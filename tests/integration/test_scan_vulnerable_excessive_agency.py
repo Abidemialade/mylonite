@@ -192,7 +192,7 @@ async def test_scan_vulnerable_finds_both_w3_and_w4(tmp_path: Path) -> None:
         for r in findings_by_predicate
     ), findings_by_predicate
     # At least one finding should reference the W4 send_email predicate.
-    assert any("send_email" in (r or "").lower() for r in findings_by_predicate), (
-        findings_by_predicate
-    )
+    assert any(
+        "send_email" in (r or "").lower() for r in findings_by_predicate
+    ), findings_by_predicate
     assert result.report.aborted is None
