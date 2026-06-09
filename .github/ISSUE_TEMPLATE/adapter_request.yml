@@ -30,6 +30,6 @@ body:
     id: motivation
     attributes:
       label: Why does this adapter matter?
-      description: Who would use it and against what kind of target? (Reminder, per SECURITY.md: targets you control only.)
+      description: "Who would use it and against what kind of target? (Reminder, per SECURITY.md: targets you control only.)"
     validations:
       required: true
