@@ -172,10 +172,12 @@ def scan(
     # v0.2 attack modules: filter to the real prompt-injection family. The
     # reference_example stub is shipped for plugin authors but isn't useful
     # for a real scan.
-    attack_modules = [m for m in all_modules if m.attack_metadata().id == "prompt-injection-family"]
+    _v0_2_ATTACK_FAMILIES = {"prompt-injection-family", "excessive-agency-family"}
+    attack_modules = [m for m in all_modules if m.attack_metadata().id in _v0_2_ATTACK_FAMILIES]
     if not attack_modules:
         typer.echo(
-            "no usable attack modules discovered (looking for 'prompt-injection-family')",
+            "no usable attack modules discovered "
+            "(looking for 'prompt-injection-family' or 'excessive-agency-family')",
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)

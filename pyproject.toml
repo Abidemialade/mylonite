@@ -83,6 +83,7 @@ mylonite = "mylonite.cli:app"
 # groups in their own pyproject.toml.
 [project.entry-points."mylonite.attack_modules"]
 prompt_injection = "mylonite.plugins._reference.prompt_injection_module:PromptInjectionAttackModule"
+excessive_agency = "mylonite.plugins._reference.excessive_agency_module:ExcessiveAgencyAttackModule"
 reference_example = "mylonite.plugins._reference.reference_attack_module:ReferenceAttackModule"
 
 [project.entry-points."mylonite.target_adapters"]
