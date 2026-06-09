@@ -1,0 +1,79 @@
+{
+  "additionalProperties": false,
+  "description": "One attempt against the target \u2014 every seed produces exactly one.",
+  "properties": {
+    "error_detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Captured exception text on outcome=error; None otherwise.",
+      "title": "Error Detail"
+    },
+    "outcome": {
+      "enum": [
+        "finding",
+        "no_finding",
+        "skipped_invalid_metadata",
+        "skipped_unknown_seed",
+        "skipped_planner_failure",
+        "skipped_dry_run",
+        "error"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "pattern_id": {
+      "description": "Payload pattern_id (matches the seed in v0.2).",
+      "title": "Pattern Id",
+      "type": "string"
+    },
+    "seed_id": {
+      "description": "The originating seed pattern_id.",
+      "title": "Seed Id",
+      "type": "string"
+    },
+    "verdict_mechanism": {
+      "anyOf": [
+        {
+          "enum": [
+            "predicate",
+            "llm"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "How the verdict was decided; None for skip/error outcomes.",
+      "title": "Verdict Mechanism"
+    },
+    "verdict_reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Verdict.reason verbatim, or the skip/error explanation.",
+      "title": "Verdict Reason"
+    }
+  },
+  "required": [
+    "seed_id",
+    "pattern_id",
+    "outcome"
+  ],
+  "title": "ScanAttempt",
+  "type": "object"
+}

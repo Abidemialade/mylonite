@@ -36,6 +36,8 @@ def test_schema_is_up_to_date(filename: str, tmp_path: Path) -> None:
         ExploitRecord,
         GeneratedTest,
         Payload,
+        ScanAttempt,
+        ScanReport,
         TargetDescriptor,
         ValidationReport,
     )
@@ -49,6 +51,8 @@ def test_schema_is_up_to_date(filename: str, tmp_path: Path) -> None:
         "generated_test.schema.json": GeneratedTest,
         "validation_report.schema.json": ValidationReport,
         "compliance_tags.schema.json": ComplianceTags,
+        "scan_attempt.schema.json": ScanAttempt,
+        "scan_report.schema.json": ScanReport,
     }
     fresh = json.dumps(models[filename].model_json_schema(), indent=2, sort_keys=True) + "\n"
     assert fresh == expected, f"{filename} is stale. Run: python scripts/regenerate_schemas.py"

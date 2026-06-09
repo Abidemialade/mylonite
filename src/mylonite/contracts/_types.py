@@ -188,3 +188,74 @@ class ValidationReport(BaseModel):
         description="True iff the test passes every stage and should be committed.",
     )
     notes: str | None = None
+
+
+# --- Scan report --------------------------------------------------------------
+
+
+ScanAttemptOutcome = Literal[
+    "finding",
+    "no_finding",
+    "skipped_invalid_metadata",
+    "skipped_unknown_seed",
+    "skipped_planner_failure",
+    "skipped_dry_run",
+    "error",
+]
+
+
+class ScanAttempt(BaseModel):
+    """One attempt against the target — every seed produces exactly one."""
+
+    model_config = _FROZEN
+
+    seed_id: str = Field(..., description="The originating seed pattern_id.")
+    pattern_id: str = Field(..., description="Payload pattern_id (matches the seed in v0.2).")
+    outcome: ScanAttemptOutcome
+    verdict_mechanism: Literal["predicate", "llm"] | None = Field(
+        default=None,
+        description="How the verdict was decided; None for skip/error outcomes.",
+    )
+    verdict_reason: str | None = Field(
+        default=None,
+        description="Verdict.reason verbatim, or the skip/error explanation.",
+    )
+    error_detail: str | None = Field(
+        default=None,
+        description="Captured exception text on outcome=error; None otherwise.",
+    )
+
+
+class ScanReport(BaseModel):
+    """Run-metadata sibling of ExploitRecord; written to scan_report.json.
+
+    Phase 1 ships this schema-validated under ``scripts/regenerate_schemas.py``
+    so CI catches drift and Phase 2 / future CI consumers can validate the
+    report shape without depending on the Python package.
+    """
+
+    model_config = _FROZEN
+
+    target_id: str
+    attack_modules: list[str] = Field(default_factory=list)
+    provider: str
+    model: str
+    elapsed_seconds: float
+    attempts: list[ScanAttempt] = Field(default_factory=list)
+    findings_count: int
+    aborted: str | None = Field(
+        default=None,
+        description=(
+            "Non-null if the scan terminated early. Values: 'budget_exceeded' "
+            "(--max-llm-calls hit) or 'provider_unreachable' (three consecutive "
+            "LLM failures)."
+        ),
+    )
+    single_run: bool = Field(
+        default=True,
+        description=(
+            "Phase 1 runs each seed once. Phase 2's 5-run flakiness filter will "
+            "set this to False when those replays land."
+        ),
+    )
+    mylonite_version: str

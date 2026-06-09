@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "ScanAttempt": {
+      "additionalProperties": false,
+      "description": "One attempt against the target \u2014 every seed produces exactly one.",
+      "properties": {
+        "error_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Captured exception text on outcome=error; None otherwise.",
+          "title": "Error Detail"
+        },
+        "outcome": {
+          "enum": [
+            "finding",
+            "no_finding",
+            "skipped_invalid_metadata",
+            "skipped_unknown_seed",
+            "skipped_planner_failure",
+            "skipped_dry_run",
+            "error"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "pattern_id": {
+          "description": "Payload pattern_id (matches the seed in v0.2).",
+          "title": "Pattern Id",
+          "type": "string"
+        },
+        "seed_id": {
+          "description": "The originating seed pattern_id.",
+          "title": "Seed Id",
+          "type": "string"
+        },
+        "verdict_mechanism": {
+          "anyOf": [
+            {
+              "enum": [
+                "predicate",
+                "llm"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How the verdict was decided; None for skip/error outcomes.",
+          "title": "Verdict Mechanism"
+        },
+        "verdict_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verdict.reason verbatim, or the skip/error explanation.",
+          "title": "Verdict Reason"
+        }
+      },
+      "required": [
+        "seed_id",
+        "pattern_id",
+        "outcome"
+      ],
+      "title": "ScanAttempt",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Run-metadata sibling of ExploitRecord; written to scan_report.json.\n\nPhase 1 ships this schema-validated under ``scripts/regenerate_schemas.py``\nso CI catches drift and Phase 2 / future CI consumers can validate the\nreport shape without depending on the Python package.",
+  "properties": {
+    "aborted": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Non-null if the scan terminated early. Values: 'budget_exceeded' (--max-llm-calls hit) or 'provider_unreachable' (three consecutive LLM failures).",
+      "title": "Aborted"
+    },
+    "attack_modules": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Attack Modules",
+      "type": "array"
+    },
+    "attempts": {
+      "items": {
+        "$ref": "#/$defs/ScanAttempt"
+      },
+      "title": "Attempts",
+      "type": "array"
+    },
+    "elapsed_seconds": {
+      "title": "Elapsed Seconds",
+      "type": "number"
+    },
+    "findings_count": {
+      "title": "Findings Count",
+      "type": "integer"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "mylonite_version": {
+      "title": "Mylonite Version",
+      "type": "string"
+    },
+    "provider": {
+      "title": "Provider",
+      "type": "string"
+    },
+    "single_run": {
+      "default": true,
+      "description": "Phase 1 runs each seed once. Phase 2's 5-run flakiness filter will set this to False when those replays land.",
+      "title": "Single Run",
+      "type": "boolean"
+    },
+    "target_id": {
+      "title": "Target Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_id",
+    "provider",
+    "model",
+    "elapsed_seconds",
+    "findings_count",
+    "mylonite_version"
+  ],
+  "title": "ScanReport",
+  "type": "object"
+}
