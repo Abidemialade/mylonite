@@ -137,14 +137,22 @@ Deliverables:
 
 ### Phase 1 — Ingestion + exploit-finding on one target
 
-Implement the MCP target adapter and app-understanding layer; implement
-the exploit-finding agent for indirect injection / tool poisoning /
-goal hijack; implement deterministic + LLM-judge success detection.
+**Status:** shipped in v0.2 (this release).
 
-*Expected outcome:* the tool reliably finds at least one real,
-app-specific exploit on the reference agent and on 2–3 real open-source
-MCP agents, with success demonstrably tied to the app's actual
-tools/prompt (not a generic probe).
+Implements an in-process target adapter against the bundled reference MCP
+agent (`reference:vulnerable` / `reference:guarded`); the
+exploit-finding agent for W1 (tool-description instruction smuggling) and
+W2 (indirect injection via note body); deterministic predicates first
+with an LLM-judge fallback. Async-first via `asyncio.gather` +
+`Semaphore`.
+
+*Expected outcome (delivered):* the tool reliably finds ≥1 W1 and ≥1 W2
+exploit on `reference:vulnerable` and zero on `reference:guarded`.
+
+**Deferred to Phase 1.5 / 2:** the MCP wire-protocol adapter (stdio /
+HTTP) and real open-source MCP target adapters. Phase 1 in-process scope
+matched the eng review's "narrow, then expand" recommendation; the
+real-network adapter follows once the MVP loop is proven.
 
 ### Phase 2 — Test generation + the validation engine
 
