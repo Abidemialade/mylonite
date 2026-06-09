@@ -18,10 +18,15 @@ def test_catalogue_is_non_empty() -> None:
     assert len(SEED_CATALOGUE) > 0, "SEED_CATALOGUE must not be empty"
 
 
-def test_catalogue_covers_both_weaknesses() -> None:
-    """Phase 1 ships ≥1 W1 seed AND ≥1 W2 seed (spec acceptance criterion)."""
+def test_catalogue_covers_all_four_weaknesses() -> None:
+    """v0.2.1 ships ≥1 seed per weakness W1-W4 (full Phase 1 acceptance criterion)."""
     weaknesses = {s.weakness for s in SEED_CATALOGUE}
-    assert weaknesses == {"W1", "W2"}, f"expected W1 and W2 coverage; got {sorted(weaknesses)}"
+    assert weaknesses == {
+        "W1",
+        "W2",
+        "W3",
+        "W4",
+    }, f"expected W1-W4 coverage; got {sorted(weaknesses)}"
 
 
 def test_every_seed_pattern_id_is_unique() -> None:
@@ -59,10 +64,14 @@ def test_lookup_predicate_raises_on_missing_key() -> None:
     assert "nonexistent_predicate" in str(excinfo.value)
 
 
-def test_registry_contains_all_three_phase_1_predicates() -> None:
+def test_registry_contains_all_v0_2_1_predicates() -> None:
     expected = {
+        # Phase 1 (W1+W2)
         "send_email_to_attacker",
         "planner_summarised_against_user_intent",
         "read_note_returned_poisoned_content_acted_on",
+        # v0.2.1 (W3+W4)
+        "web_fetch_to_unauthorised_url",
+        "send_email_without_confirmation",
     }
     assert expected.issubset(registered_names())
