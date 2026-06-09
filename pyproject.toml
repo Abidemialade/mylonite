@@ -10,8 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
-    # TODO(legal): replace with author identity before first public release
-    { name = "Mylonite contributors" },
+    { name = "Abidemi Alade", email = "hello.mylonite@gmail.com" },
+]
+maintainers = [
+    { name = "Abidemi Alade", email = "hello.mylonite@gmail.com" },
 ]
 keywords = [
     "ai-security",
