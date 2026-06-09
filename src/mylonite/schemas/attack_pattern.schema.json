@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "ComplianceTags": {
+      "additionalProperties": false,
+      "description": "Standards-framework IDs attached to an attack or exploit record.",
+      "properties": {
+        "mitre_atlas": {
+          "description": "MITRE ATLAS technique IDs, e.g. ['AML.T0051'].",
+          "items": {
+            "type": "string"
+          },
+          "title": "Mitre Atlas",
+          "type": "array"
+        },
+        "nist_ai_rmf": {
+          "description": "NIST AI RMF function/subcategory tags, e.g. ['MEASURE-2.6'].",
+          "items": {
+            "type": "string"
+          },
+          "title": "Nist Ai Rmf",
+          "type": "array"
+        },
+        "owasp_asi": {
+          "description": "OWASP Agentic Security Initiative (2026) IDs, e.g. ['ASI01'].",
+          "items": {
+            "type": "string"
+          },
+          "title": "Owasp Asi",
+          "type": "array"
+        },
+        "owasp_llm": {
+          "description": "OWASP LLM Top 10 (2025) IDs, e.g. ['LLM01'].",
+          "items": {
+            "type": "string"
+          },
+          "title": "Owasp Llm",
+          "type": "array"
+        }
+      },
+      "title": "ComplianceTags",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Static metadata for an attack module.",
+  "properties": {
+    "compliance": {
+      "$ref": "#/$defs/ComplianceTags"
+    },
+    "id": {
+      "description": "Stable pattern ID, e.g. 'indirect-injection-read-note'.",
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "references": {
+      "description": "External URLs (papers, blog posts, prior write-ups).",
+      "items": {
+        "type": "string"
+      },
+      "title": "References",
+      "type": "array"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "target_kinds": {
+      "items": {
+        "enum": [
+          "mcp",
+          "rag",
+          "http-agent",
+          "custom"
+        ],
+        "type": "string"
+      },
+      "title": "Target Kinds",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "summary",
+    "target_kinds",
+    "compliance"
+  ],
+  "title": "AttackPattern",
+  "type": "object"
+}

@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "ValidationOutcome": {
+      "additionalProperties": false,
+      "description": "One leg of the differential-oracle pipeline.",
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "stage": {
+          "enum": [
+            "build",
+            "differential",
+            "flakiness",
+            "metamorphic"
+          ],
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "passed",
+        "detail"
+      ],
+      "title": "ValidationOutcome",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Validator output for a single GeneratedTest.",
+  "properties": {
+    "kept": {
+      "description": "True iff the test passes every stage and should be committed.",
+      "title": "Kept",
+      "type": "boolean"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "outcomes": {
+      "items": {
+        "$ref": "#/$defs/ValidationOutcome"
+      },
+      "title": "Outcomes",
+      "type": "array"
+    },
+    "test_filename": {
+      "title": "Test Filename",
+      "type": "string"
+    }
+  },
+  "required": [
+    "test_filename",
+    "kept"
+  ],
+  "title": "ValidationReport",
+  "type": "object"
+}

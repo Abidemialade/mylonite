@@ -1,0 +1,35 @@
+{
+  "additionalProperties": false,
+  "description": "The target's response to a payload, as captured by an adapter.",
+  "properties": {
+    "metadata": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Metadata",
+      "type": "object"
+    },
+    "payload_pattern_id": {
+      "title": "Payload Pattern Id",
+      "type": "string"
+    },
+    "raw_response": {
+      "title": "Raw Response",
+      "type": "string"
+    },
+    "tool_calls": {
+      "description": "Names of tools invoked by the target while processing the payload.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Tool Calls",
+      "type": "array"
+    }
+  },
+  "required": [
+    "payload_pattern_id",
+    "raw_response"
+  ],
+  "title": "AdapterResponse",
+  "type": "object"
+}

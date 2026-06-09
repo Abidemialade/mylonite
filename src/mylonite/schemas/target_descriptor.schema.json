@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "ToolSpec": {
+      "additionalProperties": false,
+      "description": "A single tool exposed by an agentic target.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "json_schema": {
+          "additionalProperties": true,
+          "description": "JSON Schema for the tool's input.",
+          "title": "Json Schema",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "ToolSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A target's self-description, produced by a TargetAdapter.\n\nThis is the input the exploit-finding agent reasons over: the system\nprompt it can see, the tool surface, the data sources, the planner shape.",
+  "properties": {
+    "data_sources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Data Sources",
+      "type": "array"
+    },
+    "kind": {
+      "enum": [
+        "mcp",
+        "rag",
+        "http-agent",
+        "custom"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "system_prompt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "System Prompt"
+    },
+    "target_id": {
+      "description": "Stable identifier for this target.",
+      "title": "Target Id",
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "$ref": "#/$defs/ToolSpec"
+      },
+      "title": "Tools",
+      "type": "array"
+    }
+  },
+  "required": [
+    "target_id",
+    "kind"
+  ],
+  "title": "TargetDescriptor",
+  "type": "object"
+}

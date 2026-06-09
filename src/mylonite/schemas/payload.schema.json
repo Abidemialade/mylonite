@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "description": "A concrete attack payload to deliver to a target.",
+  "properties": {
+    "body": {
+      "title": "Body",
+      "type": "string"
+    },
+    "channel": {
+      "description": "Where the payload is delivered into the target.",
+      "enum": [
+        "user-message",
+        "tool-result",
+        "rag-document",
+        "system-prompt-injection",
+        "tool-description"
+      ],
+      "title": "Channel",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Metadata",
+      "type": "object"
+    },
+    "pattern_id": {
+      "description": "ID of the AttackPattern this payload realises.",
+      "title": "Pattern Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pattern_id",
+    "channel",
+    "body"
+  ],
+  "title": "Payload",
+  "type": "object"
+}
