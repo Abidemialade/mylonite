@@ -85,7 +85,8 @@ mylonite = "mylonite.cli:app"
 reference = "mylonite.plugins._reference.reference_attack_module:ReferenceAttackModule"
 
 [project.entry-points."mylonite.target_adapters"]
-echo = "mylonite.plugins._reference.reference_target_adapter:EchoTargetAdapter"
+in_process_reference_vulnerable = "mylonite.plugins._reference.reference_target_adapter:InProcessVulnerableReferenceAdapter"
+in_process_reference_guarded = "mylonite.plugins._reference.reference_target_adapter:InProcessGuardedReferenceAdapter"
 
 [project.entry-points."mylonite.test_generators"]
 reference_pytest = "mylonite.plugins._reference.reference_pytest_generator:ReferencePytestGenerator"
@@ -134,7 +135,7 @@ show_error_codes = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["litellm.*", "mcp.*"]
+module = ["litellm.*", "mcp.*", "mcp_kitchen_sink.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

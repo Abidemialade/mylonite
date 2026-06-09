@@ -20,6 +20,23 @@ from pydantic import BaseModel, ConfigDict, Field
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 
+class AdapterInvocationSkipped(RuntimeError):
+    """Raised by a TargetAdapter's ``invoke()`` when an attempt cannot be judged.
+
+    Phase 1's in-process adapter (and future MCP-wire adapters) raise this on
+    planner failure (A3 from the eng review) — the LLM call inside the planner
+    threw, so the trace is partial and judging it would produce false signals.
+
+    ScanEngine catches it, records ``outcome="skipped_planner_failure"`` in
+    ``scan_report.json``, and moves to the next seed without scoring this one.
+    """
+
+    def __init__(self, reason: str, *, attempt_metadata: dict[str, str] | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.attempt_metadata = attempt_metadata or {}
+
+
 class Verdict(BaseModel):
     """Outcome of a single judging step.
 

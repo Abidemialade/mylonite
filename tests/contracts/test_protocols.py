@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from mylonite.contracts import AttackModule, ComplianceMapper, TargetAdapter, Validator
+from mylonite.contracts import (
+    AsyncTargetAdapter,
+    AttackModule,
+    ComplianceMapper,
+    Validator,
+)
 from mylonite.contracts import TestGenerator as _TestGenerator
 
 # Aliased: pytest's default class-discovery rule treats names starting with
@@ -14,7 +19,10 @@ from mylonite.plugins._reference.reference_compliance_mapper import (
 from mylonite.plugins._reference.reference_pytest_generator import (
     ReferencePytestGenerator,
 )
-from mylonite.plugins._reference.reference_target_adapter import EchoTargetAdapter
+from mylonite.plugins._reference.reference_target_adapter import (
+    InProcessGuardedReferenceAdapter,
+    InProcessVulnerableReferenceAdapter,
+)
 from mylonite.plugins._reference.reference_validator import NullValidator
 
 
@@ -22,8 +30,12 @@ def test_reference_attack_module_is_attack_module() -> None:
     assert isinstance(ReferenceAttackModule(), AttackModule)
 
 
-def test_reference_target_adapter_is_target_adapter() -> None:
-    assert isinstance(EchoTargetAdapter(), TargetAdapter)
+def test_inprocess_vulnerable_adapter_is_async_target_adapter() -> None:
+    assert isinstance(InProcessVulnerableReferenceAdapter(), AsyncTargetAdapter)
+
+
+def test_inprocess_guarded_adapter_is_async_target_adapter() -> None:
+    assert isinstance(InProcessGuardedReferenceAdapter(), AsyncTargetAdapter)
 
 
 def test_reference_pytest_generator_is_test_generator() -> None:

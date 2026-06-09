@@ -12,12 +12,13 @@ land in subsequent PRs.
 
 from __future__ import annotations
 
-from mylonite.scan._types import Verdict
+from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.predicates import lookup_predicate, predicate
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern
 
 __all__ = [
     "SEED_CATALOGUE",
+    "AdapterInvocationSkipped",
     "SeedPattern",
     "Verdict",
     "lookup_predicate",
