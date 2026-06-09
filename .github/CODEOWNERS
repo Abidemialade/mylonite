@@ -1,0 +1,13 @@
+# Mylonite CODEOWNERS
+#
+# When the project moves to multi-maintainer governance (see GOVERNANCE.md),
+# split ownership by extension point. Suggested split:
+#
+#   /src/mylonite/contracts/                @contracts-maintainers
+#   /src/mylonite/taxonomy/                 @taxonomy-maintainers
+#   /reference_targets/                     @target-adapter-maintainers
+#   /docs/                                  @docs-maintainers
+#
+# For now, a single owner reviews everything.
+
+*       @Abidemialade

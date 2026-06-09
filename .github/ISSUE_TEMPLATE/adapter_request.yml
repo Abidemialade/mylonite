@@ -1,0 +1,35 @@
+name: Adapter request
+description: Request a new target adapter (a way for Mylonite to talk to a new kind of AI target).
+labels: ["adapter", "enhancement", "triage"]
+body:
+  - type: input
+    id: target-type
+    attributes:
+      label: Target type
+      description: e.g. "OpenAI Assistants API", "LangGraph agent", "LlamaIndex RAG", "Anthropic MCP HTTP server".
+    validations:
+      required: true
+
+  - type: input
+    id: public-docs
+    attributes:
+      label: Link to public docs / spec
+    validations:
+      required: true
+
+  - type: textarea
+    id: example-config
+    attributes:
+      label: Example config for the adapter
+      description: A rough sketch of what a `target_descriptor` for this adapter might look like.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why does this adapter matter?
+      description: Who would use it and against what kind of target? (Reminder, per SECURITY.md: targets you control only.)
+    validations:
+      required: true

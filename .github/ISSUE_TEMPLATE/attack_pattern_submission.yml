@@ -1,0 +1,103 @@
+name: Attack pattern submission
+description: Propose a new pattern for the community attack-pattern registry.
+labels: ["registry", "attack-pattern", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for contributing to the registry! Every accepted pattern must
+        come with a seed vulnerable target it reliably exercises and a guarded
+        variant it does not — see `GOVERNANCE.md` for the full criteria.
+
+        **Do not** submit patterns whose only application is against a
+        third-party production service.
+
+  - type: input
+    id: pattern-name
+    attributes:
+      label: Pattern name
+      placeholder: "indirect-injection-via-read-note"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target-class
+    attributes:
+      label: Target class
+      options:
+        - MCP / tool-using agent
+        - RAG pipeline
+        - Custom HTTP agent
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: owasp-llm
+    attributes:
+      label: OWASP LLM Top 10 (2025) ID
+      placeholder: "LLM01"
+    validations:
+      required: true
+
+  - type: input
+    id: owasp-asi
+    attributes:
+      label: OWASP ASI (2026) ID
+      placeholder: "ASI01"
+    validations:
+      required: true
+
+  - type: input
+    id: atlas
+    attributes:
+      label: MITRE ATLAS technique IDs
+      description: Comma-separated list, e.g. "AML.T0051,AML.T0052"
+    validations:
+      required: true
+
+  - type: input
+    id: nist
+    attributes:
+      label: NIST AI RMF subcategory tags
+      description: e.g. "MEASURE-2.6, MANAGE-1.1"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Pattern description
+      description: What weakness does this exercise and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: seed-vulnerable
+    attributes:
+      label: Seed vulnerable target
+      description: |
+        Where does the vulnerable target live? Either link to an upstream PR
+        adding it to `reference_targets/` or paste a minimal one inline.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: seed-guarded
+    attributes:
+      label: Seed guarded variant
+      description: Same as above but for the guarded counterpart.
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I am authorized to contribute this pattern under Apache-2.0.
+          required: true
+        - label: The pattern does not target third-party services.
+          required: true
