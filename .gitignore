@@ -1,5 +1,11 @@
-# Per-developer Claude Code state
-.claude/settings.local.json
+# Per-developer Claude Code / AI assistant state. The repo only commits
+# the gstack hook + the project-level Claude settings that CLAUDE.md
+# requires; everything else (per-developer local settings, planning
+# scratch, persistent memory, locally installed skills, transcripts) is
+# private and must never be pushed.
+.claude/*
+!.claude/hooks/
+!.claude/settings.json
 
 # Python
 __pycache__/
@@ -39,6 +45,15 @@ ENV/
 
 # mkdocs
 site/
+
+# Local-only docs intended for the maintainer + their AI assistants, not
+# for the public repo. The public roadmap is ROADMAP.md.
+# - PLAN.md: strategic spec (market positioning, competitive analysis,
+#   timeline).
+# - CLAUDE.md: working-context instructions for Claude Code (gstack
+#   skills, repo invariants, recommended workflows).
+PLAN.md
+CLAUDE.md
 
 # Editors / OS
 .idea/
