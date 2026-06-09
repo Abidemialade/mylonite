@@ -1,0 +1,232 @@
+# NIST AI Risk Management Framework — subcategories relevant to red-team evidence.
+#
+# Source: NIST AI 100-1 (AI RMF 1.0, January 2023) and NIST AI 600-1
+#         (Generative AI Profile, July 2024).
+#         https://www.nist.gov/itl/ai-risk-management-framework
+# Framework version: AI RMF 1.0 + NIST AI 600-1 (2024-07)
+# Retrieved: 2026-06-08
+#
+# This is a curated subset (~25 entries) — the AI RMF has ~70 subcategories
+# in total; this file holds the ones an adversarial-testing tool produces
+# evidence for. Gaps are deliberate and will be filled in Phase 5 as the
+# audit-evidence pack work lands. Every entry below is published verbatim
+# (or paraphrased into a one-sentence summary) by NIST — see source_url for
+# the canonical wording.
+
+# ----- GOVERN -----
+
+- id: GOVERN-1.4
+  function: GOVERN
+  name: Risk management process documented
+  description: >-
+    The risk management process and its outcomes are established through
+    transparent policies, procedures, and other controls based on
+    organizational risk priorities.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Govern/Govern_1_4
+  framework_version: "AI RMF 1.0"
+  references:
+    - { framework: owasp-asi, id: ASI01 }
+
+- id: GOVERN-4.1
+  function: GOVERN
+  name: AI risk management training
+  description: >-
+    Organizational practices are in place to foster a critical thinking and
+    safety-first mindset in the design, development, deployment, and uses of
+    AI systems, including red-team and adversarial-testing practice.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Govern/Govern_4_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+# ----- MAP -----
+
+- id: MAP-1.1
+  function: MAP
+  name: Intended purpose and context
+  description: >-
+    The legal and regulatory requirements relevant to the AI system are
+    understood and managed.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Map/Map_1_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MAP-2.3
+  function: MAP
+  name: TEVV processes (scientific integrity)
+  description: >-
+    Scientific integrity and test, evaluation, validation, and verification
+    (TEVV) considerations are identified and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Map/Map_2_3
+  framework_version: "AI RMF 1.0"
+  references:
+    - { framework: owasp-asi, id: ASI01 }
+    - { framework: owasp-asi, id: ASI02 }
+
+- id: MAP-5.1
+  function: MAP
+  name: Likelihood and impact assessed
+  description: >-
+    Likelihood and magnitude of each identified impact (both potentially
+    beneficial and harmful) based on expected use and past uses are assessed.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Map/Map_5_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+# ----- MEASURE -----
+
+- id: MEASURE-1.1
+  function: MEASURE
+  name: Approaches and metrics identified
+  description: >-
+    Approaches and metrics to measure AI risks enumerated during the MAP
+    function are selected for implementation, starting with the most
+    significant risks.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_1_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MEASURE-2.6
+  function: MEASURE
+  name: Safety risks evaluated
+  description: >-
+    The AI system is evaluated regularly for safety risks — as identified in
+    the MAP function. The AI system to be deployed is demonstrated to be safe
+    for its intended use and to fail safely.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_2_6
+  framework_version: "AI RMF 1.0"
+  references:
+    - { framework: owasp-llm, id: LLM06 }
+    - { framework: owasp-asi, id: ASI01 }
+
+- id: MEASURE-2.7
+  function: MEASURE
+  name: Security and resilience evaluated
+  description: >-
+    AI system security and resilience — as identified in the MAP function —
+    are evaluated and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_2_7
+  framework_version: "AI RMF 1.0"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM05 }
+    - { framework: owasp-asi, id: ASI02 }
+
+- id: MEASURE-2.8
+  function: MEASURE
+  name: Transparency and accountability risks
+  description: >-
+    Risks associated with transparency and accountability — as identified in
+    the MAP function — are examined and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_2_8
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MEASURE-2.10
+  function: MEASURE
+  name: Privacy risks evaluated
+  description: >-
+    Privacy risk of the AI system — as identified in the MAP function — is
+    examined and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_2_10
+  framework_version: "AI RMF 1.0"
+  references:
+    - { framework: owasp-llm, id: LLM02 }
+
+- id: MEASURE-2.11
+  function: MEASURE
+  name: Fairness and bias evaluated
+  description: >-
+    Fairness and bias — as identified in the MAP function — are evaluated and
+    results are documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_2_11
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MEASURE-3.2
+  function: MEASURE
+  name: Risk tracking approaches established
+  description: >-
+    Risk tracking approaches are considered for settings where AI risks are
+    difficult to assess using currently available measurement techniques or
+    where metrics are not yet available.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_3_2
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MEASURE-4.1
+  function: MEASURE
+  name: Measurement approaches reviewed
+  description: >-
+    Measurement approaches for identifying AI risks are connected to
+    deployment context(s) and informed through consultation with domain experts
+    and other end users.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Measure/Measure_4_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+# ----- MANAGE -----
+
+- id: MANAGE-1.1
+  function: MANAGE
+  name: Determination of system's acceptability
+  description: >-
+    A determination is made as to whether the AI system achieves its intended
+    purposes and stated objectives, and whether its development or deployment
+    should proceed.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_1_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MANAGE-1.3
+  function: MANAGE
+  name: Responses to risks
+  description: >-
+    Responses to the AI risks deemed high priority — as identified by the MAP
+    function — are developed, planned, and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_1_3
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MANAGE-2.2
+  function: MANAGE
+  name: Incident response mechanisms
+  description: >-
+    Mechanisms are in place and applied, and responsibilities are assigned and
+    understood, to supersede, disengage, or deactivate AI systems that
+    demonstrate performance or outcomes inconsistent with intended use.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_2_2
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MANAGE-2.3
+  function: MANAGE
+  name: Risk treatment effectiveness
+  description: >-
+    Procedures are followed to respond to and recover from a previously
+    unknown risk when it is identified.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_2_3
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MANAGE-4.1
+  function: MANAGE
+  name: Post-deployment AI system monitoring
+  description: >-
+    Post-deployment AI system monitoring plans are implemented, including
+    mechanisms for capturing and evaluating input from users and other
+    relevant AI actors, appeal and override, decommissioning, incident
+    response, recovery, and change management.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_4_1
+  framework_version: "AI RMF 1.0"
+  references: []
+
+- id: MANAGE-4.3
+  function: MANAGE
+  name: Incidents and errors monitored
+  description: >-
+    Incidents and errors are communicated to relevant AI actors, including
+    affected communities. Processes for tracking, responding to, and recovering
+    from incidents are followed and documented.
+  source_url: https://airc.nist.gov/AI_RMF_Knowledge_Base/Playbook/Manage/Manage_4_3
+  framework_version: "AI RMF 1.0"
+  references: []

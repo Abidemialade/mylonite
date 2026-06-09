@@ -1,0 +1,108 @@
+# OWASP LLM Top 10 (2025)
+#
+# Source: https://genai.owasp.org/llm-top-10/
+# Retrieved: 2026-06-08
+# Framework version: 2025
+#
+# Descriptions are excerpts from the published OWASP entries. For the full
+# text, follow each entry's source_url.
+
+- id: LLM01
+  name: Prompt Injection
+  description: >-
+    A prompt injection vulnerability occurs when user prompts alter the LLM's
+    behaviour or output in unintended ways, including by overriding system
+    instructions or smuggling instructions through untrusted inputs.
+  source_url: https://genai.owasp.org/llmrisk/llm01-prompt-injection/
+  framework_version: "2025"
+  references: []
+
+- id: LLM02
+  name: Sensitive Information Disclosure
+  description: >-
+    Sensitive information can affect both the LLM and its application context,
+    leading to unauthorised data exposure through model outputs, system prompt
+    leakage, or training-data reconstruction.
+  source_url: https://genai.owasp.org/llmrisk/llm02-sensitive-information-disclosure/
+  framework_version: "2025"
+  references: []
+
+- id: LLM03
+  name: Supply Chain
+  description: >-
+    LLM supply chains are susceptible to vulnerabilities arising from
+    third-party models, datasets, and tooling that may introduce backdoors,
+    bias, or licensing risks into downstream applications.
+  source_url: https://genai.owasp.org/llmrisk/llm03-supply-chain/
+  framework_version: "2025"
+  references: []
+
+- id: LLM04
+  name: Data and Model Poisoning
+  description: >-
+    Data poisoning occurs when pre-training, fine-tuning, or embedding data is
+    manipulated to introduce vulnerabilities, biases, or backdoors that affect
+    the model's behaviour in production.
+  source_url: https://genai.owasp.org/llmrisk/llm04-data-and-model-poisoning/
+  framework_version: "2025"
+  references: []
+
+- id: LLM05
+  name: Improper Output Handling
+  description: >-
+    Improper Output Handling refers specifically to insufficient validation,
+    sanitisation, and handling of LLM-generated content before it is passed to
+    downstream systems, enabling injection-style attacks against those systems.
+  source_url: https://genai.owasp.org/llmrisk/llm05-improper-output-handling/
+  framework_version: "2025"
+  references: []
+
+- id: LLM06
+  name: Excessive Agency
+  description: >-
+    An LLM-based system is often granted a degree of agency — the ability to
+    interact with other systems, undertake actions, or invoke tools. Excessive
+    agency arises when those permissions exceed what the use case requires.
+  source_url: https://genai.owasp.org/llmrisk/llm06-excessive-agency/
+  framework_version: "2025"
+  references: []
+
+- id: LLM07
+  name: System Prompt Leakage
+  description: >-
+    The system prompt leakage vulnerability in LLMs refers to the unintended
+    exposure of an application's system prompt — including instructions,
+    examples, secrets, or proprietary knowledge embedded in it.
+  source_url: https://genai.owasp.org/llmrisk/llm07-system-prompt-leakage/
+  framework_version: "2025"
+  references: []
+
+- id: LLM08
+  name: Vector and Embedding Weaknesses
+  description: >-
+    Vectors and embedding vulnerabilities present significant security risks
+    in systems that use retrieval-augmented generation, where adversaries can
+    poison stores, exfiltrate context, or bypass retrieval-based controls.
+  source_url: https://genai.owasp.org/llmrisk/llm08-vector-and-embedding-weaknesses/
+  framework_version: "2025"
+  references: []
+
+- id: LLM09
+  name: Misinformation
+  description: >-
+    Misinformation from LLMs poses a core vulnerability for applications
+    relying on model outputs, including hallucinated facts, fabricated
+    citations, and confidently incorrect technical guidance.
+  source_url: https://genai.owasp.org/llmrisk/llm09-misinformation/
+  framework_version: "2025"
+  references: []
+
+- id: LLM10
+  name: Unbounded Consumption
+  description: >-
+    Unbounded Consumption refers to the process where a Large Language Model
+    is exploited to consume excessive resources — compute, memory, money — via
+    crafted inputs that drive runaway generation or recursion.
+  source_url: https://genai.owasp.org/llmrisk/llm10-unbounded-consumption/
+  framework_version: "2025"
+  references: []

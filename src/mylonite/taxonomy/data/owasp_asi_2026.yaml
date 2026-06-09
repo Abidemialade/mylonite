@@ -1,0 +1,142 @@
+# OWASP Top 10 for Agentic Applications 2026 (OWASP Agentic Security Initiative)
+#
+# Source: OWASP GenAI Security Project — Agentic Security Initiative.
+#         Canonical publication page: https://genai.owasp.org
+# Released: 2025-12 (December 2025)
+# License of upstream: CC BY-SA 4.0
+# Retrieved: 2026-06-08
+#
+# Descriptions are truncated excerpts from the published entries. For the
+# full text, see each entry's source_url. Cross-references to OWASP LLM
+# Top 10 (2025) are encoded in `references`.
+
+- id: ASI01
+  name: Agent Goal Hijack
+  description: >-
+    AI agents exhibit autonomous ability to execute a series of tasks to
+    achieve a goal. Due to inherent weaknesses in how natural-language
+    instructions and related content are processed, agents and the goals they
+    pursue can be redirected away from their intended purpose by adversarial
+    inputs at any stage of the planning or execution loop.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM06 }
+
+- id: ASI02
+  name: Tool Misuse and Exploitation
+  description: >-
+    Agents can misuse legitimate tools through prompt injection, misalignment,
+    unsafe delegation, or ambiguous instructions — leading to data
+    exfiltration, tool-output manipulation, or workflow hijacking.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM06 }
+
+- id: ASI03
+  name: Identity and Privilege Abuse
+  description: >-
+    Identity and privilege abuse exploits dynamic trust and delegation
+    relationships in agentic systems to escalate access and bypass controls,
+    typically by manipulating delegation chains, role inheritance, control
+    flows, or agent context.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM02 }
+    - { framework: owasp-llm, id: LLM06 }
+
+- id: ASI04
+  name: Agentic Supply Chain Vulnerabilities
+  description: >-
+    Agentic supply-chain vulnerabilities arise when the agents, tools, and
+    artefacts the system depends on are provided by third parties and may be
+    malicious, compromised, or tampered with in transit.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM03 }
+
+- id: ASI05
+  name: Unexpected Code Execution
+  description: >-
+    Agentic systems often generate and execute code. Attackers exploit
+    code-generation features or embedded tool access to escalate routine
+    actions into remote code execution against the host environment.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM05 }
+
+- id: ASI06
+  name: Memory and Context Poisoning
+  description: >-
+    Agentic systems rely on stored and retrievable information — conversation
+    history, memory tools, expanded context — for continuity across tasks.
+    Adversaries can poison this state so subsequent reasoning is steered
+    toward attacker goals.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM04 }
+    - { framework: owasp-llm, id: LLM08 }
+
+- id: ASI07
+  name: Insecure Inter-Agent Communication
+  description: >-
+    Multi-agent systems depend on continuous communication between autonomous
+    agents that coordinate via APIs, message buses, and shared memory. This
+    significantly expands the attack surface; insecure inter-agent
+    communication enables tampering, spoofing, and lateral movement.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM02 }
+    - { framework: owasp-llm, id: LLM06 }
+
+- id: ASI08
+  name: Cascading Failures
+  description: >-
+    Cascading failures occur when a single fault — hallucination, malicious
+    input, corrupted tool, poisoned memory — propagates across autonomous
+    agents, compounding into system-wide harm faster than human review can
+    contain it.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM04 }
+    - { framework: owasp-llm, id: LLM06 }
+
+- id: ASI09
+  name: Human-Agent Trust Exploitation
+  description: >-
+    Agents can establish strong trust with users through natural-language
+    fluency and perceived expertise (anthropomorphism). Adversaries or
+    misaligned designs exploit this trust to manipulate user decisions,
+    extract data, or normalise harmful actions.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM01 }
+    - { framework: owasp-llm, id: LLM05 }
+    - { framework: owasp-llm, id: LLM06 }
+    - { framework: owasp-llm, id: LLM09 }
+
+- id: ASI10
+  name: Rogue Agents
+  description: >-
+    Rogue agents are compromised or malicious AI agents that deviate from
+    their intended function or authorised scope, operating harmfully,
+    deceptively, or parasitically within multi-agent or human-agent
+    ecosystems.
+  source_url: https://genai.owasp.org
+  framework_version: "2026"
+  references:
+    - { framework: owasp-llm, id: LLM02 }
+    - { framework: owasp-llm, id: LLM09 }
