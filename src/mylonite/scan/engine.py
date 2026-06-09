@@ -334,5 +334,3 @@ class ScanEngine:
             ),
             exploit=None,
         )
-
-
