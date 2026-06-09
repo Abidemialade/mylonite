@@ -29,7 +29,7 @@ related tags from the attack pattern.
 
 The auto-generated cross-reference tables (every OWASP LLM entry → matching
 OWASP ASI / MITRE ATLAS / NIST entries) land in **Phase 5** of
-[`PLAN.md`](https://github.com/Abidemialade/mylonite/blob/main/PLAN.md). For
+[`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md). For
 v0.1.0 you can hand-query via the CLI:
 
 ```bash

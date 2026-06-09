@@ -2,7 +2,7 @@
 
 Phase 0 only proves the Validator contract loads. The differential-oracle
 pipeline (build -> differential-seeded check -> 5-run flakiness filter ->
-metamorphic robustness) lands in Phase 2 of PLAN.md.
+metamorphic robustness) lands in Phase 2 of ROADMAP.md.
 """
 
 from __future__ import annotations

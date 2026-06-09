@@ -1,7 +1,7 @@
 # Security policy
 
 Mylonite is a defensive-security tool. Because it generates test artifacts that
-reproduce AI-layer weaknesses (per [PLAN.md](./PLAN.md)), it is subject to a
+reproduce AI-layer weaknesses (per [ROADMAP.md](./ROADMAP.md)), it is subject to a
 formal dual-use policy. This document covers both **how to report a
 vulnerability in Mylonite itself** and **the rules under which Mylonite may be
 used**.
@@ -12,8 +12,8 @@ Please **do not** open public issues for security-sensitive reports.
 
 - **Preferred:** open a private vulnerability report via GitHub Security
   Advisories: <https://github.com/Abidemialade/mylonite/security/advisories/new>
-- **Email:** TODO(contact): replace with a monitored security alias before the
-  first public release (suggested: `security@<your-domain>`).
+- **Email:** `hello.mylonite@gmail.com` (will move to a dedicated
+  `security@` alias once the project owns a domain).
 
 Please include:
 

@@ -1,6 +1,6 @@
 """Mylonite — open-source framework for AI-layer security testing.
 
-See ``PLAN.md`` for the product thesis and ``README.md`` for the quickstart.
+See ``ROADMAP.md`` for the phased build plan and ``README.md`` for the quickstart.
 """
 
 from __future__ import annotations

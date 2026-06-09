@@ -52,7 +52,7 @@ def version() -> None:
 def _not_implemented(name: str) -> None:
     typer.echo(
         f"`{name}` is not implemented in v{__version__}. "
-        "It arrives in v0.2 — see PLAN.md and the issue tracker.",
+        "It arrives in v0.2 — see ROADMAP.md and the issue tracker.",
         err=True,
     )
     raise typer.Exit(code=2)

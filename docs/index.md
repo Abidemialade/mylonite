@@ -9,8 +9,8 @@ pipeline, agent planner — and emits **validated regression tests** that gate
 CI. It deliberately does *not* test the surrounding traditional code; that
 work belongs to SAST/DAST tools.
 
-The full product thesis lives in
-[`PLAN.md`](https://github.com/Abidemialade/mylonite/blob/main/PLAN.md).
+The phased build plan lives in
+[`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md).
 
 !!! warning "Status: v0.1.0 (Phase 0)"
     Only the foundations are in place: contracts, threat taxonomy, the

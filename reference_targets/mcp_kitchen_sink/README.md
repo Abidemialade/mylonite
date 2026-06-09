@@ -2,7 +2,7 @@
 
 > ⚠️ **This package is intentionally insecure research scaffolding.** It exists
 > as ground truth for Mylonite's differential-oracle validation engine
-> (see `PLAN.md` Phases 0–2). **Do not expose it to anything but loopback.**
+> (see `ROADMAP.md` Phases 0–2). **Do not expose it to anything but loopback.**
 > Both server variants refuse to bind to non-loopback interfaces by default.
 > See `mylonite/SECURITY.md` for the project's dual-use policy.
 

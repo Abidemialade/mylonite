@@ -15,7 +15,7 @@ gate CI. It deliberately does *not* test the surrounding traditional code;
 that work belongs to SAST/DAST tools.
 
 The full product thesis, market positioning, and phased build plan live in
-[PLAN.md](./PLAN.md).
+[ROADMAP.md](./ROADMAP.md).
 
 > **Status:** v0.1.0 — Phase 0 foundations only. The exploit-finding agent,
 > test generator, and validation engine arrive in v0.2+. See
@@ -61,7 +61,7 @@ mylonite taxonomy list --framework nist
 
 ## Documentation
 
-- [PLAN.md](./PLAN.md) — full product spec and build plan.
+- [ROADMAP.md](./ROADMAP.md) — phased build plan, architecture, and engineering standards.
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup, how to author a plugin.
 - [GOVERNANCE.md](./GOVERNANCE.md) — decision-making, registry acceptance.
 - [SECURITY.md](./SECURITY.md) — responsible-disclosure + dual-use policy.

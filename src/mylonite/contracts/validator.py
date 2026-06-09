@@ -3,7 +3,7 @@
 Phase 0 ships only the Protocol and a ``NullValidator`` reference plugin.
 The real differential-oracle pipeline (build -> differential-seeded check
 -> 5-run flakiness filter -> metamorphic robustness) arrives in Phase 2 of
-``PLAN.md``.
+``ROADMAP.md``.
 
 A vulnerable oracle is a deliberately-unguarded variant of the target. A
 generated test is "meaningful" iff:

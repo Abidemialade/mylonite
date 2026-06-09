@@ -40,5 +40,5 @@ mylonite validate                                        # run the test through 
 
 These stubs exist in v0.1.0 to make the surface area visible; they exit
 non-zero with a "coming in v0.2" message. See
-[`PLAN.md`](https://github.com/Abidemialade/mylonite/blob/main/PLAN.md) for
+[`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md) for
 the implementation timeline.

@@ -38,7 +38,7 @@ the relevant row below.
   2. Run the converter (kept out of the committed tree; see commit history).
   3. Update the `framework_version` field on each entry and this README's row.
   4. Smoke-test by loading via `mylonite.taxonomy.load_atlas`.
-- `PLAN.md` cites ATLAS `v5.4.0`; the upstream renamed to date-based
+- `ROADMAP.md` cites ATLAS `v5.4.0`; the upstream renamed to date-based
   versioning. `v2026.05` is the current canonical release as of retrieval.
 
 ## NIST AI RMF
