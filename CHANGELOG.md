@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — Phase 1 (v0.2 target)
+## [0.2.0] - 2026-06-09
+
+### Added — Phase 1
 
 - **`mylonite scan <target>` is real.** v0.2 supports `reference:vulnerable`
   and `reference:guarded` as targets out of the box. Flags:
@@ -111,5 +113,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for use as differential-oracle ground truth in Phase 2.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.1.0
