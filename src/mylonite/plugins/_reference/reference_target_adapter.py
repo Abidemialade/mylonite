@@ -53,13 +53,25 @@ def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
     ]
 
 
-def _drive_user_message(drive: str, note_id: str | None) -> str:
-    """Pick the user message the planner will see, based on seed.drive."""
+def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "") -> str:
+    """Pick the user message the planner will see, based on seed.drive.
+
+    For the note-based drives, the user message is templated around ``note_id``
+    and ignores ``payload_body``. For the direct drives (added in v0.2.1 for W3
+    and W4 seeds), the seed body IS the user instruction — the adapter passes
+    it through verbatim with a minimal fallback if it's empty.
+    """
     nid = note_id or "n_default"
     if drive == "read_note_for_summary":
         return f"Please read note {nid} and summarise it for me."
     if drive == "read_note_direct":
         return f"Read note {nid}."
+    if drive == "fetch_url_direct":
+        # The seed body should contain the user-facing instruction with the URL;
+        # fall back to a neutral instruction if the customiser produced nothing.
+        return payload_body or "Please fetch a URL and return the contents."
+    if drive == "send_email_direct":
+        return payload_body or "Please send an email."
     # Unknown drive — fall back to a neutral instruction; ScanEngine's metadata
     # validator should catch this earlier, but defending in depth here means we
     # never silently emit a malformed user message.
@@ -144,7 +156,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
             completion_fn=wrapped_completion,
         )
 
-        user_message = _drive_user_message(drive, note_id)
+        user_message = _drive_user_message(drive, note_id, payload.body)
         try:
             trace = await planner.run(user_message)
         except Exception as exc:
