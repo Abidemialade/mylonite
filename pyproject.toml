@@ -82,7 +82,8 @@ mylonite = "mylonite.cli:app"
 # Reference plugin entry points. Third-party plugins register against the same
 # groups in their own pyproject.toml.
 [project.entry-points."mylonite.attack_modules"]
-reference = "mylonite.plugins._reference.reference_attack_module:ReferenceAttackModule"
+prompt_injection = "mylonite.plugins._reference.prompt_injection_module:PromptInjectionAttackModule"
+reference_example = "mylonite.plugins._reference.reference_attack_module:ReferenceAttackModule"
 
 [project.entry-points."mylonite.target_adapters"]
 in_process_reference_vulnerable = "mylonite.plugins._reference.reference_target_adapter:InProcessVulnerableReferenceAdapter"
