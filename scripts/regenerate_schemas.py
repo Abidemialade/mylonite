@@ -25,6 +25,8 @@ from mylonite.contracts._types import (
     ExploitRecord,
     GeneratedTest,
     Payload,
+    ScanAttempt,
+    ScanReport,
     TargetDescriptor,
     ValidationReport,
 )
@@ -44,6 +46,8 @@ MODELS: dict[str, type[BaseModel]] = {
     "generated_test.schema.json": GeneratedTest,
     "validation_report.schema.json": ValidationReport,
     "compliance_tags.schema.json": ComplianceTags,
+    "scan_attempt.schema.json": ScanAttempt,
+    "scan_report.schema.json": ScanReport,
 }
 
 
