@@ -226,9 +226,7 @@ async def test_invoke_w3_fetch_url_direct_against_vulnerable() -> None:
             )
         return _text_response("fetched.")
 
-    adapter = InProcessReferenceAdapter(
-        variant="vulnerable", model="stub", completion_fn=stub
-    )
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
     response = await adapter.invoke(_w3_payload())
     assert "web_fetch" in response.tool_calls
     assert "attacker.example.com" in response.metadata["store_fetched_urls"]
@@ -258,9 +256,7 @@ async def test_invoke_w4_send_email_direct_against_vulnerable() -> None:
             )
         return _text_response("sent.")
 
-    adapter = InProcessReferenceAdapter(
-        variant="vulnerable", model="stub", completion_fn=stub
-    )
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
     response = await adapter.invoke(_w4_payload())
     assert "send_email" in response.tool_calls
     assert "ops@example.com" in response.metadata["store_emails_sent"]
