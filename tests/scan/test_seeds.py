@@ -21,9 +21,12 @@ def test_catalogue_is_non_empty() -> None:
 def test_catalogue_covers_all_four_weaknesses() -> None:
     """v0.2.1 ships ≥1 seed per weakness W1-W4 (full Phase 1 acceptance criterion)."""
     weaknesses = {s.weakness for s in SEED_CATALOGUE}
-    assert weaknesses == {"W1", "W2", "W3", "W4"}, (
-        f"expected W1-W4 coverage; got {sorted(weaknesses)}"
-    )
+    assert weaknesses == {
+        "W1",
+        "W2",
+        "W3",
+        "W4",
+    }, f"expected W1-W4 coverage; got {sorted(weaknesses)}"
 
 
 def test_every_seed_pattern_id_is_unique() -> None:
