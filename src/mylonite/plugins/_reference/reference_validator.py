@@ -308,7 +308,8 @@ class DifferentialValidator(ValidatorBase):
         #    already run.
         mutation = self._mutation_score(tallies)
 
-        # 4. metamorphic-lite (report-only) — one neutral perturbation.
+        # 4. metamorphic (report-only) — multiple deterministic perturbations,
+        #    each genuinely driven through both twins.
         metamorphic = self._metamorphic_outcome(test.exploit)
 
         # build stage — collect-only, OR (when recording) record the canonical
@@ -469,7 +470,7 @@ class DifferentialValidator(ValidatorBase):
         )
         return _MutationResult(score=score, matrix=matrix, killed=killed_count, total=total)
 
-    # -- metamorphic-lite -----------------------------------------------------
+    # -- metamorphic ----------------------------------------------------------
 
     def _metamorphic_outcome(self, exploit: ExploitRecord) -> ValidationOutcome:
         """Multiple deterministic perturbations, each GENUINELY run on both twins.
