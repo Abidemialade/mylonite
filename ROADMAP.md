@@ -137,22 +137,30 @@ Deliverables:
 
 ### Phase 1 — Ingestion + exploit-finding on one target
 
-**Status:** shipped in v0.2 (this release).
+**Status:** shipped in v0.2.0 (W1+W2) → v0.2.1 (W3+W4) →
+**v0.2.2 (in-process AND stdio MCP transport)**.
 
-Implements an in-process target adapter against the bundled reference MCP
-agent (`reference:vulnerable` / `reference:guarded`); the
-exploit-finding agent for W1 (tool-description instruction smuggling) and
-W2 (indirect injection via note body); deterministic predicates first
-with an LLM-judge fallback. Async-first via `asyncio.gather` +
-`Semaphore`.
+Implements both an in-process target adapter against the bundled
+reference MCP agent (`reference:vulnerable` / `reference:guarded`)
+**and** an MCP stdio transport adapter against three bundled real
+open-source MCP servers (filesystem, fetch, github). The exploit-finding
+agent covers W1 (tool-description instruction smuggling), W2 (indirect
+injection via tool result / note body / file body / issue body), W3
+(unrestricted egress / SSRF), and W4 (unconfirmed sensitive actions).
+Deterministic predicates first with an LLM-judge fallback. Async-first
+via `asyncio.gather` + `Semaphore`. Fresh subprocess per `invoke()`
+isolates per-attempt state.
 
-*Expected outcome (delivered):* the tool reliably finds ≥1 W1 and ≥1 W2
-exploit on `reference:vulnerable` and zero on `reference:guarded`.
+*Expected outcome (delivered):* the tool reliably finds ≥1 W1-W4
+exploit on `reference:vulnerable` and zero on `reference:guarded`, AND
+≥1 app-specific exploit on each of the three bundled real OSS MCP
+agents (`mcp:filesystem:<sandbox>`, `mcp:fetch`, `mcp:github:<owner/repo>`)
+where the finding names a target-specific tool with attacker-controlled
+arguments and execution evidence.
 
-**Deferred to Phase 1.5 / 2:** the MCP wire-protocol adapter (stdio /
-HTTP) and real open-source MCP target adapters. Phase 1 in-process scope
-matched the eng review's "narrow, then expand" recommendation; the
-real-network adapter follows once the MVP loop is proven.
+**Deferred to v0.3+:** MCP Streamable HTTP transport; more OSS targets
+(brave-search, puppeteer, postgres, slack); `.mylonite/targets.yaml`
+pre-registered targets config; multi-target scan in one command.
 
 ### Phase 2 — Test generation + the validation engine
 
