@@ -44,6 +44,31 @@ def test_note_id_counter_is_deterministic_and_resets() -> None:
     assert second() == "n_demo_0001"
 
 
+def test_build_scan_threads_pattern_id_filter() -> None:
+    """``build_scan(..., pattern_id_filter=X)`` → engine config carries the filter."""
+    engine = wiring.build_scan(
+        "guarded",
+        completion_fn=None,
+        note_id_factory=None,
+        provider="anthropic",
+        model="stub-model",
+        pattern_id_filter="foo",
+    )
+    assert engine._config.pattern_id_filter == "foo"
+
+
+def test_build_scan_defaults_pattern_id_filter_none() -> None:
+    """Omitting ``pattern_id_filter`` → full scan (None), preserving back-compat."""
+    engine = wiring.build_scan(
+        "guarded",
+        completion_fn=None,
+        note_id_factory=None,
+        provider="anthropic",
+        model="stub-model",
+    )
+    assert engine._config.pattern_id_filter is None
+
+
 async def test_offline_replay_has_no_drift() -> None:
     """No-drift guard: the packaged-fixture replay still resolves cleanly.
 

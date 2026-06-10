@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-exploit fixture isolation: the offline gate now runs a single seed.**
+  `ScanConfig.pattern_id_filter` (new, default `None` = unchanged full scan)
+  scopes a scan to one pattern_id, dropping non-matching payloads *before* any
+  customiser/judge/LLM work. `mylonite.testkit.assert_guard_holds` now sets this
+  filter to the exploit's own `pattern_id`, so the offline gate replays only that
+  exploit's seed — keeping committed fixtures small and decoupled. Because the
+  recorded-fixture scope changed from "all seeds" to "one seed",
+  `FIXTURE_FORMAT_VERSION` is bumped `1 → 2`; v1 (full-scan-scoped) fixtures are
+  refused by the gate. The demo never sets the filter, so its full-scan replay is
+  unaffected.
 - **MITRE ATLAS and NIST AI RMF compliance markers are now registered and
   emitted.** The bundled pytest11 plugin registers one marker per bundled-taxonomy
   ATLAS technique (`atlas_<id>`, e.g. `atlas_aml_t0051`) and NIST AI RMF

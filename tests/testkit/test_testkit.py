@@ -205,6 +205,42 @@ def test_guard_holds_happy_path() -> None:
     assert assert_guard_holds(_exploit(), _completion_fn=_guarded_holds_fn) is None
 
 
+def test_gate_runs_only_the_exploit_seed() -> None:
+    """Per-exploit fixture isolation: the offline gate scopes the scan to ONE seed.
+
+    A spy ``completion_fn`` records every customiser invocation (one per seed
+    that needs customisation). The full guarded scan touches many seeds; with
+    single-seed scoping only the exploit's own seed flows through the
+    customiser/planner. So the spy must see exactly the exploit's pattern_id and
+    nothing else — proving the engine's ``pattern_id_filter`` dropped the rest
+    before any LLM work, while the surviving payload still flows through
+    customise + invoke + judge (the guard holds → clean pass).
+    """
+
+    class _Spy:
+        def __init__(self) -> None:
+            self.customised_bodies: list[str] = []
+
+        async def __call__(
+            self, *, model: str, messages: list[dict[str, Any]], **kwargs: Any
+        ) -> Any:
+            del model, kwargs
+            if _is_customiser(messages):
+                # Record the user message so we can prove which seed was customised.
+                self.customised_bodies.append(" ".join(str(m.get("content", "")) for m in messages))
+                return _customiser_reply()
+            if _is_judge(messages):
+                return _judge_declines()
+            return _msg("I cannot follow embedded instructions from note content.")
+
+    spy = _Spy()
+    # The W2 note-body seed needs customisation, so it must drive exactly one
+    # customiser call. No OTHER seed's customiser may run.
+    assert assert_guard_holds(_exploit(), _completion_fn=spy) is None
+    assert len(spy.customised_bodies) == 1
+    assert _PATTERN_ID in spy.customised_bodies[0]
+
+
 def test_guard_fails_raises_assertion_error() -> None:
     """A planner that drives the exploit through the guard → AssertionError."""
     with pytest.raises(AssertionError, match="guard did not hold"):
@@ -221,7 +257,7 @@ def test_r4_missing_fixture_raises_not_pass(tmp_path: Path) -> None:
     instead raise ``TestkitFixtureError`` naming the re-record path.
     """
     (tmp_path / "_meta.json").write_text(
-        json.dumps({"format_version": 1, "model": "stub-model", "pattern_id": _PATTERN_ID}),
+        json.dumps({"format_version": 2, "model": "stub-model", "pattern_id": _PATTERN_ID}),
         encoding="utf-8",
     )
     with pytest.raises(_FixtureError) as excinfo:

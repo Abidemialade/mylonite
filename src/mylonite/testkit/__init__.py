@@ -73,7 +73,12 @@ from mylonite.scan.wiring import build_scan, note_id_counter
 #: whenever the recorded-fixture layout or the (model, messages) keying changes.
 #: Fixtures stamped with a different version cannot be trusted to replay, so the
 #: gate refuses them rather than risk a false pass.
-FIXTURE_FORMAT_VERSION = 1
+#:
+#: v2 (per-exploit fixture isolation): the offline gate now scopes its scan to
+#: the exploit's single seed (``pattern_id_filter``), so a v2 fixture set records
+#: ONLY that one seed's (model, messages) pairs rather than every seed's. v1
+#: fixtures (full-scan scope) are refused by :func:`_read_meta`.
+FIXTURE_FORMAT_VERSION = 2
 
 #: Re-record guidance surfaced in every fixture-trouble error. Names the
 #: consumer-facing regeneration command (mirrors the demo's
@@ -135,6 +140,11 @@ def _read_meta(fixtures_dir: Path) -> dict[str, Any]:
     :class:`TestkitFixtureError` if the sidecar is absent, unparseable, or
     stamps an unsupported ``format_version`` — the gate must not replay fixtures
     it cannot vouch for.
+
+    As of ``FIXTURE_FORMAT_VERSION == 2`` the supported scope is single-seed: a
+    v2 fixture set records only the exploit's own seed (the gate runs the scan
+    with ``pattern_id_filter`` set), so stale v1 (full-scan-scoped) fixtures are
+    refused here.
     """
     meta_path = fixtures_dir / "_meta.json"
     if not meta_path.is_file():
@@ -259,6 +269,11 @@ async def _run_guarded_scan(
     an event loop (and the offline unit tests) ``await`` this directly to avoid
     nesting ``asyncio.run``. ``max_concurrent`` is forced to 1 by
     :func:`build_scan`, so the recorder's single-threaded state stays coherent.
+
+    The scan is scoped to the exploit's single seed via ``pattern_id_filter`` so
+    the gate replays ONLY that seed (per-exploit fixture isolation): committed
+    fixtures stay small and decoupled, and the offline gate never drives the
+    customiser/judge/planner for unrelated seeds.
     """
     engine = build_scan(
         "guarded",
@@ -266,6 +281,7 @@ async def _run_guarded_scan(
         note_id_factory=note_id_counter(),
         provider=provider,
         model=model,
+        pattern_id_filter=exploit.pattern_id,
     )
     return await engine.run()
 
