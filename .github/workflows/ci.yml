@@ -74,6 +74,22 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: Pytest
+        run: pytest
+
   precommit:
     runs-on: ubuntu-latest
     steps:
