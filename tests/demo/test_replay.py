@@ -103,6 +103,19 @@ async def test_missing_fixture_hint_is_parameterised_per_construction_site(
         await recorder(model="claude-x", messages=_MSGS)
 
 
+@pytest.mark.asyncio
+async def test_reset_zeroes_counters_and_clears_last_error(tmp_path: Path) -> None:
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
+    with pytest.raises(MissingFixtureError):
+        await recorder(model="claude-x", messages=_MSGS)
+    assert recorder.cache_misses == 1
+    assert recorder.last_error is not None
+    recorder.reset()
+    assert recorder.cache_hits == 0
+    assert recorder.cache_misses == 0
+    assert recorder.last_error is None
+
+
 # --- (3) corrupt fixture is wrapped, never a bare JSONDecodeError --------------
 
 
@@ -209,6 +222,16 @@ async def test_fixtures_dir_accepts_importlib_resources_traversable(tmp_path: Pa
     assert recorder.cache_hits == 1
 
 
+@pytest.mark.asyncio
+async def test_fixtures_dir_accepts_str_and_coerces_to_path(tmp_path: Path) -> None:
+    _write_fixture(tmp_path, "claude-x", _MSGS)
+    recorder = LiteLLMRecorder(fixtures_dir=str(tmp_path))  # type: ignore[arg-type]
+    assert isinstance(recorder.fixtures_dir, Path)
+    response = await recorder(model="claude-x", messages=_MSGS)
+    assert response.choices[0].message.content == "hello"
+    assert recorder.cache_hits == 1
+
+
 def test_record_mode_rejects_traversable_fixtures_dir(tmp_path: Path) -> None:
     archive = tmp_path / "fixtures.zip"
     with zipfile.ZipFile(archive, "w") as zf:
@@ -221,3 +244,10 @@ def test_record_mode_rejects_traversable_fixtures_dir(tmp_path: Path) -> None:
 def test_packaged_fixture_dir_points_at_demo_package() -> None:
     root = packaged_fixture_dir()
     assert root.name == "fixtures"
+    # The fixture root must live inside the mylonite.demo package itself.
+    import mylonite.demo
+
+    demo_pkg_dir = Path(mylonite.demo.__file__).resolve().parent
+    assert Path(str(root)).resolve().parent == demo_pkg_dir
+    # Per-variant namespaces must be joinable underneath the root.
+    assert (root / "vulnerable").name == "vulnerable"

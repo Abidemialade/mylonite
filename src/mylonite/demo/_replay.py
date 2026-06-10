@@ -43,15 +43,19 @@ DEMO_RERECORD_HINT = (
 )
 
 
-class MissingFixtureError(RuntimeError):
+class FixtureError(RuntimeError):
+    """Common base for all fixture record/replay errors."""
+
+
+class MissingFixtureError(FixtureError):
     """Raised in replay mode when no fixture matches the (model, messages) pair."""
 
 
-class CorruptFixtureError(RuntimeError):
+class CorruptFixtureError(FixtureError):
     """Raised in replay mode when a fixture file exists but is not valid JSON."""
 
 
-class FixtureConflictError(RuntimeError):
+class FixtureConflictError(FixtureError):
     """Raised in record mode when a key already exists with different content."""
 
 
@@ -134,6 +138,17 @@ class LiteLLMRecorder:
     ``cache_hits`` / ``cache_misses`` / ``last_error`` are runner-inspectable
     state: callers in the scan engine swallow ``completion_fn`` exceptions,
     so a post-run state check is the reliable way to detect replay problems.
+    Note the counter asymmetry: a corrupt fixture increments neither
+    ``cache_hits`` nor ``cache_misses`` (only ``last_error`` is set), so
+    callers reconciling ``hits + misses == calls`` must also check
+    ``last_error``.
+
+    Instance state is cumulative across calls — construct one recorder per
+    run or call :meth:`reset` between runs (Phase 2's multi-run flakiness
+    filter is the motivating case). The recorder is not thread-safe, and
+    ``last_error`` reflects only the most recent failure — under concurrent
+    calls use the counters as the aggregate signal; the demo runner drives
+    this with ``max_concurrent=1``.
     """
 
     fixtures_dir: Path | Traversable
@@ -144,6 +159,8 @@ class LiteLLMRecorder:
     last_error: Exception | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.fixtures_dir, str):
+            self.fixtures_dir = Path(self.fixtures_dir)
         if self.mode == "record":
             if not isinstance(self.fixtures_dir, Path):
                 raise TypeError(
@@ -152,14 +169,20 @@ class LiteLLMRecorder:
                 )
             self.fixtures_dir.mkdir(parents=True, exist_ok=True)
 
+    def reset(self) -> None:
+        """Clear cumulative state (``cache_hits``, ``cache_misses``, ``last_error``)."""
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.last_error = None
+
     async def __call__(self, *, model: str, messages: Sequence[Any], **kwargs: Any) -> Any:
         key = _stable_key(model, list(messages))
         path = self.fixtures_dir / f"{key}.json"
         if self.mode == "replay":
-            return self._replay(key=key, model=model, path=path)
+            return self._load_fixture(key=key, model=model, path=path)
         return await self._record(model=model, messages=messages, path=path, kwargs=kwargs)
 
-    def _replay(self, *, key: str, model: str, path: Path | Traversable) -> SimpleNamespace:
+    def _load_fixture(self, *, key: str, model: str, path: Path | Traversable) -> SimpleNamespace:
         if not path.is_file():
             self.cache_misses += 1
             missing = MissingFixtureError(
@@ -226,6 +249,7 @@ __all__ = [
     "DEMO_RERECORD_HINT",
     "CorruptFixtureError",
     "FixtureConflictError",
+    "FixtureError",
     "LiteLLMRecorder",
     "MissingFixtureError",
     "packaged_fixture_dir",

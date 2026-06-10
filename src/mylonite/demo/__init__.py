@@ -11,3 +11,23 @@ namespaced per target variant because the replay cache key is the
 """
 
 from __future__ import annotations
+
+from mylonite.demo._replay import (
+    DEMO_RERECORD_HINT,
+    CorruptFixtureError,
+    FixtureConflictError,
+    FixtureError,
+    LiteLLMRecorder,
+    MissingFixtureError,
+    packaged_fixture_dir,
+)
+
+__all__ = [
+    "DEMO_RERECORD_HINT",
+    "CorruptFixtureError",
+    "FixtureConflictError",
+    "FixtureError",
+    "LiteLLMRecorder",
+    "MissingFixtureError",
+    "packaged_fixture_dir",
+]

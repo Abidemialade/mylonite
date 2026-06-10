@@ -16,13 +16,14 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Final
 
 from rich.console import Console
 from rich.table import Table
 
 from mylonite.scan.engine import ScanResult
 
-OUTCOME_MARKS = {
+OUTCOME_MARKS: Final[dict[str, str]] = {
     "finding": "✗ FOUND",
     "no_finding": "✓ clean",
     "skipped_invalid_metadata": "⚠ skipped",
@@ -33,7 +34,7 @@ OUTCOME_MARKS = {
 }
 
 # Pre-v0.3.0 private name — kept as an alias so existing call sites stay valid.
-_OUTCOME_MARK = OUTCOME_MARKS
+_OUTCOME_MARK: Final = OUTCOME_MARKS
 
 
 def _sanitise_filename(pattern_id: str) -> str:
