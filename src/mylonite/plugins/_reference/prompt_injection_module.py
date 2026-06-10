@@ -27,7 +27,7 @@ from mylonite.contracts import (
     TargetDescriptor,
 )
 from mylonite.contracts.attack_module import CONTRACT_VERSION
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern
+from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
 
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
@@ -78,5 +78,7 @@ class PromptInjectionAttackModule(AttackModuleBase):
         # the engine doesn't waste calls on incompatible targets.
         if target.kind != "mcp":
             return
+        family = target_family(target.target_id)
         for seed in SEED_CATALOGUE:
-            yield _payload_from_seed(seed)
+            if family in seed.applicable_targets:
+                yield _payload_from_seed(seed)
