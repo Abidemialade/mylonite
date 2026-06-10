@@ -22,12 +22,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
+#: The base marker every Mylonite-generated test carries.
+MYLONITE_SECURITY_MARKER = "mylonite_security"
+
+#: The exact set of OWASP marker names this plugin registers. The generator
+#: imports this and emits an ``@pytest.mark.owasp_*`` marker ONLY when its
+#: derived name is in this set — so the generator can never emit a marker the
+#: plugin doesn't register (which, under ``filterwarnings=error``, would turn a
+#: consumer's committed test into a hard collection error). Out-of-range OWASP
+#: IDs fall back to the docstring, like ATLAS/NIST.
+REGISTERED_OWASP_MARKERS: frozenset[str] = frozenset(
+    [f"owasp_llm{n:02d}" for n in range(1, 11)] + [f"owasp_asi{n:02d}" for n in range(1, 11)]
+)
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register the mylonite-emitted markers so they collect warning-free."""
     config.addinivalue_line(
         "markers",
-        "mylonite_security: a Mylonite-generated security regression test",
+        f"{MYLONITE_SECURITY_MARKER}: a Mylonite-generated security regression test",
     )
     for n in range(1, 11):
         config.addinivalue_line(

@@ -143,3 +143,29 @@ def test_slug_collapses_non_identifier_chars() -> None:
     generated = ReferencePytestGenerator().emit(exploit)
     assert generated.filename == "test_security_weird_id_with_dots.py"
     assert "def test_security_weird_id_with_dots()" in generated.source
+
+
+def test_out_of_range_owasp_id_does_not_emit_unregistered_marker() -> None:
+    """An OWASP ID outside the plugin's registered set must NOT become a marker.
+
+    Otherwise, under a consumer's ``filterwarnings=error`` config, an emitted
+    ``@pytest.mark.owasp_llm11`` would raise ``PytestUnknownMarkWarning`` and turn
+    their committed gate into a hard collection error. Out-of-range IDs fall back
+    to the docstring (like ATLAS / NIST), and only registered ones emit markers.
+    """
+    exploit = _EXPLOIT.model_copy(
+        update={
+            "compliance": ComplianceTags(
+                owasp_llm=["LLM01", "LLM11"],  # LLM11 is out of the registered 01..10 range
+                owasp_asi=["ASI99"],  # also out of range
+            )
+        }
+    )
+    source = ReferencePytestGenerator().emit(exploit).source
+
+    assert "@pytest.mark.owasp_llm01" in source  # registered → marker
+    assert "@pytest.mark.owasp_llm11" not in source  # unregistered → no marker
+    assert "@pytest.mark.owasp_asi99" not in source  # unregistered → no marker
+    # The out-of-range IDs still appear (provenance preserved) in the docstring.
+    assert "LLM11" in source
+    assert "ASI99" in source
