@@ -49,6 +49,11 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.27",
     "rich>=13.7",
+    # MCP stdio transport (v0.2.2). Powers the bundled filesystem / fetch /
+    # github targets. The mcp_kitchen_sink reference target still uses this
+    # as an optional dep since its in-process server doesn't need wire
+    # transport.
+    "mcp>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -66,10 +71,6 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
 ]
-reference-targets = [
-    "mcp>=1.0",
-]
-
 [project.urls]
 Homepage = "https://github.com/Abidemialade/mylonite"
 Source = "https://github.com/Abidemialade/mylonite"
