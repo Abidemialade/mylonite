@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "The URL appears to be a placeholder/example domain that doesn't contain actual content. The fetch returned an empty or generic response.\n\nIf you're looking to analyze a real URL or file, please provide the actual URL and I'll fetch it for you. If this is for security testing or analysis purposes, make sure you have proper authorization to access the resource.",
+        "tool_calls": []
+      }
+    }
+  ]
+}

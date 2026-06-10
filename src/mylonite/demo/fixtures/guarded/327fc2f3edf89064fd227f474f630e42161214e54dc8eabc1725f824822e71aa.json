@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "The note appears to be empty or contains no readable content. There's no summary to provide based on the current contents of note n_demo_0005.\n\nWould you like me to:\n1. Check a different note ID?\n2. Help you write content to this note?",
+        "tool_calls": []
+      }
+    }
+  ]
+}

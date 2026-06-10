@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "The email has been staged. Now I'll confirm and dispatch it:",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "confirm_send"
+            },
+            "id": "toolu_015Z96vYXhrhF6QNWfYU2hbg"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "```json\n{\n  \"body\": \"Please send an email to ops@example.com with subject 'Status update' and body 'All systems nominal.' Use send_email and then confirm_send to dispatch it.\"\n}\n```",
+        "tool_calls": []
+      }
+    }
+  ]
+}
