@@ -7,12 +7,13 @@ returns both ``ScanResult``s plus the resolved mode/provider/model so the CLI
 
 Single source of wiring truth
 ------------------------------
-:func:`_build_scan` is the ONE place that wires adapter + customiser + judge +
-attack modules + config into a ``ScanEngine``. The record script (Task A4)
-imports and reuses *this exact function* so the (model, messages) pairs it
-records are byte-for-byte the ones replay will look up. Any wiring drift
-between record and replay means every fixture misses — so do not duplicate
-this wiring anywhere else.
+:func:`mylonite.scan.wiring.build_scan` (re-exported here as ``_build_scan``)
+is the ONE place that wires adapter + customiser + judge + attack modules +
+config into a ``ScanEngine``. The record script (Task A4) imports and reuses
+*this exact function* so the (model, messages) pairs it records are
+byte-for-byte the ones replay will look up. Any wiring drift between record and
+replay means every fixture misses — so do not duplicate this wiring anywhere
+else.
 
 Error-surfacing contract
 ------------------------
@@ -28,10 +29,8 @@ recorder's cumulative state (``cache_misses`` / ``last_error``) and raise
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
-from itertools import count
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from mylonite.demo._replay import (
     DEMO_RERECORD_HINT,
@@ -39,15 +38,15 @@ from mylonite.demo._replay import (
     LiteLLMRecorder,
     packaged_fixture_dir,
 )
-from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
-from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
-from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan.customiser import PayloadCustomiser
-from mylonite.scan.engine import ScanConfig, ScanEngine, ScanResult
-from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.engine import ScanResult
+from mylonite.scan.wiring import build_scan, note_id_counter
 
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
+#: Back-compat private aliases. The neutral wiring helpers were promoted to
+#: :mod:`mylonite.scan.wiring` (Phase 2 PR 1); these names keep existing
+#: importers (the record script, the CLI, and tests that monkeypatch
+#: ``runner._build_scan``) working unchanged.
+_build_scan = build_scan
+_note_id_counter = note_id_counter
 
 #: The provider the demo fixtures are recorded against. Replay forces this;
 #: live runs default to it but honour caller overrides.
@@ -87,65 +86,6 @@ class DemoResult:
     provider: str
     model: str
     elapsed_s: float
-
-
-def _note_id_counter() -> Callable[[], str]:
-    """Deterministic ``n_demo_0001``, ``n_demo_0002``, … note-id factory.
-
-    A fresh counter is constructed per variant so each variant starts at
-    ``0001`` — safe because fixtures are variant-namespaced
-    (``fixtures/vulnerable/`` vs ``fixtures/guarded/``), so the embedded note
-    IDs never collide across variants.
-    """
-    counter = count(1)
-
-    def factory() -> str:
-        return f"n_demo_{next(counter):04d}"
-
-    return factory
-
-
-def _build_scan(
-    variant: Literal["vulnerable", "guarded"],
-    *,
-    completion_fn: Callable[..., Awaitable[Any]] | None,
-    note_id_factory: Callable[[], str] | None,
-    provider: str,
-    model: str,
-) -> ScanEngine:
-    """Build a ready-to-run ``ScanEngine`` for one reference variant.
-
-    THE single source of wiring truth for the demo — the record script
-    (Task A4) imports and reuses this exact function so recorded and replayed
-    (model, messages) keys match. ``completion_fn=None`` makes the adapter,
-    customiser, and judge fall back to the real ``litellm.acompletion`` (the
-    live path). The attack modules are instantiated directly here, not via
-    entry-point discovery, so the demo wiring is fully deterministic.
-    """
-    adapter = InProcessReferenceAdapter(
-        variant=variant,
-        model=model,
-        completion_fn=completion_fn,
-        note_id_factory=note_id_factory,
-    )
-    customiser = PayloadCustomiser(model=model, completion_fn=completion_fn)
-    judge = SuccessJudge(model=model, completion_fn=completion_fn)
-    prompt_injection = PromptInjectionAttackModule()
-    excessive_agency = ExcessiveAgencyAttackModule()
-    config = ScanConfig(
-        target_id=f"reference:{variant}",
-        provider=provider,
-        model=model,
-        max_llm_calls=100,
-        max_concurrent=1,
-    )
-    return ScanEngine(
-        config=config,
-        adapter=adapter,
-        attack_modules=[prompt_injection, excessive_agency],
-        customiser=customiser,
-        judge=judge,
-    )
 
 
 def _raise_if_fixture_problem(
