@@ -11,12 +11,22 @@ Two implementations ship here:
 
 The pipeline (per ``mylonite.contracts.validator``):
 
-1. **build** — the emitted test artefact is well-formed and *collectable* under
-   pytest. At validation time the committed replay fixtures don't exist yet
-   (they are recorded later, in PR 7), so a full offline PASS isn't asserted
-   here — only that the file imports the testkit, registers its markers, and
-   collects. The full offline-pass-against-committed-fixtures is proven by PR
-   7's reference example.
+1. **build** — proves the emitted test artefact is a runnable regression gate.
+   There are two modes:
+
+   * *collect-only* (``record_fixtures_dir=None``, the offline-differential and
+     unit-test path): the committed replay fixtures don't exist, so only that
+     the file imports the testkit, registers its markers, and *collects* under
+     pytest is asserted.
+   * *full offline pass* (``record_fixtures_dir`` set, the live ``mylonite
+     validate`` path): after the differential loop finds a clean discriminating
+     run, the validator RECORDS the canonical guarded fixtures into
+     ``record_fixtures_dir``, writes the on-disk test + co-located exploit next
+     to them, and runs that ON-DISK committed test offline. The build leg passes
+     only on a FULL pass (pytest exit 0 — the guard held against the recorded
+     fixtures), not merely on collection. This closes the
+     ``validate``→committed-artefact loop: the command leaves behind a
+     ready-to-commit, replayable test + fixtures and proves it passes offline.
 2. **differential** — across ``iterations`` runs of the full attack scan, does
    the exploit's ``pattern_id`` FIRE on the vulnerable twin and RESIST on the
    guarded twin *at all*? (discrimination)
@@ -42,6 +52,7 @@ callable ⇒ deterministic offline replay (the unit tests inject one).
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -58,11 +69,13 @@ from mylonite.contracts import (
 from mylonite.contracts._types import Payload
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
+from mylonite.demo._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.pytest_runner import run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
+from mylonite.testkit import FIXTURE_FORMAT_VERSION
 
 #: Kitchen-sink seed weakness families used for the mutation tally. Resolved
 #: from the catalogue so it never drifts from the seeds.
@@ -155,6 +168,7 @@ class DifferentialValidator(ValidatorBase):
         model: str = "claude-haiku-4-5-20251001",
         completion_fn: Callable[..., Any] | None = None,
         run_build: bool = True,
+        record_fixtures_dir: Path | None = None,
     ) -> None:
         if iterations < 1:
             raise ValueError("iterations must be >= 1")
@@ -168,6 +182,7 @@ class DifferentialValidator(ValidatorBase):
         self._model = model
         self._completion_fn = completion_fn
         self._run_build = run_build
+        self._record_fixtures_dir = record_fixtures_dir
 
     # -- public contract ------------------------------------------------------
 
@@ -222,8 +237,9 @@ class DifferentialValidator(ValidatorBase):
         # 4. metamorphic-lite (report-only) — one neutral perturbation.
         metamorphic = self._metamorphic_outcome(test.exploit)
 
-        # build stage — does the emitted artefact collect under pytest?
-        build = self._build_outcome(test)
+        # build stage — collect-only, OR (when recording) record the canonical
+        # guarded fixtures and run the on-disk committed test offline (full pass).
+        build = self._build_outcome(test, tallies)
 
         kept = build.passed and differential.passed and flakiness.passed
         notes = (
@@ -414,15 +430,23 @@ class DifferentialValidator(ValidatorBase):
 
     # -- build stage ----------------------------------------------------------
 
-    def _build_outcome(self, test: GeneratedTest) -> ValidationOutcome:
-        """Assert the emitted test is well-formed and *collectable* under pytest.
+    def _build_outcome(
+        self, test: GeneratedTest, tallies: list[_IterationTally]
+    ) -> ValidationOutcome:
+        """Prove the emitted test is a runnable regression gate.
 
-        Build = "the emitted artefact is well-formed and collectable" — it
-        imports the testkit, registers its markers, and pytest can collect it.
-        The committed replay fixtures don't exist at validation time (recorded
-        later in PR 7), so a full offline PASS is intentionally NOT asserted
-        here; PR 7's reference example proves the offline-pass-against-fixtures
-        leg.
+        Two modes (see the class docstring):
+
+        * ``record_fixtures_dir is None`` → *collect-only*: write ``test.source``
+          to a temp dir and assert pytest can COLLECT it. The committed replay
+          fixtures don't exist, so a full PASS isn't asserted.
+        * ``record_fixtures_dir`` set AND a clean discriminating iteration exists
+          → *full offline pass*: record the canonical guarded fixtures, write the
+          on-disk test + co-located exploit next to them, and run that ON-DISK
+          committed test offline — the build leg passes only on a FULL pass
+          (pytest exit 0). If recording is requested but no canonical run
+          qualifies, fall back to collect-only (the kept verdict already reflects
+          the differential/flakiness failure).
         """
         if not self._run_build:
             return ValidationOutcome(
@@ -430,6 +454,36 @@ class DifferentialValidator(ValidatorBase):
                 passed=True,
                 detail="build stage skipped (run_build=False)",
             )
+
+        if self._record_fixtures_dir is not None:
+            canonical = self._canonical_run_index(tallies)
+            if canonical is not None:
+                return self._record_and_full_pass(test)
+            # No clean discriminating iteration → don't record; collect-only.
+            return self._collect_only_outcome(
+                test,
+                suffix=(
+                    " — no clean discriminating run to record; "
+                    "fixtures not recorded (kept verdict reflects the failure)"
+                ),
+            )
+
+        return self._collect_only_outcome(test)
+
+    @staticmethod
+    def _canonical_run_index(tallies: list[_IterationTally]) -> int | None:
+        """Index of the FIRST iteration that BOTH fired and resisted (D4), or None.
+
+        That clean, discriminating run is the canonical reproduction worth
+        recording. If none qualifies (flaky / failed loop), recording is skipped.
+        """
+        for i, tally in enumerate(tallies):
+            if tally.vuln_fired and tally.guard_resisted:
+                return i
+        return None
+
+    def _collect_only_outcome(self, test: GeneratedTest, *, suffix: str = "") -> ValidationOutcome:
+        """Collect-only build: assert the emitted source collects under pytest."""
         with tempfile.TemporaryDirectory() as tmp:
             test_path = Path(tmp) / test.filename
             test_path.write_text(test.source, encoding="utf-8")
@@ -438,7 +492,71 @@ class DifferentialValidator(ValidatorBase):
             stage="build",
             passed=result.collected,
             detail=(
-                f"emitted test {'collected' if result.collected else 'did NOT collect'} "
-                f"under pytest (exit_code={result.exit_code}: {result.detail})"
+                f"collect-only: emitted test "
+                f"{'collected' if result.collected else 'did NOT collect'} under pytest "
+                f"(exit_code={result.exit_code}: {result.detail}){suffix}"
+            ),
+        )
+
+    def _record_and_full_pass(self, test: GeneratedTest) -> ValidationOutcome:
+        """Record canonical guarded fixtures, then full-offline-pass the on-disk test.
+
+        A SEPARATE single-seed guarded scan (not mid-loop) records the canonical
+        fixtures: single-seed scoping (``pattern_id_filter``) + deterministic note
+        IDs make it self-consistent (one seed, ``n_demo_0001…``), so it cannot
+        collide with itself (no ``FixtureConflictError``). The on-disk test +
+        co-located exploit are written next to the recorded ``fixtures/`` so the
+        emitted test resolves its data, then run offline as a FULL pass.
+        """
+        assert self._record_fixtures_dir is not None  # guarded by caller
+        fixtures_dir = self._record_fixtures_dir
+        exploit = test.exploit
+
+        # 1. Record the canonical guarded fixtures (one separate single-seed scan).
+        recorder = LiteLLMRecorder(fixtures_dir, mode="record")
+        engine = build_scan(
+            "guarded",
+            completion_fn=recorder,
+            note_id_factory=note_id_counter(),
+            provider=self._provider,
+            model=self._model,
+            pattern_id_filter=exploit.pattern_id,
+        )
+        asyncio.run(engine.run())
+
+        # 2. Stamp the _meta.json sidecar the offline gate reads.
+        meta_path = fixtures_dir / "_meta.json"
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "format_version": FIXTURE_FORMAT_VERSION,
+                    "model": self._model,
+                    "pattern_id": exploit.pattern_id,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        # 3. Co-locate the on-disk test + exploit NEXT TO the recorded fixtures so
+        #    the emitted test (`here/"exploit_<pid>.json"`, `here/"fixtures"`)
+        #    resolves its data.
+        artefact_dir = fixtures_dir.parent
+        test_path = artefact_dir / test.filename
+        test_path.write_text(test.source, encoding="utf-8")
+        exploit_path = artefact_dir / f"exploit_{exploit.pattern_id}.json"
+        exploit_path.write_text(exploit.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+        # 4. Run the ON-DISK committed test offline — FULL pass required (exit 0).
+        result = run_test_file(test_path)
+        return ValidationOutcome(
+            stage="build",
+            passed=result.passed,
+            detail=(
+                f"full offline pass: on-disk committed test "
+                f"{'PASSED' if result.passed else 'did NOT pass'} against the recorded "
+                f"canonical guarded fixtures (exit_code={result.exit_code}: {result.detail})"
             ),
         )

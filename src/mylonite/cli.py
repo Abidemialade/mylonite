@@ -767,9 +767,14 @@ def validate(
 
     Runs LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM
     (Haiku) — roughly a minute and a few cents — and needs a provider
-    (ANTHROPIC_API_KEY). Renders a per-leg report (build / differential /
-    flakiness / metamorphic) with the mutation score and the kept verdict. Exit 0
-    when the test is kept, 5 when it is cleanly rejected, 4 with no provider.
+    (ANTHROPIC_API_KEY). Validates the ACTUAL committed test on disk (no
+    re-emit), then — on a clean discriminating run — RECORDS the canonical guarded
+    fixtures into the generated dir's ``fixtures/`` and runs that on-disk test
+    offline as a full-pass build, so the command leaves a ready-to-commit,
+    replayable test + fixtures behind. Renders a per-leg report (build /
+    differential / flakiness / metamorphic) with the mutation score and the kept
+    verdict. Exit 0 when the test is kept, 5 when it is cleanly rejected, 4 with
+    no provider.
     """
     from mylonite import testkit
 
@@ -784,18 +789,11 @@ def validate(
         typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    # Re-emit the GeneratedTest from the exploit — deterministic, and avoids
-    # trusting an edited-on-disk test source. (The on-disk test_path is what the
-    # user committed; the validator's build leg re-collects an identical render.)
-    del test_path
-
-    # The generator + validator transitively import mcp_kitchen_sink (via the
-    # reference adapter / wiring). Map its absence to the same friendly exit-2
-    # the demo command uses.
+    # The validator transitively imports mcp_kitchen_sink (via the reference
+    # adapter / wiring). Map its absence to the same friendly exit-2 the demo
+    # command uses.
     try:
-        from mylonite.plugins._reference.reference_pytest_generator import (
-            ReferencePytestGenerator,
-        )
+        from mylonite.contracts import GeneratedTest
         from mylonite.plugins._reference.reference_validator import (
             DifferentialValidator,
             ReferenceVulnerableOracle,
@@ -810,7 +808,16 @@ def validate(
             raise typer.Exit(code=EXIT_CONFIG) from exc
         raise
 
-    generated = ReferencePytestGenerator().emit(exploit)
+    # Validate the ACTUAL committed test on disk (NOT a re-render) — so a live
+    # `mylonite validate` records canonical fixtures next to it and proves the
+    # very file the user will commit passes offline.
+    on_disk_source = test_path.read_text(encoding="utf-8")
+    generated = GeneratedTest(
+        framework="pytest",
+        filename=test_path.name,
+        source=on_disk_source,
+        exploit=exploit,
+    )
 
     typer.echo(
         f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
@@ -843,6 +850,10 @@ def validate(
         iterations=iterations,
         provider=effective_provider,
         model=effective_model,
+        # Record the canonical guarded fixtures into the gen dir's `fixtures/` and
+        # run the on-disk committed test offline as a full-pass build — closing
+        # the validate→committed-artefact loop.
+        record_fixtures_dir=test_path.parent / "fixtures",
     )
     report = validator.validate(
         generated,

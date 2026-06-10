@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mylonite validate` now closes the validate→committed-artefact loop.** When
+  the differential loop finds a clean discriminating run, `validate` RECORDS the
+  canonical guarded fixtures into the generated dir's `fixtures/`, writes the
+  on-disk test + co-located exploit next to them, and runs that ON-DISK committed
+  test offline as a **full-pass** build stage (pytest exit 0 — the guard holds
+  against the recorded fixtures), replacing the old collect-only + re-emit. The
+  command leaves behind a ready-to-commit, replayable test + fixtures and proves
+  it passes offline. `validate` no longer re-renders the test from the exploit —
+  it validates the ACTUAL file on disk. If no clean discriminating run exists,
+  the build stage falls back to collect-only and records nothing.
+  `DifferentialValidator` gains a `record_fixtures_dir: Path | None = None`
+  constructor arg (default `None` preserves the prior collect-only behavior).
 - **Per-exploit fixture isolation: the offline gate now runs a single seed.**
   `ScanConfig.pattern_id_filter` (new, default `None` = unchanged full scan)
   scopes a scan to one pattern_id, dropping non-matching payloads *before* any
