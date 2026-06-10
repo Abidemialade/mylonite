@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MITRE ATLAS and NIST AI RMF compliance markers are now registered and
+  emitted.** The bundled pytest11 plugin registers one marker per bundled-taxonomy
+  ATLAS technique (`atlas_<id>`, e.g. `atlas_aml_t0051`) and NIST AI RMF
+  subcategory (`nist_<id>`, e.g. `nist_measure_2_6`), and the reference generator
+  emits the corresponding `@pytest.mark.*` decorator for any in-taxonomy tag.
+  `pytest -m atlas_aml_t0051` now selects emitted tests warning-free (no
+  `PytestUnknownMarkWarning`). Out-of-taxonomy IDs still fall back to the
+  docstring; the raw IDs continue to appear in the test docstring as before.
+
 ### Hardened
 
 - The two machine-readable validation-metric fields —
