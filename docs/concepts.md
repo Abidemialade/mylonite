@@ -47,9 +47,9 @@ Phase 0 ships the contracts, the bundled threat taxonomy, and the
 [`reference_targets/mcp_kitchen_sink/`](https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink)
 that the differential oracle will use as its ground truth.
 
-## Where Phase 0 stops
+## Where Phase 0 stopped
 
-Phase 0 is foundations only. What's in place:
+Phase 0 was foundations only. What it put in place:
 
 - Five versioned extension contracts (attack module, target adapter, test
   generator, validator, compliance mapper).
@@ -58,9 +58,10 @@ Phase 0 is foundations only. What's in place:
 - The deliberately-vulnerable reference MCP agent and its guarded twin.
 - OSS scaffolding.
 
-What's deliberately out of scope until later phases:
+What Phase 0 deliberately left to later phases:
 
-- The LLM-driven exploit-finding agent (Phase 1).
+- The LLM-driven exploit-finding agent (Phase 1 — **since delivered**: the
+  scan loop works today; see the [Quickstart](quickstart.md)).
 - A real (non-stub) pytest generator (Phase 1).
 - The differential-oracle validator (Phase 2).
 - A GitHub Action that opens a PR with a committed test (Phase 3).
