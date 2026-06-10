@@ -51,16 +51,61 @@ def test_init_is_stub() -> None:
 
 
 def test_scan_refuses_non_reference_without_authorize() -> None:
-    result = runner.invoke(app, ["scan", "mcp://example.com"])
+    result = runner.invoke(app, ["scan", "mcp:filesystem:/tmp/sandbox"])
     assert result.exit_code == EXIT_CONFIG
     assert "--authorize" in (result.stderr or result.output)
 
 
-def test_scan_refuses_unsupported_non_reference_even_with_authorize() -> None:
-    """Non-reference adapters land in Phase 1.5; v0.2 surfaces a clear refusal."""
-    result = runner.invoke(app, ["scan", "mcp://example.com", "--authorize", "mcp://example.com"])
+def test_scan_refuses_unknown_target_shape() -> None:
+    """A target that's neither reference:* nor mcp:* is a config error."""
+    result = runner.invoke(app, ["scan", "rag://example.com", "--authorize", "anything"])
     assert result.exit_code == EXIT_CONFIG
-    assert "not yet supported" in (result.stderr or result.output)
+    assert "unknown target shape" in (result.stderr or result.output)
+
+
+def test_scan_refuses_unknown_mcp_family() -> None:
+    """An mcp:<family> not in BUNDLED_TARGETS gives a typed error message."""
+    result = runner.invoke(app, ["scan", "mcp:nosuch:any", "--authorize", "any"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "unknown MCP target family" in (result.stderr or result.output)
+
+
+def test_scan_mcp_filesystem_refuses_mismatched_authorize(tmp_path: Path) -> None:
+    """filesystem requires --authorize == scope."""
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            f"mcp:filesystem:{tmp_path}",
+            "--authorize",
+            str(tmp_path / "different"),
+            "--dry-run",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize must equal the scope segment" in (result.stderr or result.output)
+
+
+def test_scan_mcp_fetch_requires_family_as_authorize() -> None:
+    """fetch is stateless — --authorize must equal the family name."""
+    result = runner.invoke(
+        app,
+        ["scan", "mcp:fetch", "--authorize", "wrong-label"],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize must equal the family name" in (result.stderr or result.output)
+
+
+def test_scan_mcp_github_rejects_missing_slash() -> None:
+    """github requires owner/repo scope — typed validation error."""
+    result = runner.invoke(
+        app,
+        ["scan", "mcp:github:notvalid", "--authorize", "notvalid"],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "owner/repo" in (result.stderr or result.output)
 
 
 def test_scan_dry_run_against_reference_vulnerable(tmp_path: Path) -> None:

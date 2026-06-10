@@ -34,10 +34,13 @@ def test_attack_metadata_returns_umbrella_pattern() -> None:
     assert "ASI01" in meta.compliance.owasp_asi
 
 
-def test_generate_payloads_emits_one_per_seed() -> None:
+def test_generate_payloads_emits_one_per_kitchen_sink_seed() -> None:
+    """``reference:vulnerable`` resolves to the kitchen-sink family; only seeds
+    tagged ``applicable_targets=['kitchen-sink']`` are emitted (PR 2 + PR 5 of v0.2.2)."""
     module = PromptInjectionAttackModule()
     payloads = list(module.generate_payloads(_mcp_descriptor()))
-    assert len(payloads) == len(SEED_CATALOGUE)
+    kitchen_sink_seeds = [s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets]
+    assert len(payloads) == len(kitchen_sink_seeds)
 
 
 def test_emitted_payloads_carry_required_metadata() -> None:

@@ -91,6 +91,93 @@ def _build_adapter_for_reference(target: str, model: str) -> Any:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+def _parse_mcp_target(target: str) -> tuple[str, str | None]:
+    """Split ``mcp:<family>`` or ``mcp:<family>:<scope>`` into ``(family, scope)``.
+
+    The scope segment is everything after the second colon — owner/repo for
+    github, absolute path for filesystem, optional label for fetch. Splits
+    at most twice so scopes carrying their own ``:`` (e.g. Windows
+    ``C:\\sandbox``) survive intact.
+    """
+    parts = target.split(":", 2)
+    if len(parts) < 2 or parts[0] != "mcp":
+        msg = f"expected mcp:<family>[:<scope>]; got {target!r}"
+        raise ValueError(msg)
+    family = parts[1]
+    scope: str | None = parts[2] if len(parts) == 3 else None
+    return family, scope
+
+
+def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> Any:
+    """Resolve ``mcp:`` target into a bundled adapter, enforcing scope-matched ``--authorize``.
+
+    Validation order:
+    1. Parse ``mcp:<family>[:<scope>]``.
+    2. Validate ``--authorize`` matches: scope-required families need
+       ``authorize == scope``; stateless families need ``authorize == family``.
+    3. Resolve the family in the registry (validates scope shape).
+    4. Construct the right bundled subclass.
+
+    Each failure → typer.Exit(EXIT_CONFIG) with a user-actionable message.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import (
+        FetchMCPAdapter,
+        FilesystemMCPAdapter,
+        GitHubMCPAdapter,
+    )
+
+    try:
+        family, scope = _parse_mcp_target(target)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # Step 2: --authorize scope-match check.
+    if family not in target_registry.BUNDLED_TARGETS:
+        typer.echo(
+            f"unknown MCP target family {family!r}. "
+            f"Known families: {sorted(target_registry.BUNDLED_TARGETS)}.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    spec = target_registry.BUNDLED_TARGETS[family]
+    if spec.requires_scope:
+        if authorize != scope:
+            typer.echo(
+                f"--authorize must equal the scope segment for {family!r} "
+                f"(scope={scope!r}, authorize={authorize!r}).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+    else:
+        if authorize != family:
+            typer.echo(
+                f"--authorize must equal the family name for stateless target "
+                f"{family!r} (got authorize={authorize!r}).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+
+    # Step 3: registry resolution (validates scope shape).
+    try:
+        target_registry.resolve_target(family, scope)
+    except (target_registry.InvalidTargetScope, target_registry.UnknownTargetFamily) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # Step 4: construct the right subclass.
+    if family == "filesystem":
+        return FilesystemMCPAdapter(scope=scope or "", model=model)
+    if family == "fetch":
+        return FetchMCPAdapter(scope=scope, model=model)
+    if family == "github":
+        return GitHubMCPAdapter(scope=scope or "", model=model)
+    # Unreachable — the registry check above already gated unknown families.
+    typer.echo(f"no subclass wired for family {family!r}", err=True)
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
 @app.command()
 def scan(
     target: Annotated[
@@ -136,21 +223,6 @@ def scan(
     ] = None,
 ) -> None:
     """Run the exploit-finding loop against a target."""
-    if not target.startswith("reference:"):
-        if not authorize:
-            typer.echo(
-                f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
-        typer.echo(
-            f"non-reference targets (got {target!r}) are not yet supported in v0.2 — "
-            "the MCP-wire and HTTP adapters land in Phase 1.5 / 2.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
     effective_provider = provider or "anthropic"
@@ -161,7 +233,24 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    adapter = _build_adapter_for_reference(target, effective_model)
+    if target.startswith("reference:"):
+        adapter = _build_adapter_for_reference(target, effective_model)
+    elif target.startswith("mcp:"):
+        if not authorize:
+            typer.echo(
+                f"--authorize is required for non-reference targets (got {target!r}). "
+                "See SECURITY.md.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+    else:
+        typer.echo(
+            f"unknown target shape {target!r}. "
+            "Expected 'reference:<variant>' or 'mcp:<family>[:<scope>]'.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
 
     try:
         all_modules: list[Any] = discover("mylonite.attack_modules")
