@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mylonite"
-version = "0.2.2"
+version = "0.3.0"
 description = "Open-source framework for AI-layer security testing — finds AI-agent weaknesses and writes the regression tests that close them."
 readme = "README.md"
 requires-python = ">=3.11"

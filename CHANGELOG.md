@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+### Added — Phase 1.5 "the Quarry" playground
+
+- **`mylonite demo`** — a zero-config, **offline, deterministic** playground.
+  It runs the real scan twice against the bundled deliberately-vulnerable
+  reference agent ("the Quarry", `reference:vulnerable`) and its guarded twin
+  (`reference:guarded`), then prints a safety banner, a W1–W4 weakness table
+  with OWASP / ASI / ATLAS taxonomy IDs, and the headline
+  **`4 exploits on vulnerable, 0 on guarded`**. No API key, no network. A
+  `--live` opt-in re-runs the same scan with real LLM calls (needs a key).
+- **Committed per-variant LLM fixtures** under `src/mylonite/demo/fixtures/`
+  (`vulnerable/`, `guarded/`), recorded with
+  `anthropic/claude-haiku-4-5-20251001`, so the default demo replays recorded
+  model behavior byte-for-byte. Re-record via
+  `python scripts/record_demo_fixtures.py` (needs `ANTHROPIC_API_KEY`).
+- **Differential renderer** — the demo's table and headline join the two scan
+  results by `pattern_id` and surface each weakness's compliance metadata
+  (OWASP LLM / ASI / MITRE ATLAS IDs).
+- **`docs/quarry.md`** — full playground walkthrough and W1–W4 scenario
+  catalogue; mkdocs nav gains a "The Quarry" page.
+- **`docs/assets/recording-script.md`** — controller script for producing the
+  README demo GIF (`docs/assets/quarry-demo.gif`).
+
+### Changed
+
+- **Replay core promoted.** The record/replay LLM wiring used by the demo is
+  shared with a strict replay check (a missing fixture is a hard error rather
+  than a silent live call), keeping the default demo provably offline.
+- **README / CONTRIBUTING refresh.** README gains a "Try it in 60 seconds"
+  (clone-first, offline) section with a GIF embed and a "What works today
+  (v0.3.0)" inventory; stale v0.1 "magic-moment quickstart" / "What's in
+  v0.1.0" sections and the unpublished-package PyPI / pyversions badges are
+  removed. CONTRIBUTING gains a "Contributing a Quarry scenario" path
+  (differential-proof gate) and a "Demo fixtures" maintenance contract.
+- **Kitchen-sink branding.** The reference agent is now consistently branded
+  "the Quarry" across its README and the docs; de-staled `docs/quickstart.md`
+  and `docs/index.md`.
+
+### Fixed
+
+- **Windows UTF-8 stdio crash.** The CLI now forces UTF-8 stdout/stderr so
+  Rich's box-drawing and status glyphs no longer raise `UnicodeEncodeError`
+  on cp1252 Windows consoles. This also fixes `mylonite scan`'s Rich-rendered
+  summary on Windows, not just the demo.
+
 ## [0.2.2] - 2026-06-09
 
 ### Added — Phase 1 truly complete (real OSS MCP agents)
@@ -235,7 +281,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for use as differential-oracle ground truth in Phase 2.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.3.0
 [0.2.2]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.0
