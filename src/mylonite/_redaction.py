@@ -112,9 +112,9 @@ def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -
     """Install (or skip) the redacting filter on the ``mylonite`` logger tree.
 
     Idempotent: at most one :class:`SecretRedactingFilter` is ever attached to the
-    named logger. When ``enabled`` is false this installs nothing (and leaves any
-    previously-installed filter in place is avoided — it removes one if present so
-    the flag is honoured for library users who toggle it off).
+    named logger. When ``enabled`` is false this installs nothing and removes an
+    existing filter if present, so the flag is honoured for library users who
+    toggle it off.
     """
     target = logging.getLogger(logger_name)
     existing = [f for f in target.filters if isinstance(f, SecretRedactingFilter)]
