@@ -99,6 +99,17 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.
 
+## Running live e2e tests before a release
+
+Mylonite ships recorded integration tests under
+`tests/integration/test_scan_mcp_*_recorded.py` that run in CI with mocked
+subprocesses. The live counterparts (`test_scan_mcp_*_live.py`) spawn real
+MCP server subprocesses and call a real LLM; they are gated behind
+`MYLONITE_LIVE_E2E=1`. We run them **before each release** to validate that
+the bundled-target wiring still matches the upstream servers.
+
+Full instructions: [docs/contributing/live-e2e-tests.md](./docs/contributing/live-e2e-tests.md).
+
 ## Community attack-pattern registry
 
 The registry is how the project accumulates a body of validated, citable

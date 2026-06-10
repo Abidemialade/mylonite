@@ -41,6 +41,21 @@ The project enforces the following non-negotiables:
    via a required `--authorize` flag plus a target identifier (hostname,
    service URL, or local-path) the user is asserting they own or are
    contractually authorized to test.
+
+   For **bundled MCP stdio targets** added in v0.2.2 (`mcp:filesystem:<sandbox>`,
+   `mcp:fetch`, `mcp:github:<owner/repo>`), `--authorize` is scope-matched:
+   - Scope-bearing families (`filesystem`, `github`) require
+     `--authorize == <scope>` exactly. Mismatched values exit 2 with both
+     the supplied authorize and the target's scope shown for diagnosis.
+   - Stateless families (`fetch`) require `--authorize == <family>` (the
+     literal `fetch`), making the user-intent assertion explicit even when
+     no scope segment is supplied.
+
+   Each `invoke()` spawns a fresh subprocess of the bundled server. Users
+   are advised to point `mcp:filesystem` at a throwaway sandbox directory
+   they own, point `mcp:github` at a throwaway repository with a
+   fine-grained PAT scoped only to that repo, and treat `mcp:fetch`'s
+   targets as out-of-scope for live scans against shared infrastructure.
 2. **No bundled targeting of public services.** Mylonite ships no built-in
    target list, allowlist of public agents, or convenience flags pointing at
    third-party production systems.

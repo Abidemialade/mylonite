@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-09
+
+### Added — Phase 1 truly complete (real OSS MCP agents)
+
+- **MCP stdio transport adapter** — `mylonite.plugins._mcp.stdio_adapter.MCPStdioAdapter`
+  spawns a bundled MCP server as a fresh subprocess per `invoke()`, drives
+  the planner over the wire via `stdio_client` + `ClientSession`, and
+  separates planner-attributed MCP calls from setup-arm calls in
+  `response.metadata["mcp_trace_planner"]` vs `mcp_trace_setup`. Per-attempt
+  timeout (60s default), filesystem sandbox-diff capture, fresh subprocess
+  isolation.
+- **Three bundled OSS MCP targets** with scope-matched authorize:
+  - `mcp:filesystem:<sandbox-path>` → official `@modelcontextprotocol/server-filesystem`.
+  - `mcp:fetch` (stateless) → official `mcp-server-fetch`.
+  - `mcp:github:<owner/repo>` → official `@modelcontextprotocol/server-github`.
+- **Eight new MCP-server-shaped seeds** under `SEED_CATALOGUE`:
+  - Filesystem: 3 seeds covering W1 description-smuggle, W2 poisoned-file-
+    then-write, W4 direct attacker-attributed write.
+  - Fetch: 2 seeds covering W3 direct attacker URL + W3 injection-driven
+    double-fetch.
+  - GitHub: 3 seeds covering W1 issue description-smuggle, W2 poisoned-
+    issue-then-act, W4 direct create-issue.
+- **Predicate primitives** (`mylonite.scan.predicate_primitives`):
+  `tool_was_called`, `tool_was_called_with_arg`, `tool_call_sequence`.
+- **Seven per-target predicates** under
+  `mylonite.plugins._mcp.predicates.{filesystem,fetch,github}` —
+  composing the primitives into named registry entries that the new seeds
+  reference.
+- **`SeedPattern.applicable_targets`** required field. Each seed declares
+  the target families it applies to (`kitchen-sink` / `filesystem` /
+  `fetch` / `github`). Both attack modules filter `SEED_CATALOGUE` by
+  matching the family resolved from `descriptor.target_id`.
+- **`SeedSetup` literal** extended with `seed_file`, `seed_issue`. **`SeedDrive`**
+  literal extended with 5 target-shaped drives.
+- **CLI `mcp:` parsing**. `mylonite scan mcp:<family>[:<scope>] --authorize <value>`
+  with scope-required families needing `--authorize == scope` and stateless
+  families needing `--authorize == family`. Typed exit-2 errors for unknown
+  family, mismatched authorize, malformed scope.
+- **Hybrid CI** — three recorded integration tests under
+  `tests/integration/test_scan_mcp_*_recorded.py` use mocked
+  `_open_mcp_session` + `ScriptedLLM` for deterministic CI. Three live
+  e2e tests under `tests/integration/test_scan_mcp_*_live.py` gated by
+  `MYLONITE_LIVE_E2E=1` exercise the full subprocess + real-LLM path.
+  Run before each release.
+
+### Changed
+
+- **`LLMPlanner` + 5 shared types lifted** from
+  `reference_targets/mcp_kitchen_sink` to `mylonite.scan.llm_planner` and
+  `mylonite.scan.llm_types`. Eliminates the would-be
+  `mylonite.scan → reference_targets/mcp_kitchen_sink` reverse dependency
+  the new MCP stdio adapter would have introduced. Kitchen-sink's
+  `_types` re-exports for back-compat.
+- **`LLMPlanner._ServerLike` Protocol is now fully async** (`async def
+  list_tools` AND `async def call_tool`). MCP SDK's session calls are
+  async-only; a sync wrapper would deadlock the running event loop.
+- **`mcp>=1.0` promoted to mainline runtime dependencies** (was in the
+  `[reference-targets]` extras group).
+- **Three new entry points** registered under `mylonite.target_adapters`:
+  `mcp_filesystem`, `mcp_fetch`, `mcp_github`.
+
+### Acceptance criteria — Phase 1 truly complete
+
+- `mylonite scan mcp:filesystem:<sandbox> --authorize <sandbox>` produces
+  ≥1 finding whose predicate reason names `write_file` with attacker-
+  controlled arguments and `sandbox_diff` execution evidence.
+- `mylonite scan mcp:fetch --authorize fetch` produces ≥1 finding whose
+  predicate reason names `fetch` with attacker-controlled URL.
+- `mylonite scan mcp:github:<owner/repo> --authorize <owner/repo>`
+  produces ≥1 finding whose predicate reason names `create_issue` or
+  `get_issue` with attacker-controlled body.
+
 ## [0.2.1] - 2026-06-09
 
 ### Added — Phase 1 completion (W3 + W4)
@@ -163,7 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for use as differential-oracle ground truth in Phase 2.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.1.0
