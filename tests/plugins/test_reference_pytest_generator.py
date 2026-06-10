@@ -70,6 +70,7 @@ from mylonite import testkit
 @pytest.mark.owasp_llm05
 @pytest.mark.owasp_asi01
 @pytest.mark.owasp_asi06
+@pytest.mark.atlas_aml_t0051
 def test_security_indirect_injection_note_body_direct() -> None:
     """The guarded twin must resist indirect-injection-note-body-direct (LLM01 · LLM05 · ASI01 · ASI06 · AML.T0051)."""
     here = Path(__file__).parent
@@ -104,9 +105,10 @@ def test_emit_is_not_skip_marked_and_gates_via_testkit() -> None:
     assert "from mylonite import testkit" in source
     assert "testkit.load_exploit(" in source
     assert "testkit.assert_guard_holds(" in source
-    # ATLAS rides in the docstring, not as a marker.
+    # ATLAS rides in BOTH the docstring (raw ID) and as a sanitised marker.
     assert "AML.T0051" in source
-    assert "@pytest.mark.AML" not in source
+    assert "@pytest.mark.AML" not in source  # raw ID never becomes a marker verbatim
+    assert "@pytest.mark.atlas_aml_t0051" in source  # sanitised, registered marker
 
 
 def test_emitted_source_collects_standalone(tmp_path: Path) -> None:
@@ -169,3 +171,26 @@ def test_out_of_range_owasp_id_does_not_emit_unregistered_marker() -> None:
     # The out-of-range IDs still appear (provenance preserved) in the docstring.
     assert "LLM11" in source
     assert "ASI99" in source
+
+
+def test_out_of_taxonomy_atlas_id_does_not_emit_unregistered_marker() -> None:
+    """An ATLAS ID outside the bundled taxonomy must NOT become a marker.
+
+    Same registered-set guard as OWASP: only ATLAS techniques the pytest11
+    plugin registers (i.e. in the bundled taxonomy) emit ``@pytest.mark.atlas_*``.
+    An out-of-taxonomy ID (e.g. a hypothetical ``AML.T9999``) falls back to the
+    docstring, so a consumer's ``filterwarnings=error`` config never trips.
+    """
+    exploit = _EXPLOIT.model_copy(
+        update={
+            "compliance": ComplianceTags(
+                mitre_atlas=["AML.T0051", "AML.T9999"],  # T9999 not in bundled taxonomy
+            )
+        }
+    )
+    source = ReferencePytestGenerator().emit(exploit).source
+
+    assert "@pytest.mark.atlas_aml_t0051" in source  # registered → marker
+    assert "@pytest.mark.atlas_aml_t9999" not in source  # unregistered → no marker
+    # The out-of-taxonomy ID still appears (provenance preserved) in the docstring.
+    assert "AML.T9999" in source
