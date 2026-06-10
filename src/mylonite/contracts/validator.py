@@ -23,7 +23,7 @@ from typing import ClassVar, Protocol, runtime_checkable
 from mylonite.contracts._types import GeneratedTest, ValidationReport
 from mylonite.contracts.target_adapter import TargetAdapter
 
-CONTRACT_VERSION: str = "0.1.0"
+CONTRACT_VERSION: str = "0.2.0"
 
 
 class VulnerableOracle(Protocol):

@@ -8,6 +8,19 @@
           "title": "Detail",
           "type": "string"
         },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional per-stage numeric \u2014 flakiness: reproducibility fraction [0,1]; differential: agreement fraction; metamorphic: robustness rate.",
+          "title": "Metric"
+        },
         "passed": {
           "title": "Passed",
           "type": "boolean"
@@ -39,6 +52,19 @@
       "description": "True iff the test passes every stage and should be committed.",
       "title": "Kept",
       "type": "boolean"
+    },
+    "mutation_score": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Fraction of the seeded-weakness bank the generated test correctly catches (fails-on-vulnerable), [0,1].",
+      "title": "Mutation Score"
     },
     "notes": {
       "anyOf": [
