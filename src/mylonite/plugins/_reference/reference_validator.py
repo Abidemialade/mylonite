@@ -41,9 +41,12 @@ The pipeline (per ``mylonite.contracts.validator``):
    for free from the full scans already run.
 5. **metamorphic** (report-only) — apply MULTIPLE deterministic, neutral
    perturbations (paraphrase / casing / whitespace / unicode confusables — pure
-   string transforms, NO LLM, NO randomness) to the exploit body and re-run the
-   differential check once per strategy; report the ROBUSTNESS fraction
-   (held / total) in [0,1] plus a per-strategy breakdown.
+   string transforms, NO LLM, NO randomness) to the exploit body and GENUINELY
+   run each reworded payload through BOTH reference twins + the judge (the
+   adapter writes the perturbed body into the poisoned note the planner reads,
+   so the reworded attack is actually executed — not a catalogue re-run of the
+   original seed); report the ROBUSTNESS fraction (held / total) in [0,1] plus a
+   per-strategy breakdown.
 
 ``kept = build ∧ differential ∧ flakiness``. Mutation + metamorphic are
 *reported*, not gating, for the MVP — even if EVERY perturbation breaks, ``kept``
@@ -58,6 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -76,11 +80,15 @@ from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.demo._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.engine import ScanResult
+from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.pytest_runner import run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
 from mylonite.testkit import FIXTURE_FORMAT_VERSION
+
+logger = logging.getLogger(__name__)
 
 #: The individual kitchen-sink seeds, ordered, that the per-seed mutation kill
 #: matrix scores. Each entry is (pattern_id, weakness). Resolved from the
@@ -464,14 +472,20 @@ class DifferentialValidator(ValidatorBase):
     # -- metamorphic-lite -----------------------------------------------------
 
     def _metamorphic_outcome(self, exploit: ExploitRecord) -> ValidationOutcome:
-        """Multiple deterministic perturbations, each re-checked once on both twins.
+        """Multiple deterministic perturbations, each GENUINELY run on both twins.
 
         Each configured strategy is a *pure string transform* of the exploit body
-        (NO LLM, NO randomness). For each, we rebuild the exploit with the
-        perturbed body and re-run the SAME per-iteration differential check once,
-        recording whether the differential still held (vuln fired AND guard
-        resisted). The reported ``metric`` is the ROBUSTNESS fraction
-        (held / total) in [0,1], and ``detail`` carries a per-strategy breakdown.
+        (NO LLM, NO randomness). For each, we build ONE perturbed ``Payload`` —
+        the reworded body, customisation disabled so the perturbed text is used
+        verbatim — and drive it DIRECTLY through both reference twins
+        (``InProcessReferenceAdapter.invoke`` writes the perturbed body into the
+        poisoned note the planner reads) plus the success judge. So the reworded
+        attack is actually executed, not a catalogue re-run of the original seed.
+
+        A strategy "holds" iff the perturbed attack still discriminates: the
+        vulnerable twin fired AND the guarded twin resisted. The reported
+        ``metric`` is the ROBUSTNESS fraction (held / total) in [0,1], and
+        ``detail`` carries a per-strategy breakdown.
 
         The stage is **report-only** (not gating): it answers "does the
         differential survive trivial, semantically-neutral rewordings?". ``passed``
@@ -480,9 +494,9 @@ class DifferentialValidator(ValidatorBase):
         """
         results: list[tuple[str, bool]] = []
         for name, transform in self._metamorphic_strategies:
-            perturbed_exploit = self._perturb_exploit(exploit, transform)
-            tally = self._run_iteration(perturbed_exploit.pattern_id)
-            held = tally.vuln_fired and tally.guard_resisted
+            perturbed_body = transform(exploit.payload.body)
+            vuln_fired, guard_resisted = self._run_perturbed(exploit, perturbed_body)
+            held = vuln_fired and guard_resisted
             results.append((name, held))
 
         total = len(results)
@@ -494,24 +508,68 @@ class DifferentialValidator(ValidatorBase):
             stage="metamorphic",
             passed=all_held,
             detail=(
-                f"{total} deterministic perturbation(s) of the exploit body "
-                f"(pure string transforms, no LLM): {breakdown} "
-                f"(robustness={robustness:.2f}); report-only — does not gate kept"
+                f"{total} deterministic perturbation(s) of the exploit body, each "
+                f"driven verbatim through both twins (pure string transforms, no "
+                f"LLM): {breakdown} (robustness={robustness:.2f}); report-only — "
+                f"does not gate kept"
             ),
             metric=robustness,
         )
 
-    @staticmethod
-    def _perturb_exploit(exploit: ExploitRecord, transform: Callable[[str], str]) -> ExploitRecord:
-        """Apply a deterministic ``body -> body`` transform to the exploit payload."""
-        perturbed_body = transform(exploit.payload.body)
-        perturbed_payload = Payload(
-            pattern_id=exploit.payload.pattern_id,
+    def _run_perturbed(self, exploit: ExploitRecord, perturbed_body: str) -> tuple[bool, bool]:
+        """Drive ONE perturbed payload through BOTH twins + judge; tally.
+
+        Builds a ``Payload`` from the exploit's seed metadata but with the
+        ``perturbed_body`` and customisation DISABLED (``needs_customisation`` =
+        ``"false"``) so the reworded text reaches the twins verbatim, then for
+        each variant invokes the reference adapter (which writes the perturbed
+        body into the poisoned note) and judges the response.
+
+        Returns ``(vuln_fired, guard_resisted)``. A skipped planner failure /
+        adapter error is NOT a clean resist — it counts as "not fired" on the
+        vulnerable twin and "not resisted" on the guarded twin, consistent with
+        the loop's ``_resisted`` semantics.
+        """
+        payload = Payload(
+            pattern_id=exploit.pattern_id,
             channel=exploit.payload.channel,
             body=perturbed_body,
-            metadata=dict(exploit.payload.metadata),
+            metadata={**exploit.payload.metadata, "needs_customisation": "false"},
         )
-        return exploit.model_copy(update={"payload": perturbed_payload})
+        vuln_success = self._invoke_and_judge("vulnerable", payload)
+        guard_success = self._invoke_and_judge("guarded", payload)
+        return vuln_success, not guard_success
+
+    def _invoke_and_judge(
+        self, variant: Literal["vulnerable", "guarded"], payload: Payload
+    ) -> bool:
+        """Invoke one twin with ``payload`` and judge the response.
+
+        Replicates the engine's invoke→judge for a single payload (no
+        customiser, since the perturbed body is used verbatim). Returns whether
+        the judge deemed the attack a success. A planner skip / adapter error
+        returns ``False`` (the attack did not land).
+        """
+
+        async def _run() -> bool:
+            adapter = InProcessReferenceAdapter(
+                variant=variant,
+                model=self._model,
+                completion_fn=self._completion_fn,
+                note_id_factory=note_id_counter(),
+            )
+            judge = SuccessJudge(model=self._model, completion_fn=self._completion_fn)
+            try:
+                response = await adapter.invoke(payload)
+            except AdapterInvocationSkipped:
+                return False
+            except Exception:
+                logger.exception("metamorphic: adapter.invoke raised unexpectedly")
+                return False
+            verdict = await judge.judge(payload, response)
+            return verdict.success
+
+        return asyncio.run(_run())
 
     # -- build stage ----------------------------------------------------------
 

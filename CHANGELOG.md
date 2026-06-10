@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DifferentialValidator` metamorphic stage now applies MULTIPLE deterministic
   perturbation strategies to the exploit body — `paraphrase`, `casing`,
   `whitespace`, and `unicode` (fullwidth confusables) — each a pure
-  `body -> body` string transform (no LLM, no randomness), re-running the
-  differential check once per strategy. The stage reports a ROBUSTNESS fraction
+  `body -> body` string transform (no LLM, no randomness). Each reworded payload
+  is GENUINELY driven through BOTH reference twins + the judge — the adapter
+  writes the perturbed body into the poisoned note the planner reads, with
+  payload customisation disabled so the reworded text is used verbatim — so the
+  reworded attack is actually executed (not a catalogue re-run of the original
+  seed body). The stage reports a ROBUSTNESS fraction
   (`held / total`, in `[0,1]`) plus a per-strategy breakdown
   (e.g. `paraphrase:held, casing:held, whitespace:broke, unicode:held`). The
   set is configurable via a new `metamorphic_strategies: list[str] | None = None`

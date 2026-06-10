@@ -102,9 +102,16 @@ class _ScriptedCompletion:
     def __init__(self, *, vuln_fire_budget: int | None = None) -> None:
         self._fires_started = 0
         self._vuln_fire_budget = vuln_fire_budget
+        # Spy: every note body the planner actually SAW (returned by read_note as
+        # a tool-role message). Lets tests prove the perturbed body genuinely
+        # reached the twins, not just a catalogue re-run of the seed body.
+        self.observed_note_bodies: list[str] = []
 
     async def __call__(self, **kwargs: Any) -> SimpleNamespace:
         messages = kwargs.get("messages", [])
+        for m in messages:
+            if m.get("role") == "tool":
+                self.observed_note_bodies.append(str(m.get("content", "")))
         system = _system_of(messages)
         if "craft security probes" in system:
             # Customiser: pass the seed body through unchanged.
@@ -317,6 +324,39 @@ def test_metamorphic_multiple_strategies_robustness() -> None:
     assert metamorphic.metric == 1.0
     assert metamorphic.passed is True
     assert "robustness=1.00" in metamorphic.detail
+
+
+def test_metamorphic_genuinely_drives_perturbed_body_through_twins() -> None:
+    # PROVES the metamorphic stage is no longer a no-op: each perturbed body is
+    # actually written into the poisoned note and read back by the planner, so
+    # the spy sees the PERTURBED text (not the original seed body). The adapter
+    # writes payload.body into the note; read_note returns it verbatim as a
+    # tool-role message, which the scripted completion records.
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    original_body = exploit.payload.body
+    strategies = _deterministic_strategies()
+    # Expected perturbed bodies for each strategy (what SHOULD reach the twins).
+    expected_perturbed = {name: transform(original_body) for name, transform in strategies.items()}
+
+    spy = _ScriptedCompletion()
+    validator = DifferentialValidator(iterations=1, completion_fn=spy)
+    report = validator.validate(
+        test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+
+    seen = spy.observed_note_bodies
+    # The differential loop reads the ORIGINAL seed body once; the metamorphic
+    # stage reads each PERTURBED body. Each genuinely-perturbed body must have
+    # reached the planner via the note (proves it was driven, not re-run).
+    for name, perturbed in expected_perturbed.items():
+        assert perturbed != original_body, name
+        assert perturbed in seen, f"{name}: perturbed body never reached the twins"
+
+    # And it actually fired as an attack on the vulnerable twin: robustness 1.0.
+    metamorphic = _outcome(report, "metamorphic")
+    assert metamorphic.metric == 1.0
+    assert metamorphic.passed is True
 
 
 def test_metamorphic_report_only_even_when_all_perturbations_break() -> None:
