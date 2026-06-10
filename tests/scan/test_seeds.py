@@ -64,6 +64,33 @@ def test_lookup_predicate_raises_on_missing_key() -> None:
     assert "nonexistent_predicate" in str(excinfo.value)
 
 
+@pytest.mark.parametrize("seed", SEED_CATALOGUE, ids=[s.pattern_id for s in SEED_CATALOGUE])
+def test_every_seed_has_non_empty_applicable_targets(seed: SeedPattern) -> None:
+    """Every seed must declare at least one target family it applies to.
+
+    The attack modules filter ``SEED_CATALOGUE`` by ``family in
+    seed.applicable_targets``; a seed with empty applicable_targets would
+    never emit a payload regardless of which target is being scanned.
+    """
+    assert seed.applicable_targets, (
+        f"seed {seed.pattern_id!r} has empty applicable_targets — would never emit"
+    )
+
+
+def test_kitchen_sink_family_has_all_v0_2_1_seeds() -> None:
+    """The 8 seeds shipped through v0.2.1 all apply to the kitchen-sink family.
+
+    v0.2.2's new MCP-server-shaped seeds will tag ``filesystem``, ``fetch``,
+    or ``github`` instead; pinning the kitchen-sink count here makes that
+    addition explicit rather than implicit.
+    """
+    kitchen_sink_seeds = [s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets]
+    assert len(kitchen_sink_seeds) == 8, (
+        f"expected 8 kitchen-sink seeds (the v0.2.1 catalogue); got "
+        f"{len(kitchen_sink_seeds)}: {[s.pattern_id for s in kitchen_sink_seeds]}"
+    )
+
+
 def test_registry_contains_all_v0_2_1_predicates() -> None:
     expected = {
         # Phase 1 (W1+W2)

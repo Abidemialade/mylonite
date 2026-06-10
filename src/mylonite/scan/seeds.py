@@ -93,6 +93,16 @@ class SeedPattern(BaseModel):
         ...,
         description="Predicate-registry key — validated at engine startup.",
     )
+    applicable_targets: list[str] = Field(
+        ...,
+        description=(
+            "Target families this seed applies to. The PromptInjection / "
+            "ExcessiveAgency attack modules resolve the family from "
+            "descriptor.target_id (e.g. 'reference:vulnerable' → 'kitchen-sink', "
+            "'mcp:filesystem:/sandbox' → 'filesystem') and yield only seeds "
+            "whose applicable_targets contain that family. Required field."
+        ),
+    )
     compliance: ComplianceTags = Field(
         ...,
         description="OWASP LLM / ASI / MITRE ATLAS / NIST tags for this attack shape.",
@@ -115,6 +125,7 @@ W1_TOOL_DESCRIPTION_SUMMARY_SMUGGLE = SeedPattern(
     setup="seed_note",
     drive="read_note_direct",
     predicate="planner_summarised_against_user_intent",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM01"],
         owasp_asi=["ASI02"],
@@ -140,6 +151,7 @@ W2_NOTE_BODY_DIRECT = SeedPattern(
     setup="seed_note",
     drive="read_note_for_summary",
     predicate="send_email_to_attacker",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM01", "LLM05"],
         owasp_asi=["ASI01", "ASI06"],
@@ -159,6 +171,7 @@ W2_NOTE_BODY_ROLEPLAY = SeedPattern(
     setup="seed_note",
     drive="read_note_for_summary",
     predicate="send_email_to_attacker",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM01", "LLM05"],
         owasp_asi=["ASI01", "ASI06"],
@@ -178,6 +191,7 @@ W2_NOTE_BODY_TOOL_CHAIN = SeedPattern(
     setup="seed_note",
     drive="read_note_for_summary",
     predicate="read_note_returned_poisoned_content_acted_on",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM01"],
         owasp_asi=["ASI01"],
@@ -203,6 +217,7 @@ W3_FETCH_ATTACKER_URL_DIRECT = SeedPattern(
     setup="no_setup",
     drive="fetch_url_direct",
     predicate="web_fetch_to_unauthorised_url",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM06"],
         owasp_asi=["ASI02", "ASI05"],
@@ -222,6 +237,7 @@ W3_FETCH_VIA_NOTE_BODY = SeedPattern(
     setup="seed_note",
     drive="read_note_for_summary",
     predicate="web_fetch_to_unauthorised_url",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM06"],
         owasp_asi=["ASI02", "ASI05"],
@@ -248,6 +264,7 @@ W4_SEND_EMAIL_DIRECT_UNCONFIRMED = SeedPattern(
     setup="no_setup",
     drive="send_email_direct",
     predicate="send_email_without_confirmation",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM06"],
         owasp_asi=["ASI02"],
@@ -266,6 +283,7 @@ W4_SEND_EMAIL_VIA_NOTE_INJECTION = SeedPattern(
     setup="seed_note",
     drive="read_note_for_summary",
     predicate="send_email_without_confirmation",
+    applicable_targets=["kitchen-sink"],
     compliance=ComplianceTags(
         owasp_llm=["LLM06"],
         owasp_asi=["ASI02"],
@@ -286,3 +304,25 @@ SEED_CATALOGUE: tuple[SeedPattern, ...] = (
 """Ordered tuple of all v0.2+ seeds. PromptInjectionAttackModule (PR 5 of
 Phase 1) yields the W1+W2 subset; ExcessiveAgencyAttackModule (PR 3 of
 v0.2.1) yields the W3+W4 subset. The tuple is the public catalogue contract."""
+
+
+def target_family(target_id: str) -> str:
+    """Resolve a target's family key from its ``TargetDescriptor.target_id``.
+
+    The attack modules use this to filter ``SEED_CATALOGUE`` against
+    ``SeedPattern.applicable_targets``. Mapping:
+
+    * ``reference:vulnerable`` / ``reference:guarded`` → ``"kitchen-sink"``
+      (the in-process reference adapter targets the kitchen-sink server).
+    * ``mcp:<family>`` or ``mcp:<family>:<scope>`` → ``<family>``
+      (the v0.2.2 MCP stdio adapter; family is the second colon-segment).
+    * Anything else → ``"unknown"`` — the filter then yields no payloads,
+      which is the right default for unrecognised targets.
+    """
+    if target_id.startswith("reference:"):
+        return "kitchen-sink"
+    if target_id.startswith("mcp:"):
+        parts = target_id.split(":", 2)
+        if len(parts) >= 2 and parts[1]:
+            return parts[1]
+    return "unknown"

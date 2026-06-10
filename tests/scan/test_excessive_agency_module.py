@@ -10,7 +10,15 @@ from mylonite.scan.seeds import SEED_CATALOGUE
 
 
 def _mcp_descriptor() -> TargetDescriptor:
-    return TargetDescriptor(target_id="test-mcp", kind="mcp", system_prompt="x", tools=[])
+    """Kitchen-sink-family MCP descriptor used by the existing v0.2.x tests."""
+    return TargetDescriptor(
+        target_id="reference:vulnerable", kind="mcp", system_prompt="x", tools=[]
+    )
+
+
+def _unknown_family_descriptor() -> TargetDescriptor:
+    """Family-unmapped MCP descriptor — applicable_targets filter yields nothing."""
+    return TargetDescriptor(target_id="mcp:nosuch:scope", kind="mcp", system_prompt="x", tools=[])
 
 
 def test_module_satisfies_attack_module_protocol() -> None:
@@ -49,3 +57,10 @@ def test_emitted_payloads_carry_required_metadata() -> None:
 def test_skips_non_mcp_targets() -> None:
     rag_target = TargetDescriptor(target_id="rag", kind="rag", tools=[])
     assert list(ExcessiveAgencyAttackModule().generate_payloads(rag_target)) == []
+
+
+def test_emits_nothing_for_unknown_target_family() -> None:
+    """An mcp: target whose family is not in any seed's applicable_targets gets zero payloads."""
+    module = ExcessiveAgencyAttackModule()
+    payloads = list(module.generate_payloads(_unknown_family_descriptor()))
+    assert payloads == []
