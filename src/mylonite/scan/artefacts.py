@@ -22,7 +22,7 @@ from rich.table import Table
 
 from mylonite.scan.engine import ScanResult
 
-_OUTCOME_MARK = {
+OUTCOME_MARKS = {
     "finding": "✗ FOUND",
     "no_finding": "✓ clean",
     "skipped_invalid_metadata": "⚠ skipped",
@@ -31,6 +31,9 @@ _OUTCOME_MARK = {
     "skipped_dry_run": "· dry-run",
     "error": "✗ error",
 }
+
+# Pre-v0.3.0 private name — kept as an alias so existing call sites stay valid.
+_OUTCOME_MARK = OUTCOME_MARKS
 
 
 def _sanitise_filename(pattern_id: str) -> str:
@@ -90,7 +93,7 @@ def render_summary(result: ScanResult) -> str:
     table.add_column("reason")
 
     for attempt in report.attempts:
-        mark = _OUTCOME_MARK.get(attempt.outcome, attempt.outcome)
+        mark = OUTCOME_MARKS.get(attempt.outcome, attempt.outcome)
         table.add_row(
             mark,
             attempt.seed_id,
