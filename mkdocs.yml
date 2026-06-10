@@ -29,6 +29,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - The Quarry (try it): quarry.md
+  - The validation engine: validation.md
   - Concepts: concepts.md
   - Plugin authoring: plugin-authoring.md
   - Standards mapping: standards-mapping.md

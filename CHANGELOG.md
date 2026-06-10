@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.4.0] - 2026-06-10
+
+### Added — Phase 2 "the validation engine" (scan → generate → validate)
 
 - **`mylonite generate` and `mylonite validate` now work** (replacing the
   not-implemented stubs), wiring the pytest generator to the
@@ -77,6 +79,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `owasp_asi01`..`owasp_asi10`) for any pytest run in an environment where
   `mylonite` is installed, so emitted tests stay warning-free even under
   `filterwarnings = error`.
+- **`mylonite.testkit` — the public offline-gate API.** A new
+  stability-promised module (on the same footing as `mylonite.contracts`) that
+  Mylonite-emitted tests import: `load_exploit` reads an `exploit_*.json` into an
+  `ExploitRecord`, and `assert_guard_holds(exploit, *, fixtures_dir=None)` is the
+  **offline regression gate** — it replays the recorded attack against the
+  in-process guarded reference twin and asserts the exploit's predicate did NOT
+  fire. The gate is *honest*: a stale, missing, corrupt, or version-mismatched
+  fixture, or an inconclusive run, **raises** (`TestkitFixtureError`) rather than
+  silently passing, with a `_meta.json` (`{"format_version", "model",
+  "pattern_id"}`) provenance check.
+- **Neutral scan wiring (`mylonite.scan.wiring`).** The single source of
+  scan-assembly truth — `build_scan(variant, ...)` + the deterministic
+  `note_id_counter()` — promoted out of the demo into `scan/` so the demo, the
+  record scripts, `mylonite.testkit`, and the `DifferentialValidator` all share
+  one wiring path (no record/replay drift).
+- **Programmatic pytest runner.** `mylonite.scan.pytest_runner.run_test_file`
+  collects + runs an emitted test file in-process for the validator's build
+  stage, distinguishing collection from execution.
+- **Gated live e2e tests.** New `tests/e2e/` package (gated behind
+  `MYLONITE_LIVE_E2E=1`, skipped in normal CI): `test_validate_live.py` runs the
+  full live `DifferentialValidator` (Haiku) for the W2 seed and asserts `kept`,
+  the mutation score, and high reproducibility; `test_real_target_generate_live.py`
+  runs `mylonite scan mcp:fetch --authorize fetch` then `mylonite generate`
+  against the real OSS fetch MCP server — the gated proof that the demo flow works
+  on a real target.
+- **Reference-example recording script.** `scripts/record_reference_example.py`
+  (dev-time, run-once-with-`ANTHROPIC_API_KEY`) records the committed
+  walking-skeleton example into `examples/reference_validation/`: a live W2
+  `exploit_*.json` from the vulnerable twin, the recorded guarded `fixtures/` +
+  `_meta.json`, and the emitted test — which then replays offline forever. Reuses
+  `build_scan` / `note_id_counter` (no re-wiring), mirroring
+  `record_demo_fixtures.py`.
+- **Docs: the validation engine + de-stubbed quickstart.** New
+  `docs/validation.md` ("The validation engine (the moat)") explains the two-tier
+  model — LIVE periodic discovery vs the OFFLINE per-PR committed gate — answers
+  the "is this a tautology?" objection (the differential proof across the 5-run
+  flakiness filter + the mutation score + the testkit's honest-fail check), and
+  defines `kept`, the reproducibility fraction, and the mutation score.
+  `docs/quickstart.md` is de-stubbed to the real `scan → generate → validate`
+  flow (`generate` offline, `scan`/`validate` live).
 - **Machine-readable validation metrics.** `ValidationOutcome` gains an optional
   `metric: float | None` (per-stage numeric — flakiness reproducibility fraction,
   differential agreement fraction, metamorphic robustness rate) and
@@ -90,6 +132,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Validator contract bumped `0.1.0 → 0.2.0`** (minor, backward-compatible — the
   two new fields above are optional with defaults). This is a `contract-change`
   per `GOVERNANCE.md`.
+- **CI gains a Windows leg.** A `windows-latest` job runs the suite so the
+  pytest-runner / emitted-test / testkit-replay paths are exercised on the
+  platform contributors most often hit cp1252 / path-separator surprises on.
 
 ## [0.3.0] - 2026-06-10
 
@@ -365,7 +410,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for use as differential-oracle ground truth in Phase 2.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.3.0
 [0.2.2]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.1
