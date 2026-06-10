@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`DifferentialValidator` — the validation-engine moat.** A new reference
+  validator (`mylonite.plugins._reference.reference_validator:DifferentialValidator`,
+  registered under the new `differential` entry point in `mylonite.validators`;
+  the existing `null` entry point is unchanged) proves a generated security test
+  is *meaningful*. It runs the full attack scan against BOTH reference twins
+  across a multi-run flakiness filter (default 5 iterations) and assembles a
+  `ValidationReport` from four stages:
+  - **build** — the emitted test artefact is well-formed and *collectable* under
+    pytest (imports the testkit, registers its markers). A full
+    offline-pass-against-committed-fixtures is intentionally not asserted here
+    (the fixtures are recorded later, in PR 7); that leg is proven by the
+    reference example.
+  - **differential** — across the iterations, does the exploit's `pattern_id`
+    FIRE on the vulnerable twin and RESIST (a clean `no_finding`) on the guarded
+    twin at all? `metric` is the agreement fraction.
+  - **flakiness** — does it do both *reliably* (vulnerable fires
+    `>= iterations - 1`, guarded resists `iterations`/`iterations` by default)?
+    `metric` is the reproducibility fraction `min(fires, resists) / iterations`.
+  - **metamorphic-lite** (report-only) — one deterministic neutral paraphrase
+    perturbation of the exploit body, re-checked once on both twins.
+
+  `kept = build ∧ differential ∧ flakiness`; metamorphic and the mutation score
+  are reported, not gating. The report also carries a **mutation score**: the
+  fraction of the four kitchen-sink weakness families (W1–W4) that show the
+  differential (vulnerable fired ≥1 seed in the family AND guarded resisted it),
+  computed for free from the scans already run. Config (iterations / thresholds /
+  provider / model / `completion_fn` / `run_build`) lives in `__init__` because
+  the contract `validate(test, target, oracle)` signature is fixed;
+  `completion_fn=None` is the live LiteLLM path and an injected callable is the
+  deterministic offline seam. A tiny `ReferenceVulnerableOracle` supplies a
+  structurally-valid oracle for the bundled reference target.
 - **Real testkit-based pytest generator.** `ReferencePytestGenerator` now emits a
   deterministic, self-contained regression test (replacing the `@pytest.mark.skip`
   stub). The emitted test imports the public `mylonite.testkit` API and, at

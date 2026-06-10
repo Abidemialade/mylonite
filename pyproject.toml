@@ -99,6 +99,7 @@ reference_pytest = "mylonite.plugins._reference.reference_pytest_generator:Refer
 
 [project.entry-points."mylonite.validators"]
 null = "mylonite.plugins._reference.reference_validator:NullValidator"
+differential = "mylonite.plugins._reference.reference_validator:DifferentialValidator"
 
 [project.entry-points."mylonite.compliance_mappers"]
 reference = "mylonite.plugins._reference.reference_compliance_mapper:ReferenceComplianceMapper"
