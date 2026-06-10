@@ -162,27 +162,50 @@ def _read_meta(fixtures_dir: Path) -> dict[str, Any]:
     return meta
 
 
-def _check_recorder_after_run(recorder: Any) -> None:
-    """Raise if the replay recorder shows any fixture trouble (R4).
+def _raise_if_fixture_trouble(
+    *, cache_misses: int, last_error: Exception | None, hint: str
+) -> None:
+    """Raise :class:`TestkitFixtureError` if recorder state shows fixture trouble (R4).
 
-    Mirrors ``mylonite.demo.runner._check_replay_recorder``: the engine swallows
-    ``completion_fn`` exceptions, so the recorder's cumulative ``cache_misses`` /
-    ``last_error`` is the only reliable signal that a fixture was missing or
-    corrupt. Duck-typed so an injected ``_completion_fn`` test double without
-    recorder state is a no-op (nothing to inspect → nothing to raise).
-
-    A corrupt fixture bumps ``last_error`` without ``cache_misses``, so both are
-    checked.
+    The engine swallows ``completion_fn`` exceptions, so the recorder's cumulative
+    ``cache_misses`` / ``last_error`` is the only reliable signal a fixture was
+    missing or corrupt. A corrupt fixture bumps ``last_error`` without
+    ``cache_misses``, so both are checked.
     """
-    cache_misses = getattr(recorder, "cache_misses", 0)
-    last_error = getattr(recorder, "last_error", None)
     if cache_misses > 0 or last_error is not None:
         detail = f" ({last_error})" if last_error is not None else ""
-        hint = getattr(recorder, "missing_fixture_hint", None) or TESTKIT_RERECORD_HINT
         raise TestkitFixtureError(
             f"replay hit a missing or corrupt fixture{detail}; the guard's "
             f"resistance could not be confirmed and the gate refuses to pass. {hint}"
         )
+
+
+def _check_replay_recorder(recorder: LiteLLMRecorder) -> None:
+    """Strict R4 check for the real replay path (statically-typed recorder).
+
+    Reads ``cache_misses`` / ``last_error`` / ``missing_fixture_hint`` as direct
+    attributes (NOT ``getattr`` with a default) so a future rename of that public
+    ``LiteLLMRecorder`` surface fails loudly here — this is the one check the whole
+    gate exists to keep honest. Mirrors ``demo.runner._check_replay_recorder``.
+    """
+    _raise_if_fixture_trouble(
+        cache_misses=recorder.cache_misses,
+        last_error=recorder.last_error,
+        hint=recorder.missing_fixture_hint or TESTKIT_RERECORD_HINT,
+    )
+
+
+def _check_injected_double(double: Any) -> None:
+    """Duck-typed R4 check for the ``_completion_fn`` injection seam (tests only).
+
+    Tolerates a bare callable with no recorder state (nothing to inspect → no-op)
+    or a test double that mimics the ``cache_misses`` / ``last_error`` surface.
+    """
+    _raise_if_fixture_trouble(
+        cache_misses=getattr(double, "cache_misses", 0),
+        last_error=getattr(double, "last_error", None),
+        hint=getattr(double, "missing_fixture_hint", None) or TESTKIT_RERECORD_HINT,
+    )
 
 
 def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
@@ -297,7 +320,7 @@ def assert_guard_holds(
                 model="stub",
             )
         )
-        _check_recorder_after_run(_completion_fn)
+        _check_injected_double(_completion_fn)
         _assert_from_result(result, exploit)
         return
 
@@ -323,7 +346,7 @@ def assert_guard_holds(
             model=model,
         )
     )
-    _check_recorder_after_run(recorder)
+    _check_replay_recorder(recorder)
     _assert_from_result(result, exploit)
 
 
