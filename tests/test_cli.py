@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from importlib.abc import MetaPathFinder
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -241,6 +243,47 @@ def test_demo_missing_kitchen_sink_maps_to_exit_2(monkeypatch: pytest.MonkeyPatc
 
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    # Friendly message, not a raw traceback.
+    assert "Traceback" not in out
+
+
+def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mcp_kitchen_sink absence at *import time* → exit 2, not a raw traceback.
+
+    `mylonite.demo.runner` transitively imports `mcp_kitchen_sink` at module
+    load (runner -> reference_target_adapter -> mcp_kitchen_sink._store). This
+    drives the real import-time path inside the ``demo`` command: it evicts the
+    cached modules and installs a meta_path finder that makes importing
+    ``mcp_kitchen_sink`` raise ModuleNotFoundError, so the command's local
+    ``from mylonite.demo.runner import ...`` re-runs and fails there — before
+    ``run_demo`` is ever called.
+    """
+
+    class _BlockKitchenSink(MetaPathFinder):
+        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+            if fullname == "mcp_kitchen_sink" or fullname.startswith("mcp_kitchen_sink."):
+                raise ModuleNotFoundError(f"No module named '{fullname}'", name="mcp_kitchen_sink")
+            return None
+
+    # Evict cached modules so the command's local import re-runs and hits the
+    # finder. monkeypatch.delitem auto-restores the originals after the test.
+    for name in list(sys.modules):
+        if (
+            name == "mcp_kitchen_sink"
+            or name.startswith("mcp_kitchen_sink.")
+            or name == "mylonite.demo.runner"
+            or name == "mylonite.plugins._reference.reference_target_adapter"
+        ):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    monkeypatch.setattr(sys, "meta_path", [_BlockKitchenSink(), *sys.meta_path])
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG, result.output
     out = result.stderr or result.output
     assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
     # Friendly message, not a raw traceback.

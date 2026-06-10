@@ -357,7 +357,27 @@ def demo(
     """
     from mylonite.demo._replay import CorruptFixtureError, MissingFixtureError
     from mylonite.demo.render import render_demo
-    from mylonite.demo.runner import DEMO_MODEL, DEMO_PROVIDER, DemoFixtureError, run_demo
+
+    # The runner import transitively pulls in mcp_kitchen_sink (runner ->
+    # reference_target_adapter -> mcp_kitchen_sink._store), which installs
+    # separately. Map its absence to the same friendly exit-2 message here, at
+    # import time, before any of the import's symbols are referenced below.
+    try:
+        from mylonite.demo.runner import (
+            DEMO_MODEL,
+            DEMO_PROVIDER,
+            DemoFixtureError,
+            run_demo,
+        )
+    except (ModuleNotFoundError, ImportError) as exc:
+        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+            typer.echo(
+                "the Quarry reference target isn't installed — run "
+                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        raise
 
     # Replay is pinned to the recorded provider/model — never silently drop the
     # override flags.

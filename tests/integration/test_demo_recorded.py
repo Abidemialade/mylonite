@@ -84,13 +84,7 @@ def test_demo_cli_fixture_miss_maps_to_exit_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """At the CLI layer, a fixture miss → exit 2 with re-record guidance (plain def)."""
-    src_root = packaged_fixture_dir()
-    dst_root = tmp_path / "fixtures"
-    for variant in ("vulnerable", "guarded"):
-        dst = dst_root / variant
-        dst.mkdir(parents=True, exist_ok=True)
-        for entry in (src_root / variant).iterdir():
-            (dst / entry.name).write_text(entry.read_text(encoding="utf-8"), encoding="utf-8")
+    dst_root = _copy_fixtures_to(tmp_path)
     vuln_fixtures = sorted((dst_root / "vulnerable").glob("*.json"))
     vuln_fixtures[0].unlink()
 
