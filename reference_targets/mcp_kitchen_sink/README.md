@@ -1,10 +1,19 @@
 # `mcp_kitchen_sink` — deliberately-insecure reference MCP agent
 
+**a.k.a. "the Quarry"** — Mylonite's built-in proving ground. The Quarry,
+the `mcp-kitchen-sink` pip package, and the `reference:vulnerable` /
+`reference:guarded` scan targets are all the **same artifact** under three
+names. The canonical walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
+
 > ⚠️ **This package is intentionally insecure research scaffolding.** It exists
 > as ground truth for Mylonite's differential-oracle validation engine
 > (see `ROADMAP.md` Phases 0–2). **Do not expose it to anything but loopback.**
 > Both server variants refuse to bind to non-loopback interfaces by default.
 > See `mylonite/SECURITY.md` for the project's dual-use policy.
+>
+> **DEMO ONLY — the Quarry is a deliberately vulnerable in-process reference
+> agent. It never binds to a network. Never point Mylonite at a system you
+> don't own or operate** (see SECURITY.md).
 
 ## What this is
 
@@ -29,10 +38,39 @@ and is used as "the agent under attack" in the validation tests. Two planner
 variants mirror the server variants so the differential oracle has a clean
 vulnerable-vs-guarded matchup.
 
+## The four seeded weaknesses
+
+The full catalogue (loci, summaries) is in
+[`seeds/seeds.yaml`](seeds/seeds.yaml); the scan seeds that exercise each
+weakness live in `src/mylonite/scan/seeds.py`. The scenario-by-scenario
+walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
+
+| W  | Name                                    | OWASP LLM    | OWASP ASI    | MITRE ATLAS | Guard (in `server_guarded`)                       |
+|----|-----------------------------------------|--------------|--------------|-------------|---------------------------------------------------|
+| W1 | tool-description-instruction-smuggling | LLM01        | ASI02        | AML.T0051   | description allowlist + parenthetical refusal     |
+| W2 | indirect-injection-via-note-body       | LLM01, LLM05 | ASI01, ASI06 | AML.T0051   | `read_note` wraps bodies in `<untrusted>`         |
+| W3 | unrestricted-web-fetch                 | LLM06        | ASI02, ASI05 | AML.T0049   | `web_fetch` hostname allowlist                    |
+| W4 | unconfirmed-email-send                 | LLM06        | ASI02        | —           | two-step send: `send_email` + `confirm_send`      |
+
+## Try it
+
+```bash
+mylonite demo
+```
+
+Runs Mylonite's real scan pipeline against both twins of the Quarry —
+offline, no API key — and prints one row per weakness above plus the
+vulnerable-vs-guarded differential headline. See
+[`docs/quarry.md`](../../docs/quarry.md) for the expected output and the
+follow-on `mylonite scan` flows.
+
 ## How to run
 
 ```bash
-# from the repo root, after `pip install -e ".[dev,reference-targets]"`:
+# from the repo root — two editable installs:
+pip install -e ".[dev]"
+pip install -e ./reference_targets/mcp_kitchen_sink
+
 python -m mcp_kitchen_sink.server_vulnerable    # vulnerable, loopback only
 python -m mcp_kitchen_sink.server_guarded       # hardened, loopback only
 ```
