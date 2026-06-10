@@ -52,6 +52,13 @@ class ScanConfig(BaseModel):
     output_dir: Path = Field(default_factory=lambda: Path(".mylonite/scans"))
     dry_run: bool = False
     provider_failure_threshold: int = DEFAULT_PROVIDER_FAILURE_THRESHOLD
+    pattern_id_filter: str | None = Field(
+        default=None,
+        description=(
+            "If set, only payloads whose pattern_id equals this run; used by the "
+            "offline gate to scope a scan to one exploit's seed."
+        ),
+    )
 
 
 @dataclass
@@ -113,6 +120,11 @@ class ScanEngine:
             for module in self._attack_modules:
                 module_id = module.attack_metadata().id
                 for payload in module.generate_payloads(descriptor):
+                    if (
+                        self._config.pattern_id_filter is not None
+                        and payload.pattern_id != self._config.pattern_id_filter
+                    ):
+                        continue
                     tasks.append(
                         asyncio.create_task(
                             self._process_one(

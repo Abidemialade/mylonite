@@ -44,6 +44,7 @@ def build_scan(
     note_id_factory: Callable[[], str] | None,
     provider: str,
     model: str,
+    pattern_id_filter: str | None = None,
 ) -> ScanEngine:
     """Build a ready-to-run ``ScanEngine`` for one reference variant.
 
@@ -70,6 +71,7 @@ def build_scan(
         model=model,
         max_llm_calls=100,
         max_concurrent=1,
+        pattern_id_filter=pattern_id_filter,
     )
     return ScanEngine(
         config=config,

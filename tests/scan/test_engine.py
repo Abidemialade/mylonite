@@ -121,7 +121,12 @@ def _payload_from_seed_index(i: int) -> Payload:
     )
 
 
-def _config(*, dry_run: bool = False, max_llm_calls: int = 50) -> ScanConfig:
+def _config(
+    *,
+    dry_run: bool = False,
+    max_llm_calls: int = 50,
+    pattern_id_filter: str | None = None,
+) -> ScanConfig:
     return ScanConfig(
         target_id="reference:vulnerable",
         provider="anthropic",
@@ -130,6 +135,7 @@ def _config(*, dry_run: bool = False, max_llm_calls: int = 50) -> ScanConfig:
         max_concurrent=2,
         output_dir=Path(".mylonite/scans"),
         dry_run=dry_run,
+        pattern_id_filter=pattern_id_filter,
     )
 
 
@@ -253,6 +259,67 @@ async def test_engine_skips_unknown_seed_id() -> None:
     )
     result = await engine.run()
     assert result.report.attempts[0].outcome == "skipped_unknown_seed"
+
+
+# --- pattern_id_filter (single-seed scoping) -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_engine_pattern_id_filter_runs_only_matching_seed() -> None:
+    """``pattern_id_filter`` set → only payloads with that pattern_id attempt."""
+    p0 = _payload_from_seed_index(0)
+    p1 = _payload_from_seed_index(1)
+    assert p0.pattern_id != p1.pattern_id
+    customiser = _CustomiserStub()
+    judge = _JudgeStub(Verdict(success=False, reason="held", evidence={}, mechanism="llm"))
+    engine = ScanEngine(
+        config=_config(pattern_id_filter=p1.pattern_id),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([p0, p1])],
+        customiser=customiser,
+        judge=judge,
+    )
+    result = await engine.run()
+    assert {a.pattern_id for a in result.report.attempts} == {p1.pattern_id}
+    # Filtered-out seed never reached the customiser / judge (pre-task drop).
+    assert customiser.calls == 1
+    assert judge.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_pattern_id_filter_no_match_is_clean_empty() -> None:
+    """A filter matching nothing → no attempts, no crash, clean result."""
+    p0 = _payload_from_seed_index(0)
+    p1 = _payload_from_seed_index(1)
+    customiser = _CustomiserStub()
+    engine = ScanEngine(
+        config=_config(pattern_id_filter="does-not-exist"),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([p0, p1])],
+        customiser=customiser,
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts == []
+    assert result.report.findings_count == 0
+    assert result.report.aborted is None
+    assert customiser.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_engine_pattern_id_filter_none_runs_all_payloads() -> None:
+    """Default ``pattern_id_filter=None`` → every payload runs (backward-compat)."""
+    p0 = _payload_from_seed_index(0)
+    p1 = _payload_from_seed_index(1)
+    engine = ScanEngine(
+        config=_config(),  # pattern_id_filter defaults to None
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([p0, p1])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert {a.pattern_id for a in result.report.attempts} == {p0.pattern_id, p1.pattern_id}
 
 
 # --- G7 budget tracking across layers -------------------------------------
