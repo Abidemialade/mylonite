@@ -198,3 +198,67 @@ def test_scan_exit_4_on_provider_failure(
     # In practice the wrapped completion in the adapter increments
     # consecutive_failures on the counter; after 3, ScanEngine sets aborted.
     assert result.exit_code in (EXIT_PROVIDER, EXIT_SUCCESS)
+
+
+# ---------------------------------------------------------------------------
+# `mylonite demo` — the offline Quarry playground (v0.3.0, PR A, Task A5).
+#
+# These tests MUST be plain `def` (not async): the command body calls
+# asyncio.run() internally, and pytest's asyncio_mode="auto" would otherwise
+# wrap them in a running event loop and raise "cannot be called from a running
+# event loop".
+# ---------------------------------------------------------------------------
+
+
+def test_demo_replay_smoke() -> None:
+    """Default (offline replay) demo renders the differential and exits 0."""
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "Quarry" in result.output
+    assert "0 on guarded" in result.output
+
+
+def test_demo_replay_warns_when_provider_flag_ignored() -> None:
+    """--provider without --live warns (never silently ignores) and still exits 0."""
+    result = runner.invoke(app, ["demo", "--provider", "openai"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert "pinned" in out.lower() or "ignored" in out.lower()
+    assert "claude-haiku-4-5-20251001" in out
+
+
+def test_demo_missing_kitchen_sink_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing mcp_kitchen_sink install → exit 2 with the clone-first command."""
+
+    async def fake_run_demo(**_: Any) -> Any:
+        exc = ModuleNotFoundError("No module named 'mcp_kitchen_sink'")
+        exc.name = "mcp_kitchen_sink"
+        raise exc
+
+    from mylonite.demo import runner as demo_runner
+
+    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    # Friendly message, not a raw traceback.
+    assert "Traceback" not in out
+
+
+def test_demo_corrupt_fixture_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A corrupt fixture surfaces as exit 2 with the underlying message."""
+    from mylonite.demo import runner as demo_runner
+    from mylonite.demo._replay import CorruptFixtureError
+
+    async def fake_run_demo(**_: Any) -> Any:
+        raise CorruptFixtureError("fixture corrupt — reinstall mylonite or re-record")
+
+    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "fixture corrupt" in out
+    assert "Traceback" not in out
