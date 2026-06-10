@@ -9,7 +9,8 @@ The configuration object is intentionally strict:
 * Target authorization is opt-in per scan: ``AuthorizationConfig.authorize``
   must be set to ``True`` and the target hostname/identifier must appear in
   ``allowed_targets`` for any tool that touches a target.
-* Logging defaults to redacting strings that look like secrets.
+* Logging defaults to redacting secret-shaped tokens from log records and
+  rendered CLI reports (see ``LoggingConfig`` and ``mylonite._redaction``).
 """
 
 from __future__ import annotations
@@ -81,8 +82,18 @@ class AuthorizationConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Logging behaviour.
 
-    Defaults err on the side of caution: secret-shaped strings are redacted
-    before any log line, report, or generated-test artifact is written.
+    Defaults err on the side of caution. When ``redact_secrets`` is on (the
+    default), the CLI installs a redacting filter on the ``mylonite`` logger tree
+    so secret-shaped tokens (provider key prefixes, AWS access-key ids, bearer
+    tokens, PEM private-key blocks, ``key=value`` credential assignments) are
+    masked out of every log record, and the rendered CLI scan/report strings are
+    redacted before they are echoed. See ``mylonite._redaction``.
+
+    Persisted replay fixtures, ``exploit_*.json`` / ``scan_report.json``
+    artefacts, and generated test source are deterministic and contain no raw
+    provider secrets by construction; redaction is intentionally NOT applied to
+    them so they stay loadable and replayable. Library users who want to disable
+    the log filter can call ``mylonite._redaction.install_log_redaction(False)``.
     """
 
     model_config = ConfigDict(extra="forbid")

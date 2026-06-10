@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Implemented the `redact_secrets` control (previously documented but inert).**
+  New `mylonite._redaction` module masks secret-shaped tokens (provider key
+  prefixes like `sk-ant-…`/`sk-…`, AWS access-key ids, `Bearer …` tokens, PEM
+  private-key blocks, and `api_key`/`token`/`secret`/`password` `key=value`
+  assignments) behind `***REDACTED***`. A `SecretRedactingFilter` is installed
+  on the `mylonite` logger tree on every CLI invocation (honouring the
+  `LoggingConfig.redact_secrets` default), and the rendered CLI scan summary is
+  redacted before it is echoed. Redaction is deliberately NOT applied to
+  persisted replay fixtures, `exploit_*.json` / `scan_report.json` artefacts, or
+  generated test source — masking those would corrupt loadable/replayable data.
+  Example emails and attack strings (`attacker@example.com`, `[SYSTEM OVERRIDE]`,
+  tool-call ids, note ids) are preserved. `config.py` and `SECURITY.md` updated
+  to describe the now-real behaviour.
 - **Patched known-vulnerable dependencies.** Bumped `litellm>=1.83.10`
   (CVE-2026-40217) and added security floors for litellm's transitive deps
   `aiohttp>=3.14.0` (CVE-2026-34993, CVE-2026-47265) and
