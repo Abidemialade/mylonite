@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Hardened
+
+- The two machine-readable validation-metric fields —
+  `ValidationOutcome.metric` and `ValidationReport.mutation_score` — now enforce
+  their documented `[0,1]` bounds (`ge=0.0, le=1.0`) at construction; an
+  out-of-range value hard-fails. Defensive only: the validator's produced values
+  are already in-range fractions, so no runtime behavior changes for real data,
+  and the validator contract version is unchanged (no contract-shape change).
+
 ## [0.4.0] - 2026-06-10
 
 ### Added — Phase 2 "the validation engine" (scan → generate → validate)

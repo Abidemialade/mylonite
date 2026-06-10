@@ -176,6 +176,8 @@ class ValidationOutcome(BaseModel):
     detail: str
     metric: float | None = Field(
         default=None,
+        ge=0.0,
+        le=1.0,
         description=(
             "Optional per-stage numeric — flakiness: reproducibility fraction "
             "[0,1]; differential: agreement fraction; metamorphic: robustness "
@@ -198,6 +200,8 @@ class ValidationReport(BaseModel):
     notes: str | None = None
     mutation_score: float | None = Field(
         default=None,
+        ge=0.0,
+        le=1.0,
         description=(
             "Fraction of the seeded-weakness bank the generated test correctly "
             "catches (fails-on-vulnerable), [0,1]."

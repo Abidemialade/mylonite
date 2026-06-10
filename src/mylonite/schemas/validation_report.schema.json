@@ -11,6 +11,8 @@
         "metric": {
           "anyOf": [
             {
+              "maximum": 1.0,
+              "minimum": 0.0,
               "type": "number"
             },
             {
@@ -56,6 +58,8 @@
     "mutation_score": {
       "anyOf": [
         {
+          "maximum": 1.0,
+          "minimum": 0.0,
           "type": "number"
         },
         {
