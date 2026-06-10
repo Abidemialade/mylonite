@@ -66,18 +66,25 @@ def test_no_tests_collected(tmp_path: Path) -> None:
 
 
 def test_utf8_non_ascii_output(tmp_path: Path) -> None:
-    """A3 Windows guard: non-ASCII child output must decode without crashing."""
-    body = 'def test_unicode():\n    print("✓ café — naïve")\n    assert True\n'
+    """A3 Windows guard: non-ASCII child output must round-trip intact, not just
+    avoid a crash.
+
+    Route the non-ASCII through a FAILING assert message — pytest echoes assert
+    messages even under ``-q``, so the text reaches ``result.stdout``. A silent
+    cp1252 decode regression would turn ``café`` into mojibake (``cafÃ©``) or
+    drop it; asserting the exact bytes survive is what actually guards A3. (A
+    passing test's ``print`` is captured/suppressed under ``-q`` and would never
+    surface the corruption.)
+    """
+    marker = "café — naïve ✓ Ω"
+    body = f'def test_unicode():\n    assert False, "{marker}"\n'
     f = _write(tmp_path, "test_unicode.py", body)
     result = run_test_file(f)
-    assert result.passed is True
+    assert result.passed is False
     assert result.collected is True
-    assert result.exit_code == 0
-    # The decoded non-ASCII text should survive (pytest captures stdout, but -q
-    # still echoes captured output on the passing summary line only when -s; the
-    # key guarantee is no decode crash). At minimum the run did not raise.
-    combined = result.stdout + result.stderr
-    assert isinstance(combined, str)
+    assert result.exit_code == 1
+    # The exact non-ASCII assert message must survive decoding intact.
+    assert marker in result.stdout, result.stdout
 
 
 def test_timeout_returns_result(tmp_path: Path) -> None:
