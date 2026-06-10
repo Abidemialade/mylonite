@@ -1,0 +1,334 @@
+"""Public runtime helpers that Mylonite-emitted security tests import.
+
+Stability promise
+-----------------
+This module is a **stability-promised public surface**, on the same footing as
+``mylonite.contracts``. The signatures of :func:`load_exploit` and
+:func:`assert_guard_holds` are frozen; any change to them is a public-API
+change and must be gated through ``CHANGELOG.md`` (and, for breaking changes, a
+major version bump). Emitted tests living in *consumer* repositories import
+these by name, so silent drift breaks every downstream regression gate.
+
+What this is for
+----------------
+``mylonite generate`` emits a pytest file that, for each confirmed exploit,
+calls::
+
+    from mylonite import testkit
+
+    def test_guard_holds_<pattern>():
+        exploit = testkit.load_exploit("exploit_<pattern>.json")
+        testkit.assert_guard_holds(exploit)
+
+:func:`assert_guard_holds` is the **offline gate**: it replays the recorded
+attack against the in-process GUARDED reference twin and asserts the exploit's
+predicate did NOT fire. A guard that genuinely holds → the test passes; a guard
+that lets the exploit through → ``AssertionError`` (the gate caught a
+regression).
+
+The single most important property here is **honesty** (R4): a stale, missing,
+corrupt, or version-mismatched fixture, or an inconclusive run, must RAISE —
+never silently pass. The scan engine swallows ``completion_fn`` exceptions (a
+missing fixture degrades to a clean, finding-free run), so this module inspects
+recorder state *after* the run and raises :class:`TestkitFixtureError` on any
+trouble. A gate that silently passes is worse than no gate.
+
+MVP target note
+---------------
+The "guarded twin" replayed here is the bundled ``mcp_kitchen_sink`` reference
+server, wired via :func:`mylonite.scan.wiring.build_scan`. Importing this module
+therefore transitively imports the reference adapter (and the kitchen sink). For
+the MVP that coupling is intentional — the bundled twin *is* the differential
+oracle. A later phase will let emitted tests target a consumer-owned agent.
+
+Synchronous API
+---------------
+:func:`assert_guard_holds` is synchronous (it wraps ``asyncio.run``) because the
+emitted pytest function is a plain ``def``. It is intended for standalone pytest
+invocation; calling it from inside an already-running event loop raises
+``RuntimeError`` from ``asyncio.run`` (the same constraint the ``mylonite demo``
+CLI lives under). Library callers already inside a loop should ``await``
+:func:`_run_guarded_scan` directly.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from mylonite.contracts._types import ExploitRecord
+from mylonite.demo._replay import (
+    FixtureError,
+    LiteLLMRecorder,
+    packaged_fixture_dir,
+)
+from mylonite.scan.engine import ScanResult
+from mylonite.scan.wiring import build_scan, note_id_counter
+
+#: On-disk format version for a ``fixtures_dir`` sidecar (``_meta.json``). Bumped
+#: whenever the recorded-fixture layout or the (model, messages) keying changes.
+#: Fixtures stamped with a different version cannot be trusted to replay, so the
+#: gate refuses them rather than risk a false pass.
+FIXTURE_FORMAT_VERSION = 1
+
+#: Re-record guidance surfaced in every fixture-trouble error. Names the
+#: consumer-facing regeneration command (mirrors the demo's
+#: ``DEMO_RERECORD_HINT`` but points at the user-run ``mylonite generate``).
+TESTKIT_RERECORD_HINT = (
+    "Regenerate the fixtures with `mylonite generate` (or re-run "
+    "`mylonite scan` + `mylonite generate` against a live provider) so the "
+    "recorded attack replays against the current guarded twin."
+)
+
+
+class TestkitFixtureError(FixtureError):
+    """Raised when the offline gate cannot trust its replay fixtures.
+
+    Subclasses the recorder's :class:`~mylonite.demo._replay.FixtureError` so
+    consumers can catch either. Covers four honest-fail cases:
+
+    * a missing / corrupt fixture (recorder ``cache_misses`` or ``last_error``);
+    * a ``_meta.json`` that is absent or stamped with an unsupported
+      ``format_version``;
+    * a run that produced no conclusive attempt for the exploit's pattern_id
+      (only ``skipped_*`` / ``error`` outcomes) — we cannot confirm the guard
+      held, so we refuse to pass.
+
+    The message always names the re-record path so the gate stays honest rather
+    than silently green.
+    """
+
+
+def load_exploit(path: str | os.PathLike[str]) -> ExploitRecord:
+    """Load an ``exploit_*.json`` artefact into an :class:`ExploitRecord`.
+
+    ``path`` points at one of the ``exploit_<pattern_id>.json`` files written by
+    ``mylonite scan`` (see ``mylonite.scan.artefacts.write_artefacts``). Raises
+    :class:`FileNotFoundError` if the file is absent and :class:`ValueError`
+    (wrapping the Pydantic validation error) if it is present but not a valid
+    serialised ``ExploitRecord`` — never returns a partially-populated record.
+    """
+    file_path = Path(path)
+    try:
+        raw = file_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"exploit artefact not found: {file_path}. Point load_exploit at an "
+            "exploit_<pattern_id>.json written by `mylonite scan`."
+        ) from exc
+    try:
+        return ExploitRecord.model_validate_json(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"exploit artefact at {file_path} is not a valid ExploitRecord: {exc}"
+        ) from exc
+
+
+def _read_meta(fixtures_dir: Path) -> dict[str, Any]:
+    """Read + version-check a ``fixtures_dir/_meta.json`` sidecar.
+
+    Returns the parsed metadata (at least ``model`` and ``pattern_id``). Raises
+    :class:`TestkitFixtureError` if the sidecar is absent, unparseable, or
+    stamps an unsupported ``format_version`` — the gate must not replay fixtures
+    it cannot vouch for.
+    """
+    meta_path = fixtures_dir / "_meta.json"
+    if not meta_path.is_file():
+        raise TestkitFixtureError(
+            f"fixtures at {fixtures_dir} are missing the _meta.json sidecar "
+            f"(format/model provenance). {TESTKIT_RERECORD_HINT}"
+        )
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise TestkitFixtureError(
+            f"fixtures _meta.json at {meta_path} is not valid JSON ({exc}). {TESTKIT_RERECORD_HINT}"
+        ) from exc
+    if not isinstance(meta, dict):
+        raise TestkitFixtureError(
+            f"fixtures _meta.json at {meta_path} is not a JSON object. {TESTKIT_RERECORD_HINT}"
+        )
+    version = meta.get("format_version")
+    if version != FIXTURE_FORMAT_VERSION:
+        raise TestkitFixtureError(
+            f"fixtures at {fixtures_dir} were generated by an incompatible "
+            f"mylonite version (fixture format_version={version!r}, this "
+            f"mylonite supports {FIXTURE_FORMAT_VERSION}). {TESTKIT_RERECORD_HINT}"
+        )
+    return meta
+
+
+def _check_recorder_after_run(recorder: Any) -> None:
+    """Raise if the replay recorder shows any fixture trouble (R4).
+
+    Mirrors ``mylonite.demo.runner._check_replay_recorder``: the engine swallows
+    ``completion_fn`` exceptions, so the recorder's cumulative ``cache_misses`` /
+    ``last_error`` is the only reliable signal that a fixture was missing or
+    corrupt. Duck-typed so an injected ``_completion_fn`` test double without
+    recorder state is a no-op (nothing to inspect → nothing to raise).
+
+    A corrupt fixture bumps ``last_error`` without ``cache_misses``, so both are
+    checked.
+    """
+    cache_misses = getattr(recorder, "cache_misses", 0)
+    last_error = getattr(recorder, "last_error", None)
+    if cache_misses > 0 or last_error is not None:
+        detail = f" ({last_error})" if last_error is not None else ""
+        hint = getattr(recorder, "missing_fixture_hint", None) or TESTKIT_RERECORD_HINT
+        raise TestkitFixtureError(
+            f"replay hit a missing or corrupt fixture{detail}; the guard's "
+            f"resistance could not be confirmed and the gate refuses to pass. {hint}"
+        )
+
+
+def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
+    """Turn a guarded ``ScanResult`` into the gate verdict (A1).
+
+    Reads the ``ScanResult`` structure — NOT a re-run of the predicate (the
+    engine discards the raw ``AdapterResponse`` on a resisting run, so there is
+    nothing to re-run a predicate against). Decision table over attempts whose
+    ``pattern_id`` matches the exploit:
+
+    * any ``finding`` (or the pattern_id in ``result.exploits``) → guard FAILED
+      → :class:`AssertionError`;
+    * at least one ``no_finding`` → guard held → return;
+    * otherwise (no matching attempt, or only ``skipped_*`` / ``error``) →
+      INCONCLUSIVE → :class:`TestkitFixtureError` (never a silent pass).
+    """
+    pattern_id = exploit.pattern_id
+    matching = [a for a in result.report.attempts if a.pattern_id == pattern_id]
+
+    exploit_fired = any(e.pattern_id == pattern_id for e in result.exploits) or any(
+        a.outcome == "finding" for a in matching
+    )
+    if exploit_fired:
+        raise AssertionError(
+            f"guard did not hold: the exploit {pattern_id!r} fired against the "
+            "guarded twin. The guarded reference agent followed the attacker's "
+            "intent — this is a regression in the guard."
+        )
+
+    if any(a.outcome == "no_finding" for a in matching):
+        return
+
+    outcomes: list[str] = sorted({str(a.outcome) for a in matching}) or ["<no attempt>"]
+    raise TestkitFixtureError(
+        f"inconclusive: no conclusive attempt for {pattern_id!r} against the "
+        f"guarded twin (outcomes seen: {outcomes}). The guard's resistance could "
+        f"not be confirmed — likely a replay/fixture problem. {TESTKIT_RERECORD_HINT}"
+    )
+
+
+async def _run_guarded_scan(
+    exploit: ExploitRecord,
+    *,
+    completion_fn: Callable[..., Any],
+    provider: str,
+    model: str,
+) -> ScanResult:
+    """Run the guarded reference scan once with the given completion driver.
+
+    The async core of :func:`assert_guard_holds`; library callers already inside
+    an event loop (and the offline unit tests) ``await`` this directly to avoid
+    nesting ``asyncio.run``. ``max_concurrent`` is forced to 1 by
+    :func:`build_scan`, so the recorder's single-threaded state stays coherent.
+    """
+    engine = build_scan(
+        "guarded",
+        completion_fn=completion_fn,
+        note_id_factory=note_id_counter(),
+        provider=provider,
+        model=model,
+    )
+    return await engine.run()
+
+
+def assert_guard_holds(
+    exploit: ExploitRecord,
+    *,
+    fixtures_dir: str | os.PathLike[str] | None = None,
+    _completion_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Assert the GUARDED twin resists ``exploit`` — the offline regression gate.
+
+    Replays the recorded attack against the in-process guarded reference twin
+    and asserts the exploit's predicate did NOT fire. Returns ``None`` when the
+    guard holds; otherwise raises (never silently passes).
+
+    Parameters
+    ----------
+    exploit:
+        The :class:`ExploitRecord` to re-drive (typically from
+        :func:`load_exploit`). Its ``pattern_id`` selects which scan attempt the
+        verdict is read from.
+    fixtures_dir:
+        Directory of recorded replay fixtures plus a ``_meta.json`` sidecar
+        (``{"format_version": int, "model": str, "pattern_id": str}``). When a
+        real directory, the recorded ``model`` is used for the replay keying.
+        When ``None`` (the default), the packaged guarded reference fixtures
+        (``packaged_fixture_dir() / "guarded"``) are used; ``model`` is read from
+        their ``_meta.json``.
+    _completion_fn:
+        Test-only injection seam. When provided, it drives the scan directly and
+        fixtures / ``_meta.json`` are skipped entirely. The post-run recorder
+        check still runs against it duck-typed, so a double exposing
+        ``cache_misses`` can simulate a missing-fixture gate.
+
+    Raises
+    ------
+    AssertionError:
+        The guard did not hold — the exploit fired against the guarded twin.
+    TestkitFixtureError:
+        The fixtures are missing / corrupt / version-mismatched, or the run was
+        inconclusive (only skip/error outcomes) — the gate refuses to pass.
+    """
+    if _completion_fn is not None:
+        # Test seam: drive directly, no fixtures/meta. Use a stub model; the
+        # injected fn ignores it.
+        result = asyncio.run(
+            _run_guarded_scan(
+                exploit,
+                completion_fn=_completion_fn,
+                provider="stub",
+                model="stub",
+            )
+        )
+        _check_recorder_after_run(_completion_fn)
+        _assert_from_result(result, exploit)
+        return
+
+    if fixtures_dir is not None:
+        fixtures_path = Path(fixtures_dir)
+        meta = _read_meta(fixtures_path)
+        model = str(meta.get("model", "")) or "unknown"
+    else:
+        fixtures_path = Path(str(packaged_fixture_dir() / "guarded"))
+        meta = _read_meta(fixtures_path)
+        model = str(meta.get("model", "")) or "unknown"
+
+    recorder = LiteLLMRecorder(
+        fixtures_path,
+        mode="replay",
+        missing_fixture_hint=TESTKIT_RERECORD_HINT,
+    )
+    result = asyncio.run(
+        _run_guarded_scan(
+            exploit,
+            completion_fn=recorder,
+            provider="anthropic",
+            model=model,
+        )
+    )
+    _check_recorder_after_run(recorder)
+    _assert_from_result(result, exploit)
+
+
+__all__ = [
+    "TestkitFixtureError",
+    "assert_guard_holds",
+    "load_exploit",
+]
