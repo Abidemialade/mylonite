@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Real testkit-based pytest generator.** `ReferencePytestGenerator` now emits a
+  deterministic, self-contained regression test (replacing the `@pytest.mark.skip`
+  stub). The emitted test imports the public `mylonite.testkit` API and, at
+  runtime, replays the recorded attack against the GUARDED reference twin via
+  `assert_guard_holds` — the offline regression gate. `load_exploit` /
+  `assert_guard_holds` live inside the test body, so the file collects cleanly
+  before its exploit JSON / fixtures exist. Output is template-driven with sorted
+  taxonomy IDs (no LLM call, clock, or RNG), so it is byte-stable and
+  snapshot-testable. Each emitted test carries compliance metadata as a docstring
+  plus pytest markers (`mylonite_security` + per-tag `owasp_llm0N` / `owasp_asi0N`);
+  unbounded ATLAS / NIST IDs ride in the docstring.
+- **Bundled pytest marker plugin.** A new `pytest11` entry point
+  (`mylonite.testkit._pytest_plugin`) auto-registers the markers emitted tests
+  carry (`mylonite_security`, `owasp_llm01`..`owasp_llm10`,
+  `owasp_asi01`..`owasp_asi10`) for any pytest run in an environment where
+  `mylonite` is installed, so emitted tests stay warning-free even under
+  `filterwarnings = error`.
 - **Machine-readable validation metrics.** `ValidationOutcome` gains an optional
   `metric: float | None` (per-stage numeric — flakiness reproducibility fraction,
   differential agreement fraction, metamorphic robustness rate) and

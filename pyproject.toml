@@ -103,6 +103,13 @@ null = "mylonite.plugins._reference.reference_validator:NullValidator"
 [project.entry-points."mylonite.compliance_mappers"]
 reference = "mylonite.plugins._reference.reference_compliance_mapper:ReferenceComplianceMapper"
 
+# Pytest plugin that registers the markers mylonite-emitted tests carry
+# (mylonite_security + the bounded owasp_llm0N / owasp_asi0N set). Auto-loaded
+# for any pytest run in an env where mylonite is installed, so emitted tests
+# stay warning-free under filterwarnings=error.
+[project.entry-points.pytest11]
+mylonite = "mylonite.testkit._pytest_plugin"
+
 # --- Tooling ---------------------------------------------------------------
 
 [tool.hatch.build.targets.wheel]
