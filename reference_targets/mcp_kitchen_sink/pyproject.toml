@@ -25,11 +25,12 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.7",
-    # LiteLLM powers the LLM-backed planner (planner_llm.LLMPlanner) — the
-    # Phase 1 attack target. Scripted planners in planner.py don't need it,
-    # so older callers still work without LiteLLM being importable until they
-    # touch the LLM planner module specifically.
-    "litellm>=1.40",
+    # ``mcp_kitchen_sink._types`` re-exports the canonical Pydantic models
+    # from ``mylonite.scan.llm_types`` (lifted there in v0.2.2 so the MCP
+    # stdio adapter and the in-process reference adapter can share a single
+    # ``_ServerLike`` Protocol). LiteLLM is no longer a kitchen-sink dep —
+    # the LLM planner lives in mylonite now.
+    "mylonite",
     # `mcp` SDK is optional at this layer so unit tests that don't need a
     # live MCP server can still run.
 ]

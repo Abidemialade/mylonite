@@ -1,20 +1,19 @@
-"""LiteLLM-backed planner — the Phase 1 attack target.
+"""LiteLLM-backed planner — the canonical agent loop used by both the
+in-process reference adapter and the MCP stdio adapter.
 
-The scripted ``VulnerablePlanner`` / ``GuardedPlanner`` from Phase 0 stay in
-place as deterministic fixtures for Phase 2's differential oracle. This module
-adds a *real* LLM-driven planner so Phase 1's scan loop has something
-stochastic to attack.
+Lifted from ``reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/planner_llm.py``
+in v0.2.2. Same behaviour; types now live under ``mylonite.scan.llm_types``
+so ``mylonite`` doesn't depend on a reference target.
 
 ``LLMPlanner`` is async and provider-agnostic via LiteLLM's tool-calling API
-(OpenAI-shaped function-calling format). It takes a server-like object with
-the same surface as ``VulnerableKitchenSinkServer`` / ``GuardedKitchenSinkServer``
-(``list_tools`` + ``call_tool``) and drives it with a user message, returning a
-``PlannerTrace`` for the adapter to inspect.
+(OpenAI-shaped function-calling format). It takes a server-like object
+exposing ``list_tools`` + ``call_tool`` and drives it with a user message,
+returning a ``PlannerTrace`` for the adapter to inspect.
 
 The completion entry point is injected via ``completion_fn`` (defaults to
-``litellm.acompletion``). The Phase 1 in-process adapter wraps the default with
-the budget counter from ``mylonite.scan._llm``; standalone callers can pass
-their own wrapper.
+``litellm.acompletion``). Phase 1's in-process adapter wraps the default
+with the budget counter from ``mylonite.scan._llm``; standalone callers can
+pass their own wrapper.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ from typing import Any, Protocol
 
 import litellm
 
-from mcp_kitchen_sink._types import (
+from mylonite.scan.llm_types import (
     PlannerStep,
     PlannerTrace,
     ToolCall,
@@ -52,7 +51,7 @@ class _ServerLike(Protocol):
 
 
 def _tool_to_openai_schema(tool: ToolDescription) -> dict[str, Any]:
-    """Convert a `ToolDescription` into LiteLLM/OpenAI tool-calling shape."""
+    """Convert a ``ToolDescription`` into LiteLLM/OpenAI tool-calling shape."""
     return {
         "type": "function",
         "function": {
@@ -133,14 +132,11 @@ class LLMPlanner:
             content = getattr(message, "content", None) or ""
 
             if not tool_calls:
-                # Text-only response — terminal.
                 final_output = str(content)
                 steps.append(PlannerStep(kind="say", text=final_output))
                 steps.append(PlannerStep(kind="stop", text=None))
                 return PlannerTrace(steps=steps, final_output=final_output)
 
-            # Echo the assistant turn so the next LLM call sees its own
-            # tool_calls + the tool responses we are about to append.
             messages.append(
                 {
                     "role": "assistant",
@@ -177,7 +173,6 @@ class LLMPlanner:
                     }
                 )
 
-        # Hit the iteration cap without a text-only response.
         final_output = f"planner stopped: iteration cap of {self._iteration_cap} reached"
         steps.append(PlannerStep(kind="stop", text=final_output))
         return PlannerTrace(steps=steps, final_output=final_output)

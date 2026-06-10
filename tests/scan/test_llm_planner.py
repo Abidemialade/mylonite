@@ -1,4 +1,8 @@
-"""LLMPlanner tests — LiteLLM mocked via the completion_fn injection point."""
+"""LLMPlanner tests — LiteLLM mocked via the completion_fn injection point.
+
+Lifted from ``reference_targets/mcp_kitchen_sink/tests/test_planner_llm.py``
+in v0.2.2 alongside the planner itself.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,9 @@ from typing import Any
 
 import pytest
 from mcp_kitchen_sink._store import NoteStore
-from mcp_kitchen_sink.planner_llm import DEFAULT_ITERATION_CAP, LLMPlanner
 from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
+
+from mylonite.scan.llm_planner import DEFAULT_ITERATION_CAP, LLMPlanner
 
 
 def _text_response(text: str) -> SimpleNamespace:
@@ -67,7 +72,6 @@ async def test_planner_executes_single_tool_then_responds() -> None:
     trace = await planner.run("Please read note n1.")
     assert trace.final_output == "I read it."
     assert trace.calls("read_note") != []
-    # Two iterations: one tool, one text.
     assert len(calls) == 2
 
 
@@ -113,7 +117,6 @@ async def test_planner_stops_at_iteration_cap() -> None:
     planner = LLMPlanner(server=server, model="stub", completion_fn=stub, iteration_cap=3)
     trace = await planner.run("Read note n1.")
     assert "iteration cap" in trace.final_output
-    # Each iteration adds a tool step (+ the final stop)
     tool_steps = [s for s in trace.steps if s.kind == "tool"]
     assert len(tool_steps) == 3
     assert trace.steps[-1].kind == "stop"
