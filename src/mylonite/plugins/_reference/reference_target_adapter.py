@@ -30,8 +30,6 @@ from collections.abc import Callable
 from typing import Any, ClassVar, Literal
 
 from mcp_kitchen_sink._store import NoteStore
-from mcp_kitchen_sink._types import ToolDescription, ToolResult
-from mcp_kitchen_sink.planner_llm import DEFAULT_SYSTEM_PROMPT, LLMPlanner
 from mcp_kitchen_sink.server_guarded import GuardedKitchenSinkServer
 from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
 
@@ -40,6 +38,8 @@ from mylonite.contracts._types import ToolSpec
 from mylonite.contracts.target_adapter import CONTRACT_VERSION
 from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped
+from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
+from mylonite.scan.llm_types import ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ class _InProcessServer:
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self.tool_calls.append(name)
-        return self._inner.call_tool(name, arguments)
+        return self._inner.call_tool(name, arguments)  # type: ignore[no-any-return]
 
 
 class InProcessReferenceAdapter(AsyncTargetAdapterBase):
