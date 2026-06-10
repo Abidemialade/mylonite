@@ -14,6 +14,32 @@ from mcp_kitchen_sink._store import NoteStore
 from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
 
 from mylonite.scan.llm_planner import DEFAULT_ITERATION_CAP, LLMPlanner
+from mylonite.scan.llm_types import ToolDescription, ToolResult
+
+
+class _AsyncServerWrapper:
+    """Async-adapt the sync kitchen-sink server to the v0.2.2 _ServerLike Protocol.
+
+    v0.2.2 made ``_ServerLike.list_tools`` and ``call_tool`` async (the MCP SDK
+    is async-only and the planner can't bridge sync wire calls without
+    re-entrant event loop hell). The in-process kitchen-sink server keeps its
+    sync methods to preserve the differential test's direct-call interface;
+    this wrapper bridges the two for planner tests.
+    """
+
+    def __init__(self, inner: VulnerableKitchenSinkServer) -> None:
+        self._inner = inner
+
+    async def list_tools(self) -> list[ToolDescription]:
+        return self._inner.list_tools()
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        return self._inner.call_tool(name, arguments)
+
+    # Pass-through for tests that inspect the inner state (sent_emails, etc.)
+    @property
+    def store(self) -> Any:
+        return self._inner.store
 
 
 def _text_response(text: str) -> SimpleNamespace:
@@ -42,7 +68,7 @@ def _tool_response(tool_calls: list[SimpleNamespace]) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 async def test_planner_returns_text_on_pure_text_response() -> None:
-    server = VulnerableKitchenSinkServer(store=NoteStore())
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
 
     async def stub(**_: Any) -> SimpleNamespace:
         return _text_response("Hello back.")
@@ -58,7 +84,7 @@ async def test_planner_returns_text_on_pure_text_response() -> None:
 async def test_planner_executes_single_tool_then_responds() -> None:
     store = NoteStore()
     store.write("n1", "the note body")
-    server = VulnerableKitchenSinkServer(store=store)
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=store))
 
     calls: list[int] = []
 
@@ -79,7 +105,7 @@ async def test_planner_executes_single_tool_then_responds() -> None:
 async def test_planner_executes_multi_tool_sequence() -> None:
     """W2-style flow: read poisoned note → planner sends email."""
     store = NoteStore()
-    server = VulnerableKitchenSinkServer(store=store)
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=store))
 
     iteration = [0]
 
@@ -109,7 +135,7 @@ async def test_planner_executes_multi_tool_sequence() -> None:
 @pytest.mark.asyncio
 async def test_planner_stops_at_iteration_cap() -> None:
     """A planner that keeps requesting tool calls must terminate at the cap."""
-    server = VulnerableKitchenSinkServer(store=NoteStore())
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
 
     async def stub(**_: Any) -> SimpleNamespace:
         return _tool_response([_tool_call("read_note", {"note_id": "n1"})])
@@ -125,7 +151,7 @@ async def test_planner_stops_at_iteration_cap() -> None:
 @pytest.mark.asyncio
 async def test_planner_raises_when_completion_raises() -> None:
     """Provider exceptions surface to the adapter for the skip-on-failure path."""
-    server = VulnerableKitchenSinkServer(store=NoteStore())
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
 
     async def stub(**_: Any) -> SimpleNamespace:
         raise RuntimeError("provider down")
