@@ -527,3 +527,50 @@ def test_validate_missing_target_exit_2(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CONFIG
     out = result.stderr or result.output
     assert "mylonite generate" in out
+
+
+def test_validate_uses_on_disk_source_and_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """validate builds the GeneratedTest from the ON-DISK test (no re-emit) and
+    points record_fixtures_dir at the gen dir's fixtures/ (offline — no key)."""
+    from mylonite.plugins._reference import reference_validator
+
+    out_dir = _generated_dir(tmp_path)
+    on_disk_test = next(out_dir.glob("test_security_*.py"))
+    # Stamp a unique marker into the committed test so a re-emit (which would NOT
+    # carry it) is detectable.
+    sentinel = "# SENTINEL: edited-on-disk committed test\n"
+    on_disk_test.write_text(sentinel + on_disk_test.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+
+    captured: dict[str, Any] = {}
+
+    class _CapturingValidator:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["init_kwargs"] = kwargs
+
+        def validate(self, test: Any, *_: Any, **__: Any) -> Any:
+            from mylonite.contracts import ValidationOutcome, ValidationReport
+
+            captured["test"] = test
+            return ValidationReport(
+                test_filename=test.filename,
+                outcomes=[ValidationOutcome(stage="build", passed=True, detail="ok")],
+                kept=True,
+                notes="captured",
+                mutation_score=1.0,
+            )
+
+    monkeypatch.setattr(reference_validator, "DifferentialValidator", _CapturingValidator)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    generated = captured["test"]
+    # The validator saw the EDITED on-disk source verbatim — not a re-render.
+    assert sentinel in generated.source
+    assert generated.filename == on_disk_test.name
+    # record_fixtures_dir points at the gen dir's fixtures/.
+    assert captured["init_kwargs"]["record_fixtures_dir"] == out_dir / "fixtures"
