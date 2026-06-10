@@ -98,8 +98,14 @@ def _aggregate_mark(result: ScanResult, pattern_ids: frozenset[str]) -> str:
 
     Binding rule: FOUND if ANY seed in the weakness found, else SKIPPED if any
     seed skipped / errored (or no attempt reached the weakness at all), else
-    clean. Unknown outcome strings fall into the skipped bucket — never crash.
+    clean. A harness ``error`` outcome is intentionally absorbed into the
+    SKIPPED bucket at this weakness-aggregation level (the demo only needs the
+    found / not-found differential). Unknown outcome strings also fall into the
+    skipped bucket — never crash.
     """
+    # Join on pattern_id (== seed_id in v0.2); _WEAKNESS_PATTERNS is keyed the
+    # same way, so a future pattern_id/seed_id divergence would surface as rows
+    # quietly dropping into the skip bucket rather than a crash.
     outcomes = [
         attempt.outcome for attempt in result.report.attempts if attempt.pattern_id in pattern_ids
     ]
