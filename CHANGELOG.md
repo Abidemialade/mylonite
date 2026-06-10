@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mylonite generate` and `mylonite validate` now work** (replacing the
+  not-implemented stubs), wiring the pytest generator to the
+  `DifferentialValidator`.
+  - `mylonite generate [SCAN_PATH] [--latest] [--out DIR]` is offline and
+    deterministic (no LLM call). It resolves an exploit from an explicit
+    `exploit_*.json`, a scan dir, or `--latest` (the newest `.mylonite/scans/<ts>/`),
+    emits the pytest regression test, writes a co-located copy of the exploit JSON
+    (under the exact name the emitted test loads) plus a `fixtures/` placeholder,
+    and prints the exact `mylonite validate <out-dir>` command to run next.
+  - `mylonite validate TARGET [--iterations N] [--provider X] [--model Y]` runs
+    the `DifferentialValidator` **live by default** (real LLM, Haiku) and renders
+    a per-leg Rich report (build / differential / flakiness / metamorphic) with
+    the mutation-score headline and the kept verdict; on rejection it prints a
+    per-leg remediation line. It discloses cost/latency/key up front (a one-line
+    banner and in `--help`) and fails fast with a distinct exit code when no
+    provider is reachable.
+- **New exit code `EXIT_NOT_KEPT = 5`** so a CI gate can distinguish a cleanly
+  validated-but-rejected test (`kept=False`) from success (0), config error (2),
+  budget (3), and provider-unreachable (4). `mylonite validate` exits 0 when the
+  test is kept and 5 when it is cleanly rejected.
 - **`DifferentialValidator` — the validation-engine moat.** A new reference
   validator (`mylonite.plugins._reference.reference_validator:DifferentialValidator`,
   registered under the new `differential` entry point in `mylonite.validators`;
