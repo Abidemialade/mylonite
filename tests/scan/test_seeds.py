@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import pytest
 
+# Eagerly import the MCP plugin package so the v0.2.2 per-target predicates
+# register before SeedPattern.predicate lookups run. The engine triggers this
+# import via adapter construction in production; the catalogue test does it
+# directly.
+import mylonite.plugins._mcp  # noqa: F401
 from mylonite.contracts._types import ComplianceTags
 from mylonite.scan.predicates import PredicateNotFound, lookup_predicate, registered_names
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern
@@ -78,16 +83,46 @@ def test_every_seed_has_non_empty_applicable_targets(seed: SeedPattern) -> None:
 
 
 def test_kitchen_sink_family_has_all_v0_2_1_seeds() -> None:
-    """The 8 seeds shipped through v0.2.1 all apply to the kitchen-sink family.
-
-    v0.2.2's new MCP-server-shaped seeds will tag ``filesystem``, ``fetch``,
-    or ``github`` instead; pinning the kitchen-sink count here makes that
-    addition explicit rather than implicit.
-    """
+    """The 8 seeds shipped through v0.2.1 all apply to the kitchen-sink family."""
     kitchen_sink_seeds = [s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets]
     assert len(kitchen_sink_seeds) == 8, (
         f"expected 8 kitchen-sink seeds (the v0.2.1 catalogue); got "
         f"{len(kitchen_sink_seeds)}: {[s.pattern_id for s in kitchen_sink_seeds]}"
+    )
+
+
+def test_each_v0_2_2_target_family_has_at_least_one_seed() -> None:
+    """v0.2.2 ships ≥1 seed per bundled MCP target family."""
+    families = {f for s in SEED_CATALOGUE for f in s.applicable_targets}
+    assert {"kitchen-sink", "filesystem", "fetch", "github"}.issubset(families), (
+        f"missing target families in SEED_CATALOGUE: {families}"
+    )
+
+
+# Per plan-eng-review T4: seed bodies must literally contain the target's
+# primary tool name so the customiser-pass-through pattern in recorded
+# integration tests routes correctly.
+_FAMILY_PRIMARY_TOOLS = {
+    "filesystem": {"write_file", "read_file"},  # at least one must appear
+    "fetch": {"fetch"},
+    "github": {"create_issue", "get_issue", "add_issue_comment"},
+}
+
+
+@pytest.mark.parametrize(
+    "seed",
+    [s for s in SEED_CATALOGUE if "kitchen-sink" not in s.applicable_targets],
+    ids=[s.pattern_id for s in SEED_CATALOGUE if "kitchen-sink" not in s.applicable_targets],
+)
+def test_v0_2_2_seed_body_names_target_tool(seed: SeedPattern) -> None:
+    """Each v0.2.2 seed body must reference a tool of its target family."""
+    target = seed.applicable_targets[0]
+    expected_tools = _FAMILY_PRIMARY_TOOLS.get(target, set())
+    matched = [t for t in expected_tools if t in seed.seed_body]
+    assert matched, (
+        f"seed {seed.pattern_id!r} body must name at least one of "
+        f"{sorted(expected_tools)} (target family={target!r}); none found in:\n"
+        f"{seed.seed_body}"
     )
 
 

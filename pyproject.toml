@@ -90,6 +90,9 @@ reference_example = "mylonite.plugins._reference.reference_attack_module:Referen
 [project.entry-points."mylonite.target_adapters"]
 in_process_reference_vulnerable = "mylonite.plugins._reference.reference_target_adapter:InProcessVulnerableReferenceAdapter"
 in_process_reference_guarded = "mylonite.plugins._reference.reference_target_adapter:InProcessGuardedReferenceAdapter"
+mcp_filesystem = "mylonite.plugins._mcp.stdio_adapter:FilesystemMCPAdapter"
+mcp_fetch = "mylonite.plugins._mcp.stdio_adapter:FetchMCPAdapter"
+mcp_github = "mylonite.plugins._mcp.stdio_adapter:GitHubMCPAdapter"
 
 [project.entry-points."mylonite.test_generators"]
 reference_pytest = "mylonite.plugins._reference.reference_pytest_generator:ReferencePytestGenerator"

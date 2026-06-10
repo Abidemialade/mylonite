@@ -34,12 +34,18 @@ def test_attack_metadata_returns_umbrella_pattern() -> None:
     assert "ASI02" in meta.compliance.owasp_asi
 
 
-def test_generate_payloads_emits_only_w3_and_w4() -> None:
+def test_generate_payloads_emits_only_w3_and_w4_for_kitchen_sink() -> None:
+    """``reference:vulnerable`` resolves to the kitchen-sink family; emitted
+    seeds are W3+W4 ∩ kitchen-sink (PR 2 + PR 5 of v0.2.2)."""
     module = ExcessiveAgencyAttackModule()
     payloads = list(module.generate_payloads(_mcp_descriptor()))
     weaknesses = {p.metadata["weakness"] for p in payloads}
     assert weaknesses == {"W3", "W4"}
-    expected_count = sum(1 for s in SEED_CATALOGUE if s.weakness in {"W3", "W4"})
+    expected_count = sum(
+        1
+        for s in SEED_CATALOGUE
+        if s.weakness in {"W3", "W4"} and "kitchen-sink" in s.applicable_targets
+    )
     assert len(payloads) == expected_count
 
 
