@@ -58,15 +58,55 @@ mylonite scan mcp:fetch --authorize fetch
   `mcp:github` (spawn via `npx`). Add `--dry-run` to enumerate seeds
   without an API key.
 
+## The full flow: scan → generate → validate
+
+The end-to-end "magic moment" works today. Scan a target for a weakness,
+emit a regression test from the finding, then validate that the test is
+*meaningful* through the differential oracle.
+
+On Linux / macOS (bash):
+
+```bash
+mylonite scan reference:vulnerable
+mylonite generate --latest
+mylonite validate .mylonite/generated/indirect-injection-note-body-direct
+```
+
+On Windows (PowerShell):
+
+```powershell
+mylonite scan reference:vulnerable
+mylonite generate --latest
+mylonite validate .mylonite\generated\indirect-injection-note-body-direct
+```
+
+- `mylonite scan reference:vulnerable` — runs the live exploit-finding loop
+  against the in-process vulnerable twin and writes `exploit_*.json` artefacts
+  under `.mylonite/scans/<ts>/`. Live — needs an API key (see below).
+- `mylonite generate --latest` — **offline and deterministic** (no LLM call).
+  Reads the newest scan's exploit, emits a testkit-based pytest regression
+  test, and prints the exact `mylonite validate <dir>` command to run next.
+  `--latest` picks the newest scan; pass an explicit `exploit_*.json` or scan
+  dir instead if you prefer.
+- `mylonite validate <dir>` — runs the `DifferentialValidator` (the
+  [validation engine](validation.md)). **Live** — it makes real LLM calls
+  (Haiku by default), so it needs an API key and discloses cost/latency up
+  front. It runs the full attack scan against *both* reference twins across a
+  5-run flakiness filter and reports `kept` plus the mutation score. Exits `0`
+  when the test is kept and `5` when it is cleanly rejected.
+
+`generate` is the only offline command here; `scan` and `validate` both make
+live LLM calls. The committed regression test that `generate` emits, however,
+replays **offline** at the CI gate (no API key needed there) — see
+[The validation engine](validation.md).
+
 ## Commands still to come
 
 ```bash
-mylonite generate     # emit a regression test from a finding (Phase 2)
-mylonite validate     # run the test through the differential oracle (Phase 2)
 mylonite init         # scaffold a config (Phase 3)
 ```
 
-These exist as stubs that exit non-zero with a pointer to
+This exists as a stub that exits non-zero with a pointer to
 [`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md).
 
 ## Where to go next
@@ -74,4 +114,6 @@ These exist as stubs that exit non-zero with a pointer to
 - [The Quarry](quarry.md) — the deliberately vulnerable playground: run the
   demo, walk the W1–W4 weakness catalogue, then point the scanner at a real
   MCP server.
+- [The validation engine](validation.md) — why a generated test means what
+  it claims, and why the CI gate runs offline.
 - [Concepts](concepts.md) — scope and the differential-oracle moat.

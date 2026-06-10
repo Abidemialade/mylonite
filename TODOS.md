@@ -5,6 +5,22 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## Phase 2 finishing touches (v0.4.0 shipped; these remain)
+
+- **Record the committed reference-validation example.** Run
+  [`scripts/record_reference_example.py`](./scripts/record_reference_example.py)
+  with `ANTHROPIC_API_KEY` to produce `examples/reference_validation/` — the live
+  W2 `exploit_*.json`, the recorded guarded `fixtures/` + `_meta.json`, and the
+  emitted test. **Blocked on the live SSL/cert environment issue** (LiteLLM's
+  HTTPS calls fail `CERTIFICATE_VERIFY_FAILED` on this machine): needs a Norton
+  HTTPS-inspection exclusion, or `SSL_CERT_FILE` pointed at certifi's bundle,
+  before the run will reach the provider. Once recorded, the example replays
+  **offline** forever (analogous to the demo fixtures), and a committed offline
+  test asserting it passes can be added. Human step.
+- **Tag `v0.4.0`** once the reference example is recorded and committed — matches
+  the prior release tagging (v0.1.0–v0.3.0 are all tagged) and the "artefact then
+  tag" sequence.
+
 ## Phase 1.5 finishing touches (v0.3.0 shipped; these remain)
 
 - **Record the demo GIF** → `docs/assets/quarry-demo.gif`. The recording script
