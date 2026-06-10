@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from importlib.abc import MetaPathFinder
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +21,27 @@ def test_version_command() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == EXIT_SUCCESS
     assert result.stdout.strip() == mylonite.__version__
+
+
+def test_configure_stdio_encoding_forces_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stdio shim reconfigures streams to UTF-8 so Rich glyphs don't crash
+    a Windows cp1252 console; streams without reconfigure() are left alone."""
+    from mylonite.cli import _configure_stdio_encoding
+
+    calls: list[dict[str, Any]] = []
+
+    class _Reconfigurable:
+        def reconfigure(self, **kwargs: Any) -> None:
+            calls.append(kwargs)
+
+    class _Plain:
+        pass
+
+    monkeypatch.setattr("mylonite.cli.sys.stdout", _Reconfigurable())
+    monkeypatch.setattr("mylonite.cli.sys.stderr", _Plain())  # no reconfigure → skipped
+    _configure_stdio_encoding()
+
+    assert calls == [{"encoding": "utf-8", "errors": "replace"}]
 
 
 def test_taxonomy_list_owasp_llm() -> None:
@@ -198,3 +221,108 @@ def test_scan_exit_4_on_provider_failure(
     # In practice the wrapped completion in the adapter increments
     # consecutive_failures on the counter; after 3, ScanEngine sets aborted.
     assert result.exit_code in (EXIT_PROVIDER, EXIT_SUCCESS)
+
+
+# ---------------------------------------------------------------------------
+# `mylonite demo` — the offline Quarry playground (v0.3.0, PR A, Task A5).
+#
+# These tests MUST be plain `def` (not async): the command body calls
+# asyncio.run() internally, and pytest's asyncio_mode="auto" would otherwise
+# wrap them in a running event loop and raise "cannot be called from a running
+# event loop".
+# ---------------------------------------------------------------------------
+
+
+def test_demo_replay_smoke() -> None:
+    """Default (offline replay) demo renders the differential and exits 0."""
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "Quarry" in result.output
+    assert "0 on guarded" in result.output
+
+
+def test_demo_replay_warns_when_provider_flag_ignored() -> None:
+    """--provider without --live warns (never silently ignores) and still exits 0."""
+    result = runner.invoke(app, ["demo", "--provider", "openai"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert "pinned" in out.lower() or "ignored" in out.lower()
+    assert "claude-haiku-4-5-20251001" in out
+
+
+def test_demo_missing_kitchen_sink_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing mcp_kitchen_sink install → exit 2 with the clone-first command."""
+
+    async def fake_run_demo(**_: Any) -> Any:
+        exc = ModuleNotFoundError("No module named 'mcp_kitchen_sink'")
+        exc.name = "mcp_kitchen_sink"
+        raise exc
+
+    from mylonite.demo import runner as demo_runner
+
+    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    # Friendly message, not a raw traceback.
+    assert "Traceback" not in out
+
+
+def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mcp_kitchen_sink absence at *import time* → exit 2, not a raw traceback.
+
+    `mylonite.demo.runner` transitively imports `mcp_kitchen_sink` at module
+    load (runner -> reference_target_adapter -> mcp_kitchen_sink._store). This
+    drives the real import-time path inside the ``demo`` command: it evicts the
+    cached modules and installs a meta_path finder that makes importing
+    ``mcp_kitchen_sink`` raise ModuleNotFoundError, so the command's local
+    ``from mylonite.demo.runner import ...`` re-runs and fails there — before
+    ``run_demo`` is ever called.
+    """
+
+    class _BlockKitchenSink(MetaPathFinder):
+        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+            if fullname == "mcp_kitchen_sink" or fullname.startswith("mcp_kitchen_sink."):
+                raise ModuleNotFoundError(f"No module named '{fullname}'", name="mcp_kitchen_sink")
+            return None
+
+    # Evict cached modules so the command's local import re-runs and hits the
+    # finder. monkeypatch.delitem auto-restores the originals after the test.
+    for name in list(sys.modules):
+        if (
+            name == "mcp_kitchen_sink"
+            or name.startswith("mcp_kitchen_sink.")
+            or name == "mylonite.demo.runner"
+            or name == "mylonite.plugins._reference.reference_target_adapter"
+        ):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+
+    monkeypatch.setattr(sys, "meta_path", [_BlockKitchenSink(), *sys.meta_path])
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    # Friendly message, not a raw traceback.
+    assert "Traceback" not in out
+
+
+def test_demo_corrupt_fixture_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A corrupt fixture surfaces as exit 2 with the underlying message."""
+    from mylonite.demo import runner as demo_runner
+    from mylonite.demo._replay import CorruptFixtureError
+
+    async def fake_run_demo(**_: Any) -> Any:
+        raise CorruptFixtureError("fixture corrupt — reinstall mylonite or re-record")
+
+    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
+
+    result = runner.invoke(app, ["demo"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "fixture corrupt" in out
+    assert "Traceback" not in out

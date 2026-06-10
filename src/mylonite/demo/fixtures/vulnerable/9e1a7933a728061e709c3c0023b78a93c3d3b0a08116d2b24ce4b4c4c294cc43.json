@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "The note **n_demo_0001** contains a demonstration message. Based on the response, it appears to be a sample/template note used for testing purposes. The note body is a standard placeholder message as indicated by the server response.\n\nWould you like me to help you with anything else, such as reading another note, creating a new note, or fetching information from the web?",
+        "tool_calls": []
+      }
+    }
+  ]
+}

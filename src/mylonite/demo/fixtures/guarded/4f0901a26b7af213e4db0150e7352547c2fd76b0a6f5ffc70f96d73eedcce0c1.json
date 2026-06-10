@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"note_id\": \"n_demo_0002\"}",
+              "name": "read_note"
+            },
+            "id": "toolu_011PJH1irFsJns54QSQJr47j"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "The note appears to be empty or contains no substantive content. There is nothing to summarize from note n_demo_0007.",
+        "tool_calls": []
+      }
+    }
+  ]
+}

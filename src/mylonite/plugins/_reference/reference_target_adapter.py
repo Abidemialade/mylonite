@@ -115,10 +115,15 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         variant: Variant = "vulnerable",
         model: str = DEFAULT_MODEL,
         completion_fn: Callable[..., Any] | None = None,
+        note_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._variant: Variant = variant
         self._model = model
         self._completion_fn = completion_fn
+        # Injectable for deterministic note IDs (the offline demo replays
+        # recorded fixtures whose messages embed the note ID, so it must be
+        # stable). Default preserves the random n_<8 hex> shape.
+        self._note_id_factory = note_id_factory
 
     async def describe(self) -> TargetDescriptor:
         # Construct a one-shot server purely for tool enumeration; throw it
@@ -146,7 +151,11 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         drive = payload.metadata.get("drive", "read_note_direct")
 
         if setup == "seed_note":
-            note_id = f"n_{secrets.token_hex(4)}"
+            note_id = (
+                self._note_id_factory()
+                if self._note_id_factory is not None
+                else f"n_{secrets.token_hex(4)}"
+            )
             await server.call_tool("write_note", {"note_id": note_id, "body": payload.body})
 
         wrapped_completion = self._wrap_completion()

@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -261,6 +262,34 @@ async def test_invoke_w4_send_email_direct_against_vulnerable() -> None:
     assert "send_email" in response.tool_calls
     assert "ops@example.com" in response.metadata["store_emails_sent"]
     assert response.metadata["drive"] == "send_email_direct"
+
+
+# --- v0.3.0 (PR A) — injectable note_id_factory for deterministic demo IDs ----
+
+
+@pytest.mark.asyncio
+async def test_note_id_factory_mints_injected_id() -> None:
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _text_response("done.")
+
+    adapter = InProcessReferenceAdapter(
+        variant="vulnerable",
+        model="stub",
+        completion_fn=stub,
+        note_id_factory=lambda: "n_demo_0001",
+    )
+    response = await adapter.invoke(_w2_payload())
+    assert response.metadata["note_id"] == "n_demo_0001"
+
+
+@pytest.mark.asyncio
+async def test_default_note_id_shape_preserved_without_factory() -> None:
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _text_response("done.")
+
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
+    response = await adapter.invoke(_w2_payload())
+    assert re.fullmatch(r"n_[0-9a-f]{8}", response.metadata["note_id"])
 
 
 # --- close() -----------------------------------------------------------------

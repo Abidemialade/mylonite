@@ -16,7 +16,9 @@ Phase 1 (v0.2) lights up ``mylonite scan``:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -48,6 +50,29 @@ EXIT_BUDGET = 3
 EXIT_PROVIDER = 4
 
 
+def _configure_stdio_encoding() -> None:
+    """Force UTF-8 on stdout/stderr before any Rich/typer output.
+
+    Rich renders the scan/demo tables with non-ASCII glyphs (✓ ✗ ⚠ —). On a
+    Windows console defaulting to cp1252 those raise ``UnicodeEncodeError`` and
+    crash the command mid-render. ``errors="replace"`` keeps output alive if a
+    stream still can't encode something. No-op where ``reconfigure`` is absent
+    (e.g. pytest's captured streams).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            # stream already detached/closed → leave it as-is rather than crash.
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
+@app.callback()
+def _root() -> None:
+    """Run before every command; normalise stdio so Rich glyphs never crash."""
+    _configure_stdio_encoding()
+
+
 class _Framework(StrEnum):
     OWASP_LLM = "owasp-llm"
     OWASP_ASI = "owasp-asi"
@@ -64,7 +89,7 @@ def version() -> None:
 def _not_implemented(name: str) -> None:
     typer.echo(
         f"`{name}` is not implemented in v{__version__}. "
-        "It arrives in v0.2 — see ROADMAP.md and the issue tracker.",
+        "It arrives in a later release — see ROADMAP.md and the issue tracker.",
         err=True,
     )
     raise typer.Exit(code=EXIT_CONFIG)
@@ -311,6 +336,136 @@ def scan(
         raise typer.Exit(code=EXIT_BUDGET)
     if result.report.aborted == "provider_unreachable":
         raise typer.Exit(code=EXIT_PROVIDER)
+    raise typer.Exit(code=EXIT_SUCCESS)
+
+
+@app.command()
+def demo(
+    live: Annotated[
+        bool,
+        typer.Option(
+            "--live",
+            help=(
+                "Make real LLM calls instead of replaying recorded fixtures. "
+                "Runs the exploit loop twice (vulnerable + guarded), capped at "
+                "max_llm_calls=100 per variant. Takes roughly a minute and costs "
+                "a few cents on Haiku pricing (well under $0.05). Needs a "
+                "provider configured (ANTHROPIC_API_KEY by default)."
+            ),
+        ),
+    ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help="LiteLLM provider for --live runs. Ignored in replay mode (pinned to anthropic).",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            help=(
+                "Model for --live runs. Ignored in replay mode "
+                "(pinned to claude-haiku-4-5-20251001)."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Run the zero-config Quarry playground: vulnerable vs guarded differential.
+
+    Default (offline replay) replays recorded fixtures — no network, no API key,
+    deterministic. Pass --live to make real LLM calls against the in-process
+    reference agent. A --live run executes the exploit loop twice (vulnerable +
+    guarded), capped at max_llm_calls=100 per variant; it takes roughly a minute
+    and costs a few cents (approximate, well under $0.05 on Haiku pricing).
+    """
+    from mylonite.demo._replay import CorruptFixtureError, MissingFixtureError
+    from mylonite.demo.render import render_demo
+
+    # The runner import transitively pulls in mcp_kitchen_sink (runner ->
+    # reference_target_adapter -> mcp_kitchen_sink._store), which installs
+    # separately. Map its absence to the same friendly exit-2 message here, at
+    # import time, before any of the import's symbols are referenced below.
+    try:
+        from mylonite.demo.runner import (
+            DEMO_MODEL,
+            DEMO_PROVIDER,
+            DemoFixtureError,
+            run_demo,
+        )
+    except (ModuleNotFoundError, ImportError) as exc:
+        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+            typer.echo(
+                "the Quarry reference target isn't installed — run "
+                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        raise
+
+    # Replay is pinned to the recorded provider/model — never silently drop the
+    # override flags.
+    if not live and (provider is not None or model is not None):
+        typer.echo(
+            "warning: --provider/--model are ignored in replay mode — the demo "
+            f"replays fixtures recorded against {DEMO_PROVIDER}/{DEMO_MODEL} "
+            "(claude-haiku-4-5-20251001). Pass --live to use a different "
+            "provider/model.",
+            err=True,
+        )
+
+    try:
+        result = asyncio.run(run_demo(live=live, provider=provider, model=model))
+    except (MissingFixtureError, DemoFixtureError) as exc:
+        typer.echo(
+            "demo fixtures missing or stale — reinstall mylonite, or run "
+            "`mylonite demo --live` with a provider configured. "
+            f"{exc}",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    except CorruptFixtureError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    except (ModuleNotFoundError, ImportError) as exc:
+        if getattr(exc, "name", None) == "mcp_kitchen_sink":
+            typer.echo(
+                "the Quarry reference target isn't installed — run "
+                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        raise
+
+    # Build a fresh Console here (not the module-level _console, which was
+    # constructed at import before the callback reconfigured stdout to UTF-8).
+    render_demo(
+        result.vulnerable,
+        result.guarded,
+        mode=result.mode,
+        elapsed_s=result.elapsed_s,
+        console=Console(),
+    )
+
+    # A --live run can abort cleanly (the engine returns rather than raises);
+    # surface those as distinct exit codes. Replay never aborts this way.
+    for variant in (result.vulnerable, result.guarded):
+        if variant.report.aborted == "provider_unreachable":
+            typer.echo(
+                "no provider reachable — set ANTHROPIC_API_KEY, or pass "
+                "--provider/--model for another LiteLLM provider.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_PROVIDER)
+        if variant.report.aborted == "budget_exceeded":
+            typer.echo(
+                "demo budget exceeded before both variants completed "
+                "(max_llm_calls=100 per variant).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_BUDGET)
+
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
