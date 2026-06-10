@@ -148,28 +148,53 @@ def _build_scan(
     )
 
 
-def _check_recorder_state(recorder: Any, variant: str) -> None:
-    """Raise a friendly demo error if a replay variant hit a fixture problem.
+def _raise_if_fixture_problem(
+    *, cache_misses: int, last_error: Exception | None, hint: str, variant: str
+) -> None:
+    """Raise :class:`DemoFixtureError` if recorder state shows a fixture problem.
 
-    The engine swallows ``completion_fn`` exceptions, so the recorder's
-    cumulative state is the only reliable signal. A cache miss OR any recorded
-    error (corrupt fixture sets ``last_error`` without bumping ``cache_misses``)
-    means the demo would otherwise show a falsely-clean vulnerable scan.
-
-    Duck-typed on ``cache_misses`` / ``last_error`` rather than the concrete
-    ``LiteLLMRecorder`` so an injected test double exposing the same surface is
-    checked too. An injected ``completion_fn`` without recorder state (no
-    ``cache_misses`` attribute) is skipped — there is nothing to inspect.
+    A cache miss OR any recorded error (corrupt fixture sets ``last_error``
+    without bumping ``cache_misses``) means the demo would otherwise show a
+    falsely-clean vulnerable scan.
     """
-    cache_misses = getattr(recorder, "cache_misses", 0)
-    last_error = getattr(recorder, "last_error", None)
     if cache_misses > 0 or last_error is not None:
-        hint = getattr(recorder, "missing_fixture_hint", None) or DEMO_RERECORD_HINT
         detail = f" ({last_error})" if last_error is not None else ""
         raise DemoFixtureError(
             f"demo fixtures for the {variant!r} variant are stale or missing"
             f"{detail}. The vulnerable scan would falsely show clean. {hint}"
         ) from last_error
+
+
+def _check_replay_recorder(recorder: LiteLLMRecorder, variant: str) -> None:
+    """Strict fixture-state check for the replay path (statically-typed recorder).
+
+    The engine swallows ``completion_fn`` exceptions, so the recorder's
+    cumulative state is the only reliable signal. Reads ``cache_misses`` /
+    ``last_error`` / ``missing_fixture_hint`` as direct attributes so a future
+    rename of that public surface fails loudly here — this is the one check the
+    whole module exists to keep honest.
+    """
+    _raise_if_fixture_problem(
+        cache_misses=recorder.cache_misses,
+        last_error=recorder.last_error,
+        hint=recorder.missing_fixture_hint or DEMO_RERECORD_HINT,
+        variant=variant,
+    )
+
+
+def _check_recorder_state(recorder: Any, variant: str) -> None:
+    """Duck-typed fixture-state check for the ``_recorder`` injection seam.
+
+    Mirrors :func:`_check_replay_recorder` but tolerates an injected test
+    double or a bare ``completion_fn`` without recorder state (no
+    ``cache_misses`` attribute → nothing to inspect, skipped).
+    """
+    _raise_if_fixture_problem(
+        cache_misses=getattr(recorder, "cache_misses", 0),
+        last_error=getattr(recorder, "last_error", None),
+        hint=getattr(recorder, "missing_fixture_hint", None) or DEMO_RERECORD_HINT,
+        variant=variant,
+    )
 
 
 async def run_demo(
@@ -231,7 +256,7 @@ async def run_demo(
     if live:
         used_provider = provider or DEMO_PROVIDER
         used_model = model or DEMO_MODEL
-        results = {}
+        results: dict[str, ScanResult] = {}
         for variant in _VARIANTS:
             engine = _build_scan(
                 variant,
@@ -264,7 +289,7 @@ async def run_demo(
             model=DEMO_MODEL,
         )
         results[variant] = await engine.run()
-        _check_recorder_state(recorder, variant)
+        _check_replay_recorder(recorder, variant)
     elapsed = time.monotonic() - start
     return DemoResult(
         vulnerable=results["vulnerable"],

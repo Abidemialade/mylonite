@@ -158,22 +158,11 @@ async def test_live_uses_random_note_ids(monkeypatch: pytest.MonkeyPatch) -> Non
     """Live path passes note_id_factory=None and honours provider/model overrides."""
     captured: list[dict[str, Any]] = []
     real_build = runner_mod._build_scan
-
-    def spy_build(variant: str, **kwargs: Any) -> Any:
-        captured.append({"variant": variant, **kwargs})
-        return real_build(variant, **kwargs)
-
-    monkeypatch.setattr(runner_mod, "_build_scan", spy_build)
-
-    # Use the fake as the live completion_fn by monkeypatching litellm? Simpler:
-    # the adapter/customiser/judge accept completion_fn=None and fall back to
-    # litellm only when actually called. We avoid real calls by driving the
-    # live path with overrides and a fake injected via the adapter's fallback —
-    # instead we just assert wiring kwargs without running the engine.
     fake = _FakeRecorder()
 
-    # Patch the engine wiring to inject our fake as completion_fn so no real
-    # litellm call happens, while preserving the runner's note_id_factory=None.
+    # Spy on _build_scan to capture the wiring kwargs the runner chose, and
+    # inject our fake as completion_fn so the live path never makes a real
+    # litellm call (the runner's note_id_factory=None is preserved).
     def spy_build_live(variant: str, **kwargs: Any) -> Any:
         captured.append({"variant": variant, **kwargs})
         kwargs = dict(kwargs)
