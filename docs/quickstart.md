@@ -47,13 +47,15 @@ mylonite scan mcp:fetch --authorize fetch
 - `mylonite taxonomy list` — browse the bundled threat taxonomy
   (`owasp-llm`, `owasp-asi`, `atlas`, `nist`).
 - `mylonite scan <target>` — run the live exploit-finding loop. Needs an LLM
-  API key (`ANTHROPIC_API_KEY` by default, or `--provider`/`--model` for any
-  LiteLLM provider). Targets: `reference:vulnerable` / `reference:guarded`
+  API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
+  provider via `--provider`/`--model` plus that provider's own key env var.
+  Targets: `reference:vulnerable` / `reference:guarded`
   (the in-process Quarry twins), and the bundled MCP stdio families
   `mcp:filesystem:<sandbox>`, `mcp:fetch`, `mcp:github:<owner/repo>` — these
   require `--authorize` (see the
-  [responsible-use policy](security.md)) and `uv` installed, since the
-  bundled servers spawn via `uvx`. Add `--dry-run` to enumerate seeds
+  [responsible-use policy](security.md)) plus the family's runtime: `uv` for
+  `mcp:fetch` (spawns via `uvx`), Node.js for `mcp:filesystem` /
+  `mcp:github` (spawn via `npx`). Add `--dry-run` to enumerate seeds
   without an API key.
 
 ## Commands still to come

@@ -80,9 +80,9 @@ from your run):
 
 ```text
 ╭──────────────────────────────────────────────────────────────────────────╮
-│ DEMO ONLY — the Quarry is a deliberately vulnerable in-process reference  │
-│ agent. It never binds to a network. Never point Mylonite at a system you  │
-│ don't own or operate (see SECURITY.md).                                   │
+│ DEMO ONLY — the Quarry is a deliberately vulnerable in-process reference │
+│ agent. It never binds to a network. Never point Mylonite at a system you │
+│ don't own or operate (see SECURITY.md).                                  │
 ╰──────────────────────────────────────────────────────────────────────────╯
 
  weakness  name                                     taxonomy IDs                              vulnerable  guarded
@@ -103,8 +103,9 @@ Try it on a real target next: mylonite scan mcp:fetch --authorize fetch
 mode: replay (offline) · elapsed 0.9s
 ```
 
-How to read the table: eight scan seeds exercise the four weaknesses (each
-seed's `pattern_id` maps to a W row). A row shows **FOUND** if *any* seed for
+How to read the table: the kitchen-sink seeds in `src/mylonite/scan/seeds.py`
+(eight today) exercise the four weaknesses (each seed's `pattern_id` maps to
+a W row). A row shows **FOUND** if *any* seed for
 that weakness landed an exploit, **SKIPPED** if any seed skipped or errored
 (and none found), and clean otherwise. The taxonomy-ID column carries the
 OWASP LLM Top 10 / OWASP ASI / MITRE ATLAS IDs from the seed catalogue —
@@ -190,9 +191,10 @@ note body) both cause mail to leave without anyone confirming.
 
 The demo is the safe sandbox; the same scan loop runs against real MCP stdio
 servers. The honest prerequisites, stated up front: this is **not**
-zero-config like the demo — it needs an LLM API key (`ANTHROPIC_API_KEY`, or
-`--provider`/`--model` for any LiteLLM provider) and `uv` installed (the
-fetch target spawns via `uvx`).
+zero-config like the demo — it needs an LLM API key (`ANTHROPIC_API_KEY` for
+the default provider; other LiteLLM providers via `--provider`/`--model`
+plus that provider's own key env var) and `uv` installed (the fetch target
+spawns via `uvx`).
 
 On Linux / macOS (bash):
 
