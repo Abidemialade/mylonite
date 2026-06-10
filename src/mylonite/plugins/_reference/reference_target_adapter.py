@@ -91,10 +91,10 @@ class _InProcessServer:
             self._inner = GuardedKitchenSinkServer(store=store)
         self.tool_calls: list[str] = []
 
-    def list_tools(self) -> list[ToolDescription]:
+    async def list_tools(self) -> list[ToolDescription]:
         return self._inner.list_tools()  # type: ignore[no-any-return]
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self.tool_calls.append(name)
         return self._inner.call_tool(name, arguments)  # type: ignore[no-any-return]
 
@@ -124,7 +124,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         # Construct a one-shot server purely for tool enumeration; throw it
         # away after. The real per-attempt server lives inside ``invoke``.
         server = _InProcessServer(self._variant, NoteStore())
-        tools = _serialise_tools(server.list_tools())
+        tools = _serialise_tools(await server.list_tools())
         return TargetDescriptor(
             target_id=f"reference:{self._variant}",
             kind="mcp",
@@ -147,7 +147,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
 
         if setup == "seed_note":
             note_id = f"n_{secrets.token_hex(4)}"
-            server.call_tool("write_note", {"note_id": note_id, "body": payload.body})
+            await server.call_tool("write_note", {"note_id": note_id, "body": payload.body})
 
         wrapped_completion = self._wrap_completion()
         planner = LLMPlanner(

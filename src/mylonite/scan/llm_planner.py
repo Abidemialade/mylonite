@@ -45,9 +45,9 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 class _ServerLike(Protocol):
-    def list_tools(self) -> list[ToolDescription]: ...
+    async def list_tools(self) -> list[ToolDescription]: ...
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult: ...
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult: ...
 
 
 def _tool_to_openai_schema(tool: ToolDescription) -> dict[str, Any]:
@@ -101,7 +101,7 @@ class LLMPlanner:
 
     async def run(self, user_message: str) -> PlannerTrace:
         """Drive the planner with ``user_message`` and return its trace."""
-        tools_schema = [_tool_to_openai_schema(t) for t in self._server.list_tools()]
+        tools_schema = [_tool_to_openai_schema(t) for t in await self._server.list_tools()]
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user_message},
@@ -164,7 +164,7 @@ class LLMPlanner:
                         call=ToolCall(name=name, arguments=arguments),
                     )
                 )
-                tool_result = self._server.call_tool(name, arguments)
+                tool_result = await self._server.call_tool(name, arguments)
                 messages.append(
                     {
                         "role": "tool",
