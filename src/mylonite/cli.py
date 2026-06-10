@@ -77,8 +77,16 @@ def _configure_stdio_encoding() -> None:
 
 @app.callback()
 def _root() -> None:
-    """Run before every command; normalise stdio so Rich glyphs never crash."""
+    """Run before every command; normalise stdio + install secret redaction.
+
+    The ``mylonite`` logger tree gets a secret-redacting filter so secret-shaped
+    tokens never reach a log line (the ``LoggingConfig.redact_secrets`` default is
+    True). The install is idempotent — safe to run on every invocation.
+    """
+    from mylonite._redaction import install_log_redaction
+
     _configure_stdio_encoding()
+    install_log_redaction(enabled=True)
 
 
 class _Framework(StrEnum):
@@ -327,17 +335,21 @@ def scan(
 
     result = asyncio.run(engine.run())
 
+    from mylonite._redaction import redact
+
     if not dry_run:
         from mylonite.scan.artefacts import render_summary, write_artefacts
 
+        # Persist artefacts UN-redacted (they are loadable/replayable data); only
+        # the console-rendered summary string is redacted before display.
         scan_dir = write_artefacts(result, output_dir)
-        typer.echo(render_summary(result))
+        typer.echo(redact(render_summary(result)))
         typer.echo(f"Artefacts: {scan_dir}")
     else:
         # Dry-run: render summary without writing files.
         from mylonite.scan.artefacts import render_summary
 
-        typer.echo(render_summary(result))
+        typer.echo(redact(render_summary(result)))
 
     # C4 / G5: map aborted reason to distinct exit code.
     if result.report.aborted == "budget_exceeded":

@@ -59,9 +59,16 @@ The project enforces the following non-negotiables:
 2. **No bundled targeting of public services.** Mylonite ships no built-in
    target list, allowlist of public agents, or convenience flags pointing at
    third-party production systems.
-3. **No payload-logging of live secrets.** When the tool encounters something
-   that looks like a secret (API key, bearer token, password) in a payload or
-   response, it redacts before any log, report, or test artifact is written.
+3. **No payload-logging of live secrets.** Mylonite does not log raw model
+   payloads or responses. As defense-in-depth, when `redact_secrets` is on (the
+   default) the `mylonite` logger tree masks secret-shaped tokens (provider key
+   prefixes, AWS access-key ids, bearer tokens, PEM private-key blocks, and
+   `key=value` credential assignments) out of every log record, and the
+   rendered CLI scan/report strings are redacted before they are echoed.
+   Redaction is intentionally NOT applied to persisted replay fixtures,
+   `exploit_*.json` / `scan_report.json` artefacts, or generated test source —
+   those are deterministic and contain no raw provider secrets by construction,
+   and masking them would corrupt loadable/replayable data.
 4. **No evasion features.** The project does not accept contributions that add
    detection-evasion, anti-forensics, or rate-limit-bypass capabilities. Any
    such PR will be closed.
