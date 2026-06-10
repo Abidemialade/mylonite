@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Patched known-vulnerable dependencies.** Bumped `litellm>=1.83.10`
+  (CVE-2026-40217) and added security floors for litellm's transitive deps
+  `aiohttp>=3.14.0` (CVE-2026-34993, CVE-2026-47265) and
+  `python-dotenv>=1.2.2` (CVE-2026-28684). `pip-audit` now reports no known
+  vulnerabilities; the full test suite is unaffected.
+
 ### Added
 
 - **Expanded metamorphic robustness check (report-only).** The
