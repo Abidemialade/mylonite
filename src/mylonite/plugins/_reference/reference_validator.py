@@ -33,16 +33,21 @@ The pipeline (per ``mylonite.contracts.validator``):
 3. **flakiness** — does it do both *reliably* — vulnerable fires
    ``>= vuln_threshold`` times and guarded resists ``>= guard_threshold`` times
    across the runs? (reproducibility)
-4. **mutation-score** (report-only) — over the four kitchen-sink weakness
-   families (W1-W4), what fraction show the differential (vulnerable fired >=1
-   seed in the family AND guarded resisted that family)? Computed for free from
-   the scans already run.
-5. **metamorphic-lite** (report-only) — apply ONE deterministic, neutral
-   paraphrase perturbation to the exploit body and re-run the differential
-   check once; report whether the differential held.
+4. **mutation-score** (report-only) — a PER-SEED kill matrix over every
+   kitchen-sink seed: of all kitchen-sink seeds, how many did this run "kill"
+   (vulnerable FIRED that seed's pattern_id AND guarded RESISTED it)? The
+   headline ``mutation_score`` is ``killed / total`` in [0,1]; the per-seed
+   matrix (``W1:…✓ W2:…✓ W3:…✗ …``) is surfaced in the report notes. Computed
+   for free from the full scans already run.
+5. **metamorphic** (report-only) — apply MULTIPLE deterministic, neutral
+   perturbations (paraphrase / casing / whitespace / unicode confusables — pure
+   string transforms, NO LLM, NO randomness) to the exploit body and re-run the
+   differential check once per strategy; report the ROBUSTNESS fraction
+   (held / total) in [0,1] plus a per-strategy breakdown.
 
 ``kept = build ∧ differential ∧ flakiness``. Mutation + metamorphic are
-*reported*, not gating, for the MVP.
+*reported*, not gating, for the MVP — even if EVERY perturbation breaks, ``kept``
+is unaffected.
 
 The live-vs-offline seam is ``completion_fn``: ``None`` ⇒ the real
 ``litellm.acompletion`` path (genuine, stochastic validation); an injected
@@ -77,14 +82,49 @@ from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
 from mylonite.testkit import FIXTURE_FORMAT_VERSION
 
-#: Kitchen-sink seed weakness families used for the mutation tally. Resolved
-#: from the catalogue so it never drifts from the seeds.
-_KITCHEN_SINK_FAMILIES: tuple[str, ...] = tuple(
-    sorted({s.weakness for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets})
+#: The individual kitchen-sink seeds, ordered, that the per-seed mutation kill
+#: matrix scores. Each entry is (pattern_id, weakness). Resolved from the
+#: catalogue so it never drifts from the seeds.
+_KITCHEN_SINK_SEEDS: tuple[tuple[str, str], ...] = tuple(
+    (s.pattern_id, s.weakness) for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
 )
 
-#: pattern_id -> weakness family, for mapping a ScanAttempt back to its family.
-_PATTERN_TO_WEAKNESS: dict[str, str] = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
+
+def _deterministic_strategies() -> dict[str, Callable[[str], str]]:
+    """The built-in, deterministic metamorphic perturbation strategies.
+
+    Each entry maps a strategy name to a *pure* ``body -> body`` string
+    transform: NO LLM, NO randomness. Re-applying the same transform to the
+    same body always yields the same result. The strategies produce DISTINCT
+    bodies from each other and from the original, so each genuinely re-paraphrases
+    the exploit.
+    """
+    return {
+        # Existing neutral paraphrase: prefix + whitespace normalisation.
+        "paraphrase": lambda body: "Please note: " + " ".join(body.split()),
+        # Case fold: swap the case of every cased character.
+        "casing": lambda body: body.swapcase(),
+        # Whitespace expansion: split into words then rejoin with newlines so the
+        # body differs from both the original and the (single-space) paraphrase.
+        "whitespace": lambda body: "\n".join(body.split()),
+        # Unicode confusables: a fixed ASCII -> fullwidth substitution.
+        "unicode": _unicode_confusables,
+    }
+
+
+#: Fixed, deterministic ASCII -> fullwidth confusable substitution table used by
+#: the ``unicode`` metamorphic strategy. Only a few chars are mapped so the body
+#: stays human-readable but is byte-distinct from the original. Built via chr()
+#: from the Halfwidth-and-Fullwidth-Forms block (U+FF01..U+FF5E maps to ASCII
+#: U+0021..U+007E by a fixed +0xFEE0 offset) to avoid embedding ambiguous
+#: confusable literals in source.
+_FULLWIDTH_OFFSET = 0xFEE0
+_CONFUSABLE_MAP: dict[str, str] = {ch: chr(ord(ch) + _FULLWIDTH_OFFSET) for ch in "aeos"}
+
+
+def _unicode_confusables(body: str) -> str:
+    """Substitute a fixed set of ASCII chars with fullwidth confusables."""
+    return "".join(_CONFUSABLE_MAP.get(ch, ch) for ch in body)
 
 
 class NullValidator(ValidatorBase):
@@ -138,6 +178,16 @@ class _IterationTally:
 
 
 @dataclass(frozen=True)
+class _MutationResult:
+    """Per-seed mutation kill matrix over the kitchen-sink seeds."""
+
+    score: float
+    matrix: str
+    killed: int
+    total: int
+
+
+@dataclass(frozen=True)
 class _Decision:
     """Pure outcome of the differential + flakiness decision over N iterations."""
 
@@ -169,6 +219,7 @@ class DifferentialValidator(ValidatorBase):
         completion_fn: Callable[..., Any] | None = None,
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
+        metamorphic_strategies: list[str] | None = None,
     ) -> None:
         if iterations < 1:
             raise ValueError("iterations must be >= 1")
@@ -183,6 +234,20 @@ class DifferentialValidator(ValidatorBase):
         self._completion_fn = completion_fn
         self._run_build = run_build
         self._record_fixtures_dir = record_fixtures_dir
+        # Metamorphic perturbation strategies (report-only robustness check).
+        # Default = all built-in deterministic transforms; a caller can restrict
+        # to a subset (e.g. for focused tests). Unknown names raise.
+        all_strategies = _deterministic_strategies()
+        if metamorphic_strategies is None:
+            chosen = list(all_strategies)
+        else:
+            unknown = [n for n in metamorphic_strategies if n not in all_strategies]
+            if unknown:
+                raise ValueError(f"unknown metamorphic strategies: {unknown}")
+            chosen = list(metamorphic_strategies)
+        self._metamorphic_strategies: list[tuple[str, Callable[[str], str]]] = [
+            (name, all_strategies[name]) for name in chosen
+        ]
 
     # -- public contract ------------------------------------------------------
 
@@ -231,8 +296,9 @@ class DifferentialValidator(ValidatorBase):
             metric=decision.flakiness_metric,
         )
 
-        # 3. mutation-score (report-only) — computed from the scans already run.
-        mutation_score = self._mutation_score(tallies)
+        # 3. mutation-score (report-only) — per-seed kill matrix from the scans
+        #    already run.
+        mutation = self._mutation_score(tallies)
 
         # 4. metamorphic-lite (report-only) — one neutral perturbation.
         metamorphic = self._metamorphic_outcome(test.exploit)
@@ -246,8 +312,10 @@ class DifferentialValidator(ValidatorBase):
             f"reproducibility: vulnerable fired {vuln_fires}/{self._iterations}, "
             f"guarded resisted {guard_resists}/{self._iterations} "
             f"(flakiness reproducibility={decision.flakiness_metric:.2f}); "
-            f"mutation_score={mutation_score:.2f} over {len(_KITCHEN_SINK_FAMILIES)} "
-            f"kitchen-sink weakness families; "
+            f"mutation: killed {mutation.killed}/{mutation.total} kitchen-sink seeds "
+            f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
+            f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
+            f"(report-only, not gating); "
             f"{'KEPT' if kept else 'REJECTED'} (kept = build ∧ differential ∧ flakiness)."
         )
 
@@ -256,7 +324,7 @@ class DifferentialValidator(ValidatorBase):
             outcomes=[build, differential, flakiness, metamorphic],
             kept=kept,
             notes=notes,
-            mutation_score=mutation_score,
+            mutation_score=mutation.score,
         )
 
     # -- pure decision helper (unit-tested directly) --------------------------
@@ -343,83 +411,100 @@ class DifferentialValidator(ValidatorBase):
 
     # -- mutation score -------------------------------------------------------
 
-    def _mutation_score(self, tallies: list[_IterationTally]) -> float:
-        """Fraction of kitchen-sink weakness families showing the differential.
+    def _mutation_score(self, tallies: list[_IterationTally]) -> _MutationResult:
+        """Per-seed kill matrix over every kitchen-sink seed.
 
-        A family "shows the differential" if, across all the scans already run,
-        the vulnerable twin fired ≥1 seed in that family AND the guarded twin
-        resisted that family (a ``no_finding`` for one of its seeds, with no
-        finding). Nearly free — the full scan ran every seed each iteration.
+        A seed is "killed" iff, across all the scans already run, the vulnerable
+        twin FIRED that seed's ``pattern_id`` (a finding/exploit for it) AND the
+        guarded twin RESISTED it (a ``no_finding`` for it, with no finding/exploit
+        on the guarded side). This mirrors the per-exploit ``_fired`` / ``_resisted``
+        helpers but applied to EVERY kitchen-sink seed, not just the exploit's.
+
+        Nearly free — the validator's differential loop runs the FULL attack bank
+        each iteration (``_run_scan`` calls ``build_scan`` with NO
+        ``pattern_id_filter``), so every kitchen-sink seed is observable.
+
+        ``mutation_score = killed_seeds / total_kitchen_sink_seeds``, bounded
+        [0,1]. The matrix string (``W1✓ W2✓ W3✓ W4✗`` style) is surfaced in the
+        report notes.
         """
-        if not _KITCHEN_SINK_FAMILIES:
-            return 0.0
-        vuln_fired_families: set[str] = set()
-        guard_resisted_families: set[str] = set()
-        guard_fired_families: set[str] = set()
-        for tally in tallies:
-            for attempt in tally.vuln_result.report.attempts:
-                family = _PATTERN_TO_WEAKNESS.get(attempt.pattern_id)
-                if family is not None and attempt.outcome == "finding":
-                    vuln_fired_families.add(family)
-            for exploit in tally.vuln_result.exploits:
-                family = _PATTERN_TO_WEAKNESS.get(exploit.pattern_id)
-                if family is not None:
-                    vuln_fired_families.add(family)
-            for attempt in tally.guard_result.report.attempts:
-                family = _PATTERN_TO_WEAKNESS.get(attempt.pattern_id)
-                if family is None:
-                    continue
-                if attempt.outcome == "finding":
-                    guard_fired_families.add(family)
-                elif attempt.outcome == "no_finding":
-                    guard_resisted_families.add(family)
-            for exploit in tally.guard_result.exploits:
-                family = _PATTERN_TO_WEAKNESS.get(exploit.pattern_id)
-                if family is not None:
-                    guard_fired_families.add(family)
+        if not _KITCHEN_SINK_SEEDS:
+            return _MutationResult(score=0.0, matrix="(no kitchen-sink seeds)", killed=0, total=0)
 
-        showing = sum(
-            1
-            for family in _KITCHEN_SINK_FAMILIES
-            if family in vuln_fired_families
-            and family in guard_resisted_families
-            and family not in guard_fired_families
+        vuln_fired: set[str] = set()
+        guard_resisted: set[str] = set()
+        guard_fired: set[str] = set()
+        for tally in tallies:
+            for pattern_id, _ in _KITCHEN_SINK_SEEDS:
+                if self._fired(tally.vuln_result, pattern_id):
+                    vuln_fired.add(pattern_id)
+                if self._fired(tally.guard_result, pattern_id):
+                    guard_fired.add(pattern_id)
+                if self._resisted(tally.guard_result, pattern_id):
+                    guard_resisted.add(pattern_id)
+
+        killed_flags: list[tuple[str, str, bool]] = []
+        for pattern_id, weakness in _KITCHEN_SINK_SEEDS:
+            killed = (
+                pattern_id in vuln_fired
+                and pattern_id in guard_resisted
+                and pattern_id not in guard_fired
+            )
+            killed_flags.append((pattern_id, weakness, killed))
+
+        killed_count = sum(1 for *_, k in killed_flags if k)
+        total = len(killed_flags)
+        score = killed_count / total
+        matrix = " ".join(
+            f"{weakness}:{pattern_id}{'✓' if killed else '✗'}"
+            for pattern_id, weakness, killed in killed_flags
         )
-        return showing / len(_KITCHEN_SINK_FAMILIES)
+        return _MutationResult(score=score, matrix=matrix, killed=killed_count, total=total)
 
     # -- metamorphic-lite -----------------------------------------------------
 
     def _metamorphic_outcome(self, exploit: ExploitRecord) -> ValidationOutcome:
-        """One neutral paraphrase perturbation, re-checked once on both twins.
+        """Multiple deterministic perturbations, each re-checked once on both twins.
 
-        The perturbation is a *pure string transform* of the exploit body — a
-        single neutral prefix + whitespace normalisation, NO LLM call (MVP).
-        We rebuild the exploit with the perturbed body and re-run the SAME
-        per-iteration differential check once. The stage is report-only (not
-        gating): it answers "does the differential survive a trivial reword?".
+        Each configured strategy is a *pure string transform* of the exploit body
+        (NO LLM, NO randomness). For each, we rebuild the exploit with the
+        perturbed body and re-run the SAME per-iteration differential check once,
+        recording whether the differential still held (vuln fired AND guard
+        resisted). The reported ``metric`` is the ROBUSTNESS fraction
+        (held / total) in [0,1], and ``detail`` carries a per-strategy breakdown.
+
+        The stage is **report-only** (not gating): it answers "does the
+        differential survive trivial, semantically-neutral rewordings?". ``passed``
+        is true iff ALL perturbations held (the strict reading), but neither
+        ``passed`` nor ``metric`` feeds the ``kept`` gate.
         """
-        perturbed_exploit = self._perturb_exploit(exploit)
-        tally = self._run_iteration(perturbed_exploit.pattern_id)
-        held = tally.vuln_fired and tally.guard_resisted
-        metric = (int(tally.vuln_fired) + int(tally.guard_resisted)) / 2.0
+        results: list[tuple[str, bool]] = []
+        for name, transform in self._metamorphic_strategies:
+            perturbed_exploit = self._perturb_exploit(exploit, transform)
+            tally = self._run_iteration(perturbed_exploit.pattern_id)
+            held = tally.vuln_fired and tally.guard_resisted
+            results.append((name, held))
+
+        total = len(results)
+        held_count = sum(1 for _, held in results if held)
+        robustness = held_count / total if total else 0.0
+        all_held = total > 0 and held_count == total
+        breakdown = ", ".join(f"{name}:{'held' if held else 'broke'}" for name, held in results)
         return ValidationOutcome(
             stage="metamorphic",
-            passed=held,
+            passed=all_held,
             detail=(
-                "one neutral paraphrase perturbation of the exploit body "
-                f"(pure string transform, no LLM): differential "
-                f"{'held' if held else 'did NOT hold'} "
-                f"(vulnerable fired={tally.vuln_fired}, guarded resisted="
-                f"{tally.guard_resisted})"
+                f"{total} deterministic perturbation(s) of the exploit body "
+                f"(pure string transforms, no LLM): {breakdown} "
+                f"(robustness={robustness:.2f}); report-only — does not gate kept"
             ),
-            metric=metric,
+            metric=robustness,
         )
 
     @staticmethod
-    def _perturb_exploit(exploit: ExploitRecord) -> ExploitRecord:
-        """Deterministic neutral paraphrase of the exploit payload body."""
-        body = exploit.payload.body
-        perturbed_body = "Please note: " + " ".join(body.split())
+    def _perturb_exploit(exploit: ExploitRecord, transform: Callable[[str], str]) -> ExploitRecord:
+        """Apply a deterministic ``body -> body`` transform to the exploit payload."""
+        perturbed_body = transform(exploit.payload.body)
         perturbed_payload = Payload(
             pattern_id=exploit.payload.pattern_id,
             channel=exploit.payload.channel,

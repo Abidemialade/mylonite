@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Expanded metamorphic robustness check (report-only).** The
+  `DifferentialValidator` metamorphic stage now applies MULTIPLE deterministic
+  perturbation strategies to the exploit body — `paraphrase`, `casing`,
+  `whitespace`, and `unicode` (fullwidth confusables) — each a pure
+  `body -> body` string transform (no LLM, no randomness), re-running the
+  differential check once per strategy. The stage reports a ROBUSTNESS fraction
+  (`held / total`, in `[0,1]`) plus a per-strategy breakdown
+  (e.g. `paraphrase:held, casing:held, whitespace:broke, unicode:held`). The
+  set is configurable via a new `metamorphic_strategies: list[str] | None = None`
+  constructor arg (default = all built-ins). **Report-only: metamorphic does NOT
+  gate `kept`** — even if every perturbation breaks, `kept` is unaffected.
+- **Per-seed mutation kill matrix (report-only).** The mutation score is now
+  computed PER-SEED over every kitchen-sink seed (not per-weakness-family): a
+  seed is "killed" when the vulnerable twin fired its `pattern_id` AND the
+  guarded twin resisted it across the differential iterations.
+  `ValidationReport.mutation_score` is now `killed_seeds / total_kitchen_sink_seeds`
+  (bounded `[0,1]`), and the report notes surface the full matrix
+  (e.g. `mutation: killed 3/4 kitchen-sink seeds … W2:<id>✓ …`). Report-only —
+  does not gate `kept`.
 - **`mylonite validate` now closes the validate→committed-artefact loop.** When
   the differential loop finds a clean discriminating run, `validate` RECORDS the
   canonical guarded fixtures into the generated dir's `fixtures/`, writes the
