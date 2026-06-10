@@ -16,7 +16,9 @@ Phase 1 (v0.2) lights up ``mylonite scan``:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -46,6 +48,29 @@ EXIT_SUCCESS = 0
 EXIT_CONFIG = 2
 EXIT_BUDGET = 3
 EXIT_PROVIDER = 4
+
+
+def _configure_stdio_encoding() -> None:
+    """Force UTF-8 on stdout/stderr before any Rich/typer output.
+
+    Rich renders the scan/demo tables with non-ASCII glyphs (✓ ✗ ⚠ —). On a
+    Windows console defaulting to cp1252 those raise ``UnicodeEncodeError`` and
+    crash the command mid-render. ``errors="replace"`` keeps output alive if a
+    stream still can't encode something. No-op where ``reconfigure`` is absent
+    (e.g. pytest's captured streams).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            # stream already detached/closed → leave it as-is rather than crash.
+            with contextlib.suppress(ValueError, OSError):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
+@app.callback()
+def _root() -> None:
+    """Run before every command; normalise stdio so Rich glyphs never crash."""
+    _configure_stdio_encoding()
 
 
 class _Framework(StrEnum):
@@ -413,12 +438,14 @@ def demo(
             raise typer.Exit(code=EXIT_CONFIG) from exc
         raise
 
+    # Build a fresh Console here (not the module-level _console, which was
+    # constructed at import before the callback reconfigured stdout to UTF-8).
     render_demo(
         result.vulnerable,
         result.guarded,
         mode=result.mode,
         elapsed_s=result.elapsed_s,
-        console=_console,
+        console=Console(),
     )
 
     # A --live run can abort cleanly (the engine returns rather than raises);

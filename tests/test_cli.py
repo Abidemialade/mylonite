@@ -23,6 +23,27 @@ def test_version_command() -> None:
     assert result.stdout.strip() == mylonite.__version__
 
 
+def test_configure_stdio_encoding_forces_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stdio shim reconfigures streams to UTF-8 so Rich glyphs don't crash
+    a Windows cp1252 console; streams without reconfigure() are left alone."""
+    from mylonite.cli import _configure_stdio_encoding
+
+    calls: list[dict[str, Any]] = []
+
+    class _Reconfigurable:
+        def reconfigure(self, **kwargs: Any) -> None:
+            calls.append(kwargs)
+
+    class _Plain:
+        pass
+
+    monkeypatch.setattr("mylonite.cli.sys.stdout", _Reconfigurable())
+    monkeypatch.setattr("mylonite.cli.sys.stderr", _Plain())  # no reconfigure → skipped
+    _configure_stdio_encoding()
+
+    assert calls == [{"encoding": "utf-8", "errors": "replace"}]
+
+
 def test_taxonomy_list_owasp_llm() -> None:
     result = runner.invoke(app, ["taxonomy", "list", "--framework", "owasp-llm"])
     assert result.exit_code == EXIT_SUCCESS
