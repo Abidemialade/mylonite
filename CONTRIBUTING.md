@@ -122,6 +122,51 @@ attack patterns. To submit one, open an issue using the
    guarded variant it does not. (Differential proof.)
 3. It does not target third-party services.
 
+## Contributing a Quarry scenario
+
+A "Quarry scenario" is a new seeded weakness for the bundled reference agent
+(the Quarry — `reference_targets/mcp_kitchen_sink/`) or for one of the real
+MCP target families. It is just a concrete instance of the
+[community attack-pattern registry](#community-attack-pattern-registry) flow
+above: open an issue with the **"Attack pattern submission"** template
+(`.github/ISSUE_TEMPLATE/attack_pattern_submission.yml`) and follow the
+registry acceptance criteria. Don't duplicate that section — this one only
+spells out the differential gate, which is the part people get wrong.
+
+**The gate: every new scenario ships a differential proof.** The scenario
+must *fire on the vulnerable variant and stay clean on the guarded variant*.
+Model your proof on
+`reference_targets/mcp_kitchen_sink/tests/test_differential.py`, which asserts
+exactly that twin behaviour and **runs in the main test suite** (it is on
+`testpaths`, so a broken differential fails CI for everyone — not just an
+opt-in job). A scenario without a green differential proof will not be merged.
+
+## Demo fixtures
+
+`mylonite demo` is offline and deterministic because it replays committed LLM
+fixtures rather than calling a model. The fixtures live at
+`src/mylonite/demo/fixtures/` (one set per variant: `vulnerable/`,
+`guarded/`). They were recorded with `anthropic/claude-haiku-4-5-20251001`.
+
+**They are a maintenance contract.** Any change to the planner, judge, or
+customiser prompts — or to the demo model — invalidates the recorded
+fixtures, and the demo's replay check will fail. When that happens the fix is
+to **re-record**, not to loosen the check:
+
+```bash
+ANTHROPIC_API_KEY=… python scripts/record_demo_fixtures.py
+```
+
+```powershell
+$env:ANTHROPIC_API_KEY="…"; python scripts/record_demo_fixtures.py
+```
+
+**Decision rule: a maintainer re-records on any PR that breaks the fixtures.**
+External contributors do **not** need an API key to contribute — if your
+change invalidates the fixtures, say so in the PR and a maintainer with the
+key will re-record before merge. CI failure messages point back to this
+section.
+
 ## Reporting security issues
 
 Do **not** open public issues for security-sensitive reports. See
