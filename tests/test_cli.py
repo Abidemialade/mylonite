@@ -276,12 +276,12 @@ def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
     """A mcp_kitchen_sink absence at *import time* → exit 2, not a raw traceback.
 
     `mylonite.demo.runner` transitively imports `mcp_kitchen_sink` at module
-    load (runner -> reference_target_adapter -> mcp_kitchen_sink._store). This
-    drives the real import-time path inside the ``demo`` command: it evicts the
-    cached modules and installs a meta_path finder that makes importing
-    ``mcp_kitchen_sink`` raise ModuleNotFoundError, so the command's local
-    ``from mylonite.demo.runner import ...`` re-runs and fails there — before
-    ``run_demo`` is ever called.
+    load (runner -> mylonite.scan.wiring -> reference_target_adapter ->
+    mcp_kitchen_sink._store). This drives the real import-time path inside the
+    ``demo`` command: it evicts the cached modules and installs a meta_path
+    finder that makes importing ``mcp_kitchen_sink`` raise ModuleNotFoundError,
+    so the command's local ``from mylonite.demo.runner import ...`` re-runs and
+    fails there — before ``run_demo`` is ever called.
     """
 
     class _BlockKitchenSink(MetaPathFinder):
@@ -297,6 +297,7 @@ def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
             name == "mcp_kitchen_sink"
             or name.startswith("mcp_kitchen_sink.")
             or name == "mylonite.demo.runner"
+            or name == "mylonite.scan.wiring"
             or name == "mylonite.plugins._reference.reference_target_adapter"
         ):
             monkeypatch.delitem(sys.modules, name, raising=False)
