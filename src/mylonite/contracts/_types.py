@@ -174,6 +174,14 @@ class ValidationOutcome(BaseModel):
     stage: Literal["build", "differential", "flakiness", "metamorphic"]
     passed: bool
     detail: str
+    metric: float | None = Field(
+        default=None,
+        description=(
+            "Optional per-stage numeric — flakiness: reproducibility fraction "
+            "[0,1]; differential: agreement fraction; metamorphic: robustness "
+            "rate."
+        ),
+    )
 
 
 class ValidationReport(BaseModel):
@@ -188,6 +196,13 @@ class ValidationReport(BaseModel):
         description="True iff the test passes every stage and should be committed.",
     )
     notes: str | None = None
+    mutation_score: float | None = Field(
+        default=None,
+        description=(
+            "Fraction of the seeded-weakness bank the generated test correctly "
+            "catches (fails-on-vulnerable), [0,1]."
+        ),
+    )
 
 
 # --- Scan report --------------------------------------------------------------

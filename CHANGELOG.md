@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Machine-readable validation metrics.** `ValidationOutcome` gains an optional
+  `metric: float | None` (per-stage numeric — flakiness reproducibility fraction,
+  differential agreement fraction, metamorphic robustness rate) and
+  `ValidationReport` gains an optional `mutation_score: float | None` (fraction of
+  the seeded-weakness bank the generated test correctly catches). Both default to
+  `None`, so the change is backward-compatible. These make the Phase 2 validation
+  engine's two headline numbers headline-able, chart-able, and CI-gate-able.
+
+### Changed
+
+- **Validator contract bumped `0.1.0 → 0.2.0`** (minor, backward-compatible — the
+  two new fields above are optional with defaults). This is a `contract-change`
+  per `GOVERNANCE.md`.
+
 ## [0.3.0] - 2026-06-10
 
 ### Added — Phase 1.5 "the Quarry" playground
