@@ -62,3 +62,6 @@ CLAUDE.md
 Thumbs.db
 *.swp
 *.swo
+
+# Local-only security audit reports (never publish findings)
+.security/

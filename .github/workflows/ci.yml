@@ -104,3 +104,27 @@ jobs:
           pip install pre-commit
       - name: Run pre-commit
         run: pre-commit run --all-files --show-diff-on-failure
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # full history so detect-secrets can be run over it locally
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+          pip install bandit pip-audit detect-secrets
+      - name: Bandit (SAST, product code, medium+ severity)
+        run: bandit -ll -r src/mylonite
+      - name: detect-secrets (tracked tree vs committed baseline)
+        run: git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
+      - name: pip-audit (dependency CVEs, informational)
+        continue-on-error: true
+        run: pip-audit

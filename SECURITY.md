@@ -103,3 +103,24 @@ Out of scope:
 
 Pre-1.0, only the latest minor release receives security fixes. Once 1.0 ships,
 this section will be updated with a longer support window.
+
+## Security tooling (project CI)
+
+Every push and pull request runs a permanent `security` job in CI
+(`.github/workflows/ci.yml`) alongside lint / typecheck / test:
+
+- **SAST — `bandit`** over `src/mylonite/` at medium-or-higher severity
+  (blocking). The deliberately-vulnerable reference targets under
+  `reference_targets/` are excluded by design (`[tool.bandit]` in
+  `pyproject.toml`) — they are the ground-truth oracle and hardening them would
+  defeat the tool's purpose.
+- **Secret scan — `detect-secrets`** over the full tracked tree against the
+  committed `.secrets.baseline` (blocking). The baseline allowlists the known
+  test fakes and the LLM-recorded demo fixtures (verified to contain no real
+  secrets); any *new* secret-shaped token fails the job. Regenerate with
+  `detect-secrets scan --baseline .secrets.baseline` and review with
+  `detect-secrets audit .secrets.baseline`.
+- **Dependency CVEs — `pip-audit`** over the installed environment
+  (informational: it surfaces advisories without blocking unrelated PRs on
+  transient upstream CVEs). Genuine advisories are remediated by raising the
+  affected dependency floor in `pyproject.toml`.

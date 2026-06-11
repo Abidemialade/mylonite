@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `aiohttp>=3.14.0` (CVE-2026-34993, CVE-2026-47265) and
   `python-dotenv>=1.2.2` (CVE-2026-28684). `pip-audit` now reports no known
   vulnerabilities; the full test suite is unaffected.
+- **Continuous security scanning in CI.** Added a permanent `security` job to
+  `.github/workflows/ci.yml` that runs on every push and pull request:
+  `bandit` SAST over `src/mylonite/` at medium+ severity (blocking),
+  `detect-secrets` over the full tracked tree against a committed
+  `.secrets.baseline` (blocking), and `pip-audit` for dependency CVEs
+  (informational). The deliberately-vulnerable reference targets are excluded
+  via `[tool.bandit]` so the ground-truth oracle is never "hardened". A
+  `detect-secrets` pre-commit hook gives the same secret-scan locally, and
+  `SECURITY.md` documents the tooling.
 
 ### Added
 

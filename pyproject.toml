@@ -178,3 +178,18 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
 ]
+
+[tool.bandit]
+# Product code only. The deliberately-vulnerable reference targets under
+# reference_targets/ are the project's ground-truth oracle and MUST NOT be
+# "hardened" (see CLAUDE.md Phase 0 invariants); the recorded demo fixtures and
+# test fakes are data, not runnable code. The CI security job scans
+# `src/mylonite` explicitly; these exclusions keep an ad-hoc `bandit -r .` from
+# flagging the intentional vulns or fixtures.
+exclude_dirs = [
+    "reference_targets",
+    "tests",
+    ".venv",
+    ".wt",
+    "src/mylonite/demo/fixtures",
+]
