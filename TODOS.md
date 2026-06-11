@@ -41,7 +41,7 @@ trigger where it should land. This is a tracking doc, not a roadmap — see
 - **PyPI publishing** of `mylonite` and `mcp-kitchen-sink` (and a possible
   `mylonite-quarry` distribution rename). Until then the "60-second" promise is
   honestly clone-first. *Trigger:* Phase 4 launch.
-- **Phase 2 walking skeleton before the YC demo** — a thin end-to-end
+- **Phase 2 walking skeleton before the public demo** — a thin end-to-end
   `scan → generate → validate` slice to de-risk the demo timeline.
   *Trigger:* Phase 2 sequencing decision.
 
