@@ -184,6 +184,36 @@ async def test_engine_records_finding_on_success_verdict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_stamps_compliance_from_firing_seed_not_module() -> None:
+    """Provenance (#4): the emitted ExploitRecord carries the FIRING seed's
+    compliance tags, not the umbrella module's. A module spans several weakness
+    classes, so module-level tags mislabel which OWASP/ASI/ATLAS IDs the test
+    actually proves. The module stub here advertises only ``owasp_llm=['LLM01']``
+    with empty ASI/ATLAS; the seed carries fuller tags, so the difference is
+    observable end-to-end."""
+    seed = SEED_CATALOGUE[0]
+    payload = _payload_from_seed_index(0)
+    # Precondition: the seed's tags differ from the module stub's, so the
+    # assertion can actually distinguish the two sources.
+    assert seed.compliance != _ModuleStub([]).attack_metadata().compliance
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(
+            Verdict(success=True, reason="caught it", evidence={}, mechanism="predicate")
+        ),
+    )
+    result = await engine.run()
+
+    assert len(result.exploits) == 1
+    # Round-trip: the emitted compliance is exactly the firing seed's, not the module's.
+    assert result.exploits[0].compliance == seed.compliance
+
+
+@pytest.mark.asyncio
 async def test_engine_customise_false_skips_customiser() -> None:
     """config.customise=False: the per-seed customiser is never called (demo determinism)."""
     payload = _payload_from_seed_index(0)  # has needs_customisation=true
@@ -423,6 +453,31 @@ async def test_engine_pattern_id_filter_none_runs_all_payloads() -> None:
     )
     result = await engine.run()
     assert {a.pattern_id for a in result.report.attempts} == {p0.pattern_id, p1.pattern_id}
+
+
+@pytest.mark.asyncio
+async def test_engine_dedupes_same_pattern_id_across_modules() -> None:
+    """The same pattern_id emitted by two modules runs at most once (#5).
+
+    Belt-and-suspenders behind the per-module weakness filters: a seed must not
+    be exercised (or counted) twice just because two modules surface it.
+    """
+    p0 = _payload_from_seed_index(0)
+    dup = _payload_from_seed_index(0)  # identical pattern_id from a second module
+    p1 = _payload_from_seed_index(1)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([p0, p1]), _ModuleStub([dup])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+
+    pattern_ids = [a.pattern_id for a in result.report.attempts]
+    assert sorted(pattern_ids) == sorted({p0.pattern_id, p1.pattern_id})
+    # The duplicate ran exactly once, not twice.
+    assert pattern_ids.count(p0.pattern_id) == 1
 
 
 # --- #14 per-attempt audit trace -------------------------------------------

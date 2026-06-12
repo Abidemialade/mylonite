@@ -140,6 +140,12 @@ class ScanEngine:
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(self._config.max_concurrent)
 
+            # A pattern_id uniquely identifies a seed; the same seed must run at
+            # most once even if two modules emit it (belt-and-suspenders behind the
+            # per-module weakness filters — #5). Dedup is debug-logged, not a
+            # contract outcome, so it never masks a genuine double-emit in review.
+            seen_pattern_ids: set[str] = set()
+
             for module in self._attack_modules:
                 module_id = module.attack_metadata().id
                 for payload in module.generate_payloads(descriptor):
@@ -148,6 +154,14 @@ class ScanEngine:
                         and payload.pattern_id != self._config.pattern_id_filter
                     ):
                         continue
+                    if payload.pattern_id in seen_pattern_ids:
+                        logger.debug(
+                            "ScanEngine: skipping duplicate pattern_id %r (already "
+                            "emitted by an earlier module)",
+                            payload.pattern_id,
+                        )
+                        continue
+                    seen_pattern_ids.add(payload.pattern_id)
                     tasks.append(
                         asyncio.create_task(
                             self._process_one(
@@ -414,13 +428,20 @@ class ScanEngine:
         judge_evidence = {k: str(v) for k, v in verdict.evidence.items()}
 
         if verdict.success:
+            # Provenance from the FIRING seed, not the module (#4). A module emits
+            # several weakness classes (W1..W4); stamping module-level compliance
+            # mislabels which OWASP/ASI/ATLAS IDs the emitted test actually proves.
+            # The seed carries the precise tags; the module-level `compliance` arg
+            # is the fallback for catalogue-unknown seeds (which never reach here —
+            # they return `skipped_unknown_seed` above — but kept for safety).
+            resolved_compliance = seed.compliance if seed is not None else compliance
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
                 pattern_id=payload.pattern_id,
                 payload=payload,
                 response=response,
                 success_reason=verdict.reason,
-                compliance=compliance,
+                compliance=resolved_compliance,
             )
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(

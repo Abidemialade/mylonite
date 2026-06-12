@@ -63,6 +63,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The scan report's `ScanAttemptOutcome` enum gained `skipped_payload_not_delivered`.
   Backward-compatible for adapters; report readers see one new outcome value.
 
+### Fixed
+
+- **Compliance provenance now comes from the firing seed, not the umbrella
+  module.** A module spans several weakness classes (W1–W4); stamping
+  module-level tags mislabelled which OWASP/ASI/ATLAS IDs an emitted test
+  actually proves. The emitted `ExploitRecord` now carries the precise
+  per-seed compliance.
+- **Seeds are no longer double-emitted.** The prompt-injection module owns the
+  W1/W2 family only (mirroring the excessive-agency module's W3/W4 filter), so
+  the W3/W4 seeds are emitted once, not twice; the engine also dedupes by
+  `pattern_id` across modules as a backstop. This lowers the demo's per-run
+  attempt count (the 2-vs-0 vulnerable/guarded differential is unchanged); eight
+  now-unreachable demo replay fixtures were pruned.
+
 ## [0.5.0] - 2026-06-12
 
 ### Added — cross-LLM robustness (JSON ingestion/emission + provider-agnostic auth)

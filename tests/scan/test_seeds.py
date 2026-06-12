@@ -170,10 +170,13 @@ def test_seeds_for_descriptor_weakness_classes_selects_kitchen_sink_shapes() -> 
 
 
 def test_attack_modules_resolve_selection_dynamically() -> None:
-    """Double-binding footgun fixed: patching seeds.seeds_for_descriptor reaches both modules."""
+    """Patching seeds.seeds_for_descriptor reaches both modules, and each module
+    emits ONLY its own weakness family (no W3/W4 double-emit — #5)."""
     from mylonite.scan import seeds as seeds_mod
 
-    sentinel = [s for s in SEED_CATALOGUE if s.weakness == "W4"][:1]
+    w2 = next(s for s in SEED_CATALOGUE if s.weakness == "W2")
+    w4 = next(s for s in SEED_CATALOGUE if s.weakness == "W4")
+    sentinel = [w2, w4]
 
     pi = PromptInjectionAttackModule()
     ea = ExcessiveAgencyAttackModule()
@@ -187,9 +190,11 @@ def test_attack_modules_resolve_selection_dynamically() -> None:
     finally:
         seeds_mod.seeds_for_descriptor = original  # type: ignore[assignment]
 
-    # Both modules honoured the patched selection (proves dynamic resolution).
-    assert pi_ids == [sentinel[0].pattern_id]
-    assert ea_ids == [sentinel[0].pattern_id]  # W4 passes the excessive-agency filter
+    # Both modules honoured the patched selection (proves dynamic resolution),
+    # and the family filters partition the seeds disjointly: W1/W2 → prompt
+    # injection, W3/W4 → excessive agency. No seed is emitted by both.
+    assert pi_ids == [w2.pattern_id]
+    assert ea_ids == [w4.pattern_id]
 
 
 def test_registry_contains_all_v0_2_1_predicates() -> None:
