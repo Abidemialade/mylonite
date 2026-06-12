@@ -26,6 +26,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from mylonite.plugins._mcp.target_registry import (
+    EffectProbeSpec,
     InvalidTargetScope,
     SeedArmSpec,
     TargetSpec,
@@ -53,6 +54,7 @@ class TargetFile(BaseModel):
     primary_tools: list[str] = []
     weakness_classes: list[str] = []
     seed_arm: SeedArmSpec | None = None
+    effect_probe: EffectProbeSpec | None = None
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -100,6 +102,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         extra_env=dict(tf.env),
         weakness_classes=tuple(tf.weakness_classes),
         seed_arm=tf.seed_arm,
+        effect_probe=tf.effect_probe,
     )
 
 

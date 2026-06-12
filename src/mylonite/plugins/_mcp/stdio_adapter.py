@@ -217,6 +217,7 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         sandbox_after: set[str] = set()
         seeded_artefact_id: str | None = None
         tool_call_names: list[str] = []
+        effect_confirmed: str = "unprobed"
 
         try:
             async with _open_mcp_session(
@@ -258,6 +259,16 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
                 # Snapshot sandbox after planner finishes.
                 if self._family == "filesystem" and self._scope is not None:
                     sandbox_after = self._snapshot_sandbox(self._scope)
+
+                # Effect probe (app-native rigor): re-query the target to confirm
+                # the damaging effect actually MATERIALIZED end-to-end. The
+                # target's operator declares the verification — generic over any
+                # consequential capability. A defended action (queued for human
+                # approval, blocked) leaves no confirmed effect → not a finding.
+                if self._spec.effect_probe is not None:
+                    effect_confirmed = await self._run_effect_probe(
+                        session, self._spec.effect_probe, payload.body, setup_calls
+                    )
 
         except TimeoutError as exc:
             raise AdapterInvocationSkipped(
@@ -303,6 +314,10 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
                 "drive": drive,
                 "mcp_trace_planner": json.dumps(planner_calls),
                 "mcp_trace_setup": json.dumps(setup_calls),
+                # Normalized, adapter-independent trace (incl. results + is_error)
+                # that the generic effect-aware predicate reads.
+                "effect_trace": json.dumps(planner_calls),
+                "effect_confirmed": effect_confirmed,
                 "sandbox_diff": json.dumps(sandbox_diff),
                 "seeded_artefact_id": seeded_artefact_id or "",
             },
@@ -376,6 +391,40 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
             return _extract_first_number(result.content) if hasattr(result, "content") else None
         return None
 
+    async def _run_effect_probe(
+        self,
+        session: ClientSession,
+        probe: target_registry.EffectProbeSpec,
+        payload_body: str,
+        probe_calls: list[dict[str, Any]],
+    ) -> str:
+        """Confirm the damaging effect materialized. Returns 'true' | 'false' | 'unprobed'.
+
+        The target declares a verify tool + an expected-effect marker. A
+        structural ``isError`` or a missing marker means the effect did NOT
+        materialize (e.g. the action was queued for human approval, not executed).
+        """
+        if not probe.verify_tool:
+            return "unprobed"
+        rendered = _render_seed_args(probe.verify_args_template, payload_body, self._scope)
+        try:
+            result = await session.call_tool(probe.verify_tool, rendered)
+        except Exception:
+            logger.info("MCPStdioAdapter: effect probe %r raised — treating as unprobed", probe.verify_tool)
+            return "unprobed"
+        content = str(getattr(result, "content", "") or "")
+        is_error = bool(getattr(result, "isError", False))
+        probe_calls.append({"tool": f"effect_probe:{probe.verify_tool}", "is_error": is_error})
+        if is_error:
+            return "false"
+        if probe.expect_marker:
+            marker = probe.expect_marker.replace("{payload}", payload_body).replace(
+                "{scope}", self._scope or ""
+            )
+            return "true" if marker in content else "false"
+        # No marker declared: a non-error verify result confirms the effect.
+        return "true"
+
     @staticmethod
     def _snapshot_sandbox(scope: str) -> set[str]:
         try:
@@ -437,8 +486,24 @@ class _RecordingServerShim:
         return await self._inner.list_tools()
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        self._sink.append({"tool": name, "args": dict(arguments)})
-        return await self._inner.call_tool(name, arguments)
+        # Record the call, then the RESULT + protocol error flag so the judge and
+        # predicates can tell an executed consequential action from a deferred /
+        # refused one. ``isError`` is a structural, provider-independent signal
+        # (server_shim propagates a guarded server's refusal); ``content`` lets a
+        # target-declared effect probe / heuristic inspect the outcome. This is
+        # what makes a finding mean "the damage happened", not "a tool was named".
+        entry: dict[str, Any] = {"tool": name, "args": dict(arguments)}
+        self._sink.append(entry)
+        result = await self._inner.call_tool(name, arguments)
+        entry["result"] = _truncate_result(getattr(result, "content", ""))
+        entry["is_error"] = bool(getattr(result, "isError", False))
+        return result
+
+
+def _truncate_result(content: Any, limit: int = 800) -> str:
+    """Coerce a tool result to a short string for the effect trace (bounded)."""
+    text = content if isinstance(content, str) else str(content)
+    return text[:limit]
 
 
 def _extract_first_number(content: Any) -> str | None:
