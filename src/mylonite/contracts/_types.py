@@ -230,6 +230,7 @@ ScanAttemptOutcome = Literal[
     "skipped_unknown_seed",
     "skipped_planner_failure",
     "skipped_no_seed_arm",
+    "skipped_payload_not_delivered",
     "skipped_dry_run",
     "error",
 ]

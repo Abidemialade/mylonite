@@ -35,7 +35,9 @@ class SeedArmSpec(BaseModel):
 
     tool: str
     args_template: dict[str, Any] = {}
-    id_from: str | None = None
+    id_from: str | None = None  # legacy: extract first integer from the tool result
+    id_key: str | None = None  # extract the planted handle from this JSON field of the result
+    id_pattern: str | None = None  # extract the handle via this regex (first capture group)
 
 
 class EffectProbeSpec(BaseModel):

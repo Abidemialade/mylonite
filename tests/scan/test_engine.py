@@ -245,6 +245,28 @@ async def test_engine_logs_skipped_planner_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_undelivered_payload_is_skipped_not_clean() -> None:
+    """Issue R6: an indirect attempt whose poison wasn't retrieved is skipped, not clean."""
+    payload = _payload_from_seed_index(0)
+    undelivered = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="I couldn't find that note.",
+        tool_calls=["recall"],
+        metadata={"payload_delivered": "false"},
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(undelivered),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=True, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "skipped_payload_not_delivered"
+    assert result.report.findings_count == 0
+
+
+@pytest.mark.asyncio
 async def test_engine_records_skipped_no_seed_arm_not_no_finding() -> None:
     """Issue #5: an un-plantable indirect seed is reported skipped, never no_finding."""
     payload = _payload_from_seed_index(0)

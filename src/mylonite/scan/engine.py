@@ -363,6 +363,26 @@ class ScanEngine:
                 exploit=None,
             )
 
+        # Delivery verification (R6): an indirect-injection attempt whose poison
+        # was never retrieved tested nothing — it must NOT be judged and read as
+        # clean. Report it as skipped, distinct from a genuine no_finding.
+        if response.metadata.get("payload_delivered") == "false":
+            return _PerPayloadOutcome(
+                attempt=ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=payload.pattern_id,
+                    outcome="skipped_payload_not_delivered",
+                    verdict_mechanism=None,
+                    verdict_reason=(
+                        "the planted payload was never retrieved by the planner "
+                        "(indirect injection not delivered); attempt not exercised"
+                    ),
+                    error_detail=None,
+                    tool_call_trace=list(response.tool_calls),
+                ),
+                exploit=None,
+            )
+
         try:
             verdict = await self._judge.judge(payload, response)
         except BudgetExceededError:
