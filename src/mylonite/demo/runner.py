@@ -204,6 +204,7 @@ async def run_demo(
                 note_id_factory=None,
                 provider=used_provider,
                 model=used_model,
+                llm_assist=False,
             )
             results[variant] = await engine.run()
         elapsed = time.monotonic() - start
@@ -227,6 +228,7 @@ async def run_demo(
             note_id_factory=_note_id_counter(),
             provider=DEMO_PROVIDER,
             model=DEMO_MODEL,
+            llm_assist=False,
         )
         results[variant] = await engine.run()
         _check_replay_recorder(recorder, variant)
@@ -257,6 +259,7 @@ async def _run_injected(recorder: Any) -> dict[str, ScanResult]:
             note_id_factory=_note_id_counter(),
             provider=DEMO_PROVIDER,
             model=DEMO_MODEL,
+            llm_assist=False,
         )
         results[variant] = await engine.run()
         # Duck-typed: a recorder/double exposing cache_misses/last_error is

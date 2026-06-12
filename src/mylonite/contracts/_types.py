@@ -78,6 +78,17 @@ class TargetDescriptor(BaseModel):
     tools: list[ToolSpec] = Field(default_factory=list)
     data_sources: list[str] = Field(default_factory=list)
     notes: str | None = None
+    weakness_classes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Weakness classes this target opts into, e.g. ['W2', 'W4']. When "
+            "non-empty, seed selection resolves from these declared classes "
+            "(letting a custom/external target opt into attack shapes) instead "
+            "of the legacy family mapping derived from target_id. Empty = use "
+            "the family mapping (the bundled reference/filesystem/fetch/github "
+            "targets leave it empty and are unaffected)."
+        ),
+    )
 
 
 # --- Attacks -----------------------------------------------------------------
@@ -218,6 +229,7 @@ ScanAttemptOutcome = Literal[
     "skipped_invalid_metadata",
     "skipped_unknown_seed",
     "skipped_planner_failure",
+    "skipped_no_seed_arm",
     "skipped_dry_run",
     "error",
 ]
@@ -243,6 +255,18 @@ class ScanAttempt(BaseModel):
         default=None,
         description="Captured exception text on outcome=error; None otherwise.",
     )
+    tool_call_trace: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of tools the target's planner invoked, in order — persisted "
+            "for EVERY judged attempt (finding and no_finding) so a finding is "
+            "auditable from the report alone."
+        ),
+    )
+    judge_evidence: dict[str, str] = Field(
+        default_factory=dict,
+        description="Verdict.evidence flattened to strings (recipients, markers, confidence).",
+    )
 
 
 class ScanReport(BaseModel):
@@ -262,12 +286,30 @@ class ScanReport(BaseModel):
     elapsed_seconds: float
     attempts: list[ScanAttempt] = Field(default_factory=list)
     findings_count: int
+    inconclusive_attempts: int = Field(
+        default=0,
+        description=(
+            "Number of attempts whose verdict came from an LLM-judge fallback "
+            "(the call raised, or its output was unparseable) rather than a real "
+            "judgement. A scan where this equals the judged-attempt count found "
+            "nothing because it could not judge — not because the target is secure."
+        ),
+    )
+    fallback_breakdown: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Counts of fallback events by cause, e.g. {'judge_unparseable_output': n, "
+            "'judge_call_raised': n, 'customiser_fallback': n}."
+        ),
+    )
     aborted: str | None = Field(
         default=None,
         description=(
-            "Non-null if the scan terminated early. Values: 'budget_exceeded' "
-            "(--max-llm-calls hit) or 'provider_unreachable' (three consecutive "
-            "LLM failures)."
+            "Non-null if the scan terminated early or ran nothing. Values: "
+            "'budget_exceeded' (--max-llm-calls hit), 'provider_unreachable' "
+            "(consecutive LLM failures), 'describe_failed' (adapter.describe() "
+            "raised), or 'no_payloads' (no seeds were applicable to the target — "
+            "the scan did not actually exercise anything)."
         ),
     )
     single_run: bool = Field(

@@ -172,6 +172,159 @@ def test_scan_mcp_github_rejects_missing_slash() -> None:
     assert "owner/repo" in (result.stderr or result.output)
 
 
+def test_scan_custom_target_requires_authorize(tmp_path: Path) -> None:
+    p = tmp_path / "t.yaml"
+    p.write_text("family: triagent\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", "--target-file", str(p)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "authorize" in (result.stderr or result.output).lower()
+
+
+def test_scan_mcp_custom_requires_command() -> None:
+    result = runner.invoke(app, ["scan", "mcp:custom", "--authorize", "custom"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--command" in (result.stderr or result.output)
+
+
+def test_scan_custom_authorize_must_match_family() -> None:
+    result = runner.invoke(
+        app, ["scan", "mcp:custom", "--command", "python", "--authorize", "wrong"]
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize must equal the family name" in (result.stderr or result.output)
+
+
+def _patch_fake_mcp_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the adapter's session opener so describe() needs no real subprocess."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            tool = SimpleNamespace(name="remember", description="store a note", inputSchema={})
+            return SimpleNamespace(tools=[tool])
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
+
+def test_scan_custom_target_file_dry_run_enumerates_seeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A custom target declaring weakness_classes yields seeds; dry-run exits 0."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: triagent\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2, W4]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "--target-file", str(p), "--authorize", "triagent", "--dry-run"],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "dry-run" in result.stdout or "attempts" in result.stdout
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_custom_target_without_weakness_classes_is_loud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No weakness_classes → no applicable seeds → loud no_payloads exit 2, not a clean pass."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    p = tmp_path / "t.yaml"
+    p.write_text("family: triagent\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["scan", "--target-file", str(p), "--authorize", "triagent"]
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "no seeds" in (result.stderr or result.output).lower()
+    target_registry.clear_runtime_targets()
+
+
+def test_route_model_prefixes_only_when_provider_explicit() -> None:
+    from mylonite.cli import _route_model
+
+    # User set --provider and the alias lacks a route prefix → prefix it (#13).
+    assert _route_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    # No explicit provider → leave the auto-routing default untouched.
+    assert _route_model(None, "claude-sonnet-4-6") == "claude-sonnet-4-6"
+    # Already prefixed → don't double-prefix.
+    assert _route_model("anthropic", "openai/gpt-4o") == "openai/gpt-4o"
+
+
+def test_scan_rejects_blank_model() -> None:
+    result = runner.invoke(app, ["scan", "reference:vulnerable", "--model", "  ", "--dry-run"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid --model" in (result.stderr or result.output)
+
+
+def test_doctor_classifies_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import litellm
+
+    def boom(**_: Any) -> Any:
+        raise RuntimeError("AnthropicException - [SSL: CERTIFICATE_VERIFY_FAILED]")
+
+    monkeypatch.setattr(litellm, "completion", boom)
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == EXIT_PROVIDER
+    out = (result.stderr or "") + result.output
+    assert "[tls]" in out
+    assert "truststore" in out.lower() or "ssl_cert_file" in out.lower()
+
+
+def test_doctor_ok_when_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import litellm
+
+    monkeypatch.setattr(litellm, "completion", lambda **_: SimpleNamespace())
+    result = runner.invoke(app, ["doctor", "--model", "claude-haiku-4-5"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "OK" in result.output
+
+
+def test_truststore_enabled_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    called: dict[str, bool] = {}
+    fake = types.ModuleType("truststore")
+    fake.inject_into_ssl = lambda: called.setdefault("injected", True)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "truststore", fake)
+    monkeypatch.delenv("MYLONITE_NO_TRUSTSTORE", raising=False)
+
+    from mylonite.cli import _maybe_enable_truststore
+
+    _maybe_enable_truststore()
+    assert called.get("injected") is True
+
+
+def test_truststore_opt_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    called: dict[str, bool] = {}
+    fake = types.ModuleType("truststore")
+    fake.inject_into_ssl = lambda: called.setdefault("injected", True)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "truststore", fake)
+    monkeypatch.setenv("MYLONITE_NO_TRUSTSTORE", "1")
+
+    from mylonite.cli import _maybe_enable_truststore
+
+    _maybe_enable_truststore()
+    assert "injected" not in called
+
+
 def test_scan_dry_run_against_reference_vulnerable(tmp_path: Path) -> None:
     result = runner.invoke(
         app,

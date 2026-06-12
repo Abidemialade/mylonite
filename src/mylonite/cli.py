@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
@@ -58,6 +59,26 @@ EXIT_PROVIDER = 4
 EXIT_NOT_KEPT = 5
 
 
+def _maybe_enable_truststore() -> None:
+    """Use the OS trust store for TLS when ``truststore`` is installed.
+
+    Enterprise environments behind a TLS-inspecting proxy present a CA that the
+    OS trusts but Python's bundled certifi does not — so provider calls fail
+    ``CERTIFICATE_VERIFY_FAILED``. ``truststore`` (an optional ``[enterprise]``
+    extra) bridges to the OS trust store without disabling verification. Opt out
+    with ``MYLONITE_NO_TRUSTSTORE=1``. Best-effort: absent/failed import is a
+    silent no-op (verification stays at certifi defaults).
+    """
+    if os.environ.get("MYLONITE_NO_TRUSTSTORE"):
+        return
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:  # not installed, or injection unsupported → leave defaults
+        pass
+
+
 def _configure_stdio_encoding() -> None:
     """Force UTF-8 on stdout/stderr before any Rich/typer output.
 
@@ -86,6 +107,7 @@ def _root() -> None:
     from mylonite._redaction import install_log_redaction
 
     _configure_stdio_encoding()
+    _maybe_enable_truststore()
     install_log_redaction(enabled=True)
 
 
@@ -102,6 +124,51 @@ def version() -> None:
     typer.echo(__version__)
 
 
+@app.command()
+def doctor(
+    provider: Annotated[
+        str | None,
+        typer.Option("--provider", help="LiteLLM provider to check, e.g. 'anthropic'."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Model id to ping (defaults to claude-sonnet-4-6)."),
+    ] = None,
+) -> None:
+    """Diagnose provider connectivity before a live scan.
+
+    Makes one tiny (1-token) completion call and classifies any failure as
+    **auth** vs **TLS** vs **network** vs **rate-limit**, each with a concrete
+    remedy — so a corporate-proxy cert failure no longer looks like a bad key.
+    Exit 0 if reachable, 4 on a provider failure.
+    """
+    from mylonite._redaction import redact
+    from mylonite.scan.diagnostics import classify_provider_error
+    from mylonite.scan.providers import provider_from_model
+
+    effective_provider = provider or "anthropic"
+    base_model = model or "claude-sonnet-4-6"
+    _validate_model_string(base_model)
+    routed = _route_model(provider, base_model)
+    resolved_provider = provider_from_model(routed, provider)
+
+    import litellm
+
+    try:
+        litellm.completion(
+            model=routed,
+            messages=[{"role": "user", "content": "ping"}],
+            max_tokens=1,
+        )
+    except Exception as exc:  # one-shot probe — classify, don't propagate raw
+        diag = classify_provider_error(exc, provider=resolved_provider)
+        typer.echo(f"provider check FAILED [{diag.category}] for {routed}", err=True)
+        typer.echo(f"  detail: {redact(diag.detail)}", err=True)
+        typer.echo(f"  remedy: {diag.remedy}", err=True)
+        raise typer.Exit(code=EXIT_PROVIDER) from exc
+    typer.echo(f"provider OK — {effective_provider}/{base_model} reachable (routed: {routed}).")
+
+
 def _not_implemented(name: str) -> None:
     typer.echo(
         f"`{name}` is not implemented in v{__version__}. "
@@ -109,6 +176,32 @@ def _not_implemented(name: str) -> None:
         err=True,
     )
     raise typer.Exit(code=EXIT_CONFIG)
+
+
+def _validate_model_string(model: str) -> None:
+    """Reject obviously-malformed model ids before they reach LiteLLM."""
+    if not model or not model.strip() or model != model.strip():
+        typer.echo(
+            f"invalid --model {model!r}: must be a non-empty model id with no "
+            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+
+def _route_model(provider: str | None, model: str) -> str:
+    """Apply LiteLLM ``provider/model`` routing when the user set --provider.
+
+    LiteLLM routes by model-string prefix; some Anthropic aliases (e.g.
+    ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM Provider
+    NOT provided". When the user explicitly passes ``--provider`` and the model
+    carries no ``provider/`` prefix yet, prefix it so the alias routes. When
+    ``--provider`` is unset we leave the model untouched, preserving the
+    auto-routing the bundled ``claude-*`` defaults already rely on.
+    """
+    if provider and "/" not in model:
+        return f"{provider}/{model}"
+    return model
 
 
 def _build_adapter_for_reference(target: str, model: str) -> Any:
@@ -149,6 +242,95 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
     return family, scope
 
 
+def _enforce_custom_authorize(family: str, scope: str | None, requires_scope: bool, authorize: str | None) -> None:
+    """Apply the same --authorize rule custom targets share with bundled ones."""
+    if requires_scope:
+        if authorize != scope:
+            typer.echo(
+                f"--authorize must equal the scope for {family!r} "
+                f"(scope={scope!r}, authorize={authorize!r}).",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+    elif authorize != family:
+        typer.echo(
+            f"--authorize must equal the family name {family!r} for this stateless "
+            f"custom target (got authorize={authorize!r}).",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+
+def _target_file_from_flags(
+    *,
+    command: str | None,
+    args: list[str] | None,
+    env: list[str] | None,
+    scope: str | None,
+    system_prompt: str | None,
+    system_prompt_file: Path | None,
+    primary_tools: list[str] | None,
+    weakness_classes: list[str] | None,
+) -> Any:
+    """Assemble a ``TargetFile`` (family='custom') from ``mcp:custom`` CLI flags."""
+    from pydantic import ValidationError
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
+    if not command:
+        typer.echo("mcp:custom requires --command (the MCP server launch command).", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    env_map: dict[str, str] = {}
+    for item in env or []:
+        if "=" not in item:
+            typer.echo(f"--env must be KEY=VALUE; got {item!r}.", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        key, _, value = item.partition("=")
+        env_map[key] = value
+    try:
+        return TargetFile(
+            family="custom",
+            command=command,
+            args=list(args or []),
+            env=env_map,
+            scope=scope,
+            requires_scope=scope is not None,
+            system_prompt=system_prompt,
+            system_prompt_file=system_prompt_file,
+            primary_tools=list(primary_tools or []),
+            weakness_classes=list(weakness_classes or []),
+        )
+    except ValidationError as exc:
+        typer.echo(f"invalid custom target: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: str) -> Any:
+    """Register a custom ``TargetFile`` and return a generic ``MCPStdioAdapter``.
+
+    Shared by ``--target-file`` and ``mcp:custom`` flags. Enforces the same
+    ``--authorize`` ownership rule as bundled targets, then registers the spec
+    so the generic adapter (and seed selection) can resolve it.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec
+
+    spec = build_target_spec(target_file)
+    _enforce_custom_authorize(spec.family, target_file.scope, spec.requires_scope, authorize)
+    try:
+        # Start from a clean runtime registry so a long-lived/embedding process
+        # that calls scan() repeatedly can't accumulate or shadow stale custom
+        # specs (each scan registers exactly the target it's running).
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+        target_registry.resolve_target(spec.family, target_file.scope)
+    except (target_registry.InvalidTargetScope, target_registry.UnknownTargetFamily, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    return MCPStdioAdapter(family=spec.family, scope=target_file.scope, model=model)
+
+
 def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> Any:
     """Resolve ``mcp:`` target into a bundled adapter, enforcing scope-matched ``--authorize``.
 
@@ -187,18 +369,20 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
         if authorize != scope:
             typer.echo(
                 f"--authorize must equal the scope segment for {family!r} "
-                f"(scope={scope!r}, authorize={authorize!r}).",
+                f"(scope={scope!r}, authorize={authorize!r}). "
+                f"Example: mylonite scan mcp:{family}:{scope or '<scope>'} "
+                f"--authorize {scope or '<scope>'}",
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
-    else:
-        if authorize != family:
-            typer.echo(
-                f"--authorize must equal the family name for stateless target "
-                f"{family!r} (got authorize={authorize!r}).",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
+    elif authorize != family:
+        typer.echo(
+            f"--authorize must equal the family name for stateless target "
+            f"{family!r} (got authorize={authorize!r}). "
+            f"Example: mylonite scan mcp:{family} --authorize {family}",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
 
     # Step 3: registry resolution (validates scope shape).
     try:
@@ -222,15 +406,58 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
 @app.command()
 def scan(
     target: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help=(
-                "Target ID. v0.2 supports 'reference:vulnerable' and "
-                "'reference:guarded'. Other targets require --authorize and an "
-                "adapter (Phase 1.5+)."
+                "Target ID: 'reference:vulnerable' / 'reference:guarded', a "
+                "bundled 'mcp:<family>[:<scope>]' (filesystem/fetch/github), or "
+                "'mcp:custom' with --command/--arg flags. Omit when using "
+                "--target-file. Non-reference targets require --authorize."
             )
         ),
-    ],
+    ] = None,
+    target_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--target-file",
+            help="Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
+        ),
+    ] = None,
+    command: Annotated[
+        str | None,
+        typer.Option("--command", help="mcp:custom — the MCP server launch command."),
+    ] = None,
+    arg: Annotated[
+        list[str] | None,
+        typer.Option("--arg", help="mcp:custom — a server arg (repeatable, in order)."),
+    ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option("--env", help="mcp:custom — a KEY=VALUE env var for the server (repeatable)."),
+    ] = None,
+    scope: Annotated[
+        str | None,
+        typer.Option("--scope", help="mcp:custom — optional scope label (must match --authorize)."),
+    ] = None,
+    system_prompt: Annotated[
+        str | None,
+        typer.Option("--system-prompt", help="mcp:custom — the target's system prompt (inline)."),
+    ] = None,
+    system_prompt_file: Annotated[
+        Path | None,
+        typer.Option("--system-prompt-file", help="mcp:custom — read the system prompt from a file."),
+    ] = None,
+    primary_tool: Annotated[
+        list[str] | None,
+        typer.Option("--primary-tool", help="mcp:custom — a primary tool name (repeatable)."),
+    ] = None,
+    weakness_class: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--weakness-class",
+            help="mcp:custom — a weakness class the target exposes, e.g. W2/W4 (repeatable).",
+        ),
+    ] = None,
     provider: Annotated[
         str | None,
         typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
@@ -267,15 +494,52 @@ def scan(
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
     effective_provider = provider or "anthropic"
-    effective_model = model or "claude-sonnet-4-6"
+    base_model = model or "claude-sonnet-4-6"
+    _validate_model_string(base_model)
+    effective_model = _route_model(provider, base_model)
 
     from mylonite.plugins.registry import discover
     from mylonite.scan.customiser import PayloadCustomiser
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    if target.startswith("reference:"):
+    if target_file is not None or target == "mcp:custom":
+        # Custom-target on-ramp (both YAML and inline flags converge here).
+        if not authorize:
+            typer.echo(
+                "--authorize is required for custom targets. See SECURITY.md.", err=True
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        if target_file is not None:
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            try:
+                tf = load_target_file(target_file)
+            except Exception as exc:  # YAML / validation errors → exit 2
+                typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+                raise typer.Exit(code=EXIT_CONFIG) from exc
+        else:
+            tf = _target_file_from_flags(
+                command=command,
+                args=arg,
+                env=env,
+                scope=scope,
+                system_prompt=system_prompt,
+                system_prompt_file=system_prompt_file,
+                primary_tools=primary_tool,
+                weakness_classes=weakness_class,
+            )
+        adapter = _build_adapter_for_custom(tf, authorize, effective_model)
+        report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
+    elif target is None:
+        typer.echo(
+            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    elif target.startswith("reference:"):
         adapter = _build_adapter_for_reference(target, effective_model)
+        report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
             typer.echo(
@@ -285,10 +549,12 @@ def scan(
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+        report_target_id = target
     else:
         typer.echo(
             f"unknown target shape {target!r}. "
-            "Expected 'reference:<variant>' or 'mcp:<family>[:<scope>]'.",
+            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', 'mcp:custom', "
+            "or --target-file.",
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -316,7 +582,7 @@ def scan(
     judge = SuccessJudge(model=effective_model)
 
     config = ScanConfig(
-        target_id=target,
+        target_id=report_target_id,
         provider=effective_provider,
         model=effective_model,
         max_llm_calls=max_llm_calls,
@@ -356,6 +622,25 @@ def scan(
         raise typer.Exit(code=EXIT_BUDGET)
     if result.report.aborted == "provider_unreachable":
         raise typer.Exit(code=EXIT_PROVIDER)
+    if result.report.aborted == "no_payloads":
+        # Issue #3: nothing ran — a misconfigured/unknown target must not look
+        # like a clean pass. Point the user at the on-ramp for custom targets.
+        typer.echo(
+            "error: no seeds were applicable to this target, so nothing was scanned. "
+            "If this is a custom MCP app, declare which weakness classes it exposes "
+            "via --target-file (weakness_classes) or --weakness-class.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if result.report.aborted == "describe_failed":
+        # The adapter couldn't describe the target (e.g. the MCP server failed to
+        # launch). Zero attempts ran — must not exit 0 and read as a clean pass.
+        typer.echo(
+            "error: could not describe the target (adapter.describe() failed); "
+            "nothing was scanned. Check the target command/scope and connectivity.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
     raise typer.Exit(code=EXIT_SUCCESS)
 
 

@@ -57,7 +57,11 @@ class LLMConfig(BaseModel):
     )
     api_key_env_var: str | None = Field(
         default=None,
-        description="Name of the env var holding the provider API key, if any.",
+        description=(
+            "Name of the env var holding the provider API key, if any. When set, "
+            "it overrides the built-in provider→env-var map used by diagnostics "
+            "remedies (see mylonite.scan.providers.env_vars_for)."
+        ),
     )
 
 

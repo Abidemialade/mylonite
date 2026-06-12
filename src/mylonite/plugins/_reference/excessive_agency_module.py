@@ -24,7 +24,8 @@ from mylonite.contracts import (
     TargetDescriptor,
 )
 from mylonite.contracts.attack_module import CONTRACT_VERSION
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
+from mylonite.scan import seeds
+from mylonite.scan.seeds import SeedPattern
 
 _W3_W4 = frozenset({"W3", "W4"})
 
@@ -75,7 +76,8 @@ class ExcessiveAgencyAttackModule(AttackModuleBase):
     def generate_payloads(self, target: TargetDescriptor) -> Iterable[Payload]:
         if target.kind != "mcp":
             return
-        family = target_family(target.target_id)
-        for seed in SEED_CATALOGUE:
-            if seed.weakness in _W3_W4 and family in seed.applicable_targets:
+        # Descriptor-first selection via the seeds module namespace, then the
+        # W3+W4 family filter this module owns.
+        for seed in seeds.seeds_for_descriptor(target):
+            if seed.weakness in _W3_W4:
                 yield _payload_from_seed(seed)

@@ -82,6 +82,14 @@
       },
       "title": "Tools",
       "type": "array"
+    },
+    "weakness_classes": {
+      "description": "Weakness classes this target opts into, e.g. ['W2', 'W4']. When non-empty, seed selection resolves from these declared classes (letting a custom/external target opt into attack shapes) instead of the legacy family mapping derived from target_id. Empty = use the family mapping (the bundled reference/filesystem/fetch/github targets leave it empty and are unaffected).",
+      "items": {
+        "type": "string"
+      },
+      "title": "Weakness Classes",
+      "type": "array"
     }
   },
   "required": [

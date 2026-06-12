@@ -14,10 +14,12 @@ from __future__ import annotations
 import io
 import json
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -29,12 +31,32 @@ OUTCOME_MARKS: Final[dict[str, str]] = {
     "skipped_invalid_metadata": "⚠ skipped",
     "skipped_unknown_seed": "⚠ skipped",
     "skipped_planner_failure": "⚠ skipped",
+    "skipped_no_seed_arm": "⚠ skipped",
     "skipped_dry_run": "· dry-run",
     "error": "✗ error",
 }
 
+# ASCII fallback marks for non-UTF-8 consoles (Windows cp1252) — a completed
+# scan must never crash on output just because a glyph can't be encoded.
+OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
+    "finding": "FOUND",
+    "no_finding": "clean",
+    "skipped_invalid_metadata": "skip",
+    "skipped_unknown_seed": "skip",
+    "skipped_planner_failure": "skip",
+    "skipped_no_seed_arm": "skip",
+    "skipped_dry_run": "dry-run",
+    "error": "error",
+}
+
 # Pre-v0.3.0 private name — kept as an alias so existing call sites stay valid.
 _OUTCOME_MARK: Final = OUTCOME_MARKS
+
+
+def _stdout_is_ascii_only() -> bool:
+    """True when stdout can't encode UTF-8 (e.g. a legacy Windows cp1252 console)."""
+    enc = (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "")
+    return enc not in {"utf8", "utf16", "utf16le", "utf16be", "utf32"}
 
 
 def _sanitise_filename(pattern_id: str) -> str:
@@ -77,16 +99,27 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
     return scan_dir
 
 
-def render_summary(result: ScanResult) -> str:
-    """Build a Rich-rendered summary table and return it as plain text."""
+def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str:
+    """Build a Rich-rendered summary table and return it as plain text.
+
+    ``ascii_safe`` forces ASCII-only output (marks, box, separators) so the
+    string is safe to print to a non-UTF-8 console; ``None`` auto-detects from
+    ``sys.stdout``. A completed scan must never crash on output (Issue #9) — the
+    CLI already forces UTF-8, but driver/embedded callers may not.
+    """
+    if ascii_safe is None:
+        ascii_safe = _stdout_is_ascii_only()
+    marks = OUTCOME_MARKS_ASCII if ascii_safe else OUTCOME_MARKS
+    sep = " | " if ascii_safe else " · "
     report = result.report
     buffer = io.StringIO()
     console = Console(file=buffer, width=110, force_terminal=False)
 
     table = Table(
-        title=f"Mylonite scan — {report.target_id}",
+        title=f"Mylonite scan - {report.target_id}",
         title_justify="left",
         show_lines=False,
+        box=box.ASCII if ascii_safe else box.HEAVY_HEAD,
     )
     table.add_column("status", no_wrap=True)
     table.add_column("seed_id", no_wrap=True)
@@ -94,7 +127,7 @@ def render_summary(result: ScanResult) -> str:
     table.add_column("reason")
 
     for attempt in report.attempts:
-        mark = OUTCOME_MARKS.get(attempt.outcome, attempt.outcome)
+        mark = marks.get(attempt.outcome, attempt.outcome)
         table.add_row(
             mark,
             attempt.seed_id,
@@ -104,11 +137,22 @@ def render_summary(result: ScanResult) -> str:
 
     console.print(table)
     counts = (
-        f"{len(report.attempts)} attempts · {report.findings_count} findings · "
-        f"provider={report.provider} · model={report.model} · "
+        f"{len(report.attempts)} attempts{sep}{report.findings_count} findings{sep}"
+        f"provider={report.provider}{sep}model={report.model}{sep}"
         f"{report.elapsed_seconds:.1f}s"
     )
     console.print(counts)
+    if report.inconclusive_attempts:
+        judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
+        denom = judged or report.inconclusive_attempts
+        line = (
+            f"judge: {report.inconclusive_attempts}/{denom} attempts inconclusive "
+            f"(unparseable/failed LLM output) - {report.fallback_breakdown}"
+        )
+        # A scan where every judged attempt fell back found nothing because it
+        # could not judge; it must not read as clean.
+        style = "bold red" if report.inconclusive_attempts >= denom else "yellow"
+        console.print(f"[{style}]{line}[/{style}]")
     if report.aborted:
         console.print(f"[red]aborted: {report.aborted}[/red]")
     return buffer.getvalue()

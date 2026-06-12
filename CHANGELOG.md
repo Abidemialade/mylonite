@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-12
+
+### Added — cross-LLM robustness (JSON ingestion/emission + provider-agnostic auth)
+
+- **Provider-native structured output.** The judge and customiser now request
+  `response_format` (json_schema where the model supports it, else json_object),
+  capability-gated via LiteLLM introspection (`supports_response_schema` /
+  `get_supported_openai_params`) and degrading to prose-only for providers/local
+  models that don't support it. So OpenAI/Gemini/etc. return valid JSON by
+  construction, not just Claude — every introspection call is guarded so an
+  unknown model never errors.
+- **Provider-tolerant JSON parsing** (belt-and-suspenders behind structured
+  output): reads JSON from `message.content` (fences/prose) **or** a tool call's
+  `arguments` (some providers' JSON mode, previously ignored); rescues non-strict
+  JSON (trailing commas, single quotes, Python `True/False`, unquoted keys) via
+  the new MIT `json-repair` dependency, strict-parse-first; and **rejects
+  truncated output honestly** (never lets repair fabricate a missing close).
+- **Planner cross-LLM hardening:** sends `tool_choice="auto"` only when tools are
+  present; tool-call arguments are repair-rescued too.
+- **Provider-agnostic auth/diagnostics:** new `scan/providers.py` maps each
+  provider to its API-key env var(s) (OpenAI→`OPENAI_API_KEY`,
+  Google→`GEMINI_API_KEY`, Bedrock→AWS vars, …, with LiteLLM spelling aliases);
+  `classify_provider_error` now matches **LiteLLM typed exceptions first**
+  (`AuthenticationError`/`RateLimitError`/`APIConnectionError`/
+  `ContextWindowExceededError`/…) before substring fallback, and the auth remedy
+  names the **right** env var for the provider in use (`LLMConfig.api_key_env_var`
+  overrides). `mylonite doctor` reports the provider-correct remedy.
+- A `tests/scan/test_llm_crossmodel.py` regression matrix exercises Claude/OpenAI/
+  Gemini/tool-call/non-strict/truncated output shapes, the capability gating
+  (incl. the raising-introspection fail-safe), and the diagnostics-per-provider —
+  so "we only tested Claude" can't regress.
+
+### Changed
+
+- **`target_adapter` contract `CONTRACT_VERSION` 0.1.0 → 0.2.0** (minor, additive).
+  `TargetDescriptor` gained the optional `weakness_classes` field. The
+  `scan_report` / `scan_attempt` report schemas also gained optional fields
+  (`inconclusive_attempts`, `fallback_breakdown`, `tool_call_trace`,
+  `judge_evidence`) and one new `ScanAttemptOutcome` value (`skipped_no_seed_arm`).
+  All changes are backward-compatible for existing adapters and report readers.
+
 ### Security
 
 - **Implemented the `redact_secrets` control (previously documented but inert).**
@@ -39,6 +80,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Environment & diagnostics hardening.**
+  - `mylonite doctor` makes a 1-token provider ping and classifies any failure
+    as **auth** / **TLS** / **network** / **rate-limit** / **unknown**, each with
+    a concrete remedy (new `scan/diagnostics.py`) — a corporate-proxy cert
+    failure no longer masquerades as a bad API key.
+  - **OS trust store support.** With `pip install "mylonite[enterprise]"` the CLI
+    auto-enables `truststore` so TLS verification uses the OS trust store (which
+    holds the corporate CA); opt out via `MYLONITE_NO_TRUSTSTORE=1`. Verification
+    is never disabled. `SECURITY.md` documents `SSL_CERT_FILE` as the alternative.
+  - **Model routing.** When `--provider` is set explicitly and the model carries
+    no `provider/` prefix, the CLI now prefixes it so Anthropic aliases like
+    `claude-3-5-haiku-latest` route instead of failing "LLM Provider NOT
+    provided"; the model string is validated up front.
+  - **ASCII-safe summary.** `render_summary(..., ascii_safe=...)` (auto-detected
+    from stdout encoding) renders a completed scan without non-cp1252 glyphs, so
+    embedded/driver callers on a legacy Windows console can't crash on output.
+- **Declared supported Python range.** `requires-python = ">=3.11,<3.14"` — the
+  upper bound matches litellm (no installable litellm on 3.14), turning a
+  confusing resolver error into a clear "unsupported Python". Revisit when
+  litellm supports 3.14.
+- Docs/clarity: `reference_example` is marked example-only (filtered out of real
+  scans); SECURITY.md documents the custom-target `--authorize` rule and the
+  Windows SQLite-URL footgun; a session-reuse design note is recorded for a
+  future `--reuse-session` mode.
+- **First-class custom MCP targets.**
+  "Test *your* AI app" is now reachable through the CLI for any MCP stdio server,
+  not just the three bundled families:
+  - `mylonite scan --target-file target.yaml --authorize <fam|scope>` — a
+    declarative `TargetFile` (`plugins/_mcp/target_file.py`) declares the launch
+    `command`/`args`/`env`, `scope`, `system_prompt`, `primary_tools`, the
+    `weakness_classes` the app exposes, and a `seed_arm` for planting poisoned
+    content. Also reachable inline via `mylonite scan mcp:custom --command … --arg
+    … --weakness-class W2 …`. Custom specs register into a runtime registry
+    (`register_target`) that can never shadow a bundled family.
+  - **Descriptor-driven seed applicability.** Seed selection now resolves from
+    `TargetDescriptor.weakness_classes` when declared (a custom target opts into
+    attack shapes) and falls back to the legacy family mapping otherwise — the
+    bundled reference/filesystem/fetch/github targets produce byte-for-byte the
+    same seed sets (golden-tested). The attack modules call
+    `seeds.seeds_for_descriptor` through the module namespace, removing the
+    triple-namespace monkeypatch footgun.
+  - **Declarable seed arm for indirect injection.** `MCPStdioAdapter._run_setup`
+    honours a target-declared `seed_arm` (tool + `{payload}`/`{scope}` arg
+    template), so indirect prompt injection — the primary threat for an
+    email/RAG agent — can finally be exercised against a custom target. The note
+    drives (`read_note_*`) emit neutral, seeded-record-referencing instructions
+    so the attack travels through the planted content, not the user message.
+  - **Auditable attempts.** `ScanAttempt` now persists `tool_call_trace`
+    and `judge_evidence` on every judged outcome (including `no_finding`), so a
+    finding is verifiable from `scan_report.json` alone without querying the
+    target's own database.
+  - Schema note: `target_descriptor.schema.json` and `scan_attempt.schema.json`
+    regenerated; all changes additive/backward-compatible.
 - **Expanded metamorphic robustness check (report-only).** The
   `DifferentialValidator` metamorphic stage now applies MULTIPLE deterministic
   perturbation strategies to the exploit body — `paraphrase`, `casing`,
@@ -101,6 +195,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out-of-range value hard-fails. Defensive only: the validator's produced values
   are already in-range fractions, so no runtime behavior changes for real data,
   and the validator contract version is unchanged (no contract-shape change).
+
+### Improved — JSON parsing & scan-result reliability
+
+- **Robust JSON extraction from model output.** `scan/_llm.py` now tolerates
+  code fences (` ```json `), surrounding prose, and string-literal braces,
+  extracting the first balanced `{…}` span — so customiser/judge output parses
+  reliably across providers. Regression tests cover fenced, bare-fence,
+  embedded-in-prose, and brace-in-string output.
+- **Distinct fallback diagnostics.** The LLM-judge fallback distinguishes
+  `"LLM call raised: …"` (provider/TLS/auth error) from `"LLM output not
+  parseable as JSON"`, carried via a reserved fallback-cause sentinel that
+  callers strip before it can reach a `Verdict` or `Payload.metadata`.
+- **Inconclusive-rate reporting.** `ScanReport` gained `inconclusive_attempts`
+  and `fallback_breakdown`; the CLI summary surfaces the inconclusive rate
+  (bold-red when every judged attempt was inconclusive) so a scan that couldn't
+  judge never reads as clean.
+- **Honest skip reporting.** When a seed's setup arm cannot be planted (e.g.
+  `seed_note` on a non-bundled target), the adapter raises `SeedArmUnavailable`
+  and the engine records the new `skipped_no_seed_arm` outcome rather than
+  `no_finding`.
+- **Loud no-op detection.** When no seeds apply to a target the engine names the
+  known families and sets `aborted="no_payloads"`; the `scan` CLI exits `2` with
+  an actionable hint. An adapter `describe()` failure (`aborted="describe_failed"`)
+  likewise exits non-zero rather than 0.
+- Schema note: `scan_report.schema.json` and `scan_attempt.schema.json` were
+  regenerated. All changes are additive (new optional fields; one new
+  `ScanAttemptOutcome` enum value) and backward-compatible for readers.
+- **Deterministic offline demo.** The reference wiring gained an `llm_assist`
+  flag (`scan/wiring.py`); the demo/replay/record paths run with
+  `llm_assist=False` (`ScanConfig.customise=False` + `SuccessJudge(llm_fallback
+  =False)`), driving raw seed bodies judged purely by deterministic predicates so
+  the recorded fixtures stay reproducible. The 4-vs-0 vulnerable/guarded
+  differential is unchanged (fixtures consolidated 36/38 → 20/20).
 
 ## [0.4.0] - 2026-06-10
 

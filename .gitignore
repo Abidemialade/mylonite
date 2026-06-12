@@ -65,3 +65,6 @@ Thumbs.db
 
 # Local-only security audit reports (never publish findings)
 .security/
+
+# Mylonite scan output (runtime artefacts)
+.mylonite/

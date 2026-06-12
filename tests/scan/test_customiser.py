@@ -88,3 +88,28 @@ async def test_customise_falls_back_when_body_key_missing() -> None:
     payload = await cust.customise(_seed(), _descriptor())
     assert payload.body == "ORIGINAL SEED BODY"
     assert payload.metadata["customiser"] == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_customise_accepts_fenced_json() -> None:
+    """Issue #6: fenced customiser output must be applied, not treated as fallback."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response('```json\n{"body": "REFINED BODY"}\n```')
+
+    cust = PayloadCustomiser(model="stub", completion_fn=stub)
+    payload = await cust.customise(_seed(), _descriptor())
+    assert payload.body == "REFINED BODY"
+    assert "customiser" not in payload.metadata
+
+
+@pytest.mark.asyncio
+async def test_customise_never_leaks_fallback_sentinels_into_metadata() -> None:
+    """Issue #7: the reserved fallback-cause sentinels must not reach Payload.metadata."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response("not json at all")
+
+    cust = PayloadCustomiser(model="stub", completion_fn=stub)
+    payload = await cust.customise(_seed(), _descriptor())
+    assert not any(k.startswith("_mylonite_") for k in payload.metadata)

@@ -12,11 +12,19 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import BaseModel
+
 from mylonite.contracts._types import Payload, TargetDescriptor
-from mylonite.scan._llm import litellm_json_call_async
+from mylonite.scan._llm import litellm_json_call_async, pop_fallback_cause
 from mylonite.scan.seeds import SeedPattern
 
 logger = logging.getLogger(__name__)
+
+
+class _CustomiserOut(BaseModel):
+    """Private response schema — drives provider-native structured output."""
+
+    body: str
 
 
 _SYSTEM = (
@@ -66,7 +74,11 @@ class PayloadCustomiser:
             caller="customiser",
             system=_SYSTEM,
             completion_fn=self._completion_fn,
+            schema_model=_CustomiserOut,
         )
+        # Drop the reserved fallback-cause sentinels so they never leak into
+        # Payload.metadata; a fallback shows up as body == seed.seed_body below.
+        pop_fallback_cause(result)
         body = str(result.get("body") or seed.seed_body)
         metadata: dict[str, str] = {
             "seed_id": seed.pattern_id,

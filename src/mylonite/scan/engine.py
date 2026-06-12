@@ -26,10 +26,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
-from mylonite.scan._types import AdapterInvocationSkipped
+from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.judge import SuccessJudge
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern
+from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
 from mylonite.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,17 @@ class ScanConfig(BaseModel):
     max_concurrent: int = 3
     output_dir: Path = Field(default_factory=lambda: Path(".mylonite/scans"))
     dry_run: bool = False
+    customise: bool = Field(
+        default=True,
+        description=(
+            "Run the per-seed LLM customiser when a payload requests it. The "
+            "deterministic demo/replay path sets this False: the customiser is "
+            "a live (non-deterministic) LLM call whose refined body would make "
+            "the recorded fixtures unreproducible, so the demo drives raw seed "
+            "bodies — which is what it always effectively did before the "
+            "JSON-fence parse fix landed."
+        ),
+    )
     provider_failure_threshold: int = DEFAULT_PROVIDER_FAILURE_THRESHOLD
     pattern_id_filter: str | None = Field(
         default=None,
@@ -73,6 +84,10 @@ class ScanResult:
 class _PerPayloadOutcome:
     attempt: ScanAttempt
     exploit: ExploitRecord | None
+    #: "call_raised" | "unparseable_output" | None — set when the LLM judge fell back.
+    judge_fallback_cause: str | None = None
+    #: True when the customiser fell back to the unmodified seed body.
+    customiser_fallback: bool = False
 
 
 class ScanEngine:
@@ -99,6 +114,8 @@ class ScanEngine:
         attempts: list[ScanAttempt] = []
         exploits: list[ExploitRecord] = []
         aborted: str | None = None
+        inconclusive_attempts = 0
+        fallback_breakdown: dict[str, int] = {}
         module_ids = [m.attack_metadata().id for m in self._attack_modules]
         module_compliance = {
             m.attack_metadata().id: m.attack_metadata().compliance for m in self._attack_modules
@@ -138,6 +155,20 @@ class ScanEngine:
                     )
 
             if not tasks:
+                # Nothing ran. A pattern_id filter that matched nothing is an
+                # intentional scoping (stay clean+empty); but a *real* scan that
+                # produced zero payloads means no seeds were applicable to this
+                # target — that must be loud, never look like a clean pass (#3).
+                if self._config.pattern_id_filter is None:
+                    family = target_family(descriptor.target_id)
+                    known = sorted({t for s in SEED_CATALOGUE for t in s.applicable_targets})
+                    logger.warning(
+                        "ScanEngine: no seeds applicable to family %r — nothing ran. "
+                        "Known families: %s",
+                        family,
+                        known,
+                    )
+                    aborted = "no_payloads"
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -153,13 +184,29 @@ class ScanEngine:
                 attempts.append(outcome.attempt)
                 if outcome.exploit is not None:
                     exploits.append(outcome.exploit)
+                if outcome.judge_fallback_cause is not None:
+                    inconclusive_attempts += 1
+                    key = f"judge_{outcome.judge_fallback_cause}"
+                    fallback_breakdown[key] = fallback_breakdown.get(key, 0) + 1
+                if outcome.customiser_fallback:
+                    fallback_breakdown["customiser_fallback"] = (
+                        fallback_breakdown.get("customiser_fallback", 0) + 1
+                    )
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
                     aborted = "provider_unreachable"
                     for pending in tasks:
                         pending.cancel()
                     break
 
-        return self._finalize(attempts, exploits, aborted, time.monotonic() - start, module_ids)
+        return self._finalize(
+            attempts,
+            exploits,
+            aborted,
+            time.monotonic() - start,
+            module_ids,
+            inconclusive_attempts=inconclusive_attempts,
+            fallback_breakdown=fallback_breakdown,
+        )
 
     def _finalize(
         self,
@@ -168,6 +215,9 @@ class ScanEngine:
         aborted: str | None,
         elapsed: float,
         module_ids: list[str],
+        *,
+        inconclusive_attempts: int = 0,
+        fallback_breakdown: dict[str, int] | None = None,
     ) -> ScanResult:
         report = ScanReport(
             target_id=self._config.target_id,
@@ -177,6 +227,8 @@ class ScanEngine:
             elapsed_seconds=round(elapsed, 3),
             attempts=attempts,
             findings_count=len(exploits),
+            inconclusive_attempts=inconclusive_attempts,
+            fallback_breakdown=fallback_breakdown or {},
             aborted=aborted,
             single_run=True,
             mylonite_version=__version__,
@@ -263,11 +315,25 @@ class ScanEngine:
                 exploit=None,
             )
 
-        if payload.metadata.get("needs_customisation") == "true":
+        customiser_fallback = False
+        if self._config.customise and payload.metadata.get("needs_customisation") == "true":
             payload = await self._customiser.customise(seed, descriptor)
+            customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
         try:
             response = await self._adapter.invoke(payload)
+        except SeedArmUnavailable as skip:
+            return _PerPayloadOutcome(
+                attempt=ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=payload.pattern_id,
+                    outcome="skipped_no_seed_arm",
+                    verdict_mechanism=None,
+                    verdict_reason=skip.reason,
+                    error_detail=None,
+                ),
+                exploit=None,
+            )
         except AdapterInvocationSkipped as skip:
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
@@ -315,6 +381,12 @@ class ScanEngine:
                 exploit=None,
             )
 
+        # Per-attempt audit trail (#14): persist the planner tool-call trace and
+        # the judge evidence on EVERY judged outcome, so a no_finding is as
+        # auditable as a finding without re-querying the target's own state.
+        tool_call_trace = list(response.tool_calls)
+        judge_evidence = {k: str(v) for k, v in verdict.evidence.items()}
+
         if verdict.success:
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
@@ -332,8 +404,12 @@ class ScanEngine:
                     verdict_mechanism=verdict.mechanism,
                     verdict_reason=verdict.reason,
                     error_detail=None,
+                    tool_call_trace=tool_call_trace,
+                    judge_evidence=judge_evidence,
                 ),
                 exploit=exploit,
+                judge_fallback_cause=verdict.fallback_cause,
+                customiser_fallback=customiser_fallback,
             )
         return _PerPayloadOutcome(
             attempt=ScanAttempt(
@@ -343,6 +419,10 @@ class ScanEngine:
                 verdict_mechanism=verdict.mechanism,
                 verdict_reason=verdict.reason,
                 error_detail=None,
+                tool_call_trace=tool_call_trace,
+                judge_evidence=judge_evidence,
             ),
             exploit=None,
+            judge_fallback_cause=verdict.fallback_cause,
+            customiser_fallback=customiser_fallback,
         )

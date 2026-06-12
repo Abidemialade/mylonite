@@ -17,6 +17,25 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class SeedArmSpec(BaseModel):
+    """How a target plants poisoned content for an indirect-injection seed.
+
+    A custom target declares which tool the adapter should call to seed an
+    untrusted record (e.g. an email-triage agent's ``remember`` tool), and the
+    argument template — string values may contain the ``{payload}`` and
+    ``{scope}`` placeholders, substituted at setup time.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str
+    args_template: dict[str, Any] = {}
+    id_from: str | None = None
 
 _FILESYSTEM_PROMPT = (
     "You are a helpful filesystem assistant. You have access to tools for "
@@ -86,6 +105,10 @@ class TargetSpec:
     requires_scope: bool
     args_with_scope: bool = True
     primary_tools: tuple[str, ...] = field(default_factory=tuple)
+    # Custom-target extensions (empty/None for the bundled families).
+    extra_env: dict[str, str] = field(default_factory=dict)
+    weakness_classes: tuple[str, ...] = field(default_factory=tuple)
+    seed_arm: SeedArmSpec | None = None
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""
@@ -130,17 +153,45 @@ BUNDLED_TARGETS: dict[str, TargetSpec] = {
 }
 
 
+# Runtime-registered custom targets (from --target-file / mcp:custom flags).
+# Kept separate from the immutable BUNDLED_TARGETS so a custom registration can
+# never shadow or mutate a bundled family.
+_RUNTIME_TARGETS: dict[str, TargetSpec] = {}
+
+
+def register_target(spec: TargetSpec) -> None:
+    """Register a custom ``TargetSpec`` so ``resolve_target`` can find it.
+
+    Used by the ``--target-file`` / ``mcp:custom`` on-ramp. A bundled family
+    name cannot be overridden — that raises, so the reference targets stay
+    authoritative.
+    """
+    if spec.family in BUNDLED_TARGETS:
+        msg = f"cannot register a custom target over bundled family {spec.family!r}"
+        raise ValueError(msg)
+    _RUNTIME_TARGETS[spec.family] = spec
+
+
+def clear_runtime_targets() -> None:
+    """Drop all runtime-registered targets (test isolation)."""
+    _RUNTIME_TARGETS.clear()
+
+
+def known_families() -> list[str]:
+    """All resolvable family names (bundled + runtime), sorted."""
+    return sorted({*BUNDLED_TARGETS, *_RUNTIME_TARGETS})
+
+
 def resolve_target(family: str, scope: str | None) -> TargetSpec:
-    """Look up ``family`` and validate ``scope`` against its rules.
+    """Look up ``family`` (bundled first, then runtime) and validate ``scope``.
 
     Raises ``UnknownTargetFamily`` if the family isn't registered, or
     ``InvalidTargetScope`` if the scope fails the family's validator. Both
     errors propagate to the CLI for an exit-2 with the typed message.
     """
-    try:
-        spec = BUNDLED_TARGETS[family]
-    except KeyError as e:
-        msg = f"unknown MCP target family {family!r}. Known families: {sorted(BUNDLED_TARGETS)}."
-        raise UnknownTargetFamily(msg) from e
+    spec = BUNDLED_TARGETS.get(family) or _RUNTIME_TARGETS.get(family)
+    if spec is None:
+        msg = f"unknown MCP target family {family!r}. Known families: {known_families()}."
+        raise UnknownTargetFamily(msg)
     spec.scope_validator(scope)
     return spec
