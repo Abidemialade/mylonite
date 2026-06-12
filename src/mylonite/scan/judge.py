@@ -13,12 +13,27 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import BaseModel
+
 from mylonite.contracts._types import AdapterResponse, Payload
-from mylonite.scan._llm import litellm_json_call_async
+from mylonite.scan._llm import (
+    FALLBACK_CALL_RAISED,
+    litellm_json_call_async,
+    pop_fallback_cause,
+)
 from mylonite.scan._types import Verdict
 from mylonite.scan.predicates import PredicateNotFound, lookup_predicate
 
 logger = logging.getLogger(__name__)
+
+
+class _JudgeOut(BaseModel):
+    """Private response schema — drives provider-native structured output."""
+
+    success: bool
+    confidence: float
+    reason: str
+
 
 _LLM_JUDGE_CONFIDENCE_FLOOR = 0.8
 
@@ -52,10 +67,16 @@ class SuccessJudge:
         model: str,
         completion_fn: Callable[..., Any] | None = None,
         confidence_floor: float = _LLM_JUDGE_CONFIDENCE_FLOOR,
+        llm_fallback: bool = True,
     ) -> None:
         self._model = model
         self._completion_fn = completion_fn
         self._confidence_floor = confidence_floor
+        # When False, an inconclusive predicate yields success=False WITHOUT an
+        # LLM call. The deterministic demo/replay path sets this False so the
+        # differential oracle is purely predicate-driven and reproducible — the
+        # LLM judge was already inert there before the JSON-fence parse fix.
+        self._llm_fallback = llm_fallback
 
     async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
         """Return the verdict for one attempt.
@@ -84,12 +105,15 @@ class SuccessJudge:
         deterministic = predicate_fn(payload, response)
         if deterministic is not None:
             return deterministic
+        if not self._llm_fallback:
+            return Verdict(
+                success=False,
+                reason="predicate inconclusive; LLM-judge fallback disabled",
+                evidence={"predicate": predicate_name},
+                mechanism="predicate",
+            )
         # LLM fallback ---------------------------------------------------------
-        fallback = {
-            "success": False,
-            "confidence": 0.0,
-            "reason": "llm-judge fallback path failed; treating as inconclusive",
-        }
+        fallback = {"success": False, "confidence": 0.0, "reason": ""}
         result = await litellm_json_call_async(
             model=self._model,
             prompt=_build_judge_prompt(payload, response),
@@ -98,7 +122,24 @@ class SuccessJudge:
             caller="judge",
             system=_JUDGE_SYSTEM,
             completion_fn=self._completion_fn,
+            schema_model=_JudgeOut,
         )
+        # Distinguish "the call raised" from "the output was not parseable" so
+        # the verdict reason no longer misattributes a parse failure to a call
+        # failure (and so the engine can tally inconclusive attempts).
+        cause, detail = pop_fallback_cause(result)
+        if cause is not None:
+            if cause == FALLBACK_CALL_RAISED:
+                reason = f"LLM-judge inconclusive — LLM call raised: {detail}"
+            else:
+                reason = "LLM-judge inconclusive — LLM output not parseable as JSON"
+            return Verdict(
+                success=False,
+                reason=reason,
+                evidence={"fallback_cause": cause, "detail": detail or ""},
+                mechanism="llm",
+                fallback_cause=cause,
+            )
         success = bool(result.get("success"))
         try:
             confidence = float(result.get("confidence", 0.0))

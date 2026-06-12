@@ -1,8 +1,12 @@
 """Reference attack module — canned indirect-injection payload.
 
-Minimal worked example used by Phase 0 tests to prove plugin discovery and
-the AttackModule contract are wired. Phase 1 will ship the real, LLM-driven
-exploit-finding modules.
+**Example only.** This is a minimal worked example for plugin authors and for
+the Phase 0 discovery tests; it is NOT a live attack. ``discover()`` returns it
+alongside the two real families, but the ``scan``/``demo`` paths filter it out
+(only ``prompt-injection-family`` and ``excessive-agency-family`` run), so
+enumerating ``mylonite.attack_modules`` shows three modules while a scan uses
+two — that gap is intentional (Issue #16). Copy this module as a starting point
+for a real ``AttackModule``.
 """
 
 from __future__ import annotations

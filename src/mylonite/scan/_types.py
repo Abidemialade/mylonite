@@ -37,6 +37,23 @@ class AdapterInvocationSkipped(RuntimeError):
         self.attempt_metadata = attempt_metadata or {}
 
 
+class SeedArmUnavailable(RuntimeError):
+    """Raised by a TargetAdapter when a seed's required setup arm cannot be planted.
+
+    The indirect-injection payload was never delivered — the declared setup arm
+    has no implementation for this target (or its preconditions failed) — so
+    driving the planner would exercise nothing. ScanEngine records
+    ``outcome="skipped_no_seed_arm"`` so the attempt is reported as *not
+    exercised*, never silently as ``no_finding`` (which would overstate
+    coverage of the indirect-injection class).
+    """
+
+    def __init__(self, reason: str, *, attempt_metadata: dict[str, str] | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.attempt_metadata = attempt_metadata or {}
+
+
 class Verdict(BaseModel):
     """Outcome of a single judging step.
 
@@ -59,4 +76,13 @@ class Verdict(BaseModel):
     mechanism: Literal["predicate", "llm"] = Field(
         ...,
         description="Which judging mechanism produced this verdict.",
+    )
+    fallback_cause: str | None = Field(
+        default=None,
+        description=(
+            "Set when the LLM-judge could not produce a real verdict: "
+            "'call_raised' (the provider call threw) or 'unparseable_output' "
+            "(the call returned but its text was not usable JSON). None for a "
+            "genuine predicate or LLM verdict. Drives the inconclusive-rate tally."
+        ),
     )

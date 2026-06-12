@@ -121,6 +121,46 @@ def test_render_summary_shows_aborted_when_set() -> None:
     assert "aborted" in summary.lower()
 
 
+def test_render_summary_surfaces_inconclusive_rate() -> None:
+    """Issue #8: a 100%-fallback scan must not read as clean."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s",
+                pattern_id="s",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="LLM-judge inconclusive — LLM output not parseable as JSON",
+            )
+        ],
+        findings_count=0,
+        inconclusive_attempts=1,
+        fallback_breakdown={"judge_unparseable_output": 1},
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert "inconclusive" in summary
+    assert "1/1" in summary
+
+
+def test_render_summary_ascii_safe_is_pure_ascii() -> None:
+    """Issue #9: ascii_safe output must encode to ASCII so a non-UTF-8 console can't crash."""
+    summary = render_summary(_result(findings=1), ascii_safe=True)
+    summary.encode("ascii")  # must not raise
+    assert "FOUND" in summary
+    assert "✗" not in summary  # no ✗ glyph leaked
+
+
+def test_render_summary_utf8_keeps_glyphs() -> None:
+    summary = render_summary(_result(findings=1), ascii_safe=False)
+    assert "✗ FOUND" in summary
+
+
 @pytest.mark.parametrize(
     "pattern_id, expected_filename_part",
     [

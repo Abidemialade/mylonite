@@ -15,7 +15,7 @@ from mylonite.contracts._types import (
     TargetDescriptor,
 )
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, active_counter
-from mylonite.scan._types import AdapterInvocationSkipped, Verdict
+from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable, Verdict
 from mylonite.scan.engine import ScanConfig, ScanEngine
 from mylonite.scan.seeds import SEED_CATALOGUE
 
@@ -40,16 +40,30 @@ class _ModuleStub:
 
 class _AdapterStub:
     def __init__(
-        self, response: AdapterResponse | None = None, *, raise_skipped: bool = False
+        self,
+        response: AdapterResponse | None = None,
+        *,
+        raise_skipped: bool = False,
+        raise_no_seed_arm: bool = False,
+        raise_describe: bool = False,
     ) -> None:
         self._response = response
         self._raise_skipped = raise_skipped
+        self._raise_no_seed_arm = raise_no_seed_arm
+        self._raise_describe = raise_describe
         self.invoked: list[Payload] = []
 
     async def describe(self) -> TargetDescriptor:
+        if self._raise_describe:
+            raise RuntimeError("describe boom")
         return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
+        if self._raise_no_seed_arm:
+            raise SeedArmUnavailable(
+                "setup arm 'seed_note' has no implementation for family 'stub'",
+                attempt_metadata={"family": "stub", "setup": "seed_note"},
+            )
         if self._raise_skipped:
             raise AdapterInvocationSkipped(
                 "planner failure: simulated",
@@ -126,6 +140,7 @@ def _config(
     dry_run: bool = False,
     max_llm_calls: int = 50,
     pattern_id_filter: str | None = None,
+    customise: bool = True,
 ) -> ScanConfig:
     return ScanConfig(
         target_id="reference:vulnerable",
@@ -136,6 +151,7 @@ def _config(
         output_dir=Path(".mylonite/scans"),
         dry_run=dry_run,
         pattern_id_filter=pattern_id_filter,
+        customise=customise,
     )
 
 
@@ -165,6 +181,23 @@ async def test_engine_records_finding_on_success_verdict() -> None:
     assert result.exploits[0].pattern_id == payload.pattern_id
     assert result.report.attempts[0].outcome == "finding"
     assert customiser.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_customise_false_skips_customiser() -> None:
+    """config.customise=False: the per-seed customiser is never called (demo determinism)."""
+    payload = _payload_from_seed_index(0)  # has needs_customisation=true
+    customiser = _CustomiserStub()
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=customiser,
+        judge=_JudgeStub(Verdict(success=True, reason="x", evidence={}, mechanism="predicate")),
+    )
+    result = await engine.run()
+    assert customiser.calls == 0
+    assert result.report.attempts[0].outcome == "finding"
 
 
 # --- G2 / A4 metadata validation -------------------------------------------
@@ -208,6 +241,24 @@ async def test_engine_logs_skipped_planner_failure() -> None:
     )
     result = await engine.run()
     assert result.report.attempts[0].outcome == "skipped_planner_failure"
+    assert result.report.findings_count == 0
+
+
+@pytest.mark.asyncio
+async def test_engine_records_skipped_no_seed_arm_not_no_finding() -> None:
+    """Issue #5: an un-plantable indirect seed is reported skipped, never no_finding."""
+    payload = _payload_from_seed_index(0)
+    adapter = _AdapterStub(raise_no_seed_arm=True)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "skipped_no_seed_arm"
+    assert "seed_note" in (result.report.attempts[0].verdict_reason or "")
     assert result.report.findings_count == 0
 
 
@@ -307,6 +358,36 @@ async def test_engine_pattern_id_filter_no_match_is_clean_empty() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_describe_failure_aborts_describe_failed() -> None:
+    """adapter.describe() raising → aborted=describe_failed (not a silent clean pass)."""
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(raise_describe=True),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.aborted == "describe_failed"
+    assert result.report.attempts == []
+
+
+@pytest.mark.asyncio
+async def test_engine_zero_payloads_aborts_no_payloads() -> None:
+    """Issue #3: a real scan that produced no payloads must be loud, not clean-empty."""
+    engine = ScanEngine(
+        config=_config(),  # no pattern_id_filter
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([])],  # module yields nothing
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts == []
+    assert result.report.aborted == "no_payloads"
+
+
+@pytest.mark.asyncio
 async def test_engine_pattern_id_filter_none_runs_all_payloads() -> None:
     """Default ``pattern_id_filter=None`` → every payload runs (backward-compat)."""
     p0 = _payload_from_seed_index(0)
@@ -320,6 +401,64 @@ async def test_engine_pattern_id_filter_none_runs_all_payloads() -> None:
     )
     result = await engine.run()
     assert {a.pattern_id for a in result.report.attempts} == {p0.pattern_id, p1.pattern_id}
+
+
+# --- #14 per-attempt audit trace -------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_engine_persists_tool_trace_and_evidence_on_no_finding() -> None:
+    """A no_finding attempt still carries the planner tool-call trace + judge evidence."""
+    payload = _payload_from_seed_index(0)
+    judge = _JudgeStub(
+        Verdict(
+            success=False,
+            reason="held",
+            evidence={"confidence": 0.1, "recipient": "ops@example.com"},
+            mechanism="llm",
+        )
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),  # tool_calls=["read_note", "send_email"]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "no_finding"
+    assert attempt.tool_call_trace == ["read_note", "send_email"]
+    assert attempt.judge_evidence["recipient"] == "ops@example.com"
+
+
+# --- #8 inconclusive / fallback-rate tally ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_engine_counts_inconclusive_judge_fallbacks() -> None:
+    """A judge verdict carrying fallback_cause is tallied as inconclusive, not clean."""
+    payload = _payload_from_seed_index(0)
+    judge = _JudgeStub(
+        Verdict(
+            success=False,
+            reason="LLM-judge inconclusive — LLM output not parseable as JSON",
+            evidence={},
+            mechanism="llm",
+            fallback_cause="unparseable_output",
+        )
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "no_finding"
+    assert result.report.inconclusive_attempts == 1
+    assert result.report.fallback_breakdown == {"judge_unparseable_output": 1}
 
 
 # --- G7 budget tracking across layers -------------------------------------

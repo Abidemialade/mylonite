@@ -75,6 +75,13 @@ async def _record_variant(variant: str) -> tuple[int, int]:
         note_id_factory=_note_id_counter(),
         provider=DEMO_PROVIDER,
         model=DEMO_MODEL,
+        # Demo determinism: the live customiser AND the LLM-judge fallback are
+        # non-deterministic LLM calls whose output makes fixtures unreproducible
+        # (same key, different content; varying findings). The demo drives raw
+        # seed bodies judged by deterministic predicates — what it always
+        # effectively did before the JSON-fence parse fix. Record + replay must
+        # stay in lock-step on this flag.
+        llm_assist=False,
     )
     result = await engine.run()
     fixture_count = len(list(variant_dir.glob("*.json")))

@@ -20,7 +20,11 @@ from typing import ClassVar, Protocol, runtime_checkable
 
 from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 
-CONTRACT_VERSION: str = "0.1.0"
+# 0.1.0 -> 0.2.0: additive, backward-compatible — TargetDescriptor gained the
+# optional ``weakness_classes`` field so a target can declare which attack
+# classes it exposes (descriptor-driven seed selection). Existing adapters and
+# consumers are unaffected; minor bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.2.0"
 
 
 @runtime_checkable

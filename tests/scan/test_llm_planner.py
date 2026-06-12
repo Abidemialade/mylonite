@@ -164,3 +164,29 @@ async def test_planner_raises_when_completion_raises() -> None:
 def test_default_iteration_cap_is_documented() -> None:
     """Pin the default so PR 4's adapter doesn't drift."""
     assert DEFAULT_ITERATION_CAP == 8
+
+
+def test_parse_tool_arguments_repairs_non_strict_json() -> None:
+    """Some models emit non-strict tool-call argument JSON; repair rescues it."""
+    from mylonite.scan.llm_planner import _parse_tool_arguments
+
+    assert _parse_tool_arguments('{"note_id": "n1",}') == {"note_id": "n1"}  # trailing comma
+    assert _parse_tool_arguments("{'note_id': 'n1'}") == {"note_id": "n1"}  # single quotes
+    assert _parse_tool_arguments("not json at all") == {}  # unrescuable → empty
+
+
+@pytest.mark.asyncio
+async def test_planner_passes_tool_choice_auto_only_with_tools() -> None:
+    """tool_choice='auto' is sent only when tools exist (some providers error otherwise)."""
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _text_response("done.")
+
+    planner = LLMPlanner(server=server, model="stub", completion_fn=stub)
+    await planner.run("Hi.")
+    # The kitchen-sink server exposes tools → tool_choice forwarded.
+    assert seen[0].get("tool_choice") == "auto"
+    assert "tools" in seen[0]

@@ -14,9 +14,11 @@ import pytest
 # import via adapter construction in production; the catalogue test does it
 # directly.
 import mylonite.plugins._mcp  # noqa: F401
-from mylonite.contracts._types import ComplianceTags
+from mylonite.contracts._types import ComplianceTags, TargetDescriptor
+from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
+from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
 from mylonite.scan.predicates import PredicateNotFound, lookup_predicate, registered_names
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern
+from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, seeds_for_descriptor, target_family
 
 
 def test_catalogue_is_non_empty() -> None:
@@ -124,6 +126,70 @@ def test_v0_2_2_seed_body_names_target_tool(seed: SeedPattern) -> None:
         f"{sorted(expected_tools)} (target family={target!r}); none found in:\n"
         f"{seed.seed_body}"
     )
+
+
+# --- #4 descriptor-driven seed applicability --------------------------------
+
+
+def _descriptor(target_id: str, weakness_classes: list[str] | None = None) -> TargetDescriptor:
+    return TargetDescriptor(
+        target_id=target_id,
+        kind="mcp",
+        weakness_classes=weakness_classes or [],
+    )
+
+
+@pytest.mark.parametrize(
+    "target_id",
+    [
+        "reference:vulnerable",
+        "reference:guarded",
+        "mcp:filesystem:/sandbox",
+        "mcp:fetch",
+        "mcp:github:owner/repo",
+        "mcp:unknown-family",
+    ],
+)
+def test_seeds_for_descriptor_matches_legacy_family_mapping(target_id: str) -> None:
+    """Golden: with no weakness_classes, selection is byte-for-byte the legacy logic.
+
+    Guards the 3 bundled families + reference + unknown against any drift from
+    the descriptor-first refactor.
+    """
+    family = target_family(target_id)
+    legacy = [s for s in SEED_CATALOGUE if family in s.applicable_targets]
+    assert seeds_for_descriptor(_descriptor(target_id)) == legacy
+
+
+def test_seeds_for_descriptor_weakness_classes_selects_kitchen_sink_shapes() -> None:
+    """A custom target declaring weakness_classes gets the matching kitchen-sink seeds."""
+    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2", "W4"]))
+    assert got, "expected W2+W4 kitchen-sink seeds for a custom target"
+    assert {s.weakness for s in got} == {"W2", "W4"}
+    assert all("kitchen-sink" in s.applicable_targets for s in got)
+
+
+def test_attack_modules_resolve_selection_dynamically() -> None:
+    """Double-binding footgun fixed: patching seeds.seeds_for_descriptor reaches both modules."""
+    from mylonite.scan import seeds as seeds_mod
+
+    sentinel = [s for s in SEED_CATALOGUE if s.weakness == "W4"][:1]
+
+    pi = PromptInjectionAttackModule()
+    ea = ExcessiveAgencyAttackModule()
+    desc = _descriptor("mcp:filesystem:/sandbox")
+
+    original = seeds_mod.seeds_for_descriptor
+    try:
+        seeds_mod.seeds_for_descriptor = lambda _d: sentinel  # type: ignore[assignment]
+        pi_ids = [p.pattern_id for p in pi.generate_payloads(desc)]
+        ea_ids = [p.pattern_id for p in ea.generate_payloads(desc)]
+    finally:
+        seeds_mod.seeds_for_descriptor = original  # type: ignore[assignment]
+
+    # Both modules honoured the patched selection (proves dynamic resolution).
+    assert pi_ids == [sentinel[0].pattern_id]
+    assert ea_ids == [sentinel[0].pattern_id]  # W4 passes the excessive-agency filter
 
 
 def test_registry_contains_all_v0_2_1_predicates() -> None:

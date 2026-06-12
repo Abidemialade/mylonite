@@ -45,6 +45,7 @@ def build_scan(
     provider: str,
     model: str,
     pattern_id_filter: str | None = None,
+    llm_assist: bool = True,
 ) -> ScanEngine:
     """Build a ready-to-run ``ScanEngine`` for one reference variant.
 
@@ -54,6 +55,14 @@ def build_scan(
     customiser, and judge fall back to the real ``litellm.acompletion`` (the
     live path). The attack modules are instantiated directly here, not via
     entry-point discovery, so the demo wiring is fully deterministic.
+
+    ``llm_assist=False`` disables the two non-deterministic LLM-assist stages —
+    the per-seed customiser and the LLM-judge fallback — leaving raw seed bodies
+    judged purely by deterministic predicates. The demo/replay/record paths use
+    this so the recorded fixtures stay reproducible: both stages were already
+    inert in the recorded demo (their fenced output was silently discarded
+    before the JSON-fence parse fix), so it changes nothing the demo shows while
+    making it robust to the now-working parsers.
     """
     adapter = InProcessReferenceAdapter(
         variant=variant,
@@ -62,7 +71,7 @@ def build_scan(
         note_id_factory=note_id_factory,
     )
     customiser = PayloadCustomiser(model=model, completion_fn=completion_fn)
-    judge = SuccessJudge(model=model, completion_fn=completion_fn)
+    judge = SuccessJudge(model=model, completion_fn=completion_fn, llm_fallback=llm_assist)
     prompt_injection = PromptInjectionAttackModule()
     excessive_agency = ExcessiveAgencyAttackModule()
     config = ScanConfig(
@@ -72,6 +81,7 @@ def build_scan(
         max_llm_calls=100,
         max_concurrent=1,
         pattern_id_filter=pattern_id_filter,
+        customise=llm_assist,
     )
     return ScanEngine(
         config=config,

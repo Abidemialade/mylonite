@@ -27,7 +27,8 @@ from mylonite.contracts import (
     TargetDescriptor,
 )
 from mylonite.contracts.attack_module import CONTRACT_VERSION
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
+from mylonite.scan import seeds
+from mylonite.scan.seeds import SeedPattern
 
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
@@ -78,7 +79,8 @@ class PromptInjectionAttackModule(AttackModuleBase):
         # the engine doesn't waste calls on incompatible targets.
         if target.kind != "mcp":
             return
-        family = target_family(target.target_id)
-        for seed in SEED_CATALOGUE:
-            if family in seed.applicable_targets:
-                yield _payload_from_seed(seed)
+        # Selection resolved centrally (descriptor-first) via the seeds module
+        # namespace, so a single patch point governs applicability and custom
+        # targets can opt in by declaring weakness_classes. W1+W2 family.
+        for seed in seeds.seeds_for_descriptor(target):
+            yield _payload_from_seed(seed)

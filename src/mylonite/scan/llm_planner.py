@@ -25,6 +25,7 @@ from typing import Any, Protocol
 
 import litellm
 
+from mylonite.scan._llm import _try_repair
 from mylonite.scan.llm_types import (
     PlannerStep,
     PlannerTrace,
@@ -63,14 +64,19 @@ def _tool_to_openai_schema(tool: ToolDescription) -> dict[str, Any]:
 
 
 def _parse_tool_arguments(raw: object) -> dict[str, Any]:
-    """LiteLLM serialises tool-call arguments as a JSON string per OpenAI."""
+    """LiteLLM serialises tool-call arguments as a JSON string per OpenAI.
+
+    Strict-parse first; if that fails, try ``json-repair`` (some models emit
+    non-strict argument JSON) before giving up to an empty dict.
+    """
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
-            return {}
+            repaired = _try_repair(raw)
+            return repaired if isinstance(repaired, dict) else {}
         if isinstance(parsed, dict):
             return parsed
     return {}
@@ -111,12 +117,15 @@ class LLMPlanner:
         completion = self._completion_fn or litellm.acompletion
 
         for iteration in range(self._iteration_cap):
+            # Pass tools + an explicit tool_choice ONLY when tools exist; some
+            # providers error on tool_choice with no tools, and some need the
+            # explicit "auto" to actually consider the tools (cross-LLM).
+            call_kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
+            if tools_schema:
+                call_kwargs["tools"] = tools_schema
+                call_kwargs["tool_choice"] = "auto"
             try:
-                response = await completion(
-                    model=self._model,
-                    messages=messages,
-                    tools=tools_schema if tools_schema else None,
-                )
+                response = await completion(**call_kwargs)
             except Exception:
                 logger.exception("LLMPlanner: completion raised on iteration %d", iteration)
                 steps.append(

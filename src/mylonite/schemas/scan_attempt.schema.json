@@ -15,6 +15,14 @@
       "description": "Captured exception text on outcome=error; None otherwise.",
       "title": "Error Detail"
     },
+    "judge_evidence": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Verdict.evidence flattened to strings (recipients, markers, confidence).",
+      "title": "Judge Evidence",
+      "type": "object"
+    },
     "outcome": {
       "enum": [
         "finding",
@@ -22,6 +30,7 @@
         "skipped_invalid_metadata",
         "skipped_unknown_seed",
         "skipped_planner_failure",
+        "skipped_no_seed_arm",
         "skipped_dry_run",
         "error"
       ],
@@ -37,6 +46,14 @@
       "description": "The originating seed pattern_id.",
       "title": "Seed Id",
       "type": "string"
+    },
+    "tool_call_trace": {
+      "description": "Names of tools the target's planner invoked, in order \u2014 persisted for EVERY judged attempt (finding and no_finding) so a finding is auditable from the report alone.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Tool Call Trace",
+      "type": "array"
     },
     "verdict_mechanism": {
       "anyOf": [

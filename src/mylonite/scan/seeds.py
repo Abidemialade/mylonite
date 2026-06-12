@@ -16,7 +16,7 @@ so this file has no runtime dependency on the predicate implementations.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -521,3 +521,30 @@ def target_family(target_id: str) -> str:
         if len(parts) >= 2 and parts[1]:
             return parts[1]
     return "unknown"
+
+
+def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
+    """Resolve the seeds applicable to a target, descriptor-first.
+
+    The attack modules call this (through the ``seeds`` module namespace, so a
+    single patch point governs selection) instead of binding ``target_family``
+    by value.
+
+    * If ``descriptor.weakness_classes`` is non-empty, the target has *declared*
+      which attack shapes it exposes (e.g. a custom MCP app opting into
+      ``['W2', 'W4']``). Selection then matches those weaknesses against the
+      generic kitchen-sink seed shapes — the target-agnostic bodies the
+      customiser adapts to the target's own tools.
+    * Otherwise, fall back to the legacy family mapping
+      (``target_family`` + ``applicable_targets``) so the bundled
+      reference/filesystem/fetch/github targets resolve byte-for-byte as before.
+    """
+    classes = set(getattr(descriptor, "weakness_classes", None) or [])
+    if classes:
+        return [
+            s
+            for s in SEED_CATALOGUE
+            if s.weakness in classes and "kitchen-sink" in s.applicable_targets
+        ]
+    family = target_family(descriptor.target_id)
+    return [s for s in SEED_CATALOGUE if family in s.applicable_targets]

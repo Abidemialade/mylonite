@@ -51,6 +51,19 @@ The project enforces the following non-negotiables:
      literal `fetch`), making the user-intent assertion explicit even when
      no scope segment is supplied.
 
+   **Custom targets** (`--target-file target.yaml` or `mcp:custom --command …`)
+   follow the same rule keyed on the target file's `requires_scope`: with a
+   `scope` declared, `--authorize == <scope>`; otherwise `--authorize == <family>`
+   (for inline `mcp:custom`, the family is the literal `custom`). A custom target
+   can never register over a bundled family name.
+
+   **TLS / corporate proxies:** behind a TLS-inspecting proxy, provider calls
+   can fail `CERTIFICATE_VERIFY_FAILED`. Install `pip install "mylonite[enterprise]"`
+   (the CLI then uses the OS trust store via `truststore`; opt out with
+   `MYLONITE_NO_TRUSTSTORE=1`) or set `SSL_CERT_FILE` to your corporate CA bundle.
+   Run `mylonite doctor` to distinguish a TLS failure from an auth/network/rate
+   problem. Mylonite never disables certificate verification.
+
    Each `invoke()` spawns a fresh subprocess of the bundled server. Users
    are advised to point `mcp:filesystem` at a throwaway sandbox directory
    they own, point `mcp:github` at a throwaway repository with a

@@ -101,6 +101,64 @@ async def test_llm_invalid_json_falls_back_to_failure() -> None:
     v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
     assert v.success is False
     assert v.mechanism == "llm"
+    # Issue #7: a parse failure must be reported as such, distinct from a call failure.
+    assert v.fallback_cause == "unparseable_output"
+    assert "not parseable" in v.reason
+    assert "call raised" not in v.reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_llm_call_raised_reports_call_failure() -> None:
+    """Issue #7: a raised provider call must read as a call failure, not a parse failure."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+    judge = SuccessJudge(model="stub", completion_fn=stub)
+    v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
+    assert v.success is False
+    assert v.mechanism == "llm"
+    assert v.fallback_cause == "call_raised"
+    assert "LLM call raised" in v.reason
+    assert "CERTIFICATE_VERIFY_FAILED" in v.reason
+
+
+@pytest.mark.asyncio
+async def test_llm_fenced_json_is_accepted() -> None:
+    """Issue #6: fenced judge output must parse, not fall back to inconclusive."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response('```json\n{"success": true, "confidence": 0.95, "reason": "ok"}\n```')
+
+    judge = SuccessJudge(model="stub", completion_fn=stub)
+    v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
+    assert v.success is True
+    assert v.mechanism == "llm"
+    assert v.fallback_cause is None
+
+
+@pytest.mark.asyncio
+async def test_llm_fallback_disabled_is_predicate_only() -> None:
+    """llm_fallback=False: an inconclusive predicate returns failure WITHOUT an LLM call.
+
+    This is the deterministic demo/replay mode — the differential oracle is
+    purely predicate-driven and never touches the (non-deterministic) LLM judge.
+    """
+    called = False
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        nonlocal called
+        called = True
+        return _stub_response('{"success": true, "confidence": 1.0, "reason": "x"}')
+
+    judge = SuccessJudge(model="stub", completion_fn=stub, llm_fallback=False)
+    v = await judge.judge(
+        _payload(), _response(tool_calls=("read_note",))
+    )  # predicate inconclusive
+    assert v.success is False
+    assert v.mechanism == "predicate"
+    assert v.fallback_cause is None
+    assert called is False
 
 
 @pytest.mark.asyncio
