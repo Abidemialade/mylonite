@@ -242,7 +242,9 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
     return family, scope
 
 
-def _enforce_custom_authorize(family: str, scope: str | None, requires_scope: bool, authorize: str | None) -> None:
+def _enforce_custom_authorize(
+    family: str, scope: str | None, requires_scope: bool, authorize: str | None
+) -> None:
     """Apply the same --authorize rule custom targets share with bundled ones."""
     if requires_scope:
         if authorize != scope:
@@ -325,7 +327,11 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
         target_registry.resolve_target(spec.family, target_file.scope)
-    except (target_registry.InvalidTargetScope, target_registry.UnknownTargetFamily, ValueError) as exc:
+    except (
+        target_registry.InvalidTargetScope,
+        target_registry.UnknownTargetFamily,
+        ValueError,
+    ) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     return MCPStdioAdapter(family=spec.family, scope=target_file.scope, model=model)
@@ -445,7 +451,9 @@ def scan(
     ] = None,
     system_prompt_file: Annotated[
         Path | None,
-        typer.Option("--system-prompt-file", help="mcp:custom — read the system prompt from a file."),
+        typer.Option(
+            "--system-prompt-file", help="mcp:custom — read the system prompt from a file."
+        ),
     ] = None,
     primary_tool: Annotated[
         list[str] | None,
@@ -506,9 +514,7 @@ def scan(
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
-            typer.echo(
-                "--authorize is required for custom targets. See SECURITY.md.", err=True
-            )
+            typer.echo("--authorize is required for custom targets. See SECURITY.md.", err=True)
             raise typer.Exit(code=EXIT_CONFIG)
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file

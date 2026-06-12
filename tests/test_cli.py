@@ -247,9 +247,7 @@ def test_scan_custom_target_without_weakness_classes_is_loud(
     _patch_fake_mcp_session(monkeypatch)
     p = tmp_path / "t.yaml"
     p.write_text("family: triagent\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
-    result = runner.invoke(
-        app, ["scan", "--target-file", str(p), "--authorize", "triagent"]
-    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "triagent"])
     assert result.exit_code == EXIT_CONFIG
     assert "no seeds" in (result.stderr or result.output).lower()
     target_registry.clear_runtime_targets()
@@ -259,7 +257,9 @@ def test_route_model_prefixes_only_when_provider_explicit() -> None:
     from mylonite.cli import _route_model
 
     # User set --provider and the alias lacks a route prefix → prefix it (#13).
-    assert _route_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    assert (
+        _route_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    )
     # No explicit provider → leave the auto-routing default untouched.
     assert _route_model(None, "claude-sonnet-4-6") == "claude-sonnet-4-6"
     # Already prefixed → don't double-prefix.

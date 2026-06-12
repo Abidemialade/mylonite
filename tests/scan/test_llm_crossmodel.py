@@ -67,7 +67,9 @@ def _run(response: SimpleNamespace) -> dict[str, Any]:
         ("array_wrapped", _content('[{"body": "hi"}]'), {"body": "hi"}),
     ],
 )
-def test_parse_matrix(label: str, response: SimpleNamespace, expected: dict[str, Any] | None) -> None:
+def test_parse_matrix(
+    label: str, response: SimpleNamespace, expected: dict[str, Any] | None
+) -> None:
     result = _run(response)
     cause, _ = pop_fallback_cause(result)
     if expected is None:
@@ -212,7 +214,9 @@ def test_typed_exceptions_map_to_categories() -> None:
 
 
 def test_tls_wrapped_in_connection_error_is_tls_not_network() -> None:
-    exc = RuntimeError("APIConnectionError - [SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer")
+    exc = RuntimeError(
+        "APIConnectionError - [SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer"
+    )
     assert classify_provider_error(exc).category == "tls"
 
 
@@ -223,7 +227,9 @@ def test_provider_from_model() -> None:
     assert provider_from_model("gpt-4o", declared="openai") == "openai"
     assert provider_from_model("anthropic/claude-haiku-4-5") == "anthropic"
     assert provider_from_model("gemini/gemini-1.5-pro") == "google"  # normalised
-    assert provider_from_model("totally-made-up-model-xyz") is None  # get_llm_provider raises → None
+    assert (
+        provider_from_model("totally-made-up-model-xyz") is None
+    )  # get_llm_provider raises → None
 
 
 def test_env_vars_for() -> None:

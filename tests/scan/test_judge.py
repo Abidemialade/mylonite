@@ -152,7 +152,9 @@ async def test_llm_fallback_disabled_is_predicate_only() -> None:
         return _stub_response('{"success": true, "confidence": 1.0, "reason": "x"}')
 
     judge = SuccessJudge(model="stub", completion_fn=stub, llm_fallback=False)
-    v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))  # predicate inconclusive
+    v = await judge.judge(
+        _payload(), _response(tool_calls=("read_note",))
+    )  # predicate inconclusive
     assert v.success is False
     assert v.mechanism == "predicate"
     assert v.fallback_cause is None

@@ -166,7 +166,7 @@ show_error_codes = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["litellm.*", "mcp.*", "mcp_kitchen_sink.*"]
+module = ["litellm.*", "mcp.*", "mcp_kitchen_sink.*", "truststore.*", "json_repair.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

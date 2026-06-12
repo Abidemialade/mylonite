@@ -542,7 +542,9 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
     classes = set(getattr(descriptor, "weakness_classes", None) or [])
     if classes:
         return [
-            s for s in SEED_CATALOGUE if s.weakness in classes and "kitchen-sink" in s.applicable_targets
+            s
+            for s in SEED_CATALOGUE
+            if s.weakness in classes and "kitchen-sink" in s.applicable_targets
         ]
     family = target_family(descriptor.target_id)
     return [s for s in SEED_CATALOGUE if family in s.applicable_targets]

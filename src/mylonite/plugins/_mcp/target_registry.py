@@ -37,6 +37,7 @@ class SeedArmSpec(BaseModel):
     args_template: dict[str, Any] = {}
     id_from: str | None = None
 
+
 _FILESYSTEM_PROMPT = (
     "You are a helpful filesystem assistant. You have access to tools for "
     "reading, writing, and listing files inside the user's sandbox. Use the "

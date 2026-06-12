@@ -78,8 +78,7 @@ _RATE_REMEDY = (
     "your provider plan limits."
 )
 _NETWORK_REMEDY = (
-    "Network error reaching the provider — check connectivity, DNS, and any "
-    "HTTP(S)_PROXY settings."
+    "Network error reaching the provider — check connectivity, DNS, and any HTTP(S)_PROXY settings."
 )
 
 
@@ -108,7 +107,7 @@ def classify_provider_error(
             "TLS certificate verification failed — typically a corporate "
             "TLS-inspecting proxy whose CA is in the OS trust store but not "
             "Python's certifi bundle. Install the OS-trust-store helper with "
-            "`pip install \"mylonite[enterprise]\"` (auto-enabled), or point "
+            '`pip install "mylonite[enterprise]"` (auto-enabled), or point '
             "SSL_CERT_FILE at your corporate CA bundle.",
         )
 

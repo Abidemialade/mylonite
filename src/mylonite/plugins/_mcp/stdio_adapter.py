@@ -109,7 +109,9 @@ def _render_seed_args(template: Any, payload_body: str, scope: str | None, _dept
     if isinstance(template, str):
         return template.replace("{payload}", payload_body).replace("{scope}", scope or "")
     if isinstance(template, dict):
-        return {k: _render_seed_args(v, payload_body, scope, _depth + 1) for k, v in template.items()}
+        return {
+            k: _render_seed_args(v, payload_body, scope, _depth + 1) for k, v in template.items()
+        }
     if isinstance(template, list):
         return [_render_seed_args(v, payload_body, scope, _depth + 1) for v in template]
     return template
