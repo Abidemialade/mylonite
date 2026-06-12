@@ -464,18 +464,22 @@ def test_demo_missing_kitchen_sink_maps_to_exit_2(monkeypatch: pytest.MonkeyPatc
     assert "Traceback" not in out
 
 
-def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
+def test_demo_missing_kitchen_sink_via_real_import_maps_to_exit_2(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A mcp_kitchen_sink absence at *import time* → exit 2, not a raw traceback.
+    """A mcp_kitchen_sink absence → exit 2, not a raw traceback.
 
-    `mylonite.demo.runner` transitively imports `mcp_kitchen_sink` at module
-    load (runner -> mylonite.scan.wiring -> reference_target_adapter ->
-    mcp_kitchen_sink._store). This drives the real import-time path inside the
-    ``demo`` command: it evicts the cached modules and installs a meta_path
-    finder that makes importing ``mcp_kitchen_sink`` raise ModuleNotFoundError,
-    so the command's local ``from mylonite.demo.runner import ...`` re-runs and
-    fails there — before ``run_demo`` is ever called.
+    ``reference_target_adapter`` now imports ``mcp_kitchen_sink`` *lazily*
+    (inside ``describe()``/``invoke()``), so ``import mylonite.testkit`` /
+    ``mylonite generate`` work without the reference package. The reference twin
+    is therefore loaded at *run* time: ``run_demo`` → engine → ``describe()`` →
+    ``from mcp_kitchen_sink._store import NoteStore``. The engine re-raises that
+    ImportError (a missing optional dependency is a config error, not a target
+    failure), so it propagates out of ``run_demo`` and the ``demo`` command's
+    ImportError guard maps it to a friendly exit 2.
+
+    This evicts the cached modules and installs a meta_path finder that makes
+    importing ``mcp_kitchen_sink`` raise ModuleNotFoundError, driving that path.
     """
 
     class _BlockKitchenSink(MetaPathFinder):
@@ -486,6 +490,24 @@ def test_demo_import_time_missing_kitchen_sink_maps_to_exit_2(
 
     # Evict cached modules so the command's local import re-runs and hits the
     # finder. monkeypatch.delitem auto-restores the originals after the test.
+    #
+    # The command's re-import also repoints the PARENT package's submodule
+    # attribute (e.g. ``mylonite.demo.runner``) at the freshly-imported module
+    # object. monkeypatch.delitem only restores ``sys.modules`` — not that parent
+    # attribute — which would leave ``from mylonite.demo import runner`` and
+    # ``from mylonite.demo.runner import ...`` resolving to DIFFERENT objects and
+    # silently break a later test's monkeypatch. Snapshot each parent attribute so
+    # monkeypatch restores it on teardown, keeping the two resolutions in sync.
+    submodule_parents = [
+        ("mylonite.demo", "runner"),
+        ("mylonite.scan", "wiring"),
+        ("mylonite.plugins._reference", "reference_target_adapter"),
+    ]
+    for parent_name, attr in submodule_parents:
+        parent = sys.modules.get(parent_name)
+        if parent is not None and hasattr(parent, attr):
+            monkeypatch.setattr(parent, attr, getattr(parent, attr), raising=False)
+
     for name in list(sys.modules):
         if (
             name == "mcp_kitchen_sink"

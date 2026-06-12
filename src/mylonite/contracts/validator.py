@@ -23,7 +23,10 @@ from typing import ClassVar, Protocol, runtime_checkable
 from mylonite.contracts._types import GeneratedTest, ValidationReport
 from mylonite.contracts.target_adapter import TargetAdapter
 
-CONTRACT_VERSION: str = "0.2.0"
+# 0.2.0 -> 0.3.0: additive — ValidationOutcome.stage gained "stability",
+# "effect", "consensus" legs for custom-target validation (re-driving the real
+# target instead of the bundled twin). Existing consumers/legs unchanged.
+CONTRACT_VERSION: str = "0.3.0"
 
 
 class VulnerableOracle(Protocol):

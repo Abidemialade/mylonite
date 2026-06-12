@@ -124,6 +124,12 @@ class ScanEngine:
         with counter.active():
             try:
                 descriptor = await self._adapter.describe()
+            except ImportError:
+                # A missing dependency (e.g. the optional reference target) is a
+                # configuration error, not a target failure — surface it so the
+                # CLI can map it to a clear exit, rather than hiding it behind a
+                # generic "describe_failed".
+                raise
             except Exception:
                 logger.exception("ScanEngine: adapter.describe() raised")
                 aborted = "describe_failed"

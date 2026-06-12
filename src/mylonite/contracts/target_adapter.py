@@ -24,7 +24,12 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 # optional ``weakness_classes`` field so a target can declare which attack
 # classes it exposes (descriptor-driven seed selection). Existing adapters and
 # consumers are unaffected; minor bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.2.0"
+# 0.2.0 -> 0.3.0: additive — the scan report's ``ScanAttemptOutcome`` enum gained
+# ``skipped_payload_not_delivered`` (an indirect payload that was never retrieved
+# is reported as not-delivered rather than silently clean). Backward-compatible
+# for adapters; report readers that switch exhaustively on the outcome see one
+# new value. Minor bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.3.0"
 
 
 @runtime_checkable

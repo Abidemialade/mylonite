@@ -186,6 +186,15 @@ class _IterationTally:
 
 
 @dataclass(frozen=True)
+class _CustomRun:
+    """Per-iteration result of re-driving a CUSTOM target (no twin)."""
+
+    finding: bool
+    effect_confirmed: str  # "true" | "false" | "unprobed"
+    response: Any
+
+
+@dataclass(frozen=True)
 class _MutationResult:
     """Per-seed mutation kill matrix over the kitchen-sink seeds."""
 
@@ -228,10 +237,16 @@ class DifferentialValidator(ValidatorBase):
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
         metamorphic_strategies: list[str] | None = None,
+        target_adapter_factory: Callable[[], Any] | None = None,
+        consensus_judges: int = 3,
     ) -> None:
         if iterations < 1:
             raise ValueError("iterations must be >= 1")
         self._iterations = iterations
+        # For a CUSTOM target: re-launch a fresh real adapter per run (isolation).
+        # Defaults to reusing the adapter passed to validate().
+        self._target_adapter_factory = target_adapter_factory
+        self._consensus_judges = max(1, consensus_judges)
         # Defaults: vulnerable should fire almost-always (N-1), guard must
         # resist every single run (N) — a guard that leaks even once is not a
         # guard.
@@ -265,7 +280,16 @@ class DifferentialValidator(ValidatorBase):
         target: TargetAdapter,
         oracle: VulnerableOracle,
     ) -> ValidationReport:
-        del target, oracle  # the validator drives both twins itself by variant
+        # Honor the contract: a reference target uses the bundled differential
+        # twins (unchanged); a CUSTOM target is re-driven for real (R1/R8) — the
+        # emitted test must fail when the actual app regresses, not when the
+        # kitchen-sink reference does.
+        del oracle  # the reference path drives both twins itself by variant
+        if not test.exploit.target_id.startswith("reference:"):
+            return self._validate_custom_target(test, target)
+        return self._validate_reference(test)
+
+    def _validate_reference(self, test: GeneratedTest) -> ValidationReport:
         pattern_id = test.exploit.pattern_id
 
         # 1+2. differential + flakiness — the one live loop (the moat).
@@ -335,6 +359,152 @@ class DifferentialValidator(ValidatorBase):
             notes=notes,
             mutation_score=mutation.score,
         )
+
+    # -- custom target: re-drive the REAL app (no in-repo guarded twin) --------
+
+    def _validate_custom_target(
+        self, test: GeneratedTest, target: TargetAdapter
+    ) -> ValidationReport:
+        """Validate a test named for a CUSTOM target by re-driving the REAL target.
+
+        There is no in-repo guarded twin, so rigor comes from: STABILITY (the
+        attack reproduces across N runs of the actual app), EFFECT (the target's
+        own effect probe confirms the damage materialised end-to-end), and
+        CONSENSUS (adversarial multi-judge majority). A "kept" test fails when the
+        real target regresses — the property the kitchen-sink-bound path lacked.
+        """
+        pattern_id = test.exploit.pattern_id
+        n = self._iterations
+        runs = [self._run_custom_iteration(target, pattern_id) for _ in range(n)]
+        fired = sum(1 for r in runs if r.finding)
+        effect_yes = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
+        probed = any(r.effect_confirmed in ("true", "false") for r in runs)
+
+        stability = ValidationOutcome(
+            stage="stability",
+            passed=fired >= self._vuln_threshold,
+            detail=(
+                f"the attack reproduced against the real target {fired}/{n} runs "
+                f"(need >= {self._vuln_threshold})"
+            ),
+            metric=(fired / n) if n else 0.0,
+        )
+        if probed:
+            effect = ValidationOutcome(
+                stage="effect",
+                passed=effect_yes >= self._vuln_threshold,
+                detail=(
+                    f"the target's effect probe confirmed the damage materialised "
+                    f"end-to-end {effect_yes}/{n} runs (need >= {self._vuln_threshold})"
+                ),
+                metric=(effect_yes / n) if n else 0.0,
+            )
+        else:
+            effect = ValidationOutcome(
+                stage="effect",
+                passed=True,
+                detail=(
+                    "no effect_probe declared on the target — effect leg is "
+                    "report-only; declare an effect_probe in the target file for "
+                    "end-to-end damage confirmation"
+                ),
+                metric=None,
+            )
+        agree = self._multi_judge_consensus([r for r in runs if r.finding], test.exploit.payload)
+        consensus = ValidationOutcome(
+            stage="consensus",
+            passed=fired > 0 and agree >= 0.5,
+            detail=(
+                f"adversarial multi-judge consensus on firing runs = {agree:.2f} "
+                "(majority required; judges the captured tool results, not just calls)"
+            ),
+            metric=agree,
+        )
+        build = ValidationOutcome(
+            stage="build",
+            passed=True,
+            detail=(
+                "custom-target regression test emitted; it re-drives the real "
+                "target via testkit.assert_attack_reproduces"
+            ),
+            metric=None,
+        )
+        kept = build.passed and stability.passed and effect.passed and consensus.passed
+        notes = (
+            f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "
+            f"effect-probe confirmed {effect_yes}/{n}, consensus={agree:.2f}; "
+            f"{'KEPT' if kept else 'REJECTED'} "
+            "(kept = build ∧ stability ∧ effect ∧ consensus). No in-repo guarded "
+            "twin — validated by re-driving the REAL target N times."
+        )
+        return ValidationReport(
+            test_filename=test.filename,
+            outcomes=[build, stability, effect, consensus],
+            kept=kept,
+            notes=notes,
+            mutation_score=0.0,
+        )
+
+    def _run_custom_iteration(self, target: TargetAdapter, pattern_id: str) -> _CustomRun:
+        """Run the attack once against the real target, scoped to one seed."""
+        from mylonite.plugins.registry import discover
+        from mylonite.scan.customiser import PayloadCustomiser
+        from mylonite.scan.engine import ScanConfig, ScanEngine
+        from mylonite.scan.judge import SuccessJudge
+
+        adapter = self._target_adapter_factory() if self._target_adapter_factory else target
+        modules = [
+            m
+            for m in discover("mylonite.attack_modules")
+            if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
+        ]
+        config = ScanConfig(
+            target_id="mcp:custom",  # report id; seed selection uses the descriptor
+            provider=self._provider,
+            model=self._model,
+            max_concurrent=1,
+            pattern_id_filter=pattern_id,
+        )
+        engine = ScanEngine(
+            config=config,
+            adapter=adapter,
+            attack_modules=modules,
+            customiser=PayloadCustomiser(model=self._model, completion_fn=self._completion_fn),
+            judge=SuccessJudge(model=self._model, completion_fn=self._completion_fn),
+        )
+        result = asyncio.run(engine.run())
+        if result.exploits:
+            response = result.exploits[0].response
+            return _CustomRun(
+                finding=True,
+                effect_confirmed=response.metadata.get("effect_confirmed", "unprobed"),
+                response=response,
+            )
+        return _CustomRun(finding=False, effect_confirmed="unprobed", response=None)
+
+    def _multi_judge_consensus(self, firing_runs: list[_CustomRun], payload: Any) -> float:
+        """Fraction of independent judge calls (across firing runs) that agree it's real.
+
+        Diverse, repeated judging guards against a single LLM verdict — the rigor
+        gap for custom targets. When an effect probe drove the verdict the judge is
+        deterministic (agreement ~1.0); otherwise repeated LLM judging surfaces
+        flaky/over-eager verdicts.
+        """
+        from mylonite.scan.judge import SuccessJudge
+
+        runs = [r for r in firing_runs if r.response is not None]
+        if not runs:
+            return 0.0
+        judge = SuccessJudge(model=self._model, completion_fn=self._completion_fn)
+        agree = 0
+        total = 0
+        for r in runs:
+            for _ in range(self._consensus_judges):
+                verdict = asyncio.run(judge.judge(payload, r.response))
+                total += 1
+                if verdict.success:
+                    agree += 1
+        return (agree / total) if total else 0.0
 
     # -- pure decision helper (unit-tested directly) --------------------------
 

@@ -10,8 +10,9 @@ from __future__ import annotations
 from mylonite.contracts import ValidationOutcome, ValidationReport, validator
 
 
-def test_validator_contract_version_is_0_2_0() -> None:
-    assert validator.CONTRACT_VERSION == "0.2.0"
+def test_validator_contract_version() -> None:
+    # 0.3.0: ValidationOutcome.stage gained stability/effect/consensus legs.
+    assert validator.CONTRACT_VERSION == "0.3.0"
 
 
 def test_validation_outcome_metric_round_trips() -> None:

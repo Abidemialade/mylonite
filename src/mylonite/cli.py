@@ -934,6 +934,52 @@ def generate(
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
+def _validate_custom(
+    generated: Any, target_file: Path | None, iterations: int, provider: str, model: str
+) -> Any:
+    """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._reference.reference_validator import (
+        DifferentialValidator,
+        ReferenceVulnerableOracle,
+    )
+
+    if target_file is None:
+        typer.echo(
+            "validating a custom-target test requires --target-file (the same target "
+            "YAML you scanned); the validator re-drives the real target.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    try:
+        tf = load_target_file(target_file)
+        spec = build_target_spec(tf)
+    except Exception as exc:
+        typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def _factory() -> Any:
+        return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=model)
+
+    typer.echo(
+        f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
+        "+ multi-judge consensus + effect probe (no in-repo twin).",
+        err=True,
+    )
+    validator = DifferentialValidator(
+        iterations=iterations,
+        provider=provider,
+        model=model,
+        target_adapter_factory=_factory,
+    )
+    return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+
+
 def _locate_generated(target: Path) -> tuple[Path, Path]:
     """Locate ``(test_security_*.py, exploit_*.json)`` for a validate TARGET.
 
@@ -1010,6 +1056,9 @@ def _render_validation_report(report: Any) -> None:
             "build": "build fail → emitted test didn't collect; re-run `mylonite generate`.",
             "differential": "differential fail → no discriminating power between the twins.",
             "flakiness": "flakiness fail → exploit too flaky to gate; try a more deterministic seed.",
+            "stability": "stability fail → the attack did not reproduce against the real target.",
+            "effect": "effect fail → the target's effect probe did not confirm the damage materialised.",
+            "consensus": "consensus fail → judges disagreed the effect was real; add an effect_probe.",
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:
@@ -1064,6 +1113,18 @@ def validate(
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
+    ] = None,
+    target_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--target-file",
+            help=(
+                "Required when validating a test for a CUSTOM target: the same "
+                "target YAML you scanned. The validator re-drives the REAL target "
+                "(N runs + multi-judge consensus + effect probe) instead of the "
+                "bundled twin, so the test fails when YOUR app regresses."
+            ),
+        ),
     ] = None,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
@@ -1122,47 +1183,52 @@ def validate(
         exploit=exploit,
     )
 
-    typer.echo(
-        f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
-        "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).",
-        err=True,
-    )
-
-    # Fail fast on an unreachable provider with a distinct exit 4 — otherwise the
-    # full loop would just report a misleading non-discriminating result.
-    try:
-        reachable = _provider_preflight(effective_provider, effective_model)
-    except (ModuleNotFoundError, ImportError) as exc:
-        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-            typer.echo(
-                "the Quarry reference target isn't installed — run "
-                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        raise
-    if not reachable:
+    is_custom = not exploit.target_id.startswith("reference:")
+    if is_custom:
+        report = _validate_custom(
+            generated, target_file, iterations, effective_provider, effective_model
+        )
+    else:
         typer.echo(
-            "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-            "--provider/--model for another LiteLLM provider.",
+            f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
+            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).",
             err=True,
         )
-        raise typer.Exit(code=EXIT_PROVIDER)
+        # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
+        # the full loop would just report a misleading non-discriminating result.
+        try:
+            reachable = _provider_preflight(effective_provider, effective_model)
+        except (ModuleNotFoundError, ImportError) as exc:
+            if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+                typer.echo(
+                    "the Quarry reference target isn't installed — run "
+                    "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
+                    err=True,
+                )
+                raise typer.Exit(code=EXIT_CONFIG) from exc
+            raise
+        if not reachable:
+            typer.echo(
+                "no provider reachable — set ANTHROPIC_API_KEY, or pass "
+                "--provider/--model for another LiteLLM provider.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_PROVIDER)
 
-    validator = DifferentialValidator(
-        iterations=iterations,
-        provider=effective_provider,
-        model=effective_model,
-        # Record the canonical guarded fixtures into the gen dir's `fixtures/` and
-        # run the on-disk committed test offline as a full-pass build — closing
-        # the validate→committed-artefact loop.
-        record_fixtures_dir=test_path.parent / "fixtures",
-    )
-    report = validator.validate(
-        generated,
-        ReferenceVulnerableOracle().adapter(),
-        ReferenceVulnerableOracle(),
-    )
+        validator = DifferentialValidator(
+            iterations=iterations,
+            provider=effective_provider,
+            model=effective_model,
+            # Record the canonical guarded fixtures into the gen dir's `fixtures/`
+            # and run the on-disk committed test offline as a full-pass build —
+            # closing the validate→committed-artefact loop.
+            record_fixtures_dir=test_path.parent / "fixtures",
+        )
+        report = validator.validate(
+            generated,
+            ReferenceVulnerableOracle().adapter(),
+            ReferenceVulnerableOracle(),
+        )
 
     _render_validation_report(report)
 

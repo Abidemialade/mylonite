@@ -32,7 +32,10 @@
             "build",
             "differential",
             "flakiness",
-            "metamorphic"
+            "metamorphic",
+            "stability",
+            "effect",
+            "consensus"
           ],
           "title": "Stage",
           "type": "string"

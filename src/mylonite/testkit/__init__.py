@@ -366,8 +366,72 @@ def assert_guard_holds(
     _assert_from_result(result, exploit)
 
 
+def assert_target_resists(
+    exploit: ExploitRecord,
+    *,
+    target_file: str | os.PathLike[str],
+    model: str = "claude-haiku-4-5",
+    provider: str = "anthropic",
+    _completion_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Assert the REAL declared target still RESISTS ``exploit`` — fails on regression.
+
+    Unlike :func:`assert_guard_holds` (which replays against the bundled
+    kitchen-sink twin), this re-drives the *actual* target declared by
+    ``target_file`` (scoped to the exploit's seed) and asserts the attack does NOT
+    take effect. A target that has regressed — the attack lands, or its declared
+    effect probe confirms the damage materialised — raises ``AssertionError``. So
+    a test named for ``mcp:<your-app>`` fails when *your app* regresses, not when
+    the reference does.
+
+    This is a LIVE check (it launches the target's MCP server and calls the
+    provider), so emitted tests gate it behind ``MYLONITE_LIVE_TARGET=1``.
+    ``_completion_fn`` is the test-only offline seam.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins.registry import discover
+    from mylonite.scan.customiser import PayloadCustomiser
+    from mylonite.scan.engine import ScanConfig, ScanEngine
+    from mylonite.scan.judge import SuccessJudge
+
+    tf = load_target_file(Path(target_file))
+    spec = build_target_spec(tf)
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    try:
+        modules = [
+            m
+            for m in discover("mylonite.attack_modules")
+            if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
+        ]
+        adapter = MCPStdioAdapter(
+            family=spec.family, scope=tf.scope, model=model, completion_fn=_completion_fn
+        )
+        config = ScanConfig(
+            target_id=f"mcp:{spec.family}",
+            provider=provider,
+            model=model,
+            max_concurrent=1,
+            pattern_id_filter=exploit.pattern_id,
+        )
+        engine = ScanEngine(
+            config=config,
+            adapter=adapter,
+            attack_modules=modules,
+            customiser=PayloadCustomiser(model=model, completion_fn=_completion_fn),
+            judge=SuccessJudge(model=model, completion_fn=_completion_fn),
+        )
+        result = asyncio.run(engine.run())
+    finally:
+        target_registry.clear_runtime_targets()
+    _assert_from_result(result, exploit)
+
+
 __all__ = [
     "TestkitFixtureError",
     "assert_guard_holds",
+    "assert_target_resists",
     "load_exploit",
 ]

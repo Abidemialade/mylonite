@@ -182,7 +182,16 @@ class ValidationOutcome(BaseModel):
 
     model_config = _FROZEN
 
-    stage: Literal["build", "differential", "flakiness", "metamorphic"]
+    stage: Literal[
+        "build",
+        "differential",
+        "flakiness",
+        "metamorphic",
+        # Custom-target legs (no in-repo guarded twin): re-drive the real target.
+        "stability",
+        "effect",
+        "consensus",
+    ]
     passed: bool
     detail: str
     metric: float | None = Field(

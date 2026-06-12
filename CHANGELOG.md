@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — effect-aware findings, delivery verification, custom-target validation
+
+- **Findings now turn on the damaging *effect*, not the tool name.** Both MCP
+  adapters (stdio + in-process reference) capture each tool's `content` + `isError`
+  into a normalized `effect_trace` in the response metadata, and the judge requires
+  the consequence to have *materialized*: a deferred / refused / `is_error` result
+  (e.g. "queued for approval", "host not in allowlist") is **not** a success even
+  when the consequential tool was named. The deterministic weight rests on the
+  MCP-protocol `isError` flag and a target-declared effect probe — provider- and
+  wording-independent — with the LLM judge as a secondary signal only.
+- **Effect probe (`EffectProbeSpec`).** A target file / seed can declare, per
+  consequential capability, how to confirm the effect end-to-end (run a verify tool
+  after the planner and check for an expected marker), plus an overridable
+  `deferred_markers` list. The adapter stamps `effect_confirmed = true|false|unprobed`.
+  Generic over email / file-write / issue / payment / egress / DB mutation — any
+  consequential action — so a finding can mean "damage confirmed" on an arbitrary app.
+- **One generic deterministic predicate.** `consequential_action_executed` reads the
+  declared consequential tool + the effect trace + the effect probe (priority:
+  `isError` → effect probe → an overridable marker heuristic as last resort),
+  replacing per-capability predicate functions. No English keyword is load-bearing.
+- **Delivery verification — a misfire no longer reads as clean.** Indirect seeds
+  inject a unique delivery marker into the planted body and capture the planted
+  handle robustly (`SeedArmSpec` gained `id_key` / `id_pattern`); if the poison is
+  never retrieved into the model's context, the attempt is reported
+  `skipped_payload_not_delivered` rather than `no_finding` (mirroring the existing
+  `skipped_no_seed_arm` honesty precedent). A `recall_all` drive lets a keyless
+  target still surface the poison.
+- **Custom-target validation — the moat no longer requires the bundled twin.**
+  `DifferentialValidator` now honours `target` / `oracle`: a `reference:*` exploit
+  takes the unchanged twin differential; a **custom** `target_id` re-drives the
+  operator's REAL MCP server (fresh subprocess per run, `--authorize`-gated) and
+  keeps the test only if it passes **stability** (the attack reproduces across N
+  runs) ∧ **effect** (the effect probe confirms damage — replacing the missing
+  twin) ∧ **consensus** (adversarial multi-judge majority). New public testkit
+  helper `assert_target_resists(exploit, *, target_file=…)` re-drives the real
+  target and asserts it still resists (live-gated behind `MYLONITE_LIVE_TARGET=1`);
+  the pytest generator emits this for custom targets while reference targets stay
+  byte-for-byte (`assert_guard_holds`). `mylonite validate --target-file …` runs
+  the custom path.
+- **`mylonite.testkit` / `mylonite generate` no longer require the reference
+  package.** `reference_target_adapter` imports `mcp_kitchen_sink` lazily (inside
+  `describe()` / `invoke()`), so importing the testkit or generating a test works
+  without the optional reference install. The scan engine re-raises an `ImportError`
+  from `describe()` (a missing optional dependency is a configuration error, not a
+  target failure) so the CLI maps it to a clear exit instead of a generic
+  `describe_failed`.
+
+### Changed
+
+- **`validator` contract `CONTRACT_VERSION` 0.2.0 → 0.3.0** (minor, additive).
+  `ValidationOutcome.stage` gained `stability` / `effect` / `consensus` legs for the
+  custom-target validation path. Existing reference-path reports are unaffected.
+- **`target_adapter` contract `CONTRACT_VERSION` 0.2.0 → 0.3.0** (minor, additive).
+  The scan report's `ScanAttemptOutcome` enum gained `skipped_payload_not_delivered`.
+  Backward-compatible for adapters; report readers see one new outcome value.
+
 ## [0.5.0] - 2026-06-12
 
 ### Added — cross-LLM robustness (JSON ingestion/emission + provider-agnostic auth)
