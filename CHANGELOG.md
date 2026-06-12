@@ -63,6 +63,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The scan report's `ScanAttemptOutcome` enum gained `skipped_payload_not_delivered`.
   Backward-compatible for adapters; report readers see one new outcome value.
 
+### Added — plug-and-play on-ramp (scaffold, keys, docs)
+
+- **`mylonite init-target`** scaffolds a custom-target YAML by launching your MCP
+  server once (no LLM call), listing its tools, and writing a commented starter
+  with SUGGESTED `weakness_classes` / `primary_tools` (taxonomy-grounded hints,
+  always user-confirmed) and a `seed_arm` + `effect_probe` template. Warns on a
+  relative SQLite DB path (the #18 Windows footgun) and round-trip-validates the
+  YAML before writing. (`mylonite init` is now a deprecated alias.)
+- **Provider key handling.** Global `--api-key-file` (a bare key or a dotenv
+  line; the provider is inferred from the key shape, never printed) and
+  `--env-file` (loads ONLY known provider API-key vars from a `.env`, never
+  blanket env injection). `mylonite doctor` now warns when a resolved key clearly
+  isn't key-shaped (placeholder / path / truncated paste) without echoing it.
+- **Natural-language planting checks (R7).** A custom target whose `seed_arm`
+  embeds `{payload}` inside a JSON/structured string, or omits it entirely, now
+  gets a loud warning (the plant must be natural language at a bare string leaf).
+  The scan summary also surfaces `customiser`-fallback and N-run-disagreement
+  counts so a low-quality or flaky plant isn't invisible.
+- **Python 3.11–3.13 guidance (S4).** The CLI prints a clear note on Python 3.14+
+  (litellm has no 3.14 wheels yet); README states the supported range.
+
 ### Added — bounded runs (timeouts, progress, scan-time flakiness filter)
 
 - **Scan-time N-run flakiness filter.** New `ScanConfig.runs` (default 1, no

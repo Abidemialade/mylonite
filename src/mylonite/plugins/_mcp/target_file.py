@@ -113,3 +113,49 @@ def load_target_file(path: Path) -> TargetFile:
         msg = f"target file {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)
     return TargetFile.model_validate(data)
+
+
+def payload_placement_warnings(tf: TargetFile) -> list[str]:
+    """Non-fatal warnings about where the ``{payload}`` placeholder is planted (R7).
+
+    Mylonite plants a NATURAL-LANGUAGE payload (the customiser returns a bare
+    ``body`` string) at a BARE string leaf. Two anti-patterns defeat that:
+
+    * ``{payload}`` embedded inside a JSON/structured string (e.g.
+      ``body: '{"text": "{payload}"}'``) — the plant is no longer natural language
+      and may not be ingested as untrusted content.
+    * no ``{payload}`` anywhere in ``args_template`` — nothing gets planted, so an
+      indirect-injection seed would silently deliver an empty attack.
+    """
+    warnings: list[str] = []
+    if tf.seed_arm is None:
+        return warnings
+
+    found = [False]
+
+    def _walk(node: object, path: str) -> None:
+        if isinstance(node, str):
+            if "{payload}" in node:
+                found[0] = True
+                stripped = node.strip()
+                if stripped != "{payload}" and stripped[:1] in "{[":
+                    warnings.append(
+                        f"seed_arm.args_template{path}: '{{payload}}' looks embedded in a "
+                        "JSON/structured string. Mylonite plants a natural-language payload "
+                        "at a BARE string leaf — make the whole field value '{payload}' (e.g. "
+                        'body: "{payload}"), not nested serialized JSON.'
+                    )
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                _walk(value, f"{path}[{i}]")
+
+    _walk(tf.seed_arm.args_template, "")
+    if not found[0]:
+        warnings.append(
+            "seed_arm.args_template has no '{payload}' placeholder — an indirect-injection "
+            "seed would plant nothing. Put '{payload}' at the field that holds untrusted content."
+        )
+    return warnings

@@ -34,7 +34,10 @@ API key:
 twin. ([How this GIF is recorded.](docs/assets/recording-script.md))*
 
 Neither `mylonite` nor `mcp-kitchen-sink` is published to PyPI yet, so the
-install is **clone-first** with two editable installs. Requires Python 3.11+.
+install is **clone-first** with two editable installs. Requires **Python
+3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14 wheels yet,
+so create your virtualenv with a 3.11–3.13 interpreter. The CLI prints a clear
+note if it detects 3.14+.
 
 ```bash
 git clone https://github.com/Abidemialade/mylonite.git

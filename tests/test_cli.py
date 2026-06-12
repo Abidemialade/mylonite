@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from importlib.abc import MetaPathFinder
 from pathlib import Path
@@ -109,9 +110,152 @@ def test_taxonomy_list_owasp_asi() -> None:
         assert f"ASI{i:02d}" in result.stdout
 
 
-def test_init_is_stub() -> None:
+def test_init_is_deprecated_alias() -> None:
     result = runner.invoke(app, ["init"])
     assert result.exit_code == EXIT_CONFIG
+    assert "init-target" in (result.stderr or result.output)
+
+
+def _fake_descriptor_with_tools() -> Any:
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    return TargetDescriptor(
+        target_id="mcp:myapp",
+        kind="mcp",
+        system_prompt="x",
+        tools=[
+            ToolSpec(name="read_note", description="read a stored note", json_schema={}),
+            ToolSpec(
+                name="send_email",
+                description="send an email to a recipient",
+                json_schema={"properties": {"to": {"type": "string"}}},
+            ),
+            ToolSpec(
+                name="web_fetch",
+                description="fetch a resource",
+                json_schema={"properties": {"url": {"type": "string"}}},
+            ),
+        ],
+    )
+
+
+def _patch_fake_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make init-target's MCPStdioAdapter return canned tools (no subprocess)."""
+    from mylonite.plugins._mcp import stdio_adapter
+
+    class _FakeAdapter:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def describe(self) -> Any:
+            return _fake_descriptor_with_tools()
+
+    monkeypatch.setattr(stdio_adapter, "MCPStdioAdapter", _FakeAdapter)
+
+
+def test_init_target_scaffolds_valid_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """init-target launches the server, lists tools, and writes a valid target YAML."""
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "init-target",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--family",
+            "myapp",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+    # The scaffold round-trips back to a TargetFile.
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    tf = load_target_file(out)
+    assert tf.family == "myapp"
+    assert tf.command == "python"
+    assert tf.args == ["-m", "my_server"]
+    # Discovered tools surfaced as primary_tools; suggestions present.
+    assert "send_email" in tf.primary_tools
+    assert "web_fetch" in tf.primary_tools
+    # W2 baseline + W3 (url-shaped) + W4 (consequential) suggested from the surface.
+    assert {"W2", "W3", "W4"}.issubset(set(tf.weakness_classes))
+
+
+def test_init_target_refuses_overwrite_without_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    out.write_text("existing", encoding="utf-8")
+    result = runner.invoke(app, ["init-target", "--command", "python", "--output", str(out)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "already exists" in (result.stderr or result.output)
+    assert out.read_text(encoding="utf-8") == "existing"  # untouched
+
+
+def test_init_target_warns_on_relative_sqlite_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "init-target",
+            "--command",
+            "python",
+            "--env",
+            "DB_URL=sqlite:///data.db",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "relative SQLite path" in (result.stderr or result.output)
+
+
+def test_env_file_loads_only_known_provider_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--env-file sets known provider key vars only; an arbitrary var is ignored."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("MYLONITE_BOGUS_VAR", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# comment\nGEMINI_API_KEY=sk-test-1234567890abcdef\nMYLONITE_BOGUS_VAR=nope\n",
+        encoding="utf-8",
+    )
+    # The loader mutates os.environ directly; monkeypatch.setenv tracks it for
+    # auto-restore so the key never leaks past the test.
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    assert os.environ.get("GEMINI_API_KEY") == "sk-test-1234567890abcdef"
+    # The arbitrary, non-provider var is NEVER loaded (no blanket env injection).
+    assert "MYLONITE_BOGUS_VAR" not in os.environ
+    # Clean up the directly-set var (monkeypatch doesn't track os.environ writes
+    # made by the code under test).
+    os.environ.pop("GEMINI_API_KEY", None)
+
+
+def test_doctor_warns_on_non_key_shaped_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """doctor flags an ANTHROPIC_API_KEY that clearly isn't a key (without printing it)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "changeme")
+    result = runner.invoke(app, ["doctor"])
+    out = result.stderr or result.output
+    assert "doesn't look like an API key" in out
+    assert "changeme" not in out  # never echo the value
 
 
 def test_scan_refuses_non_reference_without_authorize() -> None:

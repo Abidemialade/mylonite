@@ -17,6 +17,7 @@ from mylonite._redaction import (
     REDACTION_PLACEHOLDER,
     SecretRedactingFilter,
     install_log_redaction,
+    looks_like_api_key,
     redact,
 )
 
@@ -185,3 +186,23 @@ def test_install_disabled_removes_existing() -> None:
     assert any(isinstance(f, SecretRedactingFilter) for f in target.filters)
     install_log_redaction(enabled=False, logger_name=name)
     assert not any(isinstance(f, SecretRedactingFilter) for f in target.filters)
+
+
+# --- looks_like_api_key (doctor key-shape warning) --------------------------
+
+
+def test_looks_like_api_key_accepts_real_shapes() -> None:
+    assert looks_like_api_key(FAKE_ANTHROPIC)
+    assert looks_like_api_key(FAKE_OPENAI)
+    assert looks_like_api_key("AKIA" + "ABCDEFGHIJKLMNOP")
+    # A long opaque token (unrecognised provider) is permissively accepted.
+    assert looks_like_api_key("x" * 40)
+
+
+def test_looks_like_api_key_rejects_obvious_non_keys() -> None:
+    assert not looks_like_api_key("changeme")
+    assert not looks_like_api_key("your-key-here")
+    assert not looks_like_api_key("/path/to/key.txt")  # a path, not a key
+    assert not looks_like_api_key(r"C:\creds\key")
+    assert not looks_like_api_key("too short with spaces")
+    assert not looks_like_api_key("")
