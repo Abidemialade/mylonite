@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,8 @@ def _config(
     max_llm_calls: int = 50,
     pattern_id_filter: str | None = None,
     customise: bool = True,
+    runs: int = 1,
+    wall_clock_timeout_s: float | None = None,
 ) -> ScanConfig:
     return ScanConfig(
         target_id="reference:vulnerable",
@@ -152,7 +155,31 @@ def _config(
         dry_run=dry_run,
         pattern_id_filter=pattern_id_filter,
         customise=customise,
+        runs=runs,
+        wall_clock_timeout_s=wall_clock_timeout_s,
     )
+
+
+class _JudgeSequence:
+    """Judge double that returns scripted verdicts in order (per invoke→judge pass)."""
+
+    def __init__(self, verdicts: list[Verdict]) -> None:
+        self._verdicts = verdicts
+        self.calls = 0
+
+    async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+        del payload, response
+        v = self._verdicts[min(self.calls, len(self._verdicts) - 1)]
+        self.calls += 1
+        return v
+
+
+def _yes() -> Verdict:
+    return Verdict(success=True, reason="fired", evidence={}, mechanism="predicate")
+
+
+def _no() -> Verdict:
+    return Verdict(success=False, reason="held", evidence={}, mechanism="predicate")
 
 
 # --- happy path -------------------------------------------------------------
@@ -598,3 +625,107 @@ async def test_engine_runs_active_counter_inside_scope() -> None:
     await engine.run()
     assert captured[0] is not None
     assert isinstance(captured[0], LiteLLMCallCounter)
+
+
+# --- #8 / Pattern E: N-run flakiness filter + wall-clock timeout -----------
+
+
+@pytest.mark.asyncio
+async def test_engine_default_runs_is_single_run() -> None:
+    """runs defaults to 1 → report.single_run stays True (backward-compat)."""
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+    assert result.report.single_run is True
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_majority_fires_is_finding() -> None:
+    """runs=3 with 2 fires + 1 hold → strict majority → finding; single_run=False."""
+    judge = _JudgeSequence([_yes(), _no(), _yes()])
+    engine = ScanEngine(
+        config=_config(runs=3),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    assert judge.calls == 3  # invoked + judged 3 times
+    assert result.report.single_run is False
+    assert result.report.findings_count == 1
+    assert result.report.attempts[0].outcome == "finding"
+    # The runs disagreed (2 of 3) → flakiness surfaced.
+    assert result.report.fallback_breakdown.get("nrun_disagreement") == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_minority_fire_is_rejected_as_flaky() -> None:
+    """runs=3 with only 1 fire → below strict majority → no_finding (fluke rejected)."""
+    judge = _JudgeSequence([_yes(), _no(), _no()])
+    engine = ScanEngine(
+        config=_config(runs=3),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    assert result.report.findings_count == 0
+    assert result.report.attempts[0].outcome == "no_finding"
+    assert result.report.fallback_breakdown.get("nrun_disagreement") == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_unanimous_has_no_disagreement_tally() -> None:
+    """runs=2 both fire → finding with no nrun_disagreement (agreement, not flake)."""
+    engine = ScanEngine(
+        config=_config(runs=2),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeSequence([_yes(), _yes()]),
+    )
+    result = await engine.run()
+    assert result.report.findings_count == 1
+    assert "nrun_disagreement" not in result.report.fallback_breakdown
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_does_not_retry_structural_skip() -> None:
+    """A no-seed-arm skip on the first pass is terminal — not retried under runs>1."""
+    adapter = _AdapterStub(raise_no_seed_arm=True)
+    engine = ScanEngine(
+        config=_config(runs=5),
+        adapter=adapter,
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "skipped_no_seed_arm"
+
+
+@pytest.mark.asyncio
+async def test_engine_wall_clock_timeout_aborts_with_partial_results() -> None:
+    """A wall-clock budget that elapses mid-scan → aborted='wall_clock_timeout'."""
+
+    class _SlowAdapter(_AdapterStub):
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            await asyncio.sleep(0.5)
+            return await super().invoke(payload)
+
+    engine = ScanEngine(
+        config=_config(wall_clock_timeout_s=0.05, max_llm_calls=50),
+        adapter=_SlowAdapter(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+    assert result.report.aborted == "wall_clock_timeout"

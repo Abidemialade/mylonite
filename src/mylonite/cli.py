@@ -935,7 +935,12 @@ def generate(
 
 
 def _validate_custom(
-    generated: Any, target_file: Path | None, iterations: int, provider: str, model: str
+    generated: Any,
+    target_file: Path | None,
+    iterations: int,
+    provider: str,
+    model: str,
+    iteration_timeout_s: float | None = None,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
@@ -976,6 +981,8 @@ def _validate_custom(
         provider=provider,
         model=model,
         target_adapter_factory=_factory,
+        iteration_timeout_s=iteration_timeout_s,
+        progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
     )
     return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
@@ -1126,6 +1133,17 @@ def validate(
             ),
         ),
     ] = None,
+    iteration_timeout: Annotated[
+        float | None,
+        typer.Option(
+            "--iteration-timeout",
+            help=(
+                "Per-scan wall-clock budget (seconds) for a CUSTOM-target run. A "
+                "stuck or slow real target aborts that run cleanly instead of "
+                "hanging open-ended; the loop still completes and reports."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
@@ -1186,7 +1204,12 @@ def validate(
     is_custom = not exploit.target_id.startswith("reference:")
     if is_custom:
         report = _validate_custom(
-            generated, target_file, iterations, effective_provider, effective_model
+            generated,
+            target_file,
+            iterations,
+            effective_provider,
+            effective_model,
+            iteration_timeout_s=iteration_timeout,
         )
     else:
         typer.echo(
@@ -1223,6 +1246,7 @@ def validate(
             # and run the on-disk committed test offline as a full-pass build —
             # closing the validate→committed-artefact loop.
             record_fixtures_dir=test_path.parent / "fixtures",
+            progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
         )
         report = validator.validate(
             generated,

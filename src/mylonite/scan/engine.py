@@ -70,6 +70,25 @@ class ScanConfig(BaseModel):
             "offline gate to scope a scan to one exploit's seed."
         ),
     )
+    runs: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many times to invoke + judge each payload (scan-time flakiness "
+            "filter). With runs=1 (default) behaviour is unchanged. With runs>1 a "
+            "payload is a finding only if it fires in a strict majority of runs, "
+            "so a 1-in-N fluke is rejected; the report's single_run flips False."
+        ),
+    )
+    wall_clock_timeout_s: float | None = Field(
+        default=None,
+        description=(
+            "Optional overall wall-clock budget for the scan in seconds. When "
+            "exceeded mid-run the engine stops launching/awaiting further work and "
+            "returns aborted='wall_clock_timeout' with whatever completed. None "
+            "(default) means no wall-clock limit."
+        ),
+    )
 
 
 @dataclass
@@ -88,6 +107,18 @@ class _PerPayloadOutcome:
     judge_fallback_cause: str | None = None
     #: True when the customiser fell back to the unmodified seed body.
     customiser_fallback: bool = False
+    #: (success_count, runs) when runs>1 and the runs disagreed (flakiness seen).
+    run_disagreement: tuple[int, int] | None = None
+
+
+@dataclass
+class _JudgedPass:
+    """One invoke→judge pass that produced a verdict (not a structural skip)."""
+
+    verdict: Any  # mylonite.scan.judge.Verdict
+    response: Any  # mylonite.contracts._types.AdapterResponse
+    tool_call_trace: list[str]
+    judge_evidence: dict[str, str]
 
 
 class ScanEngine:
@@ -193,9 +224,23 @@ class ScanEngine:
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
 
+            timeout_s = self._config.wall_clock_timeout_s
             for coro in asyncio.as_completed(tasks):
                 try:
-                    outcome = await coro
+                    if timeout_s is not None:
+                        # Bound the overall scan: await each completion only within
+                        # the remaining budget, so even a hung task can't run past
+                        # the deadline. We then cancel whatever is still pending and
+                        # report what completed (#8 — no silent open-ended loop).
+                        remaining = timeout_s - (time.monotonic() - start)
+                        outcome = await asyncio.wait_for(coro, timeout=max(0.0, remaining))
+                    else:
+                        outcome = await coro
+                except TimeoutError:
+                    aborted = "wall_clock_timeout"
+                    for pending in tasks:
+                        pending.cancel()
+                    break
                 except BudgetExceededError:
                     aborted = "budget_exceeded"
                     for pending in tasks:
@@ -211,6 +256,12 @@ class ScanEngine:
                 if outcome.customiser_fallback:
                     fallback_breakdown["customiser_fallback"] = (
                         fallback_breakdown.get("customiser_fallback", 0) + 1
+                    )
+                if outcome.run_disagreement is not None:
+                    # The runs both fired and didn't for this payload — observed
+                    # flakiness, surfaced for the report (not a contract outcome).
+                    fallback_breakdown["nrun_disagreement"] = (
+                        fallback_breakdown.get("nrun_disagreement", 0) + 1
                     )
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
                     aborted = "provider_unreachable"
@@ -250,7 +301,7 @@ class ScanEngine:
             inconclusive_attempts=inconclusive_attempts,
             fallback_breakdown=fallback_breakdown or {},
             aborted=aborted,
-            single_run=True,
+            single_run=self._config.runs == 1,
             mylonite_version=__version__,
         )
         return ScanResult(report=report, exploits=exploits)
@@ -340,6 +391,93 @@ class ScanEngine:
             payload = await self._customiser.customise(seed, descriptor)
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
+        # Invoke + judge the (customised) payload `runs` times (scan-time flakiness
+        # filter). A structural skip or error on ANY pass is terminal — retrying a
+        # missing seed arm, an undelivered payload, or a planner outage tests
+        # nothing — so return it immediately. Otherwise tally the judged verdicts:
+        # with runs>1 the payload counts as a finding only if it fires in a strict
+        # majority, rejecting a 1-in-N fluke. runs=1 reduces to single-pass exactly.
+        runs = self._config.runs
+        success_passes: list[_JudgedPass] = []
+        last_pass: _JudgedPass | None = None
+        success_count = 0
+        for _ in range(runs):
+            result = await self._one_pass(payload=payload, seed_id=seed_id)
+            if isinstance(result, _PerPayloadOutcome):
+                return result  # structural skip / error — terminal, do not retry
+            last_pass = result
+            if result.verdict.success:
+                success_count += 1
+                success_passes.append(result)
+
+        assert last_pass is not None  # runs >= 1 and every skip returned above
+        is_finding = success_count * 2 > runs  # strict majority (runs=1 → 1 pass)
+        # Surface observed flakiness: the runs both fired and didn't.
+        run_disagreement = (success_count, runs) if runs > 1 and 0 < success_count < runs else None
+
+        decisive = success_passes[0] if is_finding else last_pass
+        verdict = decisive.verdict
+        tool_call_trace = decisive.tool_call_trace
+        judge_evidence = decisive.judge_evidence
+
+        if is_finding:
+            # Provenance from the FIRING seed, not the module (#4). A module emits
+            # several weakness classes (W1..W4); stamping module-level compliance
+            # mislabels which OWASP/ASI/ATLAS IDs the emitted test actually proves.
+            # The seed carries the precise tags; the module-level `compliance` arg
+            # is the fallback for catalogue-unknown seeds (which never reach here —
+            # they return `skipped_unknown_seed` above — but kept for safety).
+            resolved_compliance = seed.compliance if seed is not None else compliance
+            exploit = ExploitRecord(
+                target_id=descriptor.target_id,
+                pattern_id=payload.pattern_id,
+                payload=payload,
+                response=decisive.response,
+                success_reason=verdict.reason,
+                compliance=resolved_compliance,
+            )
+            return _PerPayloadOutcome(
+                attempt=ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=payload.pattern_id,
+                    outcome="finding",
+                    verdict_mechanism=verdict.mechanism,
+                    verdict_reason=verdict.reason,
+                    error_detail=None,
+                    tool_call_trace=tool_call_trace,
+                    judge_evidence=judge_evidence,
+                ),
+                exploit=exploit,
+                judge_fallback_cause=verdict.fallback_cause,
+                customiser_fallback=customiser_fallback,
+                run_disagreement=run_disagreement,
+            )
+        return _PerPayloadOutcome(
+            attempt=ScanAttempt(
+                seed_id=seed_id,
+                pattern_id=payload.pattern_id,
+                outcome="no_finding",
+                verdict_mechanism=verdict.mechanism,
+                verdict_reason=verdict.reason,
+                error_detail=None,
+                tool_call_trace=tool_call_trace,
+                judge_evidence=judge_evidence,
+            ),
+            exploit=None,
+            judge_fallback_cause=verdict.fallback_cause,
+            customiser_fallback=customiser_fallback,
+            run_disagreement=run_disagreement,
+        )
+
+    async def _one_pass(
+        self, *, payload: Payload, seed_id: str
+    ) -> _PerPayloadOutcome | _JudgedPass:
+        """One invoke→delivery→judge pass.
+
+        Returns a :class:`_JudgedPass` (the verdict + audit trace) on success, or
+        a terminal :class:`_PerPayloadOutcome` for a structural skip / error that
+        must not be retried.
+        """
         try:
             response = await self._adapter.invoke(payload)
         except SeedArmUnavailable as skip:
@@ -424,52 +562,9 @@ class ScanEngine:
         # Per-attempt audit trail (#14): persist the planner tool-call trace and
         # the judge evidence on EVERY judged outcome, so a no_finding is as
         # auditable as a finding without re-querying the target's own state.
-        tool_call_trace = list(response.tool_calls)
-        judge_evidence = {k: str(v) for k, v in verdict.evidence.items()}
-
-        if verdict.success:
-            # Provenance from the FIRING seed, not the module (#4). A module emits
-            # several weakness classes (W1..W4); stamping module-level compliance
-            # mislabels which OWASP/ASI/ATLAS IDs the emitted test actually proves.
-            # The seed carries the precise tags; the module-level `compliance` arg
-            # is the fallback for catalogue-unknown seeds (which never reach here —
-            # they return `skipped_unknown_seed` above — but kept for safety).
-            resolved_compliance = seed.compliance if seed is not None else compliance
-            exploit = ExploitRecord(
-                target_id=descriptor.target_id,
-                pattern_id=payload.pattern_id,
-                payload=payload,
-                response=response,
-                success_reason=verdict.reason,
-                compliance=resolved_compliance,
-            )
-            return _PerPayloadOutcome(
-                attempt=ScanAttempt(
-                    seed_id=seed_id,
-                    pattern_id=payload.pattern_id,
-                    outcome="finding",
-                    verdict_mechanism=verdict.mechanism,
-                    verdict_reason=verdict.reason,
-                    error_detail=None,
-                    tool_call_trace=tool_call_trace,
-                    judge_evidence=judge_evidence,
-                ),
-                exploit=exploit,
-                judge_fallback_cause=verdict.fallback_cause,
-                customiser_fallback=customiser_fallback,
-            )
-        return _PerPayloadOutcome(
-            attempt=ScanAttempt(
-                seed_id=seed_id,
-                pattern_id=payload.pattern_id,
-                outcome="no_finding",
-                verdict_mechanism=verdict.mechanism,
-                verdict_reason=verdict.reason,
-                error_detail=None,
-                tool_call_trace=tool_call_trace,
-                judge_evidence=judge_evidence,
-            ),
-            exploit=None,
-            judge_fallback_cause=verdict.fallback_cause,
-            customiser_fallback=customiser_fallback,
+        return _JudgedPass(
+            verdict=verdict,
+            response=response,
+            tool_call_trace=list(response.tool_calls),
+            judge_evidence={k: str(v) for k, v in verdict.evidence.items()},
         )

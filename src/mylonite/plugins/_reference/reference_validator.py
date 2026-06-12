@@ -239,10 +239,19 @@ class DifferentialValidator(ValidatorBase):
         metamorphic_strategies: list[str] | None = None,
         target_adapter_factory: Callable[[], Any] | None = None,
         consensus_judges: int = 3,
+        iteration_timeout_s: float | None = None,
+        progress_cb: Callable[[str], None] | None = None,
     ) -> None:
         if iterations < 1:
             raise ValueError("iterations must be >= 1")
         self._iterations = iterations
+        # Per-scan wall-clock bound (#8): a custom target that hangs or grinds must
+        # not run open-ended. Threaded into the engine's own wall_clock_timeout_s so
+        # a stuck iteration aborts cleanly and the loop still completes/reports.
+        self._iteration_timeout_s = iteration_timeout_s
+        # Optional progress sink (the CLI passes a stderr echo) so a long live
+        # validation streams "iteration k/N …" instead of going silent for minutes.
+        self._progress_cb = progress_cb
         # For a CUSTOM target: re-launch a fresh real adapter per run (isolation).
         # Defaults to reusing the adapter passed to validate().
         self._target_adapter_factory = target_adapter_factory
@@ -274,6 +283,11 @@ class DifferentialValidator(ValidatorBase):
 
     # -- public contract ------------------------------------------------------
 
+    def _progress(self, message: str) -> None:
+        """Emit a progress line to the caller's sink, if one was supplied."""
+        if self._progress_cb is not None:
+            self._progress_cb(message)
+
     def validate(
         self,
         test: GeneratedTest,
@@ -293,7 +307,12 @@ class DifferentialValidator(ValidatorBase):
         pattern_id = test.exploit.pattern_id
 
         # 1+2. differential + flakiness — the one live loop (the moat).
-        tallies = [self._run_iteration(pattern_id) for _ in range(self._iterations)]
+        tallies = []
+        for i in range(self._iterations):
+            self._progress(
+                f"differential iteration {i + 1}/{self._iterations} (vulnerable + guarded)"
+            )
+            tallies.append(self._run_iteration(pattern_id))
         vuln_fires = sum(1 for t in tallies if t.vuln_fired)
         guard_resists = sum(1 for t in tallies if t.guard_resisted)
         decision = self._decide(
@@ -375,7 +394,10 @@ class DifferentialValidator(ValidatorBase):
         """
         pattern_id = test.exploit.pattern_id
         n = self._iterations
-        runs = [self._run_custom_iteration(target, pattern_id) for _ in range(n)]
+        runs = []
+        for i in range(n):
+            self._progress(f"re-driving real target: stability run {i + 1}/{n}")
+            runs.append(self._run_custom_iteration(target, pattern_id))
         fired = sum(1 for r in runs if r.finding)
         effect_yes = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
         probed = any(r.effect_confirmed in ("true", "false") for r in runs)
@@ -464,6 +486,7 @@ class DifferentialValidator(ValidatorBase):
             model=self._model,
             max_concurrent=1,
             pattern_id_filter=pattern_id,
+            wall_clock_timeout_s=self._iteration_timeout_s,
         )
         engine = ScanEngine(
             config=config,

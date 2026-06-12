@@ -549,3 +549,49 @@ def test_validate_custom_target_rejects_when_effect_not_confirmed() -> None:
     )
     report = validator.validate(test, _FakeCustomAdapter("false"), ReferenceVulnerableOracle())
     assert report.kept is False
+
+
+def test_validate_custom_target_streams_progress() -> None:
+    """progress_cb receives one 'stability run k/N' line per iteration (#8 — no silence)."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    seen: list[str] = []
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        progress_cb=seen.append,
+    )
+    validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+    stability_lines = [m for m in seen if "stability run" in m]
+    assert len(stability_lines) == 2
+    assert "1/2" in stability_lines[0]
+    assert "2/2" in stability_lines[1]
+
+
+def test_validate_custom_target_iteration_timeout_aborts_cleanly() -> None:
+    """A per-scan wall-clock budget that elapses → the run yields no finding and the
+    loop still completes (stability fails, test rejected — not an open-ended hang)."""
+    import asyncio
+
+    class _SlowCustomAdapter(_FakeCustomAdapter):
+        async def invoke(self, payload: Any) -> AdapterResponse:
+            await asyncio.sleep(0.3)
+            return await super().invoke(payload)
+
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        iteration_timeout_s=0.05,
+    )
+    report = validator.validate(test, _SlowCustomAdapter("true"), ReferenceVulnerableOracle())
+    # The attack never reproduced (each scan aborted on the wall clock) → not kept,
+    # but the loop completed and returned a report rather than hanging.
+    assert report.kept is False
+    stability = next(o for o in report.outcomes if o.stage == "stability")
+    assert stability.passed is False

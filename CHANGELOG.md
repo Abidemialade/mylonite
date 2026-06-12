@@ -63,6 +63,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The scan report's `ScanAttemptOutcome` enum gained `skipped_payload_not_delivered`.
   Backward-compatible for adapters; report readers see one new outcome value.
 
+### Added — bounded runs (timeouts, progress, scan-time flakiness filter)
+
+- **Scan-time N-run flakiness filter.** New `ScanConfig.runs` (default 1, no
+  behaviour change) invokes + judges each payload N times; the payload is a
+  finding only if it fires in a strict majority, so a 1-in-N fluke is rejected.
+  Observed disagreement is surfaced in the report's `fallback_breakdown`
+  (`nrun_disagreement`) and `single_run` now reflects reality (`runs == 1`).
+- **Wall-clock bound on a scan.** New `ScanConfig.wall_clock_timeout_s` (default
+  None) stops a scan that exceeds its budget — even a hung task — returning
+  `aborted="wall_clock_timeout"` with whatever completed, instead of running
+  open-ended.
+- **Validator timeout + progress.** `DifferentialValidator` gained
+  `iteration_timeout_s` (per-scan wall-clock bound for a custom target, threaded
+  into the engine) and `progress_cb` (streams "iteration k/N …" so a long live
+  validation no longer goes silent for minutes). `mylonite validate` exposes
+  `--iteration-timeout` and streams progress to stderr.
+
 ### Fixed
 
 - **Compliance provenance now comes from the firing seed, not the umbrella

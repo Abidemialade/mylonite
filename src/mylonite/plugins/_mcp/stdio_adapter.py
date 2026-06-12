@@ -212,12 +212,20 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         )
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
-        # NOTE (#17, design only): a fresh MCP subprocess is spawned per invoke()
-        # — clean isolation per attempt (filesystem baseline snapshots rely on
-        # it), but heavy on Windows where spawn cost dominates a multi-attempt
-        # scan. A future opt-in --reuse-session mode would hold one ClientSession
-        # open across attempts (entered in describe(), closed in close()),
-        # trading isolation for speed. Not enabled this cycle.
+        # NOTE (#17): a fresh MCP subprocess is spawned per invoke() — clean
+        # isolation per attempt (filesystem baseline snapshots rely on it), but
+        # heavy on Windows where spawn cost dominates a multi-attempt scan.
+        #
+        # A "reuse one ClientSession across attempts" mode is NOT safe to bolt on
+        # here: the engine runs each invoke() in its own asyncio.Task (ScanEngine
+        # creates a task per payload), while `stdio_client`/`ClientSession` open
+        # anyio task groups whose cancel scopes must be entered AND exited in the
+        # SAME task. A session entered in one invoke-task and closed later in
+        # close() (a different task) raises anyio's "cancel scope in a different
+        # task". So cross-invoke reuse needs a dedicated owning task (a session
+        # actor), not a stashed handle — deferred deliberately. The Windows churn
+        # is instead bounded by the scan-level wall_clock_timeout_s and the
+        # per-planner timeout, so a slow/stuck spawn can't hang open-ended.
         setup = payload.metadata.get("setup", "no_setup")
         drive = payload.metadata.get("drive", "")
         planner_calls: list[dict[str, Any]] = []
@@ -456,7 +464,9 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         try:
             result = await session.call_tool(probe.verify_tool, rendered)
         except Exception:
-            logger.info("MCPStdioAdapter: effect probe %r raised — treating as unprobed", probe.verify_tool)
+            logger.info(
+                "MCPStdioAdapter: effect probe %r raised — treating as unprobed", probe.verify_tool
+            )
             return "unprobed"
         content = str(getattr(result, "content", "") or "")
         is_error = bool(getattr(result, "isError", False))
