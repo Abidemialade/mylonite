@@ -462,7 +462,12 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
             return "unprobed"
         rendered = _render_seed_args(probe.verify_args_template, payload_body, self._scope)
         try:
-            result = await session.call_tool(probe.verify_tool, rendered)
+            # Bound the verify call the same way the planner is bounded — a target
+            # whose verify tool hangs must not block the invoke past the timeout.
+            result = await asyncio.wait_for(
+                session.call_tool(probe.verify_tool, rendered),
+                timeout=self._planner_timeout_s,
+            )
         except Exception:
             logger.info(
                 "MCPStdioAdapter: effect probe %r raised — treating as unprobed", probe.verify_tool
@@ -472,6 +477,14 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         is_error = bool(getattr(result, "isError", False))
         probe_calls.append({"tool": f"effect_probe:{probe.verify_tool}", "is_error": is_error})
         if is_error:
+            return "false"
+        # An operator-declared deferral marker in the verify result means the action
+        # was queued / held / refused, NOT executed — a defended app. This OVERRIDES
+        # expect_marker, because a deferred result can still name the target effect
+        # (e.g. "queued for approval: send email to attacker@evil.com"). Matched
+        # case-insensitively (a defence safety net should not hinge on casing).
+        lowered = content.lower()
+        if any(m.lower() in lowered for m in probe.deferred_markers):
             return "false"
         if probe.expect_marker:
             marker = probe.expect_marker.replace("{payload}", payload_body).replace(

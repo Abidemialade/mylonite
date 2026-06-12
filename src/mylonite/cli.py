@@ -131,7 +131,11 @@ def _load_env_file(path: Path) -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
+        value = value.strip()
+        # Strip exactly one matching surrounding quote pair (dotenv convention) —
+        # not every quote char, which would corrupt a value ending in a quote.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
         if key in known and key not in os.environ:
             os.environ[key] = value
             loaded.append(key)
@@ -764,6 +768,16 @@ def scan(
         typer.echo(
             "error: could not describe the target (adapter.describe() failed); "
             "nothing was scanned. Check the target command/scope and connectivity.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if result.report.aborted == "wall_clock_timeout":
+        # The scan hit its wall-clock budget before finishing. Coverage is
+        # incomplete, so it must not exit 0 and read as a clean pass (same honesty
+        # rule as no_payloads / describe_failed).
+        typer.echo(
+            "error: scan exceeded its wall-clock budget and stopped early; coverage "
+            "is incomplete. Raise the timeout or narrow the scan, then re-run.",
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -1634,10 +1648,10 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 # How to plant untrusted content for indirect-injection (W2) seeds. Point this
 # at the tool that ingests external content; {{payload}} is replaced per attempt.
 # seed_arm:
-#   setup_tool: <tool that stores/accepts content>
+#   tool: <tool that stores/accepts untrusted content>
 #   args_template: {{ body: "{{payload}}" }}   # {{payload}} at a bare string leaf
 #   id_key: id                                 # JSON field holding the new handle
-#   retrieve_tool: <tool that reads it back>
+#                                              # (or id_pattern: a regex; or id_from)
 
 # How to CONFIRM the damage materialised end-to-end (the effect probe). After the
 # attack, re-query the target and check the damaging side effect is present.
@@ -1645,6 +1659,7 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 #   verify_tool: <tool that reports the side effect>
 #   verify_args_template: {{}}
 #   expect_marker: "<a string proving the effect, e.g. the attacker recipient>"
+#   deferred_markers: ["queued for approval", "pending review"]  # mark a DEFENDED result
 """
 
 

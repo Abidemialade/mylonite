@@ -249,6 +249,18 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
         return
 
     outcomes: list[str] = sorted({str(a.outcome) for a in matching}) or ["<no attempt>"]
+    # An undelivered indirect payload is a distinct, common cause on a LIVE custom
+    # target: either the app defended by never surfacing the poison, OR the
+    # seed_arm/drive needs tuning so the planter actually retrieves it. Naming both
+    # avoids the misleading "replay/fixture problem" hint (there are no fixtures on
+    # the live path). It still RAISES — an unexercised attack must not pass green.
+    if matching and all(a.outcome == "skipped_payload_not_delivered" for a in matching):
+        raise TestkitFixtureError(
+            f"inconclusive: the attack {pattern_id!r} was never delivered to the model "
+            "(the planted payload wasn't retrieved). Either the target defended by "
+            "blocking delivery, or the seed_arm/drive needs tuning so the poison is "
+            "surfaced. Resistance was NOT confirmed, so the gate refuses to pass."
+        )
     raise TestkitFixtureError(
         f"inconclusive: no conclusive attempt for {pattern_id!r} against the "
         f"guarded twin (outcomes seen: {outcomes}). The guard's resistance could "

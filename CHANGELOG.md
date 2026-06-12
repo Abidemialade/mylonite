@@ -23,14 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `deferred_markers` list. The adapter stamps `effect_confirmed = true|false|unprobed`.
   Generic over email / file-write / issue / payment / egress / DB mutation — any
   consequential action — so a finding can mean "damage confirmed" on an arbitrary app.
-- **One generic deterministic predicate.** `consequential_action_executed` reads the
-  declared consequential tool + the effect trace + the effect probe (priority:
-  `isError` → effect probe → an overridable marker heuristic as last resort),
-  replacing per-capability predicate functions. No English keyword is load-bearing.
-- **Delivery verification — a misfire no longer reads as clean.** Indirect seeds
-  inject a unique delivery marker into the planted body and capture the planted
-  handle robustly (`SeedArmSpec` gained `id_key` / `id_pattern`); if the poison is
-  never retrieved into the model's context, the attempt is reported
+- **One generic deterministic predicate.** `consequential_action_executed` reads a
+  seed's declared consequential tool plus the effect trace (priority: `isError` →
+  executed-not-deferred check → an overridable marker heuristic as last resort) and
+  is available for custom seeds that set `consequential_tool` in their metadata. In
+  the live path the target-declared effect probe drives the verdict structurally via
+  the judge's `effect_confirmed` short-circuit (above); the predicate is the
+  effect-trace-only fallback. No English keyword is load-bearing for either.
+- **Delivery verification — a misfire no longer reads as clean.** For indirect
+  seeds the adapter detects whether the poison was actually retrieved by checking
+  that a distinctive token from the planted payload appears in a planner tool
+  result (no marker is injected — the attack stays realistic), and captures the
+  planted handle robustly (`SeedArmSpec` gained `id_key` / `id_pattern`). If the
+  poison is never retrieved into the model's context, the attempt is reported
   `skipped_payload_not_delivered` rather than `no_finding` (mirroring the existing
   `skipped_no_seed_arm` honesty precedent). A `recall_all` drive lets a keyless
   target still surface the poison.

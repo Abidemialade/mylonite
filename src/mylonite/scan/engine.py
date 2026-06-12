@@ -269,6 +269,15 @@ class ScanEngine:
                         pending.cancel()
                     break
 
+            # Drain every task before returning. On an abort path the cancelled
+            # MCP-invoke tasks must be AWAITED so each one's async context manager
+            # runs its __aexit__ — i.e. stdio_client actually tears down the child
+            # subprocess. Cancelled-but-unawaited tasks are discarded when the loop
+            # closes, leaking subprocesses (worst on Windows, the platform the
+            # wall-clock timeout targets). On the normal path every task is already
+            # done, so this returns immediately.
+            await asyncio.gather(*tasks, return_exceptions=True)
+
         return self._finalize(
             attempts,
             exploits,
@@ -399,6 +408,7 @@ class ScanEngine:
         # majority, rejecting a 1-in-N fluke. runs=1 reduces to single-pass exactly.
         runs = self._config.runs
         success_passes: list[_JudgedPass] = []
+        fail_passes: list[_JudgedPass] = []
         last_pass: _JudgedPass | None = None
         success_count = 0
         for _ in range(runs):
@@ -409,13 +419,22 @@ class ScanEngine:
             if result.verdict.success:
                 success_count += 1
                 success_passes.append(result)
+            else:
+                fail_passes.append(result)
 
         assert last_pass is not None  # runs >= 1 and every skip returned above
         is_finding = success_count * 2 > runs  # strict majority (runs=1 → 1 pass)
         # Surface observed flakiness: the runs both fired and didn't.
         run_disagreement = (success_count, runs) if runs > 1 and 0 < success_count < runs else None
 
-        decisive = success_passes[0] if is_finding else last_pass
+        # A finding reports a FIRING pass; a no_finding reports a FAILING pass, so
+        # the audit record's verdict reason/mechanism never contradicts its outcome
+        # (a minority success must not stamp a no_finding with a success reason).
+        # When not a finding there is always at least one failing pass; last_pass is
+        # a defensive fallback only.
+        decisive = (
+            success_passes[0] if is_finding else (fail_passes[0] if fail_passes else last_pass)
+        )
         verdict = decisive.verdict
         tool_call_trace = decisive.tool_call_trace
         judge_evidence = decisive.judge_evidence

@@ -682,6 +682,27 @@ async def test_engine_nrun_minority_fire_is_rejected_as_flaky() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_nrun_minority_success_last_reports_failing_reason() -> None:
+    """A minority fire whose SUCCESS pass is LAST must still stamp the no_finding
+    attempt with a FAILING verdict reason — not the success pass's reason (the
+    audit record must never contradict its own outcome)."""
+    # Order matters: success is the final pass, so a naive `last_pass` would leak
+    # the success reason ("fired") onto a no_finding attempt.
+    judge = _JudgeSequence([_no(), _no(), _yes()])
+    engine = ScanEngine(
+        config=_config(runs=3),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "no_finding"
+    assert attempt.verdict_reason == "held"  # the FAIL reason, not "fired"
+
+
+@pytest.mark.asyncio
 async def test_engine_nrun_unanimous_has_no_disagreement_tally() -> None:
     """runs=2 both fire → finding with no nrun_disagreement (agreement, not flake)."""
     engine = ScanEngine(
