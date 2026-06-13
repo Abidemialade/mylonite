@@ -70,8 +70,9 @@ MITRE ATLAS {mitre_atlas} · NIST {nist}.
 This test re-drives the REAL target ({target_id}) and asserts it still RESISTS
 the attack — it FAILS if your app regresses (the attack lands / its effect probe
 confirms damage). It launches the target's MCP server and calls the provider, so
-it is gated behind MYLONITE_LIVE_TARGET=1. Co-locate the target's `target.yaml`
-next to this test (or pass --target-file to `mylonite generate`).
+it is gated behind MYLONITE_LIVE_TARGET=1. It needs the target's `target.yaml`
+co-located next to this test: pass `mylonite generate --target-file <your-target>.yaml`
+(it writes target.yaml here for you), or copy your scan's target YAML in as target.yaml.
 
 Regenerate with `mylonite generate`. Do not edit by hand.
 """

@@ -323,3 +323,18 @@ def test_public_surface() -> None:
     assert callable(testkit.assert_guard_holds)
     assert callable(testkit.load_exploit)
     assert issubclass(testkit.TestkitFixtureError, Exception)
+
+
+def test_assert_target_resists_missing_target_file_actionable(tmp_path: Path) -> None:
+    """A missing target.yaml raises an ACTIONABLE FileNotFoundError, not a bare one.
+
+    The emitted custom-target test calls ``assert_target_resists(..., target_file=
+    here / "target.yaml")``; if `generate` wasn't given --target-file the file is
+    absent. The error must name the fix, not just the path.
+    """
+    exploit = _exploit().model_copy(update={"target_id": "mcp:myapp"})
+    with pytest.raises(FileNotFoundError) as excinfo:
+        testkit.assert_target_resists(exploit, target_file=tmp_path / "target.yaml")
+    msg = str(excinfo.value)
+    assert "target.yaml" in msg
+    assert "--target-file" in msg  # points at the fix
