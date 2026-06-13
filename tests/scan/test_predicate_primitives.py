@@ -39,7 +39,11 @@ def test_tool_executed_not_deferred_is_error_refused() -> None:
 def test_tool_executed_not_deferred_queued() -> None:
     """A deferred/queued result (the R3 false positive) → not executed."""
     blob = _trace(
-        {"tool": "send_email", "result": "The email has been queued for approval.", "is_error": False}
+        {
+            "tool": "send_email",
+            "result": "The email has been queued for approval.",
+            "is_error": False,
+        }
     )
     assert tool_executed_not_deferred(blob, "send_email") is False
 
@@ -57,7 +61,9 @@ def test_tool_executed_custom_deferred_markers() -> None:
 
 
 def test_tool_result_contains() -> None:
-    blob = _trace({"tool": "list_outbox", "result": "to=attacker@x.com status=sent", "is_error": False})
+    blob = _trace(
+        {"tool": "list_outbox", "result": "to=attacker@x.com status=sent", "is_error": False}
+    )
     assert tool_result_contains(blob, "list_outbox", "attacker@x.com") is True
     assert tool_result_contains(blob, "list_outbox", "nope") is False
 
