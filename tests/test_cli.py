@@ -812,17 +812,21 @@ def test_generate_custom_invalid_target_file_exit_2(tmp_path: Path) -> None:
 def test_env_file_overrides_ambient_key_with_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """--env-file overrides a (wrong) ambient key and warns, naming only the var."""
-    monkeypatch.setenv("GEMINI_API_KEY", "sk-WRONG-ambient-value-000000")
+    """--env-file overrides a (wrong) ambient key and warns, naming only the var.
+
+    Uses non-secret-shaped placeholder values so the test source doesn't trip the
+    detect-secrets baseline; the override logic is value-agnostic.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "ambient-stale-placeholder")
     env_file = tmp_path / ".env"
-    env_file.write_text("GEMINI_API_KEY=sk-correct-from-file-1234567890\n", encoding="utf-8")
+    env_file.write_text("GEMINI_API_KEY=value-from-the-file\n", encoding="utf-8")
 
     result = runner.invoke(app, ["--env-file", str(env_file), "version"])
     assert result.exit_code == 0, result.output
-    assert os.environ.get("GEMINI_API_KEY") == "sk-correct-from-file-1234567890"
+    assert os.environ.get("GEMINI_API_KEY") == "value-from-the-file"
     out = result.stderr or result.output
     assert "overriding ambient GEMINI_API_KEY" in out
-    assert "sk-WRONG" not in out and "sk-correct" not in out  # never the value
+    assert "ambient-stale" not in out and "value-from-the-file" not in out  # never the value
     os.environ.pop("GEMINI_API_KEY", None)  # don't leak past the test
 
 
