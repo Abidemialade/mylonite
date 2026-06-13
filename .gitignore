@@ -52,8 +52,12 @@ site/
 #   timeline).
 # - CLAUDE.md: working-context instructions for Claude Code (gstack
 #   skills, repo invariants, recommended workflows).
+# - docs/superpowers/: brainstorming specs and implementation plans —
+#   working artefacts, not product documentation. Only docs/ (the
+#   mkdocs site) is public.
 PLAN.md
 CLAUDE.md
+docs/superpowers/
 
 # Editors / OS
 .idea/
