@@ -89,6 +89,23 @@ def test_emit_matches_golden_snapshot() -> None:
     assert generated.source == _GOLDEN
 
 
+def test_custom_target_emits_real_target_assertion() -> None:
+    """A custom target_id emits a test that re-drives the REAL target, not the twin."""
+    custom = _EXPLOIT.model_copy(update={"target_id": "mcp:triagent"})
+    source = ReferencePytestGenerator().emit(custom).source
+    assert "assert_target_resists" in source
+    assert "assert_guard_holds" not in source
+    assert "MYLONITE_LIVE_TARGET" in source  # live-gated, honest about offline
+    assert "mcp:triagent" in source
+
+
+def test_reference_target_still_emits_guard_holds() -> None:
+    """Reference targets are byte-for-byte unchanged (twin replay)."""
+    source = ReferencePytestGenerator().emit(_EXPLOIT).source
+    assert "assert_guard_holds" in source
+    assert "assert_target_resists" not in source
+
+
 def test_emit_is_deterministic() -> None:
     """Emitting the same exploit twice yields identical source (no clock/RNG)."""
     gen = ReferencePytestGenerator()

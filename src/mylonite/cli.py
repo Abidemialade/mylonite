@@ -96,8 +96,109 @@ def _configure_stdio_encoding() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
 
 
+def _warn_unsupported_python() -> None:
+    """S4: a clear note on Python 3.14+, where litellm has no wheels yet."""
+    if sys.version_info >= (3, 14):
+        typer.echo(
+            "note: Mylonite supports Python 3.11-3.13. litellm has no 3.14 wheels "
+            "yet, so live LLM calls may fail to import on this interpreter - use a "
+            "3.11-3.13 virtualenv for scan/validate/demo --live.",
+            err=True,
+        )
+
+
+def _provider_key_var_names() -> set[str]:
+    from mylonite.scan.providers import PROVIDER_ENV_VARS
+
+    return {var for variables in PROVIDER_ENV_VARS.values() for var in variables}
+
+
+def _load_env_file(path: Path) -> None:
+    """Load ONLY known provider API-key vars from a dotenv file — never blanket.
+
+    Reads ``KEY=VALUE`` lines and sets a var only if it is a known provider
+    API-key env var (``providers.PROVIDER_ENV_VARS``) and not already set, so a
+    stray ``.env`` can't inject arbitrary environment into the process.
+    """
+    if not path.exists():
+        typer.echo(f"env file {path} not found.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    known = _provider_key_var_names()
+    loaded: list[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        # Strip exactly one matching surrounding quote pair (dotenv convention) —
+        # not every quote char, which would corrupt a value ending in a quote.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        if key in known and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    if loaded:
+        typer.echo(f"loaded {', '.join(sorted(loaded))} from {path}.", err=True)
+
+
+def _infer_key_env_var(key: str) -> str | None:
+    """Best-effort provider env var for a bare API key, from its shape only."""
+    if key.startswith("sk-ant-"):
+        return "ANTHROPIC_API_KEY"
+    if key.startswith("sk-"):
+        return "OPENAI_API_KEY"
+    if key.startswith("AKIA"):
+        return "AWS_ACCESS_KEY_ID"
+    return None
+
+
+def _load_api_key_file(path: Path) -> None:
+    """Load an API key from a file: a dotenv (KEY=VALUE lines) or a bare key.
+
+    A bare key's provider is inferred from its shape; never printed.
+    """
+    if not path.exists():
+        typer.echo(f"--api-key-file {path} not found.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+    content = path.read_text(encoding="utf-8").strip()
+    first = content.splitlines()[0] if content else ""
+    if "=" in first:
+        _load_env_file(path)
+        return
+    key = content.split()[0] if content else ""
+    var = _infer_key_env_var(key)
+    if var is None:
+        typer.echo(
+            "--api-key-file: couldn't infer the provider from the key shape. Use a "
+            "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "
+            "or pass --env-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if var not in os.environ:
+        os.environ[var] = key
+        typer.echo(f"loaded {var} from {path}.", err=True)
+
+
 @app.callback()
-def _root() -> None:
+def _root(
+    api_key_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--api-key-file",
+            help="Read an API key from a file (a bare key or a dotenv KEY=VALUE line).",
+        ),
+    ] = None,
+    env_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--env-file",
+            help="Load provider API-key vars from a .env file (only known key names).",
+        ),
+    ] = None,
+) -> None:
     """Run before every command; normalise stdio + install secret redaction.
 
     The ``mylonite`` logger tree gets a secret-redacting filter so secret-shaped
@@ -109,6 +210,11 @@ def _root() -> None:
     _configure_stdio_encoding()
     _maybe_enable_truststore()
     install_log_redaction(enabled=True)
+    _warn_unsupported_python()
+    if env_file is not None:
+        _load_env_file(env_file)
+    if api_key_file is not None:
+        _load_api_key_file(api_key_file)
 
 
 class _Framework(StrEnum):
@@ -142,15 +248,27 @@ def doctor(
     remedy — so a corporate-proxy cert failure no longer looks like a bad key.
     Exit 0 if reachable, 4 on a provider failure.
     """
-    from mylonite._redaction import redact
+    from mylonite._redaction import looks_like_api_key, redact
     from mylonite.scan.diagnostics import classify_provider_error
-    from mylonite.scan.providers import provider_from_model
+    from mylonite.scan.providers import env_vars_for, provider_from_model
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
     routed = _route_model(provider, base_model)
     resolved_provider = provider_from_model(routed, provider)
+
+    # Warn (don't fail) if the resolved API key clearly isn't key-shaped — a common
+    # footgun (placeholder, path, truncated paste). Never print the value itself.
+    for var in env_vars_for(resolved_provider):
+        val = os.environ.get(var)
+        if val and not looks_like_api_key(val):
+            typer.echo(
+                f"warning: {var} is set but doesn't look like an API key "
+                "(too short / contains spaces or path separators). Check it's the "
+                "real key, not a placeholder or file path.",
+                err=True,
+            )
 
     import litellm
 
@@ -316,7 +434,13 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
     """
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
-    from mylonite.plugins._mcp.target_file import build_target_spec
+    from mylonite.plugins._mcp.target_file import build_target_spec, payload_placement_warnings
+
+    # R7: warn (don't block) if the planted {payload} isn't a bare natural-language
+    # leaf, or is missing entirely — a silently-empty/ill-formed plant otherwise
+    # reads as a clean scan.
+    for warning in payload_placement_warnings(target_file):
+        typer.echo(f"warning: {warning}", err=True)
 
     spec = build_target_spec(target_file)
     _enforce_custom_authorize(spec.family, target_file.scope, spec.requires_scope, authorize)
@@ -647,6 +771,16 @@ def scan(
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
+    if result.report.aborted == "wall_clock_timeout":
+        # The scan hit its wall-clock budget before finishing. Coverage is
+        # incomplete, so it must not exit 0 and read as a clean pass (same honesty
+        # rule as no_payloads / describe_failed).
+        typer.echo(
+            "error: scan exceeded its wall-clock budget and stopped early; coverage "
+            "is incomplete. Raise the timeout or narrow the scan, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
@@ -934,6 +1068,59 @@ def generate(
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
+def _validate_custom(
+    generated: Any,
+    target_file: Path | None,
+    iterations: int,
+    provider: str,
+    model: str,
+    iteration_timeout_s: float | None = None,
+) -> Any:
+    """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._reference.reference_validator import (
+        DifferentialValidator,
+        ReferenceVulnerableOracle,
+    )
+
+    if target_file is None:
+        typer.echo(
+            "validating a custom-target test requires --target-file (the same target "
+            "YAML you scanned); the validator re-drives the real target.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    try:
+        tf = load_target_file(target_file)
+        spec = build_target_spec(tf)
+    except Exception as exc:
+        typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def _factory() -> Any:
+        return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=model)
+
+    typer.echo(
+        f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
+        "+ multi-judge consensus + effect probe (no in-repo twin).",
+        err=True,
+    )
+    validator = DifferentialValidator(
+        iterations=iterations,
+        provider=provider,
+        model=model,
+        target_adapter_factory=_factory,
+        iteration_timeout_s=iteration_timeout_s,
+        progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+    )
+    return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+
+
 def _locate_generated(target: Path) -> tuple[Path, Path]:
     """Locate ``(test_security_*.py, exploit_*.json)`` for a validate TARGET.
 
@@ -1010,6 +1197,9 @@ def _render_validation_report(report: Any) -> None:
             "build": "build fail → emitted test didn't collect; re-run `mylonite generate`.",
             "differential": "differential fail → no discriminating power between the twins.",
             "flakiness": "flakiness fail → exploit too flaky to gate; try a more deterministic seed.",
+            "stability": "stability fail → the attack did not reproduce against the real target.",
+            "effect": "effect fail → the target's effect probe did not confirm the damage materialised.",
+            "consensus": "consensus fail → judges disagreed the effect was real; add an effect_probe.",
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:
@@ -1064,6 +1254,29 @@ def validate(
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
+    ] = None,
+    target_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--target-file",
+            help=(
+                "Required when validating a test for a CUSTOM target: the same "
+                "target YAML you scanned. The validator re-drives the REAL target "
+                "(N runs + multi-judge consensus + effect probe) instead of the "
+                "bundled twin, so the test fails when YOUR app regresses."
+            ),
+        ),
+    ] = None,
+    iteration_timeout: Annotated[
+        float | None,
+        typer.Option(
+            "--iteration-timeout",
+            help=(
+                "Per-scan wall-clock budget (seconds) for a CUSTOM-target run. A "
+                "stuck or slow real target aborts that run cleanly instead of "
+                "hanging open-ended; the loop still completes and reports."
+            ),
+        ),
     ] = None,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
@@ -1122,47 +1335,58 @@ def validate(
         exploit=exploit,
     )
 
-    typer.echo(
-        f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
-        "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).",
-        err=True,
-    )
-
-    # Fail fast on an unreachable provider with a distinct exit 4 — otherwise the
-    # full loop would just report a misleading non-discriminating result.
-    try:
-        reachable = _provider_preflight(effective_provider, effective_model)
-    except (ModuleNotFoundError, ImportError) as exc:
-        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-            typer.echo(
-                "the Quarry reference target isn't installed — run "
-                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        raise
-    if not reachable:
+    is_custom = not exploit.target_id.startswith("reference:")
+    if is_custom:
+        report = _validate_custom(
+            generated,
+            target_file,
+            iterations,
+            effective_provider,
+            effective_model,
+            iteration_timeout_s=iteration_timeout,
+        )
+    else:
         typer.echo(
-            "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-            "--provider/--model for another LiteLLM provider.",
+            f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
+            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).",
             err=True,
         )
-        raise typer.Exit(code=EXIT_PROVIDER)
+        # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
+        # the full loop would just report a misleading non-discriminating result.
+        try:
+            reachable = _provider_preflight(effective_provider, effective_model)
+        except (ModuleNotFoundError, ImportError) as exc:
+            if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+                typer.echo(
+                    "the Quarry reference target isn't installed — run "
+                    "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
+                    err=True,
+                )
+                raise typer.Exit(code=EXIT_CONFIG) from exc
+            raise
+        if not reachable:
+            typer.echo(
+                "no provider reachable — set ANTHROPIC_API_KEY, or pass "
+                "--provider/--model for another LiteLLM provider.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_PROVIDER)
 
-    validator = DifferentialValidator(
-        iterations=iterations,
-        provider=effective_provider,
-        model=effective_model,
-        # Record the canonical guarded fixtures into the gen dir's `fixtures/` and
-        # run the on-disk committed test offline as a full-pass build — closing
-        # the validate→committed-artefact loop.
-        record_fixtures_dir=test_path.parent / "fixtures",
-    )
-    report = validator.validate(
-        generated,
-        ReferenceVulnerableOracle().adapter(),
-        ReferenceVulnerableOracle(),
-    )
+        validator = DifferentialValidator(
+            iterations=iterations,
+            provider=effective_provider,
+            model=effective_model,
+            # Record the canonical guarded fixtures into the gen dir's `fixtures/`
+            # and run the on-disk committed test offline as a full-pass build —
+            # closing the validate→committed-artefact loop.
+            record_fixtures_dir=test_path.parent / "fixtures",
+            progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+        )
+        report = validator.validate(
+            generated,
+            ReferenceVulnerableOracle().adapter(),
+            ReferenceVulnerableOracle(),
+        )
 
     _render_validation_report(report)
 
@@ -1171,10 +1395,283 @@ def validate(
     raise typer.Exit(code=EXIT_NOT_KEPT)
 
 
+def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
+    """Heuristic weakness-class HINTS from a target's live tool surface.
+
+    These are SUGGESTIONS for the operator to confirm/edit - never authoritative.
+    Grounded in the bundled W1-W4 taxonomy and derived from the tool *schemas*
+    (param shapes) first, with the tool name/description as a fallback hint only
+    (no English keyword is load-bearing for a verdict — that lives in the scan's
+    structural signals and the operator-declared effect probe).
+
+    * W1 (tool-description instruction smuggling) + W2 (indirect injection):
+      baseline for any tool-using agent that ingests external content.
+    * W3 (SSRF / unrestricted egress): a tool taking a URL/endpoint-shaped input.
+    * W4 (unconfirmed consequential action): a tool that mutates external state.
+    """
+    suggestions: set[str] = set()
+    if tools:
+        suggestions.update({"W1", "W2"})
+    egress_hints = ("url", "uri", "endpoint", "fetch", "http", "request", "webhook")
+    action_hints = (
+        "send",
+        "email",
+        "post",
+        "create",
+        "delete",
+        "write",
+        "execute",
+        "pay",
+        "transfer",
+        "purchase",
+        "publish",
+        "update",
+        "remove",
+        "issue",
+        "commit",
+    )
+    for t in tools:
+        blob = f"{getattr(t, 'name', '')} {getattr(t, 'description', '')}".lower()
+        schema_text = str(getattr(t, "json_schema", "")).lower()
+        if any(k in blob or k in schema_text for k in egress_hints):
+            suggestions.add("W3")
+        if any(k in blob for k in action_hints):
+            suggestions.add("W4")
+    return sorted(suggestions)
+
+
+def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
+    """Env keys whose value looks like a SQLite DB referenced by a NON-absolute
+    path — the #18 Windows footgun (a relative sqlite path silently opens a
+    different/empty DB, making a vulnerable agent look clean)."""
+    flagged: list[str] = []
+    for key, val in env.items():
+        low = val.lower()
+        if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
+            continue
+        if "://" in val:
+            # URL form. The single '/' after the authority separator is NOT part
+            # of the path, so `sqlite:///data.db` is RELATIVE `data.db` while
+            # `sqlite:////abs/x.db` is absolute `/abs/x.db` — the exact #18 trap.
+            after = val.split("://", 1)[1]
+            path = after[1:] if after.startswith("/") else after
+        else:
+            path = val
+        is_posix_abs = path.startswith("/")
+        is_win_abs = len(path) >= 2 and path[1] == ":"  # C:\… or C:/…
+        if not (is_posix_abs or is_win_abs):
+            flagged.append(key)
+    return flagged
+
+
+@app.command(name="init-target")
+def init_target(
+    command: Annotated[
+        str,
+        typer.Option("--command", help="The MCP server launch command (e.g. 'python', 'node')."),
+    ],
+    arg: Annotated[
+        list[str] | None,
+        typer.Option("--arg", help="A server arg (repeatable, in order)."),
+    ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option("--env", help="A KEY=VALUE env var for the server (repeatable)."),
+    ] = None,
+    scope: Annotated[
+        str | None,
+        typer.Option("--scope", help="Optional scope label (must later match --authorize)."),
+    ] = None,
+    family: Annotated[
+        str,
+        typer.Option("--family", help="A short name for your target (used in report ids)."),
+    ] = "custom",
+    system_prompt_file: Annotated[
+        Path | None,
+        typer.Option("--system-prompt-file", help="Read the target's system prompt from a file."),
+    ] = None,
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Where to write the scaffolded target YAML."),
+    ] = Path("target.yaml"),
+    model: Annotated[
+        str | None,
+        typer.Option(
+            "--model", help="Model id used only to construct the adapter (no LLM call is made)."
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite the output file if it already exists."),
+    ] = False,
+) -> None:
+    """Scaffold a custom-target YAML by launching your MCP server and listing its tools.
+
+    Launches the server once (NO LLM call), introspects its tools, and writes a
+    commented ``target.yaml`` starter with SUGGESTED ``weakness_classes`` /
+    ``primary_tools`` and a ``seed_arm`` + ``effect_probe`` template for you to
+    fill in. The suggestions are hints grounded in the bundled OWASP-LLM/ASI
+    taxonomy — you own the consequential-capability + effect-probe declarations,
+    so review and edit before scanning.
+    """
+    import yaml
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec
+
+    if output.exists() and not force:
+        typer.echo(f"{output} already exists — pass --force to overwrite.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    tf = _target_file_from_flags(
+        command=command,
+        args=arg,
+        env=env,
+        scope=scope,
+        system_prompt=None,
+        system_prompt_file=system_prompt_file,
+        primary_tools=None,
+        weakness_classes=None,
+    )
+    # Allow a custom --family (the flag helper hardcodes 'custom').
+    tf = tf.model_copy(update={"family": family})
+
+    try:
+        spec = build_target_spec(tf)
+    except Exception as exc:
+        typer.echo(f"invalid target flags: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    adapter = MCPStdioAdapter(
+        family=spec.family, scope=tf.scope, model=model or "claude-haiku-4-5-20251001"
+    )
+
+    typer.echo(f"launching {command!r} to introspect its tools (no LLM call)…", err=True)
+    try:
+        descriptor = asyncio.run(adapter.describe())
+    except Exception as exc:
+        typer.echo(
+            f"could not launch / introspect the MCP server: {exc}\n"
+            "check --command/--arg/--env and that the server speaks MCP over stdio.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    tools = list(descriptor.tools)
+    tool_names = [t.name for t in tools]
+    suggested_weaknesses = _suggest_weakness_classes(tools)
+
+    # #18 footgun: warn (do not block) on a relative SQLite DB path.
+    for key in _relative_sqlite_env_keys(tf.env):
+        typer.echo(
+            f"warning: env {key}={tf.env[key]!r} looks like a relative SQLite path. "
+            "On Windows a relative/ambiguous sqlite URL can open a DIFFERENT or empty "
+            "DB, making a vulnerable agent look clean (#18). Prefer an absolute path.",
+            err=True,
+        )
+
+    yaml_text = _render_target_scaffold(
+        tf=tf,
+        tool_names=tool_names,
+        suggested_weaknesses=suggested_weaknesses,
+        system_prompt_file=system_prompt_file,
+    )
+
+    # Round-trip-validate the scaffold we are about to write so it never lands broken.
+    from mylonite.plugins._mcp.target_file import TargetFile
+
+    try:
+        TargetFile.model_validate(yaml.safe_load(yaml_text))
+    except Exception as exc:  # pragma: no cover - defensive; the scaffold is fixed-shape
+        typer.echo(f"internal error: scaffolded YAML failed validation: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    output.write_text(yaml_text, encoding="utf-8")
+    typer.echo(f"wrote {output} — {len(tool_names)} tools discovered.")
+    typer.echo(
+        "  suggested weakness_classes "
+        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning).",
+        err=True,
+    )
+    typer.echo(
+        "  next: fill in the seed_arm (how to plant untrusted content) and the "
+        "effect_probe (how to confirm damage), then run "
+        f"`mylonite scan mcp:custom --target-file {output} --authorize {family}`.",
+        err=True,
+    )
+
+
+def _render_target_scaffold(
+    *,
+    tf: Any,
+    tool_names: list[str],
+    suggested_weaknesses: list[str],
+    system_prompt_file: Path | None,
+) -> str:
+    """Render a commented, ready-to-edit ``target.yaml`` starter."""
+    import yaml
+
+    def _yaml_list(items: list[str]) -> str:
+        return yaml.safe_dump(items, default_flow_style=True).strip()
+
+    args_line = _yaml_list(list(tf.args)) if tf.args else "[]"
+    env_block = ""
+    if tf.env:
+        # Dump as a proper YAML mapping so values with ':' (e.g. sqlite URLs) are
+        # quoted/escaped correctly — never hand-roll per-value scalars.
+        env_block = yaml.safe_dump({"env": dict(tf.env)}, default_flow_style=False)
+    prompt_line = (
+        f"system_prompt_file: {system_prompt_file}\n"
+        if system_prompt_file is not None
+        else '# system_prompt_file: prompt.txt   # or set system_prompt: "..." inline\n'
+    )
+    scope_line = f"scope: {tf.scope}\n" if tf.scope is not None else "# scope: my-scope\n"
+    return f"""\
+# Mylonite custom-target scaffold — generated by `mylonite init-target`.
+# Review and EDIT before scanning: the suggestions below are hints, not gospel.
+family: {tf.family}
+command: {tf.command}
+args: {args_line}
+{env_block}{scope_line}{prompt_line}
+# Discovered tools: {", ".join(tool_names) or "(none)"}.
+# primary_tools narrows seed selection to your consequential tools (optional).
+primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
+
+# Weakness classes this target exposes (SUGGESTED — confirm/edit):
+#   W1 tool-description instruction smuggling · W2 indirect injection
+#   W3 unrestricted egress / SSRF · W4 unconfirmed consequential action
+weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else "[]"}
+
+# How to plant untrusted content for indirect-injection (W2) seeds. Point this
+# at the tool that ingests external content; {{payload}} is replaced per attempt.
+# seed_arm:
+#   tool: <tool that stores/accepts untrusted content>
+#   args_template: {{ body: "{{payload}}" }}   # {{payload}} at a bare string leaf
+#   id_key: id                                 # JSON field holding the new handle
+#                                              # (or id_pattern: a regex; or id_from)
+
+# How to CONFIRM the damage materialised end-to-end (the effect probe). After the
+# attack, re-query the target and check the damaging side effect is present.
+# effect_probe:
+#   verify_tool: <tool that reports the side effect>
+#   verify_args_template: {{}}
+#   expect_marker: "<a string proving the effect, e.g. the attacker recipient>"
+#   deferred_markers: ["queued for approval", "pending review"]  # mark a DEFENDED result
+"""
+
+
 @app.command()
 def init() -> None:
-    """[v0.3 Phase 3] Scaffold a Mylonite config in the current directory."""
-    _not_implemented("init")
+    """Deprecated alias — use `mylonite init-target` to scaffold a target YAML."""
+    typer.echo(
+        "`mylonite init` is now `mylonite init-target` — it scaffolds a custom-target "
+        "YAML by launching your MCP server. Run `mylonite init-target --help`.",
+        err=True,
+    )
+    raise typer.Exit(code=EXIT_CONFIG)
 
 
 @taxonomy_app.command("list")

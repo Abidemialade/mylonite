@@ -7,6 +7,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — effect-aware findings, delivery verification, custom-target validation
+
+- **Findings now turn on the damaging *effect*, not the tool name.** Both MCP
+  adapters (stdio + in-process reference) capture each tool's `content` + `isError`
+  into a normalized `effect_trace` in the response metadata, and the judge requires
+  the consequence to have *materialized*: a deferred / refused / `is_error` result
+  (e.g. "queued for approval", "host not in allowlist") is **not** a success even
+  when the consequential tool was named. The deterministic weight rests on the
+  MCP-protocol `isError` flag and a target-declared effect probe — provider- and
+  wording-independent — with the LLM judge as a secondary signal only.
+- **Effect probe (`EffectProbeSpec`).** A target file / seed can declare, per
+  consequential capability, how to confirm the effect end-to-end (run a verify tool
+  after the planner and check for an expected marker), plus an overridable
+  `deferred_markers` list. The adapter stamps `effect_confirmed = true|false|unprobed`.
+  Generic over email / file-write / issue / payment / egress / DB mutation — any
+  consequential action — so a finding can mean "damage confirmed" on an arbitrary app.
+- **One generic deterministic predicate.** `consequential_action_executed` reads a
+  seed's declared consequential tool plus the effect trace (priority: `isError` →
+  executed-not-deferred check → an overridable marker heuristic as last resort) and
+  is available for custom seeds that set `consequential_tool` in their metadata. In
+  the live path the target-declared effect probe drives the verdict structurally via
+  the judge's `effect_confirmed` short-circuit (above); the predicate is the
+  effect-trace-only fallback. No English keyword is load-bearing for either.
+- **Delivery verification — a misfire no longer reads as clean.** For indirect
+  seeds the adapter detects whether the poison was actually retrieved by checking
+  that a distinctive token from the planted payload appears in a planner tool
+  result (no marker is injected — the attack stays realistic), and captures the
+  planted handle robustly (`SeedArmSpec` gained `id_key` / `id_pattern`). If the
+  poison is never retrieved into the model's context, the attempt is reported
+  `skipped_payload_not_delivered` rather than `no_finding` (mirroring the existing
+  `skipped_no_seed_arm` honesty precedent). A `recall_all` drive lets a keyless
+  target still surface the poison.
+- **Custom-target validation — the moat no longer requires the bundled twin.**
+  `DifferentialValidator` now honours `target` / `oracle`: a `reference:*` exploit
+  takes the unchanged twin differential; a **custom** `target_id` re-drives the
+  operator's REAL MCP server (fresh subprocess per run, `--authorize`-gated) and
+  keeps the test only if it passes **stability** (the attack reproduces across N
+  runs) ∧ **effect** (the effect probe confirms damage — replacing the missing
+  twin) ∧ **consensus** (adversarial multi-judge majority). New public testkit
+  helper `assert_target_resists(exploit, *, target_file=…)` re-drives the real
+  target and asserts it still resists (live-gated behind `MYLONITE_LIVE_TARGET=1`);
+  the pytest generator emits this for custom targets while reference targets stay
+  byte-for-byte (`assert_guard_holds`). `mylonite validate --target-file …` runs
+  the custom path.
+- **`mylonite.testkit` / `mylonite generate` no longer require the reference
+  package.** `reference_target_adapter` imports `mcp_kitchen_sink` lazily (inside
+  `describe()` / `invoke()`), so importing the testkit or generating a test works
+  without the optional reference install. The scan engine re-raises an `ImportError`
+  from `describe()` (a missing optional dependency is a configuration error, not a
+  target failure) so the CLI maps it to a clear exit instead of a generic
+  `describe_failed`.
+
+### Changed
+
+- **`validator` contract `CONTRACT_VERSION` 0.2.0 → 0.3.0** (minor, additive).
+  `ValidationOutcome.stage` gained `stability` / `effect` / `consensus` legs for the
+  custom-target validation path. Existing reference-path reports are unaffected.
+- **`target_adapter` contract `CONTRACT_VERSION` 0.2.0 → 0.3.0** (minor, additive).
+  The scan report's `ScanAttemptOutcome` enum gained `skipped_payload_not_delivered`.
+  Backward-compatible for adapters; report readers see one new outcome value.
+
+### Added — plug-and-play on-ramp (scaffold, keys, docs)
+
+- **`mylonite init-target`** scaffolds a custom-target YAML by launching your MCP
+  server once (no LLM call), listing its tools, and writing a commented starter
+  with SUGGESTED `weakness_classes` / `primary_tools` (taxonomy-grounded hints,
+  always user-confirmed) and a `seed_arm` + `effect_probe` template. Warns on a
+  relative SQLite DB path (the #18 Windows footgun) and round-trip-validates the
+  YAML before writing. (`mylonite init` is now a deprecated alias.)
+- **Provider key handling.** Global `--api-key-file` (a bare key or a dotenv
+  line; the provider is inferred from the key shape, never printed) and
+  `--env-file` (loads ONLY known provider API-key vars from a `.env`, never
+  blanket env injection). `mylonite doctor` now warns when a resolved key clearly
+  isn't key-shaped (placeholder / path / truncated paste) without echoing it.
+- **Natural-language planting checks (R7).** A custom target whose `seed_arm`
+  embeds `{payload}` inside a JSON/structured string, or omits it entirely, now
+  gets a loud warning (the plant must be natural language at a bare string leaf).
+  The scan summary also surfaces `customiser`-fallback and N-run-disagreement
+  counts so a low-quality or flaky plant isn't invisible.
+- **Python 3.11–3.13 guidance (S4).** The CLI prints a clear note on Python 3.14+
+  (litellm has no 3.14 wheels yet); README states the supported range.
+
+### Added — bounded runs (timeouts, progress, scan-time flakiness filter)
+
+- **Scan-time N-run flakiness filter.** New `ScanConfig.runs` (default 1, no
+  behaviour change) invokes + judges each payload N times; the payload is a
+  finding only if it fires in a strict majority, so a 1-in-N fluke is rejected.
+  Observed disagreement is surfaced in the report's `fallback_breakdown`
+  (`nrun_disagreement`) and `single_run` now reflects reality (`runs == 1`).
+- **Wall-clock bound on a scan.** New `ScanConfig.wall_clock_timeout_s` (default
+  None) stops a scan that exceeds its budget — even a hung task — returning
+  `aborted="wall_clock_timeout"` with whatever completed, instead of running
+  open-ended.
+- **Validator timeout + progress.** `DifferentialValidator` gained
+  `iteration_timeout_s` (per-scan wall-clock bound for a custom target, threaded
+  into the engine) and `progress_cb` (streams "iteration k/N …" so a long live
+  validation no longer goes silent for minutes). `mylonite validate` exposes
+  `--iteration-timeout` and streams progress to stderr.
+
+### Fixed
+
+- **Compliance provenance now comes from the firing seed, not the umbrella
+  module.** A module spans several weakness classes (W1–W4); stamping
+  module-level tags mislabelled which OWASP/ASI/ATLAS IDs an emitted test
+  actually proves. The emitted `ExploitRecord` now carries the precise
+  per-seed compliance.
+- **Seeds are no longer double-emitted.** The prompt-injection module owns the
+  W1/W2 family only (mirroring the excessive-agency module's W3/W4 filter), so
+  the W3/W4 seeds are emitted once, not twice; the engine also dedupes by
+  `pattern_id` across modules as a backstop. This lowers the demo's per-run
+  attempt count (the 2-vs-0 vulnerable/guarded differential is unchanged); eight
+  now-unreachable demo replay fixtures were pruned.
+
 ## [0.5.0] - 2026-06-12
 
 ### Added — cross-LLM robustness (JSON ingestion/emission + provider-agnostic auth)

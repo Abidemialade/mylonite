@@ -72,6 +72,35 @@ def _mask_kv(match: re.Match[str]) -> str:
     return f"{match.group('key')}{match.group('sep')}{REDACTION_PLACEHOLDER}"
 
 
+#: API-key-shaped prefixes used by ``looks_like_api_key`` — a positive check
+#: (does this LOOK like a provider key?), distinct from the redaction patterns
+#: which match anywhere in a blob. AWS keys are 20 chars; provider keys are long.
+_API_KEY_SHAPES: Final[tuple[re.Pattern[str], ...]] = (
+    re.compile(r"^sk-ant-[A-Za-z0-9_-]{20,}$"),
+    re.compile(r"^sk-[A-Za-z0-9_-]{20,}$"),
+    re.compile(r"^AKIA[0-9A-Z]{16}$"),
+    re.compile(r"^gsk_[A-Za-z0-9]{20,}$"),  # Groq
+    re.compile(r"^AIza[A-Za-z0-9_-]{30,}$"),  # Google
+)
+
+
+def looks_like_api_key(value: str) -> bool:
+    """True if ``value`` has the shape of a known provider API key.
+
+    Used by ``mylonite doctor`` to warn when a resolved key clearly isn't one
+    (e.g. a placeholder, a path, or a truncated paste) — WITHOUT printing it.
+    Deliberately permissive: a very long opaque token also passes, so it only
+    flags obviously-wrong values, never a real-but-unrecognised key.
+    """
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    if any(p.match(v) for p in _API_KEY_SHAPES):
+        return True
+    # A long, whitespace-free, mostly-key-charset token is plausibly a key.
+    return len(v) >= 32 and " " not in v and "/" not in v and "\\" not in v
+
+
 def redact(text: str) -> str:
     """Return ``text`` with secret-shaped tokens replaced by the placeholder.
 

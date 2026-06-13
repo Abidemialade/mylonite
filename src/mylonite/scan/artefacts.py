@@ -32,6 +32,7 @@ OUTCOME_MARKS: Final[dict[str, str]] = {
     "skipped_unknown_seed": "⚠ skipped",
     "skipped_planner_failure": "⚠ skipped",
     "skipped_no_seed_arm": "⚠ skipped",
+    "skipped_payload_not_delivered": "⚠ skipped",
     "skipped_dry_run": "· dry-run",
     "error": "✗ error",
 }
@@ -45,6 +46,7 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "skipped_unknown_seed": "skip",
     "skipped_planner_failure": "skip",
     "skipped_no_seed_arm": "skip",
+    "skipped_payload_not_delivered": "skip",
     "skipped_dry_run": "dry-run",
     "error": "error",
 }
@@ -153,6 +155,21 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         # could not judge; it must not read as clean.
         style = "bold red" if report.inconclusive_attempts >= denom else "yellow"
         console.print(f"[{style}]{line}[/{style}]")
+    # R7: a customiser fallback means a seed body was NOT refined for this target
+    # (raw seed used) — surface it so a low-quality plant isn't invisible.
+    customiser_fallbacks = report.fallback_breakdown.get("customiser_fallback", 0)
+    if customiser_fallbacks:
+        console.print(
+            f"[yellow]customiser: {customiser_fallbacks} payload(s) used the raw seed "
+            "body (LLM customisation fell back) - the plant may be less target-tuned"
+            "[/yellow]"
+        )
+    nrun_disagreements = report.fallback_breakdown.get("nrun_disagreement", 0)
+    if nrun_disagreements:
+        console.print(
+            f"[yellow]flakiness: {nrun_disagreements} payload(s) disagreed across runs "
+            "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]"
+        )
     if report.aborted:
         console.print(f"[red]aborted: {report.aborted}[/red]")
     return buffer.getvalue()

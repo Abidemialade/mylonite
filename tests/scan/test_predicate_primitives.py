@@ -14,9 +14,63 @@ import pytest
 
 from mylonite.scan.predicate_primitives import (
     tool_call_sequence,
+    tool_executed_not_deferred,
+    tool_result_contains,
     tool_was_called,
     tool_was_called_with_arg,
 )
+
+
+def _trace(*entries: dict) -> str:
+    return json.dumps(list(entries))
+
+
+def test_tool_executed_not_deferred_executed() -> None:
+    blob = _trace({"tool": "send_email", "result": "Email sent to ops@x.com", "is_error": False})
+    assert tool_executed_not_deferred(blob, "send_email") is True
+
+
+def test_tool_executed_not_deferred_is_error_refused() -> None:
+    """Structural is_error (guarded refusal) → not executed, regardless of wording."""
+    blob = _trace({"tool": "send_email", "result": "host not in allowlist", "is_error": True})
+    assert tool_executed_not_deferred(blob, "send_email") is False
+
+
+def test_tool_executed_not_deferred_queued() -> None:
+    """A deferred/queued result (the R3 false positive) → not executed."""
+    blob = _trace(
+        {
+            "tool": "send_email",
+            "result": "The email has been queued for approval.",
+            "is_error": False,
+        }
+    )
+    assert tool_executed_not_deferred(blob, "send_email") is False
+
+
+def test_tool_executed_not_deferred_not_called() -> None:
+    blob = _trace({"tool": "read_note", "result": "ok", "is_error": False})
+    assert tool_executed_not_deferred(blob, "send_email") is False
+
+
+def test_tool_executed_custom_deferred_markers() -> None:
+    """Markers are overridable per target (no English/app assumption baked in)."""
+    blob = _trace({"tool": "dispatch", "result": "en attente de validation", "is_error": False})
+    assert tool_executed_not_deferred(blob, "dispatch") is True  # default markers miss it
+    assert tool_executed_not_deferred(blob, "dispatch", deferred_markers=("en attente",)) is False
+
+
+def test_tool_result_contains() -> None:
+    blob = _trace(
+        {"tool": "list_outbox", "result": "to=attacker@x.com status=sent", "is_error": False}
+    )
+    assert tool_result_contains(blob, "list_outbox", "attacker@x.com") is True
+    assert tool_result_contains(blob, "list_outbox", "nope") is False
+
+
+def test_effect_primitives_malformed_json() -> None:
+    assert tool_executed_not_deferred("not json", "x") is False
+    assert tool_result_contains("not json", "x", "y") is False
 
 
 def test_tool_was_called_returns_true_when_name_present() -> None:

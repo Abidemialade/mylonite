@@ -30,6 +30,8 @@ from mylonite.contracts.attack_module import CONTRACT_VERSION
 from mylonite.scan import seeds
 from mylonite.scan.seeds import SeedPattern
 
+_W1_W2 = frozenset({"W1", "W2"})
+
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
     return Payload(
@@ -81,6 +83,10 @@ class PromptInjectionAttackModule(AttackModuleBase):
             return
         # Selection resolved centrally (descriptor-first) via the seeds module
         # namespace, so a single patch point governs applicability and custom
-        # targets can opt in by declaring weakness_classes. W1+W2 family.
+        # targets can opt in by declaring weakness_classes. This module owns the
+        # W1+W2 family ONLY — without this filter it re-emits the W3/W4 seeds the
+        # ExcessiveAgency module already owns, double-counting attempts and
+        # findings for the same pattern_id (#5). Mirrors that module's `_W3_W4`.
         for seed in seeds.seeds_for_descriptor(target):
-            yield _payload_from_seed(seed)
+            if seed.weakness in _W1_W2:
+                yield _payload_from_seed(seed)

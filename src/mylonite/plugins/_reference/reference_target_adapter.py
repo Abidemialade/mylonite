@@ -27,11 +27,14 @@ from __future__ import annotations
 import logging
 import secrets
 from collections.abc import Callable
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-from mcp_kitchen_sink._store import NoteStore
-from mcp_kitchen_sink.server_guarded import GuardedKitchenSinkServer
-from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
+# The bundled reference target (`mcp_kitchen_sink`) is a SEPARATELY-installed
+# package. Import it lazily (inside the methods that construct it) so that merely
+# importing this module — and therefore `mylonite.testkit` / `mylonite generate`
+# — does NOT require the reference package to be installed (Issue P3).
+if TYPE_CHECKING:
+    from mcp_kitchen_sink._store import NoteStore
 
 from mylonite.contracts import AdapterResponse, AsyncTargetAdapterBase, Payload, TargetDescriptor
 from mylonite.contracts._types import ToolSpec
@@ -84,6 +87,9 @@ class _InProcessServer:
     ``AdapterResponse.tool_calls`` after the planner runs."""
 
     def __init__(self, variant: Variant, store: NoteStore) -> None:
+        from mcp_kitchen_sink.server_guarded import GuardedKitchenSinkServer
+        from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
+
         self._variant = variant
         if variant == "vulnerable":
             self._inner: Any = VulnerableKitchenSinkServer(store=store)
@@ -126,6 +132,8 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         self._note_id_factory = note_id_factory
 
     async def describe(self) -> TargetDescriptor:
+        from mcp_kitchen_sink._store import NoteStore
+
         # Construct a one-shot server purely for tool enumeration; throw it
         # away after. The real per-attempt server lives inside ``invoke``.
         server = _InProcessServer(self._variant, NoteStore())
@@ -144,6 +152,8 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         )
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
+        from mcp_kitchen_sink._store import NoteStore
+
         store = NoteStore()
         server = _InProcessServer(self._variant, store)
         note_id: str | None = None

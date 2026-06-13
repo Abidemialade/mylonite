@@ -313,10 +313,11 @@ def test_load_exploit_invalid_raises(tmp_path: Path) -> None:
 
 
 def test_public_surface() -> None:
-    """The stability-promised surface is exactly the two functions + error class."""
+    """The stability-promised surface: the helpers + error class."""
     assert testkit.__all__ == [
         "TestkitFixtureError",
         "assert_guard_holds",
+        "assert_target_resists",
         "load_exploit",
     ]
     assert callable(testkit.assert_guard_holds)

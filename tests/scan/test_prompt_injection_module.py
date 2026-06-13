@@ -34,13 +34,20 @@ def test_attack_metadata_returns_umbrella_pattern() -> None:
     assert "ASI01" in meta.compliance.owasp_asi
 
 
-def test_generate_payloads_emits_one_per_kitchen_sink_seed() -> None:
-    """``reference:vulnerable`` resolves to the kitchen-sink family; only seeds
-    tagged ``applicable_targets=['kitchen-sink']`` are emitted (PR 2 + PR 5 of v0.2.2)."""
+def test_generate_payloads_emits_one_per_kitchen_sink_w1_w2_seed() -> None:
+    """``reference:vulnerable`` resolves to the kitchen-sink family. This module
+    owns the W1+W2 family ONLY — the W3/W4 seeds belong to the excessive-agency
+    module, so emitting them here double-counts (#5). Only kitchen-sink seeds
+    tagged W1/W2 are emitted."""
     module = PromptInjectionAttackModule()
     payloads = list(module.generate_payloads(_mcp_descriptor()))
-    kitchen_sink_seeds = [s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets]
-    assert len(payloads) == len(kitchen_sink_seeds)
+    w1_w2_seeds = [
+        s
+        for s in SEED_CATALOGUE
+        if "kitchen-sink" in s.applicable_targets and s.weakness in {"W1", "W2"}
+    ]
+    assert len(payloads) == len(w1_w2_seeds)
+    assert {p.metadata["weakness"] for p in payloads} <= {"W1", "W2"}
 
 
 def test_emitted_payloads_carry_required_metadata() -> None:

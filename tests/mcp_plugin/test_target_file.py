@@ -11,6 +11,7 @@ from mylonite.plugins._mcp.target_file import (
     TargetFile,
     build_target_spec,
     load_target_file,
+    payload_placement_warnings,
 )
 from mylonite.plugins._mcp.target_registry import InvalidTargetScope, SeedArmSpec
 
@@ -102,3 +103,33 @@ def test_load_target_file_from_yaml(tmp_path: Path) -> None:
     assert tf.family == "triagent"
     assert tf.weakness_classes == ["W2", "W4"]
     assert tf.seed_arm is not None and tf.seed_arm.tool == "remember"
+
+
+# --- R7: natural-language payload-placement warnings ------------------------
+
+
+def test_payload_warnings_clean_for_bare_leaf() -> None:
+    """A {payload} at a bare string leaf is the happy path — no warnings."""
+    tf = _tf(seed_arm=SeedArmSpec(tool="remember", args_template={"content": "{payload}"}))
+    assert payload_placement_warnings(tf) == []
+
+
+def test_payload_warnings_flag_json_nested_placeholder() -> None:
+    """{payload} embedded in a JSON-object string is flagged (not natural language)."""
+    tf = _tf(
+        seed_arm=SeedArmSpec(tool="remember", args_template={"content": '{"text": "{payload}"}'})
+    )
+    warnings = payload_placement_warnings(tf)
+    assert any("BARE string leaf" in w for w in warnings)
+
+
+def test_payload_warnings_flag_missing_placeholder() -> None:
+    """No {payload} anywhere → the plant would deliver nothing; flagged."""
+    tf = _tf(seed_arm=SeedArmSpec(tool="remember", args_template={"content": "static text"}))
+    warnings = payload_placement_warnings(tf)
+    assert any("no '{payload}' placeholder" in w for w in warnings)
+
+
+def test_payload_warnings_none_without_seed_arm() -> None:
+    """A target with no seed_arm has nothing to plant — no warnings."""
+    assert payload_placement_warnings(_tf()) == []
