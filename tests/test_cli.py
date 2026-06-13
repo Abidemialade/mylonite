@@ -737,6 +737,95 @@ def test_generate_no_input_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "mylonite scan" in out or "--latest" in out
 
 
+def _write_custom_exploit_json(path: Path) -> Any:
+    """A custom-target ExploitRecord (target_id != reference:*) for generate tests."""
+    import json
+
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return exploit
+
+
+_MINIMAL_TARGET_YAML = (
+    "# my custom target\nfamily: myapp\ncommand: python\nargs: [-m, my_server]\n"
+    "weakness_classes: [W2]\n"
+)
+
+
+def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
+    """generate --target-file co-locates the YAML verbatim as target.yaml + prereq block."""
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(
+        app,
+        ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    colocated = out_dir / "target.yaml"
+    assert colocated.is_file()
+    # Verbatim copy (comments preserved).
+    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    # Prereq block (N5) for the live custom test.
+    out = result.output
+    assert "MYLONITE_LIVE_TARGET=1 pytest" in out
+    assert "ANTHROPIC_API_KEY" in out  # example provider key
+    assert "target.yaml" in out
+
+
+def test_generate_custom_without_target_file_warns(tmp_path: Path) -> None:
+    """A custom target generated without --target-file warns and writes no target.yaml."""
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit_json), "--out", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out_dir / "target.yaml").exists()
+    out = result.stderr or result.output
+    assert "--target-file" in out
+    assert "custom target" in out.lower()
+
+
+def test_generate_custom_invalid_target_file_exit_2(tmp_path: Path) -> None:
+    """A malformed --target-file is rejected before co-location."""
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("family: myapp\n# missing required 'command'\n", encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(
+        app, ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(bad)]
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid --target-file" in (result.stderr or result.output)
+
+
+def test_env_file_overrides_ambient_key_with_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--env-file overrides a (wrong) ambient key and warns, naming only the var."""
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-WRONG-ambient-value-000000")
+    env_file = tmp_path / ".env"
+    env_file.write_text("GEMINI_API_KEY=sk-correct-from-file-1234567890\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    assert os.environ.get("GEMINI_API_KEY") == "sk-correct-from-file-1234567890"
+    out = result.stderr or result.output
+    assert "overriding ambient GEMINI_API_KEY" in out
+    assert "sk-WRONG" not in out and "sk-correct" not in out  # never the value
+    os.environ.pop("GEMINI_API_KEY", None)  # don't leak past the test
+
+
 # ---------------------------------------------------------------------------
 # `mylonite validate` — OFFLINE: the DifferentialValidator and the provider
 # preflight are monkeypatched so NO live LLM call / API key is needed. These

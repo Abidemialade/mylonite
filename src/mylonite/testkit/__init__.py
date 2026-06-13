@@ -337,6 +337,12 @@ def assert_guard_holds(
         The fixtures are missing / corrupt / version-mismatched, or the run was
         inconclusive (only skip/error outcomes) — the gate refuses to pass.
     """
+    # Inert on the offline replay path (the recorder opens no sockets); a free
+    # defensive call so a future record-mode library caller gets TLS set up too.
+    from mylonite._bootstrap import enable_truststore
+
+    enable_truststore()
+
     if _completion_fn is not None:
         # Test seam: drive directly, no fixtures/meta. Use a stub model; the
         # injected fn ignores it.
@@ -400,6 +406,7 @@ def assert_target_resists(
     provider), so emitted tests gate it behind ``MYLONITE_LIVE_TARGET=1``.
     ``_completion_fn`` is the test-only offline seam.
     """
+    from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -408,7 +415,23 @@ def assert_target_resists(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    tf = load_target_file(Path(target_file))
+    # The CLI's _root callback never runs under pytest, so set up the OS trust
+    # store here too — otherwise this live check fails CERTIFICATE_VERIFY_FAILED
+    # behind a TLS-inspecting proxy though `mylonite scan`/`validate` work.
+    enable_truststore()
+
+    target_path = Path(target_file)
+    if not target_path.is_file():
+        # An actionable error beats a bare FileNotFoundError: `generate` writes the
+        # test next to a target.yaml only when given --target-file (mirrors how
+        # load_exploit names the missing artefact).
+        raise FileNotFoundError(
+            f"target file {target_path} not found. The emitted custom-target test needs "
+            "the target YAML co-located as 'target.yaml'. Re-run "
+            "`mylonite generate <exploit> --target-file <your-target>.yaml`, or copy your "
+            "scan's target YAML next to this test as target.yaml."
+        )
+    tf = load_target_file(target_path)
     spec = build_target_spec(tf)
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)

@@ -60,23 +60,15 @@ EXIT_NOT_KEPT = 5
 
 
 def _maybe_enable_truststore() -> None:
-    """Use the OS trust store for TLS when ``truststore`` is installed.
+    """Inject the OS trust store for TLS (shared with the testkit/library path).
 
-    Enterprise environments behind a TLS-inspecting proxy present a CA that the
-    OS trusts but Python's bundled certifi does not — so provider calls fail
-    ``CERTIFICATE_VERIFY_FAILED``. ``truststore`` (an optional ``[enterprise]``
-    extra) bridges to the OS trust store without disabling verification. Opt out
-    with ``MYLONITE_NO_TRUSTSTORE=1``. Best-effort: absent/failed import is a
-    silent no-op (verification stays at certifi defaults).
+    Thin wrapper over :func:`mylonite._bootstrap.enable_truststore` so the CLI and
+    an emitted test running under pytest set up TLS identically. Opt out with
+    ``MYLONITE_NO_TRUSTSTORE=1``. Best-effort: a no-op if ``truststore`` is absent.
     """
-    if os.environ.get("MYLONITE_NO_TRUSTSTORE"):
-        return
-    try:
-        import truststore
+    from mylonite._bootstrap import enable_truststore
 
-        truststore.inject_into_ssl()
-    except Exception:  # not installed, or injection unsupported → leave defaults
-        pass
+    enable_truststore()
 
 
 def _configure_stdio_encoding() -> None:
@@ -116,9 +108,11 @@ def _provider_key_var_names() -> set[str]:
 def _load_env_file(path: Path) -> None:
     """Load ONLY known provider API-key vars from a dotenv file — never blanket.
 
-    Reads ``KEY=VALUE`` lines and sets a var only if it is a known provider
-    API-key env var (``providers.PROVIDER_ENV_VARS``) and not already set, so a
-    stray ``.env`` can't inject arbitrary environment into the process.
+    Reads ``KEY=VALUE`` lines and sets a var when it is a known provider API-key
+    env var (``providers.PROVIDER_ENV_VARS``), so a stray ``.env`` can't inject
+    arbitrary environment. An explicitly-passed flag OVERRIDES an ambient value
+    (standard CLI precedence: explicit > ambient — the exact case the flag exists
+    for is a wrong key already in the shell), warning on stderr when it does.
     """
     if not path.exists():
         typer.echo(f"env file {path} not found.", err=True)
@@ -136,9 +130,15 @@ def _load_env_file(path: Path) -> None:
         # not every quote char, which would corrupt a value ending in a quote.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
-        if key in known and key not in os.environ:
-            os.environ[key] = value
-            loaded.append(key)
+        if key not in known:
+            continue
+        if key in os.environ and os.environ[key] != value:
+            typer.echo(
+                f"warning: overriding ambient {key} with the value from {path}.",
+                err=True,
+            )
+        os.environ[key] = value
+        loaded.append(key)
     if loaded:
         typer.echo(f"loaded {', '.join(sorted(loaded))} from {path}.", err=True)
 
@@ -177,9 +177,13 @@ def _load_api_key_file(path: Path) -> None:
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
-    if var not in os.environ:
-        os.environ[var] = key
-        typer.echo(f"loaded {var} from {path}.", err=True)
+    if var in os.environ and os.environ[var] != key:
+        typer.echo(
+            f"warning: overriding ambient {var} with the value from {path}.",
+            err=True,
+        )
+    os.environ[var] = key
+    typer.echo(f"loaded {var} from {path}.", err=True)
 
 
 @app.callback()
@@ -1013,13 +1017,25 @@ def generate(
             help="Output dir for the emitted test (default .mylonite/generated/<slug>/).",
         ),
     ] = None,
+    target_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--target-file",
+            help=(
+                "For a CUSTOM target: the same target YAML you scanned. Co-located "
+                "next to the emitted test as target.yaml so the live test can re-drive "
+                "your real app out of the box."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Emit a pytest regression test from a confirmed exploit.
 
     Offline and deterministic — no LLM call. Reads an ``exploit_*.json`` (written
     by ``mylonite scan``), renders a testkit-based pytest file, and writes it next
-    to a co-located copy of the exploit plus a ``fixtures/`` placeholder. Prints
-    the exact ``mylonite validate`` command to run next.
+    to a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a
+    CUSTOM target, pass ``--target-file`` so the target YAML is co-located as
+    ``target.yaml`` (the live test needs it). Prints what to run next.
     """
     import json
 
@@ -1063,8 +1079,48 @@ def generate(
     typer.echo(f"Wrote test:    {test_path}")
     typer.echo(f"Wrote exploit: {colocated_exploit}")
     typer.echo(f"Fixtures dir:  {fixtures_dir}")
+
+    # A custom-target test re-drives the REAL app, so it needs the target YAML
+    # co-located as target.yaml. Co-locate it when given; otherwise warn loudly
+    # (the test would fail at runtime without it). Reference tests replay the
+    # bundled twin and need no target file.
+    is_custom = not exploit.target_id.startswith("reference:")
+    colocated_target: Path | None = None
+    if target_file is not None:
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            build_target_spec(load_target_file(target_file))  # validate before copying
+        except Exception as exc:
+            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        colocated_target = out_dir / "target.yaml"
+        # Copy the text verbatim so the operator's comments/structure survive.
+        colocated_target.write_text(target_file.read_text(encoding="utf-8"), encoding="utf-8")
+        typer.echo(f"Wrote target:  {colocated_target}")
+    elif is_custom:
+        typer.echo("")
+        typer.echo(
+            f"warning: {exploit.target_id} is a custom target - the emitted test re-drives "
+            "your real app and needs a co-located target.yaml. Re-run with "
+            "`--target-file <your-target>.yaml`, or copy your scan's target YAML into "
+            f"{out_dir} as target.yaml. Without it the test errors at runtime.",
+            err=True,
+        )
+
     typer.echo("")
-    typer.echo(f"Next: mylonite validate {out_dir}")
+    if is_custom:
+        # The custom test is LIVE (gated behind MYLONITE_LIVE_TARGET=1): it needs
+        # pytest, a provider key, a runnable MCP server, and the co-located YAML.
+        typer.echo("Next - this is a LIVE custom-target test. To run it you need:")
+        typer.echo("  - pytest + mylonite installed in the consuming environment")
+        typer.echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
+        typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
+        typer.echo("Then:")
+        typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
+        typer.echo(f"  mylonite validate {out_dir} --target-file {out_dir / 'target.yaml'}")
+    else:
+        typer.echo(f"Next: mylonite validate {out_dir}")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — emitted-test runnability + shared environment bootstrap
+
+- **The emitted custom-target test is runnable out of the box.** `mylonite generate`
+  gained `--target-file`, which co-locates your target YAML next to the test as
+  `target.yaml` (copied verbatim, comments preserved) — the live test re-drives your
+  real app and needs it. Generating a custom-target test without `--target-file` now
+  warns loudly, and `testkit.assert_target_resists` raises a clear, actionable error
+  (instead of a bare `FileNotFoundError`) when `target.yaml` is missing. `generate`
+  also prints the live-test prerequisites (pytest, a provider key, a runnable MCP
+  server, the co-located YAML) and both the `pytest` and `validate` commands.
+- **TLS trust-store setup is shared with the library/testkit path.** Truststore
+  injection moved to a reusable `mylonite._bootstrap.enable_truststore()` that the
+  CLI callback and the testkit (`assert_target_resists` / `assert_guard_holds`) both
+  call, so an emitted test run under `pytest` behind a TLS-inspecting proxy no longer
+  fails `CERTIFICATE_VERIFY_FAILED` the way only the CLI used to avoid. Still honors
+  `MYLONITE_NO_TRUSTSTORE=1`; inert on the offline replay path.
+- **No import-time cost-map SSL warning.** `mylonite` now defaults
+  `LITELLM_LOCAL_MODEL_COST_MAP=True` (overridable) so litellm uses its bundled cost
+  map instead of fetching the remote one at import — which logged a noisy
+  `CERTIFICATE_VERIFY_FAILED` on proxied machines. Affects only cost/token-accounting
+  metadata, never provider routing.
+- **`--api-key-file` / `--env-file` override an ambient key.** A key passed via a
+  flag now wins over a (often wrong) value already in the environment — the exact case
+  the flags exist for — and warns on stderr when it overrides, naming only the variable,
+  never the secret.
+
 ### Added — effect-aware findings, delivery verification, custom-target validation
 
 - **Findings now turn on the damaging *effect*, not the tool name.** Both MCP
