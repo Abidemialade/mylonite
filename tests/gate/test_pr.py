@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from mylonite.gate.pr import GatePaths, PrResult, open_or_print_pr
+import pytest
+
+from mylonite.gate.pr import GatePaths, GatePrError, PrResult, open_or_print_pr
 
 
 def _make_artifacts(tmp_path: Path) -> GatePaths:
@@ -20,7 +22,7 @@ def _fake_runner_recording():
     calls = []
 
     def run(cmd, **kwargs):
-        calls.append(cmd)
+        calls.append(list(cmd))
 
         class _CP:  # completed-process-ish
             returncode = 0
@@ -35,19 +37,23 @@ def _fake_runner_recording():
 
 def test_print_path_when_open_pr_false(tmp_path, capsys):
     paths = _make_artifacts(tmp_path)
+    runner = _fake_runner_recording()
     result = open_or_print_pr(
         paths,
         branch="mylonite/gate-x",
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
-        _run=_fake_runner_recording(),
+        _run=runner,
     )
     assert isinstance(result, PrResult)
     assert result.opened is False
     out = capsys.readouterr().out
     assert "mylonite/gate-x" in out
     assert "gh pr create" in out  # prints the exact command to run by hand
+    assert result.printed_command is not None
+    assert not any(c[:2] == ["git", "push"] for c in runner.calls)
+    assert not any(c[:1] == ["gh"] for c in runner.calls)
 
 
 def test_open_path_calls_gh_when_available(tmp_path, monkeypatch):
@@ -97,3 +103,18 @@ def test_open_requested_but_gh_missing_degrades_to_print(tmp_path, capsys, monke
     )
     assert result.opened is False
     assert "gh pr create" in capsys.readouterr().out
+
+
+def test_failing_git_commit_raises(tmp_path):
+    paths = _make_artifacts(tmp_path)
+
+    def run(cmd, **kwargs):
+        class _CP:
+            returncode = 1 if cmd[:2] == ["git", "commit"] else 0
+            stdout = ""
+            stderr = "nothing to commit"
+
+        return _CP()
+
+    with pytest.raises(GatePrError):
+        open_or_print_pr(paths, branch="b", pr_title="t", pr_body="x", open_pr=False, _run=run)
