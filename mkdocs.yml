@@ -25,6 +25,13 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
+# Local-only working artefacts (brainstorming specs / implementation plans) live
+# under docs/superpowers/ and must never be published — exclude them from the
+# site build so they can't render even if present locally. They are gitignored
+# too, so they aren't in CI at all.
+exclude_docs: |
+  superpowers/
+
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
