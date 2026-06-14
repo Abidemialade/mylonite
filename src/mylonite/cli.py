@@ -1720,6 +1720,240 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 
 
 @app.command()
+def gate(
+    target: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Target ID: 'reference:vulnerable' / 'reference:guarded', a "
+                "bundled 'mcp:<family>[:<scope>]', or 'mcp:custom'. "
+                "Omit when using --target-file. Non-reference targets require --authorize."
+            )
+        ),
+    ] = None,
+    target_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--target-file",
+            help="Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
+        ),
+    ] = None,
+    authorize: Annotated[
+        str | None,
+        typer.Option(
+            "--authorize",
+            help="Required for non-reference targets; assert ownership of the target.",
+        ),
+    ] = None,
+    open_pr: Annotated[
+        bool,
+        typer.Option(
+            "--open-pr",
+            help="Push a branch and open the gating PR via gh (opt-in).",
+        ),
+    ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Model identifier passed to LiteLLM."),
+    ] = None,
+    out: Annotated[
+        Path,
+        typer.Option("--out", help="Output directory for gate artefacts."),
+    ] = Path(".mylonite/gate"),
+    max_llm_calls: Annotated[
+        int,
+        typer.Option("--max-llm-calls", help="Process-wide LLM call cap for the scan phase."),
+    ] = 50,
+    llm_enrich: Annotated[
+        bool,
+        typer.Option(
+            "--llm-enrich",
+            help="Append a labelled, unverified LLM fix suggestion to the PR body.",
+        ),
+    ] = False,
+) -> None:
+    """Scan -> generate -> validate -> (optionally) open a gating PR. The magic moment."""
+    from mylonite.gate import pr as pr_mod
+    from mylonite.gate import run_gate
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+    from mylonite.plugins._reference.reference_validator import (
+        DifferentialValidator,
+        ReferenceVulnerableOracle,
+    )
+
+    effective_provider = provider or "anthropic"
+    base_model = model or "claude-haiku-4-5-20251001"
+    _validate_model_string(base_model)
+    effective_model = _route_model(provider, base_model)
+
+    # v0.2 attack families — same filter as the scan command.
+    _v0_2_ATTACK_FAMILIES = {"prompt-injection-family", "excessive-agency-family"}
+
+    # --- resolve adapter (mirrors scan command routing) ---
+    is_reference = bool(target and target.startswith("reference:"))
+    tf = None
+
+    if target_file is not None or target == "mcp:custom":
+        # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
+        # exactly as scan does.
+        if not authorize:
+            typer.echo("--authorize is required for custom targets. See SECURITY.md.", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        if target_file is not None:
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            try:
+                tf = load_target_file(target_file)
+            except Exception as exc:
+                typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+                raise typer.Exit(code=EXIT_CONFIG) from exc
+        else:
+            # mcp:custom with inline flags — not supported via gate (no --command etc.)
+            typer.echo(
+                "gate --target-file <yaml> is the custom-target path; "
+                "inline mcp:custom flags are not wired in `gate`. "
+                "Pass a target YAML via --target-file.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        adapter = _build_adapter_for_custom(tf, authorize, effective_model)
+    elif target is None:
+        typer.echo(
+            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    elif is_reference:
+        adapter = _build_adapter_for_reference(target, effective_model)
+    elif target.startswith("mcp:"):
+        if not authorize:
+            typer.echo(
+                f"--authorize is required for non-reference targets (got {target!r}). "
+                "See SECURITY.md.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+    else:
+        typer.echo(
+            f"unknown target shape {target!r}. "
+            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    # --- closures injected into run_gate ---
+
+    def scan_fn() -> list[Any]:
+        from mylonite.plugins.registry import discover
+        from mylonite.scan.customiser import PayloadCustomiser
+        from mylonite.scan.engine import ScanConfig, ScanEngine
+        from mylonite.scan.judge import SuccessJudge
+
+        try:
+            all_modules: list[Any] = discover("mylonite.attack_modules")
+        except Exception as exc:
+            typer.echo(f"plugin discovery failed: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        attack_modules = [m for m in all_modules if m.attack_metadata().id in _v0_2_ATTACK_FAMILIES]
+        if not attack_modules:
+            typer.echo(
+                "no usable attack modules discovered "
+                "(looking for 'prompt-injection-family' or 'excessive-agency-family')",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+
+        config = ScanConfig(
+            target_id=target if target is not None else f"mcp:{tf.family if tf else 'custom'}",
+            provider=effective_provider,
+            model=effective_model,
+            max_llm_calls=max_llm_calls,
+        )
+        engine = ScanEngine(
+            config=config,
+            adapter=adapter,
+            attack_modules=attack_modules,
+            customiser=PayloadCustomiser(model=effective_model),
+            judge=SuccessJudge(model=effective_model),
+        )
+        result = asyncio.run(engine.run())
+        return result.exploits
+
+    def generate_fn(exploit: Any) -> Any:
+        return ReferencePytestGenerator().emit(exploit)
+
+    def validate_fn(generated: Any) -> Any:
+        if is_reference:
+            validator = DifferentialValidator(
+                provider=effective_provider,
+                model=effective_model,
+                record_fixtures_dir=out / "fixtures",
+            )
+            return validator.validate(
+                generated,
+                ReferenceVulnerableOracle().adapter(),
+                ReferenceVulnerableOracle(),
+            )
+        # Custom target: mirror _validate_custom — re-drive the REAL target.
+        if tf is None:
+            typer.echo(
+                "internal: expected a loaded TargetFile for custom validate_fn",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        from mylonite.plugins._mcp import target_registry
+        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.target_file import build_target_spec
+
+        spec = build_target_spec(tf)
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+
+        def _factory() -> Any:
+            return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=effective_model)
+
+        validator = DifferentialValidator(
+            iterations=1,
+            provider=effective_provider,
+            model=effective_model,
+            target_adapter_factory=_factory,
+        )
+        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+
+    def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
+        if target_file is not None:
+            (out_dir / "target.yaml").write_text(
+                target_file.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        repo_root = Path.cwd()
+        paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=[])
+        return pr_mod.open_or_print_pr(
+            paths,
+            branch=f"mylonite/gate-{exploit.pattern_id}",
+            pr_title=f"Mylonite gate: {exploit.pattern_id}",
+            pr_body=body,
+            open_pr=open_pr,
+        )
+
+    result = run_gate(
+        out_dir=out,
+        scan_fn=scan_fn,
+        generate_fn=generate_fn,
+        validate_fn=validate_fn,
+        open_pr_fn=open_pr_fn,
+        open_pr=open_pr,
+        llm_enrich=llm_enrich,
+    )
+    raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
 def init() -> None:
     """Deprecated alias — use `mylonite init-target` to scaffold a target YAML."""
     typer.echo(
