@@ -19,8 +19,12 @@ jobs:
         run: |
           pip install -e ".[dev]"
           pip install -e ./reference_targets/mcp_kitchen_sink
-      - name: gate --help is healthy (no crash, lists --open-pr)
-        run: mylonite gate --help | grep -- --open-pr
+      - name: gate --help is healthy (renders without crashing)
+        # Assert only that the real installed exe renders help (exit 0). The
+        # presence of specific flags (e.g. --open-pr) is asserted render-stably
+        # by tests/gate/test_cli_gate.py (CliRunner) in the next step — grepping
+        # Rich-rendered help is brittle across terminal widths / Rich versions.
+        run: mylonite gate --help
       - name: gate offline test suite
         run: pytest tests/gate -q
 
