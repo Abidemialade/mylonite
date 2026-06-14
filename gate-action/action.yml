@@ -1,0 +1,46 @@
+name: "Mylonite gate"
+description: "Find an AI-layer exploit, validate it, and open a gating regression-test PR."
+inputs:
+  target-file:
+    description: "Path to your Mylonite target YAML."
+    required: true
+  authorize:
+    description: "Authorization scope/family (you must own the target)."
+    required: true
+  model:
+    description: "LiteLLM model id."
+    required: false
+    default: "claude-haiku-4-5"
+  open-pr:
+    description: "Open the gating PR (true) or just write artifacts (false)."
+    required: false
+    default: "true"
+  runs-on:
+    description: "Informational; set the job runs-on in your workflow for self-hosted."
+    required: false
+    default: "ubuntu-latest"
+  mode:
+    description: "discovery (full scan) or gate (informational)."
+    required: false
+    default: "discovery"
+  python-version:
+    description: "Python to set up."
+    required: false
+    default: "3.12"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install mylonite
+      shell: bash
+      run: pip install "mylonite"
+    - name: Run mylonite gate
+      shell: bash
+      run: >
+        mylonite gate
+        --target-file "${{ inputs.target-file }}"
+        --authorize "${{ inputs.authorize }}"
+        --model "${{ inputs.model }}"
+        ${{ inputs.open-pr == 'true' && '--open-pr' || '' }}
