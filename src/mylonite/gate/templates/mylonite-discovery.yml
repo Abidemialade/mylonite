@@ -1,0 +1,32 @@
+# Mylonite discovery — the EXPENSIVE, non-blocking job.
+# Runs nightly (and on demand): full scan -> generate -> validate, and on a NEW
+# kept exploit opens a gating PR that adds/updates the .mylonite/gate/ test plus
+# a suggested-fix description. Never blocks merges.
+#
+# Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open
+# the PR — no extra secret needed.
+name: Mylonite discovery
+on:
+  schedule:
+    - cron: "17 4 * * *"   # nightly at 04:17 UTC; adjust to taste
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  discover:
+    runs-on: __RUNS_ON__
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install mylonite
+        run: pip install "mylonite"
+      - name: Discover -> generate -> validate -> open gating PR
+        run: >
+          mylonite gate --target-file .mylonite/gate/target.yaml
+          --authorize "${{ vars.MYLONITE_AUTHORIZE }}" --open-pr
