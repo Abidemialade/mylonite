@@ -116,3 +116,35 @@ def test_pr_body_custom_target_has_no_diff_link():
 def test_pr_body_is_deterministic():
     ex = _exploit_for("indirect-injection-note-body-direct")
     assert build_pr_body(ex, _report()) == build_pr_body(ex, _report())
+
+
+def test_llm_enrichment_is_labelled_and_opt_in():
+    ex = _exploit_for("indirect-injection-note-body-direct")
+
+    calls = {"n": 0}
+
+    def fake_completion(*, model, messages, **kwargs):
+        calls["n"] += 1
+
+        class _Msg:  # minimal litellm-shaped response
+            content = "Wrap retrieved notes in an untrusted envelope and re-test."
+
+        class _Choice:
+            message: _Msg = _Msg()  # type: ignore[misc]
+
+        class _Resp:
+            def __init__(self) -> None:
+                self.choices = [_Choice()]
+
+        return _Resp()
+
+    # default: no enrichment, no call
+    body_plain = build_pr_body(ex, _report())
+    assert "Unverified LLM suggestion" not in body_plain
+    assert calls["n"] == 0
+
+    # opt-in: labelled block, completion called once
+    body_rich = build_pr_body(ex, _report(), llm_enrich=True, completion_fn=fake_completion)
+    assert "Unverified LLM suggestion" in body_rich
+    assert "untrusted envelope" in body_rich
+    assert calls["n"] == 1

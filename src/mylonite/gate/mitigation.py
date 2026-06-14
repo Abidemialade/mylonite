@@ -117,5 +117,28 @@ def build_pr_body(
 
 def _llm_suggestion(
     exploit: ExploitRecord, *, completion_fn: Callable[..., Any] | None = None
-) -> str | None:  # fully implemented in Task 5
-    return None
+) -> str | None:
+    """A short, app-specific remediation idea. Best-effort; labelled unverified.
+
+    Uses the injected ``completion_fn`` when given (the offline test seam);
+    otherwise routes through litellm. Any failure returns ``None`` — enrichment
+    must never break body assembly.
+    """
+    prompt = (
+        "You are a security engineer. In 2-3 sentences, suggest a concrete, "
+        "human-applied mitigation for this AI-agent weakness. Do not include "
+        "code unless trivial. Weakness pattern: "
+        f"{exploit.pattern_id}; reason: {exploit.success_reason}."
+    )
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        if completion_fn is not None:
+            resp = completion_fn(model="enrich", messages=messages)
+        else:  # pragma: no cover - live path
+            import litellm
+
+            resp = litellm.completion(model="claude-haiku-4-5", messages=messages)
+        text = resp.choices[0].message.content
+        return text.strip() if text else None
+    except Exception:  # broad catch intentional — enrichment must never break body assembly
+        return None
