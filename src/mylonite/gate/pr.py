@@ -72,14 +72,20 @@ def open_or_print_pr(
     """Commit the gate artifacts to ``branch``; open the PR iff ``open_pr`` and gh works."""
     cwd = paths.repo_root
     _git(["checkout", "-b", branch], cwd=cwd, _run=_run)
-    rels = [str(p.relative_to(cwd)) for p in paths.all_paths()]
+    rels = []
+    for p in paths.all_paths():
+        if p.is_absolute():
+            rels.append(str(p.relative_to(cwd)))
+        else:
+            # already relative to cwd (the repo root) — git add takes it as-is
+            rels.append(str(p))
     _git(["add", *rels], cwd=cwd, _run=_run)
     _git(["commit", "-m", pr_title], cwd=cwd, _run=_run)
 
     if not open_pr or not gh_available(_run=_run):
         body_path = paths.gate_dir / "PR_BODY.md"
         body_path.write_text(pr_body, encoding="utf-8")
-        rel_body = body_path.relative_to(cwd)
+        rel_body = body_path if not body_path.is_absolute() else body_path.relative_to(cwd)
         gh_cmd = (
             f"gh pr create --base {base} --head {branch} "
             f"--title {shlex.quote(pr_title)} --body-file {rel_body}"

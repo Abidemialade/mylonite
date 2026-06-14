@@ -105,6 +105,38 @@ def test_open_requested_but_gh_missing_degrades_to_print(tmp_path, capsys, monke
     assert "gh pr create" in capsys.readouterr().out
 
 
+def test_relative_gate_dir_does_not_crash(tmp_path, monkeypatch):
+    """A RELATIVE gate_dir (the CLI default '--out .mylonite/gate') must not raise ValueError.
+
+    Before the fix, Path(".mylonite/gate").relative_to(tmp_path) raised ValueError because
+    you cannot call relative_to() on a relative path against an absolute one.
+    """
+    monkeypatch.chdir(tmp_path)
+    gate_dir = tmp_path / ".mylonite" / "gate"
+    gate_dir.mkdir(parents=True)
+    (gate_dir / "test_security_x.py").write_text("# t\n", encoding="utf-8")
+
+    from pathlib import Path as _P
+
+    # gate_dir is deliberately RELATIVE — mirrors the real CLI default
+    paths = GatePaths(repo_root=tmp_path, gate_dir=_P(".mylonite/gate"), workflow_files=[])
+    runner = _fake_runner_recording()
+    result = open_or_print_pr(
+        paths,
+        branch="b",
+        pr_title="t",
+        pr_body="x",
+        open_pr=False,
+        _run=runner,
+    )
+    assert result.opened is False
+    # The relative path must have reached git add without crashing
+    git_add_calls = [c for c in runner.calls if c[:2] == ["git", "add"]]
+    assert git_add_calls, "expected at least one git add call"
+    added_args = " ".join(str(a) for a in git_add_calls[0])
+    assert ".mylonite" in added_args, f"expected .mylonite in git add args; got: {git_add_calls[0]}"
+
+
 def test_failing_git_commit_raises(tmp_path):
     paths = _make_artifacts(tmp_path)
 
