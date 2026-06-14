@@ -58,6 +58,8 @@ EXIT_BUDGET = 3
 EXIT_PROVIDER = 4
 EXIT_NOT_KEPT = 5
 
+_V0_2_ATTACK_FAMILIES = frozenset({"prompt-injection-family", "excessive-agency-family"})
+
 
 def _maybe_enable_truststore() -> None:
     """Inject the OS trust store for TLS (shared with the testkit/library path).
@@ -702,8 +704,7 @@ def scan(
     # v0.2 attack modules: filter to the real prompt-injection family. The
     # reference_example stub is shipped for plugin authors but isn't useful
     # for a real scan.
-    _v0_2_ATTACK_FAMILIES = {"prompt-injection-family", "excessive-agency-family"}
-    attack_modules = [m for m in all_modules if m.attack_metadata().id in _v0_2_ATTACK_FAMILIES]
+    attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
     if not attack_modules:
         typer.echo(
             "no usable attack modules discovered "
@@ -1790,9 +1791,6 @@ def gate(
     _validate_model_string(base_model)
     effective_model = _route_model(provider, base_model)
 
-    # v0.2 attack families — same filter as the scan command.
-    _v0_2_ATTACK_FAMILIES = {"prompt-injection-family", "excessive-agency-family"}
-
     # --- resolve adapter (mirrors scan command routing) ---
     is_reference = bool(target and target.startswith("reference:"))
     tf = None
@@ -1860,7 +1858,7 @@ def gate(
             typer.echo(f"plugin discovery failed: {exc}", err=True)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
-        attack_modules = [m for m in all_modules if m.attack_metadata().id in _v0_2_ATTACK_FAMILIES]
+        attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
         if not attack_modules:
             typer.echo(
                 "no usable attack modules discovered "
@@ -1894,6 +1892,7 @@ def gate(
                 provider=effective_provider,
                 model=effective_model,
                 record_fixtures_dir=out / "fixtures",
+                progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
             )
             return validator.validate(
                 generated,
@@ -1918,11 +1917,16 @@ def gate(
         def _factory() -> Any:
             return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=effective_model)
 
+        # gate is the fast magic-moment path: one re-drive that must FIRE at least once
+        # (vuln_threshold=1, not the default iterations-1=0). Deeper multi-iteration
+        # rigor lives in nightly discovery + the committed test's assert_target_resists.
         validator = DifferentialValidator(
             iterations=1,
+            vuln_threshold=1,
             provider=effective_provider,
             model=effective_model,
             target_adapter_factory=_factory,
+            progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
         )
         return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
