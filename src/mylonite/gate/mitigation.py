@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.resources as _ir
+from collections.abc import Callable
 from typing import Any
 
-from mylonite.contracts._types import ExploitRecord
+from mylonite.contracts._types import ExploitRecord, ValidationReport
 from mylonite.scan.seeds import SEED_CATALOGUE
 
 _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
@@ -15,6 +17,8 @@ _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
 # LLM06 excessive agency with the egress/unconfirmed-action families (W3/W4).
 _ASI_TO_WEAKNESS = {"ASI01": "W2", "ASI06": "W2", "ASI02": "W1", "ASI05": "W3"}
 _LLM_TO_WEAKNESS = {"LLM05": "W2", "LLM06": "W4"}
+
+_GUARDED_TWIN = "reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_guarded.py"
 
 
 def weakness_class_for(exploit: ExploitRecord) -> str:
@@ -34,5 +38,84 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
     return "generic"
 
 
-def build_pr_body(*args: Any, **kwargs: Any) -> str:  # pragma: no cover - replaced in Task 4
-    raise NotImplementedError
+def _snippet(weakness_class: str) -> str:
+    base = _ir.files("mylonite.gate") / "mitigations"
+    return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
+
+
+def _evidence_lines(report: ValidationReport) -> str:
+    rows = [
+        f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {o.detail}" for o in report.outcomes
+    ]
+    if report.mutation_score is not None:
+        rows.append(f"- **mutation score**: {report.mutation_score:.2f}")
+    rows.append(f"- **kept**: {report.kept}")
+    return "\n".join(rows)
+
+
+def _compliance_line(exploit: ExploitRecord) -> str:
+    c = exploit.compliance
+    parts = []
+    if c.owasp_llm:
+        parts.append("OWASP-LLM " + ", ".join(c.owasp_llm))
+    if c.owasp_asi:
+        parts.append("OWASP-ASI " + ", ".join(c.owasp_asi))
+    if c.mitre_atlas:
+        parts.append("MITRE ATLAS " + ", ".join(c.mitre_atlas))
+    if c.nist_ai_rmf:
+        parts.append("NIST " + ", ".join(c.nist_ai_rmf))
+    return " · ".join(parts) if parts else "(no compliance tags)"
+
+
+def build_pr_body(
+    exploit: ExploitRecord,
+    report: ValidationReport,
+    *,
+    llm_enrich: bool = False,
+    completion_fn: Callable[..., Any] | None = None,
+) -> str:
+    """Assemble the gating PR description (deterministic; opt-in LLM enrichment)."""
+    wc = weakness_class_for(exploit)
+    is_reference = exploit.target_id.startswith("reference:")
+
+    sections = [
+        "## What Mylonite found",
+        f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`.",
+        "",
+        f"**Compliance:** {_compliance_line(exploit)}",
+        "",
+        "**Validation evidence:**",
+        _evidence_lines(report),
+        "",
+        "## Suggested mitigation",
+        "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
+        "",
+        _snippet(wc),
+    ]
+    if is_reference:
+        sections += [
+            "",
+            f"See the guarded reference twin for a concrete fix: `{_GUARDED_TWIN}`.",
+        ]
+    if llm_enrich:
+        extra = _llm_suggestion(exploit, completion_fn=completion_fn)
+        if extra:
+            sections += [
+                "",
+                "> **Unverified LLM suggestion** (not validated by the oracle — review before applying):",
+                "> " + extra.replace("\n", "\n> "),
+            ]
+    sections += [
+        "",
+        "## How this is gated",
+        f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives this attack and "
+        "asserts your agent resists it. The committed per-PR workflow runs it on every PR; "
+        "a regression fails the check.",
+    ]
+    return "\n".join(sections) + "\n"
+
+
+def _llm_suggestion(
+    exploit: ExploitRecord, *, completion_fn: Callable[..., Any] | None = None
+) -> str | None:  # fully implemented in Task 5
+    return None

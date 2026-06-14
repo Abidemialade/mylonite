@@ -5,8 +5,10 @@ from mylonite.contracts._types import (
     ComplianceTags,
     ExploitRecord,
     Payload,
+    ValidationOutcome,
+    ValidationReport,
 )
-from mylonite.gate.mitigation import weakness_class_for
+from mylonite.gate.mitigation import build_pr_body, weakness_class_for
 from mylonite.scan.seeds import SEED_CATALOGUE
 
 
@@ -63,7 +65,10 @@ def test_weakness_class_unknown_pattern_falls_back_to_compliance_then_generic():
         success_reason="test",
         compliance=ComplianceTags(owasp_asi=["ASI02"]),
     )
-    assert weakness_class_for(ex) == "W1"  # ASI02 (tool misuse) -> W1/W2 family; see mapping
+    assert weakness_class_for(ex) == "W1"  # ASI02 (tool-description smuggling) -> W1
+
+    ex_llm = ex.model_copy(update={"compliance": ComplianceTags(owasp_llm=["LLM06"])})
+    assert weakness_class_for(ex_llm) == "W4"
 
     ex_blank = ex.model_copy(update={"compliance": ComplianceTags()})
     assert weakness_class_for(ex_blank) == "generic"
@@ -74,3 +79,40 @@ def test_all_mitigation_snippets_present():
     for name in ("W1", "W2", "W3", "W4", "generic"):
         text = (base / f"{name}.md").read_text(encoding="utf-8")
         assert text.strip(), f"{name}.md is empty"
+
+
+def _report(kept=True):
+    return ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="stability", passed=True, detail="2/2 runs", metric=1.0),
+            ValidationOutcome(stage="effect", passed=True, detail="probe confirmed", metric=1.0),
+        ],
+        kept=kept,
+        mutation_score=0.75,
+    )
+
+
+def test_pr_body_reference_target_has_all_sections_and_diff_link():
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")  # reference:vulnerable
+    body = build_pr_body(ex, _report())
+    assert "## What Mylonite found" in body
+    assert "## Suggested mitigation" in body
+    assert "human-applied" in body.lower()
+    assert "## How this is gated" in body
+    assert "excessive agency (W4)" in body  # the W4 snippet
+    assert "LLM06" in body and "ASI02" in body  # compliance tags surfaced
+    assert "server_guarded.py" in body  # guarded-twin diff reference
+    assert "mutation" in body.lower()  # validation evidence
+
+
+def test_pr_body_custom_target_has_no_diff_link():
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
+    body = build_pr_body(ex, _report())
+    assert "server_guarded.py" not in body
+    assert "## Suggested mitigation" in body
+
+
+def test_pr_body_is_deterministic():
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    assert build_pr_body(ex, _report()) == build_pr_body(ex, _report())
