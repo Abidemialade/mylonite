@@ -28,3 +28,9 @@ def test_gate_requires_authorize_for_custom(tmp_path):
     )
     res = runner.invoke(app, ["gate", "--target-file", str(tf)])
     assert res.exit_code == 2
+
+
+def test_gate_help_lists_runs_on_and_no_workflows():
+    res = runner.invoke(app, ["gate", "--help"])
+    assert "--runs-on" in res.output
+    assert "--no-workflows" in res.output or "--workflows" in res.output

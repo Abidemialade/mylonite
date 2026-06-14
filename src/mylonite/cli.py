@@ -1769,6 +1769,20 @@ def gate(
         int,
         typer.Option("--max-llm-calls", help="Process-wide LLM call cap for the scan phase."),
     ] = 50,
+    runs_on: Annotated[
+        str,
+        typer.Option(
+            "--runs-on",
+            help="GitHub runner label for the scaffolded workflows; use a self-hosted label for in-perimeter MCP backends.",
+        ),
+    ] = "ubuntu-latest",
+    workflows: Annotated[
+        bool,
+        typer.Option(
+            "--workflows/--no-workflows",
+            help="Scaffold .github/workflows/ gate + discovery templates.",
+        ),
+    ] = True,
     llm_enrich: Annotated[
         bool,
         typer.Option(
@@ -1931,12 +1945,15 @@ def gate(
         return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
     def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
+        from mylonite.gate.workflows import write_workflows
+
+        repo_root = Path.cwd()
+        wf_files = write_workflows(repo_root, runs_on=runs_on) if workflows else []
         if target_file is not None:
             (out_dir / "target.yaml").write_text(
                 target_file.read_text(encoding="utf-8"), encoding="utf-8"
             )
-        repo_root = Path.cwd()
-        paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=[])
+        paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
         return pr_mod.open_or_print_pr(
             paths,
             branch=f"mylonite/gate-{exploit.pattern_id}",
