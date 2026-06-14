@@ -30,6 +30,8 @@ nav:
   - Quickstart: quickstart.md
   - The Quarry (try it): quarry.md
   - The validation engine: validation.md
+  - CI gating: ci-gating.md
+  - Enterprise networking: enterprise-networking.md
   - Concepts: concepts.md
   - Plugin authoring: plugin-authoring.md
   - Standards mapping: standards-mapping.md
