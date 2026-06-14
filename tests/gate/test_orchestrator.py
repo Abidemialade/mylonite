@@ -70,6 +70,9 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     assert isinstance(result, GateResult)
     assert result.exit_code == 0
     assert (tmp_path / ".mylonite" / "gate" / "test_security_x.py").exists()
+    assert (
+        tmp_path / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
+    ).exists()
     assert "Suggested mitigation" in pr_calls["body"]
     assert pr_calls["open_pr"] is False
 
@@ -85,6 +88,34 @@ def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
     )
     assert result.exit_code == 0
     assert result.opened_pr is False
+
+
+def test_run_gate_opened_pr_flows_from_prresult(tmp_path):
+    from mylonite.gate.pr import PrResult
+
+    ex = _exploit()
+    report = ValidationReport(
+        test_filename="t.py",
+        kept=True,
+        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        mutation_score=None,
+    )
+
+    def fake_open_pr(**k):
+        return PrResult(branch="mylonite/gate-x", opened=True, pr_url="http://x/1")
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: [ex],
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="t.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: report,
+        open_pr_fn=fake_open_pr,
+        open_pr=True,
+    )
+    assert result.opened_pr is True
+    assert result.branch == "mylonite/gate-x"
 
 
 def test_run_gate_rejected_test_exits_5_no_pr(tmp_path):
