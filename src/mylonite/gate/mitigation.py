@@ -137,7 +137,7 @@ def _llm_suggestion(
         else:  # pragma: no cover - live path
             import litellm
 
-            resp = litellm.completion(model="claude-haiku-4-5", messages=messages)
+            resp = litellm.completion(model="claude-haiku-4-5-20251001", messages=messages)
         text = resp.choices[0].message.content
         return text.strip() if text else None
     except Exception:  # broad catch intentional — enrichment must never break body assembly
