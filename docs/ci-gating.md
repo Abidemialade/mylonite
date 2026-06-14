@@ -11,7 +11,7 @@ CI on it.
 mylonite gate reference:vulnerable
 
 # against your own MCP app
-mylonite init-target --command "python" --arg "-m" --arg "your.server" > target.yaml
+mylonite init-target --command "python" --arg "-m" --arg "your.server" --output target.yaml
 mylonite gate --target-file target.yaml --authorize your-scope --open-pr
 ```
 
