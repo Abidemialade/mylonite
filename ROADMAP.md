@@ -164,23 +164,55 @@ pre-registered targets config; multi-target scan in one command.
 
 ### Phase 2 — Test generation + the validation engine
 
+**Status:** shipped in v0.4.0 (core engine) → v0.5.0 (multi-provider +
+custom MCP targets + effect-aware findings + custom-target validation +
+runnable emitted tests).
+
 Emit `pytest` reproductions; implement the validation pipeline (build
 → differential seeded-vulnerability oracle → 5-run flakiness filter →
-metamorphic variants).
+metamorphic variants). v0.5.0 extended the validator to cover custom
+MCP targets (no in-repo twin) via stability + effect probe + adversarial
+multi-judge consensus, and added first-class custom-target support across
+`scan`, `generate`, `validate`, and `init-target`.
 
-*Expected outcome:* generated tests that are *proven* meaningful — each
-fails on the unguarded agent and passes on the guarded one across
-repeated runs; a measurable "kept-test" survival ratio reported to the
-user.
+*Delivered:* generated tests that are *proven* meaningful — each fails on
+the unguarded agent and passes on the guarded one across repeated runs;
+a measurable "kept-test" survival ratio; emitted tests runnable out of
+the box against the bundled or real target.
 
 ### Phase 3 — CI gating + the magic moment, end-to-end
 
-Ship the GitHub Action and the `scan → generate → validate → open
-gating PR` flow under 60 seconds for the MVP path. Polish DX, docs, and
-the first-run experience.
+**Status:** landing in v0.6.0.
+
+Delivers the `scan → generate → validate → open gating PR` end-to-end
+flow in a single command, plus the GitHub Action and CI workflow templates
+that keep the gate running forever:
+
+- **`mylonite gate`** — the one-command magic moment. Runs scan →
+  generate → validate, writes the regression test and two CI workflow
+  templates under `.mylonite/gate/`, then prints (or with `--open-pr`
+  opens via `gh`) a gating PR carrying the finding, its OWASP/ASI/ATLAS/NIST
+  compliance tags, the validation evidence, and a deterministic suggested-fix
+  PR body. Optional `--llm-enrich` appends a labelled (unverified) LLM fix
+  suggestion.
+- **`mylonite.gate` package** — deterministic PR-body renderer; per-weakness-class
+  remediation snippets; opt-in labelled LLM enrichment cleanly separated from
+  the deterministic path.
+- **Two scaffolded CI workflow templates** (per-PR gate + nightly discovery)
+  encoding the cost-tier split: the cheap per-PR job replays the committed
+  offline fixture in seconds; the nightly job re-runs the full live scan to
+  catch regressions and discover new weaknesses. `--runs-on` lets operators
+  target a self-hosted runner for in-perimeter MCP backends.
+- **Reusable composite Action** (`Abidemialade/mylonite/gate-action@v1`) so
+  any repo can add the gate in three lines of workflow YAML.
+- **Enterprise / air-gapped support** documented in
+  `docs/enterprise-networking.md` (OS trust-store, `SSL_CERT_FILE`,
+  self-hosted runners, offline fixture replay without egress).
+- **`pip install mylonite`** on PyPI lands with this release.
 
 *Expected outcome:* a one-command demo a stranger can run on their own
-agent and get a committed, gating regression test.
+agent and get a committed, gating regression test, with the CI gate
+running on every subsequent PR.
 
 ### Phase 4 — Launch and community
 
