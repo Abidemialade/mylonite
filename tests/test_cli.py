@@ -989,3 +989,156 @@ def test_validate_uses_on_disk_source_and_records(
     assert generated.filename == on_disk_test.name
     # record_fixtures_dir points at the gen dir's fixtures/.
     assert captured["init_kwargs"]["record_fixtures_dir"] == out_dir / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# PR1 — frictionless flow: target.yaml persisted once, auto-resolved downstream,
+# and "Next:" hints. The custom-target journey should need --target-file at most
+# once (at scan), then nothing re-passes it.
+# ---------------------------------------------------------------------------
+
+
+def test_dump_target_file_roundtrips() -> None:
+    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import (
+        TargetFile,
+        dump_target_file,
+    )
+
+    tf = TargetFile(
+        family="myapp",
+        command="python",
+        args=["-m", "my_server"],
+        env={"DB": "/abs/path.db"},
+        weakness_classes=["W2", "W4"],
+        primary_tools=["send_email"],
+    )
+    text = dump_target_file(tf)
+    # Re-loadable and equal (round-trip through the same validator the CLI uses).
+    assert yaml.safe_load(text)  # valid YAML mapping
+    reloaded = TargetFile.model_validate(yaml.safe_load(text))
+    assert reloaded == tf
+
+
+def _canned_scan_result(target_id: str, *, findings: int) -> Any:
+    """A minimal real ScanResult (no mocks of the models) for engine-patched tests."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanResult
+
+    attempts = [
+        ScanAttempt(
+            seed_id="indirect-injection-note-body-direct",
+            pattern_id="indirect-injection-note-body-direct",
+            outcome="finding" if findings else "no_finding",
+            verdict_mechanism="predicate",
+            verdict_reason="synthetic verdict for PR1 flow test",
+            error_detail=None,
+        )
+    ]
+    report = ScanReport(
+        target_id=target_id,
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=attempts,
+        findings_count=findings,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    return ScanResult(report=report, exploits=[])
+
+
+def test_scan_custom_persists_target_yaml_and_next_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A custom scan co-locates the resolved target YAML in the scan dir (verbatim)
+    and prints a `Next: mylonite generate` hint when it found something."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+
+    source = _MINIMAL_TARGET_YAML
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(source, encoding="utf-8")
+    scan_root = tmp_path / "scans"
+
+    async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
+        return _canned_scan_result("mcp:myapp", findings=1)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp",
+            "--output-dir",
+            str(scan_root),
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    scan_dirs = [p for p in scan_root.iterdir() if p.is_dir()]
+    assert len(scan_dirs) == 1, scan_dirs
+    colocated = scan_dirs[0] / "target.yaml"
+    assert colocated.is_file()
+    # Verbatim copy (operator comments/structure preserved).
+    assert colocated.read_text(encoding="utf-8") == source
+    assert "Next: mylonite generate" in result.output
+    target_registry.clear_runtime_targets()
+
+
+def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
+    """generate without --target-file picks up target.yaml from the scan dir."""
+    scan_dir = tmp_path / "scans" / "s"
+    _write_custom_exploit_json(scan_dir / "exploit_pid.json")
+    # `scan` would have written this next to the exploit.
+    (scan_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(scan_dir), "--out", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Auto-resolved: co-located into the generated dir, no "re-run with --target-file" warning.
+    colocated = out_dir / "target.yaml"
+    assert colocated.is_file()
+    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    assert "Using target:" in result.output
+    out = result.stderr or result.output
+    assert "Re-run with" not in out
+
+
+def test_validate_custom_auto_resolves_colocated_target_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """validate without --target-file picks up the co-located target.yaml."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    (out_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    def _fake_validate_custom(generated: Any, target_file: Any, *_a: Any, **_k: Any) -> Any:
+        captured["target_file"] = target_file
+        return SimpleNamespace(test_filename="t.py", outcomes=[], mutation_score=None, kept=True)
+
+    monkeypatch.setattr("mylonite.cli._validate_custom", _fake_validate_custom)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Auto-resolved the co-located YAML — the operator passed --target-file zero times here.
+    assert captured["target_file"] == out_dir / "target.yaml"
+    out = (result.stderr or "") + result.output
+    assert "Using target:" in out
+    assert "Next: commit" in result.output

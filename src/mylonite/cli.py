@@ -628,7 +628,12 @@ def scan(
         ),
     ] = None,
 ) -> None:
-    """Run the exploit-finding loop against a target."""
+    """Run the exploit-finding loop against a target.
+
+    Exit codes: 0 ok; 2 config/usage error (incl. nothing scanned); 3 budget
+    exceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an
+    aborted/empty scan exits non-zero so it never reads as a clean pass.
+    """
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
     effective_provider = provider or "anthropic"
@@ -641,6 +646,10 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
+    # For a custom target we persist the resolved target YAML next to the scan
+    # (below, after artefacts are written) so `generate`/`validate` can re-resolve
+    # it without the operator re-passing --target-file at every step.
+    custom_target_yaml: str | None = None
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
@@ -665,6 +674,16 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
+        from mylonite.plugins._mcp.target_file import dump_target_file
+
+        # Copy the source YAML verbatim (preserves operator comments/structure)
+        # when given a file; otherwise serialise the inline mcp:custom flags so the
+        # exact target is reproducible from the scan dir alone.
+        custom_target_yaml = (
+            target_file.read_text(encoding="utf-8")
+            if target_file is not None
+            else dump_target_file(tf)
+        )
         adapter = _build_adapter_for_custom(tf, authorize, effective_model)
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
@@ -744,8 +763,16 @@ def scan(
         # Persist artefacts UN-redacted (they are loadable/replayable data); only
         # the console-rendered summary string is redacted before display.
         scan_dir = write_artefacts(result, output_dir)
+        # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
+        # it from the scan dir — the custom-target journey needs the path ONCE.
+        if custom_target_yaml is not None:
+            (scan_dir / "target.yaml").write_text(custom_target_yaml, encoding="utf-8")
         typer.echo(redact(render_summary(result)))
         typer.echo(f"Artefacts: {scan_dir}")
+        # "Next:" hint — point at the very next command so the flow is self-guiding.
+        if result.report.findings_count > 0:
+            typer.echo("")
+            typer.echo(f"Next: mylonite generate {scan_dir}")
     else:
         # Dry-run: render summary without writing files.
         from mylonite.scan.artefacts import render_summary
@@ -1086,6 +1113,14 @@ def generate(
     # (the test would fail at runtime without it). Reference tests replay the
     # bundled twin and need no target file.
     is_custom = not exploit.target_id.startswith("reference:")
+    # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
+    # the operator needn't re-pass --target-file at every step. An explicit
+    # --target-file always wins.
+    if target_file is None and is_custom:
+        candidate = exploit_path.parent / "target.yaml"
+        if candidate.is_file():
+            target_file = candidate
+            typer.echo(f"Using target:  {candidate} (from the scan dir)")
     colocated_target: Path | None = None
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -1119,7 +1154,8 @@ def generate(
         typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
         typer.echo("Then:")
         typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
-        typer.echo(f"  mylonite validate {out_dir} --target-file {out_dir / 'target.yaml'}")
+        # validate auto-resolves the co-located target.yaml — no --target-file needed.
+        typer.echo(f"  mylonite validate {out_dir}")
     else:
         typer.echo(f"Next: mylonite validate {out_dir}")
     raise typer.Exit(code=EXIT_SUCCESS)
@@ -1393,6 +1429,13 @@ def validate(
     )
 
     is_custom = not exploit.target_id.startswith("reference:")
+    # Auto-resolve the target YAML co-located with the test (written by `generate`)
+    # so the operator needn't re-pass --target-file. Explicit --target-file wins.
+    if target_file is None and is_custom:
+        candidate = test_path.parent / "target.yaml"
+        if candidate.is_file():
+            target_file = candidate
+            typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
         report = _validate_custom(
             generated,
@@ -1448,6 +1491,11 @@ def validate(
     _render_validation_report(report)
 
     if report.kept:
+        typer.echo("")
+        typer.echo(
+            "Next: commit the generated test + fixtures so CI can gate on it "
+            "(see `mylonite gate --help`)."
+        )
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
 

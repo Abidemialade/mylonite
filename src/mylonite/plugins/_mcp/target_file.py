@@ -115,6 +115,19 @@ def load_target_file(path: Path) -> TargetFile:
     return TargetFile.model_validate(data)
 
 
+def dump_target_file(tf: TargetFile) -> str:
+    """Serialise a ``TargetFile`` back to YAML.
+
+    Used to persist an *inline* ``mcp:custom`` target (assembled from CLI flags,
+    with no source YAML on disk) next to its scan as ``target.yaml`` — so
+    ``generate`` and ``validate`` can re-resolve the exact same target without the
+    operator re-passing every flag. ``exclude_defaults`` keeps the file minimal and
+    re-loadable: it round-trips back through ``load_target_file`` to an equal model.
+    """
+    data = tf.model_dump(mode="json", exclude_defaults=True)
+    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+
+
 def payload_placement_warnings(tf: TargetFile) -> list[str]:
     """Non-fatal warnings about where the ``{payload}`` placeholder is planted (R7).
 
