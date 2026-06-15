@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — Pre-Phase-4 readiness: flow + verification legibility
 
+- **`mylonite export` — eval/CI interop.** Mylonite is the validation layer;
+  `mylonite export <dir|exploit.json> --format eval-yaml` hands a
+  differential-oracle-validated finding to the eval/CI harness a team already
+  runs. It emits a portable eval test case (the attack as input + a rubric assert
+  that the agent must resist it) carrying the OWASP/ATLAS/NIST compliance tags
+  and a `validated_by: mylonite-differential-oracle` provenance marker — so the
+  team gets a Mylonite-validated regression in their existing suite. Offline, no
+  LLM. `--out` writes the config and prints the next step.
+- **Declarative `mylonite.yaml` run config.** A new `RunConfig`
+  (`mylonite.config.load_run_config`) threads a run so the same flags need not be
+  re-passed: `scan --config mylonite.yaml` fills any omitted `target_file` /
+  `authorize` / `provider` / `model` / `max_llm_calls` (an explicit flag always
+  wins). Single-file run ergonomics for the custom-target journey.
 - **Measured precision/recall corpus.** A new `mylonite.corpus` module +
   `scripts/measure_precision_recall.py` drive the bundled kitchen-sink twins
   across the W1-W4 seeded weaknesses with no LLM and no network, then compute a

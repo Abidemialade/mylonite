@@ -1364,3 +1364,60 @@ def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CONFIG
     out = result.stderr or result.output
     assert "scan_report.json" in out or "validation_report.json" in out
+
+
+# ---------------------------------------------------------------------------
+# PR6 — declarative run-config + eval/CI interop export.
+# ---------------------------------------------------------------------------
+
+
+def test_export_eval_yaml_stdout(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    result = runner.invoke(app, ["export", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    import yaml as _yaml
+
+    doc = _yaml.safe_load(result.output)
+    assert doc["tests"][0]["assert"][0]["type"] == "llm-rubric"
+    assert doc["tests"][0]["metadata"]["validated_by"] == "mylonite-differential-oracle"
+
+
+def test_export_eval_yaml_to_file(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    out = tmp_path / "evalconfig.yaml"
+    result = runner.invoke(app, ["export", str(gen), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert out.is_file()
+    assert "eval/CI harness" in result.output  # next-step hint
+    assert "llm-rubric" in out.read_text(encoding="utf-8")
+
+
+def test_export_unknown_format_exit_2(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    result = runner.invoke(app, ["export", str(gen), "--format", "nope"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "eval-yaml" in (result.stderr or result.output)
+
+
+def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mylonite.yaml supplies target_file + authorize so the bare `scan --config`
+    resolves the custom target (dry-run enumerates seeds)."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {target_yaml}\nauthorize: myapp\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--dry-run"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "dry-run" in result.stdout or "attempts" in result.stdout
+    target_registry.clear_runtime_targets()

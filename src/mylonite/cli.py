@@ -616,6 +616,17 @@ def scan(
         Path,
         typer.Option("--output-dir", help="Root directory for scan artefacts."),
     ] = Path(".mylonite/scans"),
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / max_llm_calls). Fills any flag you omit; an "
+                "explicit flag always wins."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Enumerate seeds; skip customisation + invocation."),
@@ -646,6 +657,24 @@ def scan(
     exceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an
     aborted/empty scan exits non-zero so it never reads as a clean pass.
     """
+    # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
+    # custom-target run isn't a wall of repeated flags. An explicit flag wins.
+    if run_config_path is not None:
+        from mylonite.config import load_run_config
+
+        try:
+            rc = load_run_config(run_config_path)
+        except Exception as exc:
+            typer.echo(f"invalid --config {run_config_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        if max_llm_calls == 50 and rc.max_llm_calls is not None:
+            # 50 is the option default; only the config overrides an untouched flag.
+            max_llm_calls = rc.max_llm_calls
+
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
     effective_provider = provider or "anthropic"
@@ -1744,6 +1773,80 @@ def report(
     if html is not None:
         html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
         typer.echo(f"Wrote HTML trust panel: {html}")
+    raise typer.Exit(code=EXIT_SUCCESS)
+
+
+def _exploit_for_export(target: Path) -> Path:
+    """Resolve an export TARGET (a dir or an exploit_*.json) to an exploit file."""
+    if target.is_file():
+        return target
+    if target.is_dir():
+        matches = sorted(target.glob("exploit_*.json"))
+        if matches:
+            return matches[0]
+        typer.echo(
+            f"no exploit_*.json found in {target}. Run `mylonite scan`/`generate` first.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    typer.echo(
+        f"path not found: {target}. Pass a scan/generated dir or an exploit_*.json.", err=True
+    )
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
+@app.command(name="export")
+def export_cmd(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "A validated/generated dir, a scan dir, or an exploit_*.json. "
+                "The validated finding to export."
+            ),
+        ),
+    ],
+    fmt: Annotated[
+        str,
+        typer.Option("--format", help="Export format. Currently 'eval-yaml' (the default)."),
+    ] = "eval-yaml",
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Write to this file instead of stdout."),
+    ] = None,
+) -> None:
+    """Export a validated finding into a portable eval format (offline, no LLM).
+
+    Mylonite is the validation layer; this hands a differential-oracle-validated
+    finding to the eval/CI harness a team already runs. ``--format eval-yaml``
+    emits a portable eval test case (the attack as input + a rubric assert that
+    the agent must resist it) carrying the compliance tags and a provenance
+    marker, so the team gets a Mylonite-validated regression in their suite.
+    """
+    from mylonite import testkit
+    from mylonite.export import SUPPORTED_FORMATS, to_eval_config
+
+    if fmt not in SUPPORTED_FORMATS:
+        typer.echo(
+            f"unknown --format {fmt!r}. Supported: {', '.join(SUPPORTED_FORMATS)}.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    exploit_path = _exploit_for_export(target)
+    try:
+        exploit = testkit.load_exploit(exploit_path)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    rendered = to_eval_config(exploit)
+    if out is not None:
+        out.write_text(rendered, encoding="utf-8")
+        typer.echo(f"Wrote {fmt} export: {out}")
+        typer.echo("Next: wire your agent under `providers`, then run it in your eval/CI harness.")
+    else:
+        typer.echo(rendered)
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
