@@ -1,0 +1,49 @@
+# Dogfood: prove the gate command + action wiring stay healthy. Runs the cheap,
+# key-free surface on every PR; the full live run is gated behind a repo secret.
+name: Gate dogfood
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install (editable, with reference target)
+        run: |
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: gate --help is healthy (renders without crashing)
+        # Assert only that the real installed exe renders help (exit 0). The
+        # presence of specific flags (e.g. --open-pr) is asserted render-stably
+        # by tests/gate/test_cli_gate.py (CliRunner) in the next step — grepping
+        # Rich-rendered help is brittle across terminal widths / Rich versions.
+        run: mylonite gate --help
+      - name: gate offline test suite
+        run: pytest tests/gate -q
+
+  live:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_DOGFOOD_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: gate reference:vulnerable (no --open-pr; just prove the flow)
+        run: |
+          git config user.email ci@example.com
+          git config user.name ci
+          mylonite gate reference:vulnerable --no-workflows --out .mylonite/gate

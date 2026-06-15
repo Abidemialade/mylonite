@@ -15,12 +15,15 @@ that work belongs to SAST/DAST tools.
 The full product thesis, market positioning, and phased build plan live in
 [ROADMAP.md](./ROADMAP.md).
 
-> **Status:** v0.3.0 — `mylonite scan` and the zero-config `mylonite demo`
-> playground work today against the bundled reference agent and real
-> open-source MCP servers. The differential validation engine and test
-> emission (Phase 2 — the moat) are next. See [CHANGELOG.md](./CHANGELOG.md)
-> and the [issue tracker](https://github.com/Abidemialade/mylonite/issues)
-> for what is and isn't implemented today.
+> **Status:** Phases 0–2 shipped. v0.5.0 added multi-provider LLM support
+> and custom MCP targets. **v0.6.0 (Phase 3, in progress) brings the
+> end-to-end `scan → gating PR` flow**: `mylonite gate`, a reusable
+> GitHub Action (`Abidemialade/mylonite/gate-action@v1`), and cost-tiered
+> CI workflow templates (cheap per-PR gate + nightly discovery). See
+> [CHANGELOG.md](./CHANGELOG.md) and the
+> [issue tracker](https://github.com/Abidemialade/mylonite/issues) for
+> what is and isn't landed today. `pip install mylonite` lands with v0.6.0;
+> install is still clone-first until then.
 
 ## Try it in 60 seconds
 
@@ -33,7 +36,8 @@ API key:
 *The `mylonite demo` playground running against the Quarry and its guarded
 twin. ([How this GIF is recorded.](docs/assets/recording-script.md))*
 
-Neither `mylonite` nor `mcp-kitchen-sink` is published to PyPI yet, so the
+Neither `mylonite` nor `mcp-kitchen-sink` is published to PyPI yet —
+`pip install mylonite` lands with the v0.6.0 release. Until then the
 install is **clone-first** with two editable installs. Requires **Python
 3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14 wheels yet,
 so create your virtualenv with a 3.11–3.13 interpreter. The CLI prints a clear
@@ -89,19 +93,60 @@ mylonite scan mcp:fetch --authorize fetch
 
 *(needs an LLM API key + [`uv`](https://docs.astral.sh/uv/) installed)*
 
-## What works today (v0.3.0)
+## From scan to a gating PR
 
+`mylonite gate` runs the whole magic moment — find an exploit, write a regression
+test, validate it against the differential oracle, and (opt-in) open a PR that
+gates CI on it:
+
+```bash
+mylonite gate reference:vulnerable          # find -> test -> validate -> print the PR command
+mylonite gate --target-file target.yaml --authorize your-scope --open-pr   # ...and open it
+```
+
+`gate` writes a validated regression test under `.mylonite/gate/` plus two CI
+workflows (a cheap per-PR gate + nightly discovery), then prints (or, with
+`--open-pr`, opens) a PR carrying the finding, its OWASP/ASI/ATLAS/NIST tags, the
+validation evidence, and a human-applied suggested fix. Full guide:
+[docs/ci-gating.md](./docs/ci-gating.md). Behind a corporate network, see
+[docs/enterprise-networking.md](./docs/enterprise-networking.md).
+
+## What works today (v0.5.0 / v0.6.0-dev)
+
+- **`mylonite gate <target>`** — the end-to-end magic moment: scan → generate
+  → validate → optionally open a gating PR. Writes the regression test and
+  two CI workflow templates under `.mylonite/gate/`. Add `--open-pr` to push
+  a branch and open the PR via `gh`. Use `--target-file target.yaml` for a
+  custom MCP app.
 - **`mylonite scan <target>`** — the async exploit-finding loop. Targets:
   `reference:vulnerable` / `reference:guarded` (the bundled Quarry twins),
   plus real open-source MCP servers — `mcp:filesystem:<sandbox>`,
   `mcp:fetch`, and `mcp:github:<owner/repo>` (these need an LLM API key,
-  `uv`/`uvx`, and an explicit `--authorize`).
+  `uv`/`uvx`, and an explicit `--authorize`). Custom MCP apps: pass
+  `--target-file target.yaml --authorize <scope>`.
+- **`mylonite generate [SCAN_PATH]`** — emit a `pytest` regression test from
+  a confirmed exploit (offline, no LLM). Pass `--latest` to auto-pick the
+  newest scan, or `--target-file` when the scan was against a custom target.
+- **`mylonite validate <generated-dir>`** — run the differential-oracle
+  validator live (real LLM, Haiku) to prove the test is meaningful: it must
+  fail on the vulnerable twin and pass on the guarded one across multiple
+  runs. Pass `--target-file` for custom targets (re-drives the real app).
 - **`mylonite demo`** — zero-config, offline, deterministic playground that
   replays committed LLM fixtures to find four exploits on the Quarry and
   none on its guarded twin. `--live` re-runs for real (needs a key).
+- **`mylonite doctor`** — diagnose provider connectivity before a live scan;
+  classifies failures as auth / TLS / network / rate-limit with a concrete
+  remedy.
+- **`mylonite init-target`** — scaffold a `target.yaml` for a custom MCP app
+  by launching it once (no LLM call), listing its tools, and writing a
+  commented starter with suggested `weakness_classes`, `seed_arm`, and
+  `effect_probe` template.
 - **`mylonite taxonomy list`** — the bundled threat taxonomy: OWASP LLM Top
   10 (2025), OWASP Agentic Security Initiative (2026), MITRE ATLAS, and
   NIST AI RMF, all as data files with provenance.
+- **Custom MCP targets via `--target-file`** — declare your MCP server's
+  `command`, `weakness_classes`, `seed_arm`, and `effect_probe` in a YAML
+  file; Mylonite drives indirect injection and validates effect end-to-end.
 - **Versioned extension contracts + plugins** — five Python Protocols
   (attack modules, target adapters, test generators, validators, compliance
   mappers) with reference implementations and entry-point-based plugin
@@ -109,7 +154,10 @@ mylonite scan mcp:fetch --authorize fetch
 
 ## Documentation
 
+- [docs/ci-gating.md](./docs/ci-gating.md) — the `mylonite gate` end-to-end guide (scan → gating PR).
+- [docs/enterprise-networking.md](./docs/enterprise-networking.md) — TLS/proxy setup for corporate networks.
 - [docs/quarry.md](./docs/quarry.md) — the Quarry playground walkthrough.
+- [docs/validation.md](./docs/validation.md) — the validation engine (the moat) in depth.
 - [ROADMAP.md](./ROADMAP.md) — phased build plan, architecture, and engineering standards.
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup, how to author a plugin.
 - [GOVERNANCE.md](./GOVERNANCE.md) — decision-making, registry acceptance.

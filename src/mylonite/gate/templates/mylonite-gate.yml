@@ -1,0 +1,32 @@
+# Mylonite per-PR gate — the CHEAP, blocking check.
+# Runs the committed .mylonite/gate/ regression test on every PR. For a custom
+# target it BOUNDED-re-drives your MCP server (deterministic effect-probe, small
+# model, 1 iteration) — a few cents/PR. A regression fails this check.
+#
+# Requires one secret: MYLONITE_API_KEY (your LLM provider key).
+#
+# Enterprise / air-gapped: if your MCP server's backend is behind a corporate
+# network, change `runs-on` below to a self-hosted runner inside your perimeter,
+# or point target.yaml's env at a CI-reachable staging/mock backend. See
+# https://github.com/Abidemialade/mylonite docs: "Enterprise & air-gapped networking".
+name: Mylonite gate
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: __RUNS_ON__
+    env:
+      MYLONITE_LIVE_TARGET: "1"
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install mylonite + pytest
+        run: pip install "mylonite" pytest
+      - name: Run the committed gate test
+        run: pytest .mylonite/gate -q

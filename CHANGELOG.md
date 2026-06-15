@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Phase 3: CI gating + the magic moment
+
+- **`mylonite gate` command** — the end-to-end magic moment: `scan →
+  generate → validate → (opt-in) open a gating PR`. Writes all artefacts
+  under `.mylonite/gate/` (test, exploit, fixtures, target YAML for custom
+  targets, CI workflow templates). Mirrors `scan` routing: accepts
+  `reference:vulnerable`, bundled `mcp:<family>`, or `--target-file
+  target.yaml --authorize <scope>` for custom MCP apps. Flags: `--open-pr`
+  (push a branch + open via `gh`), `--llm-enrich` (labelled LLM fix
+  suggestion, clearly marked unverified), `--runs-on` (runner label for
+  scaffolded workflows), `--workflows/--no-workflows` (scaffold CI
+  templates), `--out` (output directory), `--max-llm-calls`, `--provider`,
+  `--model`. Exit codes mirror `scan`/`validate`.
+- **`mylonite.gate` package** — deterministic PR-body renderer with
+  per-weakness-class remediation snippets (W1 tool-description smuggling,
+  W2 indirect injection, W3 unrestricted egress, W4 unconfirmed
+  consequential action), compliance-tag section (OWASP LLM / ASI / ATLAS /
+  NIST), and validation-evidence summary. The deterministic path never calls
+  an LLM; `--llm-enrich` appends a labelled section cleanly separated from
+  the deterministic body, so the human reviewer sees exactly what is machine-
+  generated vs LLM-suggested.
+- **Two scaffolded GitHub Actions workflow templates** written by
+  `gate`/`write_workflows`: a per-PR gate job (offline fixture replay — fast,
+  cheap, no LLM egress) and a nightly discovery job (full live scan — catches
+  new weaknesses and regressions). The cost-tier split is encoded in the
+  template: per-PR stays under the free tier; nightly uses a capped
+  `max-llm-calls` budget. `--runs-on` lets operators target a self-hosted
+  runner for in-perimeter MCP backends.
+- **Reusable composite `gate-action`** (`Abidemialade/mylonite/gate-action@v1`)
+  — a three-line drop-in for any repo's workflow that installs Mylonite,
+  resolves the Python + provider environment, and runs `mylonite gate` with
+  the caller's inputs.
+- **`docs/ci-gating.md`** — the end-to-end CI gating guide: from first
+  `mylonite gate` run through reviewing the PR, merging the committed
+  regression test, and operating the two-job CI setup over time.
+- **`docs/enterprise-networking.md`** — TLS/proxy setup for corporate and
+  air-gapped environments: OS trust-store (`pip install "mylonite[enterprise]"`
+  + `truststore`), `SSL_CERT_FILE`, `MYLONITE_NO_TRUSTSTORE`, self-hosted
+  runner configuration for in-perimeter MCP backends, and the offline
+  fixture-replay path that needs no LLM egress at all for the per-PR gate.
+
 ### Fixed — emitted-test runnability + shared environment bootstrap
 
 - **The emitted custom-target test is runnable out of the box.** `mylonite generate`
@@ -771,7 +812,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for use as differential-oracle ground truth in Phase 2.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.3.0
 [0.2.2]: https://github.com/Abidemialade/mylonite/releases/tag/v0.2.2
