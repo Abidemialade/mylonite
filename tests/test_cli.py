@@ -1082,6 +1082,9 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
             "myapp",
             "--output-dir",
             str(scan_root),
+            # _MINIMAL_TARGET_YAML declares W2 with no seed_arm; the escape hatch
+            # lets this persistence-focused test run past the PR3 pre-flight.
+            "--allow-no-seed-arm",
         ],
     )
     assert result.exit_code == EXIT_SUCCESS, result.output
@@ -1194,3 +1197,79 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
     assert "W2:indirect-injection-note-body-direct" in out
     assert "metric legend" in out
     assert "report-only" in out  # metamorphic does-not-gate note
+
+
+# ---------------------------------------------------------------------------
+# PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
+# ---------------------------------------------------------------------------
+
+
+def test_scan_custom_w2_without_seed_arm_blocks(tmp_path: Path) -> None:
+    """Declaring W2 (indirect-injection-only) with no seed_arm blocks a real scan."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "myapp"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "seed_arm" in out
+    assert "--allow-no-seed-arm" in out
+    target_registry.clear_runtime_targets()
+
+
+def test_validate_for_scan_helper() -> None:
+    """The pre-flight helper flags W2-without-seed_arm and honours the escape."""
+    from mylonite.plugins._mcp.target_file import TargetFile, validate_for_scan
+
+    tf = TargetFile(family="myapp", command="python", weakness_classes=["W2"])
+    assert validate_for_scan(tf)  # non-empty -> blocked
+    assert not validate_for_scan(tf, allow_no_seed_arm=True)  # escape clears it
+    # W4-only (has direct variants) needs no seed_arm -> not blocked.
+    tf_w4 = TargetFile(family="myapp", command="python", weakness_classes=["W4"])
+    assert not validate_for_scan(tf_w4)
+
+
+def test_render_summary_not_tested_is_loud_and_distinct_from_clean() -> None:
+    """A delivery-miss renders a NOT TESTED mark + a loud coverage warning,
+    never the benign 'clean' mark (PR3)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.artefacts import render_summary
+    from mylonite.scan.engine import ScanResult
+
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="indirect-injection-note-body-direct",
+                pattern_id="indirect-injection-note-body-direct",
+                outcome="skipped_payload_not_delivered",
+                verdict_mechanism=None,
+                verdict_reason="poison never retrieved",
+                error_detail=None,
+            )
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    result = ScanResult(report=report, exploits=[])
+    # UTF-8 surface.
+    out = render_summary(result, ascii_safe=False)
+    assert "NOT TESTED" in out
+    assert "coverage:" in out
+    # The benign clean MARK must never appear for a delivery-miss attempt.
+    assert "✓ clean" not in out
+    # ASCII surface stays crash-free and still loud.
+    out_ascii = render_summary(result, ascii_safe=True)
+    assert "NOT-TESTED" in out_ascii
+    assert "coverage:" in out_ascii

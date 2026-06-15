@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reproducibility counts, the per-seed mutation kill matrix, and a one-line
   metric legend — previously all buried in `report.notes` and rendered nowhere.
   The gating PR body (`mylonite gate`) mirrors the same evidence.
+- **A misfire can never read as "clean" (correctness safeguards).** A scan
+  attempt that was *not exercised* — its planted payload was never delivered, or
+  the target declared no `seed_arm` to plant it — now gets a loud `NOT TESTED`
+  mark (distinct from the benign `clean`) plus a red `coverage:` warning in the
+  summary, so a `findings_count == 0` scan with undelivered seeds is never
+  mistaken for safety. `scan` also runs a blocking pre-flight: declaring an
+  indirect-injection-only weakness class (e.g. W2) with no `seed_arm` errors out
+  with a fix hint unless `--allow-no-seed-arm` is passed (a `--dry-run` only
+  warns). New `mylonite.plugins._mcp.target_file.validate_for_scan` helper.
 
 ### Changed
 

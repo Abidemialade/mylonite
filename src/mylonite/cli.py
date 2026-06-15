@@ -620,6 +620,18 @@ def scan(
         bool,
         typer.Option("--dry-run", help="Enumerate seeds; skip customisation + invocation."),
     ] = False,
+    allow_no_seed_arm: Annotated[
+        bool,
+        typer.Option(
+            "--allow-no-seed-arm",
+            help=(
+                "Scan a custom target that declares an indirect-injection weakness "
+                "class (e.g. W2) without a seed_arm. Those seeds will report NOT "
+                "TESTED rather than block the scan. Off by default so a misconfig "
+                "never reads as clean."
+            ),
+        ),
+    ] = False,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -674,7 +686,20 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
-        from mylonite.plugins._mcp.target_file import dump_target_file
+        from mylonite.plugins._mcp.target_file import dump_target_file, validate_for_scan
+
+        # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
+        # weakness class with no seed_arm would silently skip those seeds and read
+        # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
+        # set. A --dry-run only enumerates seeds (no clean/finding verdict to
+        # mislead), so there we downgrade the block to a warning.
+        preflight_errors = validate_for_scan(tf, allow_no_seed_arm=allow_no_seed_arm)
+        if preflight_errors:
+            for err in preflight_errors:
+                level = "warning" if dry_run else "error"
+                typer.echo(f"{level}: {err}", err=True)
+            if not dry_run:
+                raise typer.Exit(code=EXIT_CONFIG)
 
         # Copy the source YAML verbatim (preserves operator comments/structure)
         # when given a file; otherwise serialise the inline mcp:custom flags so the
