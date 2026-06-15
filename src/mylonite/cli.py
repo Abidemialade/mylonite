@@ -1278,7 +1278,7 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
     return test_matches[0], exploit_matches[0]
 
 
-def _render_validation_report(report: Any) -> None:
+def _render_validation_report(report: Any, console: Console | None = None) -> None:
     """Render a per-leg Rich report (F4): one row per ValidationOutcome.
 
     This is the moat's SHOWCASE surface, so it is made ASCII-safe independently
@@ -1304,7 +1304,8 @@ def _render_validation_report(report: Any) -> None:
     sep = " | " if ascii_safe else " · "
     dash = "-" if ascii_safe else "—"
 
-    console = Console()
+    if console is None:
+        console = Console()
     table = Table(
         title=f"Mylonite validate {dash} {report.test_filename}",
         title_justify="left",
@@ -1585,6 +1586,12 @@ def validate(
             ReferenceVulnerableOracle(),
         )
 
+    # Persist the full ValidationReport (incl. the PR2 structured evidence) next
+    # to the test so `mylonite report` can re-render the trust panel offline and
+    # the JSON artefact carries the oracle's discrimination, not just a verdict.
+    report_path = test_path.parent / "validation_report.json"
+    report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
     _render_validation_report(report)
 
     if report.kept:
@@ -1595,6 +1602,149 @@ def validate(
         )
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
+
+
+def _compliance_tags_line(compliance: Any) -> str:
+    """One-line compliance summary from a ComplianceTags (OWASP/ATLAS/NIST)."""
+    parts = []
+    if compliance.owasp_llm:
+        parts.append("OWASP-LLM " + ", ".join(compliance.owasp_llm))
+    if compliance.owasp_asi:
+        parts.append("OWASP-ASI " + ", ".join(compliance.owasp_asi))
+    if compliance.mitre_atlas:
+        parts.append("MITRE ATLAS " + ", ".join(compliance.mitre_atlas))
+    if compliance.nist_ai_rmf:
+        parts.append("NIST " + ", ".join(compliance.nist_ai_rmf))
+    return " | ".join(parts) if parts else "(no compliance tags)"
+
+
+def _locate_report_artefact(target: Path) -> tuple[str, Path]:
+    """Resolve a ``report`` TARGET to a ('validation'|'scan', path) pair.
+
+    Prefers a persisted ``validation_report.json`` (the oracle verdict + evidence)
+    over a ``scan_report.json`` when a dir holds both. Exits 2 with guidance when
+    nothing loadable is found.
+    """
+    if target.is_file():
+        if target.name == "validation_report.json":
+            return "validation", target
+        if target.name == "scan_report.json":
+            return "scan", target
+        typer.echo(
+            f"don't know how to report on {target.name}. Pass a scan dir, a "
+            "generated/validated dir, or a scan_report.json / validation_report.json.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if target.is_dir():
+        vr = target / "validation_report.json"
+        if vr.is_file():
+            return "validation", vr
+        sr = target / "scan_report.json"
+        if sr.is_file():
+            return "scan", sr
+        typer.echo(
+            f"no validation_report.json or scan_report.json found in {target}. "
+            "Run `mylonite scan` or `mylonite validate` first.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    typer.echo(
+        f"path not found: {target}. Pass a scan/validated dir or a report JSON.",
+        err=True,
+    )
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
+@app.command()
+def report(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "A scan dir, a generated/validated dir, or a scan_report.json / "
+                "validation_report.json. Renders the trust panel for whichever it finds."
+            ),
+        ),
+    ],
+    html: Annotated[
+        Path | None,
+        typer.Option(
+            "--html",
+            help="Also write a standalone, shareable HTML trust panel to this path.",
+        ),
+    ] = None,
+) -> None:
+    """Render a saved scan or validation as a trust panel (offline, no LLM).
+
+    A clean, screenshot-able "why you can trust this" readout. For a validation it
+    shows the verdict, the gating formula with
+    live per-leg marks, the fires/resists reproducibility counts, the per-seed
+    kill matrix, and the compliance tags. For a scan it shows the findings,
+    coverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no
+    loadable artefact is found.
+    """
+    import json
+
+    from rich.console import Console as _Console
+
+    kind, path = _locate_report_artefact(target)
+    # A recording console only when exporting HTML (keeps the terminal path lean).
+    console = _Console(record=html is not None)
+
+    if kind == "validation":
+        from mylonite.contracts import ValidationReport
+
+        try:
+            vreport = ValidationReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            typer.echo(f"could not load {path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _render_validation_report(vreport, console=console)
+        # Compliance tags from the co-located exploit, if present.
+        exploit_matches = sorted(path.parent.glob("exploit_*.json"))
+        if exploit_matches:
+            from mylonite import testkit
+
+            try:
+                exploit = testkit.load_exploit(exploit_matches[0])
+                console.print(f"compliance: {_compliance_tags_line(exploit.compliance)}")
+                console.print(f"target: {exploit.target_id}  pattern: {exploit.pattern_id}")
+            except (FileNotFoundError, ValueError):
+                pass
+        console.print(f"artefacts: {path.parent}")
+    else:
+        from mylonite.contracts._types import ScanReport
+        from mylonite.scan.artefacts import render_summary
+        from mylonite.scan.engine import ScanResult
+
+        try:
+            sreport = ScanReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            typer.echo(f"could not load {path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        result = ScanResult(report=sreport, exploits=[])
+        # render_summary already returns a fully-rendered, ASCII-aware string.
+        console.print(render_summary(result), markup=False)
+        # Compliance tags aggregated across the co-located exploit files.
+        tags: set[str] = set()
+        target_id = sreport.target_id
+        for exploit_file in sorted(path.parent.glob("exploit_*.json")):
+            try:
+                data = json.loads(exploit_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            c = data.get("compliance", {})
+            for key in ("owasp_llm", "owasp_asi", "mitre_atlas", "nist_ai_rmf"):
+                tags.update(c.get(key) or [])
+        if tags:
+            console.print(f"compliance: {', '.join(sorted(tags))}")
+        console.print(f"target: {target_id}  artefacts: {path.parent}")
+
+    if html is not None:
+        html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
+        typer.echo(f"Wrote HTML trust panel: {html}")
+    raise typer.Exit(code=EXIT_SUCCESS)
 
 
 def _suggest_weakness_classes(tools: list[Any]) -> list[str]:

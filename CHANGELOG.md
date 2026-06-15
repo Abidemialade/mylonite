@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — Pre-Phase-4 readiness: flow + verification legibility
 
+- **`mylonite report` command** — an offline trust panel. Point it at a scan
+  dir, a validated dir, or a `scan_report.json` /
+  `validation_report.json` and it renders a clean, screenshot-able "why you can
+  trust this" readout: for a validation, the verdict + gating formula + live
+  per-leg marks + fires/resists counts + per-seed kill matrix + compliance tags;
+  for a scan, the findings + coverage (incl. any NOT TESTED gap) + compliance
+  tags. `--html PATH` also writes a standalone, shareable HTML panel. `mylonite
+  validate` now persists `validation_report.json` next to the test so the panel
+  (and the JSON artefact) carry the full oracle evidence.
+
 - **Frictionless custom-target flow.** `scan` now persists the resolved target
   YAML into the scan dir as `target.yaml`; `generate` and `validate`
   auto-resolve it from the scan/generated dir, so a custom-target journey needs

@@ -1133,8 +1133,11 @@ def test_validate_custom_auto_resolves_colocated_target_yaml(
     captured: dict[str, Any] = {}
 
     def _fake_validate_custom(generated: Any, target_file: Any, *_a: Any, **_k: Any) -> Any:
+        from mylonite.contracts import ValidationReport
+
         captured["target_file"] = target_file
-        return SimpleNamespace(test_filename="t.py", outcomes=[], mutation_score=None, kept=True)
+        # A real report (not a stub) so validate can persist validation_report.json.
+        return ValidationReport(test_filename="t.py", outcomes=[], kept=True)
 
     monkeypatch.setattr("mylonite.cli._validate_custom", _fake_validate_custom)
 
@@ -1145,6 +1148,8 @@ def test_validate_custom_auto_resolves_colocated_target_yaml(
     out = (result.stderr or "") + result.output
     assert "Using target:" in out
     assert "Next: commit" in result.output
+    # validate persisted the report next to the test (PR4 trust-panel input).
+    assert (out_dir / "validation_report.json").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -1273,3 +1278,89 @@ def test_render_summary_not_tested_is_loud_and_distinct_from_clean() -> None:
     out_ascii = render_summary(result, ascii_safe=True)
     assert "NOT-TESTED" in out_ascii
     assert "coverage:" in out_ascii
+
+
+# ---------------------------------------------------------------------------
+# PR4 — `mylonite report`: the offline trust panel.
+# ---------------------------------------------------------------------------
+
+
+def _write_validation_report_json(dir_path: Path) -> None:
+    from mylonite.contracts import (
+        ReproducibilityEvidence,
+        SeedKill,
+        ValidationOutcome,
+        ValidationReport,
+    )
+
+    dir_path.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=True, detail="5/5", metric=1.0),
+        ],
+        kept=True,
+        mutation_score=0.875,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=5),
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+        ],
+    )
+    (dir_path / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def test_report_validation_dir_renders_trust_panel(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    _write_exploit_json(gen / "exploit_pid.json")  # reference exploit -> compliance tags
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.output
+    assert "gate: kept = build" in out
+    assert "kill matrix" in out
+    assert "KEPT" in out
+    assert "compliance:" in out
+    assert "LLM01" in out  # from the co-located exploit's tags
+
+
+def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "mcp:myapp" in result.output
+    assert "findings" in result.output.lower()
+
+
+def test_report_html_export(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    html = tmp_path / "panel.html"
+    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert html.is_file()
+    body = html.read_text(encoding="utf-8")
+    assert "<html" in body.lower()
+    assert "kill matrix" in body
+
+
+def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = runner.invoke(app, ["report", str(empty)])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "scan_report.json" in out or "validation_report.json" in out
