@@ -50,7 +50,9 @@ def _evidence_lines(report: ValidationReport) -> str:
     # The differential-oracle evidence (PR2): the gate with live per-leg marks,
     # the fires/resists counts, and the per-seed kill matrix — so the PR shows
     # WHY this test is trustworthy, not just that it was kept.
-    legs_by_stage = {o.stage: o for o in report.outcomes}
+    # str() the stage key so indexing with gating_legs (list[str]) type-checks
+    # against the Literal-keyed outcome stages.
+    legs_by_stage = {str(o.stage): o for o in report.outcomes}
     if report.gating_legs:
         rendered = " AND ".join(
             f"{leg} {'✓' if legs_by_stage[leg].passed else '✗'}"
