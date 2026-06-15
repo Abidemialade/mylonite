@@ -118,6 +118,39 @@ def test_pr_body_is_deterministic():
     assert build_pr_body(ex, _report()) == build_pr_body(ex, _report())
 
 
+def test_pr_body_surfaces_differential_oracle_evidence():
+    """The gating PR shows the formula + reproducibility + kill matrix (PR2)."""
+    from mylonite.contracts import ReproducibilityEvidence, SeedKill
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=True, detail="5/5", metric=1.0),
+        ],
+        kept=True,
+        mutation_score=0.75,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=5),
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+            SeedKill(
+                pattern_id="excessive-agency-fetch-attacker-url-direct", weakness="W3", killed=False
+            ),
+        ],
+    )
+    body = build_pr_body(_exploit_for("indirect-injection-note-body-direct"), report)
+    assert "gate" in body and "kept = build" in body
+    assert "vulnerable fired 5/5" in body
+    assert "guarded resisted 5/5" in body
+    assert "kill matrix" in body
+    assert "W2:indirect-injection-note-body-direct" in body
+
+
 def test_llm_enrichment_is_labelled_and_opt_in():
     ex = _exploit_for("indirect-injection-note-body-direct")
 

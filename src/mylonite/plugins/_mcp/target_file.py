@@ -115,6 +115,19 @@ def load_target_file(path: Path) -> TargetFile:
     return TargetFile.model_validate(data)
 
 
+def dump_target_file(tf: TargetFile) -> str:
+    """Serialise a ``TargetFile`` back to YAML.
+
+    Used to persist an *inline* ``mcp:custom`` target (assembled from CLI flags,
+    with no source YAML on disk) next to its scan as ``target.yaml`` — so
+    ``generate`` and ``validate`` can re-resolve the exact same target without the
+    operator re-passing every flag. ``exclude_defaults`` keeps the file minimal and
+    re-loadable: it round-trips back through ``load_target_file`` to an equal model.
+    """
+    data = tf.model_dump(mode="json", exclude_defaults=True)
+    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+
+
 def payload_placement_warnings(tf: TargetFile) -> list[str]:
     """Non-fatal warnings about where the ``{payload}`` placeholder is planted (R7).
 
@@ -159,3 +172,37 @@ def payload_placement_warnings(tf: TargetFile) -> list[str]:
             "seed would plant nothing. Put '{payload}' at the field that holds untrusted content."
         )
     return warnings
+
+
+# Weakness classes delivered ONLY by planting a poisoned note (the seeds use
+# setup="seed_note"). Without a ``seed_arm`` the payload cannot be planted, so
+# every such seed skips and a vulnerable target wrongly reads as clean — the most
+# dangerous silent footgun. W1/W3/W4 also have non-indirect (direct) variants, so
+# only the indirect-only classes are hard blockers here.
+_INDIRECT_ONLY_WEAKNESS_CLASSES: frozenset[str] = frozenset({"W2"})
+
+
+def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> list[str]:
+    """BLOCKING pre-flight errors for a scan (distinct from the non-fatal
+    ``payload_placement_warnings``).
+
+    Returns a list of human-readable error strings; an empty list means the
+    target is safe to scan. The caller is expected to print these and exit
+    non-zero so a misconfigured target never produces a misleading "clean" scan.
+
+    Currently enforces one rule: declaring an indirect-injection-only weakness
+    class (e.g. W2) with no ``seed_arm`` is a hard error, because those seeds
+    would silently skip. ``allow_no_seed_arm=True`` downgrades it to allowed (the
+    seeds then report NOT TESTED, which the summary surfaces loudly).
+    """
+    errors: list[str] = []
+    indirect = sorted(set(tf.weakness_classes) & _INDIRECT_ONLY_WEAKNESS_CLASSES)
+    if indirect and tf.seed_arm is None and not allow_no_seed_arm:
+        errors.append(
+            f"weakness class(es) {', '.join(indirect)} are indirect-injection only and need a "
+            "seed_arm to plant the poisoned content, but the target declares none. Those seeds "
+            "would skip and a vulnerable target would wrongly read as clean. Add a seed_arm to "
+            "the target file (see docs/targets), or pass --allow-no-seed-arm to scan anyway "
+            "(those seeds will be reported NOT TESTED, not clean)."
+        )
+    return errors

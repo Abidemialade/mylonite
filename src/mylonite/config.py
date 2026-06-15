@@ -15,8 +15,10 @@ The configuration object is intentionally strict:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -138,3 +140,44 @@ class MyloniteSettings(BaseSettings):
             )
             raise RuntimeError(msg)
         return self.llm
+
+
+class RunConfig(BaseModel):
+    """Declarative run configuration (``mylonite.yaml``).
+
+    One file that threads a run so the same flags need not be re-passed across
+    ``scan`` / ``generate`` / ``validate`` — single-file run ergonomics.
+    Every field is optional and an explicit CLI flag always wins; a field left
+    unset simply doesn't override the command default. Example::
+
+        target_file: ./target.yaml
+        authorize: my-app
+        provider: anthropic
+        model: claude-sonnet-4-6
+        max_llm_calls: 50
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_file: Path | None = Field(
+        default=None, description="Path to the custom-target YAML (the `--target-file`)."
+    )
+    authorize: str | None = Field(
+        default=None, description="Ownership assertion for a custom/non-reference target."
+    )
+    provider: str | None = Field(default=None, description="LiteLLM provider id.")
+    model: str | None = Field(default=None, description="Model identifier passed to LiteLLM.")
+    max_llm_calls: int | None = Field(
+        default=None, ge=1, description="Process-wide LLM call cap (budget) for a scan."
+    )
+
+
+def load_run_config(path: Path) -> RunConfig:
+    """Parse a ``mylonite.yaml`` run config into a validated :class:`RunConfig`."""
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if data is None:
+        return RunConfig()
+    if not isinstance(data, dict):
+        msg = f"run config {path} must contain a YAML mapping at the top level"
+        raise ValueError(msg)
+    return RunConfig.model_validate(data)

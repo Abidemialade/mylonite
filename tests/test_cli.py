@@ -989,3 +989,520 @@ def test_validate_uses_on_disk_source_and_records(
     assert generated.filename == on_disk_test.name
     # record_fixtures_dir points at the gen dir's fixtures/.
     assert captured["init_kwargs"]["record_fixtures_dir"] == out_dir / "fixtures"
+
+
+# ---------------------------------------------------------------------------
+# PR1 — frictionless flow: target.yaml persisted once, auto-resolved downstream,
+# and "Next:" hints. The custom-target journey should need --target-file at most
+# once (at scan), then nothing re-passes it.
+# ---------------------------------------------------------------------------
+
+
+def test_dump_target_file_roundtrips() -> None:
+    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import (
+        TargetFile,
+        dump_target_file,
+    )
+
+    tf = TargetFile(
+        family="myapp",
+        command="python",
+        args=["-m", "my_server"],
+        env={"DB": "/abs/path.db"},
+        weakness_classes=["W2", "W4"],
+        primary_tools=["send_email"],
+    )
+    text = dump_target_file(tf)
+    # Re-loadable and equal (round-trip through the same validator the CLI uses).
+    assert yaml.safe_load(text)  # valid YAML mapping
+    reloaded = TargetFile.model_validate(yaml.safe_load(text))
+    assert reloaded == tf
+
+
+def _canned_scan_result(target_id: str, *, findings: int) -> Any:
+    """A minimal real ScanResult (no mocks of the models) for engine-patched tests."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanResult
+
+    attempts = [
+        ScanAttempt(
+            seed_id="indirect-injection-note-body-direct",
+            pattern_id="indirect-injection-note-body-direct",
+            outcome="finding" if findings else "no_finding",
+            verdict_mechanism="predicate",
+            verdict_reason="synthetic verdict for PR1 flow test",
+            error_detail=None,
+        )
+    ]
+    report = ScanReport(
+        target_id=target_id,
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=attempts,
+        findings_count=findings,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    return ScanResult(report=report, exploits=[])
+
+
+def test_scan_custom_persists_target_yaml_and_next_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A custom scan co-locates the resolved target YAML in the scan dir (verbatim)
+    and prints a `Next: mylonite generate` hint when it found something."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+
+    source = _MINIMAL_TARGET_YAML
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(source, encoding="utf-8")
+    scan_root = tmp_path / "scans"
+
+    async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
+        return _canned_scan_result("mcp:myapp", findings=1)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp",
+            "--output-dir",
+            str(scan_root),
+            # _MINIMAL_TARGET_YAML declares W2 with no seed_arm; the escape hatch
+            # lets this persistence-focused test run past the PR3 pre-flight.
+            "--allow-no-seed-arm",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    scan_dirs = [p for p in scan_root.iterdir() if p.is_dir()]
+    assert len(scan_dirs) == 1, scan_dirs
+    colocated = scan_dirs[0] / "target.yaml"
+    assert colocated.is_file()
+    # Verbatim copy (operator comments/structure preserved).
+    assert colocated.read_text(encoding="utf-8") == source
+    assert "Next: mylonite generate" in result.output
+    target_registry.clear_runtime_targets()
+
+
+def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
+    """generate without --target-file picks up target.yaml from the scan dir."""
+    scan_dir = tmp_path / "scans" / "s"
+    _write_custom_exploit_json(scan_dir / "exploit_pid.json")
+    # `scan` would have written this next to the exploit.
+    (scan_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(scan_dir), "--out", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Auto-resolved: co-located into the generated dir, no "re-run with --target-file" warning.
+    colocated = out_dir / "target.yaml"
+    assert colocated.is_file()
+    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    assert "Using target:" in result.output
+    out = result.stderr or result.output
+    assert "Re-run with" not in out
+
+
+def test_validate_custom_auto_resolves_colocated_target_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """validate without --target-file picks up the co-located target.yaml."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    (out_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    def _fake_validate_custom(generated: Any, target_file: Any, *_a: Any, **_k: Any) -> Any:
+        from mylonite.contracts import ValidationReport
+
+        captured["target_file"] = target_file
+        # A real report (not a stub) so validate can persist validation_report.json.
+        return ValidationReport(test_filename="t.py", outcomes=[], kept=True)
+
+    monkeypatch.setattr("mylonite.cli._validate_custom", _fake_validate_custom)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Auto-resolved the co-located YAML — the operator passed --target-file zero times here.
+    assert captured["target_file"] == out_dir / "target.yaml"
+    out = (result.stderr or "") + result.output
+    assert "Using target:" in out
+    assert "Next: commit" in result.output
+    # validate persisted the report next to the test (PR4 trust-panel input).
+    assert (out_dir / "validation_report.json").is_file()
+
+
+# ---------------------------------------------------------------------------
+# PR2 — verification legibility: the differential-oracle evidence renders in the
+# console report (gating formula with live marks, fires/resists, kill matrix).
+# ---------------------------------------------------------------------------
+
+
+def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFixture[str]) -> None:
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import (
+        ReproducibilityEvidence,
+        SeedKill,
+        ValidationOutcome,
+        ValidationReport,
+    )
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=False, detail="too flaky", metric=0.4),
+            ValidationOutcome(stage="metamorphic", passed=True, detail="robust", metric=1.0),
+        ],
+        kept=False,
+        mutation_score=0.75,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=2),
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+            SeedKill(
+                pattern_id="excessive-agency-fetch-attacker-url-direct", weakness="W3", killed=False
+            ),
+        ],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    # Gating formula with live per-leg marks, ending in the REJECTED verdict.
+    assert "gate: kept = build" in out
+    assert "REJECTED" in out
+    # Reproducibility counts behind the legs.
+    assert "vulnerable fired 5/5" in out
+    assert "guarded resisted 2/5" in out
+    # Per-seed kill matrix + the metric legend + metamorphic non-gating note.
+    assert "kill matrix" in out
+    assert "W2:indirect-injection-note-body-direct" in out
+    assert "metric legend" in out
+    assert "report-only" in out  # metamorphic does-not-gate note
+
+
+# ---------------------------------------------------------------------------
+# PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
+# ---------------------------------------------------------------------------
+
+
+def test_scan_custom_w2_without_seed_arm_blocks(tmp_path: Path) -> None:
+    """Declaring W2 (indirect-injection-only) with no seed_arm blocks a real scan."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "myapp"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "seed_arm" in out
+    assert "--allow-no-seed-arm" in out
+    target_registry.clear_runtime_targets()
+
+
+def test_validate_for_scan_helper() -> None:
+    """The pre-flight helper flags W2-without-seed_arm and honours the escape."""
+    from mylonite.plugins._mcp.target_file import TargetFile, validate_for_scan
+
+    tf = TargetFile(family="myapp", command="python", weakness_classes=["W2"])
+    assert validate_for_scan(tf)  # non-empty -> blocked
+    assert not validate_for_scan(tf, allow_no_seed_arm=True)  # escape clears it
+    # W4-only (has direct variants) needs no seed_arm -> not blocked.
+    tf_w4 = TargetFile(family="myapp", command="python", weakness_classes=["W4"])
+    assert not validate_for_scan(tf_w4)
+
+
+def test_render_summary_not_tested_is_loud_and_distinct_from_clean() -> None:
+    """A delivery-miss renders a NOT TESTED mark + a loud coverage warning,
+    never the benign 'clean' mark (PR3)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.artefacts import render_summary
+    from mylonite.scan.engine import ScanResult
+
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="indirect-injection-note-body-direct",
+                pattern_id="indirect-injection-note-body-direct",
+                outcome="skipped_payload_not_delivered",
+                verdict_mechanism=None,
+                verdict_reason="poison never retrieved",
+                error_detail=None,
+            )
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    result = ScanResult(report=report, exploits=[])
+    # UTF-8 surface.
+    out = render_summary(result, ascii_safe=False)
+    assert "NOT TESTED" in out
+    assert "coverage:" in out
+    # The benign clean MARK must never appear for a delivery-miss attempt.
+    assert "✓ clean" not in out
+    # ASCII surface stays crash-free and still loud.
+    out_ascii = render_summary(result, ascii_safe=True)
+    assert "NOT-TESTED" in out_ascii
+    assert "coverage:" in out_ascii
+
+
+# ---------------------------------------------------------------------------
+# PR4 — `mylonite report`: the offline trust panel.
+# ---------------------------------------------------------------------------
+
+
+def _write_validation_report_json(dir_path: Path) -> None:
+    from mylonite.contracts import (
+        ReproducibilityEvidence,
+        SeedKill,
+        ValidationOutcome,
+        ValidationReport,
+    )
+
+    dir_path.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=True, detail="5/5", metric=1.0),
+        ],
+        kept=True,
+        mutation_score=0.875,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=5),
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+        ],
+    )
+    (dir_path / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def test_report_validation_dir_renders_trust_panel(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    _write_exploit_json(gen / "exploit_pid.json")  # reference exploit -> compliance tags
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.output
+    assert "gate: kept = build" in out
+    assert "kill matrix" in out
+    assert "KEPT" in out
+    assert "compliance:" in out
+    assert "LLM01" in out  # from the co-located exploit's tags
+
+
+def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "mcp:myapp" in result.output
+    assert "findings" in result.output.lower()
+
+
+def test_report_html_export(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    html = tmp_path / "panel.html"
+    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert html.is_file()
+    body = html.read_text(encoding="utf-8")
+    assert "<html" in body.lower()
+    assert "kill matrix" in body
+
+
+def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = runner.invoke(app, ["report", str(empty)])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "scan_report.json" in out or "validation_report.json" in out
+
+
+# ---------------------------------------------------------------------------
+# PR6 — declarative run-config + eval/CI interop export.
+# ---------------------------------------------------------------------------
+
+
+def test_export_eval_yaml_stdout(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    result = runner.invoke(app, ["export", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    import yaml as _yaml
+
+    doc = _yaml.safe_load(result.output)
+    assert doc["tests"][0]["assert"][0]["type"] == "llm-rubric"
+    assert doc["tests"][0]["metadata"]["validated_by"] == "mylonite-differential-oracle"
+
+
+def test_export_eval_yaml_to_file(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    out = tmp_path / "evalconfig.yaml"
+    result = runner.invoke(app, ["export", str(gen), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert out.is_file()
+    assert "eval/CI harness" in result.output  # next-step hint
+    assert "llm-rubric" in out.read_text(encoding="utf-8")
+
+
+def test_export_unknown_format_exit_2(tmp_path: Path) -> None:
+    gen = tmp_path / "gen"
+    _write_exploit_json(gen / "exploit_pid.json")
+    result = runner.invoke(app, ["export", str(gen), "--format", "nope"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "eval-yaml" in (result.stderr or result.output)
+
+
+def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A mylonite.yaml supplies target_file + authorize so the bare `scan --config`
+    resolves the custom target (dry-run enumerates seeds)."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {target_yaml}\nauthorize: myapp\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--dry-run"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "dry-run" in result.stdout or "attempts" in result.stdout
+    target_registry.clear_runtime_targets()
+
+
+# ---------------------------------------------------------------------------
+# PR7 — launch infra: an end-to-end guard that the custom-target path needs
+# --target-file at most ONCE (scan), then auto-resolves it downstream. This is
+# the regression test that keeps the headline custom-target flow honest.
+# ---------------------------------------------------------------------------
+
+
+def test_custom_target_flow_needs_target_file_at_most_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine, ScanResult
+
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=exploit.pattern_id,
+                pattern_id=exploit.pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="x",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[exploit])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    target_yaml = tmp_path / "target.yaml"
+    # W4 needs no seed_arm, so no PR3 pre-flight block.
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    scan_root = tmp_path / "scans"
+
+    # 1) scan — pass --target-file exactly ONCE.
+    r1 = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp",
+            "--output-dir",
+            str(scan_root),
+        ],
+    )
+    assert r1.exit_code == EXIT_SUCCESS, r1.output
+    scan_dir = next(p for p in scan_root.iterdir() if p.is_dir())
+    assert (scan_dir / "target.yaml").is_file()  # persisted for downstream
+
+    # 2) generate — NO --target-file; it auto-resolves from the scan dir.
+    gen = tmp_path / "gen"
+    r2 = runner.invoke(app, ["generate", str(scan_dir), "--out", str(gen)])
+    assert r2.exit_code == EXIT_SUCCESS, r2.output
+    assert list(gen.glob("test_security_*.py"))
+    assert (gen / "target.yaml").is_file()  # co-located, ready for validate
+    assert "Using target:" in r2.output
+
+    # 3) export the validated finding — also needs no flags beyond the dir.
+    r3 = runner.invoke(app, ["export", str(gen)])
+    assert r3.exit_code == EXIT_SUCCESS, r3.output
+    assert "validated_by" in r3.output
+
+    target_registry.clear_runtime_targets()

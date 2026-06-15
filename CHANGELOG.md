@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Pre-Phase-4 readiness: flow + verification legibility
+
+- **`mylonite export` — eval/CI interop.** Mylonite is the validation layer;
+  `mylonite export <dir|exploit.json> --format eval-yaml` hands a
+  differential-oracle-validated finding to the eval/CI harness a team already
+  runs. It emits a portable eval test case (the attack as input + a rubric assert
+  that the agent must resist it) carrying the OWASP/ATLAS/NIST compliance tags
+  and a `validated_by: mylonite-differential-oracle` provenance marker — so the
+  team gets a Mylonite-validated regression in their existing suite. Offline, no
+  LLM. `--out` writes the config and prints the next step.
+- **Declarative `mylonite.yaml` run config.** A new `RunConfig`
+  (`mylonite.config.load_run_config`) threads a run so the same flags need not be
+  re-passed: `scan --config mylonite.yaml` fills any omitted `target_file` /
+  `authorize` / `provider` / `model` / `max_llm_calls` (an explicit flag always
+  wins). Single-file run ergonomics for the custom-target journey.
+- **Measured precision/recall corpus.** A new `mylonite.corpus` module +
+  `scripts/measure_precision_recall.py` drive the bundled kitchen-sink twins
+  across the W1-W4 seeded weaknesses with no LLM and no network, then compute a
+  confusion matrix (TP/FP/FN/TN) and report precision / recall / false-positive
+  rate / F1 — turning "the oracle is reliable" into a measured number CI can
+  track. The seeded twins separate perfectly (precision = recall = 1.0, FPR = 0).
+  (Multi-judge consensus already applies to every custom-target validation; this
+  adds the offline measurement substrate.)
+- **`mylonite report` command** — an offline trust panel. Point it at a scan
+  dir, a validated dir, or a `scan_report.json` /
+  `validation_report.json` and it renders a clean, screenshot-able "why you can
+  trust this" readout: for a validation, the verdict + gating formula + live
+  per-leg marks + fires/resists counts + per-seed kill matrix + compliance tags;
+  for a scan, the findings + coverage (incl. any NOT TESTED gap) + compliance
+  tags. `--html PATH` also writes a standalone, shareable HTML panel. `mylonite
+  validate` now persists `validation_report.json` next to the test so the panel
+  (and the JSON artefact) carry the full oracle evidence.
+
+- **Frictionless custom-target flow.** `scan` now persists the resolved target
+  YAML into the scan dir as `target.yaml`; `generate` and `validate`
+  auto-resolve it from the scan/generated dir, so a custom-target journey needs
+  `--target-file` at most once (at `scan`). `scan` and `validate` print a
+  `Next:` hint pointing at the following command. `scan --help` documents its
+  exit codes.
+- **Differential-oracle evidence is now legible.** `mylonite validate` renders
+  the gating formula with live per-leg marks (`kept = build [ok] AND
+  differential [ok] AND flakiness [x]`), the vulnerable-fires / guarded-resists
+  reproducibility counts, the per-seed mutation kill matrix, and a one-line
+  metric legend — previously all buried in `report.notes` and rendered nowhere.
+  The gating PR body (`mylonite gate`) mirrors the same evidence.
+- **A misfire can never read as "clean" (correctness safeguards).** A scan
+  attempt that was *not exercised* — its planted payload was never delivered, or
+  the target declared no `seed_arm` to plant it — now gets a loud `NOT TESTED`
+  mark (distinct from the benign `clean`) plus a red `coverage:` warning in the
+  summary, so a `findings_count == 0` scan with undelivered seeds is never
+  mistaken for safety. `scan` also runs a blocking pre-flight: declaring an
+  indirect-injection-only weakness class (e.g. W2) with no `seed_arm` errors out
+  with a fix hint unless `--allow-no-seed-arm` is passed (a `--dry-run` only
+  warns). New `mylonite.plugins._mcp.target_file.validate_for_scan` helper.
+
+### Changed
+
+- **Validator contract `0.3.0 → 0.4.0` (additive).** `ValidationReport` gained
+  optional structured-evidence fields — `gating_formula`, `gating_legs`,
+  `reproducibility` (a `ReproducibilityEvidence`), and `mutation_matrix` (a list
+  of `SeedKill`) — lifted out of the free-text `notes` so surfaces can render
+  the oracle's discrimination. All fields are optional/defaulted; existing
+  reports remain valid. `SeedKill` and `ReproducibilityEvidence` are exported
+  from `mylonite.contracts`.
+
 ### Added — Phase 3: CI gating + the magic moment
 
 - **`mylonite gate` command** — the end-to-end magic moment: `scan →

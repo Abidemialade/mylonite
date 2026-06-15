@@ -1,5 +1,78 @@
 {
   "$defs": {
+    "ReproducibilityEvidence": {
+      "additionalProperties": false,
+      "description": "The per-iteration counts behind the differential/flakiness legs.\n\nFor the reference path both twins run each iteration, so ``vuln_fired`` and\n``guard_resisted`` are populated. For a custom target (no in-repo guarded\ntwin) only the real target is re-driven, so ``vuln_fired`` is the reproduced\ncount and ``guard_resisted`` is ``None``.",
+      "properties": {
+        "guard_resisted": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Iterations where the guarded twin resisted; None for custom targets.",
+          "title": "Guard Resisted"
+        },
+        "iterations": {
+          "description": "Number of differential/flakiness iterations.",
+          "minimum": 0,
+          "title": "Iterations",
+          "type": "integer"
+        },
+        "vuln_fired": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Iterations where the vulnerable twin (or the real target) fired the exploit.",
+          "title": "Vuln Fired"
+        }
+      },
+      "required": [
+        "iterations"
+      ],
+      "title": "ReproducibilityEvidence",
+      "type": "object"
+    },
+    "SeedKill": {
+      "additionalProperties": false,
+      "description": "One row of the mutation kill matrix.\n\nDid the generated test catch this seeded weakness \u2014 i.e. did the vulnerable\ntwin FIRE this seed while the guarded twin RESISTED it? This is the\nper-seed evidence behind ``ValidationReport.mutation_score``; rendering it\nmakes the differential oracle's discrimination legible instead of a bare\nscalar.",
+      "properties": {
+        "killed": {
+          "description": "True iff vulnerable fired this seed AND guarded resisted it.",
+          "title": "Killed",
+          "type": "boolean"
+        },
+        "pattern_id": {
+          "description": "The kitchen-sink seed's pattern_id.",
+          "title": "Pattern Id",
+          "type": "string"
+        },
+        "weakness": {
+          "description": "The weakness class (e.g. W1-W4) the seed exercises.",
+          "title": "Weakness",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pattern_id",
+        "weakness",
+        "killed"
+      ],
+      "title": "SeedKill",
+      "type": "object"
+    },
     "ValidationOutcome": {
       "additionalProperties": false,
       "description": "One leg of the differential-oracle pipeline.",
@@ -53,10 +126,39 @@
   "additionalProperties": false,
   "description": "Validator output for a single GeneratedTest.",
   "properties": {
+    "gating_formula": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Human-readable gate, e.g. 'kept = build AND differential AND flakiness'. The legs that actually decide ``kept``.",
+      "title": "Gating Formula"
+    },
+    "gating_legs": {
+      "description": "Ordered stage names that gate ``kept`` (a subset of ``outcomes``).",
+      "items": {
+        "type": "string"
+      },
+      "title": "Gating Legs",
+      "type": "array"
+    },
     "kept": {
       "description": "True iff the test passes every stage and should be committed.",
       "title": "Kept",
       "type": "boolean"
+    },
+    "mutation_matrix": {
+      "description": "Per-seed kill matrix behind ``mutation_score``.",
+      "items": {
+        "$ref": "#/$defs/SeedKill"
+      },
+      "title": "Mutation Matrix",
+      "type": "array"
     },
     "mutation_score": {
       "anyOf": [
@@ -91,6 +193,18 @@
       },
       "title": "Outcomes",
       "type": "array"
+    },
+    "reproducibility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReproducibilityEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Per-iteration fire/resist counts behind the differential/flakiness legs."
     },
     "test_filename": {
       "title": "Test Filename",

@@ -54,6 +54,9 @@ site/
 #   skills, repo invariants, recommended workflows).
 PLAN.md
 CLAUDE.md
+# - MYLONITE_*.md: local-only review / readiness / run-feedback working notes
+#   (competitive analysis, investigation write-ups). Never publish.
+MYLONITE_*.md
 
 # Editors / OS
 .idea/

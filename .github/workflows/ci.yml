@@ -67,12 +67,23 @@ jobs:
           pip install -e ./reference_targets/mcp_kitchen_sink
       - name: Pytest
         run: pytest --cov=mylonite --cov-report=xml --cov-report=term-missing
+      - name: Precision/recall corpus (differential oracle)
+        # Measures the oracle's FP/FN against the seeded kitchen-sink twins
+        # (offline, no LLM). The asserted numbers live in tests/corpus; this
+        # surfaces the measured precision/recall/FPR and the report artefact.
+        run: python scripts/measure_precision_recall.py --out corpus_report.json
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
+      - name: Upload corpus report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: corpus-report
+          path: corpus_report.json
 
   test-windows:
     runs-on: windows-latest

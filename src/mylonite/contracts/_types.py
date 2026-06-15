@@ -177,6 +177,50 @@ class GeneratedTest(BaseModel):
 # --- Validation reports -------------------------------------------------------
 
 
+class SeedKill(BaseModel):
+    """One row of the mutation kill matrix.
+
+    Did the generated test catch this seeded weakness — i.e. did the vulnerable
+    twin FIRE this seed while the guarded twin RESISTED it? This is the
+    per-seed evidence behind ``ValidationReport.mutation_score``; rendering it
+    makes the differential oracle's discrimination legible instead of a bare
+    scalar.
+    """
+
+    model_config = _FROZEN
+
+    pattern_id: str = Field(..., description="The kitchen-sink seed's pattern_id.")
+    weakness: str = Field(..., description="The weakness class (e.g. W1-W4) the seed exercises.")
+    killed: bool = Field(
+        ...,
+        description="True iff vulnerable fired this seed AND guarded resisted it.",
+    )
+
+
+class ReproducibilityEvidence(BaseModel):
+    """The per-iteration counts behind the differential/flakiness legs.
+
+    For the reference path both twins run each iteration, so ``vuln_fired`` and
+    ``guard_resisted`` are populated. For a custom target (no in-repo guarded
+    twin) only the real target is re-driven, so ``vuln_fired`` is the reproduced
+    count and ``guard_resisted`` is ``None``.
+    """
+
+    model_config = _FROZEN
+
+    iterations: int = Field(..., ge=0, description="Number of differential/flakiness iterations.")
+    vuln_fired: int | None = Field(
+        default=None,
+        ge=0,
+        description="Iterations where the vulnerable twin (or the real target) fired the exploit.",
+    )
+    guard_resisted: int | None = Field(
+        default=None,
+        ge=0,
+        description="Iterations where the guarded twin resisted; None for custom targets.",
+    )
+
+
 class ValidationOutcome(BaseModel):
     """One leg of the differential-oracle pipeline."""
 
@@ -226,6 +270,30 @@ class ValidationReport(BaseModel):
             "Fraction of the seeded-weakness bank the generated test correctly "
             "catches (fails-on-vulnerable), [0,1]."
         ),
+    )
+    # --- structured evidence (added v0.4.0) -----------------------------------
+    # The differential oracle's discrimination evidence, lifted out of the
+    # free-text ``notes`` so surfaces (console report, PR body, JSON artefact)
+    # can render it. All optional/back-compatible — a report omitting them is
+    # still valid and renders as before.
+    gating_formula: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable gate, e.g. 'kept = build AND differential AND "
+            "flakiness'. The legs that actually decide ``kept``."
+        ),
+    )
+    gating_legs: list[str] = Field(
+        default_factory=list,
+        description="Ordered stage names that gate ``kept`` (a subset of ``outcomes``).",
+    )
+    reproducibility: ReproducibilityEvidence | None = Field(
+        default=None,
+        description="Per-iteration fire/resist counts behind the differential/flakiness legs.",
+    )
+    mutation_matrix: list[SeedKill] = Field(
+        default_factory=list,
+        description="Per-seed kill matrix behind ``mutation_score``.",
     )
 
 

@@ -616,9 +616,32 @@ def scan(
         Path,
         typer.Option("--output-dir", help="Root directory for scan artefacts."),
     ] = Path(".mylonite/scans"),
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / max_llm_calls). Fills any flag you omit; an "
+                "explicit flag always wins."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Enumerate seeds; skip customisation + invocation."),
+    ] = False,
+    allow_no_seed_arm: Annotated[
+        bool,
+        typer.Option(
+            "--allow-no-seed-arm",
+            help=(
+                "Scan a custom target that declares an indirect-injection weakness "
+                "class (e.g. W2) without a seed_arm. Those seeds will report NOT "
+                "TESTED rather than block the scan. Off by default so a misconfig "
+                "never reads as clean."
+            ),
+        ),
     ] = False,
     authorize: Annotated[
         str | None,
@@ -628,7 +651,30 @@ def scan(
         ),
     ] = None,
 ) -> None:
-    """Run the exploit-finding loop against a target."""
+    """Run the exploit-finding loop against a target.
+
+    Exit codes: 0 ok; 2 config/usage error (incl. nothing scanned); 3 budget
+    exceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an
+    aborted/empty scan exits non-zero so it never reads as a clean pass.
+    """
+    # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
+    # custom-target run isn't a wall of repeated flags. An explicit flag wins.
+    if run_config_path is not None:
+        from mylonite.config import load_run_config
+
+        try:
+            rc = load_run_config(run_config_path)
+        except Exception as exc:
+            typer.echo(f"invalid --config {run_config_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        if max_llm_calls == 50 and rc.max_llm_calls is not None:
+            # 50 is the option default; only the config overrides an untouched flag.
+            max_llm_calls = rc.max_llm_calls
+
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
     effective_provider = provider or "anthropic"
@@ -641,6 +687,10 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
+    # For a custom target we persist the resolved target YAML next to the scan
+    # (below, after artefacts are written) so `generate`/`validate` can re-resolve
+    # it without the operator re-passing --target-file at every step.
+    custom_target_yaml: str | None = None
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
@@ -665,6 +715,29 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
+        from mylonite.plugins._mcp.target_file import dump_target_file, validate_for_scan
+
+        # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
+        # weakness class with no seed_arm would silently skip those seeds and read
+        # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
+        # set. A --dry-run only enumerates seeds (no clean/finding verdict to
+        # mislead), so there we downgrade the block to a warning.
+        preflight_errors = validate_for_scan(tf, allow_no_seed_arm=allow_no_seed_arm)
+        if preflight_errors:
+            for err in preflight_errors:
+                level = "warning" if dry_run else "error"
+                typer.echo(f"{level}: {err}", err=True)
+            if not dry_run:
+                raise typer.Exit(code=EXIT_CONFIG)
+
+        # Copy the source YAML verbatim (preserves operator comments/structure)
+        # when given a file; otherwise serialise the inline mcp:custom flags so the
+        # exact target is reproducible from the scan dir alone.
+        custom_target_yaml = (
+            target_file.read_text(encoding="utf-8")
+            if target_file is not None
+            else dump_target_file(tf)
+        )
         adapter = _build_adapter_for_custom(tf, authorize, effective_model)
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
@@ -744,8 +817,16 @@ def scan(
         # Persist artefacts UN-redacted (they are loadable/replayable data); only
         # the console-rendered summary string is redacted before display.
         scan_dir = write_artefacts(result, output_dir)
+        # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
+        # it from the scan dir — the custom-target journey needs the path ONCE.
+        if custom_target_yaml is not None:
+            (scan_dir / "target.yaml").write_text(custom_target_yaml, encoding="utf-8")
         typer.echo(redact(render_summary(result)))
         typer.echo(f"Artefacts: {scan_dir}")
+        # "Next:" hint — point at the very next command so the flow is self-guiding.
+        if result.report.findings_count > 0:
+            typer.echo("")
+            typer.echo(f"Next: mylonite generate {scan_dir}")
     else:
         # Dry-run: render summary without writing files.
         from mylonite.scan.artefacts import render_summary
@@ -1086,6 +1167,14 @@ def generate(
     # (the test would fail at runtime without it). Reference tests replay the
     # bundled twin and need no target file.
     is_custom = not exploit.target_id.startswith("reference:")
+    # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
+    # the operator needn't re-pass --target-file at every step. An explicit
+    # --target-file always wins.
+    if target_file is None and is_custom:
+        candidate = exploit_path.parent / "target.yaml"
+        if candidate.is_file():
+            target_file = candidate
+            typer.echo(f"Using target:  {candidate} (from the scan dir)")
     colocated_target: Path | None = None
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -1119,7 +1208,8 @@ def generate(
         typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
         typer.echo("Then:")
         typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
-        typer.echo(f"  mylonite validate {out_dir} --target-file {out_dir / 'target.yaml'}")
+        # validate auto-resolves the co-located target.yaml — no --target-file needed.
+        typer.echo(f"  mylonite validate {out_dir}")
     else:
         typer.echo(f"Next: mylonite validate {out_dir}")
     raise typer.Exit(code=EXIT_SUCCESS)
@@ -1217,17 +1307,36 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
     return test_matches[0], exploit_matches[0]
 
 
-def _render_validation_report(report: Any) -> None:
+def _render_validation_report(report: Any, console: Console | None = None) -> None:
     """Render a per-leg Rich report (F4): one row per ValidationOutcome.
 
-    Uses a FRESH Console (UTF-8 already forced by the root callback). Shows the
-    pass/✗ mark, the stage's metric, and its detail; then the mutation-score
-    headline and the overall kept verdict; plus a remediation line per failed
-    gating leg when the test was rejected.
+    This is the moat's SHOWCASE surface, so it is made ASCII-safe independently
+    of the root callback's UTF-8 forcing: a legacy cp1252 Windows console must
+    never crash on the pass/fail marks or the title dash (Issue #9). Shows the
+    per-leg result + metric + detail; the gating formula with live per-leg marks,
+    the fires/resists reproducibility counts, the per-seed kill matrix and the
+    mutation-score headline; the overall kept verdict; plus a remediation line
+    per failed gating leg when the test was rejected.
     """
-    console = Console()
+    # ASCII-aware marks/separators so the showcase surface never crashes on a
+    # legacy cp1252 console — independent of the root callback's UTF-8 forcing.
+    from mylonite.scan.artefacts import _stdout_is_ascii_only
+
+    ascii_safe = _stdout_is_ascii_only()
+
+    def _mark(ok: bool) -> str:
+        # NB: avoid '[...]' tokens — Rich would parse them as console markup.
+        if ascii_safe:
+            return "+" if ok else "x"
+        return "✓" if ok else "✗"
+
+    sep = " | " if ascii_safe else " · "
+    dash = "-" if ascii_safe else "—"
+
+    if console is None:
+        console = Console()
     table = Table(
-        title=f"Mylonite validate — {report.test_filename}",
+        title=f"Mylonite validate {dash} {report.test_filename}",
         title_justify="left",
         show_lines=False,
     )
@@ -1237,26 +1346,80 @@ def _render_validation_report(report: Any) -> None:
     table.add_column("detail")
 
     for outcome in report.outcomes:
-        mark = "✓ pass" if outcome.passed else "✗ FAIL"
+        mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
         metric = f"{outcome.metric:.2f}" if outcome.metric is not None else "-"
         table.add_row(outcome.stage, mark, metric, outcome.detail)
 
     console.print(table)
 
+    # --- the differential-oracle EVIDENCE (PR2: make the moat legible) --------
+    # The gating formula with live per-leg marks, the fires/resists counts, and
+    # the per-seed kill matrix were previously buried in report.notes (rendered
+    # nowhere). Surface them so a "KEPT" verdict shows WHY it's trustworthy.
+    # Metric legend — what the bare decimals in the table's metric column mean.
+    console.print(
+        "metric legend: "
+        + sep.join(
+            ["differential=agreement", "flakiness=reproducibility", "metamorphic=robustness (0-1)"]
+        )
+    )
+
+    # The gate itself, with LIVE per-leg marks — this is what makes a verdict
+    # legible: kept = build [ok] AND differential [ok] AND flakiness [x].
+    legs_by_stage = {o.stage: o for o in report.outcomes}
+    if getattr(report, "gating_legs", None):
+        rendered = " AND ".join(
+            f"{leg} {_mark(legs_by_stage[leg].passed)}"
+            for leg in report.gating_legs
+            if leg in legs_by_stage
+        )
+        verdict = "KEPT" if report.kept else "REJECTED"
+        console.print(f"gate: kept = {rendered}  =>  {verdict}")
+
+    # Reproducibility counts (fires/resists) behind differential + flakiness.
+    repro = getattr(report, "reproducibility", None)
+    if repro is not None:
+        if repro.guard_resisted is not None:
+            console.print(
+                f"reproducibility: vulnerable fired {repro.vuln_fired}/{repro.iterations}, "
+                f"guarded resisted {repro.guard_resisted}/{repro.iterations}"
+            )
+        else:
+            console.print(
+                f"reproducibility: reproduced {repro.vuln_fired}/{repro.iterations} "
+                "against the real target (no in-repo guarded twin)"
+            )
+
     if report.mutation_score is not None:
         console.print(f"mutation score: {report.mutation_score:.2f}")
 
+    # Per-seed kill matrix — the oracle's discrimination, seed by seed.
+    matrix = getattr(report, "mutation_matrix", None) or []
+    if matrix:
+        killed = sum(1 for s in matrix if s.killed)
+        console.print(
+            f"kill matrix ({killed}/{len(matrix)} seeds killed = "
+            "fired-on-vulnerable, resisted-on-guarded):"
+        )
+        for seed in matrix:
+            console.print(f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
+
+    # Metamorphic is report-only — say so explicitly so a failing metamorphic row
+    # is never read as a gate failure.
+    if any(o.stage == "metamorphic" for o in report.outcomes):
+        console.print("note: metamorphic robustness is report-only - it does not gate kept.")
+
     if report.kept:
-        console.print("[green]verdict: KEPT — the test discriminates and is stable.[/green]")
+        console.print(f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
     else:
-        console.print("[red]verdict: REJECTED — the test was not kept.[/red]")
+        console.print(f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
         _remediation = {
-            "build": "build fail → emitted test didn't collect; re-run `mylonite generate`.",
-            "differential": "differential fail → no discriminating power between the twins.",
-            "flakiness": "flakiness fail → exploit too flaky to gate; try a more deterministic seed.",
-            "stability": "stability fail → the attack did not reproduce against the real target.",
-            "effect": "effect fail → the target's effect probe did not confirm the damage materialised.",
-            "consensus": "consensus fail → judges disagreed the effect was real; add an effect_probe.",
+            "build": "build fail: emitted test didn't collect; re-run `mylonite generate`.",
+            "differential": "differential fail: no discriminating power between the twins.",
+            "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
+            "stability": "stability fail: the attack did not reproduce against the real target.",
+            "effect": "effect fail: the target's effect probe did not confirm the damage materialised.",
+            "consensus": "consensus fail: judges disagreed the effect was real; add an effect_probe.",
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:
@@ -1393,6 +1556,13 @@ def validate(
     )
 
     is_custom = not exploit.target_id.startswith("reference:")
+    # Auto-resolve the target YAML co-located with the test (written by `generate`)
+    # so the operator needn't re-pass --target-file. Explicit --target-file wins.
+    if target_file is None and is_custom:
+        candidate = test_path.parent / "target.yaml"
+        if candidate.is_file():
+            target_file = candidate
+            typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
         report = _validate_custom(
             generated,
@@ -1445,11 +1615,239 @@ def validate(
             ReferenceVulnerableOracle(),
         )
 
+    # Persist the full ValidationReport (incl. the PR2 structured evidence) next
+    # to the test so `mylonite report` can re-render the trust panel offline and
+    # the JSON artefact carries the oracle's discrimination, not just a verdict.
+    report_path = test_path.parent / "validation_report.json"
+    report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
     _render_validation_report(report)
 
     if report.kept:
+        typer.echo("")
+        typer.echo(
+            "Next: commit the generated test + fixtures so CI can gate on it "
+            "(see `mylonite gate --help`)."
+        )
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
+
+
+def _compliance_tags_line(compliance: Any) -> str:
+    """One-line compliance summary from a ComplianceTags (OWASP/ATLAS/NIST)."""
+    parts = []
+    if compliance.owasp_llm:
+        parts.append("OWASP-LLM " + ", ".join(compliance.owasp_llm))
+    if compliance.owasp_asi:
+        parts.append("OWASP-ASI " + ", ".join(compliance.owasp_asi))
+    if compliance.mitre_atlas:
+        parts.append("MITRE ATLAS " + ", ".join(compliance.mitre_atlas))
+    if compliance.nist_ai_rmf:
+        parts.append("NIST " + ", ".join(compliance.nist_ai_rmf))
+    return " | ".join(parts) if parts else "(no compliance tags)"
+
+
+def _locate_report_artefact(target: Path) -> tuple[str, Path]:
+    """Resolve a ``report`` TARGET to a ('validation'|'scan', path) pair.
+
+    Prefers a persisted ``validation_report.json`` (the oracle verdict + evidence)
+    over a ``scan_report.json`` when a dir holds both. Exits 2 with guidance when
+    nothing loadable is found.
+    """
+    if target.is_file():
+        if target.name == "validation_report.json":
+            return "validation", target
+        if target.name == "scan_report.json":
+            return "scan", target
+        typer.echo(
+            f"don't know how to report on {target.name}. Pass a scan dir, a "
+            "generated/validated dir, or a scan_report.json / validation_report.json.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if target.is_dir():
+        vr = target / "validation_report.json"
+        if vr.is_file():
+            return "validation", vr
+        sr = target / "scan_report.json"
+        if sr.is_file():
+            return "scan", sr
+        typer.echo(
+            f"no validation_report.json or scan_report.json found in {target}. "
+            "Run `mylonite scan` or `mylonite validate` first.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    typer.echo(
+        f"path not found: {target}. Pass a scan/validated dir or a report JSON.",
+        err=True,
+    )
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
+@app.command()
+def report(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "A scan dir, a generated/validated dir, or a scan_report.json / "
+                "validation_report.json. Renders the trust panel for whichever it finds."
+            ),
+        ),
+    ],
+    html: Annotated[
+        Path | None,
+        typer.Option(
+            "--html",
+            help="Also write a standalone, shareable HTML trust panel to this path.",
+        ),
+    ] = None,
+) -> None:
+    """Render a saved scan or validation as a trust panel (offline, no LLM).
+
+    A clean, screenshot-able "why you can trust this" readout. For a validation it
+    shows the verdict, the gating formula with
+    live per-leg marks, the fires/resists reproducibility counts, the per-seed
+    kill matrix, and the compliance tags. For a scan it shows the findings,
+    coverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no
+    loadable artefact is found.
+    """
+    import json
+
+    from rich.console import Console as _Console
+
+    kind, path = _locate_report_artefact(target)
+    # A recording console only when exporting HTML (keeps the terminal path lean).
+    console = _Console(record=html is not None)
+
+    if kind == "validation":
+        from mylonite.contracts import ValidationReport
+
+        try:
+            vreport = ValidationReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            typer.echo(f"could not load {path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _render_validation_report(vreport, console=console)
+        # Compliance tags from the co-located exploit, if present.
+        exploit_matches = sorted(path.parent.glob("exploit_*.json"))
+        if exploit_matches:
+            from mylonite import testkit
+
+            try:
+                exploit = testkit.load_exploit(exploit_matches[0])
+                console.print(f"compliance: {_compliance_tags_line(exploit.compliance)}")
+                console.print(f"target: {exploit.target_id}  pattern: {exploit.pattern_id}")
+            except (FileNotFoundError, ValueError):
+                pass
+        console.print(f"artefacts: {path.parent}")
+    else:
+        from mylonite.contracts._types import ScanReport
+        from mylonite.scan.artefacts import render_summary
+        from mylonite.scan.engine import ScanResult
+
+        try:
+            sreport = ScanReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            typer.echo(f"could not load {path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        result = ScanResult(report=sreport, exploits=[])
+        # render_summary already returns a fully-rendered, ASCII-aware string.
+        console.print(render_summary(result), markup=False)
+        # Compliance tags aggregated across the co-located exploit files.
+        tags: set[str] = set()
+        target_id = sreport.target_id
+        for exploit_file in sorted(path.parent.glob("exploit_*.json")):
+            try:
+                data = json.loads(exploit_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            c = data.get("compliance", {})
+            for key in ("owasp_llm", "owasp_asi", "mitre_atlas", "nist_ai_rmf"):
+                tags.update(c.get(key) or [])
+        if tags:
+            console.print(f"compliance: {', '.join(sorted(tags))}")
+        console.print(f"target: {target_id}  artefacts: {path.parent}")
+
+    if html is not None:
+        html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
+        typer.echo(f"Wrote HTML trust panel: {html}")
+    raise typer.Exit(code=EXIT_SUCCESS)
+
+
+def _exploit_for_export(target: Path) -> Path:
+    """Resolve an export TARGET (a dir or an exploit_*.json) to an exploit file."""
+    if target.is_file():
+        return target
+    if target.is_dir():
+        matches = sorted(target.glob("exploit_*.json"))
+        if matches:
+            return matches[0]
+        typer.echo(
+            f"no exploit_*.json found in {target}. Run `mylonite scan`/`generate` first.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    typer.echo(
+        f"path not found: {target}. Pass a scan/generated dir or an exploit_*.json.", err=True
+    )
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
+@app.command(name="export")
+def export_cmd(
+    target: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "A validated/generated dir, a scan dir, or an exploit_*.json. "
+                "The validated finding to export."
+            ),
+        ),
+    ],
+    fmt: Annotated[
+        str,
+        typer.Option("--format", help="Export format. Currently 'eval-yaml' (the default)."),
+    ] = "eval-yaml",
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Write to this file instead of stdout."),
+    ] = None,
+) -> None:
+    """Export a validated finding into a portable eval format (offline, no LLM).
+
+    Mylonite is the validation layer; this hands a differential-oracle-validated
+    finding to the eval/CI harness a team already runs. ``--format eval-yaml``
+    emits a portable eval test case (the attack as input + a rubric assert that
+    the agent must resist it) carrying the compliance tags and a provenance
+    marker, so the team gets a Mylonite-validated regression in their suite.
+    """
+    from mylonite import testkit
+    from mylonite.export import SUPPORTED_FORMATS, to_eval_config
+
+    if fmt not in SUPPORTED_FORMATS:
+        typer.echo(
+            f"unknown --format {fmt!r}. Supported: {', '.join(SUPPORTED_FORMATS)}.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    exploit_path = _exploit_for_export(target)
+    try:
+        exploit = testkit.load_exploit(exploit_path)
+    except (FileNotFoundError, ValueError) as exc:
+        typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    rendered = to_eval_config(exploit)
+    if out is not None:
+        out.write_text(rendered, encoding="utf-8")
+        typer.echo(f"Wrote {fmt} export: {out}")
+        typer.echo("Next: wire your agent under `providers`, then run it in your eval/CI harness.")
+    else:
+        typer.echo(rendered)
+    raise typer.Exit(code=EXIT_SUCCESS)
 
 
 def _suggest_weakness_classes(tools: list[Any]) -> list[str]:

@@ -75,7 +75,7 @@ from mylonite.contracts import (
     ValidationReport,
     ValidatorBase,
 )
-from mylonite.contracts._types import Payload
+from mylonite.contracts._types import Payload, ReproducibilityEvidence, SeedKill
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.demo._replay import LiteLLMRecorder
@@ -202,6 +202,9 @@ class _MutationResult:
     matrix: str
     killed: int
     total: int
+    # Structured per-seed rows (pattern_id, weakness, killed) so the report can
+    # surface the matrix as data, not just the ``matrix`` display string.
+    seeds: tuple[tuple[str, str, bool], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -377,6 +380,17 @@ class DifferentialValidator(ValidatorBase):
             kept=kept,
             notes=notes,
             mutation_score=mutation.score,
+            gating_formula="kept = build AND differential AND flakiness",
+            gating_legs=["build", "differential", "flakiness"],
+            reproducibility=ReproducibilityEvidence(
+                iterations=self._iterations,
+                vuln_fired=vuln_fires,
+                guard_resisted=guard_resists,
+            ),
+            mutation_matrix=[
+                SeedKill(pattern_id=pid, weakness=weakness, killed=killed)
+                for pid, weakness, killed in mutation.seeds
+            ],
         )
 
     # -- custom target: re-drive the REAL app (no in-repo guarded twin) --------
@@ -465,6 +479,14 @@ class DifferentialValidator(ValidatorBase):
             kept=kept,
             notes=notes,
             mutation_score=0.0,
+            gating_formula="kept = build AND stability AND effect AND consensus",
+            gating_legs=["build", "stability", "effect", "consensus"],
+            reproducibility=ReproducibilityEvidence(
+                iterations=n,
+                vuln_fired=fired,
+                guard_resisted=None,
+            ),
+            mutation_matrix=[],
         )
 
     def _run_custom_iteration(self, target: TargetAdapter, pattern_id: str) -> _CustomRun:
@@ -631,7 +653,9 @@ class DifferentialValidator(ValidatorBase):
         report notes.
         """
         if not _KITCHEN_SINK_SEEDS:
-            return _MutationResult(score=0.0, matrix="(no kitchen-sink seeds)", killed=0, total=0)
+            return _MutationResult(
+                score=0.0, matrix="(no kitchen-sink seeds)", killed=0, total=0, seeds=()
+            )
 
         vuln_fired: set[str] = set()
         guard_resisted: set[str] = set()
@@ -661,7 +685,13 @@ class DifferentialValidator(ValidatorBase):
             f"{weakness}:{pattern_id}{'✓' if killed else '✗'}"
             for pattern_id, weakness, killed in killed_flags
         )
-        return _MutationResult(score=score, matrix=matrix, killed=killed_count, total=total)
+        return _MutationResult(
+            score=score,
+            matrix=matrix,
+            killed=killed_count,
+            total=total,
+            seeds=tuple(killed_flags),
+        )
 
     # -- metamorphic ----------------------------------------------------------
 

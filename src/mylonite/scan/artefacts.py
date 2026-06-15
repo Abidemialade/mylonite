@@ -25,14 +25,22 @@ from rich.table import Table
 
 from mylonite.scan.engine import ScanResult
 
+# Outcomes that mean "an attack was NOT exercised" — distinct from a benign
+# skip (the seed didn't apply) and CRUCIALLY distinct from a proven `no_finding`.
+# A scan with these but zero findings is NOT a clean result: those seeds tested
+# nothing. They get a loud mark and a summary warning so the gap is never silent.
+NOT_TESTED_OUTCOMES: Final[frozenset[str]] = frozenset(
+    {"skipped_no_seed_arm", "skipped_payload_not_delivered"}
+)
+
 OUTCOME_MARKS: Final[dict[str, str]] = {
     "finding": "✗ FOUND",
     "no_finding": "✓ clean",
     "skipped_invalid_metadata": "⚠ skipped",
     "skipped_unknown_seed": "⚠ skipped",
     "skipped_planner_failure": "⚠ skipped",
-    "skipped_no_seed_arm": "⚠ skipped",
-    "skipped_payload_not_delivered": "⚠ skipped",
+    "skipped_no_seed_arm": "⚠ NOT TESTED",
+    "skipped_payload_not_delivered": "⚠ NOT TESTED",
     "skipped_dry_run": "· dry-run",
     "error": "✗ error",
 }
@@ -45,8 +53,8 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "skipped_invalid_metadata": "skip",
     "skipped_unknown_seed": "skip",
     "skipped_planner_failure": "skip",
-    "skipped_no_seed_arm": "skip",
-    "skipped_payload_not_delivered": "skip",
+    "skipped_no_seed_arm": "NOT-TESTED",
+    "skipped_payload_not_delivered": "NOT-TESTED",
     "skipped_dry_run": "dry-run",
     "error": "error",
 }
@@ -169,6 +177,18 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         console.print(
             f"[yellow]flakiness: {nrun_disagreements} payload(s) disagreed across runs "
             "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]"
+        )
+    # Correctness safeguard (PR3): an attempt that was NOT TESTED (poison never
+    # delivered / no seed_arm to plant) proved nothing — it must not let a
+    # findings_count==0 scan read as "clean". Surface the gap loudly so a misfire
+    # can never be mistaken for safety.
+    not_tested = sum(1 for a in report.attempts if a.outcome in NOT_TESTED_OUTCOMES)
+    if not_tested:
+        console.print(
+            f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
+            "(planted payload undelivered or no seed_arm) - those seeds proved "
+            "NOTHING. This is not a clean result for them; declare a seed_arm so "
+            "the indirect-injection payload is planted, then re-scan.[/bold red]"
         )
     if report.aborted:
         console.print(f"[red]aborted: {report.aborted}[/red]")
