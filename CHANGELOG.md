@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — Pre-Phase-4 readiness: flow + verification legibility
 
+- **Measured precision/recall corpus.** A new `mylonite.corpus` module +
+  `scripts/measure_precision_recall.py` drive the bundled kitchen-sink twins
+  across the W1-W4 seeded weaknesses with no LLM and no network, then compute a
+  confusion matrix (TP/FP/FN/TN) and report precision / recall / false-positive
+  rate / F1 — turning "the oracle is reliable" into a measured number CI can
+  track. The seeded twins separate perfectly (precision = recall = 1.0, FPR = 0).
+  (Multi-judge consensus already applies to every custom-target validation; this
+  adds the offline measurement substrate.)
 - **`mylonite report` command** — an offline trust panel. Point it at a scan
   dir, a validated dir, or a `scan_report.json` /
   `validation_report.json` and it renders a clean, screenshot-able "why you can
