@@ -5,6 +5,28 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## Phase 4 launch infrastructure (pre-launch readiness landed; these remain — human-gated)
+
+The pre-Phase-4 readiness work (flow, verification legibility, correctness
+safeguards, trust panel, precision/recall corpus, eval/CI export + declarative
+config) has landed. The remaining launch items need a maintainer because they
+depend on the local SSL/cert environment or on tagging a release:
+
+- **PyPI first publish.** The Trusted-Publishing release workflow already exists
+  ([`.github/workflows/release.yml`](./.github/workflows/release.yml): build →
+  TestPyPI → PyPI). Human step: push a version tag, then verify `pip install
+  mylonite` and `pip install mcp-kitchen-sink` from a clean env. Until then the
+  "60-second / pip install" promise is honestly clone-first.
+- **Demo GIF + reference-validation example.** See the two items below — both are
+  blocked on the live SSL/cert environment (Norton HTTPS inspection /
+  `SSL_CERT_FILE`) and are maintainer-run.
+- **Precision/recall corpus is wired into CI** ([`ci.yml`] runs
+  `scripts/measure_precision_recall.py` and uploads `corpus_report.json`); the
+  asserted numbers live in `tests/corpus`. ✅ done.
+- **Custom-target flow is regression-guarded** end-to-end
+  (`tests/test_cli.py::test_custom_target_flow_needs_target_file_at_most_once`:
+  scan → generate → export needs `--target-file` at most once). ✅ done.
+
 ## Phase 2 finishing touches (v0.4.0 shipped; these remain)
 
 - **Record the committed reference-validation example.** Run

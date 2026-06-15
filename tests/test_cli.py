@@ -1421,3 +1421,88 @@ def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert "dry-run" in result.stdout or "attempts" in result.stdout
     target_registry.clear_runtime_targets()
+
+
+# ---------------------------------------------------------------------------
+# PR7 — launch infra: an end-to-end guard that the custom-target path needs
+# --target-file at most ONCE (scan), then auto-resolves it downstream. This is
+# the regression test that keeps the headline custom-target flow honest.
+# ---------------------------------------------------------------------------
+
+
+def test_custom_target_flow_needs_target_file_at_most_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine, ScanResult
+
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=exploit.pattern_id,
+                pattern_id=exploit.pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="x",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[exploit])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    target_yaml = tmp_path / "target.yaml"
+    # W4 needs no seed_arm, so no PR3 pre-flight block.
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    scan_root = tmp_path / "scans"
+
+    # 1) scan — pass --target-file exactly ONCE.
+    r1 = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp",
+            "--output-dir",
+            str(scan_root),
+        ],
+    )
+    assert r1.exit_code == EXIT_SUCCESS, r1.output
+    scan_dir = next(p for p in scan_root.iterdir() if p.is_dir())
+    assert (scan_dir / "target.yaml").is_file()  # persisted for downstream
+
+    # 2) generate — NO --target-file; it auto-resolves from the scan dir.
+    gen = tmp_path / "gen"
+    r2 = runner.invoke(app, ["generate", str(scan_dir), "--out", str(gen)])
+    assert r2.exit_code == EXIT_SUCCESS, r2.output
+    assert list(gen.glob("test_security_*.py"))
+    assert (gen / "target.yaml").is_file()  # co-located, ready for validate
+    assert "Using target:" in r2.output
+
+    # 3) export the validated finding — also needs no flags beyond the dir.
+    r3 = runner.invoke(app, ["export", str(gen)])
+    assert r3.exit_code == EXIT_SUCCESS, r3.output
+    assert "validated_by" in r3.output
+
+    target_registry.clear_runtime_targets()
