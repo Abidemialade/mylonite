@@ -12,7 +12,31 @@ from mylonite.contracts import ValidationOutcome, ValidationReport, validator
 
 def test_validator_contract_version() -> None:
     # 0.3.0: ValidationOutcome.stage gained stability/effect/consensus legs.
-    assert validator.CONTRACT_VERSION == "0.3.0"
+    # 0.4.0: ValidationReport gained structured evidence fields (gating_formula,
+    # gating_legs, reproducibility, mutation_matrix).
+    assert validator.CONTRACT_VERSION == "0.4.0"
+
+
+def test_validation_report_structured_evidence_round_trips() -> None:
+    """The 0.4.0 evidence fields round-trip and default to empty/None."""
+    from mylonite.contracts import ReproducibilityEvidence, SeedKill
+
+    report = ValidationReport(
+        test_filename="test_x.py",
+        outcomes=[ValidationOutcome(stage="differential", passed=True, detail="d", metric=1.0)],
+        kept=True,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=5),
+        mutation_matrix=[SeedKill(pattern_id="p1", weakness="W2", killed=True)],
+    )
+    assert ValidationReport.model_validate_json(report.model_dump_json()) == report
+    # Back-compatible default: omitting the new fields is still valid.
+    bare = ValidationReport(test_filename="t.py", outcomes=[], kept=False)
+    assert bare.gating_formula is None
+    assert bare.gating_legs == []
+    assert bare.reproducibility is None
+    assert bare.mutation_matrix == []
 
 
 def test_validation_outcome_metric_round_trips() -> None:

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Pre-Phase-4 readiness: flow + verification legibility
+
+- **Frictionless custom-target flow.** `scan` now persists the resolved target
+  YAML into the scan dir as `target.yaml`; `generate` and `validate`
+  auto-resolve it from the scan/generated dir, so a custom-target journey needs
+  `--target-file` at most once (at `scan`). `scan` and `validate` print a
+  `Next:` hint pointing at the following command. `scan --help` documents its
+  exit codes.
+- **Differential-oracle evidence is now legible.** `mylonite validate` renders
+  the gating formula with live per-leg marks (`kept = build [ok] AND
+  differential [ok] AND flakiness [x]`), the vulnerable-fires / guarded-resists
+  reproducibility counts, the per-seed mutation kill matrix, and a one-line
+  metric legend — previously all buried in `report.notes` and rendered nowhere.
+  The gating PR body (`mylonite gate`) mirrors the same evidence.
+
+### Changed
+
+- **Validator contract `0.3.0 → 0.4.0` (additive).** `ValidationReport` gained
+  optional structured-evidence fields — `gating_formula`, `gating_legs`,
+  `reproducibility` (a `ReproducibilityEvidence`), and `mutation_matrix` (a list
+  of `SeedKill`) — lifted out of the free-text `notes` so surfaces can render
+  the oracle's discrimination. All fields are optional/defaulted; existing
+  reports remain valid. `SeedKill` and `ReproducibilityEvidence` are exported
+  from `mylonite.contracts`.
+
 ### Added — Phase 3: CI gating + the magic moment
 
 - **`mylonite gate` command** — the end-to-end magic moment: `scan →

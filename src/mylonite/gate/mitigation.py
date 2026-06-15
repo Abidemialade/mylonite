@@ -47,8 +47,39 @@ def _evidence_lines(report: ValidationReport) -> str:
     rows = [
         f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {o.detail}" for o in report.outcomes
     ]
+    # The differential-oracle evidence (PR2): the gate with live per-leg marks,
+    # the fires/resists counts, and the per-seed kill matrix — so the PR shows
+    # WHY this test is trustworthy, not just that it was kept.
+    legs_by_stage = {o.stage: o for o in report.outcomes}
+    if report.gating_legs:
+        rendered = " AND ".join(
+            f"{leg} {'✓' if legs_by_stage[leg].passed else '✗'}"
+            for leg in report.gating_legs
+            if leg in legs_by_stage
+        )
+        verdict = "KEPT" if report.kept else "REJECTED"
+        rows.append(f"- **gate**: kept = {rendered} => **{verdict}**")
+    repro = report.reproducibility
+    if repro is not None:
+        if repro.guard_resisted is not None:
+            rows.append(
+                f"- **reproducibility**: vulnerable fired {repro.vuln_fired}/{repro.iterations}, "
+                f"guarded resisted {repro.guard_resisted}/{repro.iterations}"
+            )
+        else:
+            rows.append(
+                f"- **reproducibility**: reproduced {repro.vuln_fired}/{repro.iterations} "
+                "against the real target"
+            )
     if report.mutation_score is not None:
         rows.append(f"- **mutation score**: {report.mutation_score:.2f}")
+    if report.mutation_matrix:
+        killed = sum(1 for s in report.mutation_matrix if s.killed)
+        cells = ", ".join(
+            f"{s.weakness}:{s.pattern_id} {'✓' if s.killed else '✗'}"
+            for s in report.mutation_matrix
+        )
+        rows.append(f"- **kill matrix** ({killed}/{len(report.mutation_matrix)}): {cells}")
     rows.append(f"- **kept**: {report.kept}")
     return "\n".join(rows)
 

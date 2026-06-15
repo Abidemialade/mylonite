@@ -1256,14 +1256,32 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
 def _render_validation_report(report: Any) -> None:
     """Render a per-leg Rich report (F4): one row per ValidationOutcome.
 
-    Uses a FRESH Console (UTF-8 already forced by the root callback). Shows the
-    pass/✗ mark, the stage's metric, and its detail; then the mutation-score
-    headline and the overall kept verdict; plus a remediation line per failed
-    gating leg when the test was rejected.
+    This is the moat's SHOWCASE surface, so it is made ASCII-safe independently
+    of the root callback's UTF-8 forcing: a legacy cp1252 Windows console must
+    never crash on the pass/fail marks or the title dash (Issue #9). Shows the
+    per-leg result + metric + detail; the gating formula with live per-leg marks,
+    the fires/resists reproducibility counts, the per-seed kill matrix and the
+    mutation-score headline; the overall kept verdict; plus a remediation line
+    per failed gating leg when the test was rejected.
     """
+    # ASCII-aware marks/separators so the showcase surface never crashes on a
+    # legacy cp1252 console — independent of the root callback's UTF-8 forcing.
+    from mylonite.scan.artefacts import _stdout_is_ascii_only
+
+    ascii_safe = _stdout_is_ascii_only()
+
+    def _mark(ok: bool) -> str:
+        # NB: avoid '[...]' tokens — Rich would parse them as console markup.
+        if ascii_safe:
+            return "+" if ok else "x"
+        return "✓" if ok else "✗"
+
+    sep = " | " if ascii_safe else " · "
+    dash = "-" if ascii_safe else "—"
+
     console = Console()
     table = Table(
-        title=f"Mylonite validate — {report.test_filename}",
+        title=f"Mylonite validate {dash} {report.test_filename}",
         title_justify="left",
         show_lines=False,
     )
@@ -1273,26 +1291,80 @@ def _render_validation_report(report: Any) -> None:
     table.add_column("detail")
 
     for outcome in report.outcomes:
-        mark = "✓ pass" if outcome.passed else "✗ FAIL"
+        mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
         metric = f"{outcome.metric:.2f}" if outcome.metric is not None else "-"
         table.add_row(outcome.stage, mark, metric, outcome.detail)
 
     console.print(table)
 
+    # --- the differential-oracle EVIDENCE (PR2: make the moat legible) --------
+    # The gating formula with live per-leg marks, the fires/resists counts, and
+    # the per-seed kill matrix were previously buried in report.notes (rendered
+    # nowhere). Surface them so a "KEPT" verdict shows WHY it's trustworthy.
+    # Metric legend — what the bare decimals in the table's metric column mean.
+    console.print(
+        "metric legend: "
+        + sep.join(
+            ["differential=agreement", "flakiness=reproducibility", "metamorphic=robustness (0-1)"]
+        )
+    )
+
+    # The gate itself, with LIVE per-leg marks — this is what makes a verdict
+    # legible: kept = build [ok] AND differential [ok] AND flakiness [x].
+    legs_by_stage = {o.stage: o for o in report.outcomes}
+    if getattr(report, "gating_legs", None):
+        rendered = " AND ".join(
+            f"{leg} {_mark(legs_by_stage[leg].passed)}"
+            for leg in report.gating_legs
+            if leg in legs_by_stage
+        )
+        verdict = "KEPT" if report.kept else "REJECTED"
+        console.print(f"gate: kept = {rendered}  =>  {verdict}")
+
+    # Reproducibility counts (fires/resists) behind differential + flakiness.
+    repro = getattr(report, "reproducibility", None)
+    if repro is not None:
+        if repro.guard_resisted is not None:
+            console.print(
+                f"reproducibility: vulnerable fired {repro.vuln_fired}/{repro.iterations}, "
+                f"guarded resisted {repro.guard_resisted}/{repro.iterations}"
+            )
+        else:
+            console.print(
+                f"reproducibility: reproduced {repro.vuln_fired}/{repro.iterations} "
+                "against the real target (no in-repo guarded twin)"
+            )
+
     if report.mutation_score is not None:
         console.print(f"mutation score: {report.mutation_score:.2f}")
 
+    # Per-seed kill matrix — the oracle's discrimination, seed by seed.
+    matrix = getattr(report, "mutation_matrix", None) or []
+    if matrix:
+        killed = sum(1 for s in matrix if s.killed)
+        console.print(
+            f"kill matrix ({killed}/{len(matrix)} seeds killed = "
+            "fired-on-vulnerable, resisted-on-guarded):"
+        )
+        for seed in matrix:
+            console.print(f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
+
+    # Metamorphic is report-only — say so explicitly so a failing metamorphic row
+    # is never read as a gate failure.
+    if any(o.stage == "metamorphic" for o in report.outcomes):
+        console.print("note: metamorphic robustness is report-only - it does not gate kept.")
+
     if report.kept:
-        console.print("[green]verdict: KEPT — the test discriminates and is stable.[/green]")
+        console.print(f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
     else:
-        console.print("[red]verdict: REJECTED — the test was not kept.[/red]")
+        console.print(f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
         _remediation = {
-            "build": "build fail → emitted test didn't collect; re-run `mylonite generate`.",
-            "differential": "differential fail → no discriminating power between the twins.",
-            "flakiness": "flakiness fail → exploit too flaky to gate; try a more deterministic seed.",
-            "stability": "stability fail → the attack did not reproduce against the real target.",
-            "effect": "effect fail → the target's effect probe did not confirm the damage materialised.",
-            "consensus": "consensus fail → judges disagreed the effect was real; add an effect_probe.",
+            "build": "build fail: emitted test didn't collect; re-run `mylonite generate`.",
+            "differential": "differential fail: no discriminating power between the twins.",
+            "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
+            "stability": "stability fail: the attack did not reproduce against the real target.",
+            "effect": "effect fail: the target's effect probe did not confirm the damage materialised.",
+            "consensus": "consensus fail: judges disagreed the effect was real; add an effect_probe.",
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:

@@ -1142,3 +1142,55 @@ def test_validate_custom_auto_resolves_colocated_target_yaml(
     out = (result.stderr or "") + result.output
     assert "Using target:" in out
     assert "Next: commit" in result.output
+
+
+# ---------------------------------------------------------------------------
+# PR2 — verification legibility: the differential-oracle evidence renders in the
+# console report (gating formula with live marks, fires/resists, kill matrix).
+# ---------------------------------------------------------------------------
+
+
+def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFixture[str]) -> None:
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import (
+        ReproducibilityEvidence,
+        SeedKill,
+        ValidationOutcome,
+        ValidationReport,
+    )
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=False, detail="too flaky", metric=0.4),
+            ValidationOutcome(stage="metamorphic", passed=True, detail="robust", metric=1.0),
+        ],
+        kept=False,
+        mutation_score=0.75,
+        gating_formula="kept = build AND differential AND flakiness",
+        gating_legs=["build", "differential", "flakiness"],
+        reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=2),
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+            SeedKill(
+                pattern_id="excessive-agency-fetch-attacker-url-direct", weakness="W3", killed=False
+            ),
+        ],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    # Gating formula with live per-leg marks, ending in the REJECTED verdict.
+    assert "gate: kept = build" in out
+    assert "REJECTED" in out
+    # Reproducibility counts behind the legs.
+    assert "vulnerable fired 5/5" in out
+    assert "guarded resisted 2/5" in out
+    # Per-seed kill matrix + the metric legend + metamorphic non-gating note.
+    assert "kill matrix" in out
+    assert "W2:indirect-injection-note-body-direct" in out
+    assert "metric legend" in out
+    assert "report-only" in out  # metamorphic does-not-gate note

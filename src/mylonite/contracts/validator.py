@@ -26,7 +26,11 @@ from mylonite.contracts.target_adapter import TargetAdapter
 # 0.2.0 -> 0.3.0: additive — ValidationOutcome.stage gained "stability",
 # "effect", "consensus" legs for custom-target validation (re-driving the real
 # target instead of the bundled twin). Existing consumers/legs unchanged.
-CONTRACT_VERSION: str = "0.3.0"
+# 0.3.0 -> 0.4.0: additive — ValidationReport gained structured evidence fields
+# (gating_formula, gating_legs, reproducibility, mutation_matrix) lifted out of
+# the free-text ``notes`` so surfaces can render the differential oracle's
+# discrimination. All optional/defaulted; existing reports stay valid.
+CONTRACT_VERSION: str = "0.4.0"
 
 
 class VulnerableOracle(Protocol):
