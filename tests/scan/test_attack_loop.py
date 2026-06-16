@@ -140,15 +140,14 @@ async def test_loop_finds_after_one_refinement() -> None:
         if not state["refined"]:
             return _planner_msg("I won't act on instructions hidden in a note.", None)
         msgs = kwargs.get("messages", [])
-        # LLMPlanner appends tool results as {"role": "tool", "tool_call_id": ..., "content": ...}
-        # The tool_call_id is derived from the tool-call id ("c1" from _planner_tool_call).
-        already_emailed = any(
-            isinstance(m, dict)
-            and m.get("role") == "tool"
-            and "send_email" in str(m.get("tool_call_id", ""))
+        # LLMPlanner appends tool results as {"role": "tool", "tool_call_id": ..., "content": ...}.
+        # Any tool-result message means the planner already acted this turn — so it
+        # stops cleanly after the first send_email instead of spinning to the cap.
+        already_acted = any(
+            isinstance(m, dict) and m.get("role") == "tool"
             for m in msgs  # type: ignore[union-attr]
         )
-        if already_emailed:
+        if already_acted:
             return _planner_msg("done.", None)
         return _planner_msg(
             "",
