@@ -30,7 +30,7 @@ import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 import typer
 from rich.console import Console
@@ -246,6 +246,17 @@ def doctor(
         str | None,
         typer.Option("--model", help="Model id to ping (defaults to claude-sonnet-4-6)."),
     ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config. Fills provider/model when "
+                "you omit the flags, so `doctor` pings the SAME model your scan will "
+                "use; an explicit flag always wins."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Diagnose provider connectivity before a live scan.
 
@@ -257,6 +268,20 @@ def doctor(
     from mylonite._redaction import looks_like_api_key, redact
     from mylonite.scan.diagnostics import classify_provider_error
     from mylonite.scan.providers import env_vars_for, provider_from_model
+
+    # Mirror `scan`: fill provider/model from mylonite.yaml when the flags are
+    # omitted, so `doctor` checks the same model the scan will actually use
+    # rather than silently falling back to the default.
+    if run_config_path is not None:
+        from mylonite.config import load_run_config
+
+        try:
+            rc = load_run_config(run_config_path)
+        except Exception as exc:
+            typer.echo(f"invalid --config {run_config_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        provider = provider or rc.provider
+        model = model or rc.model
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
@@ -604,6 +629,32 @@ def scan(
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
     ] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner). "
+                "Defaults to --model. An aligned planner refuses injection even on a "
+                "vulnerable target; point this at a representatively exploitable model "
+                "to keep the attack class testable."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help="Override the model that crafts/refines attack payloads. Defaults to --model.",
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help="Override the model for the LLM-judge verdict. Defaults to --model.",
+        ),
+    ] = None,
     max_llm_calls: Annotated[
         int,
         typer.Option("--max-llm-calls", help="Process-wide LLM call cap for this scan."),
@@ -682,6 +733,18 @@ def scan(
     _validate_model_string(base_model)
     effective_model = _route_model(provider, base_model)
 
+    # Role-separated models: each defaults to the base model. Validate + route
+    # any explicit override exactly like --model.
+    def _resolve_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _route_model(provider, override)
+
+    effective_planner_model = _resolve_role_model(planner_model)
+    effective_customiser_model = _resolve_role_model(customiser_model)
+    effective_judge_model = _resolve_role_model(judge_model)
+
     from mylonite.plugins.registry import discover
     from mylonite.scan.customiser import PayloadCustomiser
     from mylonite.scan.engine import ScanConfig, ScanEngine
@@ -738,7 +801,7 @@ def scan(
             if target_file is not None
             else dump_target_file(tf)
         )
-        adapter = _build_adapter_for_custom(tf, authorize, effective_model)
+        adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
         typer.echo(
@@ -747,7 +810,7 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
-        adapter = _build_adapter_for_reference(target, effective_model)
+        adapter = _build_adapter_for_reference(target, effective_planner_model)
         report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
@@ -757,7 +820,7 @@ def scan(
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+        adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         report_target_id = target
     else:
         typer.echo(
@@ -786,13 +849,16 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
-    customiser = PayloadCustomiser(model=effective_model)
-    judge = SuccessJudge(model=effective_model)
+    customiser = PayloadCustomiser(model=effective_customiser_model)
+    judge = SuccessJudge(model=effective_judge_model)
 
     config = ScanConfig(
         target_id=report_target_id,
         provider=effective_provider,
         model=effective_model,
+        planner_model=effective_planner_model if planner_model else None,
+        customiser_model=effective_customiser_model if customiser_model else None,
+        judge_model=effective_judge_model if judge_model else None,
         max_llm_calls=max_llm_calls,
         max_concurrent=max_concurrent,
         output_dir=output_dir,
@@ -1017,25 +1083,26 @@ def _find_latest_scan_dir(scans_root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _exploit_in_dir(scan_dir: Path) -> Path | None:
-    """First (sorted) ``exploit_*.json`` inside ``scan_dir``, or ``None``."""
-    matches = sorted(scan_dir.glob("exploit_*.json"))
-    return matches[0] if matches else None
+def _exploits_in_dir(scan_dir: Path) -> list[Path]:
+    """All (sorted) ``exploit_*.json`` inside ``scan_dir``."""
+    return sorted(scan_dir.glob("exploit_*.json"))
 
 
-def _resolve_exploit_path(scan_path: Path | None, latest: bool, scans_root: Path) -> Path:
-    """Resolve the exploit JSON to generate from (F1 — no path archaeology).
+def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Path) -> list[Path]:
+    """Resolve ALL exploit JSONs to generate from (F1 — no path archaeology).
 
     Precedence: an explicit ``scan_path`` (an ``exploit_*.json`` file *or* a scan
-    dir containing one), else ``--latest`` (newest scan dir under ``scans_root``).
-    Exits 2 with actionable guidance when nothing resolves.
+    dir), else ``--latest`` (newest scan dir under ``scans_root``). A scan dir
+    yields *every* ``exploit_*.json`` it contains — so a multi-finding scan emits
+    one test per finding instead of silently dropping all but the
+    alphabetically-first. Exits 2 with actionable guidance when nothing resolves.
     """
     if scan_path is not None:
         if scan_path.is_file():
-            return scan_path
+            return [scan_path]
         if scan_path.is_dir():
-            found = _exploit_in_dir(scan_path)
-            if found is not None:
+            found = _exploits_in_dir(scan_path)
+            if found:
                 return found
             typer.echo(
                 f"no exploit_*.json found in {scan_path}. "
@@ -1058,8 +1125,8 @@ def _resolve_exploit_path(scan_path: Path | None, latest: bool, scans_root: Path
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        found = _exploit_in_dir(scan_dir)
-        if found is None:
+        found = _exploits_in_dir(scan_dir)
+        if not found:
             typer.echo(
                 f"the latest scan ({scan_dir}) found no exploits — nothing to generate. "
                 "Run `mylonite scan <target>` against a vulnerable target first.",
@@ -1075,6 +1142,97 @@ def _resolve_exploit_path(scan_path: Path | None, latest: bool, scans_root: Path
         err=True,
     )
     raise typer.Exit(code=EXIT_CONFIG)
+
+
+def _emit_generated_test(
+    exploit: Any,
+    exploit_path: Path,
+    out_dir: Path,
+    target_file: Path | None,
+    *,
+    json_mod: Any,
+) -> None:
+    """Emit one regression test (+ co-located exploit/fixtures/target) for one
+    exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
+
+    Factored out of :func:`generate` so a multi-finding scan dir can emit one
+    test per finding into per-pattern subdirs. The single-exploit output is
+    unchanged.
+    """
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        ReferencePytestGenerator,
+    )
+
+    generated = ReferencePytestGenerator().emit(exploit)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    test_path = out_dir / generated.filename
+    test_path.write_text(generated.source, encoding="utf-8")
+
+    # Co-locate the exploit under the exact name the emitted test loads
+    # (`load_exploit(here / "exploit_<pattern_id>.json")`).
+    colocated_exploit = out_dir / f"exploit_{exploit.pattern_id}.json"
+    colocated_exploit.write_text(
+        json_mod.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    fixtures_dir = out_dir / "fixtures"
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+
+    typer.echo(f"Wrote test:    {test_path}")
+    typer.echo(f"Wrote exploit: {colocated_exploit}")
+    typer.echo(f"Fixtures dir:  {fixtures_dir}")
+
+    # A custom-target test re-drives the REAL app, so it needs the target YAML
+    # co-located as target.yaml. Co-locate it when given; otherwise warn loudly
+    # (the test would fail at runtime without it). Reference tests replay the
+    # bundled twin and need no target file.
+    is_custom = not exploit.target_id.startswith("reference:")
+    # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
+    # the operator needn't re-pass --target-file at every step. An explicit
+    # --target-file always wins.
+    if target_file is None and is_custom:
+        candidate = exploit_path.parent / "target.yaml"
+        if candidate.is_file():
+            target_file = candidate
+            typer.echo(f"Using target:  {candidate} (from the scan dir)")
+    if target_file is not None:
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            build_target_spec(load_target_file(target_file))  # validate before copying
+        except Exception as exc:
+            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        colocated_target = out_dir / "target.yaml"
+        # Copy the text verbatim so the operator's comments/structure survive.
+        colocated_target.write_text(target_file.read_text(encoding="utf-8"), encoding="utf-8")
+        typer.echo(f"Wrote target:  {colocated_target}")
+    elif is_custom:
+        typer.echo("")
+        typer.echo(
+            f"warning: {exploit.target_id} is a custom target - the emitted test re-drives "
+            "your real app and needs a co-located target.yaml. Re-run with "
+            "`--target-file <your-target>.yaml`, or copy your scan's target YAML into "
+            f"{out_dir} as target.yaml. Without it the test errors at runtime.",
+            err=True,
+        )
+
+    typer.echo("")
+    if is_custom:
+        # The custom test is LIVE (gated behind MYLONITE_LIVE_TARGET=1): it needs
+        # pytest, a provider key, a runnable MCP server, and the co-located YAML.
+        typer.echo("Next - this is a LIVE custom-target test. To run it you need:")
+        typer.echo("  - pytest + mylonite installed in the consuming environment")
+        typer.echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
+        typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
+        typer.echo("Then:")
+        typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
+        # validate auto-resolves the co-located target.yaml — no --target-file needed.
+        typer.echo(f"  mylonite validate {out_dir}")
+    else:
+        typer.echo(f"Next: mylonite validate {out_dir}")
 
 
 @app.command()
@@ -1122,96 +1280,33 @@ def generate(
     import json
 
     from mylonite import testkit
-    from mylonite.plugins._reference.reference_pytest_generator import (
-        ReferencePytestGenerator,
-    )
 
     scans_root = Path(".mylonite/scans")
-    exploit_path = _resolve_exploit_path(scan_path, latest, scans_root)
+    exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
+    multi = len(exploit_paths) > 1
 
-    try:
-        exploit = testkit.load_exploit(exploit_path)
-    except (FileNotFoundError, ValueError) as exc:
-        typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-    generated = ReferencePytestGenerator().emit(exploit)
-
-    out_dir = (
-        out
-        if out is not None
-        else Path(".mylonite/generated") / _slugify_pattern(exploit.pattern_id)
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    test_path = out_dir / generated.filename
-    test_path.write_text(generated.source, encoding="utf-8")
-
-    # Co-locate the exploit under the exact name the emitted test loads
-    # (`load_exploit(here / "exploit_<pattern_id>.json")`).
-    colocated_exploit = out_dir / f"exploit_{exploit.pattern_id}.json"
-    colocated_exploit.write_text(
-        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-    fixtures_dir = out_dir / "fixtures"
-    fixtures_dir.mkdir(parents=True, exist_ok=True)
-
-    typer.echo(f"Wrote test:    {test_path}")
-    typer.echo(f"Wrote exploit: {colocated_exploit}")
-    typer.echo(f"Fixtures dir:  {fixtures_dir}")
-
-    # A custom-target test re-drives the REAL app, so it needs the target YAML
-    # co-located as target.yaml. Co-locate it when given; otherwise warn loudly
-    # (the test would fail at runtime without it). Reference tests replay the
-    # bundled twin and need no target file.
-    is_custom = not exploit.target_id.startswith("reference:")
-    # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
-    # the operator needn't re-pass --target-file at every step. An explicit
-    # --target-file always wins.
-    if target_file is None and is_custom:
-        candidate = exploit_path.parent / "target.yaml"
-        if candidate.is_file():
-            target_file = candidate
-            typer.echo(f"Using target:  {candidate} (from the scan dir)")
-    colocated_target: Path | None = None
-    if target_file is not None:
-        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
-
-        try:
-            build_target_spec(load_target_file(target_file))  # validate before copying
-        except Exception as exc:
-            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        colocated_target = out_dir / "target.yaml"
-        # Copy the text verbatim so the operator's comments/structure survive.
-        colocated_target.write_text(target_file.read_text(encoding="utf-8"), encoding="utf-8")
-        typer.echo(f"Wrote target:  {colocated_target}")
-    elif is_custom:
+    if multi:
+        typer.echo(f"Found {len(exploit_paths)} findings - emitting one test each.")
         typer.echo("")
-        typer.echo(
-            f"warning: {exploit.target_id} is a custom target - the emitted test re-drives "
-            "your real app and needs a co-located target.yaml. Re-run with "
-            "`--target-file <your-target>.yaml`, or copy your scan's target YAML into "
-            f"{out_dir} as target.yaml. Without it the test errors at runtime.",
-            err=True,
-        )
 
-    typer.echo("")
-    if is_custom:
-        # The custom test is LIVE (gated behind MYLONITE_LIVE_TARGET=1): it needs
-        # pytest, a provider key, a runnable MCP server, and the co-located YAML.
-        typer.echo("Next - this is a LIVE custom-target test. To run it you need:")
-        typer.echo("  - pytest + mylonite installed in the consuming environment")
-        typer.echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
-        typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
-        typer.echo("Then:")
-        typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
-        # validate auto-resolves the co-located target.yaml — no --target-file needed.
-        typer.echo(f"  mylonite validate {out_dir}")
-    else:
-        typer.echo(f"Next: mylonite validate {out_dir}")
+    for index, exploit_path in enumerate(exploit_paths):
+        try:
+            exploit = testkit.load_exploit(exploit_path)
+        except (FileNotFoundError, ValueError) as exc:
+            typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        # With multiple findings, give each its own subdir so tests don't clobber
+        # each other; a single finding keeps the exact dir the operator chose.
+        if out is not None:
+            this_out = out / _slugify_pattern(exploit.pattern_id) if multi else out
+        else:
+            this_out = Path(".mylonite/generated") / _slugify_pattern(exploit.pattern_id)
+
+        if multi and index > 0:
+            typer.echo("")
+        _emit_generated_test(exploit, exploit_path, this_out, target_file, json_mod=json)
+
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
@@ -1700,7 +1795,10 @@ def report(
         Path | None,
         typer.Option(
             "--html",
-            help="Also write a standalone, shareable HTML trust panel to this path.",
+            help=(
+                "Also write a standalone, shareable HTML trust panel. Takes a file "
+                "PATH argument, e.g. --html trust.html (not a bare flag)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -1895,6 +1993,126 @@ def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
     return sorted(suggestions)
 
 
+class _ToolRoles(NamedTuple):
+    """Best-guess role assignment over a target's discovered tools.
+
+    Drives the auto-populated ``seed_arm`` / ``effect_probe`` in the init-target
+    scaffold so the operator starts from concrete candidates rather than blank
+    templates — the single biggest custom-target onboarding friction. Every field
+    is a HINT to confirm, never authoritative.
+    """
+
+    seed_arm_tool: str | None  # a tool that stores untrusted content (good seed_arm)
+    seed_arm_param: str | None  # the string param of seed_arm_tool to hold {payload}
+    retrieve_tool: str | None  # surfaces stored content WITHOUT needing an id (the recall path)
+    verify_tool: str | None  # reports a side effect (good effect_probe verify_tool)
+    sink_tools: list[str]  # consequential-action tools (W4 candidates)
+
+
+def _words(spec: str) -> tuple[str, ...]:
+    """Whitespace-split a spec string into a tuple of hint fragments."""
+    return tuple(spec.split())
+
+
+# Name fragments (not load-bearing for any verdict — only for scaffold hints).
+_STORE_NAME_HINTS = _words(
+    "save store remember add create write post append note record insert put memor log"
+)
+_RETRIEVE_NAME_HINTS = _words(
+    "recall list search history feed inbox recent browse read get find load query"
+)
+_OBSERVE_NAME_HINTS = _words("sent outbox history status log audit recent list feed report get")
+_SINK_NAME_HINTS = _words(
+    "send email post publish pay transfer purchase execute "
+    "delete remove dispatch share forward submit"
+)
+_CONTENT_PARAM_HINTS = _words(
+    "body content text message note memo comment data value payload description"
+)
+_ID_PARAM_HINTS = _words("id key uuid handle ref index")
+
+
+def _schema_props(tool: Any) -> dict[str, Any]:
+    schema = getattr(tool, "json_schema", {}) or {}
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    return props if isinstance(props, dict) else {}
+
+
+def _schema_required(tool: Any) -> list[str]:
+    schema = getattr(tool, "json_schema", {}) or {}
+    req = schema.get("required", []) if isinstance(schema, dict) else []
+    return [str(r) for r in req] if isinstance(req, list) else []
+
+
+def _is_string_param(spec: Any) -> bool:
+    return isinstance(spec, dict) and spec.get("type") == "string"
+
+
+def _content_param(tool: Any) -> str | None:
+    """The string param of ``tool`` most likely to hold untrusted content."""
+    props = _schema_props(tool)
+    string_params = [name for name, spec in props.items() if _is_string_param(spec)]
+    # Prefer an explicitly content-shaped name, else the first non-id string param.
+    for name in string_params:
+        if any(h in name.lower() for h in _CONTENT_PARAM_HINTS):
+            return name
+    for name in string_params:
+        if not any(h in name.lower() for h in _ID_PARAM_HINTS):
+            return name
+    return string_params[0] if string_params else None
+
+
+def _requires_id(tool: Any) -> bool:
+    """True if the tool REQUIRES an id-shaped param — so it can't surface content
+    without already knowing the handle (the ``save_note``/``read_note`` trap)."""
+    return any(any(h in r.lower() for h in _ID_PARAM_HINTS) for r in _schema_required(tool))
+
+
+def _classify_tools(tools: list[Any]) -> _ToolRoles:
+    """Bucket discovered tools into seed-arm / retrieve / verify / sink roles.
+
+    Pure and deterministic (schema + name heuristics, no LLM, no live calls).
+    The retrieve role deliberately requires a NO-id retrieval path: a store whose
+    only readback needs the new record's id can't be exercised by the planner
+    (which never learns the id), so we surface that gap instead of suggesting a
+    seed_arm that will silently never deliver.
+    """
+    seed_arm_tool: str | None = None
+    seed_arm_param: str | None = None
+    retrieve_tool: str | None = None
+    verify_tool: str | None = None
+    sink_tools: list[str] = []
+
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        low = name.lower()
+        param = _content_param(tool)
+        if seed_arm_tool is None and param is not None and any(h in low for h in _STORE_NAME_HINTS):
+            seed_arm_tool, seed_arm_param = name, param
+        if (
+            retrieve_tool is None
+            and any(h in low for h in _RETRIEVE_NAME_HINTS)
+            and not _requires_id(tool)
+        ):
+            retrieve_tool = name
+        if (
+            verify_tool is None
+            and any(h in low for h in _OBSERVE_NAME_HINTS)
+            and not _requires_id(tool)
+        ):
+            verify_tool = name
+        if any(h in low for h in _SINK_NAME_HINTS):
+            sink_tools.append(name)
+
+    return _ToolRoles(
+        seed_arm_tool=seed_arm_tool,
+        seed_arm_param=seed_arm_param,
+        retrieve_tool=retrieve_tool,
+        verify_tool=verify_tool,
+        sink_tools=sink_tools,
+    )
+
+
 def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
     """Env keys whose value looks like a SQLite DB referenced by a NON-absolute
     path — the #18 Windows footgun (a relative sqlite path silently opens a
@@ -2018,6 +2236,7 @@ def init_target(
     tools = list(descriptor.tools)
     tool_names = [t.name for t in tools]
     suggested_weaknesses = _suggest_weakness_classes(tools)
+    roles = _classify_tools(tools)
 
     # #18 footgun: warn (do not block) on a relative SQLite DB path.
     for key in _relative_sqlite_env_keys(tf.env):
@@ -2033,6 +2252,7 @@ def init_target(
         tool_names=tool_names,
         suggested_weaknesses=suggested_weaknesses,
         system_prompt_file=system_prompt_file,
+        roles=roles,
     )
 
     # Round-trip-validate the scaffold we are about to write so it never lands broken.
@@ -2051,6 +2271,26 @@ def init_target(
         f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning).",
         err=True,
     )
+    if roles.seed_arm_tool is not None:
+        typer.echo(
+            f"  seed_arm candidate: {roles.seed_arm_tool}(...{roles.seed_arm_param}='{{payload}}') "
+            f"+ retrieval via {roles.retrieve_tool!r}."
+            if roles.retrieve_tool is not None
+            else (
+                f"  seed_arm candidate: {roles.seed_arm_tool} — but NO id-free retrieval tool was "
+                "found to surface what it stores. The planner never learns a new record's id, so a "
+                "store whose only readback needs that id (the save_note/read_note trap) will never "
+                "deliver the poison. Confirm a list/recall/search-style tool exists, or expect those "
+                "seeds to report NOT TESTED."
+            ),
+            err=True,
+        )
+    elif "W2" in suggested_weaknesses:
+        typer.echo(
+            "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
+            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED.",
+            err=True,
+        )
     typer.echo(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
@@ -2065,9 +2305,18 @@ def _render_target_scaffold(
     tool_names: list[str],
     suggested_weaknesses: list[str],
     system_prompt_file: Path | None,
+    roles: _ToolRoles | None = None,
 ) -> str:
-    """Render a commented, ready-to-edit ``target.yaml`` starter."""
+    """Render a commented, ready-to-edit ``target.yaml`` starter.
+
+    When ``roles`` is supplied, the ``seed_arm`` and ``effect_probe`` blocks are
+    pre-filled with concrete candidates auto-detected from the tool schemas
+    (still commented — the operator confirms and uncomments), instead of blank
+    placeholders.
+    """
     import yaml
+
+    roles = roles or _ToolRoles(None, None, None, None, [])
 
     def _yaml_list(items: list[str]) -> str:
         return yaml.safe_dump(items, default_flow_style=True).strip()
@@ -2084,6 +2333,36 @@ def _render_target_scaffold(
         else '# system_prompt_file: prompt.txt   # or set system_prompt: "..." inline\n'
     )
     scope_line = f"scope: {tf.scope}\n" if tf.scope is not None else "# scope: my-scope\n"
+
+    # Pre-fill seed_arm/effect_probe from the detected roles (commented — confirm
+    # then uncomment). Concrete tool + param names beat blank placeholders.
+    sa_tool = roles.seed_arm_tool or "<tool that stores/accepts untrusted content>"
+    sa_param = roles.seed_arm_param or "body"
+    if roles.seed_arm_tool is not None and roles.retrieve_tool is not None:
+        sa_status = (
+            f"# CANDIDATE (auto-detected): {roles.seed_arm_tool} stores content; "
+            f"{roles.retrieve_tool} surfaces it without an id."
+        )
+    elif roles.seed_arm_tool is not None:
+        sa_status = (
+            f"# CANDIDATE (auto-detected): {roles.seed_arm_tool} — WARNING: no id-free retrieval "
+            "tool detected, so the planted poison may never be readable back (save_note trap)."
+        )
+    else:
+        sa_status = (
+            "# (no content-storing tool auto-detected — fill in the tool that ingests content)"
+        )
+    verify_tool = roles.verify_tool or "<tool that reports the side effect>"
+    ep_status = (
+        f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}."
+        if roles.verify_tool is not None
+        else "# (no side-effect-reporting tool auto-detected — point this at one)"
+    )
+    sink_hint = (
+        f"# Consequential-action tools detected (W4 candidates): {', '.join(roles.sink_tools)}.\n"
+        if roles.sink_tools
+        else ""
+    )
     return f"""\
 # Mylonite custom-target scaffold — generated by `mylonite init-target`.
 # Review and EDIT before scanning: the suggestions below are hints, not gospel.
@@ -2100,18 +2379,20 @@ primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
 #   W3 unrestricted egress / SSRF · W4 unconfirmed consequential action
 weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else "[]"}
 
-# How to plant untrusted content for indirect-injection (W2) seeds. Point this
-# at the tool that ingests external content; {{payload}} is replaced per attempt.
+# How to plant untrusted content for indirect-injection (W2) seeds. {{payload}}
+# is replaced per attempt and must sit at a BARE string leaf (not nested JSON).
+{sa_status}
 # seed_arm:
-#   tool: <tool that stores/accepts untrusted content>
-#   args_template: {{ body: "{{payload}}" }}   # {{payload}} at a bare string leaf
+#   tool: {sa_tool}
+#   args_template: {{ {sa_param}: "{{payload}}" }}
 #   id_key: id                                 # JSON field holding the new handle
 #                                              # (or id_pattern: a regex; or id_from)
 
 # How to CONFIRM the damage materialised end-to-end (the effect probe). After the
 # attack, re-query the target and check the damaging side effect is present.
-# effect_probe:
-#   verify_tool: <tool that reports the side effect>
+{ep_status}
+{sink_hint}# effect_probe:
+#   verify_tool: {verify_tool}
 #   verify_args_template: {{}}
 #   expect_marker: "<a string proving the effect, e.g. the attacker recipient>"
 #   deferred_markers: ["queued for approval", "pending review"]  # mark a DEFENDED result
@@ -2387,7 +2668,10 @@ def init() -> None:
 def taxonomy_list(
     framework: Annotated[
         _Framework,
-        typer.Option("--framework", help="Which framework to list."),
+        typer.Option(
+            "--framework",
+            help="Which framework to list (required): owasp-llm | owasp-asi | atlas | nist.",
+        ),
     ],
 ) -> None:
     """List entries from a bundled threat-taxonomy framework."""

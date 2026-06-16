@@ -190,6 +190,99 @@ def test_init_target_scaffolds_valid_yaml(tmp_path: Path, monkeypatch: pytest.Mo
     assert {"W2", "W3", "W4"}.issubset(set(tf.weakness_classes))
 
 
+def test_classify_tools_happy_path() -> None:
+    """A remember/recall/send_email/list_sent surface yields a usable seed_arm,
+    an id-free retrieval path, an effect verify tool, and the W4 sink."""
+    from mylonite.cli import _classify_tools
+    from mylonite.contracts import ToolSpec
+
+    tools = [
+        ToolSpec(
+            name="remember",
+            description="store a memory",
+            json_schema={"properties": {"content": {"type": "string"}}},
+        ),
+        ToolSpec(name="recall", description="recall memories", json_schema={"properties": {}}),
+        ToolSpec(
+            name="send_email",
+            description="send an email",
+            json_schema={"properties": {"to": {"type": "string"}}},
+        ),
+        ToolSpec(name="list_sent", description="list sent mail", json_schema={"properties": {}}),
+    ]
+    roles = _classify_tools(tools)
+    assert roles.seed_arm_tool == "remember"
+    assert roles.seed_arm_param == "content"
+    assert roles.retrieve_tool == "recall"
+    assert roles.verify_tool == "list_sent"
+    assert "send_email" in roles.sink_tools
+
+
+def test_classify_tools_detects_save_note_trap() -> None:
+    """A write-only store whose only readback needs the new record's id has NO
+    id-free retrieval path — the save_note/read_note trap — so retrieve_tool is None."""
+    from mylonite.cli import _classify_tools
+    from mylonite.contracts import ToolSpec
+
+    tools = [
+        ToolSpec(
+            name="save_note",
+            description="save a note",
+            json_schema={"properties": {"body": {"type": "string"}}},
+        ),
+        ToolSpec(
+            name="read_note",
+            description="read a note by id",
+            json_schema={
+                "properties": {"note_id": {"type": "string"}},
+                "required": ["note_id"],
+            },
+        ),
+    ]
+    roles = _classify_tools(tools)
+    assert roles.seed_arm_tool == "save_note"
+    assert roles.retrieve_tool is None  # the trap: no id-free readback
+
+
+def test_init_target_scaffold_prefills_seed_arm_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scaffold pre-fills a concrete seed_arm candidate from the tool schemas."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+    from mylonite.plugins._mcp import stdio_adapter
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="custom",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="remember",
+                    description="store a memory",
+                    json_schema={"properties": {"content": {"type": "string"}}},
+                ),
+                ToolSpec(name="recall", description="recall", json_schema={"properties": {}}),
+            ],
+        )
+
+    class _FakeAdapter:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def describe(self) -> Any:
+            return _desc()
+
+    monkeypatch.setattr(stdio_adapter, "MCPStdioAdapter", _FakeAdapter)
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(app, ["init-target", "--command", "python", "--output", str(out)])
+    assert result.exit_code == 0, result.output
+    text = out.read_text(encoding="utf-8")
+    assert "tool: remember" in text
+    assert 'content: "{payload}"' in text
+    assert "recall" in text  # the detected id-free retrieval path
+
+
 def test_init_target_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -437,6 +530,28 @@ def test_doctor_ok_when_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor", "--model", "claude-haiku-4-5"])
     assert result.exit_code == EXIT_SUCCESS
     assert "OK" in result.output
+
+
+def test_doctor_config_fills_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """doctor --config pings the SAME model declared in mylonite.yaml rather than
+    silently falling back to the default (regression for the 'set haiku but doctor
+    used sonnet' friction)."""
+    import litellm
+
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text("provider: anthropic\nmodel: claude-haiku-4-5\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+
+    def _capture(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(litellm, "completion", _capture)
+    result = runner.invoke(app, ["doctor", "--config", str(cfg)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "claude-haiku-4-5" in captured["model"]
+    assert "claude-haiku-4-5" in result.output
 
 
 def test_truststore_enabled_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -726,6 +841,41 @@ def test_generate_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert list(out_dir.glob("test_security_*.py"))
     assert list(out_dir.glob("exploit_*.json"))
+
+
+def test_generate_scan_dir_emits_one_test_per_finding(tmp_path: Path) -> None:
+    """A scan dir with multiple exploit_*.json emits one test per finding into
+    per-pattern subdirs (regression: previously only the first was generated)."""
+    import json
+
+    from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    pids = ("fetch-attacker-url-direct", "indirect-injection-note-body-direct")
+    for pid in pids:
+        exploit = ExploitRecord(
+            target_id="reference:vulnerable",
+            pattern_id=pid,
+            payload=Payload(
+                pattern_id=pid, channel="tool-result", body="x", metadata={"weakness": "W2"}
+            ),
+            response=AdapterResponse(payload_pattern_id=pid, raw_response="ok"),
+            success_reason="r",
+            compliance=ComplianceTags(owasp_llm=["LLM01"]),
+        )
+        (scan_dir / f"exploit_{pid}.json").write_text(
+            json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    out_dir = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(scan_dir), "--out", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "Found 2 findings" in result.output
+    # One per-pattern subdir per finding, each with its own test file.
+    test_files = sorted(out_dir.glob("*/test_security_*.py"))
+    assert len(test_files) == 2, [str(p) for p in test_files]
 
 
 def test_generate_no_input_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -183,6 +183,10 @@ class _IterationTally:
     guard_resisted: bool
     vuln_result: ScanResult
     guard_result: ScanResult
+    # Whether the GUARDED twin also fired (leaked). Distinct from
+    # ``not guard_resisted``: a guarded run can skip/error (neither resist nor
+    # fire). The statistical oracle needs the actual leak rate, not its inverse.
+    guard_fired: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,8 +238,14 @@ class DifferentialValidator(ValidatorBase):
         iterations: int = 5,
         vuln_threshold: int | None = None,
         guard_threshold: int | None = None,
+        min_rate_gap: float = 0.5,
+        min_vuln_rate: float = 0.4,
+        max_guard_leak: float = 0.0,
         provider: str = "anthropic",
         model: str = "claude-haiku-4-5-20251001",
+        planner_model: str | None = None,
+        customiser_model: str | None = None,
+        judge_model: str | None = None,
         completion_fn: Callable[..., Any] | None = None,
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
@@ -264,8 +274,22 @@ class DifferentialValidator(ValidatorBase):
         # guard.
         self._vuln_threshold = vuln_threshold if vuln_threshold is not None else iterations - 1
         self._guard_threshold = guard_threshold if guard_threshold is not None else iterations
+        # Statistical differential thresholds (reference path). The oracle keeps a
+        # test only when the attack SUCCESS RATE differs significantly between the
+        # twins: vulnerable-rate minus guarded-leak-rate >= min_rate_gap, with the
+        # vulnerable firing at least min_vuln_rate and the guard leaking at most
+        # max_guard_leak. This replaces the brittle "vulnerable fires ≥ N-1/N"
+        # count gate, which rejected genuinely-present-but-probabilistic LLM-
+        # mediated exploits (e.g. an injection that lands 3/5 runs).
+        self._min_rate_gap = min_rate_gap
+        self._min_vuln_rate = min_vuln_rate
+        self._max_guard_leak = max_guard_leak
         self._provider = provider
         self._model = model
+        # Role-separated models for the live differential (each defaults to model).
+        self._planner_model = planner_model or model
+        self._customiser_model = customiser_model or model
+        self._judge_model = judge_model or model
         self._completion_fn = completion_fn
         self._run_build = run_build
         self._record_fixtures_dir = record_fixtures_dir
@@ -318,23 +342,28 @@ class DifferentialValidator(ValidatorBase):
             tallies.append(self._run_iteration(pattern_id))
         vuln_fires = sum(1 for t in tallies if t.vuln_fired)
         guard_resists = sum(1 for t in tallies if t.guard_resisted)
+        guard_fires = sum(1 for t in tallies if t.guard_fired)
         decision = self._decide(
             vuln_fires=vuln_fires,
-            guard_resists=guard_resists,
+            guard_fires=guard_fires,
             iterations=self._iterations,
-            vuln_threshold=self._vuln_threshold,
-            guard_threshold=self._guard_threshold,
+            min_rate_gap=self._min_rate_gap,
+            min_vuln_rate=self._min_vuln_rate,
+            max_guard_leak=self._max_guard_leak,
         )
+        n = self._iterations
+        vuln_rate = vuln_fires / n if n else 0.0
+        guard_leak_rate = guard_fires / n if n else 0.0
+        rate_gap = vuln_rate - guard_leak_rate
 
         differential = ValidationOutcome(
             stage="differential",
             passed=decision.differential_passed,
             detail=(
-                f"vulnerable fired the exploit {vuln_fires}/{self._iterations}, "
-                f"guarded resisted {guard_resists}/{self._iterations} "
-                f"(agreement={decision.differential_metric:.2f}); the test "
+                f"vulnerable fired the exploit {vuln_fires}/{n} ({vuln_rate:.0%}), "
+                f"guarded leaked {guard_fires}/{n} ({guard_leak_rate:.0%}); the test "
                 f"{'discriminates' if decision.differential_passed else 'does NOT discriminate'} "
-                "between the twins"
+                f"between the twins (strength={decision.differential_metric:.2f})"
             ),
             metric=decision.differential_metric,
         )
@@ -342,10 +371,10 @@ class DifferentialValidator(ValidatorBase):
             stage="flakiness",
             passed=decision.flakiness_passed,
             detail=(
-                f"vulnerable fired {vuln_fires}/{self._iterations} "
-                f"(need >= {self._vuln_threshold}), guarded resisted "
-                f"{guard_resists}/{self._iterations} (need >= {self._guard_threshold}) "
-                f"(reproducibility={decision.flakiness_metric:.2f})"
+                f"success-rate gap {rate_gap:+.0%} (vulnerable {vuln_rate:.0%} minus guarded "
+                f"{guard_leak_rate:.0%}); need gap >= {self._min_rate_gap:.0%}, vulnerable "
+                f">= {self._min_vuln_rate:.0%}, guard leak <= {self._max_guard_leak:.0%} "
+                f"({'significant' if decision.flakiness_passed else 'not significant'})"
             ),
             metric=decision.flakiness_metric,
         )
@@ -364,9 +393,10 @@ class DifferentialValidator(ValidatorBase):
 
         kept = build.passed and differential.passed and flakiness.passed
         notes = (
-            f"reproducibility: vulnerable fired {vuln_fires}/{self._iterations}, "
-            f"guarded resisted {guard_resists}/{self._iterations} "
-            f"(flakiness reproducibility={decision.flakiness_metric:.2f}); "
+            f"statistical differential: vulnerable fired {vuln_fires}/{self._iterations} "
+            f"({vuln_rate:.0%}), guarded leaked {guard_fires}/{self._iterations} "
+            f"({guard_leak_rate:.0%}), success-rate gap {rate_gap:+.0%} "
+            f"(significant={decision.flakiness_passed}); "
             f"mutation: killed {mutation.killed}/{mutation.total} kitchen-sink seeds "
             f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
             f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
@@ -386,6 +416,8 @@ class DifferentialValidator(ValidatorBase):
                 iterations=self._iterations,
                 vuln_fired=vuln_fires,
                 guard_resisted=guard_resists,
+                guard_fired=guard_fires,
+                rate_gap=rate_gap,
             ),
             mutation_matrix=[
                 SeedKill(pattern_id=pid, weakness=weakness, killed=killed)
@@ -506,6 +538,8 @@ class DifferentialValidator(ValidatorBase):
             target_id="mcp:custom",  # report id; seed selection uses the descriptor
             provider=self._provider,
             model=self._model,
+            customiser_model=self._customiser_model,
+            judge_model=self._judge_model,
             max_concurrent=1,
             pattern_id_filter=pattern_id,
             wall_clock_timeout_s=self._iteration_timeout_s,
@@ -514,8 +548,10 @@ class DifferentialValidator(ValidatorBase):
             config=config,
             adapter=adapter,
             attack_modules=modules,
-            customiser=PayloadCustomiser(model=self._model, completion_fn=self._completion_fn),
-            judge=SuccessJudge(model=self._model, completion_fn=self._completion_fn),
+            customiser=PayloadCustomiser(
+                model=self._customiser_model, completion_fn=self._completion_fn
+            ),
+            judge=SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn),
         )
         result = asyncio.run(engine.run())
         if result.exploits:
@@ -540,7 +576,7 @@ class DifferentialValidator(ValidatorBase):
         runs = [r for r in firing_runs if r.response is not None]
         if not runs:
             return 0.0
-        judge = SuccessJudge(model=self._model, completion_fn=self._completion_fn)
+        judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
         agree = 0
         total = 0
         for r in runs:
@@ -557,23 +593,37 @@ class DifferentialValidator(ValidatorBase):
     def _decide(
         *,
         vuln_fires: int,
-        guard_resists: int,
+        guard_fires: int,
         iterations: int,
-        vuln_threshold: int,
-        guard_threshold: int,
+        min_rate_gap: float,
+        min_vuln_rate: float,
+        max_guard_leak: float,
     ) -> _Decision:
-        """Pure decision over the differential/flakiness tallies.
+        """Pure STATISTICAL decision over the differential tallies.
 
-        * differential: the test discriminates *at all* (vuln fired ≥1 AND
-          guard resisted ≥1); metric is the agreement fraction over the 2N
-          observations.
-        * flakiness: the test discriminates *reliably* (≥ thresholds); metric
-          is the reproducibility fraction = min(fires, resists) / N.
+        The signal is the attack SUCCESS-RATE gap between the twins, not a count
+        threshold. This keeps probabilistic-but-real LLM-mediated exploits (e.g.
+        an injection that lands 3/5 runs) instead of rejecting them the way the
+        old "vulnerable fires ≥ N-1" gate did.
+
+        * differential: the test discriminates *at all* — vulnerable fires
+          strictly more often than the guard leaks (gap > 0). Metric is the
+          discrimination strength ``(vuln_rate + (1 - guard_rate)) / 2`` ∈ [0,1].
+        * flakiness (significance): the gap is large and clean — gap ≥
+          ``min_rate_gap`` AND vuln_rate ≥ ``min_vuln_rate`` AND guard leak ≤
+          ``max_guard_leak``. Metric is the rate gap itself, clamped to [0,1].
         """
-        differential_passed = vuln_fires >= 1 and guard_resists >= 1
-        differential_metric = (vuln_fires + guard_resists) / (2 * iterations)
-        flakiness_passed = vuln_fires >= vuln_threshold and guard_resists >= guard_threshold
-        flakiness_metric = min(vuln_fires, guard_resists) / iterations
+        n = max(1, iterations)
+        vuln_rate = vuln_fires / n
+        guard_rate = guard_fires / n
+        gap = vuln_rate - guard_rate
+
+        differential_passed = gap > 0.0
+        differential_metric = max(0.0, min(1.0, (vuln_rate + (1.0 - guard_rate)) / 2.0))
+        flakiness_passed = (
+            gap >= min_rate_gap and vuln_rate >= min_vuln_rate and guard_rate <= max_guard_leak
+        )
+        flakiness_metric = max(0.0, min(1.0, gap))
         return _Decision(
             differential_passed=differential_passed,
             differential_metric=differential_metric,
@@ -596,6 +646,7 @@ class DifferentialValidator(ValidatorBase):
             guard_resisted=self._resisted(guard_result, pattern_id),
             vuln_result=vuln_result,
             guard_result=guard_result,
+            guard_fired=self._fired(guard_result, pattern_id),
         )
 
     def _run_scan(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
@@ -606,6 +657,9 @@ class DifferentialValidator(ValidatorBase):
             note_id_factory=note_id_counter(),
             provider=self._provider,
             model=self._model,
+            planner_model=self._planner_model,
+            customiser_model=self._customiser_model,
+            judge_model=self._judge_model,
         )
         return asyncio.run(engine.run())
 
@@ -778,11 +832,11 @@ class DifferentialValidator(ValidatorBase):
         async def _run() -> bool:
             adapter = InProcessReferenceAdapter(
                 variant=variant,
-                model=self._model,
+                model=self._planner_model,
                 completion_fn=self._completion_fn,
                 note_id_factory=note_id_counter(),
             )
-            judge = SuccessJudge(model=self._model, completion_fn=self._completion_fn)
+            judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
             try:
                 response = await adapter.invoke(payload)
             except AdapterInvocationSkipped:

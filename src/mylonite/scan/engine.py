@@ -47,6 +47,24 @@ class ScanConfig(BaseModel):
     target_id: str
     provider: str
     model: str
+    # Role-separated model overrides. Each defaults to ``model`` when unset, so
+    # existing callers are unaffected. Separating the roles is the lever for the
+    # AI-layer attack class: the PLANNER (the agent-under-test decision-maker) is
+    # what an aligned model makes refuse injection even on a vulnerable target,
+    # collapsing the differential. Pointing the planner at a representatively
+    # exploitable model — while keeping an aligned judge — restores signal.
+    planner_model: str | None = Field(
+        default=None,
+        description="Model for the agent-under-test planner. Defaults to ``model``.",
+    )
+    customiser_model: str | None = Field(
+        default=None,
+        description="Model that crafts/refines attack payloads. Defaults to ``model``.",
+    )
+    judge_model: str | None = Field(
+        default=None,
+        description="Model for the LLM-judge verdict fallback. Defaults to ``model``.",
+    )
     max_llm_calls: int = 50
     max_concurrent: int = 3
     output_dir: Path = Field(default_factory=lambda: Path(".mylonite/scans"))
@@ -89,6 +107,21 @@ class ScanConfig(BaseModel):
             "(default) means no wall-clock limit."
         ),
     )
+
+    @property
+    def resolved_planner_model(self) -> str:
+        """The planner model, falling back to ``model``."""
+        return self.planner_model or self.model
+
+    @property
+    def resolved_customiser_model(self) -> str:
+        """The customiser model, falling back to ``model``."""
+        return self.customiser_model or self.model
+
+    @property
+    def resolved_judge_model(self) -> str:
+        """The judge model, falling back to ``model``."""
+        return self.judge_model or self.model
 
 
 @dataclass
