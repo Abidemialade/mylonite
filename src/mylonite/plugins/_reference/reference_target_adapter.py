@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 from mylonite.contracts import AdapterResponse, AsyncTargetAdapterBase, Payload, TargetDescriptor
 from mylonite.contracts._types import ToolSpec
-from mylonite.contracts.target_adapter import CONTRACT_VERSION
+from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
@@ -128,6 +128,59 @@ class _InProcessServer:
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self.tool_calls.append(name)
         return self._inner.call_tool(name, arguments)  # type: ignore[no-any-return]
+
+
+class _InProcessAttackSession:
+    """Stateful session over ONE NoteStore/server for the reference target.
+
+    Unlike ``invoke`` (fresh store per call), this persists state across steps
+    so an attack loop can plant, probe, and drive the planner against the same
+    instance. Implements the ``AttackSession`` capability Protocol structurally.
+    """
+
+    def __init__(
+        self,
+        *,
+        variant: Variant,
+        model: str,
+        completion_fn: Callable[..., Any] | None,
+    ) -> None:
+        from mcp_kitchen_sink._store import NoteStore
+
+        self._variant = variant
+        self._model = model
+        self._completion_fn = completion_fn
+        self._store = NoteStore()
+        self._server = _InProcessServer(variant, self._store)
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolCallOutcome:
+        result = await self._server.call_tool(name, dict(arguments))
+        return ToolCallOutcome(tool=result.name, result=result.content, is_error=result.isError)
+
+    async def drive_planner(self, user_message: str) -> AdapterResponse:
+        # Snapshot the recorder so the returned trace contains only the calls
+        # THIS planner turn made — not earlier attacker plant/probe calls.
+        start = len(self._server.tool_calls)
+        planner = LLMPlanner(
+            server=self._server,
+            model=self._model,
+            completion_fn=_wrap_counted(self._completion_fn),
+        )
+        trace = await planner.run(user_message)
+        planner_calls = list(self._server.tool_calls[start:])
+        return AdapterResponse(
+            payload_pattern_id="session-drive",
+            raw_response=trace.final_output,
+            tool_calls=planner_calls,
+            metadata={
+                "variant": self._variant,
+                "store_emails_sent": str(self._store.sent_emails),
+                "store_fetched_urls": str(self._store.fetched_urls),
+            },
+        )
+
+    async def close(self) -> None:
+        return None
 
 
 class InProcessReferenceAdapter(AsyncTargetAdapterBase):
@@ -226,6 +279,14 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
                 "setup": setup,
                 "drive": drive,
             },
+        )
+
+    async def open_session(self) -> _InProcessAttackSession:
+        """Open a stateful :class:`AttackSession` over a fresh store/server."""
+        return _InProcessAttackSession(
+            variant=self._variant,
+            model=self._model,
+            completion_fn=self._completion_fn,
         )
 
     async def close(self) -> None:
