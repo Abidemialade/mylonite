@@ -20,10 +20,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from mylonite.contracts._types import AdapterResponse
+from mylonite.contracts._types import AdapterResponse, Payload
+from mylonite.contracts.target_adapter import AttackSession, SupportsAttackSession
 from mylonite.scan._llm import litellm_json_call_async, pop_fallback_cause
 from mylonite.scan._types import Verdict
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.seeds import SeedPattern
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,78 @@ class AdaptiveAttackDriver:
         self._completion_fn = completion_fn
         self._max_attempts = max(1, max_attempts)
         self._id_factory = id_factory
+
+    async def run(
+        self,
+        *,
+        seed: SeedPattern,
+        adapter: SupportsAttackSession,
+        plan: AttackPlan,
+    ) -> AdaptiveOutcome:
+        """Run the adaptive loop: plant -> drive -> judge -> refine, until a
+        finding, the attempt budget is spent, or the strategist stops changing
+        the injection."""
+        if self._judge is None:  # defensive: run() needs a judge
+            raise ValueError("AdaptiveAttackDriver.run requires a judge")
+        body = seed.seed_body
+        attempt = 0
+        last_response: AdapterResponse | None = None
+        last_verdict: Verdict | None = None
+        while attempt < self._max_attempts:
+            attempt += 1
+            response = await self._attempt(adapter=adapter, plan=plan, body=body)
+            payload = Payload(
+                pattern_id=seed.pattern_id,
+                channel=seed.channel,
+                body=body,
+                metadata={
+                    "seed_id": seed.pattern_id,
+                    "weakness": seed.weakness,
+                    "predicate": seed.predicate,
+                    "setup": seed.setup,
+                    "drive": seed.drive,
+                },
+            )
+            verdict = await self._judge.judge(payload, response)
+            last_response, last_verdict = response, verdict
+            if verdict.success:
+                return AdaptiveOutcome(
+                    success=True,
+                    attempts=attempt,
+                    final_body=body,
+                    response=response,
+                    verdict=verdict,
+                )
+            refined = await self._refine_injection(
+                weakness=seed.weakness, current_body=body, response=response, verdict=verdict
+            )
+            if refined is None:
+                break
+            body = refined
+        return AdaptiveOutcome(
+            success=False,
+            attempts=attempt,
+            final_body=body,
+            response=last_response,
+            verdict=last_verdict,
+        )
+
+    async def _attempt(
+        self, *, adapter: SupportsAttackSession, plan: AttackPlan, body: str
+    ) -> AdapterResponse:
+        """One isolated attempt: plant the injection, then drive the planner."""
+        nid = self._id_factory()
+        session: AttackSession = await adapter.open_session()
+        try:
+            args: dict[str, object] = {
+                k: v.replace("{payload}", body).replace("{id}", nid)
+                for k, v in plan.plant_args.items()
+            }
+            await session.call_tool(plan.plant_tool, args)
+            drive = plan.drive_message.replace("{id}", nid)
+            return await session.drive_planner(drive)
+        finally:
+            await session.close()
 
     async def _refine_injection(
         self,
