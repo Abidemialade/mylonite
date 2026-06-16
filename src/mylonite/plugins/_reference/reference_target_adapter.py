@@ -149,7 +149,10 @@ class _InProcessAttackSession:
 
         self._variant = variant
         self._model = model
-        self._completion_fn = completion_fn
+        # Wrap once for the session's lifetime (the budget counter is resolved
+        # per-call inside the wrapper, so caching it here is safe and avoids
+        # re-wrapping on every drive_planner turn).
+        self._counted_completion_fn = _wrap_counted(completion_fn)
         self._store = NoteStore()
         self._server = _InProcessServer(variant, self._store)
 
@@ -164,8 +167,11 @@ class _InProcessAttackSession:
         planner = LLMPlanner(
             server=self._server,
             model=self._model,
-            completion_fn=_wrap_counted(self._completion_fn),
+            completion_fn=self._counted_completion_fn,
         )
+        # Planner exceptions propagate; the attack loop (a later slice) owns
+        # retry/abort — unlike invoke(), which wraps them in
+        # AdapterInvocationSkipped for the single-shot engine path.
         trace = await planner.run(user_message)
         planner_calls = list(self._server.tool_calls[start:])
         return AdapterResponse(
