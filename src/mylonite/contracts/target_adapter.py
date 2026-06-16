@@ -18,6 +18,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import ClassVar, Protocol, runtime_checkable
 
+from pydantic import BaseModel, ConfigDict
+
 from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 
 # 0.1.0 -> 0.2.0: additive, backward-compatible — TargetDescriptor gained the
@@ -29,7 +31,13 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 # is reported as not-delivered rather than silently clean). Backward-compatible
 # for adapters; report readers that switch exhaustively on the outcome see one
 # new value. Minor bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.3.0"
+# 0.3.0 -> 0.4.0: additive — optional multi-step ``AttackSession`` capability
+# (``SupportsAttackSession.open_session`` → ``AttackSession`` with raw
+# ``call_tool`` + ``drive_planner`` + ``close``). Lets an attack loop carry
+# target state across steps. Single-shot adapters that only implement
+# ``invoke`` are unaffected; the loop detects support via isinstance and falls
+# back to ``invoke``. Backward-compatible; minor bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.4.0"
 
 
 @runtime_checkable
@@ -86,3 +94,43 @@ class AsyncTargetAdapterBase(ABC):
 
     @abstractmethod
     async def close(self) -> None: ...
+
+
+# --- Multi-step attack session (capability, added 0.4.0) ---------------------
+
+
+class ToolCallOutcome(BaseModel):
+    """Result of one attacker-issued raw tool call inside an AttackSession.
+
+    Distinct from ``AdapterResponse`` (which is planner-shaped): this is a
+    single, direct tool invocation the loop makes itself — e.g. planting a
+    canary or probing a retrieval path — not a planner turn.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tool: str
+    result: str
+    is_error: bool = False
+
+
+@runtime_checkable
+class AttackSession(Protocol):
+    """A stateful session against one target instance.
+
+    The store/subprocess persists for the session's lifetime, so the loop can
+    plant, probe, and drive the planner against the SAME state across steps.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolCallOutcome: ...
+
+    async def drive_planner(self, user_message: str) -> AdapterResponse: ...
+
+    async def close(self) -> None: ...
+
+
+@runtime_checkable
+class SupportsAttackSession(Protocol):
+    """Optional adapter capability: open a stateful :class:`AttackSession`."""
+
+    async def open_session(self) -> AttackSession: ...
