@@ -104,8 +104,16 @@ class AdaptiveAttackDriver:
     ) -> AdaptiveOutcome:
         """Run the adaptive loop: plant -> drive -> judge -> refine, until a
         finding, the attempt budget is spent, or the strategist stops changing
-        the injection."""
-        if self._judge is None:  # defensive: run() needs a judge
+        the injection.
+
+        Adapter/planner errors from an attempt propagate and abort the loop
+        (no per-attempt tolerance yet) — acceptable against the in-process
+        reference twin; graceful degradation for flaky live targets is a
+        later (engine-wiring) concern.
+        """
+        # run() requires a judge; construction allows judge=None for the
+        # strategist-only unit tests, so enforce the real precondition here.
+        if self._judge is None:
             raise ValueError("AdaptiveAttackDriver.run requires a judge")
         body = seed.seed_body
         attempt = 0
