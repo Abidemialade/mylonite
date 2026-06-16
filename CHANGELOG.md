@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-step `AttackSession` adapter capability** (target-adapter contract
+  `0.3.0` → `0.4.0`, additive). Optional `SupportsAttackSession.open_session()`
+  returns an `AttackSession` exposing raw `call_tool` + `drive_planner` +
+  `close`, letting an attack loop carry target state across steps. Implemented
+  for the in-process reference adapter; single-shot adapters are unaffected.
+
+### Changed — Effectiveness hardening (custom-target accuracy)
+
+- **Statistical differential oracle.** The reference differential now keeps a
+  test on the attack **success-rate gap** between the twins
+  (`vulnerable-fire-rate − guarded-leak-rate ≥ 50%`, vulnerable firing ≥ 40%,
+  guard leak ≤ 0%) instead of the brittle count gate ("vulnerable fires ≥ N-1
+  of N"). The old gate rejected genuinely-present-but-probabilistic,
+  LLM-mediated exploits — e.g. an indirect injection that lands 3/5 runs is now
+  KEPT, not REJECTED. Thresholds are configurable on `DifferentialValidator`
+  (`min_rate_gap` / `min_vuln_rate` / `max_guard_leak`). **Contract:** the
+  validator contract is **0.4.0 → 0.5.0** (additive): `ReproducibilityEvidence`
+  gained `guard_fired` (guard leak count) and `rate_gap`.
+- **Role-separated models.** `scan` accepts `--planner-model` /
+  `--customiser-model` / `--judge-model` (each defaults to `--model`);
+  `ScanConfig`, `build_scan`, and `DifferentialValidator` thread them through.
+  The planner — the agent-under-test decision-maker — is what an aligned model
+  makes refuse injection on *both* twins, collapsing the differential; pointing
+  the planner at a representatively exploitable model while keeping an aligned
+  judge restores signal.
+- **Robust delivery confirmation.** Indirect-injection "delivered?" detection
+  now scans the **untruncated** tool results and folds in **JSON-decoded**
+  structured returns (a `recall`-style tool returning a list of records), and
+  matches several high-signal tokens — so a planted note nested in a JSON list
+  or sitting past the trace cap no longer reads as a false `NOT TESTED`.
+- **`init-target` config synthesis.** The scaffold now classifies discovered
+  tools (store / retrieve / sink / observe) and pre-fills concrete `seed_arm`
+  and `effect_probe` candidates instead of blank templates, and warns when a
+  content-storing tool has no id-free retrieval path (the `save_note`/`read_note`
+  trap that silently makes injection seeds undeliverable).
+
+### Fixed
+
+- **`export --format eval-yaml`** no longer splices the raw predicate reason
+  into the rubric ("MUST NOT planner called web_fetch …"); it maps the weakness
+  class to a grammatical consequence clause.
+- **`generate <scan_dir>`** now emits one test per finding (into per-pattern
+  subdirs) instead of silently dropping all but the alphabetically-first.
+- **`doctor --config`** pings the model declared in `mylonite.yaml` rather than
+  defaulting to `claude-sonnet-4-6` when you configured another.
+- CLI help clarity: `taxonomy list --framework` is marked required; `report
+  --html` documents that it takes a file-path argument.
+
 ### Added — Pre-Phase-4 readiness: flow + verification legibility
 
 - **`mylonite export` — eval/CI interop.** Mylonite is the validation layer;
