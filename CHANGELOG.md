@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns an `AttackSession` exposing raw `call_tool` + `drive_planner` +
   `close`, letting an attack loop carry target state across steps. Implemented
   for the in-process reference adapter; single-shot adapters are unaffected.
+- **Adaptive attack loop (`AdaptiveAttackDriver`).** When an indirect-injection
+  attempt does not fire (e.g. an aligned planner refusing a poisoned note), an
+  LLM strategist re-crafts the injection from the planner trace + judge reason
+  and retries against a fresh session, within an attempt budget — turning a
+  single-shot miss into a finding. Standalone unit over the reference twin;
+  engine/CLI wiring follows.
 
 ### Changed — Effectiveness hardening (custom-target accuracy)
 
