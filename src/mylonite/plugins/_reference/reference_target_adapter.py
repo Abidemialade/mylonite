@@ -81,6 +81,31 @@ def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "")
     return f"Process note {nid}."
 
 
+def _wrap_counted(completion_fn: Callable[..., Any] | None) -> Callable[..., Any]:
+    """Wrap a completion_fn (or the LiteLLM default) so each call increments the
+    active LiteLLMCallCounter as the 'planner' caller — closing the planner-side
+    budget leak (eng review A1). Shared by ``invoke`` and ``AttackSession``."""
+    import litellm  # local import keeps cold-start cheap
+
+    underlying = completion_fn or litellm.acompletion
+
+    async def _counted(**kwargs: Any) -> Any:
+        counter = active_counter()
+        if counter is not None:
+            counter.record("planner")
+        try:
+            response = await underlying(**kwargs)
+        except Exception:
+            if counter is not None:
+                counter.mark_failure()
+            raise
+        if counter is not None:
+            counter.mark_success()
+        return response
+
+    return _counted
+
+
 class _InProcessServer:
     """Either VulnerableKitchenSinkServer or GuardedKitchenSinkServer, plus a
     tool-call recorder injected around ``call_tool`` so the adapter can build
@@ -207,32 +232,8 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         return None
 
     def _wrap_completion(self) -> Callable[..., Any]:
-        """Wrap the user-supplied completion_fn (or LiteLLM default) so each
-        call increments the active LiteLLMCallCounter as the 'planner' caller.
-
-        Closes the planner-side of the budget leak A1 raised: the
-        ScanEngine-active counter sees every LLM call, regardless of which
-        layer made it.
-        """
-        import litellm  # local import keeps cold-start cheap
-
-        underlying = self._completion_fn or litellm.acompletion
-
-        async def _counted(**kwargs: Any) -> Any:
-            counter = active_counter()
-            if counter is not None:
-                counter.record("planner")
-            try:
-                response = await underlying(**kwargs)
-            except Exception:
-                if counter is not None:
-                    counter.mark_failure()
-                raise
-            if counter is not None:
-                counter.mark_success()
-            return response
-
-        return _counted
+        """Wrap the completion_fn with the planner budget counter (A1)."""
+        return _wrap_counted(self._completion_fn)
 
 
 class InProcessVulnerableReferenceAdapter(InProcessReferenceAdapter):
