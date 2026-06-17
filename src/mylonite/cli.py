@@ -695,6 +695,19 @@ def scan(
             ),
         ),
     ] = False,
+    adaptive: Annotated[
+        bool,
+        typer.Option(
+            "--adaptive",
+            help=(
+                "Opt-in adaptive attack loop: for indirect-injection seeds, plant "
+                "the payload, drive the planner, and on failure re-craft the "
+                "injection and retry within a budget (needs a session-capable "
+                "target, e.g. reference:*). Off by default; the single-shot path "
+                "is unchanged."
+            ),
+        ),
+    ] = False,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -853,6 +866,26 @@ def scan(
     customiser = PayloadCustomiser(model=effective_customiser_model)
     judge = SuccessJudge(model=effective_judge_model)
 
+    # Adaptive loop is opt-in. Build the driver only when asked; warn (don't
+    # fail) if the chosen target can't open sessions, so --adaptive degrades to
+    # the single-shot path instead of erroring.
+    from mylonite.contracts.target_adapter import SupportsAttackSession
+
+    attack_driver = None
+    if adaptive:
+        if isinstance(adapter, SupportsAttackSession):
+            from mylonite.scan.attack_loop import AdaptiveAttackDriver
+
+            attack_driver = AdaptiveAttackDriver(
+                judge=judge, strategist_model=effective_customiser_model
+            )
+        else:
+            typer.echo(
+                "note: --adaptive ignored — this target does not support multi-step "
+                "sessions; using the single-shot path.",
+                err=True,
+            )
+
     config = ScanConfig(
         target_id=report_target_id,
         provider=effective_provider,
@@ -864,6 +897,7 @@ def scan(
         max_concurrent=max_concurrent,
         output_dir=output_dir,
         dry_run=dry_run,
+        adaptive=adaptive and attack_driver is not None,
     )
 
     engine = ScanEngine(
@@ -872,6 +906,7 @@ def scan(
         attack_modules=attack_modules,
         customiser=customiser,
         judge=judge,
+        attack_driver=attack_driver,
     )
 
     result = asyncio.run(engine.run())

@@ -1656,3 +1656,14 @@ def test_custom_target_flow_needs_target_file_at_most_once(
     assert "validated_by" in r3.output
 
     target_registry.clear_runtime_targets()
+
+
+def test_scan_exposes_adaptive_flag() -> None:
+    """--adaptive is wired into the scan command (render-independent check)."""
+    import typer
+
+    from mylonite.cli import app
+
+    scan_cmd = typer.main.get_command(app).commands["scan"]  # type: ignore[attr-defined]
+    param_names = {p.name for p in scan_cmd.params}
+    assert "adaptive" in param_names
