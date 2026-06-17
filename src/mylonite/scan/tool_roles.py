@@ -85,6 +85,25 @@ def _content_param(tool: Any) -> str | None:
     return string_params[0] if string_params else None
 
 
+def _genuine_content_param(tool: Any) -> str | None:
+    """The free-text content slot of ``tool``, or ``None`` if it has none.
+
+    Stricter than :func:`_content_param`: it refuses to fall back to an
+    id-shaped string param. A tool whose only string param is an id (e.g.
+    ``read_note(note_id)``) is a reader, not a store — so it must NOT be picked
+    as a plant target by :func:`mylonite.scan.attack_loop.discover_attack_plan`.
+    """
+    props = _schema_props(tool)
+    string_params = [name for name, spec in props.items() if _is_string_param(spec)]
+    # Reject id-shaped params first — a name like ``note_id`` matches the "note"
+    # content hint by substring but is a handle, not a free-text slot.
+    non_id = [name for name in string_params if not any(h in name.lower() for h in _ID_PARAM_HINTS)]
+    for name in non_id:
+        if any(h in name.lower() for h in _CONTENT_PARAM_HINTS):
+            return name
+    return non_id[0] if non_id else None
+
+
 def _id_param(tool: Any) -> str | None:
     """The id-shaped param name of ``tool`` (required params first).
 
@@ -168,9 +187,11 @@ def _read_by_id_tool(tools: list[Any]) -> str | None:
 
 
 __all__ = [
+    "_STORE_NAME_HINTS",
     "_ToolRoles",
     "_classify_tools",
     "_content_param",
+    "_genuine_content_param",
     "_id_param",
     "_read_by_id_tool",
     "_requires_id",
