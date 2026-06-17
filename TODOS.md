@@ -39,9 +39,6 @@ depend on the local SSL/cert environment or on tagging a release:
   before the run will reach the provider. Once recorded, the example replays
   **offline** forever (analogous to the demo fixtures), and a committed offline
   test asserting it passes can be added. Human step.
-- **Tag `v0.4.0`** once the reference example is recorded and committed — matches
-  the prior release tagging (v0.1.0–v0.3.0 are all tagged) and the "artefact then
-  tag" sequence.
 
 ## Phase 1.5 finishing touches (v0.3.0 shipped; these remain)
 
@@ -49,8 +46,6 @@ depend on the local SSL/cert environment or on tagging a release:
   is ready at [`docs/assets/recording-script.md`](./docs/assets/recording-script.md);
   it needs a terminal recorder (terminalizer, or asciinema + agg). Human step.
   The README already embeds the path as a placeholder.
-- **Tag `v0.3.0`** once the GIF is committed — matches the prior release tagging
-  (v0.1.0–v0.2.2 are all tagged) and the master plan's "GIF then tag" sequence.
 
 ## Deferred to later phases (from the v0.3.0 review)
 
