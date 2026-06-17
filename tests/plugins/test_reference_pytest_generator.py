@@ -236,7 +236,10 @@ def test_emit_synthesized_chain_uses_chain_replay_template() -> None:
             pattern_id="synthesized-chain-send_email",
             channel="tool-result",
             body=chain.injection,
-            metadata={"consequential_tool": "send_email", "synthesized_chain": chain_to_json(chain)},
+            metadata={
+                "consequential_tool": "send_email",
+                "synthesized_chain": chain_to_json(chain),
+            },
         ),
         response=AdapterResponse(
             payload_pattern_id="synthesized-chain-send_email",
