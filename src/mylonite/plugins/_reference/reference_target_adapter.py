@@ -24,6 +24,7 @@ raises ``AdapterInvocationSkipped`` — ScanEngine catches and records as
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from collections.abc import Callable
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 from mylonite.contracts import AdapterResponse, AsyncTargetAdapterBase, Payload, TargetDescriptor
 from mylonite.contracts._types import ToolSpec
-from mylonite.contracts.target_adapter import CONTRACT_VERSION
+from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
@@ -81,6 +82,31 @@ def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "")
     return f"Process note {nid}."
 
 
+def _wrap_counted(completion_fn: Callable[..., Any] | None) -> Callable[..., Any]:
+    """Wrap a completion_fn (or the LiteLLM default) so each call increments the
+    active LiteLLMCallCounter as the 'planner' caller — closing the planner-side
+    budget leak (eng review A1). Shared by ``invoke`` and ``AttackSession``."""
+    import litellm  # local import keeps cold-start cheap
+
+    underlying = completion_fn or litellm.acompletion
+
+    async def _counted(**kwargs: Any) -> Any:
+        counter = active_counter()
+        if counter is not None:
+            counter.record("planner")
+        try:
+            response = await underlying(**kwargs)
+        except Exception:
+            if counter is not None:
+                counter.mark_failure()
+            raise
+        if counter is not None:
+            counter.mark_success()
+        return response
+
+    return _counted
+
+
 class _InProcessServer:
     """Either VulnerableKitchenSinkServer or GuardedKitchenSinkServer, plus a
     tool-call recorder injected around ``call_tool`` so the adapter can build
@@ -96,13 +122,93 @@ class _InProcessServer:
         else:
             self._inner = GuardedKitchenSinkServer(store=store)
         self.tool_calls: list[str] = []
+        # Per-call results (tool, is_error, result), index-aligned with
+        # tool_calls, so a session drive can surface a chain's per-step effects
+        # (incl. refusals/errors) to the effect-aware judge.
+        self.tool_results: list[dict[str, Any]] = []
 
     async def list_tools(self) -> list[ToolDescription]:
         return self._inner.list_tools()  # type: ignore[no-any-return]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self.tool_calls.append(name)
-        return self._inner.call_tool(name, arguments)  # type: ignore[no-any-return]
+        result: ToolResult = self._inner.call_tool(name, arguments)
+        self.tool_results.append(
+            {
+                "tool": result.name,
+                "is_error": bool(result.isError),
+                "result": str(result.content)[:500],
+            }
+        )
+        return result
+
+
+class _InProcessAttackSession:
+    """Stateful session over ONE NoteStore/server for the reference target.
+
+    Unlike ``invoke`` (fresh store per call), this persists state across steps
+    so an attack loop can plant, probe, and drive the planner against the same
+    instance. Implements the ``AttackSession`` capability Protocol structurally.
+    """
+
+    def __init__(
+        self,
+        *,
+        variant: Variant,
+        model: str,
+        completion_fn: Callable[..., Any] | None,
+    ) -> None:
+        from mcp_kitchen_sink._store import NoteStore
+
+        self._variant = variant
+        self._model = model
+        # Wrap once for the session's lifetime (the budget counter is resolved
+        # per-call inside the wrapper, so caching it here is safe and avoids
+        # re-wrapping on every drive_planner turn).
+        self._counted_completion_fn = _wrap_counted(completion_fn)
+        self._store = NoteStore()
+        self._server = _InProcessServer(variant, self._store)
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolCallOutcome:
+        result = await self._server.call_tool(name, dict(arguments))
+        return ToolCallOutcome(tool=result.name, result=result.content, is_error=result.isError)
+
+    async def drive_planner(
+        self, user_message: str, *, pattern_id: str = "session-drive"
+    ) -> AdapterResponse:
+        # Snapshot the recorder so the returned trace contains only the calls
+        # THIS planner turn made — not earlier attacker plant/probe calls.
+        start = len(self._server.tool_calls)
+        planner = LLMPlanner(
+            server=self._server,
+            model=self._model,
+            completion_fn=self._counted_completion_fn,
+        )
+        # Planner exceptions propagate; the attack loop (a later slice) owns
+        # retry/abort — unlike invoke(), which wraps them in
+        # AdapterInvocationSkipped for the single-shot engine path.
+        trace = await planner.run(user_message)
+        # Per-step results for THIS planner turn — the chain-aware effect trace
+        # the judge's _summarise_effect_trace consumes (incl. refusals/errors),
+        # not just bare tool names.
+        effect_trace = self._server.tool_results[start:]
+        return AdapterResponse(
+            # Stamp the originating seed's pattern_id when the driver supplies it
+            # (0.5.0) so findings retain provenance; ad-hoc callers keep the
+            # neutral "session-drive" sentinel.
+            payload_pattern_id=pattern_id,
+            raw_response=trace.final_output,
+            tool_calls=list(self._server.tool_calls[start:]),
+            metadata={
+                "variant": self._variant,
+                "store_emails_sent": str(self._store.sent_emails),
+                "store_fetched_urls": str(self._store.fetched_urls),
+                "effect_trace": json.dumps(effect_trace),
+            },
+        )
+
+    async def close(self) -> None:
+        return None
 
 
 class InProcessReferenceAdapter(AsyncTargetAdapterBase):
@@ -203,36 +309,20 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
             },
         )
 
+    async def open_session(self) -> _InProcessAttackSession:
+        """Open a stateful :class:`AttackSession` over a fresh store/server."""
+        return _InProcessAttackSession(
+            variant=self._variant,
+            model=self._model,
+            completion_fn=self._completion_fn,
+        )
+
     async def close(self) -> None:
         return None
 
     def _wrap_completion(self) -> Callable[..., Any]:
-        """Wrap the user-supplied completion_fn (or LiteLLM default) so each
-        call increments the active LiteLLMCallCounter as the 'planner' caller.
-
-        Closes the planner-side of the budget leak A1 raised: the
-        ScanEngine-active counter sees every LLM call, regardless of which
-        layer made it.
-        """
-        import litellm  # local import keeps cold-start cheap
-
-        underlying = self._completion_fn or litellm.acompletion
-
-        async def _counted(**kwargs: Any) -> Any:
-            counter = active_counter()
-            if counter is not None:
-                counter.record("planner")
-            try:
-                response = await underlying(**kwargs)
-            except Exception:
-                if counter is not None:
-                    counter.mark_failure()
-                raise
-            if counter is not None:
-                counter.mark_success()
-            return response
-
-        return _counted
+        """Wrap the completion_fn with the planner budget counter (A1)."""
+        return _wrap_counted(self._completion_fn)
 
 
 class InProcessVulnerableReferenceAdapter(InProcessReferenceAdapter):

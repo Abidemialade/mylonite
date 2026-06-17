@@ -219,6 +219,24 @@ class ReproducibilityEvidence(BaseModel):
         ge=0,
         description="Iterations where the guarded twin resisted; None for custom targets.",
     )
+    # --- statistical differential evidence (added v0.5.0) ---------------------
+    # The success-rate oracle keeps a test on the RATE gap between the twins, not
+    # a count threshold. Optional/back-compatible: a report omitting them is still
+    # valid (e.g. custom-target or older artefacts).
+    guard_fired: int | None = Field(
+        default=None,
+        ge=0,
+        description="Iterations where the guarded twin LEAKED (fired); None for custom targets.",
+    )
+    rate_gap: float | None = Field(
+        default=None,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Attack success-rate gap = vulnerable-fire-rate minus guarded-leak-rate, "
+            "[-1,1]. The headline statistic the differential leg gates on."
+        ),
+    )
 
 
 class ValidationOutcome(BaseModel):

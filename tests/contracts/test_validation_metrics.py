@@ -14,7 +14,9 @@ def test_validator_contract_version() -> None:
     # 0.3.0: ValidationOutcome.stage gained stability/effect/consensus legs.
     # 0.4.0: ValidationReport gained structured evidence fields (gating_formula,
     # gating_legs, reproducibility, mutation_matrix).
-    assert validator.CONTRACT_VERSION == "0.4.0"
+    # 0.5.0: ReproducibilityEvidence gained guard_fired + rate_gap (statistical
+    # success-rate differential).
+    assert validator.CONTRACT_VERSION == "0.5.0"
 
 
 def test_validation_report_structured_evidence_round_trips() -> None:

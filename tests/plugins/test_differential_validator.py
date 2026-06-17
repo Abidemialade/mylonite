@@ -220,9 +220,9 @@ def test_kept_happy_path() -> None:
     assert _outcome(report, "differential").passed is True
     flakiness = _outcome(report, "flakiness")
     assert flakiness.passed is True
-    # reproducibility surfaced in metric + notes.
+    # The success-rate gap surfaces in the metric + notes.
     assert flakiness.metric == 1.0
-    assert "reproducibility" in (report.notes or "").lower()
+    assert "success-rate gap" in (report.notes or "").lower()
     assert report.mutation_score is not None
     assert 0.0 <= report.mutation_score <= 1.0
     assert _outcome(report, "build").passed is True
@@ -243,8 +243,13 @@ def test_sub_threshold_vuln_fire_rejects() -> None:
     flakiness = _outcome(report, "flakiness")
     assert flakiness.passed is False
     assert report.kept is False
-    # Detail names the fraction (e.g. "2/5").
-    assert "/5" in flakiness.detail
+    # A low vulnerable fire rate vs 0% guard leak → a gap below the 50%
+    # significance bar, so the differential is "not significant".
+    assert "not significant" in flakiness.detail
+    assert report.reproducibility is not None
+    assert report.reproducibility.guard_fired == 0
+    assert report.reproducibility.rate_gap is not None
+    assert report.reproducibility.rate_gap < 0.5
 
 
 def test_build_failure_rejects() -> None:
@@ -439,35 +444,38 @@ def test_mutation_score_seed_level_and_matrix_surfaced() -> None:
 
 
 def test_decide_helper_pure() -> None:
-    # Reliable discrimination → both pass.
-    d = DifferentialValidator._decide(
-        vuln_fires=5, guard_resists=5, iterations=5, vuln_threshold=4, guard_threshold=5
-    )
+    defaults = {"min_rate_gap": 0.5, "min_vuln_rate": 0.4, "max_guard_leak": 0.0}
+
+    # Full separation (vuln 100%, guard 0% leak) → both pass; gap = 1.0.
+    d = DifferentialValidator._decide(vuln_fires=5, guard_fires=0, iterations=5, **defaults)
     assert isinstance(d, _Decision)
     assert d.differential_passed is True
     assert d.flakiness_passed is True
     assert d.flakiness_metric == 1.0
     assert d.differential_metric == 1.0
 
-    # Discriminates at all but not reliably → differential passes, flakiness fails.
-    d2 = DifferentialValidator._decide(
-        vuln_fires=2, guard_resists=5, iterations=5, vuln_threshold=4, guard_threshold=5
-    )
+    # A 60% vulnerable rate vs 0% leak = 60% gap → KEPT. The old count gate
+    # ("fires >= 4/5") would have REJECTED this genuinely-present-but-probabilistic
+    # exploit; the statistical gate keeps it. This is the headline behaviour change.
+    d_prob = DifferentialValidator._decide(vuln_fires=3, guard_fires=0, iterations=5, **defaults)
+    assert d_prob.differential_passed is True
+    assert d_prob.flakiness_passed is True
+    assert d_prob.flakiness_metric == pytest.approx(0.6)
+
+    # Discriminates at all but the gap (40%) is below the 50% bar → not significant.
+    d2 = DifferentialValidator._decide(vuln_fires=2, guard_fires=0, iterations=5, **defaults)
     assert d2.differential_passed is True
     assert d2.flakiness_passed is False
     assert d2.flakiness_metric == pytest.approx(2 / 5)
 
     # No discrimination at all (vuln never fired) → both fail.
-    d3 = DifferentialValidator._decide(
-        vuln_fires=0, guard_resists=5, iterations=5, vuln_threshold=4, guard_threshold=5
-    )
+    d3 = DifferentialValidator._decide(vuln_fires=0, guard_fires=0, iterations=5, **defaults)
     assert d3.differential_passed is False
     assert d3.flakiness_passed is False
 
-    # Guard leaked once → flakiness fails on the guard side.
-    d4 = DifferentialValidator._decide(
-        vuln_fires=5, guard_resists=4, iterations=5, vuln_threshold=4, guard_threshold=5
-    )
+    # Guard leaked once (20%) → significance fails on the guard side even though
+    # the vulnerable always fires.
+    d4 = DifferentialValidator._decide(vuln_fires=5, guard_fires=1, iterations=5, **defaults)
     assert d4.differential_passed is True
     assert d4.flakiness_passed is False
 

@@ -69,6 +69,38 @@ def test_build_scan_defaults_pattern_id_filter_none() -> None:
     assert engine._config.pattern_id_filter is None
 
 
+def test_build_scan_threads_role_models() -> None:
+    """``build_scan`` routes per-role models to the planner adapter / customiser /
+    judge, each defaulting to ``model`` when unset."""
+    engine = wiring.build_scan(
+        "vulnerable",
+        completion_fn=None,
+        note_id_factory=None,
+        provider="anthropic",
+        model="base-model",
+        planner_model="planner-x",
+        judge_model="judge-y",
+    )
+    # The adapter (planner) and judge carry their overrides; customiser defaults.
+    assert engine._adapter._model == "planner-x"
+    assert engine._judge._model == "judge-y"
+    assert engine._customiser._model == "base-model"
+    # ScanConfig records the explicit overrides (None where unset).
+    assert engine._config.resolved_planner_model == "planner-x"
+    assert engine._config.resolved_judge_model == "judge-y"
+    assert engine._config.resolved_customiser_model == "base-model"
+
+
+def test_scan_config_resolved_models_default_to_model() -> None:
+    """Each resolved_* model falls back to ``model`` when its override is unset."""
+    from mylonite.scan.engine import ScanConfig
+
+    cfg = ScanConfig(target_id="t", provider="anthropic", model="m", planner_model="p")
+    assert cfg.resolved_planner_model == "p"
+    assert cfg.resolved_customiser_model == "m"
+    assert cfg.resolved_judge_model == "m"
+
+
 async def test_offline_replay_has_no_drift() -> None:
     """No-drift guard: the packaged-fixture replay still resolves cleanly.
 

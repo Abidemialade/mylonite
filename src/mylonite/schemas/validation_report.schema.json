@@ -4,6 +4,20 @@
       "additionalProperties": false,
       "description": "The per-iteration counts behind the differential/flakiness legs.\n\nFor the reference path both twins run each iteration, so ``vuln_fired`` and\n``guard_resisted`` are populated. For a custom target (no in-repo guarded\ntwin) only the real target is re-driven, so ``vuln_fired`` is the reproduced\ncount and ``guard_resisted`` is ``None``.",
       "properties": {
+        "guard_fired": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Iterations where the guarded twin LEAKED (fired); None for custom targets.",
+          "title": "Guard Fired"
+        },
         "guard_resisted": {
           "anyOf": [
             {
@@ -23,6 +37,21 @@
           "minimum": 0,
           "title": "Iterations",
           "type": "integer"
+        },
+        "rate_gap": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": -1.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Attack success-rate gap = vulnerable-fire-rate minus guarded-leak-rate, [-1,1]. The headline statistic the differential leg gates on.",
+          "title": "Rate Gap"
         },
         "vuln_fired": {
           "anyOf": [
