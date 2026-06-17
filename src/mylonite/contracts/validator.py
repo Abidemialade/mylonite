@@ -30,7 +30,12 @@ from mylonite.contracts.target_adapter import TargetAdapter
 # (gating_formula, gating_legs, reproducibility, mutation_matrix) lifted out of
 # the free-text ``notes`` so surfaces can render the differential oracle's
 # discrimination. All optional/defaulted; existing reports stay valid.
-CONTRACT_VERSION: str = "0.4.0"
+# 0.4.0 -> 0.5.0: additive — ReproducibilityEvidence gained guard_fired and
+# rate_gap, the statistical differential's leak count + success-rate gap. The
+# oracle now gates on the success-RATE gap between the twins rather than a
+# count threshold (keeps probabilistic LLM-mediated exploits). Both fields are
+# optional/defaulted; existing reports stay valid.
+CONTRACT_VERSION: str = "0.5.0"
 
 
 class VulnerableOracle(Protocol):

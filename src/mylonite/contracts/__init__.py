@@ -28,8 +28,11 @@ from mylonite.contracts.compliance_mapper import (
 from mylonite.contracts.target_adapter import (
     AsyncTargetAdapter,
     AsyncTargetAdapterBase,
+    AttackSession,
+    SupportsAttackSession,
     TargetAdapter,
     TargetAdapterBase,
+    ToolCallOutcome,
 )
 from mylonite.contracts.test_generator import TestGenerator, TestGeneratorBase
 from mylonite.contracts.validator import (
@@ -45,6 +48,7 @@ __all__ = [
     "AttackModule",
     "AttackModuleBase",
     "AttackPattern",
+    "AttackSession",
     "ComplianceMapper",
     "ComplianceMapperBase",
     "ComplianceTags",
@@ -53,11 +57,13 @@ __all__ = [
     "Payload",
     "ReproducibilityEvidence",
     "SeedKill",
+    "SupportsAttackSession",
     "TargetAdapter",
     "TargetAdapterBase",
     "TargetDescriptor",
     "TestGenerator",
     "TestGeneratorBase",
+    "ToolCallOutcome",
     "ToolSpec",
     "ValidationOutcome",
     "ValidationReport",

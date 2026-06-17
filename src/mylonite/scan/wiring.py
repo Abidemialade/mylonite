@@ -44,6 +44,9 @@ def build_scan(
     note_id_factory: Callable[[], str] | None,
     provider: str,
     model: str,
+    planner_model: str | None = None,
+    customiser_model: str | None = None,
+    judge_model: str | None = None,
     pattern_id_filter: str | None = None,
     llm_assist: bool = True,
 ) -> ScanEngine:
@@ -64,20 +67,30 @@ def build_scan(
     before the JSON-fence parse fix), so it changes nothing the demo shows while
     making it robust to the now-working parsers.
     """
+    # Role-separated models (each defaults to ``model``). The planner is the
+    # agent-under-test decision-maker — pointing it at a representatively
+    # exploitable model keeps the differential from collapsing when the default
+    # is a highly-aligned model that refuses injection on both twins.
+    resolved_planner = planner_model or model
+    resolved_customiser = customiser_model or model
+    resolved_judge = judge_model or model
     adapter = InProcessReferenceAdapter(
         variant=variant,
-        model=model,
+        model=resolved_planner,
         completion_fn=completion_fn,
         note_id_factory=note_id_factory,
     )
-    customiser = PayloadCustomiser(model=model, completion_fn=completion_fn)
-    judge = SuccessJudge(model=model, completion_fn=completion_fn, llm_fallback=llm_assist)
+    customiser = PayloadCustomiser(model=resolved_customiser, completion_fn=completion_fn)
+    judge = SuccessJudge(model=resolved_judge, completion_fn=completion_fn, llm_fallback=llm_assist)
     prompt_injection = PromptInjectionAttackModule()
     excessive_agency = ExcessiveAgencyAttackModule()
     config = ScanConfig(
         target_id=f"reference:{variant}",
         provider=provider,
         model=model,
+        planner_model=planner_model,
+        customiser_model=customiser_model,
+        judge_model=judge_model,
         max_llm_calls=100,
         max_concurrent=1,
         pattern_id_filter=pattern_id_filter,
