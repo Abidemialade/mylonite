@@ -24,6 +24,7 @@ raises ``AdapterInvocationSkipped`` — ScanEngine catches and records as
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 from collections.abc import Callable
@@ -121,13 +122,25 @@ class _InProcessServer:
         else:
             self._inner = GuardedKitchenSinkServer(store=store)
         self.tool_calls: list[str] = []
+        # Per-call results (tool, is_error, result), index-aligned with
+        # tool_calls, so a session drive can surface a chain's per-step effects
+        # (incl. refusals/errors) to the effect-aware judge.
+        self.tool_results: list[dict[str, Any]] = []
 
     async def list_tools(self) -> list[ToolDescription]:
         return self._inner.list_tools()  # type: ignore[no-any-return]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self.tool_calls.append(name)
-        return self._inner.call_tool(name, arguments)  # type: ignore[no-any-return]
+        result: ToolResult = self._inner.call_tool(name, arguments)
+        self.tool_results.append(
+            {
+                "tool": result.name,
+                "is_error": bool(result.isError),
+                "result": str(result.content)[:500],
+            }
+        )
+        return result
 
 
 class _InProcessAttackSession:
@@ -175,6 +188,10 @@ class _InProcessAttackSession:
         # retry/abort — unlike invoke(), which wraps them in
         # AdapterInvocationSkipped for the single-shot engine path.
         trace = await planner.run(user_message)
+        # Per-step results for THIS planner turn — the chain-aware effect trace
+        # the judge's _summarise_effect_trace consumes (incl. refusals/errors),
+        # not just bare tool names.
+        effect_trace = self._server.tool_results[start:]
         return AdapterResponse(
             # Stamp the originating seed's pattern_id when the driver supplies it
             # (0.5.0) so findings retain provenance; ad-hoc callers keep the
@@ -186,6 +203,7 @@ class _InProcessAttackSession:
                 "variant": self._variant,
                 "store_emails_sent": str(self._store.sent_emails),
                 "store_fetched_urls": str(self._store.fetched_urls),
+                "effect_trace": json.dumps(effect_trace),
             },
         )
 
