@@ -18,8 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempt does not fire (e.g. an aligned planner refusing a poisoned note), an
   LLM strategist re-crafts the injection from the planner trace + judge reason
   and retries against a fresh session, within an attempt budget — turning a
-  single-shot miss into a finding. Standalone unit over the reference twin;
-  engine/CLI wiring follows.
+  single-shot miss into a finding. A single attempt that raises is tolerated
+  (the loop refines and continues; `BudgetExceededError` still aborts).
+- **`scan --adaptive` — engine-wired adaptive path.** Opt-in flag that, against
+  a session-capable target (e.g. `reference:*`) with a discoverable plan, runs
+  the plant-drive-judge-refine loop for indirect-injection seeds instead of the
+  single-shot path; the outcome maps onto the usual `ScanAttempt`/`ExploitRecord`
+  (with `adaptive_attempts` evidence and the refined body). Off by default — the
+  single-shot path and the `seed_arm`/`effect_probe` config stay the fallback;
+  `--adaptive` degrades with a notice when the target can't open sessions.
+- **`AttackPlan` auto-discovery (`discover_attack_plan`).** The adaptive loop
+  builds its plant/drive plan from the target's tool surface (a store tool with
+  a genuine free-text slot, an id-keyed read-back), so it needs no hand-authored
+  `seed_arm`/`effect_probe`. Because the loop mints and controls the id, it can
+  exploit id-keyed read-backs the single-shot scaffold heuristic must skip. The
+  tool-role heuristics now live in `mylonite.scan.tool_roles` (shared by the
+  scaffold and the loop).
+- **Chain-aware session judging.** A session `drive_planner` now emits an
+  `effect_trace` (per-step tool, `is_error`, result) that the effect-aware judge
+  consumes, so a session-driven attempt is judged on the chain's per-step
+  outcomes (incl. refusals), not just bare tool names. **Contract:** the
+  target-adapter contract is **0.4.0 → 0.5.0** (additive): `drive_planner` gained
+  an optional `pattern_id` kwarg so findings carry the originating seed's id
+  instead of the `"session-drive"` sentinel.
 
 ### Changed — Effectiveness hardening (custom-target accuracy)
 
