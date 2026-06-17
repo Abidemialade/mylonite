@@ -91,3 +91,19 @@ async def test_drive_planner_isolates_planner_calls_from_attacker_calls() -> Non
     assert "read_note" in response.tool_calls
     assert "write_note" not in response.tool_calls
     await session.close()
+
+
+@pytest.mark.asyncio
+async def test_drive_planner_stamps_pattern_id_when_supplied() -> None:
+    """0.5.0: a driver-supplied pattern_id replaces the session-drive sentinel."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _text_response("done.")
+
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
+    session = await adapter.open_session()
+    default = await session.drive_planner("hello")
+    stamped = await session.drive_planner("hello", pattern_id="my-seed-id")
+    await session.close()
+    assert default.payload_pattern_id == "session-drive"
+    assert stamped.payload_pattern_id == "my-seed-id"

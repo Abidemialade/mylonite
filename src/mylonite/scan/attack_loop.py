@@ -27,11 +27,11 @@ from mylonite.scan._types import Verdict
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.seeds import SeedPattern
 from mylonite.scan.tool_roles import (
+    _STORE_NAME_HINTS,
     _classify_tools,
     _genuine_content_param,
     _id_param,
     _read_by_id_tool,
-    _STORE_NAME_HINTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,9 @@ class AdaptiveAttackDriver:
         last_verdict: Verdict | None = None
         while attempt < self._max_attempts:
             attempt += 1
-            response = await self._attempt(adapter=adapter, plan=plan, body=body)
+            response = await self._attempt(
+                adapter=adapter, plan=plan, body=body, pattern_id=seed.pattern_id
+            )
             payload = Payload(
                 pattern_id=seed.pattern_id,
                 channel=seed.channel,
@@ -225,7 +227,12 @@ class AdaptiveAttackDriver:
         )
 
     async def _attempt(
-        self, *, adapter: SupportsAttackSession, plan: AttackPlan, body: str
+        self,
+        *,
+        adapter: SupportsAttackSession,
+        plan: AttackPlan,
+        body: str,
+        pattern_id: str = "session-drive",
     ) -> AdapterResponse:
         """One isolated attempt: plant the injection, then drive the planner."""
         nid = self._id_factory()
@@ -237,7 +244,7 @@ class AdaptiveAttackDriver:
             }
             await session.call_tool(plan.plant_tool, args)
             drive = plan.drive_message.replace("{id}", nid)
-            return await session.drive_planner(drive)
+            return await session.drive_planner(drive, pattern_id=pattern_id)
         finally:
             await session.close()
 

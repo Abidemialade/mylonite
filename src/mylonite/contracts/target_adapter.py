@@ -37,7 +37,12 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 # target state across steps. Single-shot adapters that only implement
 # ``invoke`` are unaffected; the loop detects support via isinstance and falls
 # back to ``invoke``. Backward-compatible; minor bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.4.0"
+# 0.4.0 -> 0.5.0: additive — ``AttackSession.drive_planner`` gained an optional
+# keyword ``pattern_id`` so a multi-step driver can stamp the originating seed's
+# id onto the returned ``AdapterResponse`` (replacing the ``"session-drive"``
+# sentinel) and findings retain provenance. Defaulted, so existing callers and
+# implementations are unaffected. Backward-compatible; minor bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.5.0"
 
 
 @runtime_checkable
@@ -124,7 +129,9 @@ class AttackSession(Protocol):
 
     async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolCallOutcome: ...
 
-    async def drive_planner(self, user_message: str) -> AdapterResponse: ...
+    async def drive_planner(
+        self, user_message: str, *, pattern_id: str = "session-drive"
+    ) -> AdapterResponse: ...
 
     async def close(self) -> None: ...
 

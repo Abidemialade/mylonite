@@ -160,7 +160,9 @@ class _InProcessAttackSession:
         result = await self._server.call_tool(name, dict(arguments))
         return ToolCallOutcome(tool=result.name, result=result.content, is_error=result.isError)
 
-    async def drive_planner(self, user_message: str) -> AdapterResponse:
+    async def drive_planner(
+        self, user_message: str, *, pattern_id: str = "session-drive"
+    ) -> AdapterResponse:
         # Snapshot the recorder so the returned trace contains only the calls
         # THIS planner turn made — not earlier attacker plant/probe calls.
         start = len(self._server.tool_calls)
@@ -173,11 +175,13 @@ class _InProcessAttackSession:
         # retry/abort — unlike invoke(), which wraps them in
         # AdapterInvocationSkipped for the single-shot engine path.
         trace = await planner.run(user_message)
-        planner_calls = list(self._server.tool_calls[start:])
         return AdapterResponse(
-            payload_pattern_id="session-drive",
+            # Stamp the originating seed's pattern_id when the driver supplies it
+            # (0.5.0) so findings retain provenance; ad-hoc callers keep the
+            # neutral "session-drive" sentinel.
+            payload_pattern_id=pattern_id,
             raw_response=trace.final_output,
-            tool_calls=planner_calls,
+            tool_calls=list(self._server.tool_calls[start:]),
             metadata={
                 "variant": self._variant,
                 "store_emails_sent": str(self._store.sent_emails),
