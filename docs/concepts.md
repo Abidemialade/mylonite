@@ -47,6 +47,33 @@ Phase 0 ships the contracts, the bundled threat taxonomy, and the
 [`reference_targets/mcp_kitchen_sink/`](https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink)
 that the differential oracle will use as its ground truth.
 
+## Adaptive attacks and tool-chaining synthesis
+
+The default scan is single-shot per seed. Two **opt-in** modes deepen it — same
+AI-layer scope, same differential-validation bar, more app-specific reach. Both
+need a session-capable target (e.g. the bundled `reference:*` twins) and leave
+the single-shot path unchanged when off.
+
+- **`--adaptive` (the adaptive loop).** When an indirect-injection attempt does
+  not fire — typically an aligned planner refusing a poisoned note — an LLM
+  strategist re-crafts the *injection* from the planner trace and the judge's
+  reason, then retries against a fresh session within an attempt budget. It
+  auto-discovers how to plant and drive from the target's own tool surface, so a
+  single-shot miss can still become a finding.
+
+- **`--synthesize` (tool-chaining synthesis).** Synthesizes an exploit that
+  requires *combining several of the target's own tools* to reach a harmful sink
+  (e.g. `read_note → send_email`) — the app-specific depth a generic probe
+  library can't reach, because it doesn't know your tool graph. The chain is
+  executed (single drive first, then multi-turn steering if needed) and only
+  counts as a finding if it **differentially validates**: the sink is reached on
+  the vulnerable twin and blocked on the guarded twin, across the flakiness
+  filter. A validated chain emits a replay-backed regression test.
+
+Both reuse the same moat below — a finding is never "the agent did something,"
+only "a weakness that fires on the vulnerable variant and is blocked on the
+guarded one."
+
 ## Where Phase 0 stopped
 
 Phase 0 was foundations only. What it put in place:

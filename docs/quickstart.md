@@ -39,6 +39,8 @@ mylonite taxonomy list --framework owasp-llm
 mylonite demo
 mylonite scan reference:vulnerable
 mylonite scan mcp:fetch --authorize fetch
+mylonite scan reference:vulnerable --adaptive
+mylonite scan reference:vulnerable --synthesize
 ```
 
 - `mylonite demo` — the 60-second offline showcase: replays recorded scans
@@ -57,6 +59,14 @@ mylonite scan mcp:fetch --authorize fetch
   `mcp:fetch` (spawns via `uvx`), Node.js for `mcp:filesystem` /
   `mcp:github` (spawn via `npx`). Add `--dry-run` to enumerate seeds
   without an API key.
+- `mylonite scan <target> --adaptive` — opt-in adaptive loop: when an
+  indirect-injection attempt doesn't fire, an LLM strategist re-crafts the
+  injection and retries within a budget (needs a session-capable target, e.g.
+  `reference:*`). Off by default.
+- `mylonite scan <target> --synthesize` — opt-in tool-chaining synthesis:
+  synthesize an app-specific multi-tool exploit chain from the tool surface and
+  differentially validate it against the twins (reference-twin targets for now).
+  See [Concepts](concepts.md#adaptive-attacks-and-tool-chaining-synthesis).
 
 ## The full flow: scan → generate → validate
 
