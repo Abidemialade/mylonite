@@ -84,6 +84,10 @@ _DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
     "not sent",
     "will be sent",
     "for approval",
+    # A staged action awaiting a separate confirm/dispatch step is deferred, not
+    # executed — e.g. a guarded twin returning "staged — call confirm_send".
+    "staged",
+    "confirm_send",
 )
 
 
