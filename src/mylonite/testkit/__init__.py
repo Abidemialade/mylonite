@@ -464,9 +464,71 @@ def assert_target_resists(
     _assert_from_result(result, exploit)
 
 
+def assert_synthesized_chain_resists(
+    exploit: ExploitRecord,
+    *,
+    planner_model: str = "claude-sonnet-4-6",
+    _completion_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Assert the GUARDED twin resists a synthesized tool-chain (Driver 2).
+
+    Reconstructs the :class:`SynthesizedChain` embedded in the exploit artefact
+    (``payload.metadata['synthesized_chain']``) and re-drives it against the
+    in-process guarded reference twin. Passes (returns ``None``) when the guard
+    blocks the chain's sink; raises :class:`AssertionError` if the chain reaches
+    the sink — a regression. This re-drives the planner live, so the generated
+    test gates it behind ``MYLONITE_LIVE_TARGET``; ``_completion_fn`` is a
+    test-only seam for offline replay.
+
+    Raises
+    ------
+    TestkitFixtureError:
+        The exploit is not a synthesized chain (no embedded chain).
+    AssertionError:
+        The guard did not hold — the synthesized chain reached its sink.
+    """
+    from mylonite.contracts._types import ComplianceTags
+    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+    from mylonite.scan.chain_driver import ChainAttackDriver
+    from mylonite.scan.chain_synth import SynthesizedChain
+    from mylonite.scan.judge import SuccessJudge
+
+    raw = exploit.payload.metadata.get("synthesized_chain")
+    if not raw:
+        raise TestkitFixtureError(
+            "exploit is not a synthesized chain (no payload.metadata['synthesized_chain'])"
+        )
+    data = json.loads(raw)
+    chain = SynthesizedChain(
+        plant_tool=data["plant_tool"],
+        plant_args=data["plant_args"],
+        sink_tool=data["sink_tool"],
+        injection=data["injection"],
+        drive_message=data["drive_message"],
+        expected_effect=data["expected_effect"],
+        judge_rubric=data["judge_rubric"],
+        compliance=ComplianceTags(**data["compliance"]),
+    )
+    adapter = InProcessReferenceAdapter(
+        variant="guarded", model=planner_model, completion_fn=_completion_fn
+    )
+    driver = ChainAttackDriver(
+        judge=SuccessJudge(model=planner_model, completion_fn=_completion_fn, llm_fallback=False),
+        strategist_model=planner_model,
+        completion_fn=_completion_fn,
+    )
+    outcome = asyncio.run(driver.run(chain=chain, adapter=adapter))
+    if outcome.success:
+        raise AssertionError(
+            f"REGRESSION: synthesized chain reached sink {chain.sink_tool!r} on the "
+            "guarded twin — the guard no longer resists this tool-chaining exploit"
+        )
+
+
 __all__ = [
     "TestkitFixtureError",
     "assert_guard_holds",
+    "assert_synthesized_chain_resists",
     "assert_target_resists",
     "load_exploit",
 ]

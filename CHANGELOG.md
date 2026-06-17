@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Driver 2 — app-specific tool-chaining synthesis (`scan --synthesize`).**
+  Synthesizes a multi-tool exploit chain from the target's own tool surface (a
+  store/plant tool → a harmful sink, e.g. `read_note → send_email`) — the
+  app-specific depth generic probe libraries can't reach — then **differentially
+  validates** it: the synthesized sink must be reached on the vulnerable twin and
+  blocked on the guarded twin across a flakiness filter, or it is not a finding.
+  `ChainSynthesizer` proposes the chain (deterministic tool selection + one
+  constrained LLM call, with a deterministic skeleton on fallback);
+  `ChainAttackDriver` executes it by reusing the Driver 1 adaptive loop and
+  escalates to multi-turn steering when a single drive doesn't reach the sink;
+  `ChainDifferentialValidator` is the moat. A validated chain emits an
+  `ExploitRecord` with the chain embedded for replay, and `mylonite generate`
+  emits a live-gated regression test (`testkit.assert_synthesized_chain_resists`)
+  that fails if the guard regresses. Opt-in, reference-twin targets for now
+  (custom single-variant validation is deferred); the per-seed scan is unchanged.
 - **Multi-step `AttackSession` adapter capability** (target-adapter contract
   `0.3.0` → `0.4.0`, additive). Optional `SupportsAttackSession.open_session()`
   returns an `AttackSession` exposing raw `call_tool` + `drive_planner` +
