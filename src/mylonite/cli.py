@@ -565,6 +565,105 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+def _run_synthesis(
+    *,
+    target: str | None,
+    provider: str,
+    model: str,
+    planner_model: str,
+    customiser_model: str,
+    judge_model: str,
+    output_dir: Path,
+) -> None:
+    """Driver 2 flow: synthesize a tool-chain, differentially validate it against
+    the reference twins, and write the validated finding as scan artefacts.
+
+    Reference-twin targets only for now (custom single-variant validation is a
+    later extension). Uses the live provider for the planner/strategist/synthesizer.
+    """
+    if not (target and target.startswith("reference:")):
+        typer.echo(
+            "note: --synthesize currently needs a reference twin target "
+            "(e.g. reference:vulnerable); custom single-variant targets are not yet "
+            "supported.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+    from mylonite.scan.artefacts import render_summary, write_artefacts
+    from mylonite.scan.chain_synth import ChainSynthesizer
+    from mylonite.scan.chain_validator import ChainDifferentialValidator
+    from mylonite.scan.engine import ScanResult
+    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.synthesis_runner import SynthesisRunner
+
+    def factory(variant: str) -> InProcessReferenceAdapter:
+        return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
+
+    runner = SynthesisRunner(
+        synthesizer=ChainSynthesizer(model=customiser_model),
+        validator=ChainDifferentialValidator(
+            adapter_factory=factory,
+            judge=SuccessJudge(model=judge_model),
+            strategist_model=customiser_model,
+        ),
+        target_id=target,
+    )
+    descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
+    result = asyncio.run(runner.run(descriptor))
+
+    exploits = [result.exploit] if result.exploit is not None else []
+    if result.chain is None:
+        attempts = [
+            ScanAttempt(
+                seed_id="tool-chaining-synthesis",
+                pattern_id="tool-chaining-synthesis",
+                outcome="no_finding",
+                verdict_reason="no plant+sink pair discoverable on the tool surface",
+            )
+        ]
+    else:
+        pid = f"synthesized-chain-{result.chain.sink_tool}"
+        attempts = [
+            ScanAttempt(
+                seed_id=pid,
+                pattern_id=pid,
+                outcome="finding" if result.exploit is not None else "no_finding",
+                verdict_reason=(
+                    result.exploit.success_reason
+                    if result.exploit is not None
+                    else "synthesized chain did not differentially validate"
+                ),
+            )
+        ]
+    report = ScanReport(
+        target_id=target,
+        attack_modules=["tool-chaining-synthesis"],
+        provider=provider,
+        model=model,
+        elapsed_seconds=0.0,
+        attempts=attempts,
+        findings_count=len(exploits),
+        inconclusive_attempts=0,
+        fallback_breakdown={},
+        aborted=None,
+        single_run=False,
+        mylonite_version=__version__,
+    )
+    scan_result = ScanResult(report=report, exploits=exploits)
+
+    from mylonite._redaction import redact
+
+    scan_dir = write_artefacts(scan_result, output_dir)
+    typer.echo(redact(render_summary(scan_result)))
+    typer.echo(f"Artefacts: {scan_dir}")
+    if exploits:
+        typer.echo("")
+        typer.echo(f"Next: mylonite generate {scan_dir}")
+
+
 @app.command()
 def scan(
     target: Annotated[
@@ -708,6 +807,18 @@ def scan(
             ),
         ),
     ] = False,
+    synthesize: Annotated[
+        bool,
+        typer.Option(
+            "--synthesize",
+            help=(
+                "Opt-in Driver 2 tool-chaining synthesis: synthesize an "
+                "app-specific multi-tool exploit chain from the tool surface, then "
+                "differentially validate it against the twins (needs a reference "
+                "twin target, e.g. reference:vulnerable). Off by default."
+            ),
+        ),
+    ] = False,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -758,6 +869,20 @@ def scan(
     effective_planner_model = _resolve_role_model(planner_model)
     effective_customiser_model = _resolve_role_model(customiser_model)
     effective_judge_model = _resolve_role_model(judge_model)
+
+    # Driver 2: tool-chaining synthesis is a distinct flow (synthesize -> twin
+    # differential validation), not the per-seed engine. Branch early and return.
+    if synthesize:
+        _run_synthesis(
+            target=target,
+            provider=effective_provider,
+            model=effective_model,
+            planner_model=effective_planner_model,
+            customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
+            output_dir=output_dir,
+        )
+        return
 
     from mylonite.plugins.registry import discover
     from mylonite.scan.customiser import PayloadCustomiser

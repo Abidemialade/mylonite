@@ -1667,3 +1667,21 @@ def test_scan_exposes_adaptive_flag() -> None:
     scan_cmd = typer.main.get_command(app).commands["scan"]  # type: ignore[attr-defined]
     param_names = {p.name for p in scan_cmd.params}
     assert "adaptive" in param_names
+
+
+def test_scan_exposes_synthesize_flag() -> None:
+    """--synthesize is wired into the scan command (render-independent check)."""
+    import typer
+
+    from mylonite.cli import app
+
+    scan_cmd = typer.main.get_command(app).commands["scan"]  # type: ignore[attr-defined]
+    assert "synthesize" in {p.name for p in scan_cmd.params}
+
+
+def test_scan_synthesize_requires_reference_twin_target() -> None:
+    """--synthesize against a non-reference target is refused with a clear notice
+    (custom single-variant validation is deferred) — no LLM call is made."""
+    result = runner.invoke(app, ["scan", "mcp:filesystem:/sandbox", "--synthesize"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "reference twin" in result.output
