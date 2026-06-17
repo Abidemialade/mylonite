@@ -172,6 +172,7 @@ class AdaptiveAttackDriver:
         seed: SeedPattern,
         adapter: SupportsAttackSession,
         plan: AttackPlan,
+        extra_metadata: dict[str, str] | None = None,
     ) -> AdaptiveOutcome:
         """Run the adaptive loop: plant -> drive -> judge -> refine, until a
         finding, the attempt budget is spent, or the strategist stops changing
@@ -228,6 +229,9 @@ class AdaptiveAttackDriver:
                         "predicate": seed.predicate,
                         "setup": seed.setup,
                         "drive": seed.drive,
+                        # Chain drivers pass the synthesized sink (consequential_tool)
+                        # so the generic effect-aware predicate can judge it.
+                        **(extra_metadata or {}),
                     },
                 )
                 verdict = await self._judge.judge(payload, response)
