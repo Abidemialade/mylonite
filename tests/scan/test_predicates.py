@@ -157,7 +157,9 @@ def test_w3_fires_when_attacker_url_landed_in_fetched_urls() -> None:
     assert v is not None
     assert v.success is True
     assert v.mechanism == "predicate"
-    assert "attacker.example.com" in v.evidence["matched_markers"]  # type: ignore[operator]
+    # The predicate now keys on the payload's exfil host (default here); the
+    # matched URL surfaces via the recorded fetched-urls blob.
+    assert "attacker.example.com" in v.evidence["fetched_urls_blob"]  # type: ignore[operator]
 
 
 def test_w3_inconclusive_when_web_fetch_not_called() -> None:

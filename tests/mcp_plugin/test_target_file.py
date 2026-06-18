@@ -39,6 +39,36 @@ def test_target_file_rejects_reserved_family() -> None:
         _tf(family="filesystem")
 
 
+def test_target_file_carries_control_config() -> None:
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
+    tf = _tf(
+        weakness_classes=["W3"],
+        control_config=ControlConfig(
+            egress_tools=("web_fetch",),
+            egress_url_param="url",
+            consequential_tools=("send_email",),
+        ),
+    )
+    spec = build_target_spec(tf)
+    assert spec.control_config is not None
+    assert spec.control_config.egress_tools == ("web_fetch",)
+    assert spec.control_config.egress_url_param == "url"
+    assert spec.control_config.consequential_tools == ("send_email",)
+
+
+def test_target_file_control_config_round_trips_yaml(tmp_path: Path) -> None:
+    from mylonite.plugins._mcp.target_file import dump_target_file
+
+    tf = _tf(control_config={"egress_tools": ["web_fetch"], "egress_url_param": "url"})
+    p = tmp_path / "t.yaml"
+    p.write_text(dump_target_file(tf), encoding="utf-8")
+    reloaded = load_target_file(p)
+    assert reloaded.control_config is not None
+    assert reloaded.control_config.egress_tools == ("web_fetch",)
+    assert reloaded.control_config.egress_url_param == "url"
+
+
 def test_target_file_rejects_both_prompt_sources() -> None:
     with pytest.raises(ValueError, match="at most one"):
         _tf(system_prompt="a", system_prompt_file=Path("p.txt"))

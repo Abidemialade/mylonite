@@ -30,7 +30,9 @@ from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttackPlan, discover_attack_plan
 from mylonite.scan.customiser import PayloadCustomiser
+from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.obfuscate import obfuscate_payload
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
 from mylonite.version import __version__
 
@@ -119,6 +121,26 @@ class ScanConfig(BaseModel):
             "injection on failure — instead of the single-shot invoke path. "
             "Non-plantable seeds and unsupported adapters keep the single-shot "
             "path. Default False preserves existing behaviour exactly."
+        ),
+    )
+    randomize_exfil: bool = Field(
+        default=False,
+        description=(
+            "Mint a unique exfil destination per run and substitute it into the "
+            "payload body, keying the success predicate on the minted token. Tests "
+            "whether the control/target GENERALIZES rather than blocking the one "
+            "demo address. Default False preserves existing behaviour (and the "
+            "recorded-fixture replay path, which must NOT randomize)."
+        ),
+    )
+    obfuscate: str | None = Field(
+        default=None,
+        description=(
+            "Apply a deterministic obfuscation transform to the payload body after "
+            "customisation (unicode-tag / split / multilingual / base64-wrapper) to "
+            "test whether a control/filter catches only plaintext. The exfil "
+            "destination stays literal so detection still fires. Default None; never "
+            "applied on the fixture/replay path."
         ),
     )
 
@@ -228,18 +250,37 @@ class ScanEngine:
             # byte-for-byte unchanged.
             self._adaptive_active = False
             self._attack_plan = None
+            adapter_sess = (
+                self._adapter if isinstance(self._adapter, SupportsAttackSession) else None
+            )
             if (
                 self._config.adaptive
                 and self._attack_driver is not None
-                and isinstance(self._adapter, SupportsAttackSession)
+                and adapter_sess is not None
             ):
                 self._attack_plan = discover_attack_plan(descriptor)
-                self._adaptive_active = self._attack_plan is not None
                 if self._attack_plan is None:
                     logger.warning(
                         "ScanEngine: --adaptive set but no AttackPlan was discoverable "
                         "from the tool surface; falling back to the single-shot path"
                     )
+                else:
+                    # Probe that a stateful session actually opens (a real MCP
+                    # subprocess can fail to spawn / hit a transport error). Without
+                    # this, every adaptive attempt would error and the scan would
+                    # report a misleading "nothing found"; degrade to single-shot.
+                    try:
+                        _probe = await adapter_sess.open_session()
+                        await _probe.close()
+                        self._adaptive_active = True
+                    except BudgetExceededError:
+                        raise
+                    except Exception:
+                        logger.warning(
+                            "ScanEngine: --adaptive set but the target could not open a "
+                            "stateful session; falling back to the single-shot path",
+                            exc_info=True,
+                        )
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(self._config.max_concurrent)
@@ -482,6 +523,19 @@ class ScanEngine:
             payload = await self._customiser.customise(seed, descriptor)
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
+        # Generalization probe (opt-in): randomize the exfil destination AFTER
+        # customisation so the predicate (keyed on the minted token via metadata)
+        # tests whether the control/target stops exfil to ANY attacker address,
+        # not just the demo literal. No-op by default; never on the fixture path.
+        if self._config.randomize_exfil:
+            payload = randomize_payload_exfil(payload)
+
+        # Obfuscation tier (opt-in): rewrite the body to test whether a control/
+        # filter catches only plaintext. Applied AFTER randomize so the minted
+        # destination stays literal (predicate still matches). Never on fixtures.
+        if self._config.obfuscate:
+            payload = obfuscate_payload(payload, self._config.obfuscate)
+
         # Invoke + judge the (customised) payload `runs` times (scan-time flakiness
         # filter). A structural skip or error on ANY pass is terminal — retrying a
         # missing seed arm, an undelivered payload, or a planner outage tests
@@ -529,10 +583,16 @@ class ScanEngine:
             # is the fallback for catalogue-unknown seeds (which never reach here —
             # they return `skipped_unknown_seed` above — but kept for safety).
             resolved_compliance = seed.compliance if seed is not None else compliance
+            # Attack-tier provenance (no contract change — rides payload.metadata):
+            # single-shot is "static", or "obfuscated" when an obfuscation tier ran.
+            tier = "obfuscated" if payload.metadata.get("obfuscation") else "static"
+            tiered_payload = payload.model_copy(
+                update={"metadata": {**payload.metadata, "attack_tier": tier}}
+            )
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
                 pattern_id=payload.pattern_id,
-                payload=payload,
+                payload=tiered_payload,
                 response=decisive.response,
                 success_reason=verdict.reason,
                 compliance=resolved_compliance,
@@ -611,7 +671,10 @@ class ScanEngine:
         if verdict is not None:
             evidence.update({k: str(v) for k, v in verdict.evidence.items()})
         trace = list(outcome.response.tool_calls) if outcome.response is not None else []
-        final_payload = payload.model_copy(update={"body": outcome.final_body})
+        tier = "adaptive+obfuscated" if payload.metadata.get("obfuscation") else "adaptive"
+        final_payload = payload.model_copy(
+            update={"body": outcome.final_body, "metadata": {**payload.metadata, "attack_tier": tier}}
+        )
 
         if outcome.success and verdict is not None and outcome.response is not None:
             exploit = ExploitRecord(

@@ -45,12 +45,13 @@ from mylonite.contracts import (
     TargetDescriptor,
 )
 from mylonite.contracts._types import ToolSpec
-from mylonite.contracts.target_adapter import CONTRACT_VERSION
+from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
-from mylonite.scan.llm_planner import LLMPlanner
+from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
+from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import ToolDescription
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,7 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         model: str = DEFAULT_MODEL,
         completion_fn: Callable[..., Any] | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
+        controls: list[BoundaryControl] | None = None,
     ) -> None:
         self._spec = target_registry.resolve_target(family, scope)
         self._family = family
@@ -182,6 +184,9 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         self._model = model
         self._completion_fn = completion_fn
         self._planner_timeout_s = planner_timeout_s
+        # Boundary controls synthesize a guarded twin of THIS real target: they
+        # guard only the planner's view (see invoke()). Empty = raw target.
+        self._controls: list[BoundaryControl] = controls or []
 
     def _target_id(self) -> str:
         if self._scope is None:
@@ -258,9 +263,18 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
                 if self._family == "filesystem" and self._scope is not None:
                     sandbox_baseline = self._snapshot_sandbox(self._scope)
 
+                # Optionally synthesize a guarded twin at the boundary. The
+                # control shim guards ONLY the planner's view (it sits UNDER the
+                # recording shim, so the recorded trace reflects the guarded
+                # view). The plant (_run_setup, above) and the effect probe
+                # (_run_effect_probe) use the raw `session` and bypass it — see
+                # the control_shim module invariant.
+                inner_shim: _ServerLike = shim
+                if self._controls:
+                    inner_shim = ControlServerShim(shim, self._controls)
                 # Wrap shim so planner-driven calls land in planner_calls.
                 recording_shim = _RecordingServerShim(
-                    shim, planner_calls, full_results=planner_result_texts
+                    inner_shim, planner_calls, full_results=planner_result_texts
                 )
 
                 wrapped_completion = self._wrap_completion()
@@ -372,6 +386,25 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
 
     async def close(self) -> None:
         return None
+
+    async def open_session(self) -> _MCPAttackSession:
+        """Open a stateful session that persists ONE MCP subprocess across steps.
+
+        Satisfies the optional ``SupportsAttackSession`` capability so the
+        adaptive loop (``--adaptive``) runs against a real MCP target instead of
+        degrading to single-shot.
+
+        Lifecycle constraint: the returned session must be opened, used, and
+        closed within a SINGLE coroutine/task — exactly what the adaptive
+        driver's ``_attempt`` does (open -> plant -> drive -> close). Because the
+        ``stdio_client``/``ClientSession`` cancel scope is then entered and exited
+        in the same task, the cross-invoke reuse hazard documented in ``invoke``
+        does not apply. The engine probes this once (open+close) before activating
+        the adaptive path and degrades to single-shot if it raises.
+        """
+        cm = _open_mcp_session(self._spec, self._scope, extra_env=dict(self._spec.extra_env))
+        session = await cm.__aenter__()
+        return _MCPAttackSession(self, cm, session)
 
     async def _run_setup(
         self,
@@ -560,7 +593,7 @@ class _RecordingServerShim:
 
     def __init__(
         self,
-        inner: MCPSessionAsServerLike,
+        inner: _ServerLike,
         sink: list[dict[str, Any]],
         *,
         full_results: list[str] | None = None,
@@ -592,6 +625,91 @@ class _RecordingServerShim:
             text = content if isinstance(content, str) else str(content)
             self._full_results.append(text[:16000])
         return result
+
+
+class _MCPAttackSession:
+    """Stateful ``AttackSession`` over ONE persistent MCP stdio subprocess.
+
+    Holds the ``stdio_client``/``ClientSession`` context open across
+    ``call_tool`` + ``drive_planner``, exiting it on ``close``. Opened, used, and
+    closed within a single coroutine by the adaptive driver, so the anyio cancel
+    scope is entered and exited in the same task (see ``open_session``).
+
+    INVARIANT (mirrors the in-process reference session and the control-shim
+    module): ``call_tool`` is the raw attacker-issued plant and BYPASSES the
+    boundary control; only ``drive_planner`` (the planner's view) is guarded.
+    """
+
+    def __init__(self, adapter: MCPStdioAdapter, cm: Any, session: ClientSession) -> None:
+        self._adapter = adapter
+        self._cm = cm
+        self._session = session
+        self._completion = adapter._wrap_completion()
+        # What this session planted (for delivery detection + the effect probe in
+        # drive_planner). String arg values carry the injected body.
+        self._planted_bodies: list[str] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolCallOutcome:
+        # Raw plant — un-sanitized by design (honesty invariant).
+        args = dict(arguments)
+        for value in args.values():
+            if isinstance(value, str):
+                self._planted_bodies.append(value)
+        shim = MCPSessionAsServerLike(self._session)
+        result = await shim.call_tool(name, args)
+        return ToolCallOutcome(tool=name, result=result.content, is_error=result.isError)
+
+    async def drive_planner(
+        self, user_message: str, *, pattern_id: str = "session-drive"
+    ) -> AdapterResponse:
+        planner_calls: list[dict[str, Any]] = []
+        result_texts: list[str] = []
+        inner_shim: _ServerLike = MCPSessionAsServerLike(self._session)
+        if self._adapter._controls:
+            # Guard ONLY the planner's view (the boundary-guarded twin); the plant
+            # above used the raw session.
+            inner_shim = ControlServerShim(inner_shim, self._adapter._controls)
+        recording = _RecordingServerShim(inner_shim, planner_calls, full_results=result_texts)
+        planner = LLMPlanner(
+            server=recording,
+            model=self._adapter._model,
+            system_prompt=self._adapter._spec.default_system_prompt,
+            completion_fn=self._completion,
+        )
+        trace = await asyncio.wait_for(
+            planner.run(user_message), timeout=self._adapter._planner_timeout_s
+        )
+        metadata: dict[str, str] = {
+            "family": self._adapter._family,
+            "scope": self._adapter._scope or "",
+            "mcp_trace_planner": json.dumps(planner_calls),
+            # Chain-aware effect trace (incl. results + is_error) for the judge.
+            "effect_trace": json.dumps(planner_calls),
+        }
+        # Delivery + effect confirmation — parity with single-shot invoke(), so an
+        # adaptive finding is judged with the same rigor. Both run against the RAW
+        # self._session (never the control shim) — the honesty invariant.
+        if self._planted_bodies:
+            delivered = any(
+                _planted_payload_retrieved(body, result_texts) for body in self._planted_bodies
+            )
+            metadata["payload_delivered"] = "true" if delivered else "false"
+        probe = self._adapter._spec.effect_probe
+        if probe is not None:
+            probe_body = self._planted_bodies[-1] if self._planted_bodies else ""
+            probe_calls: list[dict[str, Any]] = []
+            metadata["effect_confirmed"] = await self._adapter._run_effect_probe(
+                self._session, probe, probe_body, probe_calls
+            )
+        return AdapterResponse(
+            payload_pattern_id=pattern_id,
+            raw_response=trace.final_output,
+            tool_calls=[entry["tool"] for entry in planner_calls],
+            metadata=metadata,
+        )
+
+    async def close(self) -> None:
+        await self._cm.__aexit__(None, None, None)
 
 
 def _truncate_result(content: Any, limit: int = 800) -> str:

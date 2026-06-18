@@ -89,6 +89,17 @@ engine proves that, in four layers:
 4. **Optional security mutation score.** Maintain a bank of distinct seeded
    weaknesses and report the fraction a generated test correctly fails on
    — a quantitative quality signal per emitted test.
+5. **Control-efficacy oracle (the extension that generalises the moat).** On a
+   real target with no second build, hold the model constant and vary only the
+   safeguard: synthesize a *guarded twin* by applying a canonical control (W1–W4)
+   at the adapter boundary, and keep a finding only when the attack fires on the
+   raw target and is resisted with the control applied — proving the *control*
+   carries the security. The plant and effect probe bypass the boundary shim so
+   the attack stays undiluted; the result is reported as a boundary proxy with an
+   explicit fidelity caveat and a server-side fix. `validate --prove-control`
+   proves one control load-bearing (with `--adaptive`, whether it survives an
+   adaptive attacker); `mylonite ablate` scores the whole control set as
+   load-bearing / theater / redundant.
 
 The deliberately-vulnerable reference target (`reference_targets/mcp_kitchen_sink/`)
 exists from v0.1.0 onwards for exactly this purpose. It is intentionally
@@ -182,7 +193,7 @@ the box against the bundled or real target.
 
 ### Phase 3 — CI gating + the magic moment, end-to-end
 
-**Status:** landing in v0.6.0.
+**Status:** shipped in v0.6.0.
 
 Delivers the `scan → generate → validate → open gating PR` end-to-end
 flow in a single command, plus the GitHub Action and CI workflow templates

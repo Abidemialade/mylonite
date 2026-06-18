@@ -93,14 +93,60 @@ A fourth stage, **metamorphic-lite**, applies one neutral paraphrase of the
 exploit body and re-checks the differential once. It is reported, not gating —
 a cheap robustness read that catches the most brittle over-fit tests.
 
-## MVP scope: the bundled reference twin
+## Beyond the bundled twin: the control-efficacy oracle
 
-For the MVP, the "guarded twin" the engine validates against is the **bundled
-reference agent** — [the Quarry](quarry.md)'s `mcp_kitchen_sink` server in its
-vulnerable and guarded variants. That bundled twin *is* the differential
-oracle, which is why importing the testkit transitively imports the reference
-adapter. Pointing the engine at a **consumer-owned** agent (your app's real AI
-layer, with your own guarded/unguarded variants) is a later phase. The
-machinery — differential, flakiness, mutation score, honest-fail gate — is the
-part that generalises; the bundled twin is the ground truth it is proven
-against today.
+The differential above proves a weakness is real by comparing a *vulnerable*
+build to a *guarded* one. But on a **real target you don't have two builds of**,
+the sharper question is not "is there a weakness?" — it's *"which safeguard is
+actually carrying the security, and does it hold?"* That is what the
+**control-efficacy oracle** (`validate --prove-control`) answers, and it is the
+deepened moat.
+
+The move is to **hold the model constant and vary only the safeguard**. Mylonite
+synthesizes a *guarded twin* of any real target by applying a canonical control
+at the **adapter boundary** — a `ControlServerShim` that wraps the live target
+(W1 tool-description sanitiser, W2 untrusted-data envelope, W3 egress
+allowlist, W4 confirm-gate). The same model, the same tools, the same target;
+the only thing that changes between the two legs is whether the control is in
+the planner's path. A finding is kept only when the attack **fires on the raw
+target and is resisted with the control applied** — which proves the *control*,
+not the model's mood, is what stopped it. It is scored as a control-contribution
+rate gap across the same flakiness filter.
+
+Two honesty properties make this trustworthy:
+
+- **The plant and the effect probe always bypass the shim.** The attacker plants
+  on the raw session and the effect probe reads the raw session; only the
+  *planner's view* is guarded. So the control is measured against an undiluted
+  attack, never a hobbled one.
+- **It is a boundary proxy, stated as one.** Mylonite enforces the control at
+  the adapter boundary, not inside your server. The emitted test and the gating
+  PR say so explicitly and point you at a server-side fix — the test is a
+  load-bearing-control regression gate, with the proxy caveat on the label.
+
+`mylonite ablate` generalises this across a target's whole control set: it
+toggles each safeguard and reports which are **load-bearing**, which are
+**security-theater** (the attack fires with or without them), and — with
+`--redundancy` — which are **redundant** (another control already covers the
+weakness).
+
+### Holding under an adaptive attacker
+
+`validate --prove-control --adaptive` drives the *guarded* leg under the
+[adaptive loop](concepts.md#adaptive-attacks-and-tool-chaining-synthesis), with
+the active control fed to the strategist so it crafts injections to evade *that
+specific* defense. The verdict then separates a control that **holds under
+adaptive pressure** from one that **holds against static probes but falls to an
+adaptive attacker** — grading control *robustness*, which a single-shot check
+can't see.
+
+## The bundled reference twin
+
+The bundled **reference agent** — [the Quarry](quarry.md)'s `mcp_kitchen_sink`
+server in its vulnerable and guarded variants — remains the ground-truth twin
+for the seeded-vulnerability differential, which is why importing the testkit
+transitively imports the reference adapter. The machinery — differential,
+flakiness, mutation score, honest-fail gate, control-efficacy oracle — is the
+part that generalises to a consumer-owned agent (via `--target-file` and the
+synthetic guarded twin); the bundled twin is the ground truth it is proven
+against.

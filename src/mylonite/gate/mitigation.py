@@ -110,15 +110,57 @@ def build_pr_body(
     """Assemble the gating PR description (deterministic; opt-in LLM enrichment)."""
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
+    control = exploit.payload.metadata.get("synthetic_control") or ""
+    is_control = bool(control)
+
+    if is_control:
+        repro = report.reproducibility
+        if repro is not None and repro.iterations:
+            raw_rate = (repro.vuln_fired or 0) / repro.iterations
+            guard_rate = (repro.guard_fired or 0) / repro.iterations
+            gap = repro.rate_gap if repro.rate_gap is not None else raw_rate - guard_rate
+            stat = (
+                f"With your model held constant, attack `{exploit.pattern_id}` **succeeds** "
+                f"against your app ({raw_rate:.0%}) and is **resisted** when control "
+                f"**{control}** is applied at the boundary ({guard_rate:.0%} leak); control "
+                f"contribution **{gap:+.0%}**."
+            )
+        else:
+            stat = (
+                f"Control **{control}** is verified load-bearing for `{exploit.pattern_id}` "
+                f"against `{exploit.target_id}` (model held constant)."
+            )
+        head = [
+            "## Control efficacy verified",
+            stat,
+            "",
+            "This proves the **safeguard** - not the model - carries the security.",
+            "",
+            "> **Boundary-validated control (proxy).** Mylonite enforced this control at the "
+            "adapter boundary, not in your server. Implement it server-side for a production "
+            "fix (see the mitigation below), then re-point the committed test at your real "
+            "implementation.",
+            "",
+            f"**Compliance:** {_compliance_line(exploit)}",
+            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
+            "",
+            "**Validation evidence:**",
+            _evidence_lines(report),
+        ]
+    else:
+        head = [
+            "## What Mylonite found",
+            f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`.",
+            "",
+            f"**Compliance:** {_compliance_line(exploit)}",
+            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
+            "",
+            "**Validation evidence:**",
+            _evidence_lines(report),
+        ]
 
     sections = [
-        "## What Mylonite found",
-        f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`.",
-        "",
-        f"**Compliance:** {_compliance_line(exploit)}",
-        "",
-        "**Validation evidence:**",
-        _evidence_lines(report),
+        *head,
         "",
         "## Suggested mitigation",
         "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
@@ -138,13 +180,20 @@ def build_pr_body(
                 "> **Unverified LLM suggestion** (not validated by the oracle — review before applying):",
                 "> " + extra.replace("\n", "\n> "),
             ]
-    sections += [
-        "",
-        "## How this is gated",
-        f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives this attack and "
-        "asserts your agent resists it. The committed per-PR workflow runs it on every PR; "
-        "a regression fails the check.",
-    ]
+    if is_control:
+        gating_desc = (
+            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives the attack with and "
+            f"without control **{control}** and asserts it fires on the raw target but is "
+            "resisted with the control applied. The committed per-PR workflow runs it on every "
+            "PR; if the control stops carrying the security, the check fails."
+        )
+    else:
+        gating_desc = (
+            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives this attack and "
+            "asserts your agent resists it. The committed per-PR workflow runs it on every PR; "
+            "a regression fails the check."
+        )
+    sections += ["", "## How this is gated", gating_desc]
     return "\n".join(sections) + "\n"
 
 

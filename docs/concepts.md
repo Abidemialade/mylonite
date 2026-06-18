@@ -49,30 +49,56 @@ that the differential oracle will use as its ground truth.
 
 ## Adaptive attacks and tool-chaining synthesis
 
-The default scan is single-shot per seed. Two **opt-in** modes deepen it — same
-AI-layer scope, same differential-validation bar, more app-specific reach. Both
-need a session-capable target (e.g. the bundled `reference:*` twins) and leave
-the single-shot path unchanged when off.
+The default scan is single-shot per seed. Three **opt-in** modes deepen it —
+same AI-layer scope, same differential-validation bar, more app-specific reach.
+All need a session-capable target; both the bundled `reference:*` twins and
+**real MCP targets** (`--target-file`, via stateful stdio sessions) qualify.
+They leave the single-shot path unchanged when off.
 
 - **`--adaptive` (the adaptive loop).** When an indirect-injection attempt does
   not fire — typically an aligned planner refusing a poisoned note — an LLM
   strategist re-crafts the *injection* from the planner trace and the judge's
   reason, then retries against a fresh session within an attempt budget. It
   auto-discovers how to plant and drive from the target's own tool surface, so a
-  single-shot miss can still become a finding.
+  single-shot miss can still become a finding. Runs on real MCP targets, not
+  just the reference twins.
 
 - **`--synthesize` (tool-chaining synthesis).** Synthesizes an exploit that
   requires *combining several of the target's own tools* to reach a harmful sink
   (e.g. `read_note → send_email`) — the app-specific depth a generic probe
   library can't reach, because it doesn't know your tool graph. The chain is
-  executed (single drive first, then multi-turn steering if needed) and only
-  counts as a finding if it **differentially validates**: the sink is reached on
-  the vulnerable twin and blocked on the guarded twin, across the flakiness
-  filter. A validated chain emits a replay-backed regression test.
+  executed (single drive first, then effect-trace-aware multi-turn steering if
+  needed) and only counts as a finding if it **differentially validates**: the
+  sink is reached on the raw target and blocked on the guarded twin, across the
+  flakiness filter. Works against `--target-file` custom targets via the
+  synthetic guarded twin. A validated chain emits a replay-backed regression
+  test.
 
-Both reuse the same moat below — a finding is never "the agent did something,"
-only "a weakness that fires on the vulnerable variant and is blocked on the
+- **`--obfuscate <strategy>` (attack tiers).** Re-encodes the payload body —
+  `unicode-tag` (invisible-tag ASCII smuggling), `split`, `multilingual`,
+  `base64-wrapper` — while keeping the exfil destination literal, to test
+  whether a control or filter generalises beyond plaintext. Every exploit
+  carries an `attack_tier` (static / obfuscated / adaptive / adaptive+obfuscated)
+  surfaced in the gating PR and the emitted test.
+
+All reuse the same moat below — a finding is never "the agent did something,"
+only "a weakness that fires on the raw/vulnerable variant and is blocked on the
 guarded one."
+
+## Control efficacy — which safeguard is load-bearing?
+
+On a real target you don't ship two builds of, the question shifts from "is
+there a weakness?" to "which safeguard is actually carrying the security, and
+does it hold?" Mylonite answers it by **holding the model constant and varying
+only the safeguard**: it synthesizes a *guarded twin* of any real target by
+applying a canonical control (W1–W4) at the adapter boundary, then keeps a
+finding only when the attack fires on the raw target and is resisted with the
+control applied. `validate --prove-control` proves a single control load-bearing
+(add `--adaptive` to grade whether it survives an adaptive attacker);
+`mylonite ablate` scores the whole control set as load-bearing / theater /
+redundant. The plant and effect probe always bypass the boundary shim, so the
+control is measured against an undiluted attack. Full treatment in
+[the validation engine](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
 
 ## Where Phase 0 stopped
 
