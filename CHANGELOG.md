@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`generate --prove-control`.** The standalone `generate` command can now emit a
+  control-efficacy test (`assert_control_holds`) — proving the control blocking a
+  finding is load-bearing (the attack lands without it, is resisted with it) —
+  instead of only the standard resists/guard test. Previously this assertion was
+  reachable only through the full `gate --prove-control` pipeline, so committing
+  the oracle's per-control verdict as a CI gate meant hand-wiring the test. Custom
+  targets only (needs `--target-file`); a reference or non-controllable finding
+  falls back to the standard test with a notice.
 - **Server-layer twin launch for the differential machinery.** Ablation,
   `validate --prove-control`, and `scan --synthesize` previously synthesised the
   "raw"/unguarded side by emptying the *adapter-shim* controls — which is blind to

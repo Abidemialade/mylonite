@@ -1746,3 +1746,49 @@ def test_vulnerable_adapter_is_default_when_no_vulnerable_launch() -> None:
         assert adapter._launch_env is None
     finally:
         target_registry.clear_runtime_targets()
+
+
+# --- Theme C: generate --prove-control emits assert_control_holds ------------
+
+
+def test_generate_prove_control_emits_assert_control_holds(tmp_path: Path) -> None:
+    """generate --prove-control on a custom finding emits a committable control-
+    efficacy test (assert_control_holds) — closing the oracle->test loop without
+    needing the full gate pipeline."""
+    import json as _json
+
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    tf = tmp_path / "target.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "gen"
+    result = runner.invoke(
+        app,
+        ["generate", str(ep), "--prove-control", "--target-file", str(tf), "--out", str(out)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    test_files = list(out.glob("test_security_*.py"))
+    assert test_files, list(out.iterdir())
+    src = test_files[0].read_text(encoding="utf-8")
+    assert "assert_control_holds" in src
+    assert 'control="W2"' in src
+
+
+def test_generate_prove_control_passes_through_reference_target(tmp_path: Path) -> None:
+    """A reference finding can't be proven load-bearing via a custom target.yaml,
+    so --prove-control passes it through to the standard guard test."""
+    import json as _json
+
+    exploit = _sample_exploit()  # reference:vulnerable
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--prove-control", "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    src = next(out.glob("test_security_*.py")).read_text(encoding="utf-8")
+    assert "assert_control_holds" not in src
+    assert "assert_guard_holds" in src
