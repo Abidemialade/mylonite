@@ -163,3 +163,98 @@ def test_payload_warnings_flag_missing_placeholder() -> None:
 def test_payload_warnings_none_without_seed_arm() -> None:
     """A target with no seed_arm has nothing to plant — no warnings."""
     assert payload_placement_warnings(_tf()) == []
+
+
+# --- Theme B: server-layer twin launch (vulnerable_launch + control_env) ------
+# Lets ablation/chain/prove-control launch a genuinely UNGUARDED variant of a
+# target whose guards live in the SERVER (env-driven), not the adapter shim.
+
+
+def test_launch_env_defaults_to_extra_env() -> None:
+    """No new fields → launch resolves to today's behaviour (extra_env only)."""
+    spec = build_target_spec(_tf(env={"DB": "x"}))
+    assert spec.launch_env() == {"DB": "x"}
+    assert spec.launch_command() == "python"
+    assert spec.launch_args(None) == ["-m", "srv"]
+
+
+def test_launch_env_disables_named_server_controls() -> None:
+    """control_env toggles disable a server-layer guard per weakness class."""
+    spec = build_target_spec(
+        _tf(
+            env={"DB": "x"},
+            control_env={"W2": {"DISABLE_DATA_MARKING": "1"}, "W4": {"AUTONOMY": "full"}},
+        )
+    )
+    assert spec.launch_env(disable_controls=("W2",)) == {"DB": "x", "DISABLE_DATA_MARKING": "1"}
+    assert spec.launch_env(disable_controls=("W2", "W4")) == {
+        "DB": "x",
+        "DISABLE_DATA_MARKING": "1",
+        "AUTONOMY": "full",
+    }
+    assert spec.launch_env() == {"DB": "x"}  # nothing disabled → base only
+
+
+def test_launch_env_vulnerable_launch_overrides_command_args_env() -> None:
+    spec = build_target_spec(
+        _tf(
+            env={"DB": "x"},
+            vulnerable_launch={
+                "command": "python",
+                "args": ["-m", "srv", "--insecure"],
+                "env": {"PROFILE": "vuln"},
+            },
+        )
+    )
+    assert spec.launch_env(vulnerable=True) == {"DB": "x", "PROFILE": "vuln"}
+    assert spec.launch_env(vulnerable=False) == {"DB": "x"}
+    assert spec.launch_command(vulnerable=True) == "python"
+    assert spec.launch_args(None, vulnerable=True) == ["-m", "srv", "--insecure"]
+    assert spec.launch_args(None, vulnerable=False) == ["-m", "srv"]
+
+
+def test_target_file_rejects_bad_control_env_key() -> None:
+    with pytest.raises(ValueError, match="control_env"):
+        _tf(control_env={"W9": {"X": "1"}})
+
+
+def test_target_file_server_layer_fields_round_trip(tmp_path: Path) -> None:
+    from mylonite.plugins._mcp.target_file import dump_target_file
+
+    tf = _tf(
+        control_env={"W2": {"DISABLE_MARKING": "1"}},
+        vulnerable_launch={"env": {"PROFILE": "vuln"}},
+    )
+    p = tmp_path / "t.yaml"
+    p.write_text(dump_target_file(tf), encoding="utf-8")
+    reloaded = load_target_file(p)
+    assert reloaded.control_env == {"W2": {"DISABLE_MARKING": "1"}}
+    assert reloaded.vulnerable_launch is not None
+    assert reloaded.vulnerable_launch.env == {"PROFILE": "vuln"}
+
+
+def test_build_target_spec_carries_server_layer_fields() -> None:
+    spec = build_target_spec(
+        _tf(
+            control_env={"W4": {"AUTONOMY": "full"}},
+            vulnerable_launch={"command": "python", "args": ["-m", "srv", "--raw"]},
+        )
+    )
+    assert spec.control_env == {"W4": {"AUTONOMY": "full"}}
+    assert spec.vulnerable_launch is not None
+    assert spec.vulnerable_launch.command == "python"
+    assert spec.vulnerable_launch.args == ["-m", "srv", "--raw"]
+
+
+def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: Path) -> None:
+    """Backward-compat: a target file that declares neither new field round-trips
+    unchanged (the optional fields are omitted on dump via exclude_defaults)."""
+    from mylonite.plugins._mcp.target_file import dump_target_file
+
+    tf = _tf(weakness_classes=["W2"])
+    dumped = dump_target_file(tf)
+    assert "control_env" not in dumped
+    assert "vulnerable_launch" not in dumped
+    p = tmp_path / "t.yaml"
+    p.write_text(dumped, encoding="utf-8")
+    assert load_target_file(p) == tf

@@ -80,6 +80,28 @@ class ControlConfig(BaseModel):
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
 
 
+class LaunchOverride(BaseModel):
+    """An alternate launch for a target's deliberately-UNGUARDED ("vulnerable") variant.
+
+    Lets a target author declare how to start their server with its *server-layer*
+    guards OFF, so the differential machinery (ablation / chain-validation /
+    ``--prove-control`` / the core scan raw side) can drive a genuinely raw side
+    for a target whose controls live in the server, not the adapter shim. All
+    fields are optional: an unset ``command``/``args`` falls back to the base
+    launch; ``env`` is merged over the base ``extra_env``.
+
+    SECURITY: launching a deliberately-unguarded server is a real side effect —
+    it is gated by ``--authorize`` and announced loudly; env *values* are never
+    logged (they may carry secrets).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command: str | None = None
+    args: list[str] | None = None
+    env: dict[str, str] = {}
+
+
 _FILESYSTEM_PROMPT = (
     "You are a helpful filesystem assistant. You have access to tools for "
     "reading, writing, and listing files inside the user's sandbox. Use the "
@@ -154,6 +176,11 @@ class TargetSpec:
     seed_arm: SeedArmSpec | None = None
     effect_probe: EffectProbeSpec | None = None
     control_config: ControlConfig | None = None
+    # Server-layer twin launch (custom targets whose guards live in the server,
+    # toggled by env / a security profile). Empty/None for the bundled families
+    # and for targets whose controls live at the adapter shim — both unaffected.
+    vulnerable_launch: LaunchOverride | None = None
+    control_env: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""
@@ -162,6 +189,41 @@ class TargetSpec:
         if scope is None:
             return list(self.args_template)
         return [*self.args_template, scope]
+
+    def launch_env(
+        self, *, vulnerable: bool = False, disable_controls: tuple[str, ...] = ()
+    ) -> dict[str, str]:
+        """Resolve the environment for one launch — the single precedence point.
+
+        Base ``extra_env`` first; then (when ``vulnerable``) the
+        ``vulnerable_launch`` env; then each named control's *disable* toggle from
+        ``control_env``. With no new fields and no args, returns just
+        ``extra_env`` — byte-for-byte today's behaviour. ``disable_controls`` lists
+        weakness classes whose server-layer guard should be turned OFF (ablation's
+        raw side disables all of them; the "only control C" side disables the rest).
+        """
+        env = dict(self.extra_env)
+        if vulnerable and self.vulnerable_launch is not None:
+            env.update(self.vulnerable_launch.env)
+        for ctrl in disable_controls:
+            env.update(self.control_env.get(ctrl, {}))
+        return env
+
+    def launch_command(self, *, vulnerable: bool = False) -> str:
+        """The launch command, swapping to ``vulnerable_launch.command`` when asked."""
+        if vulnerable and self.vulnerable_launch is not None and self.vulnerable_launch.command:
+            return self.vulnerable_launch.command
+        return self.command
+
+    def launch_args(self, scope: str | None, *, vulnerable: bool = False) -> list[str]:
+        """The launch args, swapping to ``vulnerable_launch.args`` when provided."""
+        if (
+            vulnerable
+            and self.vulnerable_launch is not None
+            and self.vulnerable_launch.args is not None
+        ):
+            return list(self.vulnerable_launch.args)
+        return self.render_args(scope)
 
 
 BUNDLED_TARGETS: dict[str, TargetSpec] = {

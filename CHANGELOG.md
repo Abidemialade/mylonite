@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Server-layer twin launch for the differential machinery.** Ablation,
+  `validate --prove-control`, and `scan --synthesize` previously synthesised the
+  "raw"/unguarded side by emptying the *adapter-shim* controls — which is blind to
+  targets that bake their guards into the **server** (env-/profile-driven, the
+  common real architecture): the raw side stayed fully guarded, so ablation
+  classified every control `no-attack`. A target file can now declare how to run a
+  genuinely-unguarded variant:
+  - `control_env` — a per-weakness map of env vars that disable one server-layer
+    guard. `mylonite ablate` toggles controls individually through it (raw side
+    disables all; "only control C" leaves just C on), restoring per-control
+    load-bearing/theater attribution on server-layer targets.
+  - `vulnerable_launch` — an alternate `command`/`args`/`env` that starts a fully
+    unguarded variant, used as the raw side by `validate --prove-control` and
+    `scan --synthesize`.
+  Both fields are optional and additive (omitting them is byte-for-byte today's
+  behaviour). Launching a deliberately-unguarded server is gated by `--authorize`,
+  announced on stderr, and env **values are never logged**. When a declared raw
+  launch doesn't actually disable the guard, the raw side never fires and the tool
+  says so (`no-attack` + a hint) rather than emitting a wrong verdict. No contract
+  bump (the `TargetFile`/`TargetSpec` types are not under `contracts/`).
+
 ## [0.7.0] - 2026-06-17
 
 ### Added

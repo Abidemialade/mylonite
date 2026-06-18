@@ -1695,3 +1695,54 @@ def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> Non
     result = runner.invoke(app, ["scan", "--synthesize", "--target-file", str(tf)])
     assert result.exit_code == EXIT_CONFIG
     assert "authorize" in result.output.lower()
+
+
+# --- Theme B: _vulnerable_adapter honors vulnerable_launch ------------------
+
+
+def test_vulnerable_adapter_uses_vulnerable_launch_when_declared() -> None:
+    """The raw side of a differential launches the declared unguarded variant."""
+    from mylonite.cli import _vulnerable_adapter
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(
+            family="vuln-srv",
+            command="python",
+            args=["-m", "srv"],
+            env={"BASE": "1"},
+            vulnerable_launch={
+                "command": "python",
+                "args": ["-m", "srv", "--raw"],
+                "env": {"PROFILE": "vuln"},
+            },
+        )
+        spec = build_target_spec(tf)
+        target_registry.register_target(spec)
+        adapter = _vulnerable_adapter(spec, None, "m")
+        assert adapter._launch_command == "python"
+        assert adapter._launch_args == ["-m", "srv", "--raw"]
+        assert adapter._launch_env == {"BASE": "1", "PROFILE": "vuln"}
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_vulnerable_adapter_is_default_when_no_vulnerable_launch() -> None:
+    """No vulnerable_launch → the default adapter (today's behaviour) — no overrides."""
+    from mylonite.cli import _vulnerable_adapter
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(family="plain-srv", command="python", args=["-m", "srv"])
+        spec = build_target_spec(tf)
+        target_registry.register_target(spec)
+        adapter = _vulnerable_adapter(spec, None, "m")
+        assert adapter._launch_command is None
+        assert adapter._launch_args is None
+        assert adapter._launch_env is None
+    finally:
+        target_registry.clear_runtime_targets()
