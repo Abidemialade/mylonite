@@ -853,6 +853,18 @@ def scan(
             ),
         ),
     ] = False,
+    verbose_strategist: Annotated[
+        bool,
+        typer.Option(
+            "--verbose-strategist",
+            help=(
+                "With --adaptive, echo each refinement round live (the injection "
+                "tried, the planner's tool calls, and why it failed) so the "
+                "strategist's reasoning is observable, not just an attempt count. "
+                "Payloads are redacted before display."
+            ),
+        ),
+    ] = False,
     obfuscate: Annotated[
         str | None,
         typer.Option(
@@ -1058,10 +1070,22 @@ def scan(
     attack_driver = None
     if adaptive:
         if isinstance(adapter, SupportsAttackSession):
-            from mylonite.scan.attack_loop import AdaptiveAttackDriver
+            from mylonite._redaction import redact
+            from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttemptStep
+
+            def _echo_step(step: AttemptStep) -> None:
+                status = "FOUND" if step.success else "failed"
+                typer.echo(
+                    f"  strategist round {step.attempt}: {status} — "
+                    f"{redact(step.reason)[:160]} | tools={list(step.tool_calls)} | "
+                    f"injection={redact(step.injection)[:120]}",
+                    err=True,
+                )
 
             attack_driver = AdaptiveAttackDriver(
-                judge=judge, strategist_model=effective_customiser_model
+                judge=judge,
+                strategist_model=effective_customiser_model,
+                on_step=_echo_step if verbose_strategist else None,
             )
         else:
             typer.echo(

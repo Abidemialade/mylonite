@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Strategist observability for `--adaptive`.** The adaptive loop now records a
+  per-round log (the injection tried, the planner's tool calls, and *why* that
+  round failed — the input the strategist refines from), where previously only the
+  attempt *count* survived. The trace is persisted in the finding's evidence
+  (`adaptive_log`) so a finding records HOW it was reached, and a new
+  `--verbose-strategist` flag echoes each round live to stderr (payloads redacted).
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
