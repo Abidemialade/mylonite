@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **NIST AI RMF tags now appear in `mylonite report`, matching the emitted test's
+  marks.** NIST was derived (from the OWASP cross-refs) only inline when emitting a
+  test's pytest marks, while the persisted exploit JSON that `report` reads stayed
+  un-enriched — so NIST showed in the test but not the report. `generate` now
+  persists the enriched exploit, and `report` enriches compliance on read (covering
+  scan dirs and pre-existing artefacts), so OWASP / ASI / ATLAS / NIST are
+  consistent across the test, the scan report, and the validation report.
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
