@@ -35,6 +35,7 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
+  - Installing on Windows: install-windows.md
   - The Quarry (try it): quarry.md
   - The validation engine: validation.md
   - CI gating: ci-gating.md
