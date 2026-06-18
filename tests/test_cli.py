@@ -1876,3 +1876,47 @@ def test_adaptive_budget_untouched_when_not_adaptive() -> None:
     from mylonite.cli import _adaptive_budget
 
     assert _adaptive_budget(50, adaptive_active=False) == (50, False)
+# --- Theme G: NIST enriched at mint (report parity with test marks) ---------
+
+
+def test_generate_colocated_exploit_carries_nist_for_report(tmp_path: Path) -> None:
+    """The co-located exploit JSON that `report` reads must carry the SAME NIST
+    tags the generated test's marks do. Previously NIST was derived only inline at
+    mark emission, while the persisted exploit (what the report reads) stayed
+    un-enriched — so NIST showed in the pytest marks but not the report (claim 11)."""
+    import json as _json
+
+    exploit = _sample_exploit()  # owasp_llm=['LLM01'] cross-refs to NIST, no nist yet
+    assert exploit.compliance.nist_ai_rmf == []  # precondition: raw has no NIST
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    colocated = next(out.glob("exploit_*.json"))
+    data = _json.loads(colocated.read_text(encoding="utf-8"))
+    assert data["compliance"]["nist_ai_rmf"], (
+        "co-located exploit (what `report` reads) must carry the derived NIST tags"
+    )
+
+
+def test_report_scan_dir_shows_derived_nist(tmp_path: Path) -> None:
+    """report enriches compliance on read, so NIST appears even when the persisted
+    exploit only carried OWASP tags (claim 11: NIST in marks, absent from report)."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    assert exploit.compliance.nist_ai_rmf == []  # persisted shape: OWASP only, no NIST
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # NIST (e.g. MEASURE-2.7 derived from LLM01) now shows in the report compliance.
+    assert "MEASURE" in result.output or "GOVERN" in result.output or "MAP-" in result.output

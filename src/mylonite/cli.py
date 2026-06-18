@@ -1479,7 +1479,13 @@ def _emit_generated_test(
         ReferencePytestGenerator,
     )
 
-    generated = ReferencePytestGenerator().emit(_map_compliance(exploit))
+    # Enrich compliance ONCE (derives NIST from the OWASP cross-refs) and use the
+    # SAME enriched record for both the emitted test's marks and the co-located
+    # exploit JSON. Writing the raw record here left the persisted exploit (what
+    # `mylonite report` reads) without the NIST tags the marks carried — the
+    # marks-vs-report inconsistency from the v0.7.0 assessment.
+    enriched = _map_compliance(exploit)
+    generated = ReferencePytestGenerator().emit(enriched)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
@@ -1487,9 +1493,9 @@ def _emit_generated_test(
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
-    colocated_exploit = out_dir / f"exploit_{exploit.pattern_id}.json"
+    colocated_exploit = out_dir / f"exploit_{enriched.pattern_id}.json"
     colocated_exploit.write_text(
-        json_mod.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json_mod.dumps(enriched.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -2326,8 +2332,6 @@ def report(
     coverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no
     loadable artefact is found.
     """
-    import json
-
     from rich.console import Console as _Console
 
     kind, path = _locate_report_artefact(target)
@@ -2349,7 +2353,10 @@ def report(
             from mylonite import testkit
 
             try:
-                exploit = testkit.load_exploit(exploit_matches[0])
+                # Enrich on read (derive NIST from the OWASP cross-refs) so the
+                # report's compliance line matches the emitted test's marks even
+                # for artefacts whose persisted exploit predates enrichment.
+                exploit = _map_compliance(testkit.load_exploit(exploit_matches[0]))
                 console.print(f"compliance: {_compliance_tags_line(exploit.compliance)}")
                 console.print(f"target: {exploit.target_id}  pattern: {exploit.pattern_id}")
             except (FileNotFoundError, ValueError):
@@ -2368,17 +2375,22 @@ def report(
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console.print(render_summary(result), markup=False)
-        # Compliance tags aggregated across the co-located exploit files.
+        # Compliance tags aggregated across the co-located exploit files, enriched
+        # on read (derive NIST from the OWASP cross-refs) so the report matches the
+        # emitted test's marks even for scan dirs whose persisted exploits predate
+        # enrichment.
+        from mylonite import testkit
+
         tags: set[str] = set()
         target_id = sreport.target_id
         for exploit_file in sorted(path.parent.glob("exploit_*.json")):
             try:
-                data = json.loads(exploit_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                exploit = _map_compliance(testkit.load_exploit(exploit_file))
+            except (FileNotFoundError, ValueError, OSError):
                 continue
-            c = data.get("compliance", {})
-            for key in ("owasp_llm", "owasp_asi", "mitre_atlas", "nist_ai_rmf"):
-                tags.update(c.get(key) or [])
+            c = exploit.compliance
+            for ids in (c.owasp_llm, c.owasp_asi, c.mitre_atlas, c.nist_ai_rmf):
+                tags.update(ids)
         if tags:
             console.print(f"compliance: {', '.join(sorted(tags))}")
         console.print(f"target: {target_id}  artefacts: {path.parent}")
