@@ -633,10 +633,22 @@ def _run_synthesis(
             err=True,
         )
 
+        if spec.vulnerable_launch is not None:
+            typer.echo(
+                f"--synthesize: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                "Env values are never logged.",
+                err=True,
+            )
+
         def factory(variant: str) -> Any:
-            controls = None if variant == "vulnerable" else [_boundary_control("W2", spec)]
+            if variant == "vulnerable":
+                return _vulnerable_adapter(spec, tf.scope, planner_model)
             return MCPStdioAdapter(
-                family=spec.family, scope=tf.scope, model=planner_model, controls=controls
+                family=spec.family,
+                scope=tf.scope,
+                model=planner_model,
+                controls=[_boundary_control("W2", spec)],
             )
 
         descriptor = asyncio.run(
@@ -1567,6 +1579,30 @@ def _boundary_control(weakness: str, spec: Any) -> Any:
     )
 
 
+def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
+    """Adapter for the RAW/vulnerable side of a differential.
+
+    Honors a target's ``vulnerable_launch`` (its declared, deliberately-unguarded
+    variant) so the raw side of a SERVER-LAYER-controlled target is genuinely
+    unguarded — otherwise the "raw" side would launch the guarded server and the
+    differential would never fire. When ``vulnerable_launch`` is undeclared this is
+    byte-for-byte the default adapter (today's behaviour). SECURITY: launching the
+    unguarded variant is announced loudly by the caller; env values are never logged.
+    """
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+
+    if getattr(spec, "vulnerable_launch", None) is None:
+        return MCPStdioAdapter(family=spec.family, scope=scope, model=model)
+    return MCPStdioAdapter(
+        family=spec.family,
+        scope=scope,
+        model=model,
+        launch_env=spec.launch_env(vulnerable=True),
+        launch_command=spec.launch_command(vulnerable=True),
+        launch_args=spec.launch_args(scope, vulnerable=True),
+    )
+
+
 def _validate_custom(
     generated: Any,
     target_file: Path | None,
@@ -1604,8 +1640,16 @@ def _validate_custom(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
+    if spec.vulnerable_launch is not None:
+        typer.echo(
+            f"validate: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+            f"{spec.family!r} (vulnerable_launch) — ensure you are authorized to run it. "
+            "Env values are never logged.",
+            err=True,
+        )
+
     def _factory() -> Any:
-        return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=model)
+        return _vulnerable_adapter(spec, tf.scope, model)
 
     # --prove-control: synthesize a boundary-guarded twin of the SAME real target
     # (model held constant) so the differential leg can prove the control carries
@@ -3073,22 +3117,37 @@ def ablate(
         typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
+    # Server-layer mode: the target bakes its guards into the server (toggled by
+    # env / a security profile), so the differential's "raw" side is produced by
+    # DISABLING them via control_env — not by emptying the adapter shim, which
+    # cannot reach a server-layer guard. This is what lets ablation classify
+    # load-bearing/theater on the common real architecture instead of returning
+    # no-attack for every control.
+    server_layer = bool(spec.control_env)
+
     if controls:
         chosen = [c.strip().upper() for c in controls.split(",") if c.strip()]
     elif spec.control_config and spec.control_config.declared:
         chosen = list(spec.control_config.declared)
     elif spec.control_config and spec.control_config.synthetic:
         chosen = list(spec.control_config.synthetic)
+    elif server_layer:
+        chosen = list(spec.control_env)
     else:
         chosen = [w for w in tf.weakness_classes if w in REP_SEED_BY_WEAKNESS]
 
     usable: list[str] = []
     for c in chosen:
-        try:
-            make_control(c)
-        except ValueError:
-            typer.echo(f"skipping {c}: no boundary control implemented", err=True)
-            continue
+        if server_layer:
+            if c not in spec.control_env:
+                typer.echo(f"skipping {c}: no control_env toggle declared", err=True)
+                continue
+        else:
+            try:
+                make_control(c)
+            except ValueError:
+                typer.echo(f"skipping {c}: no boundary control implemented", err=True)
+                continue
         if c not in REP_SEED_BY_WEAKNESS:
             typer.echo(f"skipping {c}: no representative seed", err=True)
             continue
@@ -3108,19 +3167,32 @@ def ablate(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     mode = "all-minus-c (redundancy)" if redundancy else "on/off"
+    layer = "server-layer (env toggles)" if server_layer else "adapter-shim"
     typer.echo(
         f"ablate re-drives {spec.family!r} live, toggling {', '.join(usable)} {mode} "
-        f"({iterations} run(s) each) — ~{total_scans} scoped scans.",
+        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans.",
         err=True,
     )
 
     def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
-        adapter = MCPStdioAdapter(
-            family=spec.family,
-            scope=tf.scope,
-            model=effective_model,
-            controls=[_boundary_control(w, spec) for w in applied],
-        )
+        if server_layer:
+            # ``applied`` = controls currently ON. The raw side (applied=()) turns
+            # them all OFF; the "only C" side leaves only C on. Translate to the
+            # complement and disable those server-layer guards via the launch env.
+            disable = tuple(c for c in usable if c not in applied)
+            adapter = MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=effective_model,
+                launch_env=spec.launch_env(disable_controls=disable),
+            )
+        else:
+            adapter = MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=effective_model,
+                controls=[_boundary_control(w, spec) for w in applied],
+            )
         return scan_target_fires(
             adapter,
             pattern_id,
@@ -3144,6 +3216,13 @@ def ablate(
         target_registry.clear_runtime_targets()
 
     _render_ablation_matrix(results)
+    if server_layer and results and all(r.status == "no-attack" for r in results):
+        typer.echo(
+            "hint: every control classified 'no-attack' — the raw side never fired. "
+            "Check that control_env actually disables the server's guard for these "
+            "weakness classes, and that the representative seeds reach the surface.",
+            err=True,
+        )
 
 
 @app.command()

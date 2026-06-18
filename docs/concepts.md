@@ -100,6 +100,48 @@ redundant. The plant and effect probe always bypass the boundary shim, so the
 control is measured against an undiluted attack. Full treatment in
 [the validation engine](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
 
+### When the controls live in the server, not the adapter
+
+The boundary shim synthesizes a guarded twin by guarding the *planner's view* —
+which works when Mylonite can add the control. But many real MCP apps bake their
+guards into the **server itself**, toggled by an env var or a security profile
+(e.g. `SECURITY_PROFILE=strict`). The shim can't strip a guard it doesn't own, so
+its "raw" side would still be fully guarded — and ablation would (correctly but
+uselessly) classify every control `no-attack`, because the attack never fires on
+the raw side.
+
+For those targets, declare in your target file **how to run the server with its
+guards off**, and Mylonite drives a genuinely raw side:
+
+- `control_env` — a per-weakness map of env vars that *disable* one server-layer
+  guard. `mylonite ablate` uses it to toggle controls individually: the raw side
+  disables all of them; the "only control C" side leaves just C on. This restores
+  per-control load-bearing/theater attribution on a server-layer architecture.
+- `vulnerable_launch` — an alternate `command`/`args`/`env` that starts a fully
+  **unguarded** variant. `validate --prove-control` and `scan --synthesize` use it
+  as the raw side of their differential.
+
+```yaml
+family: my-agent
+command: python
+args: [-m, my_agent.server]
+weakness_classes: [W2, W4]
+# Per-control env toggles (ablation): each disables ONE server guard.
+control_env:
+  W2: { DISABLE_DATA_MARKING: "1" }
+  W4: { AUTONOMY_OVERRIDE: "full" }
+# Or a single fully-unguarded launch (prove-control / synthesize):
+vulnerable_launch:
+  env: { SECURITY_PROFILE: "off" }
+```
+
+Both fields are optional and additive: omit them and behaviour is exactly as
+before. Launching a deliberately-unguarded server is a real action — it is gated
+by `--authorize`, announced loudly, and env **values are never logged** (they may
+carry secrets). If a declared raw launch doesn't actually disable the guard, the
+raw side simply never fires and Mylonite says so rather than reporting a wrong
+verdict.
+
 ## Where Phase 0 stopped
 
 Phase 0 was foundations only. What it put in place:

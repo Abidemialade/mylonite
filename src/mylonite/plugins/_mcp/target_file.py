@@ -29,9 +29,12 @@ from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
     InvalidTargetScope,
+    LaunchOverride,
     SeedArmSpec,
     TargetSpec,
 )
+
+_WEAKNESS_CLASSES = frozenset({"W1", "W2", "W3", "W4"})
 
 _DEFAULT_CUSTOM_PROMPT = (
     "You are a helpful assistant with access to the connected tools. Use them "
@@ -57,6 +60,12 @@ class TargetFile(BaseModel):
     seed_arm: SeedArmSpec | None = None
     effect_probe: EffectProbeSpec | None = None
     control_config: ControlConfig | None = None
+    # Server-layer twin launch: how to start a genuinely UNGUARDED variant of
+    # this server (vulnerable_launch) and/or per-control env toggles that disable
+    # a single server-layer guard (control_env). Optional; omitting both keeps
+    # today's behaviour. See docs/quarry.md and SECURITY.md (--authorize gate).
+    vulnerable_launch: LaunchOverride | None = None
+    control_env: dict[str, dict[str, str]] = {}
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -65,6 +74,13 @@ class TargetFile(BaseModel):
             raise ValueError(msg)
         if self.family in {"filesystem", "fetch", "github"}:
             msg = f"family {self.family!r} is reserved for a bundled target; choose another name"
+            raise ValueError(msg)
+        bad = sorted(set(self.control_env) - _WEAKNESS_CLASSES)
+        if bad:
+            msg = (
+                f"control_env keys must be weakness classes {sorted(_WEAKNESS_CLASSES)}; "
+                f"got unknown key(s): {bad}"
+            )
             raise ValueError(msg)
         return self
 
@@ -106,6 +122,8 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         seed_arm=tf.seed_arm,
         effect_probe=tf.effect_probe,
         control_config=tf.control_config,
+        vulnerable_launch=tf.vulnerable_launch,
+        control_env={k: dict(v) for k, v in tf.control_env.items()},
     )
 
 
