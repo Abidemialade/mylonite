@@ -1695,3 +1695,31 @@ def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> Non
     result = runner.invoke(app, ["scan", "--synthesize", "--target-file", str(tf)])
     assert result.exit_code == EXIT_CONFIG
     assert "authorize" in result.output.lower()
+
+
+# --- Theme D1: adaptive budget auto-size ------------------------------------
+
+
+def test_adaptive_budget_autosizes_untouched_default() -> None:
+    """An active --adaptive run with the untouched default (50) auto-raises to an
+    adaptive-appropriate budget so an 8-seed run doesn't abort mid-way."""
+    from mylonite.cli import ADAPTIVE_DEFAULT_MAX_LLM_CALLS, _adaptive_budget
+
+    budget, raised = _adaptive_budget(50, adaptive_active=True)
+    assert budget == ADAPTIVE_DEFAULT_MAX_LLM_CALLS
+    assert ADAPTIVE_DEFAULT_MAX_LLM_CALLS >= 150
+    assert raised is True
+
+
+def test_adaptive_budget_respects_explicit_value() -> None:
+    from mylonite.cli import _adaptive_budget
+
+    assert _adaptive_budget(300, adaptive_active=True) == (300, False)
+    # An explicit lower value is respected (the user opted in), not silently raised.
+    assert _adaptive_budget(80, adaptive_active=True) == (80, False)
+
+
+def test_adaptive_budget_untouched_when_not_adaptive() -> None:
+    from mylonite.cli import _adaptive_budget
+
+    assert _adaptive_budget(50, adaptive_active=False) == (50, False)
