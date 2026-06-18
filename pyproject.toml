@@ -77,7 +77,17 @@ dev = [
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.22",
+    # OS-trust-store TLS so contributors behind a corporate proxy (and Windows
+    # devs whose certifi bundle lacks the org CA) can run the live-gated tests and
+    # `mylonite doctor` without CERTIFICATE_VERIFY_FAILED. Also in `[enterprise]`
+    # for end users; the CLI auto-enables it when present.
+    "truststore>=0.9",
 ]
+# NOTE: the bundled reference target `mcp_kitchen_sink` is a SEPARATE editable
+# package (a deliberately-vulnerable server used as differential-oracle ground
+# truth). The full test suite imports it, so after `pip install -e ".[dev]"` also
+# run:  pip install -e ./reference_targets/mcp_kitchen_sink
+# (kept separate so a plain `pip install mylonite` never pulls the vulnerable agent).
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

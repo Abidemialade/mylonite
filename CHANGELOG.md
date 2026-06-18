@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Windows install guide** (`docs/install-windows.md`) covering the platform
+  friction: selecting a supported Python (3.11–3.13, not 3.14), cloning with the
+  schannel TLS backend behind a corporate proxy, the separate `mcp_kitchen_sink`
+  editable install, OS-trust-store TLS, and `PYTHONUTF8=1` for the console.
+
+### Changed
+
+- **`truststore` is now in the `[dev]` extra** (as well as `[enterprise]`), so a
+  dev install gives contributors behind a corporate proxy OS-trust-store TLS for
+  the live-gated tests and `mylonite doctor` without extra steps. The `[dev]`
+  extra also documents the separate `pip install -e ./reference_targets/mcp_kitchen_sink`
+  the full test suite needs.
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
