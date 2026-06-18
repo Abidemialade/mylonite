@@ -14,6 +14,7 @@ The engine returns a ``ScanResult`` (in-process wrapper around a serialisable
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -668,6 +669,22 @@ class ScanEngine:
 
         verdict = outcome.verdict
         evidence: dict[str, str] = {"adaptive_attempts": str(outcome.attempts)}
+        if outcome.attempts_log:
+            # Persist the strategist's refinement trace (the per-round story) so a
+            # finding records HOW it was reached, not just how many tries. Artefacts
+            # are stored un-redacted (replayable data); the CLI redacts on display.
+            evidence["adaptive_log"] = json.dumps(
+                [
+                    {
+                        "attempt": s.attempt,
+                        "injection": s.injection,
+                        "tool_calls": list(s.tool_calls),
+                        "success": s.success,
+                        "reason": s.reason[:300],
+                    }
+                    for s in outcome.attempts_log
+                ]
+            )
         if verdict is not None:
             evidence.update({k: str(v) for k, v in verdict.evidence.items()})
         trace = list(outcome.response.tool_calls) if outcome.response is not None else []

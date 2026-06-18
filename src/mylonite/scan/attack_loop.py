@@ -111,6 +111,29 @@ def discover_attack_plan(descriptor: Any) -> AttackPlan | None:
     return AttackPlan(plant_tool=plant_tool, plant_args=plant_args, drive_message=drive_message)
 
 
+#: How much of an attempt's injection body to retain in the observable log — the
+#: payload can be large and is an attack string, so it is bounded (and redacted by
+#: the CLI before display).
+_STEP_INJECTION_CHARS = 240
+
+
+@dataclass(frozen=True)
+class AttemptStep:
+    """One round of the adaptive loop, for observability (the strategist's story).
+
+    The sequence of ``injection`` values across steps is the refinement path; each
+    ``reason`` is why that round failed (what the strategist was handed to craft
+    the next variant). Captured regardless of ``--verbose-strategist``; the flag
+    only echoes it live.
+    """
+
+    attempt: int
+    injection: str
+    tool_calls: tuple[str, ...]
+    success: bool
+    reason: str
+
+
 @dataclass(frozen=True)
 class AdaptiveOutcome:
     """The result of an adaptive loop run."""
@@ -120,6 +143,8 @@ class AdaptiveOutcome:
     final_body: str
     response: AdapterResponse | None
     verdict: Verdict | None
+    #: Per-round observability log (one entry per attempt, in order).
+    attempts_log: tuple[AttemptStep, ...] = ()
 
 
 DEFAULT_MAX_ATTEMPTS = 4
@@ -160,6 +185,7 @@ class AdaptiveAttackDriver:
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         id_factory: Callable[[], str] = _mint_id,
         control_context: str | None = None,
+        on_step: Callable[[AttemptStep], None] | None = None,
     ) -> None:
         self._judge = judge
         self._strategist_model = strategist_model
@@ -170,6 +196,9 @@ class AdaptiveAttackDriver:
         # control is in force (and how it works) so it crafts payloads to evade
         # THAT specific defense — sharper than generic re-wording.
         self._control_context = control_context
+        # Observability hook (``--verbose-strategist``): called with each
+        # AttemptStep as the loop runs. The log is captured either way.
+        self._on_step = on_step
 
     async def run(
         self,
@@ -197,6 +226,7 @@ class AdaptiveAttackDriver:
         attempt = 0
         last_response: AdapterResponse | None = None
         last_verdict: Verdict | None = None
+        log: list[AttemptStep] = []
         while attempt < self._max_attempts:
             attempt += 1
             try:
@@ -241,6 +271,16 @@ class AdaptiveAttackDriver:
                 )
                 verdict = await self._judge.judge(payload, response)
             last_response, last_verdict = response, verdict
+            step = AttemptStep(
+                attempt=attempt,
+                injection=body[:_STEP_INJECTION_CHARS],
+                tool_calls=tuple(response.tool_calls),
+                success=verdict.success,
+                reason=verdict.reason,
+            )
+            log.append(step)
+            if self._on_step is not None:
+                self._on_step(step)
             if verdict.success:
                 return AdaptiveOutcome(
                     success=True,
@@ -248,6 +288,7 @@ class AdaptiveAttackDriver:
                     final_body=body,
                     response=response,
                     verdict=verdict,
+                    attempts_log=tuple(log),
                 )
             refined = await self._refine_injection(
                 weakness=seed.weakness, current_body=body, response=response, verdict=verdict
@@ -261,6 +302,7 @@ class AdaptiveAttackDriver:
             final_body=body,
             response=last_response,
             verdict=last_verdict,
+            attempts_log=tuple(log),
         )
 
     async def _attempt(

@@ -12,7 +12,12 @@ from mylonite.contracts import ComplianceTags
 from mylonite.contracts._types import AdapterResponse
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 from mylonite.scan._types import Verdict
-from mylonite.scan.attack_loop import AdaptiveAttackDriver, AdaptiveOutcome, AttackPlan
+from mylonite.scan.attack_loop import (
+    AdaptiveAttackDriver,
+    AdaptiveOutcome,
+    AttackPlan,
+    AttemptStep,
+)
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.seeds import SeedPattern
 
@@ -304,3 +309,63 @@ async def test_loop_tolerates_attempt_exception_then_finds() -> None:
 
     assert outcome.success is True
     assert outcome.attempts == 2
+
+
+# --- D2: strategist observability (per-attempt log + on_step callback) -------
+
+
+@pytest.mark.asyncio
+async def test_run_records_per_attempt_log() -> None:
+    """Every adaptive round is recorded with WHY it failed — the refinement story
+    the strategist follows, previously thrown away (only the count survived)."""
+
+    async def always_refuse(**_: object) -> object:
+        return _planner_msg("No.", None)
+
+    async def strategist_stub(**_: object) -> object:
+        return _planner_msg(_json.dumps({"injection": f"variant-{_s.token_hex(2)}"}), None)
+
+    adapter = InProcessReferenceAdapter(
+        variant="vulnerable", model="stub", completion_fn=always_refuse
+    )
+    judge = SuccessJudge(model="stub", llm_fallback=False)
+    driver = AdaptiveAttackDriver(
+        judge=judge, strategist_model="stub", completion_fn=strategist_stub, max_attempts=3
+    )
+
+    outcome = await driver.run(seed=_w2_seed(), adapter=adapter, plan=_plan())
+
+    assert len(outcome.attempts_log) == 3
+    assert [s.attempt for s in outcome.attempts_log] == [1, 2, 3]
+    assert all(isinstance(s, AttemptStep) for s in outcome.attempts_log)
+    assert all(s.success is False for s in outcome.attempts_log)
+    assert all(s.reason for s in outcome.attempts_log)  # each records why it failed
+
+
+@pytest.mark.asyncio
+async def test_on_step_callback_invoked_live_per_attempt() -> None:
+    """--verbose-strategist hooks here: on_step fires once per round as it runs."""
+    seen: list[AttemptStep] = []
+
+    async def always_refuse(**_: object) -> object:
+        return _planner_msg("No.", None)
+
+    async def strategist_stub(**_: object) -> object:
+        return _planner_msg(_json.dumps({"injection": f"variant-{_s.token_hex(2)}"}), None)
+
+    adapter = InProcessReferenceAdapter(
+        variant="vulnerable", model="stub", completion_fn=always_refuse
+    )
+    judge = SuccessJudge(model="stub", llm_fallback=False)
+    driver = AdaptiveAttackDriver(
+        judge=judge,
+        strategist_model="stub",
+        completion_fn=strategist_stub,
+        max_attempts=3,
+        on_step=seen.append,
+    )
+
+    outcome = await driver.run(seed=_w2_seed(), adapter=adapter, plan=_plan())
+
+    assert seen == list(outcome.attempts_log)
+    assert len(seen) == 3
