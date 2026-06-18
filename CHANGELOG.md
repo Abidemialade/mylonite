@@ -7,43 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.7.1] - 2026-06-18
 
-- **Oracle precision: W1/W4 false positives on the guarded side.** Two
-  deterministic success-predicates over-fired on a guarded target when the
-  planner model behaved benignly, which destabilised the differential oracle
-  (a single benign guarded-side fire trips the strict 5-run flakiness filter and
-  rejects an otherwise-valid regression test). Both predicates are now
-  model-robust and target-agnostic:
-  - `planner_summarised_against_user_intent` (W1) is **drive-aware** — it stays
-    inconclusive when the seed's `drive` explicitly solicits a summary (e.g.
-    `read_note_for_summary`), so a benign solicited summary is no longer read as
-    tool-description injection. The summary-marker set was tightened to
-    high-signal *unsolicited* phrasings (dropping incidental `summary:` / `tl;dr`).
-  - `send_email_without_confirmation` (W4) now returns a **confident
-    `success=False`** (short-circuiting the permissive LLM judge) when an
-    approval/confirmation step ran or when `send_email` only staged without
-    dispatch — instead of `None`, which previously let the judge re-introduce a
-    finding on the guarded twin. The approval step generalises beyond the
-    reference `confirm_send` via `payload.metadata['approval_tool']` /
-    `['confirmation_tool']`.
+Responds to an external v0.7.0 effectiveness assessment: hardens the differential
+oracle's precision, extends the differential machinery to server-layer-controlled
+real targets, and closes several CLI / report / packaging gaps. No breaking
+changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
+`contracts/`).
+
 ### Added
 
-- **`generate --prove-control`.** The standalone `generate` command can now emit a
-  control-efficacy test (`assert_control_holds`) — proving the control blocking a
-  finding is load-bearing (the attack lands without it, is resisted with it) —
-  instead of only the standard resists/guard test. Previously this assertion was
-  reachable only through the full `gate --prove-control` pipeline, so committing
-  the oracle's per-control verdict as a CI gate meant hand-wiring the test. Custom
-  targets only (needs `--target-file`); a reference or non-controllable finding
-  falls back to the standard test with a notice.
 - **Server-layer twin launch for the differential machinery.** Ablation,
   `validate --prove-control`, and `scan --synthesize` previously synthesised the
-  "raw"/unguarded side by emptying the *adapter-shim* controls — which is blind to
-  targets that bake their guards into the **server** (env-/profile-driven, the
-  common real architecture): the raw side stayed fully guarded, so ablation
-  classified every control `no-attack`. A target file can now declare how to run a
-  genuinely-unguarded variant:
+  "raw"/unguarded side by emptying the *adapter-shim* controls — blind to targets
+  that bake their guards into the **server** (env-/profile-driven, the common real
+  architecture): the raw side stayed fully guarded, so ablation classified every
+  control `no-attack`. A target file can now declare how to run a genuinely
+  unguarded variant:
   - `control_env` — a per-weakness map of env vars that disable one server-layer
     guard. `mylonite ablate` toggles controls individually through it (raw side
     disables all; "only control C" leaves just C on), restoring per-control
@@ -55,58 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behaviour). Launching a deliberately-unguarded server is gated by `--authorize`,
   announced on stderr, and env **values are never logged**. When a declared raw
   launch doesn't actually disable the guard, the raw side never fires and the tool
-  says so (`no-attack` + a hint) rather than emitting a wrong verdict. No contract
-  bump (the `TargetFile`/`TargetSpec` types are not under `contracts/`).
-### Changed
-
-- **`gate` reads `mylonite.yaml` like `scan`.** `gate` now accepts `--config` and
-  auto-discovers `./mylonite.yaml`, filling `target_file` / `authorize` /
-  `provider` / `model` / `max_llm_calls` from it when the matching flag is omitted
-  (an explicit flag always wins). Previously `gate` ignored the project run config
-  and exited 2 ("no target given") unless you re-passed `--target-file` — a parity
-  wart with `scan`.
-- **Clearer `generate --latest` message on a clean scan.** When the newest scan
-  found no exploits, the message now frames it as a PASS (a clean/guarded target),
-  not a bare error, and points at passing an earlier scan dir explicitly.
-### Changed
-
-- **`--adaptive` auto-sizes its LLM-call budget.** An active adaptive scan that
-  leaves `--max-llm-calls` at the single-shot default (50) now raises it to an
-  adaptive-appropriate default (200) with a notice, instead of silently aborting
-  partway through a multi-seed run (each seed can spend ~10–15 calls across its
-  retry budget). Any explicit `--max-llm-calls` (or `mylonite.yaml`) value —
-  including a deliberately low one — is respected unchanged.
-### Added
-
+  says so (`no-attack` + a hint) rather than emitting a wrong verdict.
+- **`generate --prove-control`.** The standalone `generate` command can now emit a
+  control-efficacy test (`assert_control_holds`) — proving the control blocking a
+  finding is load-bearing (the attack lands without it, is resisted with it) —
+  instead of only the standard resists/guard test. Previously this assertion was
+  reachable only through the full `gate --prove-control` pipeline. Custom targets
+  only (needs `--target-file`); a reference or non-controllable finding falls back
+  to the standard test with a notice.
 - **Strategist observability for `--adaptive`.** The adaptive loop now records a
   per-round log (the injection tried, the planner's tool calls, and *why* that
   round failed — the input the strategist refines from), where previously only the
   attempt *count* survived. The trace is persisted in the finding's evidence
   (`adaptive_log`) so a finding records HOW it was reached, and a new
   `--verbose-strategist` flag echoes each round live to stderr (payloads redacted).
-### Added
-
-- **Windows install guide** (`docs/install-windows.md`) covering the platform
-  friction: selecting a supported Python (3.11–3.13, not 3.14), cloning with the
-  schannel TLS backend behind a corporate proxy, the separate `mcp_kitchen_sink`
-  editable install, OS-trust-store TLS, and `PYTHONUTF8=1` for the console.
-
-### Changed
-
-- **`truststore` is now in the `[dev]` extra** (as well as `[enterprise]`), so a
-  dev install gives contributors behind a corporate proxy OS-trust-store TLS for
-  the live-gated tests and `mylonite doctor` without extra steps. The `[dev]`
-  extra also documents the separate `pip install -e ./reference_targets/mcp_kitchen_sink`
-  the full test suite needs.
-- **NIST AI RMF tags now appear in `mylonite report`, matching the emitted test's
-  marks.** NIST was derived (from the OWASP cross-refs) only inline when emitting a
-  test's pytest marks, while the persisted exploit JSON that `report` reads stayed
-  un-enriched — so NIST showed in the test but not the report. `generate` now
-  persists the enriched exploit, and `report` enriches compliance on read (covering
-  scan dirs and pre-existing artefacts), so OWASP / ASI / ATLAS / NIST are
-  consistent across the test, the scan report, and the validation report.
-### Added
-
 - **Stakeholder HTML report dashboard (`report --html`).** `mylonite report --html`
   now writes a structured, self-contained dashboard by default: an executive
   summary (target / verdict / run metadata), per-finding cards with a **severity
@@ -116,7 +58,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collapsible raw evidence via native `<details>` — interactivity with **zero
   JavaScript**, no CDN, and no web fonts, so it still screenshots cleanly in CI.
   The previous raw trust-panel export is preserved as `--html-style terminal`.
-  Compliance is enriched on read, so NIST appears consistently here too.
+- **Windows install guide** (`docs/install-windows.md`) covering the platform
+  friction: selecting a supported Python (3.11–3.13, not 3.14), cloning with the
+  schannel TLS backend behind a corporate proxy, the separate `mcp_kitchen_sink`
+  editable install, OS-trust-store TLS, and `PYTHONUTF8=1` for the console.
+
+### Changed
+
+- **`gate` reads `mylonite.yaml` like `scan`.** `gate` now accepts `--config` and
+  auto-discovers `./mylonite.yaml`, filling `target_file` / `authorize` /
+  `provider` / `model` / `max_llm_calls` from it when the matching flag is omitted
+  (an explicit flag always wins). Previously `gate` ignored the project run config
+  and exited 2 ("no target given") unless you re-passed `--target-file`.
+- **`--adaptive` auto-sizes its LLM-call budget.** An active adaptive scan that
+  leaves `--max-llm-calls` at the single-shot default (50) now raises it to an
+  adaptive-appropriate default (200) with a notice, instead of silently aborting
+  partway through a multi-seed run. Any explicit value (flag or `mylonite.yaml`) —
+  including a deliberately low one — is respected unchanged.
+- **Clearer `generate --latest` message on a clean scan.** When the newest scan
+  found no exploits, the message frames it as a PASS (a clean/guarded target), not
+  a bare error, and points at passing an earlier scan dir explicitly.
+- **`truststore` is now in the `[dev]` extra** (as well as `[enterprise]`), so a
+  dev install gives contributors behind a corporate proxy OS-trust-store TLS for
+  the live-gated tests and `mylonite doctor` without extra steps. The `[dev]`
+  extra also documents the separate `pip install -e ./reference_targets/mcp_kitchen_sink`
+  the full test suite needs.
+
+### Fixed
+
+- **Oracle precision: W1/W4 false positives on the guarded side.** Two
+  deterministic success-predicates over-fired on a guarded target when the planner
+  model behaved benignly, destabilising the differential oracle (a single benign
+  guarded-side fire trips the strict 5-run flakiness filter and rejects an
+  otherwise-valid regression test). Both are now model-robust and target-agnostic:
+  - `planner_summarised_against_user_intent` (W1) is **drive-aware** — it stays
+    inconclusive when the seed's `drive` explicitly solicits a summary (e.g.
+    `read_note_for_summary`); the summary-marker set was tightened to high-signal
+    *unsolicited* phrasings (dropping incidental `summary:` / `tl;dr`).
+  - `send_email_without_confirmation` (W4) returns a confident `success=False`
+    (short-circuiting the permissive LLM judge) when an approval step ran or
+    `send_email` only staged without dispatch — instead of `None`, which let the
+    judge re-introduce a finding on the guarded twin. The approval step generalises
+    beyond the reference `confirm_send` via `payload.metadata['approval_tool']` /
+    `['confirmation_tool']`.
+- **NIST AI RMF tags now appear in `mylonite report`, matching the emitted test's
+  marks.** NIST was derived (from the OWASP cross-refs) only inline when emitting a
+  test's pytest marks, while the persisted exploit JSON `report` reads stayed
+  un-enriched — so NIST showed in the test but not the report. `generate` now
+  persists the enriched exploit, and `report` enriches compliance on read, so
+  OWASP / ASI / ATLAS / NIST are consistent across the test, the scan report, and
+  the validation report.
 
 ## [0.7.0] - 2026-06-17
 
