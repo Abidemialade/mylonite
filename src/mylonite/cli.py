@@ -568,6 +568,8 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
 def _run_synthesis(
     *,
     target: str | None,
+    target_file: Path | None = None,
+    authorize: str | None = None,
     provider: str,
     model: str,
     planner_model: str,
@@ -575,17 +577,19 @@ def _run_synthesis(
     judge_model: str,
     output_dir: Path,
 ) -> None:
-    """Driver 2 flow: synthesize a tool-chain, differentially validate it against
-    the reference twins, and write the validated finding as scan artefacts.
+    """Driver 2 flow: synthesize a tool-chain and differentially validate it, then
+    write the validated finding as scan artefacts.
 
-    Reference-twin targets only for now (custom single-variant validation is a
-    later extension). Uses the live provider for the planner/strategist/synthesizer.
+    For a reference target the differential uses the bundled twins; for a custom
+    ``--target-file`` it uses the SYNTHETIC guarded twin (raw vs a W2 boundary-
+    guarded variant via the control shim), reusing the control-efficacy machinery.
+    Uses the live provider for the planner/strategist/synthesizer.
     """
-    if not (target and target.startswith("reference:")):
+    is_reference = bool(target and target.startswith("reference:"))
+    if not is_reference and target_file is None:
         typer.echo(
-            "note: --synthesize currently needs a reference twin target "
-            "(e.g. reference:vulnerable); custom single-variant targets are not yet "
-            "supported.",
+            "--synthesize needs a reference twin target (e.g. reference:vulnerable) or a "
+            "custom --target-file.",
             err=True,
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -599,8 +603,45 @@ def _run_synthesis(
     from mylonite.scan.judge import SuccessJudge
     from mylonite.scan.synthesis_runner import SynthesisRunner
 
-    def factory(variant: str) -> InProcessReferenceAdapter:
-        return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
+    if is_reference:
+        report_target = target or "reference:vulnerable"
+
+        def factory(variant: str) -> Any:
+            return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
+
+        descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
+    else:
+        if not authorize:
+            typer.echo("--authorize is required to synthesize against a custom target.", err=True)
+            raise typer.Exit(code=EXIT_CONFIG)
+        from mylonite.plugins._mcp import target_registry
+        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            tf = load_target_file(target_file)  # type: ignore[arg-type]
+            spec = build_target_spec(tf)
+        except Exception as exc:
+            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+        report_target = target or f"mcp:{spec.family}"
+        typer.echo(
+            f"--synthesize on custom target {spec.family!r}: validating the chain raw vs a "
+            "W2 boundary-guarded twin (the synthetic guarded side).",
+            err=True,
+        )
+
+        def factory(variant: str) -> Any:
+            controls = None if variant == "vulnerable" else [_boundary_control("W2", spec)]
+            return MCPStdioAdapter(
+                family=spec.family, scope=tf.scope, model=planner_model, controls=controls
+            )
+
+        descriptor = asyncio.run(
+            MCPStdioAdapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
+        )
 
     runner = SynthesisRunner(
         synthesizer=ChainSynthesizer(model=customiser_model),
@@ -609,10 +650,15 @@ def _run_synthesis(
             judge=SuccessJudge(model=judge_model),
             strategist_model=customiser_model,
         ),
-        target_id=target,
+        target_id=report_target,
     )
-    descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
-    result = asyncio.run(runner.run(descriptor))
+    try:
+        result = asyncio.run(runner.run(descriptor))
+    finally:
+        if not is_reference:
+            from mylonite.plugins._mcp import target_registry
+
+            target_registry.clear_runtime_targets()
 
     exploits = [result.exploit] if result.exploit is not None else []
     if result.chain is None:
@@ -639,7 +685,7 @@ def _run_synthesis(
             )
         ]
     report = ScanReport(
-        target_id=target,
+        target_id=report_target,
         attack_modules=["tool-chaining-synthesis"],
         provider=provider,
         model=model,
@@ -807,6 +853,17 @@ def scan(
             ),
         ),
     ] = False,
+    obfuscate: Annotated[
+        str | None,
+        typer.Option(
+            "--obfuscate",
+            help=(
+                "Obfuscate the payload body to test filter generalization "
+                "(unicode-tag | split | multilingual | base64-wrapper). The exfil "
+                "destination stays literal so detection still fires."
+            ),
+        ),
+    ] = None,
     synthesize: Annotated[
         bool,
         typer.Option(
@@ -875,6 +932,8 @@ def scan(
     if synthesize:
         _run_synthesis(
             target=target,
+            target_file=target_file,
+            authorize=authorize,
             provider=effective_provider,
             model=effective_model,
             planner_model=effective_planner_model,
@@ -1011,6 +1070,16 @@ def scan(
                 err=True,
             )
 
+    if obfuscate is not None:
+        from mylonite.scan.obfuscate import STRATEGY_NAMES
+
+        if obfuscate not in STRATEGY_NAMES:
+            typer.echo(
+                f"--obfuscate: unknown strategy {obfuscate!r}; choose from {list(STRATEGY_NAMES)}",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+
     config = ScanConfig(
         target_id=report_target_id,
         provider=effective_provider,
@@ -1023,6 +1092,7 @@ def scan(
         output_dir=output_dir,
         dry_run=dry_run,
         adaptive=adaptive and attack_driver is not None,
+        obfuscate=obfuscate,
     )
 
     engine = ScanEngine(
@@ -1305,6 +1375,14 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+def _map_compliance(exploit: Any) -> Any:
+    """Enrich a finding's compliance tags via the reference mapper (derives NIST
+    from the OWASP tags using the bundled taxonomy cross-refs)."""
+    from mylonite.plugins._reference.reference_compliance_mapper import ReferenceComplianceMapper
+
+    return exploit.model_copy(update={"compliance": ReferenceComplianceMapper().map(exploit)})
+
+
 def _emit_generated_test(
     exploit: Any,
     exploit_path: Path,
@@ -1324,7 +1402,7 @@ def _emit_generated_test(
         ReferencePytestGenerator,
     )
 
-    generated = ReferencePytestGenerator().emit(exploit)
+    generated = ReferencePytestGenerator().emit(_map_compliance(exploit))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
@@ -1471,6 +1549,24 @@ def generate(
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
+def _boundary_control(weakness: str, spec: Any) -> Any:
+    """Build a boundary control for ``weakness``, applying the target's ControlConfig
+    hints (declared egress / consequential tools, URL param, allowlist) when present;
+    falls back to the control's name heuristics otherwise."""
+    from mylonite.scan.control_shim import make_control
+
+    cfg = getattr(spec, "control_config", None)
+    if cfg is None:
+        return make_control(weakness)
+    return make_control(
+        weakness,
+        egress_tools=frozenset(cfg.egress_tools) or None,
+        url_param=cfg.egress_url_param,
+        fetch_allowlist=tuple(cfg.fetch_allowlist),
+        consequential_tools=frozenset(cfg.consequential_tools) or None,
+    )
+
+
 def _validate_custom(
     generated: Any,
     target_file: Path | None,
@@ -1478,6 +1574,9 @@ def _validate_custom(
     provider: str,
     model: str,
     iteration_timeout_s: float | None = None,
+    prove_control: bool = False,
+    randomize_exfil: bool = False,
+    adaptive: bool = False,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
@@ -1508,6 +1607,47 @@ def _validate_custom(
     def _factory() -> Any:
         return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=model)
 
+    # --prove-control: synthesize a boundary-guarded twin of the SAME real target
+    # (model held constant) so the differential leg can prove the control carries
+    # the security. Off by default — the path is the prior stability/effect/
+    # consensus gate.
+    guarded_factory: Any = None
+    control_weakness: str | None = None
+    control_context: str | None = None
+    if prove_control:
+        from mylonite.gate.mitigation import _snippet, weakness_class_for
+        from mylonite.scan.control_shim import make_control
+
+        cw = weakness_class_for(generated.exploit)
+        try:
+            make_control(cw)
+        except ValueError:
+            typer.echo(
+                f"--prove-control: no boundary control implemented for weakness {cw!r} yet "
+                "(Slice 1 ships W2). Re-run without --prove-control.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG) from None
+        control_weakness = cw
+        # Feed the strategist what control it is up against (adaptive-aware oracle).
+        control_context = f"Control {cw}: {_snippet(cw)}"
+
+        def _guarded() -> Any:
+            return MCPStdioAdapter(
+                family=spec.family, scope=tf.scope, model=model, controls=[_boundary_control(cw, spec)]
+            )
+
+        guarded_factory = _guarded
+        mode = (
+            "under ADAPTIVE PRESSURE (strategist evades the control)"
+            if adaptive
+            else "via a boundary-guarded twin"
+        )
+        typer.echo(
+            f"--prove-control: proving control {cw} is load-bearing {mode} (model held constant).",
+            err=True,
+        )
+
     typer.echo(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
         "+ multi-judge consensus + effect probe (no in-repo twin).",
@@ -1518,6 +1658,11 @@ def _validate_custom(
         provider=provider,
         model=model,
         target_adapter_factory=_factory,
+        guarded_adapter_factory=guarded_factory,
+        control_weakness=control_weakness,
+        randomize_exfil=randomize_exfil,
+        adaptive_guarded=adaptive and prove_control,
+        control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
     )
@@ -1754,6 +1899,40 @@ def validate(
             ),
         ),
     ] = None,
+    prove_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-control",
+            help=(
+                "Prove the safeguard is load-bearing: synthesize a boundary-guarded twin "
+                "of the real target (model held constant) and add a differential leg that "
+                "passes only if the attack fires on the raw target and is resisted with the "
+                "control applied (Slice 1 ships W2)."
+            ),
+        ),
+    ] = False,
+    randomize_exfil: Annotated[
+        bool,
+        typer.Option(
+            "--randomize-exfil",
+            help=(
+                "Mint a unique exfil destination per run instead of the demo address, so "
+                "the run proves the control/target stops exfil to ANY attacker destination "
+                "(generalizes) rather than blocking one literal."
+            ),
+        ),
+    ] = False,
+    adaptive: Annotated[
+        bool,
+        typer.Option(
+            "--adaptive",
+            help=(
+                "Adaptive-aware oracle (use with --prove-control): drive the guarded twin "
+                "with the adaptive loop so the strategist tries to EVADE the control, "
+                "grading whether it holds under adaptive pressure vs falls to it."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
@@ -1820,6 +1999,13 @@ def validate(
             target_file = candidate
             typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
+        if adaptive and not prove_control:
+            typer.echo(
+                "--adaptive requires --prove-control (it grades the control under adaptive "
+                "pressure). Re-run with both, or drop --adaptive.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
         report = _validate_custom(
             generated,
             target_file,
@@ -1827,6 +2013,9 @@ def validate(
             effective_provider,
             effective_model,
             iteration_timeout_s=iteration_timeout,
+            prove_control=prove_control,
+            randomize_exfil=randomize_exfil,
+            adaptive=adaptive,
         )
     else:
         typer.echo(
@@ -2510,6 +2699,29 @@ def gate(
             help="Append a labelled, unverified LLM fix suggestion to the PR body.",
         ),
     ] = False,
+    prove_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-control",
+            help=(
+                "Prove which safeguard is load-bearing: for a controllable finding "
+                "(Slice 1: W2), synthesize a boundary-guarded twin and gate on the control's "
+                "differential contribution; the emitted test + PR are reframed to "
+                "'control verified'."
+            ),
+        ),
+    ] = False,
+    randomize_exfil: Annotated[
+        bool,
+        typer.Option(
+            "--randomize-exfil",
+            help=(
+                "Mint a unique exfil destination per run so the finding proves the "
+                "control/target stops exfil to ANY attacker destination, not just the "
+                "demo address."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Scan -> generate -> validate -> (optionally) open a gating PR. The magic moment."""
     from mylonite.gate import pr as pr_mod
@@ -2615,7 +2827,30 @@ def gate(
             judge=SuccessJudge(model=effective_model),
         )
         result = asyncio.run(engine.run())
-        return result.exploits
+        # Enrich compliance (derive NIST) once so both the emitted test and the PR
+        # carry it.
+        exploits = [_map_compliance(ex) for ex in result.exploits]
+        if not prove_control:
+            return exploits
+        # --prove-control: tag each controllable finding so generate_fn emits the
+        # control test and validate_fn runs the differential. W2 only in Slice 1;
+        # non-controllable findings pass through untagged.
+        from mylonite.gate.mitigation import weakness_class_for
+        from mylonite.scan.control_shim import make_control
+
+        tagged: list[Any] = []
+        for ex in exploits:
+            cw = weakness_class_for(ex)
+            try:
+                make_control(cw)
+            except ValueError:
+                tagged.append(ex)
+                continue
+            meta = {**ex.payload.metadata, "synthetic_control": cw}
+            tagged.append(
+                ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
+            )
+        return tagged
 
     def generate_fn(exploit: Any) -> Any:
         return ReferencePytestGenerator().emit(exploit)
@@ -2651,15 +2886,36 @@ def gate(
         def _factory() -> Any:
             return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=effective_model)
 
+        # --prove-control: a controllable finding (tagged in scan_fn) gets a
+        # boundary-guarded twin so the differential leg proves the control is
+        # load-bearing (model held constant).
+        guarded_factory: Any = None
+        control_weakness = generated.exploit.payload.metadata.get("synthetic_control")
+        if control_weakness:
+            cw: str = control_weakness
+
+            def _guarded() -> Any:
+                return MCPStdioAdapter(
+                    family=spec.family,
+                    scope=tf.scope,
+                    model=effective_model,
+                    controls=[_boundary_control(cw, spec)],
+                )
+
+            guarded_factory = _guarded
+
         # gate is the fast magic-moment path: one re-drive that must FIRE at least once
         # (vuln_threshold=1, not the default iterations-1=0). Deeper multi-iteration
-        # rigor lives in nightly discovery + the committed test's assert_target_resists.
+        # rigor lives in nightly discovery + the committed test's regression assert.
         validator = DifferentialValidator(
             iterations=1,
             vuln_threshold=1,
             provider=effective_provider,
             model=effective_model,
             target_adapter_factory=_factory,
+            guarded_adapter_factory=guarded_factory,
+            control_weakness=control_weakness,
+            randomize_exfil=randomize_exfil,
             progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
         )
         return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
@@ -2692,6 +2948,197 @@ def gate(
         llm_enrich=llm_enrich,
     )
     raise typer.Exit(code=result.exit_code)
+
+
+def _render_ablation_matrix(results: list[Any], console: Console | None = None) -> None:
+    """Render the control-ablation matrix (ASCII-safe for a legacy cp1252 console)."""
+    from mylonite.scan.artefacts import _stdout_is_ascii_only
+
+    dash = "-" if _stdout_is_ascii_only() else "—"
+    if console is None:
+        console = Console()
+    table = Table(
+        title=f"Mylonite control ablation {dash} marginal contribution",
+        title_justify="left",
+        show_lines=False,
+    )
+    table.add_column("control", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("contribution", no_wrap=True)
+    table.add_column("raw/guarded fired", no_wrap=True)
+    for r in results:
+        table.add_row(
+            r.weakness,
+            r.status,
+            f"{r.contribution:+.0%}",
+            f"{r.raw_fired}/{r.guarded_fired} of {r.total}",
+        )
+    console.print(table)
+    load_bearing = [r.weakness for r in results if r.load_bearing]
+    redundant = [r.weakness for r in results if r.status == "redundant"]
+    theater = [r.weakness for r in results if r.status == "theater"]
+    if load_bearing:
+        console.print(f"load-bearing: {', '.join(load_bearing)}")
+    if redundant:
+        console.print(f"redundant (another control covers it): {', '.join(redundant)}")
+    if theater:
+        console.print(f"security theater (no marginal contribution): {', '.join(theater)}")
+
+
+@app.command()
+def ablate(
+    target_file: Annotated[
+        Path | None,
+        typer.Option("--target-file", help="Custom-target YAML (required): the app to ablate."),
+    ] = None,
+    authorize: Annotated[
+        str | None,
+        typer.Option(
+            "--authorize", help="Required: assert ownership of the target. See SECURITY.md."
+        ),
+    ] = None,
+    controls: Annotated[
+        str | None,
+        typer.Option(
+            "--controls",
+            help=(
+                "Comma-separated weakness classes to ablate (e.g. W2,W3,W4). Default: the "
+                "target's declared controls, else all implemented controls matching its "
+                "weakness_classes."
+            ),
+        ),
+    ] = None,
+    iterations: Annotated[
+        int,
+        typer.Option("--iterations", help="Scans per control per side (raw/guarded). Default 1."),
+    ] = 1,
+    provider: Annotated[str | None, typer.Option("--provider")] = None,
+    model: Annotated[str | None, typer.Option("--model")] = None,
+    redundancy: Annotated[
+        bool,
+        typer.Option(
+            "--redundancy",
+            help=(
+                "Toggle each control OFF against the FULL set (all-minus-c) instead of "
+                "on-vs-off, so the matrix tells 'redundant' (another control covers the "
+                "weakness) from 'theater'."
+            ),
+        ),
+    ] = False,
+    max_seeds: Annotated[
+        int,
+        typer.Option("--max-seeds", help="Max kitchen-sink seeds per weakness to probe. Default 2."),
+    ] = 2,
+) -> None:
+    """Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).
+
+    For each control, toggle it (on vs off, or all-minus-c with --redundancy)
+    against its weakness's attack (model held constant) and report whether it
+    actually carries the security. LIVE: launches the target's MCP server + provider.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.scan.ablation import (
+        REP_SEED_BY_WEAKNESS,
+        run_control_ablation,
+        scan_target_fires,
+        seeds_for_weaknesses,
+    )
+    from mylonite.scan.control_shim import make_control
+
+    if target_file is None:
+        typer.echo(
+            "ablate requires --target-file (the app whose controls you want to score).", err=True
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    if not authorize:
+        typer.echo("--authorize is required to ablate a custom target. See SECURITY.md.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    effective_provider = provider or "anthropic"
+    base_model = model or "claude-haiku-4-5-20251001"
+    _validate_model_string(base_model)
+    effective_model = _route_model(provider, base_model)
+
+    try:
+        tf = load_target_file(target_file)
+        spec = build_target_spec(tf)
+    except Exception as exc:
+        typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    if controls:
+        chosen = [c.strip().upper() for c in controls.split(",") if c.strip()]
+    elif spec.control_config and spec.control_config.declared:
+        chosen = list(spec.control_config.declared)
+    elif spec.control_config and spec.control_config.synthetic:
+        chosen = list(spec.control_config.synthetic)
+    else:
+        chosen = [w for w in tf.weakness_classes if w in REP_SEED_BY_WEAKNESS]
+
+    usable: list[str] = []
+    for c in chosen:
+        try:
+            make_control(c)
+        except ValueError:
+            typer.echo(f"skipping {c}: no boundary control implemented", err=True)
+            continue
+        if c not in REP_SEED_BY_WEAKNESS:
+            typer.echo(f"skipping {c}: no representative seed", err=True)
+            continue
+        usable.append(c)
+    if not usable:
+        typer.echo(
+            "no ablatable controls. Pass --controls W2,W3,W4 or declare weakness_classes / "
+            "control_config in the target file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    seeds_by_weakness = seeds_for_weaknesses(usable, max_per_weakness=max_seeds)
+    sides = 3 if redundancy else 2
+    total_scans = sum(len(seeds_by_weakness.get(c, [])) for c in usable) * iterations * sides
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    mode = "all-minus-c (redundancy)" if redundancy else "on/off"
+    typer.echo(
+        f"ablate re-drives {spec.family!r} live, toggling {', '.join(usable)} {mode} "
+        f"({iterations} run(s) each) — ~{total_scans} scoped scans.",
+        err=True,
+    )
+
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
+        adapter = MCPStdioAdapter(
+            family=spec.family,
+            scope=tf.scope,
+            model=effective_model,
+            controls=[_boundary_control(w, spec) for w in applied],
+        )
+        return scan_target_fires(
+            adapter,
+            pattern_id,
+            provider=effective_provider,
+            model=effective_model,
+            customiser_model=effective_model,
+            judge_model=effective_model,
+        )
+
+    try:
+        results = run_control_ablation(
+            controls=usable,
+            seeds_by_weakness=seeds_by_weakness,
+            scan_fires=scan_fires,
+            iterations=iterations,
+            progress=lambda msg: typer.echo(f"  … {msg}", err=True),
+            redundancy=redundancy,
+            all_controls=usable,
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    _render_ablation_matrix(results)
 
 
 @app.command()

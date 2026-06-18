@@ -603,3 +603,149 @@ def test_validate_custom_target_iteration_timeout_aborts_cleanly() -> None:
     assert report.kept is False
     stability = next(o for o in report.outcomes if o.stage == "stability")
     assert stability.passed is False
+
+
+# --- custom-target DIFFERENTIAL leg (synthetic boundary-guarded twin) -------------
+
+
+def test_custom_differential_leg_keeps_when_control_resists() -> None:
+    """Headline: a boundary-guarded twin that RESISTS while the raw target FIRES
+    proves the control is load-bearing (model held constant) → differential passes."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: _FakeCustomAdapter("true"),  # raw fires
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("false"),  # control resists
+        control_weakness="W2",
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    assert report.kept is True, report.notes
+    differential = _outcome(report, "differential")
+    assert differential.passed is True
+    assert "differential" in report.gating_legs
+    assert report.gating_formula is not None and "differential" in report.gating_formula
+    assert report.reproducibility is not None
+    assert report.reproducibility.guard_fired == 0
+    assert report.reproducibility.guard_resisted == 2
+    assert report.reproducibility.rate_gap == 1.0
+    assert "contribution +100%" in (report.notes or "")
+
+
+def test_custom_differential_leg_rejects_when_control_is_theater() -> None:
+    """A control that the attack walks straight through (guarded leaks every run)
+    has zero marginal contribution → differential fails → not kept ('theater')."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: _FakeCustomAdapter("true"),  # raw fires
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("true"),  # control does nothing
+        control_weakness="W2",
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    assert report.kept is False
+    assert report.reproducibility is not None
+    assert report.reproducibility.guard_fired == 2
+    assert report.reproducibility.rate_gap == 0.0
+
+
+def test_custom_no_guarded_factory_omits_differential_leg() -> None:
+    """Backward-compatible: with no guarded factory, the custom path is exactly
+    the prior stability/effect/consensus gate — no differential leg."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    assert "differential" not in report.gating_legs
+    assert all(o.stage != "differential" for o in report.outcomes)
+    assert report.kept is True
+
+
+# --- adaptive-aware oracle (guarded side driven by the adaptive loop) -------------
+
+
+def _adaptive_resp() -> AdapterResponse:
+    return AdapterResponse(
+        payload_pattern_id="p",
+        raw_response="ok",
+        tool_calls=["send_email"],
+        metadata={"effect_confirmed": "true", "effect_trace": "[]"},
+    )
+
+
+def test_adaptive_aware_oracle_holds_under_pressure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """raw fires; the guarded side driven by the adaptive loop cannot fire ->
+    'holds UNDER ADAPTIVE PRESSURE' and the guarded runs ran with adaptive=True."""
+    from mylonite.plugins._reference.reference_validator import _CustomRun
+
+    seen: list[bool] = []
+
+    def fake_iter(self, target, pattern_id, *, factory=None, adaptive=False):
+        seen.append(adaptive)
+        if factory is None:  # raw side fires (single-shot)
+            return _CustomRun(finding=True, effect_confirmed="true", response=_adaptive_resp())
+        return _CustomRun(finding=False, effect_confirmed="false", response=None)  # guarded resists
+
+    monkeypatch.setattr(DifferentialValidator, "_run_custom_iteration", fake_iter)
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: object(),
+        guarded_adapter_factory=lambda: object(),
+        control_weakness="W2",
+        adaptive_guarded=True,
+        control_context="Control W2: untrusted-data envelope",
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    diff = _outcome(report, "differential")
+    assert diff.passed is True
+    assert "UNDER ADAPTIVE PRESSURE" in diff.detail
+    assert report.kept is True
+    assert True in seen and False in seen  # guarded ran adaptively, raw did not
+
+
+def test_adaptive_aware_oracle_falls_to_adaptive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The adaptive strategist evades the control (guarded also fires) ->
+    'FALLS TO ADAPTIVE' and the test is not kept."""
+    from mylonite.plugins._reference.reference_validator import _CustomRun
+
+    def fake_iter(self, target, pattern_id, *, factory=None, adaptive=False):
+        return _CustomRun(finding=True, effect_confirmed="true", response=_adaptive_resp())
+
+    monkeypatch.setattr(DifferentialValidator, "_run_custom_iteration", fake_iter)
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: object(),
+        guarded_adapter_factory=lambda: object(),
+        control_weakness="W2",
+        adaptive_guarded=True,
+        control_context="Control W2: untrusted-data envelope",
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    diff = _outcome(report, "differential")
+    assert diff.passed is False
+    assert "FALLS TO ADAPTIVE" in diff.detail
+    assert report.kept is False

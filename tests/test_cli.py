@@ -1679,9 +1679,19 @@ def test_scan_exposes_synthesize_flag() -> None:
     assert "synthesize" in {p.name for p in scan_cmd.params}
 
 
-def test_scan_synthesize_requires_reference_twin_target() -> None:
-    """--synthesize against a non-reference target is refused with a clear notice
-    (custom single-variant validation is deferred) — no LLM call is made."""
+def test_scan_synthesize_needs_reference_or_target_file() -> None:
+    """--synthesize with a bare non-reference target (no --target-file) is refused
+    with a clear notice pointing at both routes — no LLM call is made."""
     result = runner.invoke(app, ["scan", "mcp:filesystem:/sandbox", "--synthesize"])
     assert result.exit_code == EXIT_CONFIG
-    assert "reference twin" in result.output
+    assert "reference twin" in result.output and "--target-file" in result.output
+
+
+def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> None:
+    """A custom --target-file synthesis routes to the synthetic-guarded-twin path
+    but requires --authorize first — no subprocess/LLM work happens without it."""
+    tf = tmp_path / "t.yaml"
+    tf.write_text("family: kitchen-sink\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", "--synthesize", "--target-file", str(tf)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "authorize" in result.output.lower()

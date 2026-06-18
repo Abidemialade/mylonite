@@ -13,13 +13,16 @@ from mylonite.contracts.compliance_mapper import CONTRACT_VERSION
 
 
 class ReferenceComplianceMapper(ComplianceMapperBase):
-    """Returns the compliance tags already present on the exploit record.
+    """Enriches a finding's tags using the bundled taxonomy.
 
-    Real mappers consult the bundled taxonomy and infer additional tags from
-    the attack pattern. This stub just passes through whatever upstream set.
+    Consults the bundled NIST AI RMF cross-references to derive NIST subcategory
+    ids from the finding's OWASP LLM/ASI tags (no per-seed NIST tagging). Other
+    frameworks pass through unchanged.
     """
 
     contract_version: ClassVar[str] = CONTRACT_VERSION
 
     def map(self, exploit: ExploitRecord) -> ComplianceTags:
-        return exploit.compliance
+        from mylonite.taxonomy.compliance import enrich_with_nist
+
+        return enrich_with_nist(exploit.compliance)

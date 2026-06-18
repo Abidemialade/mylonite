@@ -181,3 +181,56 @@ def test_llm_enrichment_is_labelled_and_opt_in():
     assert "Unverified LLM suggestion" in body_rich
     assert "untrusted envelope" in body_rich
     assert calls["n"] == 1
+
+
+def test_pr_body_shows_attack_tier_and_nist():
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    ex = ex.model_copy(
+        update={
+            "compliance": ex.compliance.model_copy(update={"nist_ai_rmf": ["MEASURE-2.7"]}),
+            "payload": ex.payload.model_copy(update={"metadata": {"attack_tier": "obfuscated"}}),
+        }
+    )
+    body = build_pr_body(ex, _report())
+    assert "Attack tier:" in body and "obfuscated" in body
+    assert "NIST MEASURE-2.7" in body
+
+
+def test_pr_body_control_efficacy_framing():
+    """A control-efficacy finding (synthetic_control metadata) reframes the PR to
+    'Control efficacy verified' with the raw/guarded rates, contribution, and the
+    boundary-proxy fidelity caveat — not the generic 'What Mylonite found'."""
+    from mylonite.contracts import ReproducibilityEvidence
+
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={
+            "payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})
+        }
+    )
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected"),
+            ValidationOutcome(stage="stability", passed=True, detail="2/2"),
+            ValidationOutcome(stage="effect", passed=True, detail="probe confirmed"),
+            ValidationOutcome(stage="consensus", passed=True, detail="agree"),
+            ValidationOutcome(stage="differential", passed=True, detail="control W2 +100%"),
+        ],
+        kept=True,
+        gating_formula="kept = build AND stability AND effect AND consensus AND differential",
+        gating_legs=["build", "stability", "effect", "consensus", "differential"],
+        reproducibility=ReproducibilityEvidence(
+            iterations=2, vuln_fired=2, guard_resisted=2, guard_fired=0, rate_gap=1.0
+        ),
+    )
+    body = build_pr_body(ex, report)
+    assert "## Control efficacy verified" in body
+    assert "## What Mylonite found" not in body
+    assert "control **W2**" in body
+    assert "contribution **+100%**" in body
+    assert "Boundary-validated control (proxy)" in body
+    # The gating section explains the with/without-control re-drive.
+    assert "with and without control **W2**" in body
+    # Mitigation snippet still present (single source of truth).
+    assert "## Suggested mitigation" in body

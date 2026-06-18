@@ -251,6 +251,11 @@ class DifferentialValidator(ValidatorBase):
         record_fixtures_dir: Path | None = None,
         metamorphic_strategies: list[str] | None = None,
         target_adapter_factory: Callable[[], Any] | None = None,
+        guarded_adapter_factory: Callable[[], Any] | None = None,
+        control_weakness: str | None = None,
+        randomize_exfil: bool = False,
+        adaptive_guarded: bool = False,
+        control_context: str | None = None,
         consensus_judges: int = 3,
         iteration_timeout_s: float | None = None,
         progress_cb: Callable[[str], None] | None = None,
@@ -268,6 +273,21 @@ class DifferentialValidator(ValidatorBase):
         # For a CUSTOM target: re-launch a fresh real adapter per run (isolation).
         # Defaults to reusing the adapter passed to validate().
         self._target_adapter_factory = target_adapter_factory
+        # Optional boundary-guarded twin factory: builds the SAME real adapter
+        # with a control applied (model held constant), enabling the differential
+        # control-efficacy leg on a custom target. None = stability/effect/
+        # consensus only (today's behaviour).
+        self._guarded_adapter_factory = guarded_adapter_factory
+        self._control_weakness = control_weakness
+        # Generalization probe: randomize the exfil destination per run so the
+        # differential proves the control/target stops exfil to ANY attacker
+        # address, not just the demo literal. Off by default.
+        self._randomize_exfil = randomize_exfil
+        # Adaptive-aware oracle: when set, the GUARDED side of the differential is
+        # driven by the adaptive loop (with control_context fed to the strategist),
+        # grading whether the control holds UNDER ADAPTIVE PRESSURE vs falls to it.
+        self._adaptive_guarded = adaptive_guarded
+        self._control_context = control_context
         self._consensus_judges = max(1, consensus_judges)
         # Defaults: vulnerable should fire almost-always (N-1), guard must
         # resist every single run (N) — a guard that leaks even once is not a
@@ -497,38 +517,129 @@ class DifferentialValidator(ValidatorBase):
             ),
             metric=None,
         )
+        outcomes = [build, stability, effect, consensus]
+        legs = ["build", "stability", "effect", "consensus"]
         kept = build.passed and stability.passed and effect.passed and consensus.passed
+        repro = ReproducibilityEvidence(iterations=n, vuln_fired=fired, guard_resisted=None)
+        notes_tail = ""
+
+        if self._guarded_adapter_factory is not None:
+            # Synthesize a guarded twin of the REAL target at the boundary and
+            # re-drive it (model held constant). The raw runs above are the
+            # "vulnerable" side; only the guarded runs are new. The success-RATE
+            # gap is the control's marginal contribution — proof the safeguard,
+            # not the model, carries the security.
+            mode_label = "adaptive guarded twin" if self._adaptive_guarded else "boundary-guarded twin"
+            guard_runs = []
+            for i in range(n):
+                self._progress(f"{mode_label}: differential run {i + 1}/{n}")
+                guard_runs.append(
+                    self._run_custom_iteration(
+                        target,
+                        pattern_id,
+                        factory=self._guarded_adapter_factory,
+                        adaptive=self._adaptive_guarded,
+                    )
+                )
+            guard_fired = sum(1 for r in guard_runs if r.finding)
+            decision = self._decide(
+                vuln_fires=fired,
+                guard_fires=guard_fired,
+                iterations=n,
+                min_rate_gap=self._min_rate_gap,
+                min_vuln_rate=self._min_vuln_rate,
+                max_guard_leak=self._max_guard_leak,
+            )
+            passed = decision.differential_passed and decision.flakiness_passed
+            control = self._control_weakness or "boundary control"
+            rate_gap = ((fired - guard_fired) / n) if n else 0.0
+            if self._adaptive_guarded:
+                phrase = (
+                    "holds UNDER ADAPTIVE PRESSURE (the adaptive loop could not make "
+                    "the guarded twin fire)"
+                    if passed
+                    else f"holds statically but FALLS TO ADAPTIVE (guarded leaked {guard_fired}/{n})"
+                )
+                detail = (
+                    f"control {control!r} {phrase}: raw fired {fired}/{n}, guarded leaked "
+                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f}"
+                )
+            else:
+                detail = (
+                    f"control {control!r}: raw fired {fired}/{n}, guarded leaked "
+                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f} "
+                    f"(need >= {self._min_rate_gap}); the safeguard - not the model "
+                    "- carries the security"
+                )
+            differential = ValidationOutcome(
+                stage="differential",
+                passed=passed,
+                detail=detail,
+                metric=decision.flakiness_metric,
+            )
+            outcomes.append(differential)
+            legs.append("differential")
+            kept = kept and differential.passed
+            repro = ReproducibilityEvidence(
+                iterations=n,
+                vuln_fired=fired,
+                guard_resisted=n - guard_fired,
+                guard_fired=guard_fired,
+                rate_gap=rate_gap,
+            )
+            mode_suffix = " under adaptive pressure" if self._adaptive_guarded else ""
+            notes_tail = (
+                f" Boundary-guarded twin (control {control!r}){mode_suffix}: leaked "
+                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}."
+            )
+
+        twin_note = (
+            " No in-repo guarded twin - validated by re-driving the REAL target N times."
+            if self._guarded_adapter_factory is None
+            else ""
+        )
         notes = (
             f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "
             f"effect-probe confirmed {effect_yes}/{n}, consensus={agree:.2f}; "
-            f"{'KEPT' if kept else 'REJECTED'} "
-            "(kept = build ∧ stability ∧ effect ∧ consensus). No in-repo guarded "
-            "twin — validated by re-driving the REAL target N times."
+            f"{'KEPT' if kept else 'REJECTED'} (kept = {' AND '.join(legs)})."
+            + twin_note
+            + notes_tail
         )
         return ValidationReport(
             test_filename=test.filename,
-            outcomes=[build, stability, effect, consensus],
+            outcomes=outcomes,
             kept=kept,
             notes=notes,
             mutation_score=0.0,
-            gating_formula="kept = build AND stability AND effect AND consensus",
-            gating_legs=["build", "stability", "effect", "consensus"],
-            reproducibility=ReproducibilityEvidence(
-                iterations=n,
-                vuln_fired=fired,
-                guard_resisted=None,
-            ),
+            gating_formula="kept = " + " AND ".join(legs),
+            gating_legs=legs,
+            reproducibility=repro,
             mutation_matrix=[],
         )
 
-    def _run_custom_iteration(self, target: TargetAdapter, pattern_id: str) -> _CustomRun:
-        """Run the attack once against the real target, scoped to one seed."""
+    def _run_custom_iteration(
+        self,
+        target: TargetAdapter,
+        pattern_id: str,
+        *,
+        factory: Callable[[], Any] | None = None,
+        adaptive: bool = False,
+    ) -> _CustomRun:
+        """Run the attack once against the real target, scoped to one seed.
+
+        ``factory`` overrides the adapter source for this run (e.g. the
+        boundary-guarded twin factory); it defaults to the raw target factory.
+        ``adaptive`` drives the run through the adaptive plant-drive-refine loop
+        (with the validator's ``control_context`` fed to the strategist) — used by
+        the adaptive-aware oracle to attack the guarded twin under adaptive pressure.
+        """
         from mylonite.plugins.registry import discover
         from mylonite.scan.customiser import PayloadCustomiser
         from mylonite.scan.engine import ScanConfig, ScanEngine
         from mylonite.scan.judge import SuccessJudge
 
-        adapter = self._target_adapter_factory() if self._target_adapter_factory else target
+        chosen_factory = factory or self._target_adapter_factory
+        adapter = chosen_factory() if chosen_factory else target
         modules = [
             m
             for m in discover("mylonite.attack_modules")
@@ -543,7 +654,20 @@ class DifferentialValidator(ValidatorBase):
             max_concurrent=1,
             pattern_id_filter=pattern_id,
             wall_clock_timeout_s=self._iteration_timeout_s,
+            randomize_exfil=self._randomize_exfil,
+            adaptive=adaptive,
         )
+        judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
+        attack_driver = None
+        if adaptive:
+            from mylonite.scan.attack_loop import AdaptiveAttackDriver
+
+            attack_driver = AdaptiveAttackDriver(
+                judge=judge,
+                strategist_model=self._customiser_model,
+                completion_fn=self._completion_fn,
+                control_context=self._control_context,
+            )
         engine = ScanEngine(
             config=config,
             adapter=adapter,
@@ -551,7 +675,8 @@ class DifferentialValidator(ValidatorBase):
             customiser=PayloadCustomiser(
                 model=self._customiser_model, completion_fn=self._completion_fn
             ),
-            judge=SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn),
+            judge=judge,
+            attack_driver=attack_driver,
         )
         result = asyncio.run(engine.run())
         if result.exploits:

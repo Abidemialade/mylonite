@@ -316,11 +316,13 @@ def test_public_surface() -> None:
     """The stability-promised surface: the helpers + error class."""
     assert testkit.__all__ == [
         "TestkitFixtureError",
+        "assert_control_holds",
         "assert_guard_holds",
         "assert_synthesized_chain_resists",
         "assert_target_resists",
         "load_exploit",
     ]
+    assert callable(testkit.assert_control_holds)
     assert callable(testkit.assert_guard_holds)
     assert callable(testkit.assert_synthesized_chain_resists)
     assert callable(testkit.load_exploit)

@@ -268,6 +268,66 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
     )
 
 
+def _exploit_fired(result: ScanResult, exploit: ExploitRecord) -> bool:
+    """True iff the scan fired the exploit for ``exploit.pattern_id``."""
+    pid = exploit.pattern_id
+    return any(e.pattern_id == pid for e in result.exploits) or any(
+        a.outcome == "finding" for a in result.report.attempts if a.pattern_id == pid
+    )
+
+
+def _run_target_scan(
+    *,
+    spec: Any,
+    scope: str | None,
+    pattern_id: str,
+    model: str,
+    provider: str,
+    controls: list[Any] | None,
+    completion_fn: Callable[..., Any] | None,
+) -> ScanResult:
+    """Re-drive the declared target once, scoped to one seed.
+
+    ``controls`` (when non-empty) wraps the adapter boundary to synthesize a
+    guarded twin of the real target — the model is held constant, only the
+    control differs. Shared by :func:`assert_target_resists` (raw, no controls)
+    and :func:`assert_control_holds` (raw + boundary-guarded).
+    """
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins.registry import discover
+    from mylonite.scan.customiser import PayloadCustomiser
+    from mylonite.scan.engine import ScanConfig, ScanEngine
+    from mylonite.scan.judge import SuccessJudge
+
+    modules = [
+        m
+        for m in discover("mylonite.attack_modules")
+        if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
+    ]
+    adapter = MCPStdioAdapter(
+        family=spec.family,
+        scope=scope,
+        model=model,
+        completion_fn=completion_fn,
+        controls=controls,
+    )
+    config = ScanConfig(
+        target_id=f"mcp:{spec.family}",
+        provider=provider,
+        model=model,
+        max_concurrent=1,
+        pattern_id_filter=pattern_id,
+    )
+    engine = ScanEngine(
+        config=config,
+        adapter=adapter,
+        attack_modules=modules,
+        customiser=PayloadCustomiser(model=model, completion_fn=completion_fn),
+        judge=SuccessJudge(model=model, completion_fn=completion_fn),
+    )
+    return asyncio.run(engine.run())
+
+
 async def _run_guarded_scan(
     exploit: ExploitRecord,
     *,
@@ -408,12 +468,7 @@ def assert_target_resists(
     """
     from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
-    from mylonite.plugins.registry import discover
-    from mylonite.scan.customiser import PayloadCustomiser
-    from mylonite.scan.engine import ScanConfig, ScanEngine
-    from mylonite.scan.judge import SuccessJudge
 
     # The CLI's _root callback never runs under pytest, so set up the OS trust
     # store here too — otherwise this live check fails CERTIFICATE_VERIFY_FAILED
@@ -436,32 +491,109 @@ def assert_target_resists(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     try:
-        modules = [
-            m
-            for m in discover("mylonite.attack_modules")
-            if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
-        ]
-        adapter = MCPStdioAdapter(
-            family=spec.family, scope=tf.scope, model=model, completion_fn=_completion_fn
-        )
-        config = ScanConfig(
-            target_id=f"mcp:{spec.family}",
-            provider=provider,
+        result = _run_target_scan(
+            spec=spec,
+            scope=tf.scope,
+            pattern_id=exploit.pattern_id,
             model=model,
-            max_concurrent=1,
-            pattern_id_filter=exploit.pattern_id,
+            provider=provider,
+            controls=None,
+            completion_fn=_completion_fn,
         )
-        engine = ScanEngine(
-            config=config,
-            adapter=adapter,
-            attack_modules=modules,
-            customiser=PayloadCustomiser(model=model, completion_fn=_completion_fn),
-            judge=SuccessJudge(model=model, completion_fn=_completion_fn),
-        )
-        result = asyncio.run(engine.run())
     finally:
         target_registry.clear_runtime_targets()
     _assert_from_result(result, exploit)
+
+
+def assert_control_holds(
+    exploit: ExploitRecord,
+    *,
+    target_file: str | os.PathLike[str],
+    control: str,
+    model: str = "claude-haiku-4-5",
+    provider: str = "anthropic",
+    _completion_fn: Callable[..., Any] | None = None,
+) -> None:
+    """Assert a boundary CONTROL is load-bearing for ``exploit`` on the real target.
+
+    Differential, model held constant: the attack must FIRE against the raw
+    target and be RESISTED once ``control`` (e.g. ``"W2"``) is applied at the
+    adapter boundary (see :mod:`mylonite.scan.control_shim`). This is the
+    committed control-efficacy gate — it FAILS if either:
+
+    * the control stops carrying the security (the boundary-guarded variant now
+      fires — a regression in the control, or in your server-side implementation
+      of it), or
+    * the underlying attack no longer reproduces on the raw target, in which
+      case the test would be theater and must not pass green.
+
+    LIVE check (launches the target's MCP server and calls the provider), so
+    emitted tests gate it behind ``MYLONITE_LIVE_TARGET=1``. ``_completion_fn``
+    is the test-only offline seam.
+
+    Raises
+    ------
+    AssertionError:
+        The control did not hold (guarded variant fired), or the attack no
+        longer reproduces on the raw target.
+    TestkitFixtureError:
+        The guarded run was inconclusive (only skip/error outcomes).
+    ValueError:
+        ``control`` names a weakness class with no implemented boundary control.
+    """
+    from mylonite._bootstrap import enable_truststore
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.scan.control_shim import make_control
+
+    enable_truststore()
+
+    target_path = Path(target_file)
+    if not target_path.is_file():
+        raise FileNotFoundError(
+            f"target file {target_path} not found. The emitted control test needs "
+            "the target YAML co-located as 'target.yaml'. Re-run "
+            "`mylonite generate <exploit> --target-file <your-target>.yaml`, or copy your "
+            "scan's target YAML next to this test as target.yaml."
+        )
+    tf = load_target_file(target_path)
+    spec = build_target_spec(tf)
+    # Resolve the boundary control up front so a bad control name fails clearly
+    # (ValueError) before we spawn any subprocess.
+    boundary_control = make_control(control)
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    try:
+        raw = _run_target_scan(
+            spec=spec,
+            scope=tf.scope,
+            pattern_id=exploit.pattern_id,
+            model=model,
+            provider=provider,
+            controls=None,
+            completion_fn=_completion_fn,
+        )
+        guarded = _run_target_scan(
+            spec=spec,
+            scope=tf.scope,
+            pattern_id=exploit.pattern_id,
+            model=model,
+            provider=provider,
+            controls=[boundary_control],
+            completion_fn=_completion_fn,
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    if not _exploit_fired(raw, exploit):
+        raise AssertionError(
+            f"control {control!r} could not be shown load-bearing: the attack "
+            f"{exploit.pattern_id!r} no longer fires against the RAW target, so there is "
+            "nothing for the control to stop (this test would be theater). Re-discover "
+            "the exploit with `mylonite scan`."
+        )
+    # Guarded must resist — reuse the canonical resist / inconclusive / regression logic.
+    _assert_from_result(guarded, exploit)
 
 
 def assert_synthesized_chain_resists(
@@ -527,6 +659,7 @@ def assert_synthesized_chain_resists(
 
 __all__ = [
     "TestkitFixtureError",
+    "assert_control_holds",
     "assert_guard_holds",
     "assert_synthesized_chain_resists",
     "assert_target_resists",
