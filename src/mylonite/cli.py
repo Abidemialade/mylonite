@@ -1372,7 +1372,10 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
         if not found:
             typer.echo(
                 f"the latest scan ({scan_dir}) found no exploits — nothing to generate. "
-                "Run `mylonite scan <target>` against a vulnerable target first.",
+                "A no-finding scan is a PASS, not an error: it usually means the target "
+                "is clean or guarded. To generate from an earlier scan that DID find "
+                "something, pass that scan dir explicitly, e.g. "
+                "`mylonite generate .mylonite/scans/<earlier-run>`.",
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
@@ -2748,6 +2751,17 @@ def gate(
             help="Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
         ),
     ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / budget) — the same one `scan` reads. Auto-discovered "
+                "from ./mylonite.yaml when present; an explicit flag always wins."
+            ),
+        ),
+    ] = None,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -2831,6 +2845,32 @@ def gate(
         DifferentialValidator,
         ReferenceVulnerableOracle,
     )
+
+    # Declarative run config (mylonite.yaml): mirror `scan` so `gate` fills any flag
+    # the user omitted (target_file / authorize / provider / model / budget) from a
+    # project config. Auto-discovered from ./mylonite.yaml when present and no
+    # --config is passed; an explicit flag always wins. Closes the parity gap where
+    # `gate` required --target-file even though the project's mylonite.yaml set it.
+    config_path = run_config_path
+    if config_path is None and Path("mylonite.yaml").is_file():
+        config_path = Path("mylonite.yaml")
+    if config_path is not None:
+        from mylonite.config import load_run_config
+
+        try:
+            rc = load_run_config(config_path)
+        except Exception as exc:
+            typer.echo(f"invalid config {config_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        if run_config_path is None:
+            typer.echo(f"gate: using {config_path} (auto-discovered).", err=True)
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        if max_llm_calls == 50 and rc.max_llm_calls is not None:
+            # 50 is the option default; only the config overrides an untouched flag.
+            max_llm_calls = rc.max_llm_calls
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"

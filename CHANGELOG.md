@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   launch doesn't actually disable the guard, the raw side never fires and the tool
   says so (`no-attack` + a hint) rather than emitting a wrong verdict. No contract
   bump (the `TargetFile`/`TargetSpec` types are not under `contracts/`).
+### Changed
+
+- **`gate` reads `mylonite.yaml` like `scan`.** `gate` now accepts `--config` and
+  auto-discovers `./mylonite.yaml`, filling `target_file` / `authorize` /
+  `provider` / `model` / `max_llm_calls` from it when the matching flag is omitted
+  (an explicit flag always wins). Previously `gate` ignored the project run config
+  and exited 2 ("no target given") unless you re-passed `--target-file` — a parity
+  wart with `scan`.
+- **Clearer `generate --latest` message on a clean scan.** When the newest scan
+  found no exploits, the message now frames it as a PASS (a clean/guarded target),
+  not a bare error, and points at passing an earlier scan dir explicitly.
 
 ## [0.7.0] - 2026-06-17
 
