@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Oracle precision: W1/W4 false positives on the guarded side.** Two
+  deterministic success-predicates over-fired on a guarded target when the
+  planner model behaved benignly, which destabilised the differential oracle
+  (a single benign guarded-side fire trips the strict 5-run flakiness filter and
+  rejects an otherwise-valid regression test). Both predicates are now
+  model-robust and target-agnostic:
+  - `planner_summarised_against_user_intent` (W1) is **drive-aware** — it stays
+    inconclusive when the seed's `drive` explicitly solicits a summary (e.g.
+    `read_note_for_summary`), so a benign solicited summary is no longer read as
+    tool-description injection. The summary-marker set was tightened to
+    high-signal *unsolicited* phrasings (dropping incidental `summary:` / `tl;dr`).
+  - `send_email_without_confirmation` (W4) now returns a **confident
+    `success=False`** (short-circuiting the permissive LLM judge) when an
+    approval/confirmation step ran or when `send_email` only staged without
+    dispatch — instead of `None`, which previously let the judge re-introduce a
+    finding on the guarded twin. The approval step generalises beyond the
+    reference `confirm_send` via `payload.metadata['approval_tool']` /
+    `['confirmation_tool']`.
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
