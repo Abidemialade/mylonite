@@ -1486,6 +1486,41 @@ def _emit_generated_test(
         typer.echo(f"Next: mylonite validate {out_dir}")
 
 
+def _tag_control_for_generate(exploit: Any) -> Any:
+    """Stamp ``synthetic_control`` so the generator emits an ``assert_control_holds``
+    test (``generate --prove-control``), turning the control-efficacy oracle's
+    verdict into a committable CI gate.
+
+    Passes the exploit through unchanged (with a notice) for a reference target or
+    a weakness with no boundary control — those can't be emitted as a committable
+    custom-target control test. Mirrors the tagging ``gate --prove-control`` does.
+    """
+    from mylonite.gate.mitigation import weakness_class_for
+    from mylonite.scan.control_shim import make_control
+
+    if exploit.target_id.startswith("reference:"):
+        typer.echo(
+            f"--prove-control: {exploit.pattern_id} targets a reference twin; emitting "
+            "the standard guard test instead.",
+            err=True,
+        )
+        return exploit
+    cw = weakness_class_for(exploit)
+    try:
+        make_control(cw)
+    except ValueError:
+        typer.echo(
+            f"--prove-control: no boundary control for weakness {cw!r} "
+            f"({exploit.pattern_id}); emitting the standard target-resists test instead.",
+            err=True,
+        )
+        return exploit
+    meta = {**exploit.payload.metadata, "synthetic_control": cw}
+    return exploit.model_copy(
+        update={"payload": exploit.payload.model_copy(update={"metadata": meta})}
+    )
+
+
 @app.command()
 def generate(
     scan_path: Annotated[
@@ -1519,6 +1554,19 @@ def generate(
             ),
         ),
     ] = None,
+    prove_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-control",
+            help=(
+                "Emit a control-efficacy test (assert_control_holds) that proves the "
+                "control blocking this finding is load-bearing — the attack lands "
+                "without it and is resisted with it — instead of the standard "
+                "resists/guard test. Custom targets only (needs --target-file); a "
+                "reference or non-controllable finding falls back to the standard test."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Emit a pytest regression test from a confirmed exploit.
 
@@ -1526,7 +1574,9 @@ def generate(
     by ``mylonite scan``), renders a testkit-based pytest file, and writes it next
     to a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a
     CUSTOM target, pass ``--target-file`` so the target YAML is co-located as
-    ``target.yaml`` (the live test needs it). Prints what to run next.
+    ``target.yaml`` (the live test needs it). With ``--prove-control`` the emitted
+    test asserts the control is load-bearing (``assert_control_holds``) rather than
+    just that the target resists. Prints what to run next.
     """
     import json
 
@@ -1546,6 +1596,9 @@ def generate(
         except (FileNotFoundError, ValueError) as exc:
             typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
             raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        if prove_control:
+            exploit = _tag_control_for_generate(exploit)
 
         # With multiple findings, give each its own subdir so tests don't clobber
         # each other; a single finding keeps the exact dir the operator chose.
