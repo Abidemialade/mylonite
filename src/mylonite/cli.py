@@ -2149,11 +2149,22 @@ def report(
         typer.Option(
             "--html",
             help=(
-                "Also write a standalone, shareable HTML trust panel. Takes a file "
-                "PATH argument, e.g. --html trust.html (not a bare flag)."
+                "Also write a standalone, shareable HTML report. Takes a file "
+                "PATH argument, e.g. --html report.html (not a bare flag)."
             ),
         ),
     ] = None,
+    html_style: Annotated[
+        str,
+        typer.Option(
+            "--html-style",
+            help=(
+                "HTML style: 'dashboard' (structured exec summary + per-finding "
+                "severity + compliance + collapsible evidence, default) or 'terminal' "
+                "(the raw trust-panel export). Both are self-contained (no JS/CDN)."
+            ),
+        ),
+    ] = "dashboard",
 ) -> None:
     """Render a saved scan or validation as a trust panel (offline, no LLM).
 
@@ -2164,15 +2175,28 @@ def report(
     coverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no
     loadable artefact is found.
     """
-    import json
-
     from rich.console import Console as _Console
 
+    if html is not None and html_style not in ("dashboard", "terminal"):
+        typer.echo(
+            f"--html-style {html_style!r} is not valid; choose 'dashboard' or 'terminal'.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
     kind, path = _locate_report_artefact(target)
-    # A recording console only when exporting HTML (keeps the terminal path lean).
-    console = _Console(record=html is not None)
+    # A recording console only when exporting the terminal HTML style.
+    record = html is not None and html_style == "terminal"
+    console = _Console(record=record)
+
+    # Captured for the dashboard renderer (enriched so NIST is present everywhere).
+    vreport: Any = None
+    sreport: Any = None
+    dashboard_exploit: Any = None
+    dashboard_exploits: list[Any] = []
 
     if kind == "validation":
+        from mylonite import testkit
         from mylonite.contracts import ValidationReport
 
         try:
@@ -2184,16 +2208,18 @@ def report(
         # Compliance tags from the co-located exploit, if present.
         exploit_matches = sorted(path.parent.glob("exploit_*.json"))
         if exploit_matches:
-            from mylonite import testkit
-
             try:
-                exploit = testkit.load_exploit(exploit_matches[0])
-                console.print(f"compliance: {_compliance_tags_line(exploit.compliance)}")
-                console.print(f"target: {exploit.target_id}  pattern: {exploit.pattern_id}")
+                dashboard_exploit = _map_compliance(testkit.load_exploit(exploit_matches[0]))
+                console.print(f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}")
+                console.print(
+                    f"target: {dashboard_exploit.target_id}  "
+                    f"pattern: {dashboard_exploit.pattern_id}"
+                )
             except (FileNotFoundError, ValueError):
                 pass
         console.print(f"artefacts: {path.parent}")
     else:
+        from mylonite import testkit
         from mylonite.contracts._types import ScanReport
         from mylonite.scan.artefacts import render_summary
         from mylonite.scan.engine import ScanResult
@@ -2206,24 +2232,36 @@ def report(
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console.print(render_summary(result), markup=False)
-        # Compliance tags aggregated across the co-located exploit files.
+        # Compliance tags aggregated across the co-located exploit files, enriched
+        # on read (derive NIST from OWASP) so it matches the emitted test's marks.
         tags: set[str] = set()
         target_id = sreport.target_id
         for exploit_file in sorted(path.parent.glob("exploit_*.json")):
             try:
-                data = json.loads(exploit_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                exploit = _map_compliance(testkit.load_exploit(exploit_file))
+            except (FileNotFoundError, ValueError, OSError):
                 continue
-            c = data.get("compliance", {})
-            for key in ("owasp_llm", "owasp_asi", "mitre_atlas", "nist_ai_rmf"):
-                tags.update(c.get(key) or [])
+            dashboard_exploits.append(exploit)
+            c = exploit.compliance
+            for ids in (c.owasp_llm, c.owasp_asi, c.mitre_atlas, c.nist_ai_rmf):
+                tags.update(ids)
         if tags:
             console.print(f"compliance: {', '.join(sorted(tags))}")
         console.print(f"target: {target_id}  artefacts: {path.parent}")
 
     if html is not None:
-        html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
-        typer.echo(f"Wrote HTML trust panel: {html}")
+        if html_style == "dashboard":
+            from mylonite.report import render_scan_html, render_validation_html
+
+            page = (
+                render_validation_html(vreport, dashboard_exploit)
+                if kind == "validation"
+                else render_scan_html(sreport, dashboard_exploits)
+            )
+            html.write_text(page, encoding="utf-8")
+        else:
+            html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
+        typer.echo(f"Wrote HTML report: {html} (style: {html_style})")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 

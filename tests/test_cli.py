@@ -1495,16 +1495,32 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
-def test_report_html_export(tmp_path: Path) -> None:
+def test_report_html_export_terminal_style(tmp_path: Path) -> None:
+    """The 'terminal' style preserves the raw trust-panel export (kill matrix)."""
     gen = tmp_path / "gen"
     _write_validation_report_json(gen)
     html = tmp_path / "panel.html"
-    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    result = runner.invoke(
+        app, ["report", str(gen), "--html", str(html), "--html-style", "terminal"]
+    )
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert html.is_file()
     body = html.read_text(encoding="utf-8")
     assert "<html" in body.lower()
     assert "kill matrix" in body
+
+
+def test_report_html_export_dashboard_is_default(tmp_path: Path) -> None:
+    """`report --html` defaults to the structured dashboard (self-contained)."""
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    html = tmp_path / "panel.html"
+    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    body = html.read_text(encoding="utf-8")
+    assert "<!doctype html" in body.lower()
+    assert "Mylonite validation report" in body
+    assert "<script" not in body.lower()  # self-contained, no JS
 
 
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
