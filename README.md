@@ -15,12 +15,16 @@ that work belongs to SAST/DAST tools.
 The full product thesis, market positioning, and phased build plan live in
 [ROADMAP.md](./ROADMAP.md).
 
-> **Status:** Phases 0–2 shipped. v0.5.0 added multi-provider LLM support
-> and custom MCP targets. **v0.6.0 (Phase 3, in progress) brings the
-> end-to-end `scan → gating PR` flow**: `mylonite gate`, a reusable
-> GitHub Action (`Abidemialade/mylonite/gate-action@v1`), and cost-tiered
-> CI workflow templates (cheap per-PR gate + nightly discovery). See
-> [CHANGELOG.md](./CHANGELOG.md) and the
+> **Status:** Phases 0–3 shipped. v0.5.0 added multi-provider LLM support
+> and custom MCP targets; **v0.6.0 (Phase 3) shipped the end-to-end
+> `scan → gating PR` flow** — `mylonite gate`, a reusable GitHub Action
+> (`Abidemialade/mylonite/gate-action@v1`), and cost-tiered CI workflow
+> templates (cheap per-PR gate + nightly discovery). **Unreleased (on `main`)
+> is the depth release**: a *control-efficacy oracle* that holds the model
+> constant and proves which safeguard is actually load-bearing on a real
+> target (`validate --prove-control`, `mylonite ablate`), the adaptive loop
+> and tool-chaining synthesis on real/custom targets, and payload-obfuscation
+> attack tiers. See [CHANGELOG.md](./CHANGELOG.md) and the
 > [issue tracker](https://github.com/Abidemialade/mylonite/issues) for
 > what is and isn't landed today. `pip install mylonite` lands with v0.6.0;
 > install is still clone-first until then.
@@ -111,7 +115,7 @@ validation evidence, and a human-applied suggested fix. Full guide:
 [docs/ci-gating.md](./docs/ci-gating.md). Behind a corporate network, see
 [docs/enterprise-networking.md](./docs/enterprise-networking.md).
 
-## What works today (v0.5.0 / v0.6.0-dev)
+## What works today (v0.6.0 + unreleased depth on `main`)
 
 - **`mylonite gate <target>`** — the end-to-end magic moment: scan → generate
   → validate → optionally open a gating PR. Writes the regression test and
@@ -123,14 +127,30 @@ validation evidence, and a human-applied suggested fix. Full guide:
   plus real open-source MCP servers — `mcp:filesystem:<sandbox>`,
   `mcp:fetch`, and `mcp:github:<owner/repo>` (these need an LLM API key,
   `uv`/`uvx`, and an explicit `--authorize`). Custom MCP apps: pass
-  `--target-file target.yaml --authorize <scope>`.
+  `--target-file target.yaml --authorize <scope>`. Depth flags: `--adaptive`
+  (multi-step session loop on real targets), `--obfuscate <strategy>`
+  (unicode-tag / split / multilingual / base64-wrapper attack tiers), and
+  `--synthesize` (tool-chaining synthesis; now works on `--target-file` too).
 - **`mylonite generate [SCAN_PATH]`** — emit a `pytest` regression test from
   a confirmed exploit (offline, no LLM). Pass `--latest` to auto-pick the
   newest scan, or `--target-file` when the scan was against a custom target.
+  Emitted tests carry OWASP/ASI/ATLAS/NIST tags (NIST auto-derived) and the
+  attack tier.
 - **`mylonite validate <generated-dir>`** — run the differential-oracle
   validator live (real LLM, Haiku) to prove the test is meaningful: it must
   fail on the vulnerable twin and pass on the guarded one across multiple
   runs. Pass `--target-file` for custom targets (re-drives the real app).
+- **`mylonite validate --prove-control [--adaptive]`** — the **control-efficacy
+  oracle** (the deepened moat). Holds the model constant and varies only the
+  safeguard: the attack must fire on the raw target and be resisted once a
+  canonical control is applied at the adapter boundary (a *synthetic guarded
+  twin*), proving the control — not the model — carries the security. Add
+  `--adaptive` to grade whether the control *holds under an adaptive attacker*
+  vs. only static ones.
+- **`mylonite ablate <target>`** — the control-ablation matrix: scores each
+  safeguard's marginal contribution (load-bearing vs. security-theater), with
+  `--redundancy` to find controls another control already covers and
+  `--max-seeds` to probe multiple seeds per weakness.
 - **`mylonite demo`** — zero-config, offline, deterministic playground that
   replays committed LLM fixtures to find four exploits on the Quarry and
   none on its guarded twin. `--live` re-runs for real (needs a key).

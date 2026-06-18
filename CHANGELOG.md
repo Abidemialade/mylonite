@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Control-efficacy oracle on real targets (Slice 1).** Mylonite can now prove
+  which safeguard is load-bearing on a real MCP target, not just the bundled
+  reference twin. A `ControlServerShim` (`mylonite.scan.control_shim`) synthesizes
+  a *guarded twin* of a real target by applying a canonical control at the adapter
+  boundary (Slice 1 ships **W2**, the untrusted-data envelope) — the model is held
+  constant, so the differential measures the *control's* marginal contribution.
+  Only the planner's view is guarded; the attacker's plant and the effect probe
+  bypass the shim, so the measurement stays honest. `DifferentialValidator` gains
+  an optional `guarded_adapter_factory`; for a custom target it adds a
+  `differential` leg (reusing the statistical `_decide`): the attack must fire on
+  the raw target and be resisted with the control, scored as a control-contribution
+  rate gap. No contract bump (reuses the `differential` stage +
+  `ReproducibilityEvidence`). The emitted regression test and the gating PR are
+  reframed to "control verified load-bearing — fails if it regresses", with an
+  explicit boundary-proxy fidelity caveat.
+- **`mylonite.testkit.assert_control_holds`** — new public testkit gate (a
+  stability-promised surface): asserts a boundary control is load-bearing (the
+  attack fires on the raw target and is resisted once the control is applied). The
+  reference pytest generator emits it for control-efficacy findings (those
+  carrying `synthetic_control` metadata).
+- **Per-run exfil-destination randomization (`--randomize-exfil`).** Mints a
+  unique, fully-distinct exfil destination per run (reserved `.test` TLD, sharing
+  no substring with the demo literal) and keys the success predicate on the
+  minted token, so a finding proves the control/target stops exfil to ANY
+  attacker destination, not just the one demo address. The destination predicates
+  (`send_email_to_attacker`, `web_fetch_to_unauthorised_url`) now read the
+  per-payload token, defaulting to the demo literal — so behaviour is unchanged
+  with the flag off, and the recorded-fixture replay path never randomizes. Wired
+  into `validate` and `gate`.
+- **Full boundary control set (W1-W4) + control-ablation matrix (`mylonite ablate`).**
+  Adds the W1 tool-description sanitizer (strips `(Note:)` / `<IMPORTANT>` / HTML-comment
+  / bracketed-directive smuggles and non-ASCII / invisible-tag-char ASCII-smuggling),
+  W3 egress host-allowlist gate, and W4 confirm-gate (blocks unconfirmed consequential
+  actions). `mylonite ablate` scores each safeguard's marginal contribution on a real
+  target — toggling each control on vs off against its weakness (model held constant) —
+  and reports load-bearing vs "security theater". An optional `control_config` in the
+  target YAML declares egress / consequential tools and the URL param so W3/W4 are
+  precise on an arbitrary tool surface (name heuristics otherwise).
+- **Safeguard-aware adaptive strategist.** The `AdaptiveAttackDriver` accepts a
+  `control_context` describing the active boundary control (and how it works), so
+  on a control-guarded target it crafts injections to evade THAT specific defense
+  rather than re-wording blindly.
+- **Stateful MCP sessions — `--adaptive` now works on real targets.**
+  `MCPStdioAdapter` implements `SupportsAttackSession.open_session`, returning a
+  session that persists one subprocess across `call_tool` (raw plant) +
+  `drive_planner` (planner view, boundary-control-guarded) and closes it cleanly
+  (open/use/close in one coroutine, verified against a real subprocess — no anyio
+  cancel-scope violation). Previously `--adaptive` silently degraded to
+  single-shot on every real MCP target. The engine probes the session once before
+  activating the adaptive path and falls back to single-shot if it can't open, so
+  a target whose server fails to spawn never reports a misleading "nothing found".
+- **Adaptive-aware control oracle (`validate --prove-control --adaptive`).** The
+  headline depth capability: drive the *guarded* side of the control-efficacy
+  differential under the adaptive loop (with the active control fed to the
+  safeguard-aware strategist via `control_context`), while the raw side stays
+  single-shot. The verdict now distinguishes a control that "holds under adaptive
+  pressure" from one that "holds static but falls to adaptive" — grading control
+  *robustness*, not just presence. `--adaptive` requires `--prove-control`. No
+  contract bump (reuses `_decide` + the `differential` stage).
+- **Adaptive-path effect-probe rigor.** Adaptive findings on real targets now get
+  the same judge rigor as the single-shot path: `_MCPAttackSession.drive_planner`
+  stamps `payload_delivered` and runs the target's `effect_probe` against the
+  **raw** session (bypassing the control shim — the honesty invariant), so the
+  judge's effect-probe override applies on the adaptive path and a "fired" verdict
+  reflects a confirmed effect, not just a plausible reply.
+- **Payload obfuscation as live attack tiers (`scan --obfuscate <strategy>`).**
+  Tests whether a filter/control generalizes beyond plaintext: `unicode-tag`
+  (invisible-tag-char ASCII smuggling), `split` (payload-splitting), `multilingual`
+  (fixed phrase table, no LLM), and `base64-wrapper` (encodes the instruction
+  wrapper only). Every transform keeps the exfil destination **literal** so the
+  body-agnostic success predicates still match the emitted tool-call blob. Stamps
+  `payload.metadata["obfuscation"]`; the recorded-fixture replay path never
+  obfuscates. Deterministic and pure.
+- **Effect-trace-aware chain escalation + chains on real custom targets.**
+  `ChainAttackDriver._next_drive` now synthesizes turn N+1 from turn N's per-step
+  effect trace + the judge's reason via the strategist (degrade-safe fallback to a
+  static sink-nudge), instead of a fixed follow-up. `scan --synthesize` now accepts
+  a custom `--target-file` (with `--authorize`): it synthesizes the chain and
+  differentially validates it against the **synthetic guarded twin** (raw vs a W2
+  boundary-guarded variant via the control shim), reusing the control-efficacy
+  machinery — previously synthesis was reference-twin-only.
+- **Auto-derived NIST AI RMF tags + attack-tier signal.** The reference compliance
+  mapper (previously never invoked) is now wired into the generate / gate / PR
+  boundary and auto-derives `nist_ai_rmf` ids from an exploit's OWASP LLM/ASI tags
+  via the bundled taxonomy cross-references (single source of truth, idempotent).
+  Every exploit also carries `payload.metadata["attack_tier"]`
+  (static / obfuscated / adaptive / adaptive+obfuscated), surfaced in the gating PR
+  body and the emitted-test docstring. No contract bump (the `nist_ai_rmf` field
+  pre-existed; tier rides metadata).
+- **Ablation thoroughness — multiple seeds + redundancy mode (`ablate --redundancy`,
+  `--max-seeds`).** `mylonite ablate` now probes multiple kitchen-sink seeds per
+  weakness (capped by `--max-seeds`) instead of a single representative. The new
+  `--redundancy` mode toggles each control OFF against the **full** control set
+  (rather than on-vs-nothing), surfacing a `redundant` status — a control whose
+  weakness is still covered by another control — distinct from `theater` (fires
+  with and without). Prints a run-count estimate up front.
+
 ## [0.6.0] - 2026-06-17
 
 ### Added
