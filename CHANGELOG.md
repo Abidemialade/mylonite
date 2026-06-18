@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Clearer `generate --latest` message on a clean scan.** When the newest scan
   found no exploits, the message now frames it as a PASS (a clean/guarded target),
   not a bare error, and points at passing an earlier scan dir explicitly.
+### Changed
+
+- **`--adaptive` auto-sizes its LLM-call budget.** An active adaptive scan that
+  leaves `--max-llm-calls` at the single-shot default (50) now raises it to an
+  adaptive-appropriate default (200) with a notice, instead of silently aborting
+  partway through a multi-seed run (each seed can spend ~10–15 calls across its
+  retry budget). Any explicit `--max-llm-calls` (or `mylonite.yaml`) value —
+  including a deliberately low one — is respected unchanged.
 
 ## [0.7.0] - 2026-06-17
 

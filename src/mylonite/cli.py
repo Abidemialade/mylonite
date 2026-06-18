@@ -328,6 +328,30 @@ def _not_implemented(name: str) -> None:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+#: Default LLM-call budget for an active ``--adaptive`` scan. The single-shot
+#: default (50) aborts a multi-seed adaptive run mid-way — each seed can spend
+#: ~10-15 calls across its retry budget (customise + plant/drive/judge, then up
+#: to DEFAULT_MAX_ATTEMPTS strategist refinements). 200 clears a full 8-seed run.
+ADAPTIVE_DEFAULT_MAX_LLM_CALLS = 200
+
+#: The untouched default of the ``--max-llm-calls`` option; only this exact value
+#: is treated as "not set by the user" (an explicit value, even 50, is honoured).
+_DEFAULT_MAX_LLM_CALLS = 50
+
+
+def _adaptive_budget(max_llm_calls: int, *, adaptive_active: bool) -> tuple[int, bool]:
+    """Auto-size the LLM-call budget for an active adaptive run.
+
+    Returns ``(budget, raised)``. When the adaptive loop is active and the budget
+    is the untouched default, raise it to ``ADAPTIVE_DEFAULT_MAX_LLM_CALLS`` so the
+    run doesn't silently abort partway through; any explicit value (flag or
+    mylonite.yaml) — including a deliberately low one — is respected unchanged.
+    """
+    if adaptive_active and max_llm_calls == _DEFAULT_MAX_LLM_CALLS:
+        return ADAPTIVE_DEFAULT_MAX_LLM_CALLS, True
+    return max_llm_calls, False
+
+
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
@@ -1091,6 +1115,20 @@ def scan(
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
+
+    # Auto-size the budget for an active adaptive run so it doesn't abort mid-way
+    # on the single-shot default (the assessment's seed-3-of-8 abort). An explicit
+    # --max-llm-calls (or mylonite.yaml) always wins.
+    max_llm_calls, _budget_raised = _adaptive_budget(
+        max_llm_calls, adaptive_active=adaptive and attack_driver is not None
+    )
+    if _budget_raised:
+        typer.echo(
+            f"--adaptive: raised the LLM-call budget to {max_llm_calls} (the default "
+            f"{_DEFAULT_MAX_LLM_CALLS} aborts a multi-seed adaptive run mid-way). "
+            "Pass --max-llm-calls to override.",
+            err=True,
+        )
 
     config = ScanConfig(
         target_id=report_target_id,
