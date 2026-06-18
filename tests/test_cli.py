@@ -1695,3 +1695,63 @@ def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> Non
     result = runner.invoke(app, ["scan", "--synthesize", "--target-file", str(tf)])
     assert result.exit_code == EXIT_CONFIG
     assert "authorize" in result.output.lower()
+
+
+# --- Theme E1: gate reads mylonite.yaml (parity with scan) -------------------
+
+
+def test_gate_reads_target_file_from_mylonite_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate auto-discovers ./mylonite.yaml and fills target_file/authorize, so it
+    no longer exits 2 'no target given' when the project config declares them."""
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "target.yaml"
+    target.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mylonite.yaml").write_text(
+        f"target_file: {target}\nauthorize: myapp\n", encoding="utf-8"
+    )
+
+    class _ReachedRunGate(Exception):
+        pass
+
+    def _stub(**_: Any) -> Any:
+        raise _ReachedRunGate()
+
+    monkeypatch.setattr("mylonite.gate.run_gate", _stub)
+    result = runner.invoke(app, ["gate"])
+    # Config resolved the target → we reached run_gate, not "no target given".
+    assert isinstance(result.exception, _ReachedRunGate), result.output
+    assert "no target given" not in result.output
+
+
+def test_gate_without_config_or_target_still_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["gate"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "no target given" in result.output
+
+
+# --- Theme E2: generate --latest on a clean (0-exploit) scan -----------------
+
+
+def test_generate_latest_clean_scan_explains_it_is_a_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean latest scan (0 exploits) exits with a message that frames it as a
+    PASS and points at targeting an earlier scan, not a bare error."""
+    scans_root = tmp_path / ".mylonite" / "scans"
+    (scans_root / "2026-06-10T12-00-00Z").mkdir(parents=True)
+    (scans_root / "2026-06-10T12-00-00Z" / "scan_report.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["generate", "--latest"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "no exploits" in result.output
+    assert "PASS" in result.output
+    assert "earlier scan" in result.output
