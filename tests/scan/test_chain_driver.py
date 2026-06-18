@@ -206,7 +206,5 @@ async def test_next_drive_degrades_to_static_on_llm_failure() -> None:
     response = AdapterResponse(
         payload_pattern_id="p", raw_response="no", tool_calls=[], metadata={}
     )
-    drive = await driver._next_drive(
-        _chain(), response, SimpleNamespace(success=False, reason="x")
-    )
+    drive = await driver._next_drive(_chain(), response, SimpleNamespace(success=False, reason="x"))
     assert "send_email" in drive  # static fallback still drives toward the sink

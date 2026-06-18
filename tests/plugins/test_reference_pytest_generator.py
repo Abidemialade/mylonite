@@ -49,6 +49,7 @@ _EXPLOIT = ExploitRecord(
     ),
 )
 
+
 # Exact expected source — the golden. Byte-equality proves determinism and the
 # precise emitted shape (docstring, imports, markers, in-body testkit calls).
 def test_emits_control_template_for_synthetic_control_metadata() -> None:

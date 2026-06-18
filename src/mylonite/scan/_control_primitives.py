@@ -83,4 +83,3 @@ def host_allowed(url: str, allowlist: tuple[str, ...]) -> bool:
     except ValueError:
         return False
     return host in allowlist
-

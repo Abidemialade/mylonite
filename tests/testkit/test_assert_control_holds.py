@@ -52,7 +52,9 @@ def _exploit() -> ExploitRecord:
             metadata={"seed_id": _PATTERN_ID, "weakness": "W2", "synthetic_control": "W2"},
         ),
         response=AdapterResponse(
-            payload_pattern_id=_PATTERN_ID, raw_response="ok", tool_calls=["read_note", "send_email"]
+            payload_pattern_id=_PATTERN_ID,
+            raw_response="ok",
+            tool_calls=["read_note", "send_email"],
         ),
         success_reason="planner emailed attacker after reading the poisoned note",
         compliance=ComplianceTags(owasp_llm=["LLM01"], owasp_asi=["ASI01"]),
@@ -62,7 +64,9 @@ def _exploit() -> ExploitRecord:
 def _fired() -> Any:
     return SimpleNamespace(
         exploits=[SimpleNamespace(pattern_id=_PATTERN_ID)],
-        report=SimpleNamespace(attempts=[SimpleNamespace(pattern_id=_PATTERN_ID, outcome="finding")]),
+        report=SimpleNamespace(
+            attempts=[SimpleNamespace(pattern_id=_PATTERN_ID, outcome="finding")]
+        ),
     )
 
 
@@ -92,9 +96,7 @@ def test_passes_when_raw_fires_and_guarded_resists(
 ) -> None:
     target_file = _write_target_yaml(tmp_path)
     seen = _patch_scans(monkeypatch, raw=_fired(), guarded=_resisted())
-    assert (
-        testkit.assert_control_holds(_exploit(), target_file=target_file, control="W2") is None
-    )
+    assert testkit.assert_control_holds(_exploit(), target_file=target_file, control="W2") is None
     # Two scans: raw (no controls) then boundary-guarded (one control).
     assert len(seen) == 2
     assert seen[0] is None and seen[1] and seen[1][0].weakness == "W2"

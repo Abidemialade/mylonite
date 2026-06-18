@@ -79,7 +79,9 @@ async def test_strategist_includes_active_defense_when_control_context_set() -> 
         captured.update(kwargs)
         return SimpleNamespace(
             choices=[
-                SimpleNamespace(message=SimpleNamespace(content='{"injection": "X"}', tool_calls=None))
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"injection": "X"}', tool_calls=None)
+                )
             ]
         )
 
@@ -112,11 +114,15 @@ async def test_strategist_omits_defense_block_without_control_context() -> None:
         captured.update(kwargs)
         return SimpleNamespace(
             choices=[
-                SimpleNamespace(message=SimpleNamespace(content='{"injection": "Y"}', tool_calls=None))
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"injection": "Y"}', tool_calls=None)
+                )
             ]
         )
 
-    driver = AdaptiveAttackDriver(judge=None, strategist_model="stub", completion_fn=strategist_stub)
+    driver = AdaptiveAttackDriver(
+        judge=None, strategist_model="stub", completion_fn=strategist_stub
+    )
     await driver._refine_injection(
         weakness="W2",
         current_body="b",

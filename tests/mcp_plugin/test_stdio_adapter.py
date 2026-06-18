@@ -756,7 +756,9 @@ async def test_open_session_drive_planner_stamps_effect_and_delivery(tmp_path: P
             args=["-m", "srv"],
             weakness_classes=["W2"],
             seed_arm=SeedArmSpec(tool="remember", args_template={"content": "{payload}"}),
-            effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker="attacker@example.com"),
+            effect_probe=EffectProbeSpec(
+                verify_tool="list_outbox", expect_marker="attacker@example.com"
+            ),
         )
     )
     target_registry.register_target(spec)
