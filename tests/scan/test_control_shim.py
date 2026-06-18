@@ -122,9 +122,7 @@ async def test_intercept_short_circuits_before_inner() -> None:
     class _RefuseAll(BoundaryControl):
         weakness = "W3"
 
-        def intercept_call(
-            self, name: str, arguments: dict[str, object]
-        ) -> ToolResult | None:
+        def intercept_call(self, name: str, arguments: dict[str, object]) -> ToolResult | None:
             return ToolResult(name=name, content="refused", isError=True)
 
     server = _FakeServer(results={"web_fetch": ToolResult(name="web_fetch", content="body")})

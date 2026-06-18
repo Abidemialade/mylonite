@@ -204,9 +204,7 @@ def test_pr_body_control_efficacy_framing():
 
     ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
     ex = ex.model_copy(
-        update={
-            "payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})
-        }
+        update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
     )
     report = ValidationReport(
         test_filename="test_security_x.py",

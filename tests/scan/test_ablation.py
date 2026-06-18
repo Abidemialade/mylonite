@@ -35,7 +35,9 @@ def test_run_control_ablation_scores_each_control() -> None:
         "W2": ["indirect-injection-note-body-direct"],
         "W4": ["excessive-agency-send-email-direct-unconfirmed"],
     }
-    out = run_control_ablation(controls=["W2", "W4"], seeds_by_weakness=seeds, scan_fires=scan_fires)
+    out = run_control_ablation(
+        controls=["W2", "W4"], seeds_by_weakness=seeds, scan_fires=scan_fires
+    )
     by = {c.weakness: c for c in out}
     assert by["W2"].status == "load-bearing"
     assert by["W2"].contribution == 1.0

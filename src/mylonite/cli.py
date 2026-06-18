@@ -1634,7 +1634,10 @@ def _validate_custom(
 
         def _guarded() -> Any:
             return MCPStdioAdapter(
-                family=spec.family, scope=tf.scope, model=model, controls=[_boundary_control(cw, spec)]
+                family=spec.family,
+                scope=tf.scope,
+                model=model,
+                controls=[_boundary_control(cw, spec)],
             )
 
         guarded_factory = _guarded
@@ -3027,7 +3030,9 @@ def ablate(
     ] = False,
     max_seeds: Annotated[
         int,
-        typer.Option("--max-seeds", help="Max kitchen-sink seeds per weakness to probe. Default 2."),
+        typer.Option(
+            "--max-seeds", help="Max kitchen-sink seeds per weakness to probe. Default 2."
+        ),
     ] = 2,
 ) -> None:
     """Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).

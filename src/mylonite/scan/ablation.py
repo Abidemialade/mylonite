@@ -35,9 +35,7 @@ REP_SEED_BY_WEAKNESS: dict[str, str] = {
 _FAMILY_PREFIXES = ("filesystem-", "fetch-", "github-")
 
 
-def seeds_for_weaknesses(
-    controls: list[str], *, max_per_weakness: int = 2
-) -> dict[str, list[str]]:
+def seeds_for_weaknesses(controls: list[str], *, max_per_weakness: int = 2) -> dict[str, list[str]]:
     """Kitchen-sink seed pattern_ids grouped by weakness (capped), for the controls.
 
     Multiple seeds per weakness give the ablation more than one probe per control;
@@ -181,7 +179,9 @@ def run_control_ablation(
         for seed in seeds:
             for i in range(iterations):
                 if progress is not None:
-                    progress(f"ablation {control} (all-minus-c): seed {seed} run {i + 1}/{iterations}")
+                    progress(
+                        f"ablation {control} (all-minus-c): seed {seed} run {i + 1}/{iterations}"
+                    )
                 if scan_fires((), seed):
                     raw_fired += 1
                 if scan_fires(full, seed):

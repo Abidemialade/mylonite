@@ -673,7 +673,10 @@ class ScanEngine:
         trace = list(outcome.response.tool_calls) if outcome.response is not None else []
         tier = "adaptive+obfuscated" if payload.metadata.get("obfuscation") else "adaptive"
         final_payload = payload.model_copy(
-            update={"body": outcome.final_body, "metadata": {**payload.metadata, "attack_tier": tier}}
+            update={
+                "body": outcome.final_body,
+                "metadata": {**payload.metadata, "attack_tier": tier},
+            }
         )
 
         if outcome.success and verdict is not None and outcome.response is not None:

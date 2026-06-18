@@ -529,7 +529,9 @@ class DifferentialValidator(ValidatorBase):
             # "vulnerable" side; only the guarded runs are new. The success-RATE
             # gap is the control's marginal contribution — proof the safeguard,
             # not the model, carries the security.
-            mode_label = "adaptive guarded twin" if self._adaptive_guarded else "boundary-guarded twin"
+            mode_label = (
+                "adaptive guarded twin" if self._adaptive_guarded else "boundary-guarded twin"
+            )
             guard_runs = []
             for i in range(n):
                 self._progress(f"{mode_label}: differential run {i + 1}/{n}")
