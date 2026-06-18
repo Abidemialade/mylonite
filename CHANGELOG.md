@@ -105,6 +105,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   persists the enriched exploit, and `report` enriches compliance on read (covering
   scan dirs and pre-existing artefacts), so OWASP / ASI / ATLAS / NIST are
   consistent across the test, the scan report, and the validation report.
+### Added
+
+- **Stakeholder HTML report dashboard (`report --html`).** `mylonite report --html`
+  now writes a structured, self-contained dashboard by default: an executive
+  summary (target / verdict / run metadata), per-finding cards with a **severity
+  badge** (High = a consequential action materialized or an exfil/egress/
+  excessive-agency weakness landed; Medium = fires without a damaging effect;
+  Low = situational), compliance chips (OWASP-LLM / ASI / ATLAS / NIST), and
+  collapsible raw evidence via native `<details>` — interactivity with **zero
+  JavaScript**, no CDN, and no web fonts, so it still screenshots cleanly in CI.
+  The previous raw trust-panel export is preserved as `--html-style terminal`.
+  Compliance is enriched on read, so NIST appears consistently here too.
 
 ## [0.7.0] - 2026-06-17
 
