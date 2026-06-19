@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-06-18
+### Changed
+
+- **Metamorphic robustness now GATES the kept decision (was report-only).** The
+  reference oracle's gate is now `kept = build ∧ differential ∧ flakiness ∧
+  metamorphic`: a generated test must survive a MAJORITY (default 60%) of
+  deterministic, semantically-neutral rewordings of the exploit body (paraphrase /
+  casing / whitespace / unicode confusables, each genuinely re-driven through both
+  twins) to be committed. This makes the fourth named moat mechanism actually
+  enforce — a test over-fit to one literal payload ("teaching to the test") is now
+  rejected. A majority threshold (not all-or-nothing, configurable via
+  `metamorphic_robustness_threshold`) avoids rejecting a real finding just because a
+  single aggressive rewording didn't reproduce. Mutation score stays near-free
+  observability (not gating).
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
 oracle's precision, extends the differential machinery to server-layer-controlled
