@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirms the poison resurfaced in the retrieval turn (`cross_turn_delivered`), so a
   non-delivery reads as NOT TESTED rather than a false clean pass. No new attack class
   or adapter — deepens W2 over existing session machinery. New `scan/memory_poison.py`.
-  (Engine/CLI `scan` dispatch follows next.)
+  Exposed as **`scan --memory`** (mirrors `--synthesize`): a reference twin uses the
+  bundled twins; a custom `--target-file` uses the synthetic W2-boundary-guarded twin,
+  so the differential proves the *memory* control (quarantining recalled content) is
+  load-bearing.
 
 Depth-first release (no new attack classes or adapters): makes the differential
 oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic

@@ -1713,6 +1713,41 @@ def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> Non
     assert "authorize" in result.output.lower()
 
 
+def test_scan_exposes_memory_flag() -> None:
+    """--memory (T1 cross-turn memory poisoning) is wired into the scan command."""
+    import typer
+
+    from mylonite.cli import app
+
+    scan_cmd = typer.main.get_command(app).commands["scan"]  # type: ignore[attr-defined]
+    assert "memory" in {p.name for p in scan_cmd.params}
+
+
+def test_scan_memory_needs_reference_or_target_file() -> None:
+    """--memory with a bare non-reference target (no --target-file) is refused with a
+    clear notice pointing at both routes — no LLM call is made."""
+    result = runner.invoke(app, ["scan", "mcp:filesystem:/sandbox", "--memory"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "reference twin" in result.output and "--target-file" in result.output
+
+
+def test_scan_memory_custom_target_requires_authorize(tmp_path: Path) -> None:
+    """A custom --target-file memory-poisoning run routes to the synthetic-guarded-twin
+    path but requires --authorize first — no subprocess/LLM work without it."""
+    tf = tmp_path / "t.yaml"
+    tf.write_text("family: kitchen-sink\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", "--memory", "--target-file", str(tf)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "authorize" in result.output.lower()
+
+
+def test_scan_synthesize_and_memory_are_mutually_exclusive() -> None:
+    """--synthesize and --memory are distinct flows; passing both is refused early."""
+    result = runner.invoke(app, ["scan", "reference:vulnerable", "--synthesize", "--memory"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "only one" in result.output.lower()
+
+
 # --- Theme B: _vulnerable_adapter honors vulnerable_launch ------------------
 
 

@@ -746,6 +746,169 @@ def _run_synthesis(
         typer.echo(f"Next: mylonite generate {scan_dir}")
 
 
+def _run_memory_poison(
+    *,
+    target: str | None,
+    target_file: Path | None = None,
+    authorize: str | None = None,
+    provider: str,
+    model: str,
+    planner_model: str,
+    judge_model: str,
+    output_dir: Path,
+) -> None:
+    """T1 flow: plant poison, let it PERSIST across a benign turn, then drive a later
+    retrieval that surfaces and acts on it — differentially validated against the twins.
+
+    Mirrors ``--synthesize``: a reference target uses the bundled twins; a custom
+    ``--target-file`` uses the SYNTHETIC W2 boundary-guarded twin (the control shim),
+    so the differential proves the *memory* control — quarantining recalled content —
+    is load-bearing. The poison is planted once and retrieved a turn later, modelling
+    the cross-session slow-drip ("zombie agent") shape single-turn scans miss.
+    """
+    is_reference = bool(target and target.startswith("reference:"))
+    if not is_reference and target_file is None:
+        typer.echo(
+            "--memory needs a reference twin target (e.g. reference:vulnerable) or a "
+            "custom --target-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+    from mylonite.scan.artefacts import render_summary, write_artefacts
+    from mylonite.scan.engine import ScanResult
+    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.memory_poison import MemoryPoisonRunner
+    from mylonite.scan.seeds import SEED_CATALOGUE
+
+    seed = next(s for s in SEED_CATALOGUE if s.pattern_id == "indirect-injection-note-body-direct")
+    # One innocent turn between the plant and the retrieval, so the poison is acted on
+    # in a later turn than it was planted (the defining memory-poisoning separation).
+    benign_turns = ("Please give me a brief status update on my recent activity.",)
+
+    if is_reference:
+        report_target = target or "reference:vulnerable"
+
+        def factory(variant: str) -> Any:
+            return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
+
+        descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
+    else:
+        if not authorize:
+            typer.echo(
+                "--authorize is required to test memory poisoning against a custom target.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        from mylonite.plugins._mcp import target_registry
+        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            tf = load_target_file(target_file)  # type: ignore[arg-type]
+            spec = build_target_spec(tf)
+        except Exception as exc:
+            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+        report_target = target or f"mcp:{spec.family}"
+        typer.echo(
+            f"--memory on custom target {spec.family!r}: validating raw vs a W2 boundary-"
+            "guarded twin (the synthetic guarded side quarantines recalled memory).",
+            err=True,
+        )
+        if spec.vulnerable_launch is not None:
+            typer.echo(
+                f"--memory: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                "Env values are never logged.",
+                err=True,
+            )
+
+        def factory(variant: str) -> Any:
+            if variant == "vulnerable":
+                return _vulnerable_adapter(spec, tf.scope, planner_model)
+            return MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=planner_model,
+                controls=[_boundary_control("W2", spec)],
+            )
+
+        descriptor = asyncio.run(
+            MCPStdioAdapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
+        )
+
+    runner = MemoryPoisonRunner(
+        adapter_factory=factory,
+        judge=SuccessJudge(model=judge_model),
+        seed=seed,
+        target_id=report_target,
+        benign_turns=benign_turns,
+    )
+    try:
+        result = asyncio.run(runner.run(descriptor))
+    finally:
+        if not is_reference:
+            from mylonite.plugins._mcp import target_registry
+
+            target_registry.clear_runtime_targets()
+
+    exploits = [result.exploit] if result.exploit is not None else []
+    if result.plan is None:
+        attempts = [
+            ScanAttempt(
+                seed_id="memory-poisoning",
+                pattern_id="memory-poisoning",
+                outcome="no_finding",
+                verdict_reason=(
+                    "no plant+retrieve surface discoverable for cross-turn memory poisoning"
+                ),
+            )
+        ]
+    else:
+        pid = result.exploit.pattern_id if result.exploit is not None else "memory-poisoning"
+        attempts = [
+            ScanAttempt(
+                seed_id=pid,
+                pattern_id=pid,
+                outcome="finding" if result.exploit is not None else "no_finding",
+                verdict_reason=(
+                    result.exploit.success_reason
+                    if result.exploit is not None
+                    else "cross-turn memory poisoning did not differentially validate"
+                ),
+            )
+        ]
+    report = ScanReport(
+        target_id=report_target,
+        attack_modules=["memory-poisoning"],
+        provider=provider,
+        model=model,
+        elapsed_seconds=0.0,
+        attempts=attempts,
+        findings_count=len(exploits),
+        inconclusive_attempts=0,
+        fallback_breakdown={},
+        aborted=None,
+        single_run=False,
+        mylonite_version=__version__,
+    )
+    scan_result = ScanResult(report=report, exploits=exploits)
+
+    from mylonite._redaction import redact
+
+    scan_dir = write_artefacts(scan_result, output_dir)
+    typer.echo(redact(render_summary(scan_result)))
+    typer.echo(f"Artefacts: {scan_dir}")
+    if exploits:
+        typer.echo("")
+        typer.echo(f"Next: mylonite generate {scan_dir}")
+
+
 @app.command()
 def scan(
     target: Annotated[
@@ -924,6 +1087,19 @@ def scan(
             ),
         ),
     ] = False,
+    memory: Annotated[
+        bool,
+        typer.Option(
+            "--memory",
+            help=(
+                "Opt-in stateful memory-poisoning test: plant poison, let it persist "
+                "across a benign turn, then drive a later retrieval that surfaces and "
+                "acts on it — the cross-session slow-drip ('zombie agent') shape. "
+                "Differentially validated against the twins (reference, or a custom "
+                "--target-file's synthetic W2-guarded twin). Off by default."
+            ),
+        ),
+    ] = False,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -977,6 +1153,9 @@ def scan(
 
     # Driver 2: tool-chaining synthesis is a distinct flow (synthesize -> twin
     # differential validation), not the per-seed engine. Branch early and return.
+    if synthesize and memory:
+        typer.echo("--synthesize and --memory are distinct flows; pass only one.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
     if synthesize:
         _run_synthesis(
             target=target,
@@ -986,6 +1165,21 @@ def scan(
             model=effective_model,
             planner_model=effective_planner_model,
             customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
+            output_dir=output_dir,
+        )
+        return
+
+    # T1: stateful cross-turn memory poisoning is a distinct flow (plant -> persist ->
+    # retrieve, twin-differentially validated), not the per-seed engine. Branch and return.
+    if memory:
+        _run_memory_poison(
+            target=target,
+            target_file=target_file,
+            authorize=authorize,
+            provider=effective_provider,
+            model=effective_model,
+            planner_model=effective_planner_model,
             judge_model=effective_judge_model,
             output_dir=output_dir,
         )
