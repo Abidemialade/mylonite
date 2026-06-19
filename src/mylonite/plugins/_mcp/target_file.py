@@ -21,6 +21,7 @@ Prefer an absolute path and verify the target actually opened it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -227,3 +228,44 @@ def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> lis
             "(those seeds will be reported NOT TESTED, not clean)."
         )
     return errors
+
+
+def needs_seed_arm_autowire(tf: TargetFile) -> bool:
+    """True when the target declares an indirect-injection-only weakness (W2) but no
+    ``seed_arm`` — the case M3 auto-wires from the tool surface so a real app needs
+    near-zero config instead of a hard pre-flight block."""
+    return tf.seed_arm is None and bool(set(tf.weakness_classes) & _INDIRECT_ONLY_WEAKNESS_CLASSES)
+
+
+def infer_seed_arm(tools: list[Any]) -> tuple[SeedArmSpec | None, str]:
+    """Derive a ``seed_arm`` (how to plant untrusted content) from the tool surface.
+
+    Reuses the deterministic tool-role heuristics (``_classify_tools``). Only returns
+    a seed_arm when a NO-id recall path exists, so the planted payload is *guaranteed*
+    to be surfaced back to the planner — avoiding the "plants but never lands" trap (a
+    store whose only readback needs the new record's id the planner never learns). The
+    caller prints the note; the operator can override the inferred value in the file.
+    """
+    from mylonite.scan.tool_roles import _classify_tools
+
+    roles = _classify_tools(tools)
+    if roles.seed_arm_tool and roles.seed_arm_param and roles.retrieve_tool:
+        spec = SeedArmSpec(
+            tool=roles.seed_arm_tool,
+            args_template={roles.seed_arm_param: "{payload}"},
+        )
+        note = (
+            f"inferred seed_arm: {roles.seed_arm_tool}({roles.seed_arm_param}='{{payload}}') "
+            f"with recall via {roles.retrieve_tool!r} — override in the target file if wrong."
+        )
+        return spec, note
+    if roles.seed_arm_tool:
+        return None, (
+            f"found a content-storing tool ({roles.seed_arm_tool!r}) but NO id-free recall path: "
+            "an auto-wired plant could not be delivered back to the planner. Declare a seed_arm "
+            "(+ matching drive) in the target file."
+        )
+    return None, (
+        "no content-storing tool found on the target's surface — declare a seed_arm in the "
+        "target file to test indirect injection (W2)."
+    )

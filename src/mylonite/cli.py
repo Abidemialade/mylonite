@@ -1024,13 +1024,40 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
-        from mylonite.plugins._mcp.target_file import dump_target_file, validate_for_scan
+        from mylonite.plugins._mcp.target_file import (
+            dump_target_file,
+            infer_seed_arm,
+            needs_seed_arm_autowire,
+            validate_for_scan,
+        )
+
+        # M3: auto-wire the seed_arm from the LIVE tool surface when a W2 target omits
+        # it, so a real app needs near-zero config instead of the hard block below.
+        # Only when a no-id recall path exists (else the plant wouldn't be delivered —
+        # the "plants but never lands" trap). Best-effort: a describe failure leaves the
+        # pre-flight block to handle it. Skipped on --dry-run / --allow-no-seed-arm.
+        if needs_seed_arm_autowire(tf) and not dry_run and not allow_no_seed_arm:
+            try:
+                _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
+                _descriptor = asyncio.run(asyncio.wait_for(_probe.describe(), timeout=20))
+            except Exception as exc:
+                _descriptor = None
+                typer.echo(
+                    f"auto-wire: could not describe the target to infer a seed_arm "
+                    f"({type(exc).__name__}); falling back to the pre-flight check.",
+                    err=True,
+                )
+            if _descriptor is not None:
+                _spec, _note = infer_seed_arm(_descriptor.tools)
+                typer.echo(f"auto-wire: {_note}", err=True)
+                if _spec is not None:
+                    tf = tf.model_copy(update={"seed_arm": _spec})
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
         # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
-        # set. A --dry-run only enumerates seeds (no clean/finding verdict to
-        # mislead), so there we downgrade the block to a warning.
+        # set (or M3 auto-wired one above). A --dry-run only enumerates seeds (no
+        # clean/finding verdict to mislead), so there we downgrade the block to a warning.
         preflight_errors = validate_for_scan(tf, allow_no_seed_arm=allow_no_seed_arm)
         if preflight_errors:
             for err in preflight_errors:

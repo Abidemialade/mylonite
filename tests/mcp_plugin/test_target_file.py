@@ -258,3 +258,63 @@ def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: P
     p = tmp_path / "t.yaml"
     p.write_text(dumped, encoding="utf-8")
     assert load_target_file(p) == tf
+
+
+# --- M3: auto-wire seed_arm from the tool surface ---------------------------
+
+
+def _toolspec(name: str, props: dict, required: list | None = None):
+    from mylonite.contracts._types import ToolSpec
+
+    return ToolSpec(
+        name=name,
+        description=name,
+        json_schema={"type": "object", "properties": props, "required": required or []},
+    )
+
+
+def test_infer_seed_arm_when_store_and_recall_present() -> None:
+    from mylonite.plugins._mcp.target_file import infer_seed_arm
+
+    tools = [
+        _toolspec("remember", {"content": {"type": "string"}}),
+        _toolspec("recall", {}),  # no-id recall path → delivery guaranteed
+    ]
+    spec, note = infer_seed_arm(tools)
+    assert spec is not None
+    assert spec.tool == "remember"
+    assert spec.args_template == {"content": "{payload}"}
+    assert "inferred seed_arm" in note
+
+
+def test_infer_seed_arm_none_when_no_id_free_recall() -> None:
+    from mylonite.plugins._mcp.target_file import infer_seed_arm
+
+    tools = [
+        _toolspec("save_note", {"content": {"type": "string"}}),
+        _toolspec("read_note", {"note_id": {"type": "string"}}, required=["note_id"]),
+    ]
+    spec, note = infer_seed_arm(tools)
+    assert spec is None
+    assert "id-free recall" in note.lower()
+
+
+def test_infer_seed_arm_none_when_no_store_tool() -> None:
+    from mylonite.plugins._mcp.target_file import infer_seed_arm
+
+    spec, note = infer_seed_arm([_toolspec("list_files", {"path": {"type": "string"}})])
+    assert spec is None
+    assert "no content-storing tool" in note.lower()
+
+
+def test_needs_seed_arm_autowire() -> None:
+    from mylonite.plugins._mcp.target_file import needs_seed_arm_autowire
+
+    assert needs_seed_arm_autowire(_tf(weakness_classes=["W2"])) is True  # W2, no seed_arm
+    assert needs_seed_arm_autowire(_tf(weakness_classes=["W4"])) is False  # not indirect-only
+    assert (
+        needs_seed_arm_autowire(
+            _tf(weakness_classes=["W2"], seed_arm=SeedArmSpec(tool="x", args_template={}))
+        )
+        is False  # already declared
+    )

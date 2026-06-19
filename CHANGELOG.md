@@ -31,6 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proof** in its message ("fired N/N on the vulnerable target, resisted M/M with the
   control — the safeguard, not the model, carries the security"). Reuses the existing
   exploit/validation data and the dashboard's severity rule; no new finding logic.
+### Added
+
+- **Auto-wired `seed_arm` from the tool surface (frictionless real-target on-ramp).**
+  When a custom `--target-file` declares an indirect-injection weakness (W2) but no
+  `seed_arm`, `scan` now describes the target's live tool surface and infers how to
+  plant untrusted content — so a real MCP app can be tested with near-zero config
+  instead of hitting a hard pre-flight block. To avoid the "plants but never lands"
+  trap, it auto-wires **only when a no-id recall path exists** (so the planted
+  payload is guaranteed to be surfaced back to the planner); otherwise it explains
+  why and leaves the seed_arm to the operator. The inferred value is printed
+  (`auto-wire: inferred seed_arm: …`) and overridable in the target file. New
+  `infer_seed_arm` / `needs_seed_arm_autowire` reuse the existing `_classify_tools`
+  heuristics — no new attack logic.
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
 oracle's precision, extends the differential machinery to server-layer-controlled
