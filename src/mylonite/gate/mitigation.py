@@ -43,6 +43,18 @@ def _snippet(weakness_class: str) -> str:
     return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
 
 
+def _fix_block(weakness_class: str) -> str:
+    """The concrete, reviewable fix (a fenced diff) for a weakness class (R3).
+
+    Parallel to ``_snippet`` (prose rationale) but actionable: it renders the
+    server-side change that implements the boundary control the differential
+    proved load-bearing, so the PR carries "here's the fix we proved works", not
+    a guess. Class-keyed (W1-W4/generic) — the control name rides in the prose.
+    """
+    base = _ir.files("mylonite.gate") / "fixes"
+    return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
+
+
 def _evidence_lines(report: ValidationReport) -> str:
     rows = [
         f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {o.detail}" for o in report.outcomes
@@ -166,6 +178,16 @@ def build_pr_body(
         "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
         "",
         _snippet(wc),
+        "",
+        (
+            "**Proven fix** — implement the control the differential verified load-bearing, "
+            "server-side, then re-point the committed test at it:"
+            if is_control
+            else "**Recommended fix** — implement this control server-side, then re-point the "
+            "committed test at your implementation:"
+        ),
+        "",
+        _fix_block(wc),
     ]
     if is_reference:
         sections += [

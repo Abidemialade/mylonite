@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Proven fix rendered as a reviewable diff in the gating PR.** The "Suggested
+  mitigation" section now carries a concrete, class-specific code diff (the
+  server-side change that implements the boundary control the differential proved
+  load-bearing) alongside the prose rationale — "here's the fix we proved works",
+  not a guess. For a control-efficacy finding it is framed as a **Proven fix**; for
+  other findings as a **Recommended fix**. New `gate/fixes/{W1-W4,generic}.md`.
+
 ## [0.7.1] - 2026-06-18
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
