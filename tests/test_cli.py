@@ -1936,3 +1936,28 @@ def test_report_scan_dir_shows_derived_nist(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_SUCCESS, result.output
     # NIST (e.g. MEASURE-2.7 derived from LLM01) now shows in the report compliance.
     assert "MEASURE" in result.output or "GOVERN" in result.output or "MAP-" in result.output
+
+
+def test_report_sarif_emits_valid_document(tmp_path: Path) -> None:
+    """report --sarif writes a SARIF 2.1.0 doc (GitHub code scanning) from findings."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    sarif = tmp_path / "out.sarif"
+    result = runner.invoke(app, ["report", str(scan_dir), "--sarif", str(sarif)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    doc = _json.loads(sarif.read_text(encoding="utf-8"))
+    assert doc["version"] == "2.1.0"
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "Mylonite"
+    res = doc["runs"][0]["results"]
+    assert len(res) == 1 and res[0]["ruleId"] == "indirect-injection-note-body-direct"
+    assert "LLM01" in res[0]["properties"]["tags"]  # compliance enriched on read

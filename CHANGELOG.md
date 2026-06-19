@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-06-18
+### Added
+
+- **SARIF 2.1.0 output (`report --sarif <path>`) for GitHub code scanning.** AI-layer
+  findings now land in the GitHub **Security tab** and PR checks — where developers
+  already triage every other finding — instead of only a terminal/HTML panel. Each
+  SARIF result carries a severity (`security-severity` + level), the compliance tags
+  (OWASP-LLM/ASI · MITRE ATLAS · NIST), and — the trust signal — the **differential
+  proof** in its message ("fired N/N on the vulnerable target, resisted M/M with the
+  control — the safeguard, not the model, carries the security"). Reuses the existing
+  exploit/validation data and the dashboard's severity rule; no new finding logic.
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
 oracle's precision, extends the differential machinery to server-layer-controlled

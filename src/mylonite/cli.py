@@ -2333,6 +2333,17 @@ def report(
             ),
         ),
     ] = "dashboard",
+    sarif: Annotated[
+        Path | None,
+        typer.Option(
+            "--sarif",
+            help=(
+                "Also write a SARIF 2.1.0 file for GitHub code scanning (the Security "
+                "tab + PR checks). Each result carries severity, compliance tags, and "
+                "the differential proof (fired N/N, resisted M/M). Takes a PATH."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Render a saved scan or validation as a trust panel (offline, no LLM).
 
@@ -2436,6 +2447,18 @@ def report(
         else:
             html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
         typer.echo(f"Wrote HTML report: {html} (style: {html_style})")
+
+    if sarif is not None:
+        import json as _json
+
+        from mylonite.report import to_sarif
+
+        if kind == "validation":
+            findings = [(dashboard_exploit, vreport)] if dashboard_exploit is not None else []
+        else:
+            findings = [(e, None) for e in dashboard_exploits]
+        sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
+        typer.echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
