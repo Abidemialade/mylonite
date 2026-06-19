@@ -1727,6 +1727,47 @@ def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
     )
 
 
+def _differential_plan(exploit: Any, *, fast: bool) -> tuple[bool, str | None, str]:
+    """Decide whether the differential leg gates a real-target finding (M1).
+
+    The differential — re-driving a boundary-guarded twin to prove the *safeguard*,
+    not the model, carries the security — is the moat. It now runs BY DEFAULT for a
+    custom/real target whenever a boundary control can be built for the finding's
+    weakness; ``--fast`` opts out (it doubles the live runs per finding). When no
+    control is inferable we run WITHOUT it, loudly (never a silently weaker gate).
+
+    Returns ``(run, control_weakness, note)`` — pure (``make_control`` is
+    deterministic), so it is unit-tested without a live target.
+    """
+    if fast:
+        return (
+            False,
+            None,
+            "--fast: skipping the differential leg "
+            "(weaker guarantee: kept = build ∧ stability ∧ effect ∧ consensus).",
+        )
+    from mylonite.gate.mitigation import weakness_class_for
+    from mylonite.scan.control_shim import make_control
+
+    cw = weakness_class_for(exploit)
+    try:
+        make_control(cw)
+    except ValueError:
+        return (
+            False,
+            None,
+            f"no boundary control implemented for weakness {cw!r} — running WITHOUT the "
+            "differential leg (weaker guarantee: kept = build ∧ stability ∧ effect ∧ "
+            "consensus). Add a control for this weakness, or pass --fast to silence.",
+        )
+    return (
+        True,
+        cw,
+        f"differential ON (default): proving control {cw} is load-bearing — "
+        "the differential gates `kept` (the safeguard, not the model, carries the security).",
+    )
+
+
 def _validate_custom(
     generated: Any,
     target_file: Path | None,
@@ -1737,6 +1778,7 @@ def _validate_custom(
     prove_control: bool = False,
     randomize_exfil: bool = False,
     adaptive: bool = False,
+    fast: bool = False,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
@@ -1775,28 +1817,21 @@ def _validate_custom(
     def _factory() -> Any:
         return _vulnerable_adapter(spec, tf.scope, model)
 
-    # --prove-control: synthesize a boundary-guarded twin of the SAME real target
-    # (model held constant) so the differential leg can prove the control carries
-    # the security. Off by default — the path is the prior stability/effect/
-    # consensus gate.
+    # M1: the differential leg (re-driving a boundary-guarded twin of the SAME real
+    # target, model held constant) gates `kept` BY DEFAULT — proving the *safeguard*,
+    # not the model, carries the security. `--fast` opts out (it doubles the live runs
+    # per finding); a weakness with no inferable control falls back loudly to the
+    # stability/effect/consensus gate. `--prove-control` is now the default behaviour
+    # and kept only for back-compat.
+    del prove_control
+    run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
+    typer.echo(f"validate: {diff_note}", err=True)
     guarded_factory: Any = None
-    control_weakness: str | None = None
     control_context: str | None = None
-    if prove_control:
-        from mylonite.gate.mitigation import _snippet, weakness_class_for
-        from mylonite.scan.control_shim import make_control
+    if run_diff and control_weakness is not None:
+        from mylonite.gate.mitigation import _snippet
 
-        cw = weakness_class_for(generated.exploit)
-        try:
-            make_control(cw)
-        except ValueError:
-            typer.echo(
-                f"--prove-control: no boundary control implemented for weakness {cw!r} yet "
-                "(Slice 1 ships W2). Re-run without --prove-control.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from None
-        control_weakness = cw
+        cw = control_weakness
         # Feed the strategist what control it is up against (adaptive-aware oracle).
         control_context = f"Control {cw}: {_snippet(cw)}"
 
@@ -1809,15 +1844,12 @@ def _validate_custom(
             )
 
         guarded_factory = _guarded
-        mode = (
-            "under ADAPTIVE PRESSURE (strategist evades the control)"
-            if adaptive
-            else "via a boundary-guarded twin"
-        )
-        typer.echo(
-            f"--prove-control: proving control {cw} is load-bearing {mode} (model held constant).",
-            err=True,
-        )
+        if adaptive:
+            typer.echo(
+                f"--adaptive: grading control {cw} UNDER ADAPTIVE PRESSURE "
+                "(the strategist tries to evade it).",
+                err=True,
+            )
 
     typer.echo(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
@@ -1832,7 +1864,7 @@ def _validate_custom(
         guarded_adapter_factory=guarded_factory,
         control_weakness=control_weakness,
         randomize_exfil=randomize_exfil,
-        adaptive_guarded=adaptive and prove_control,
+        adaptive_guarded=adaptive and guarded_factory is not None,
         control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
@@ -2075,10 +2107,19 @@ def validate(
         typer.Option(
             "--prove-control",
             help=(
-                "Prove the safeguard is load-bearing: synthesize a boundary-guarded twin "
-                "of the real target (model held constant) and add a differential leg that "
-                "passes only if the attack fires on the raw target and is resisted with the "
-                "control applied (Slice 1 ships W2)."
+                "Deprecated/back-compat: the differential leg now runs BY DEFAULT for a "
+                "real target, so this flag is a no-op. Pass --fast to skip the differential."
+            ),
+        ),
+    ] = False,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help=(
+                "Skip the differential leg (the boundary-guarded twin). Faster/cheaper "
+                "(~half the live runs) but a WEAKER guarantee: kept = build ∧ stability ∧ "
+                "effect ∧ consensus, without proving the safeguard carries the security."
             ),
         ),
     ] = False,
@@ -2170,10 +2211,10 @@ def validate(
             target_file = candidate
             typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
-        if adaptive and not prove_control:
+        if adaptive and fast:
             typer.echo(
-                "--adaptive requires --prove-control (it grades the control under adaptive "
-                "pressure). Re-run with both, or drop --adaptive.",
+                "--adaptive grades the control under adaptive pressure, which needs the "
+                "differential twin — but --fast skips it. Drop --fast to use --adaptive.",
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
@@ -2187,6 +2228,7 @@ def validate(
             prove_control=prove_control,
             randomize_exfil=randomize_exfil,
             adaptive=adaptive,
+            fast=fast,
         )
     else:
         typer.echo(
@@ -2930,10 +2972,19 @@ def gate(
         typer.Option(
             "--prove-control",
             help=(
-                "Prove which safeguard is load-bearing: for a controllable finding "
-                "(Slice 1: W2), synthesize a boundary-guarded twin and gate on the control's "
-                "differential contribution; the emitted test + PR are reframed to "
-                "'control verified'."
+                "Deprecated/back-compat: for a custom target the differential now runs BY "
+                "DEFAULT (the emitted test is the control-verified one). Pass --fast to skip it."
+            ),
+        ),
+    ] = False,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help=(
+                "Skip the differential leg for a custom target (no boundary-guarded twin). "
+                "Faster/cheaper but a WEAKER guarantee — the kept test no longer proves the "
+                "safeguard, not the model, carries the security."
             ),
         ),
     ] = False,
@@ -3082,11 +3133,13 @@ def gate(
         # Enrich compliance (derive NIST) once so both the emitted test and the PR
         # carry it.
         exploits = [_map_compliance(ex) for ex in result.exploits]
-        if not prove_control:
+        # M1: tag each controllable CUSTOM finding BY DEFAULT so generate_fn emits the
+        # control test and validate_fn runs the differential (the safeguard, not the
+        # model, carries the security). --fast opts out; reference targets use the
+        # in-repo differential and are not tagged here. --prove-control is now the
+        # default behaviour and kept for back-compat.
+        if fast or is_reference:
             return exploits
-        # --prove-control: tag each controllable finding so generate_fn emits the
-        # control test and validate_fn runs the differential. W2 only in Slice 1;
-        # non-controllable findings pass through untagged.
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
 

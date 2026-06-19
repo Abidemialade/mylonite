@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-06-18
+### Changed
+
+- **The differential oracle now gates real (`--target-file`) targets BY DEFAULT.**
+  Previously a custom-target finding was kept on `build ∧ stability ∧ effect ∧
+  consensus` and the differential leg (re-driving a boundary-guarded twin to prove
+  the *safeguard*, not the model, carries the security) ran only with
+  `--prove-control` — so a real app's regression test could be kept even if its
+  safeguard was broken, as long as the attack reproduced. `validate` and `gate`
+  now build the guarded twin and run the differential automatically whenever a
+  boundary control can be inferred for the finding's weakness. `--fast` opts out
+  (≈ half the live runs, but the weaker stability+consensus gate); a weakness with
+  no inferable control falls back to that gate **loudly** (never silently weaker).
+  `--prove-control` is now the default behaviour and kept for back-compat; on
+  `validate`, `--adaptive` no longer requires it.
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
 oracle's precision, extends the differential machinery to server-layer-controlled
