@@ -2082,3 +2082,28 @@ def test_report_sarif_emits_valid_document(tmp_path: Path) -> None:
     res = doc["runs"][0]["results"]
     assert len(res) == 1 and res[0]["ruleId"] == "indirect-injection-note-body-direct"
     assert "LLM01" in res[0]["properties"]["tags"]  # compliance enriched on read
+
+
+def test_report_json_bundle_emits_machine_readable_findings(tmp_path: Path) -> None:
+    """report --json writes a self-contained finding bundle (dashboards / SIEM)."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    out = tmp_path / "finding.json"
+    result = runner.invoke(app, ["report", str(scan_dir), "--json", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    bundle = _json.loads(out.read_text(encoding="utf-8"))
+    assert bundle["schema_version"] and bundle["tool"]["name"] == "Mylonite"
+    f = bundle["findings"]
+    assert len(f) == 1 and f[0]["pattern_id"] == "indirect-injection-note-body-direct"
+    assert "LLM01" in f[0]["compliance"]["owasp_llm"]  # compliance enriched on read
+    assert "localization" in f[0] and "severity" in f[0]
