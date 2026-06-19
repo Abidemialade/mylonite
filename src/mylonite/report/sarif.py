@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mylonite.gate.localize import localize
 from mylonite.report.html import severity_for
 from mylonite.version import __version__
 
@@ -49,16 +50,38 @@ def _proof_text(report: Any | None) -> str | None:
     )
 
 
-def _result(exploit: Any, report: Any | None) -> dict[str, Any]:
+def _result(
+    exploit: Any, report: Any | None, *, system_prompt: str | None = None
+) -> dict[str, Any]:
     weakness = str((getattr(exploit.payload, "metadata", {}) or {}).get("weakness", ""))
     effect = str(getattr(exploit.response, "metadata", {}).get("effect_confirmed", "unprobed"))
     sev = severity_for(weakness, effect)
-    message = str(exploit.success_reason)
+    # R4: pin the finding to its locus (the implicated tool/field or prompt line) so
+    # GitHub code scanning shows WHERE to fix, not just what.
+    loc = localize(exploit, system_prompt=system_prompt)
+    message = f"{exploit.success_reason}\n\nLocated at: {loc.label}. {loc.why}"
     proof = _proof_text(report)
     if proof:
         message = f"{message}\n\n{proof}"
     is_custom = not str(exploit.target_id).startswith("reference:")
     uri = "target.yaml" if is_custom else str(exploit.target_id)
+    # A remote MCP tool has no source file in this repo, so the honest unit is a
+    # SARIF logicalLocation (tool + field); the physicalLocation gets the real prompt
+    # line only when we localized one, else the conventional startLine 1.
+    location: dict[str, Any] = {
+        "physicalLocation": {
+            "artifactLocation": {"uri": uri},
+            "region": {"startLine": loc.line or 1},
+        }
+    }
+    if loc.tool:
+        location["logicalLocations"] = [
+            {
+                "name": loc.tool,
+                "kind": "function",
+                "fullyQualifiedName": f"{loc.tool}.{loc.field}" if loc.field else loc.tool,
+            }
+        ]
     props: dict[str, Any] = {
         "security-severity": _SECURITY_SEVERITY.get(sev, "5.0"),
         "tags": _tags(exploit.compliance),
@@ -70,14 +93,7 @@ def _result(exploit: Any, report: Any | None) -> dict[str, Any]:
         "ruleId": str(exploit.pattern_id),
         "level": _LEVEL.get(sev, "warning"),
         "message": {"text": message},
-        "locations": [
-            {
-                "physicalLocation": {
-                    "artifactLocation": {"uri": uri},
-                    "region": {"startLine": 1},
-                }
-            }
-        ],
+        "locations": [location],
         "properties": props,
     }
 

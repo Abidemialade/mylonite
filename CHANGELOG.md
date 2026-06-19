@@ -68,6 +68,18 @@ scanning, the gating PR). No breaking changes; no contract-version bump.
   load-bearing) alongside the prose rationale — "here's the fix we proved works",
   not a guess. For a control-efficacy finding it is framed as a **Proven fix**; for
   other findings as a **Recommended fix**. New `gate/fixes/{W1-W4,generic}.md`.
+- **Findings are localized to their exact locus, and rendered where developers
+  read.** Mylonite ingests the AI layer, so it now pins each finding to the precise
+  place to fix it — which tool's *description* smuggled the instruction, which tool's
+  *returned content* was trusted, which action *handler* fired without a guard, or
+  which *system-prompt line* is at fault — derived deterministically from data every
+  finding already carries. The locus shows as a **Located at:** line in the gating
+  PR and as a SARIF `logicalLocation` (plus a real prompt-file line where available)
+  so GitHub code scanning pins it. With `--open-pr`, a finding that maps to a
+  committed prompt line also posts a best-effort inline **check-run annotation**
+  (GitHub Checks API); loci with no source line (a remote MCP tool) ride in the PR
+  body + SARIF instead — never silently dropped. New `gate/localize.py` +
+  `gate/annotate.py`.
 
 ## [0.7.1] - 2026-06-18
 
