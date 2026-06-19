@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-18
+
+Depth-first release (no new attack classes or adapters): makes the differential
+oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic
+robustness to a gating leg so the moat is enforced rather than merely reported, and
+surfaces findings + proven fixes where developers already consume them (GitHub code
+scanning, the gating PR). No breaking changes; no contract-version bump.
+
 ### Changed
 
 - **The differential oracle now gates real (`--target-file`) targets BY DEFAULT.**
@@ -21,29 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no inferable control falls back to that gate **loudly** (never silently weaker).
   `--prove-control` is now the default behaviour and kept for back-compat; on
   `validate`, `--adaptive` no longer requires it.
-### Added
-
-- **SARIF 2.1.0 output (`report --sarif <path>`) for GitHub code scanning.** AI-layer
-  findings now land in the GitHub **Security tab** and PR checks — where developers
-  already triage every other finding — instead of only a terminal/HTML panel. Each
-  SARIF result carries a severity (`security-severity` + level), the compliance tags
-  (OWASP-LLM/ASI · MITRE ATLAS · NIST), and — the trust signal — the **differential
-  proof** in its message ("fired N/N on the vulnerable target, resisted M/M with the
-  control — the safeguard, not the model, carries the security"). Reuses the existing
-  exploit/validation data and the dashboard's severity rule; no new finding logic.
-### Added
-
-- **Auto-wired `seed_arm` from the tool surface (frictionless real-target on-ramp).**
-  When a custom `--target-file` declares an indirect-injection weakness (W2) but no
-  `seed_arm`, `scan` now describes the target's live tool surface and infers how to
-  plant untrusted content — so a real MCP app can be tested with near-zero config
-  instead of hitting a hard pre-flight block. To avoid the "plants but never lands"
-  trap, it auto-wires **only when a no-id recall path exists** (so the planted
-  payload is guaranteed to be surfaced back to the planner); otherwise it explains
-  why and leaves the seed_arm to the operator. The inferred value is printed
-  (`auto-wire: inferred seed_arm: …`) and overridable in the target file. New
-  `infer_seed_arm` / `needs_seed_arm_autowire` reuse the existing `_classify_tools`
-  heuristics — no new attack logic.
 - **Metamorphic robustness now GATES the kept decision (was report-only).** The
   reference oracle's gate is now `kept = build ∧ differential ∧ flakiness ∧
   metamorphic`: a generated test must survive a MAJORITY (default 60%) of
@@ -55,8 +40,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `metamorphic_robustness_threshold`) avoids rejecting a real finding just because a
   single aggressive rewording didn't reproduce. Mutation score stays near-free
   observability (not gating).
+
 ### Added
 
+- **SARIF 2.1.0 output (`report --sarif <path>`) for GitHub code scanning.** AI-layer
+  findings now land in the GitHub **Security tab** and PR checks — where developers
+  already triage every other finding — instead of only a terminal/HTML panel. Each
+  SARIF result carries a severity (`security-severity` + level), the compliance tags
+  (OWASP-LLM/ASI · MITRE ATLAS · NIST), and — the trust signal — the **differential
+  proof** in its message ("fired N/N on the vulnerable target, resisted M/M with the
+  control — the safeguard, not the model, carries the security"). Reuses the existing
+  exploit/validation data and the dashboard's severity rule; no new finding logic.
+- **Auto-wired `seed_arm` from the tool surface (frictionless real-target on-ramp).**
+  When a custom `--target-file` declares an indirect-injection weakness (W2) but no
+  `seed_arm`, `scan` now describes the target's live tool surface and infers how to
+  plant untrusted content — so a real MCP app can be tested with near-zero config
+  instead of hitting a hard pre-flight block. To avoid the "plants but never lands"
+  trap, it auto-wires **only when a no-id recall path exists** (so the planted
+  payload is guaranteed to be surfaced back to the planner); otherwise it explains
+  why and leaves the seed_arm to the operator. The inferred value is printed
+  (`auto-wire: inferred seed_arm: …`) and overridable in the target file. New
+  `infer_seed_arm` / `needs_seed_arm_autowire` reuse the existing `_classify_tools`
+  heuristics — no new attack logic.
 - **Proven fix rendered as a reviewable diff in the gating PR.** The "Suggested
   mitigation" section now carries a concrete, class-specific code diff (the
   server-side change that implements the boundary control the differential proved
