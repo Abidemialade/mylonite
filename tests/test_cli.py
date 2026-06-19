@@ -1808,6 +1808,8 @@ def test_generate_prove_control_passes_through_reference_target(tmp_path: Path) 
     src = next(out.glob("test_security_*.py")).read_text(encoding="utf-8")
     assert "assert_control_holds" not in src
     assert "assert_guard_holds" in src
+
+
 # --- Theme E1: gate reads mylonite.yaml (parity with scan) -------------------
 
 
@@ -1866,6 +1868,8 @@ def test_generate_latest_clean_scan_explains_it_is_a_pass(
     assert "no exploits" in result.output
     assert "PASS" in result.output
     assert "earlier scan" in result.output
+
+
 # --- Theme D1: adaptive budget auto-size ------------------------------------
 
 
@@ -1892,6 +1896,8 @@ def test_adaptive_budget_untouched_when_not_adaptive() -> None:
     from mylonite.cli import _adaptive_budget
 
     assert _adaptive_budget(50, adaptive_active=False) == (50, False)
+
+
 # --- Theme G: NIST enriched at mint (report parity with test marks) ---------
 
 
@@ -1936,3 +1942,83 @@ def test_report_scan_dir_shows_derived_nist(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_SUCCESS, result.output
     # NIST (e.g. MEASURE-2.7 derived from LLM01) now shows in the report compliance.
     assert "MEASURE" in result.output or "GOVERN" in result.output or "MAP-" in result.output
+
+
+# --- M1: differential gates real targets by default -------------------------
+
+
+def test_differential_plan_default_runs_for_controllable_weakness() -> None:
+    from mylonite.cli import _differential_plan
+
+    run, cw, note = _differential_plan(_sample_exploit(), fast=False)
+    assert run is True
+    assert cw == "W2"
+    assert "differential" in note.lower()
+
+
+def test_differential_plan_fast_skips() -> None:
+    from mylonite.cli import _differential_plan
+
+    run, cw, note = _differential_plan(_sample_exploit(), fast=True)
+    assert run is False and cw is None
+    assert "fast" in note.lower()
+
+
+def test_differential_plan_no_control_falls_back_loudly() -> None:
+    from mylonite.cli import _differential_plan
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    ex = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id="unknown-weakness-shape",
+        payload=Payload(pattern_id="unknown-weakness-shape", channel="user-message", body="x"),
+        response=AdapterResponse(
+            payload_pattern_id="unknown-weakness-shape", raw_response="", tool_calls=[]
+        ),
+        success_reason="x",
+        compliance=ComplianceTags(),
+    )
+    run, cw, note = _differential_plan(ex, fast=False)
+    assert run is False and cw is None
+    assert "no boundary control" in note.lower() and "weaker" in note.lower()
+
+
+def test_validate_custom_runs_differential_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M1: a real-target validation builds the boundary-guarded twin (differential
+    leg) BY DEFAULT; --fast skips it."""
+    from types import SimpleNamespace
+
+    from mylonite.cli import _validate_custom
+    from mylonite.plugins._mcp import target_registry
+
+    captured: dict[str, Any] = {}
+
+    class _StubValidator:
+        def __init__(self, **kw: Any) -> None:
+            captured.update(kw)
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return SimpleNamespace(kept=True, gating_legs=[])
+
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
+    )
+    tf = tmp_path / "t.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
+    target_registry.clear_runtime_targets()
+    try:
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False)
+        assert captured["guarded_adapter_factory"] is not None  # differential ON by default
+        assert captured["control_weakness"] == "W2"
+        captured.clear()
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True)
+        assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
+    finally:
+        target_registry.clear_runtime_targets()
