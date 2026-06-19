@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dashboards, SIEM, chat bots, custom CI. Reuses the exact data the SARIF/HTML
   reports already compute; no new analysis. New `report/bundle.py`.
 
+### Changed
+
+- **Real-world evasion encodings are now GATING, not a report-only sideshow.** The
+  differential oracle's metamorphic layer gained three new strategies — zero-width
+  (`unicode-tag`), word-`split`, and `multilingual` framing — so a kept test must
+  survive re-encoding (EchoLeak's invisible text, RAG unicode/split tricks), not just
+  rewording. Each preserves the exfil email/URL literal so the attack still lands and
+  the majority threshold stays honest.
+
+### Removed
+
+- **The standalone `scan --obfuscate` tier.** It was report-only with no path into
+  the moat; its one useful idea (the evasion encodings above) now lives in the
+  *gating* metamorphic layer, so this is strictly less surface for more depth. The
+  `obfuscate_payload` transform utility remains (now feeding the metamorphic gate).
+
 - **Stateful memory-poisoning attack + differential validation (T1).** Models the
   threat the single-turn loop misses: poison planted ONCE, left to PERSIST across
   unrelated turns, then retrieved and acted on in a LATER turn (the "zombie agent" /

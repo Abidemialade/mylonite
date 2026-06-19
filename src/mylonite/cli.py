@@ -1064,17 +1064,6 @@ def scan(
             ),
         ),
     ] = False,
-    obfuscate: Annotated[
-        str | None,
-        typer.Option(
-            "--obfuscate",
-            help=(
-                "Obfuscate the payload body to test filter generalization "
-                "(unicode-tag | split | multilingual | base64-wrapper). The exfil "
-                "destination stays literal so detection still fires."
-            ),
-        ),
-    ] = None,
     synthesize: Annotated[
         bool,
         typer.Option(
@@ -1351,16 +1340,6 @@ def scan(
                 err=True,
             )
 
-    if obfuscate is not None:
-        from mylonite.scan.obfuscate import STRATEGY_NAMES
-
-        if obfuscate not in STRATEGY_NAMES:
-            typer.echo(
-                f"--obfuscate: unknown strategy {obfuscate!r}; choose from {list(STRATEGY_NAMES)}",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
-
     # Auto-size the budget for an active adaptive run so it doesn't abort mid-way
     # on the single-shot default (the assessment's seed-3-of-8 abort). An explicit
     # --max-llm-calls (or mylonite.yaml) always wins.
@@ -1387,7 +1366,6 @@ def scan(
         output_dir=output_dir,
         dry_run=dry_run,
         adaptive=adaptive and attack_driver is not None,
-        obfuscate=obfuscate,
     )
 
     engine = ScanEngine(

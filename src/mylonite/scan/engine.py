@@ -33,7 +33,6 @@ from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttackPlan, discover
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
-from mylonite.scan.obfuscate import obfuscate_payload
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
 from mylonite.version import __version__
 
@@ -132,16 +131,6 @@ class ScanConfig(BaseModel):
             "whether the control/target GENERALIZES rather than blocking the one "
             "demo address. Default False preserves existing behaviour (and the "
             "recorded-fixture replay path, which must NOT randomize)."
-        ),
-    )
-    obfuscate: str | None = Field(
-        default=None,
-        description=(
-            "Apply a deterministic obfuscation transform to the payload body after "
-            "customisation (unicode-tag / split / multilingual / base64-wrapper) to "
-            "test whether a control/filter catches only plaintext. The exfil "
-            "destination stays literal so detection still fires. Default None; never "
-            "applied on the fixture/replay path."
         ),
     )
 
@@ -531,12 +520,6 @@ class ScanEngine:
         if self._config.randomize_exfil:
             payload = randomize_payload_exfil(payload)
 
-        # Obfuscation tier (opt-in): rewrite the body to test whether a control/
-        # filter catches only plaintext. Applied AFTER randomize so the minted
-        # destination stays literal (predicate still matches). Never on fixtures.
-        if self._config.obfuscate:
-            payload = obfuscate_payload(payload, self._config.obfuscate)
-
         # Invoke + judge the (customised) payload `runs` times (scan-time flakiness
         # filter). A structural skip or error on ANY pass is terminal — retrying a
         # missing seed arm, an undelivered payload, or a planner outage tests
@@ -584,11 +567,9 @@ class ScanEngine:
             # is the fallback for catalogue-unknown seeds (which never reach here —
             # they return `skipped_unknown_seed` above — but kept for safety).
             resolved_compliance = seed.compliance if seed is not None else compliance
-            # Attack-tier provenance (no contract change — rides payload.metadata):
-            # single-shot is "static", or "obfuscated" when an obfuscation tier ran.
-            tier = "obfuscated" if payload.metadata.get("obfuscation") else "static"
+            # Attack-tier provenance (no contract change — rides payload.metadata).
             tiered_payload = payload.model_copy(
-                update={"metadata": {**payload.metadata, "attack_tier": tier}}
+                update={"metadata": {**payload.metadata, "attack_tier": "static"}}
             )
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
@@ -688,11 +669,10 @@ class ScanEngine:
         if verdict is not None:
             evidence.update({k: str(v) for k, v in verdict.evidence.items()})
         trace = list(outcome.response.tool_calls) if outcome.response is not None else []
-        tier = "adaptive+obfuscated" if payload.metadata.get("obfuscation") else "adaptive"
         final_payload = payload.model_copy(
             update={
                 "body": outcome.final_body,
-                "metadata": {**payload.metadata, "attack_tier": tier},
+                "metadata": {**payload.metadata, "attack_tier": "adaptive"},
             }
         )
 
