@@ -169,3 +169,95 @@ async def test_zero_benign_turns_is_still_cross_turn() -> None:
     out = await _driver().run(seed=_w2_seed(), adapter=vuln, plan=_plan())
     assert out.success is True
     assert out.plant_turn == 1 and out.retrieve_turn == 2
+
+
+# --- Slice 2: differential validation + runner -----------------------------------
+
+
+def _adapter_factory(variant: str) -> InProcessReferenceAdapter:
+    return InProcessReferenceAdapter(variant=variant, model="stub", completion_fn=_planner_stub())
+
+
+@pytest.mark.asyncio
+async def test_validator_confirms_the_memory_control_is_load_bearing() -> None:
+    """The moat: the cross-turn poison fires on the vulnerable twin every run and is
+    resisted on the guarded twin every run -> the memory control is load-bearing."""
+    from mylonite.scan.memory_poison import MemoryPoisonValidator
+
+    validator = MemoryPoisonValidator(
+        adapter_factory=_adapter_factory,
+        judge=SuccessJudge(model="stub", llm_fallback=False),
+        seed=_w2_seed(),
+        plan=_plan(),
+        benign_turns=("what's next?",),
+        id_factory=lambda: _NID,
+        runs=3,
+    )
+    result = await validator.validate()
+    assert result.validated is True
+    assert result.vuln_fires == 3 and result.guard_leaks == 0
+    assert result.rate_gap == 1.0
+    assert result.winning_outcome is not None and result.winning_outcome.success
+
+
+@pytest.mark.asyncio
+async def test_validator_rejects_when_both_twins_behave_the_same() -> None:
+    """A poison that fires on BOTH twins is not an app weakness (no control gap)."""
+    from mylonite.scan.memory_poison import MemoryPoisonValidator
+
+    validator = MemoryPoisonValidator(
+        adapter_factory=lambda _variant: _adapter_factory("vulnerable"),  # both twins vulnerable
+        judge=SuccessJudge(model="stub", llm_fallback=False),
+        seed=_w2_seed(),
+        plan=_plan(),
+        id_factory=lambda: _NID,
+        runs=3,
+    )
+    result = await validator.validate()
+    assert result.validated is False
+    assert result.guard_leaks == 3  # the "guarded" twin leaks too -> no gap
+
+
+@pytest.mark.asyncio
+async def test_runner_emits_validated_memory_poisoning_exploit() -> None:
+    """End to end: discover the plant/retrieve plan from the tool surface, validate
+    the cross-turn attack differentially, and emit an ExploitRecord."""
+    from mylonite.scan.memory_poison import MemoryPoisonRunner
+
+    descriptor = await InProcessReferenceAdapter(variant="vulnerable", model="stub").describe()
+    runner = MemoryPoisonRunner(
+        adapter_factory=_adapter_factory,
+        judge=SuccessJudge(model="stub", llm_fallback=False),
+        seed=_w2_seed(),
+        target_id="reference:vulnerable",
+        benign_turns=("what's next?",),
+        id_factory=lambda: _NID,
+        runs=3,
+    )
+    result = await runner.run(descriptor)
+    assert result.plan is not None
+    assert result.validation is not None and result.validation.validated
+    ex = result.exploit
+    assert ex is not None
+    assert ex.target_id == "reference:vulnerable"
+    assert ex.payload.metadata["attack_shape"] == "memory_poisoning"
+    assert "memory" in ex.pattern_id
+    assert "guarded" in ex.success_reason.lower() or "resist" in ex.success_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_runner_no_exploit_when_surface_has_no_store_or_retrieval() -> None:
+    """A target with no plant/retrieve surface can't host indirect memory poisoning."""
+    from types import SimpleNamespace
+
+    from mylonite.scan.memory_poison import MemoryPoisonRunner
+
+    bare = SimpleNamespace(tools=[])
+    runner = MemoryPoisonRunner(
+        adapter_factory=_adapter_factory,
+        judge=SuccessJudge(model="stub", llm_fallback=False),
+        seed=_w2_seed(),
+        target_id="reference:vulnerable",
+    )
+    result = await runner.run(bare)
+    assert result.plan is None and result.exploit is None

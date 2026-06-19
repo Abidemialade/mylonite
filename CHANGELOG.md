@@ -9,17 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Stateful memory-poisoning attack driver (T1, slice 1).** Models the threat the
-  single-turn loop misses: poison planted ONCE, left to PERSIST across unrelated
-  turns, then retrieved and acted on in a LATER turn (the "zombie agent" / slow-drip
-  shape). `MemoryPoisoningDriver` runs plant → N benign turns → retrieve over one
-  persistent `AttackSession`, validated by the existing W2 differential — the same
-  attack fires on the vulnerable twin and resists on the guarded one (which
-  quarantines the *recalled* memory). It also confirms the planted poison actually
-  resurfaced in the retrieval turn (`cross_turn_delivered`), so a non-delivery reads
-  as NOT TESTED rather than a false clean pass. No new attack class or adapter —
-  deepens W2 over existing session machinery. New `scan/memory_poison.py`. (Engine /
-  CLI wiring + custom-target differential validation follow in slice 2.)
+- **Stateful memory-poisoning attack + differential validation (T1).** Models the
+  threat the single-turn loop misses: poison planted ONCE, left to PERSIST across
+  unrelated turns, then retrieved and acted on in a LATER turn (the "zombie agent" /
+  slow-drip shape). `MemoryPoisoningDriver` runs plant → N benign turns → retrieve
+  over one persistent `AttackSession`; `MemoryPoisonValidator` re-drives that
+  cross-turn attack against both twins and keeps it as a finding only when it fires
+  on the vulnerable twin and is resisted on the guarded one (which quarantines the
+  *recalled* memory) across a flakiness filter — the same differential moat applied
+  to memory poisoning. `MemoryPoisonRunner` discovers the plant/retrieve plan from
+  the live tool surface, validates, and emits a finding stamped
+  `attack_shape=memory_poisoning` with the plant/retrieve turn separation. It also
+  confirms the poison resurfaced in the retrieval turn (`cross_turn_delivered`), so a
+  non-delivery reads as NOT TESTED rather than a false clean pass. No new attack class
+  or adapter — deepens W2 over existing session machinery. New `scan/memory_poison.py`.
+  (Engine/CLI `scan` dispatch follows next.)
 
 Depth-first release (no new attack classes or adapters): makes the differential
 oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic
