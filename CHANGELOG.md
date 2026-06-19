@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cross-model durability (`validate --models a,b,c`).** A weakness fixed and gated
+  against one model can silently re-emerge when a team upgrades the model — a blind
+  spot with no regression. Because Mylonite is model-agnostic, it now re-proves the
+  *same* differential across several models and flags the ones where the guarantee no
+  longer holds ("durable on A and B, RE-EMERGES on C"), exiting non-zero if any model
+  fails and writing a `cross_model_report.json`. Single-model `validate` now also
+  stamps the validated model into the report so the committed regression is honest
+  about which model version it gates. New `scan/cross_model.py`.
 - **Real-world evasion encodings are now GATING, not a report-only sideshow.** The
   differential oracle's metamorphic layer gained three new strategies — zero-width
   (`unicode-tag`), word-`split`, and `multilingual` framing — so a kept test must

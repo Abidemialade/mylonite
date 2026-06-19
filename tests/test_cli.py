@@ -1069,6 +1069,78 @@ def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert "remediation" in result.output
 
 
+def test_validate_exposes_models_flag() -> None:
+    """--models (T2 cross-model durability) is wired into the validate command."""
+    import typer
+
+    from mylonite.cli import app as _app
+
+    cmd = typer.main.get_command(_app).commands["validate"]  # type: ignore[attr-defined]
+    assert "models" in {p.name for p in cmd.params}
+
+
+def _patch_cross_model_validator(
+    monkeypatch: pytest.MonkeyPatch, scripted: dict[str, bool]
+) -> None:
+    """Patch DifferentialValidator to return a per-MODEL kept verdict (no live call)."""
+    from mylonite.contracts import ReproducibilityEvidence, ValidationReport
+    from mylonite.plugins._reference import reference_validator
+
+    reports = {
+        model: ValidationReport(
+            test_filename="t.py",
+            kept=kept,
+            notes="canned",
+            reproducibility=ReproducibilityEvidence(
+                iterations=5, vuln_fired=5, guard_resisted=5 if kept else 1
+            ),
+        )
+        for model, kept in scripted.items()
+    }
+
+    class _FakeValidator:
+        def __init__(self, *, model: str = "", **_: Any) -> None:
+            self._model = model
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return reports[self._model]
+
+    monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+
+def test_validate_models_flags_cross_model_re_emergence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--models re-proves the differential per model; a model where the weakness
+    re-emerges is flagged and the command exits non-zero (CI-gating)."""
+    import json as _json
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_cross_model_validator(monkeypatch, {"m-stable": True, "m-new": False})
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--models", "m-stable,m-new"])
+    assert result.exit_code == EXIT_NOT_KEPT, result.output
+    assert "RE-EMERGES" in result.output and "m-new" in result.output
+    assert "Durability gap" in result.output
+    cm = _json.loads((out_dir / "cross_model_report.json").read_text(encoding="utf-8"))
+    assert cm["all_durable"] is False
+    assert {m["model"]: m["kept"] for m in cm["models"]} == {"m-stable": True, "m-new": False}
+
+
+def test_validate_models_all_durable_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When every model keeps the test, the fix is durable to upgrade → exit 0."""
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_cross_model_validator(monkeypatch, {"m1": True, "m2": True})
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--models", "m1,m2"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "holds across all tested models" in result.output.lower()
+
+
 def test_validate_provider_unreachable_exit_4(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

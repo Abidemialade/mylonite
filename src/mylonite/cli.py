@@ -2250,6 +2250,73 @@ def _provider_preflight(provider: str, model: str) -> bool:
     return result.report.aborted != "provider_unreachable"
 
 
+def _run_cross_model_validation(
+    generated: Any, models_csv: str, iterations: int, provider: str, test_path: Path
+) -> None:
+    """Re-prove the reference differential across several models; flag re-emergence (T2).
+
+    Runs the full differential oracle once per model and writes a durability table +
+    ``cross_model_report.json``. Exits non-zero if ANY model fails to keep the test —
+    that model is one a team could upgrade to and silently re-introduce the weakness.
+    """
+    import json as _json
+
+    from mylonite.plugins._reference.reference_validator import (
+        DifferentialValidator,
+        ReferenceVulnerableOracle,
+    )
+    from mylonite.scan.cross_model import row_from_report, summarize_cross_model
+
+    model_list = [m.strip() for m in models_csv.split(",") if m.strip()]
+    if not model_list:
+        typer.echo("--models was empty; pass e.g. --models m1,m2", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    rows = []
+    for m in model_list:
+        typer.echo(f"Cross-model durability: re-validating against {m} …", err=True)
+        if not _provider_preflight(provider, m):
+            typer.echo(
+                f"model {m!r} is unreachable — set the provider/key or drop it from "
+                "--models. Aborting rather than reporting a misleading durability result.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_PROVIDER)
+        validator = DifferentialValidator(iterations=iterations, provider=provider, model=m)
+        report = validator.validate(
+            generated, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+        )
+        rows.append(row_from_report(m, report))
+
+    all_durable, summary = summarize_cross_model(rows)
+    typer.echo("")
+    typer.echo(summary)
+
+    out_path = test_path.parent / "cross_model_report.json"
+    out_path.write_text(
+        _json.dumps(
+            {
+                "all_durable": all_durable,
+                "models": [
+                    {
+                        "model": r.model,
+                        "kept": r.kept,
+                        "vuln_fired": r.vuln_fired,
+                        "guard_resisted": r.guard_resisted,
+                        "iterations": r.iterations,
+                    }
+                    for r in rows
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    typer.echo(f"Cross-model report: {out_path}")
+    raise typer.Exit(code=EXIT_SUCCESS if all_durable else EXIT_NOT_KEPT)
+
+
 @app.command()
 def validate(
     target: Annotated[
@@ -2277,6 +2344,19 @@ def validate(
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
+    ] = None,
+    models: Annotated[
+        str | None,
+        typer.Option(
+            "--models",
+            help=(
+                "Cross-model durability (T2): comma-separated models to RE-PROVE the "
+                "differential across (e.g. 'claude-haiku-4-5,claude-sonnet-4-6'). Flags "
+                "any model where the weakness re-emerges / the control fails — a fix can "
+                "silently reappear on a model upgrade. Reference targets only; exits "
+                "non-zero if any model fails. Overrides --model."
+            ),
+        ),
     ] = None,
     target_file: Annotated[
         Path | None,
@@ -2402,6 +2482,22 @@ def validate(
     )
 
     is_custom = not exploit.target_id.startswith("reference:")
+
+    # T2: cross-model durability is a distinct flow — re-prove the differential across
+    # several models and flag any where the weakness re-emerges. Reference twins only
+    # (the differential needs the bundled guarded twin). Branch early and return.
+    if models is not None:
+        if is_custom:
+            typer.echo(
+                "--models (cross-model durability) needs a reference target — the "
+                "differential re-runs against the bundled twins across each model. A "
+                "custom target has no in-repo guarded twin to re-prove.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        _run_cross_model_validation(generated, models, iterations, effective_provider, test_path)
+        return
+
     # Auto-resolve the target YAML co-located with the test (written by `generate`)
     # so the operator needn't re-pass --target-file. Explicit --target-file wins.
     if target_file is None and is_custom:
@@ -2471,6 +2567,14 @@ def validate(
             ReferenceVulnerableOracle().adapter(),
             ReferenceVulnerableOracle(),
         )
+
+    # T2: stamp the model the differential was proven against, so the committed
+    # regression is honest about which model version it gates (a fix can silently
+    # re-emerge on a model upgrade — see `validate --models`).
+    _stamp = f"validated against model: {effective_model}"
+    report = report.model_copy(
+        update={"notes": (f"{report.notes}\n{_stamp}" if report.notes else _stamp)}
+    )
 
     # Persist the full ValidationReport (incl. the PR2 structured evidence) next
     # to the test so `mylonite report` can re-render the trust panel offline and
