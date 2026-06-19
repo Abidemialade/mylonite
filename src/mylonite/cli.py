@@ -2607,6 +2607,17 @@ def report(
             ),
         ),
     ] = None,
+    json_bundle: Annotated[
+        Path | None,
+        typer.Option(
+            "--json",
+            help=(
+                "Also write a machine-readable JSON finding bundle (severity, "
+                "compliance, localization, differential proof, proven control) for "
+                "dashboards / SIEM / bots. Takes a PATH."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Render a saved scan or validation as a trust panel (offline, no LLM).
 
@@ -2711,17 +2722,28 @@ def report(
             html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
         typer.echo(f"Wrote HTML report: {html} (style: {html_style})")
 
-    if sarif is not None:
+    if sarif is not None or json_bundle is not None:
         import json as _json
 
-        from mylonite.report import to_sarif
-
+        # The same finding set feeds both machine-readable exports: a validation
+        # carries its differential-proof report; a scan has exploits with no report.
         if kind == "validation":
             findings = [(dashboard_exploit, vreport)] if dashboard_exploit is not None else []
         else:
             findings = [(e, None) for e in dashboard_exploits]
-        sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
-        typer.echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
+
+        if sarif is not None:
+            from mylonite.report import to_sarif
+
+            sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
+            typer.echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
+        if json_bundle is not None:
+            from mylonite.report import to_bundle
+
+            json_bundle.write_text(
+                _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
+            )
+            typer.echo(f"Wrote JSON finding bundle: {json_bundle}")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 

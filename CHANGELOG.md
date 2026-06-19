@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Machine-readable JSON finding bundle (`report --json <path>`).** A self-contained
+  `finding.json` (severity, weakness class, compliance tags, R4 localization, the R2
+  differential proof, and the proven control) for teams not on GitHub/pytest —
+  dashboards, SIEM, chat bots, custom CI. Reuses the exact data the SARIF/HTML
+  reports already compute; no new analysis. New `report/bundle.py`.
+
 - **Stateful memory-poisoning attack + differential validation (T1).** Models the
   threat the single-turn loop misses: poison planted ONCE, left to PERSIST across
   unrelated turns, then retrieved and acted on in a LATER turn (the "zombie agent" /
