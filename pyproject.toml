@@ -142,7 +142,7 @@ mylonite = "mylonite.testkit._pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mylonite"]
-# The gate package's data files (mitigations/*.md, templates/*.yml) are shipped
+# The gate package's data files (mitigations/*.md, fixes/*.md, templates/*.yml) are shipped
 # by the default package selection above — hatchling includes all files under a
 # selected package. (A force-include here would double-add them and the wheel
 # build fails with "a second file is being added".)
