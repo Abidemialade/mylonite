@@ -62,6 +62,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -83,6 +84,7 @@ from mylonite.plugins._reference.reference_target_adapter import InProcessRefere
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
 from mylonite.scan.pytest_runner import run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
@@ -96,6 +98,28 @@ logger = logging.getLogger(__name__)
 _KITCHEN_SINK_SEEDS: tuple[tuple[str, str], ...] = tuple(
     (s.pattern_id, s.weakness) for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
 )
+
+
+#: Exfil literals (email / URL) the model must EMIT for the attack to land — the
+#: success predicate keys on them, so an evasion encoding must leave them verbatim.
+_EXFIL_LITERAL_RE = re.compile(r"[\w.+-]+@[\w.-]+|https?://\S+")
+
+
+def _protect_exfil(body: str, fn: Callable[[str], str]) -> str:
+    """Apply ``fn`` to ``body`` everywhere EXCEPT inside exfil email/URL literals.
+
+    Mirrors ``obfuscate._outside_protected`` but keyed on a generic email/URL
+    pattern (no payload needed), so a re-encoding strategy disguises the
+    *instruction* without breaking the *destination* the predicate matches.
+    """
+    out: list[str] = []
+    last = 0
+    for m in _EXFIL_LITERAL_RE.finditer(body):
+        out.append(fn(body[last : m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(fn(body[last:]))
+    return "".join(out)
 
 
 def _deterministic_strategies() -> dict[str, Callable[[str], str]]:
@@ -117,6 +141,14 @@ def _deterministic_strategies() -> dict[str, Callable[[str], str]]:
         "whitespace": lambda body: "\n".join(body.split()),
         # Unicode confusables: a fixed ASCII -> fullwidth substitution.
         "unicode": _unicode_confusables,
+        # Real-world evasion encodings (X1): the useful idea from the retired
+        # standalone --obfuscate, promoted into the GATING layer so a kept test must
+        # survive re-encoding (EchoLeak's invisible text, RAG unicode/split tricks),
+        # not just rewording. Each preserves any exfil email/URL literal so the
+        # attack still lands and the majority stays honest.
+        "unicode-tag": lambda body: _protect_exfil(body, _zero_width),
+        "split": lambda body: _protect_exfil(body, _split_words),
+        "multilingual": lambda body: _MULTILINGUAL_PREFIX + body,
     }
 
 
