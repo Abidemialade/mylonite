@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.2] - 2026-06-18
+### Added
+
+- **Findings are localized to their exact locus, and rendered where developers
+  read.** Mylonite ingests the AI layer, so it now pins each finding to the precise
+  place to fix it — which tool's *description* smuggled the instruction, which tool's
+  *returned content* was trusted, which action *handler* fired without a guard, or
+  which *system-prompt line* is at fault — derived deterministically from data every
+  finding already carries. The locus shows as a **Located at:** line in the gating
+  PR and as a SARIF `logicalLocation` (plus a real prompt-file line where available)
+  so GitHub code scanning pins it. With `--open-pr`, a finding that maps to a
+  committed prompt line also posts a best-effort inline **check-run annotation**
+  (GitHub Checks API); loci with no source line (a remote MCP tool) ride in the PR
+  body + SARIF instead — never silently dropped. New `gate/localize.py` +
+  `gate/annotate.py`.
 
 Depth-first release (no new attack classes or adapters): makes the differential
 oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic

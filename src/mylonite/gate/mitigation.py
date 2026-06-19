@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mylonite.contracts._types import ExploitRecord, ValidationReport
+from mylonite.gate.localize import localize
 from mylonite.scan.seeds import SEED_CATALOGUE
 
 _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
@@ -118,12 +119,18 @@ def build_pr_body(
     *,
     llm_enrich: bool = False,
     completion_fn: Callable[..., Any] | None = None,
+    system_prompt: str | None = None,
 ) -> str:
-    """Assemble the gating PR description (deterministic; opt-in LLM enrichment)."""
+    """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
+
+    ``system_prompt`` (the target's ingested prompt, when available) lets the
+    locus line pin a system-prompt finding to an exact line (R4).
+    """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
     control = exploit.payload.metadata.get("synthetic_control") or ""
     is_control = bool(control)
+    loc = localize(exploit, system_prompt=system_prompt)
 
     if is_control:
         repro = report.reproducibility
@@ -176,6 +183,8 @@ def build_pr_body(
         "",
         "## Suggested mitigation",
         "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
+        "",
+        f"**Located at:** {loc.label}. {loc.why}",
         "",
         _snippet(wc),
         "",

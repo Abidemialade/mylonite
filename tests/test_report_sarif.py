@@ -83,6 +83,19 @@ def test_to_sarif_levels_by_severity() -> None:
     assert "differential" not in res["message"]["text"].lower()
 
 
+def test_to_sarif_localizes_finding_to_a_logical_location() -> None:
+    """R4: the result pins the finding to its locus (the implicated tool/field) via a
+    SARIF logicalLocation, and names it in the message — so code scanning shows WHERE."""
+    from mylonite.report.sarif import to_sarif
+
+    res = to_sarif([(_exploit("W2"), None)])["runs"][0]["results"][0]
+    logical = res["locations"][0]["logicalLocations"]
+    assert logical[0]["name"] == "read_note"  # the returned-content tool (first call)
+    assert "returned content" in logical[0]["fullyQualifiedName"]
+    assert "Located at:" in res["message"]["text"]
+    assert "read_note" in res["message"]["text"]
+
+
 def test_to_sarif_empty() -> None:
     from mylonite.report.sarif import to_sarif
 

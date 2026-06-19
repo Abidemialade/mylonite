@@ -2936,6 +2936,53 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 """
 
 
+def _post_gate_annotations(
+    repo_root: Path, exploit: Any, report: Any, target_file: Path | None, pr_mod: Any
+) -> None:
+    """Best-effort GitHub check-run annotation for a finding that maps to a committed
+    prompt line (R4). Untestable live glue (needs a real PR + ``checks:write``); the
+    payload assembly and localization it calls are unit-tested. Never raises."""
+    try:
+        from mylonite.gate.annotate import (
+            annotations_from_findings,
+            check_run_payload,
+            post_check_run,
+        )
+
+        sp_path: str | None = None
+        sp_text: str | None = None
+        if target_file is not None:
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            tf = load_target_file(target_file)
+            if tf.system_prompt_file is not None:
+                spf = Path(tf.system_prompt_file)
+                sp_text = spf.read_text(encoding="utf-8")
+                try:
+                    sp_path = str(spf.resolve().relative_to(repo_root.resolve()))
+                except ValueError:
+                    sp_path = str(spf)
+
+        anns = annotations_from_findings(
+            [(exploit, report)], system_prompt=sp_path, system_prompt_text=sp_text
+        )
+        if not anns:
+            return
+        head = pr_mod._default_run(["git", "rev-parse", "HEAD"], cwd=str(repo_root))
+        head_sha = (getattr(head, "stdout", "") or "").strip()
+        if not head_sha:
+            return
+        payload = check_run_payload(
+            head_sha=head_sha,
+            annotations=anns,
+            title="Mylonite AI-layer findings",
+            summary=f"{len(anns)} finding(s) localized to a source line.",
+        )
+        post_check_run(repo_root, payload, _run=pr_mod._default_run)
+    except Exception:  # live glue must never break the gate
+        return
+
+
 @app.command()
 def gate(
     target: Annotated[
@@ -3285,13 +3332,20 @@ def gate(
                 target_file.read_text(encoding="utf-8"), encoding="utf-8"
             )
         paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
-        return pr_mod.open_or_print_pr(
+        pr = pr_mod.open_or_print_pr(
             paths,
             branch=f"mylonite/gate-{exploit.pattern_id}",
             pr_title=f"Mylonite gate: {exploit.pattern_id}",
             pr_body=body,
             open_pr=open_pr,
         )
+        # R4: best-effort inline check-run annotation on the exact prompt line, when
+        # the AI layer is a committed file GitHub can render against. Tool loci (a
+        # remote MCP description/handler/return path) have no source line and ride in
+        # the PR body + SARIF instead. Live-only glue; never fails the gate.
+        if open_pr and getattr(pr, "opened", False):
+            _post_gate_annotations(repo_root, exploit, report, target_file, pr_mod)
+        return pr
 
     result = run_gate(
         out_dir=out,
