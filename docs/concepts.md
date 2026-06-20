@@ -74,16 +74,21 @@ They leave the single-shot path unchanged when off.
   synthetic guarded twin. A validated chain emits a replay-backed regression
   test.
 
-- **`--obfuscate <strategy>` (attack tiers).** Re-encodes the payload body —
-  `unicode-tag` (invisible-tag ASCII smuggling), `split`, `multilingual`,
-  `base64-wrapper` — while keeping the exfil destination literal, to test
-  whether a control or filter generalises beyond plaintext. Every exploit
-  carries an `attack_tier` (static / obfuscated / adaptive / adaptive+obfuscated)
-  surfaced in the gating PR and the emitted test.
+- **`--memory` (stateful memory poisoning).** Models the cross-session
+  "zombie agent" shape single-turn scans miss: poison is planted *once*, persists
+  across unrelated turns, and is retrieved and acted on a *later* turn. Same
+  differential bar — fires on the vulnerable twin, resisted on the guarded one whose
+  control quarantines the *recalled* memory — and it confirms the poison actually
+  resurfaced (else NOT TESTED, never a false clean). See [Attack modes](attack-modes.md).
 
 All reuse the same moat below — a finding is never "the agent did something,"
 only "a weakness that fires on the raw/vulnerable variant and is blocked on the
 guarded one."
+
+> The real-world evasion encodings (zero-width / split / multilingual) that used to be a
+> standalone, report-only `--obfuscate` tier are now folded into the **gating**
+> metamorphic layer of the oracle (see [The validation engine](validation.md)), so a
+> *kept* test must survive re-encoding — not merely report on it.
 
 ## Control efficacy — which safeguard is load-bearing?
 
@@ -93,8 +98,10 @@ does it hold?" Mylonite answers it by **holding the model constant and varying
 only the safeguard**: it synthesizes a *guarded twin* of any real target by
 applying a canonical control (W1–W4) at the adapter boundary, then keeps a
 finding only when the attack fires on the raw target and is resisted with the
-control applied. `validate --prove-control` proves a single control load-bearing
-(add `--adaptive` to grade whether it survives an adaptive attacker);
+control applied. For a real (`--target-file`) target this differential runs **by
+default** in `validate`/`gate`, proving the control load-bearing (add `--adaptive` to
+grade whether it survives an adaptive attacker; `--prove-control` is a back-compat
+no-op, `--fast` skips it);
 `mylonite ablate` scores the whole control set as load-bearing / theater /
 redundant. The plant and effect probe always bypass the boundary shim, so the
 control is measured against an undiluted attack. Full treatment in

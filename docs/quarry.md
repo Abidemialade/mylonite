@@ -39,9 +39,10 @@ if it FAILS on the vulnerable twin and PASSES on the guarded one. See
 
 ## The 60-second demo
 
-Requires **Python 3.11+**. Mylonite is not on PyPI yet — the flow is
-clone-first, with **two** editable installs: the `mylonite` package itself,
-then the Quarry (`mcp-kitchen-sink`) reference target.
+Requires **Python 3.11+**. The `mylonite` CLI is on PyPI (`pip install
+mylonite`), but the Quarry (`mcp-kitchen-sink`) reference target the demo drives
+is **not** published — so the demo is clone-first, with **two** editable
+installs: the `mylonite` package itself, then the reference target.
 
 On Linux / macOS (bash):
 
