@@ -2,10 +2,16 @@
 
 ## Install
 
-Requires Python 3.11 or newer. Mylonite is not on PyPI yet — install from
-source. The flow is clone-first with **two** editable installs: the
-`mylonite` package, then the Quarry (`mcp-kitchen-sink`) reference target
-used by the demo and the differential oracle.
+Requires Python 3.11 or newer. The `mylonite` CLI is on PyPI:
+
+```bash
+pip install mylonite
+```
+
+The demo and the differential oracle also use the Quarry (`mcp-kitchen-sink`)
+reference target, which is **not** published yet — so to run them you need a
+clone-first install with **two** editable installs (the `mylonite` package, then
+the reference target):
 
 On Linux / macOS (bash):
 
@@ -39,8 +45,11 @@ mylonite taxonomy list --framework owasp-llm
 mylonite demo
 mylonite scan reference:vulnerable
 mylonite scan mcp:fetch --authorize fetch
-mylonite scan reference:vulnerable --adaptive
-mylonite scan reference:vulnerable --synthesize
+mylonite scan reference:vulnerable --adaptive      # strategist refines until it lands
+mylonite scan reference:vulnerable --synthesize    # chain 2+ tools to a sink
+mylonite scan reference:vulnerable --memory        # cross-turn memory poisoning
+mylonite gate reference:vulnerable                 # scan -> test -> validate, the magic moment
+mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
 - `mylonite demo` — the 60-second offline showcase: replays recorded scans
@@ -63,10 +72,13 @@ mylonite scan reference:vulnerable --synthesize
   indirect-injection attempt doesn't fire, an LLM strategist re-crafts the
   injection and retries within a budget (needs a session-capable target, e.g.
   `reference:*`). Off by default.
-- `mylonite scan <target> --synthesize` — opt-in tool-chaining synthesis:
-  synthesize an app-specific multi-tool exploit chain from the tool surface and
-  differentially validate it against the twins (reference-twin targets for now).
-  See [Concepts](concepts.md#adaptive-attacks-and-tool-chaining-synthesis).
+- `mylonite scan <target> --synthesize` / `--memory` — opt-in tool-chaining
+  synthesis and stateful cross-turn memory poisoning. See [Attack modes](attack-modes.md).
+- `mylonite gate <target>` — the whole pipeline (scan → generate → validate → optional
+  PR) in one command; only a kept test makes it through. See [CI gating](ci-gating.md).
+- `mylonite report <dir>` — render a scan/validation as a terminal panel, HTML
+  dashboard, `--sarif` (GitHub code scanning), or `--json` bundle. See
+  [Reading the results](reading-results.md).
 
 ## The full flow: scan → generate → validate
 
@@ -110,20 +122,21 @@ live LLM calls. The committed regression test that `generate` emits, however,
 replays **offline** at the CI gate (no API key needed there) — see
 [The validation engine](validation.md).
 
-## Commands still to come
+## Gate it (CI) and read the results
+
+Turn a finding into a committed regression test and a gating PR with one command, then
+render it in whatever format your pipeline consumes:
 
 ```bash
-mylonite init         # scaffold a config (Phase 3)
+mylonite gate --target-file app.yaml --authorize me --open-pr   # against YOUR app
+mylonite report .mylonite/validated/<dir> --sarif out.sarif     # GitHub code scanning
+mylonite validate <dir> --models claude-haiku-4-5,claude-sonnet-4-6   # durable across upgrades?
 ```
-
-This exists as a stub that exits non-zero with a pointer to
-[`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md).
 
 ## Where to go next
 
-- [The Quarry](quarry.md) — the deliberately vulnerable playground: run the
-  demo, walk the W1–W4 weakness catalogue, then point the scanner at a real
-  MCP server.
-- [The validation engine](validation.md) — why a generated test means what
-  it claims, and why the CI gate runs offline.
-- [Concepts](concepts.md) — scope and the differential-oracle moat.
+- [Test your own app](test-your-app.md) — the custom MCP on-ramp (`init-target` → scan → gate).
+- [Try it — the Quarry](quarry.md) — the deliberately vulnerable playground (W1–W4 walkthrough).
+- [Attack modes](attack-modes.md) — single-shot, adaptive, tool-chaining, memory poisoning.
+- [The validation engine](validation.md) — why a generated test means what it claims.
+- [Reading the results](reading-results.md) · [CLI reference](cli-reference.md).

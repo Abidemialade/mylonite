@@ -18,8 +18,24 @@ mylonite gate --target-file target.yaml --authorize your-scope --open-pr
 Without `--open-pr`, `gate` writes `.mylonite/gate/` (the test, the exploit,
 your `target.yaml`) and the `.github/workflows/` templates, commits them to a
 branch, and prints the exact `gh pr create` command. With `--open-pr` it opens
-the PR via `gh`. The PR body explains the finding, its OWASP/ASI/ATLAS/NIST
-tags, the validation evidence, and a human-applied suggested mitigation.
+the PR via `gh`.
+
+The PR body is itself a result surface (see [Reading the results](reading-results.md#the-gating-pr)):
+
+- **The differential proof** — the fires/resists numbers and the `kept` formula, so a
+  reviewer sees *why the test is trustworthy*, not just that it exists.
+- **Located at** — the exact locus to fix (which tool description / returned content /
+  action handler / system-prompt line).
+- **The proven fix** — a concrete, reviewable code **diff** implementing the boundary
+  control the differential proved load-bearing — "here's the fix we proved works."
+- **Compliance** — the OWASP-LLM/ASI · MITRE ATLAS · NIST tags.
+- **Inline annotations** — a best-effort GitHub check-run annotation on the offending
+  prompt line, when the AI layer is a committed file.
+
+For a custom target the gate proves the finding **differentially by default** (the
+control-efficacy oracle); `--fast` skips that leg for a faster, cheaper check that no
+longer proves the safeguard carries the security — a deliberate trade-off, not the
+recommended default.
 
 ## Adopting it in GitHub CI
 
@@ -49,6 +65,17 @@ The scaffolded workflows map the `MYLONITE_API_KEY` secret to
 provider, set that provider's key env var in the workflow instead (e.g.
 `OPENAI_API_KEY`) and pass `--provider`/`--model` — Mylonite routes through
 LiteLLM.
+
+### Surfacing findings in the Security tab
+
+Emit SARIF from a scan or validation and upload it so AI-layer findings land in the
+GitHub **Security tab** alongside every other code-scanning result:
+
+```yaml
+- run: mylonite report .mylonite/validated --sarif mylonite.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with: { sarif_file: mylonite.sarif }
+```
 
 Behind a corporate network? See
 [Enterprise & air-gapped networking](enterprise-networking.md).

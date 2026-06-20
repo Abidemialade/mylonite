@@ -32,18 +32,36 @@ theme:
 exclude_docs: |
   superpowers/
 
+# Peripheral pages intentionally not in the main nav (a dev/contributing guide and an
+# internal asset note) — listed here so `--strict` doesn't flag them as orphaned.
+not_in_nav: |
+  /assets/recording-script.md
+  /contributing/live-e2e-tests.md
+
 nav:
   - Home: index.md
-  - Quickstart: quickstart.md
-  - Installing on Windows: install-windows.md
-  - The Quarry (try it): quarry.md
-  - The validation engine: validation.md
-  - CI gating: ci-gating.md
-  - Enterprise networking: enterprise-networking.md
-  - Concepts: concepts.md
-  - Plugin authoring: plugin-authoring.md
-  - Standards mapping: standards-mapping.md
-  - Security: security.md
+  - Get started:
+      - Quickstart: quickstart.md
+      - Installing on Windows: install-windows.md
+      - Try it — the Quarry: quarry.md
+  - Guides:
+      - Test your own app: test-your-app.md
+      - Gate CI: ci-gating.md
+      - Reading the results: reading-results.md
+  - How it works:
+      - Weakness classes & how attacks work: weakness-classes.md
+      - Attack modes: attack-modes.md
+      - The validation engine: validation.md
+      - Concepts: concepts.md
+      - Standards mapping: standards-mapping.md
+  - Reference:
+      - CLI reference: cli-reference.md
+      - target.yaml reference: target-file.md
+      - Architecture & modules: architecture.md
+      - Plugin authoring: plugin-authoring.md
+  - Operating:
+      - Enterprise networking: enterprise-networking.md
+      - Security & responsible use: security.md
 
 markdown_extensions:
   - admonition

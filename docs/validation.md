@@ -75,10 +75,11 @@ replay is honest about its own evidence.
 
 Every validation reports three headline figures.
 
-- **`kept`** — the gating verdict. `kept = build ∧ differential ∧ flakiness`.
-  The test built and collected under pytest, showed the differential at all,
-  *and* showed it reliably across the flakiness filter. Only a kept test is
-  worth committing.
+- **`kept`** — the gating verdict.
+  `kept = build ∧ differential ∧ flakiness ∧ metamorphic`. The test built and
+  collected under pytest, showed the differential at all, showed it reliably across
+  the flakiness filter, *and* survived a majority of metamorphic rewrites. Only a kept
+  test is worth committing.
 - **Reproducibility fraction** — the flakiness-stage metric,
   `min(vulnerable fires, guarded resists) / iterations`. How dependably the
   test discriminates run-to-run; `1.0` means it fired and resisted on every
@@ -89,9 +90,15 @@ Every validation reports three headline figures.
   it). It is computed for free from the scans already run and gives a coverage
   read across the weakness bank, not just the single exploit under test.
 
-A fourth stage, **metamorphic-lite**, applies one neutral paraphrase of the
-exploit body and re-checks the differential once. It is reported, not gating —
-a cheap robustness read that catches the most brittle over-fit tests.
+A fourth stage, **metamorphic**, is **gating**. It applies several deterministic,
+semantically-neutral rewrites of the exploit body — paraphrase, casing, whitespace,
+unicode confusables, and the real-world **evasion encodings** (zero-width / invisible
+chars, word-splitting, multilingual framing) — and genuinely re-drives each through
+*both* twins. A kept test must survive a **majority** (default 60%) of them, so it
+can't be over-fit to one literal payload ("teaching to the test"). Each rewrite
+preserves the exfil destination so the attack still lands and the majority stays
+honest. This is what makes a kept test robust to the exact tricks real injections use
+(EchoLeak's invisible text, RAG unicode/split games) — not just to rewording.
 
 ## Beyond the bundled twin: the control-efficacy oracle
 
@@ -99,8 +106,11 @@ The differential above proves a weakness is real by comparing a *vulnerable*
 build to a *guarded* one. But on a **real target you don't have two builds of**,
 the sharper question is not "is there a weakness?" — it's *"which safeguard is
 actually carrying the security, and does it hold?"* That is what the
-**control-efficacy oracle** (`validate --prove-control`) answers, and it is the
-deepened moat.
+**control-efficacy oracle** answers, and it is the deepened moat. For a real
+(`--target-file`) target it now runs **by default** — `validate` and `gate` build the
+synthetic guarded twin and prove the control automatically. (`--prove-control` is kept
+as a back-compat no-op; pass `--fast` to *skip* the differential for a faster, weaker
+gate.)
 
 The move is to **hold the model constant and vary only the safeguard**. Mylonite
 synthesizes a *guarded twin* of any real target by applying a canonical control
@@ -139,6 +149,24 @@ specific* defense. The verdict then separates a control that **holds under
 adaptive pressure** from one that **holds against static probes but falls to an
 adaptive attacker** — grading control *robustness*, which a single-shot check
 can't see.
+
+## Cross-model durability
+
+A weakness you fixed and gated against one model can silently **re-emerge** when your
+team upgrades the model — a blind spot you otherwise have no regression for. Because
+every Mylonite call flows through LiteLLM, it can re-prove the *same* differential
+across model versions:
+
+```bash
+mylonite validate <dir> --models claude-haiku-4-5,claude-sonnet-4-6
+```
+
+It runs the full oracle once per model and prints a durability table, flagging any model
+where the test is **not kept** ("durable on A and B, **RE-EMERGES** on C"). It exits
+non-zero if any model fails — so CI catches a model your team could upgrade to and
+silently re-introduce the weakness — and writes a `cross_model_report.json`.
+Single-model `validate` also stamps the model it proved the test against into the
+report, so the committed regression is honest about which version it gates.
 
 ## The bundled reference twin
 

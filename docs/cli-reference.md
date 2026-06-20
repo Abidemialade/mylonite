@@ -1,0 +1,162 @@
+# CLI reference
+
+Every command, its key options, and a worked example. Run `mylonite COMMAND --help` for
+the authoritative, always-current list (the help strings and usage examples live in the
+CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
+
+**Exit codes:** `0` ok/kept · `2` config or usage error (incl. an empty scan) · `3`
+LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept).
+
+---
+
+## `scan` — find weaknesses
+
+Run the exploit-finding loop against a target. Default is the [single-shot
+engine](attack-modes.md); opt into `--adaptive`, `--synthesize`, or `--memory`.
+
+**Target** (positional): `reference:vulnerable` / `reference:guarded`, a bundled
+`mcp:<family>[:<scope>]` (`filesystem`/`fetch`/`github`), or `mcp:custom` with
+`--command`/`--arg`. Omit when using `--target-file`. Non-reference targets need
+`--authorize`.
+
+Key options: `--target-file PATH`, `--authorize NAME`, `--adaptive`,
+`--verbose-strategist`, `--synthesize`, `--memory`, `--provider`, `--model`,
+`--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
+`--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
+`--allow-no-seed-arm`. For `mcp:custom`: `--command`, `--arg`, `--env`, `--scope`,
+`--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
+
+```bash
+mylonite scan --target-file app.yaml --authorize me --adaptive
+```
+
+## `generate` — emit the regression test
+
+Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no
+LLM call. Carries the compliance metadata.
+
+Options: `scan_path` (an `exploit_*.json` or scan dir) or `--latest`; `--out PATH`;
+`--target-file PATH` (custom targets — co-locates the YAML so the live test re-drives
+your app); `--prove-control` (emit a control-efficacy test).
+
+```bash
+mylonite generate --latest --out .mylonite/generated/my-finding
+```
+
+## `validate` — prove the test (the moat)
+
+Run the generated test through the [differential-oracle validator](validation.md), LIVE.
+A test is **kept** only when it discriminates reliably.
+
+Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
+`--model`; **`--models a,b,c`** ([cross-model durability](validation.md#cross-model-durability)
+— re-prove across models, flags re-emergence, reference targets only); `--target-file
+PATH` (re-drive your REAL app instead of the twin); `--fast` (skip the differential leg
+— faster, weaker); `--randomize-exfil`; `--adaptive` (grade the control under adaptive
+pressure); `--iteration-timeout S`. `--prove-control` is a back-compat no-op (the
+differential is now default).
+
+```bash
+mylonite validate .mylonite/generated/my-finding --models claude-haiku-4-5,claude-sonnet-4-6
+```
+
+## `gate` — scan → generate → validate → PR (the magic moment)
+
+The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows.
+
+Options: `target` or `--target-file`; `--authorize`; `--open-pr` (push a branch + open
+the PR via `gh`); `--config`; `--provider`, `--model`; `--out PATH`; `--max-llm-calls`;
+`--runs-on LABEL` (GitHub runner; use a self-hosted label for in-perimeter MCP
+backends); `--workflows/--no-workflows`; `--llm-enrich` (append a labelled, unverified
+LLM fix suggestion); `--fast`; `--randomize-exfil`.
+
+```bash
+mylonite gate --target-file app.yaml --authorize me --open-pr
+```
+
+## `report` — render findings
+
+Render a saved scan or validation, offline. See [Reading the results](reading-results.md).
+
+Options: `target` (a scan/validated dir or `*_report.json`); `--html PATH`
+(`--html-style dashboard|terminal`); `--sarif PATH` (GitHub code scanning); `--json
+PATH` (machine-readable bundle).
+
+```bash
+mylonite report .mylonite/validated/my-finding --sarif out.sarif --json finding.json
+```
+
+## `ablate` — score the safeguards
+
+Toggle each AI safeguard and report which are **load-bearing**, **security-theater**, or
+**redundant**. See [the control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
+
+Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
+`--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
+`--max-seeds N`; `--provider`, `--model`.
+
+```bash
+mylonite ablate --target-file app.yaml --authorize me --controls W2,W4 --redundancy
+```
+
+## `init-target` — scaffold a `target.yaml`
+
+Launch your MCP server, list its tools (no LLM call), and write a commented target file.
+See [Test your own app](test-your-app.md) and the [target.yaml reference](target-file.md).
+
+Options: `--command` (required); `--arg`, `--env`; `--scope`; `--family`;
+`--system-prompt-file`; `--output/-o PATH`; `--model`; `--force`.
+
+```bash
+mylonite init-target --command python --arg my_server.py -o app.yaml
+```
+
+## `demo` — the Quarry playground
+
+Zero-config: run the vulnerable-vs-guarded differential on the bundled reference agent.
+Replays recorded fixtures by default; `--live` makes real calls. See [the Quarry](quarry.md).
+
+```bash
+mylonite demo            # offline, instant
+mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
+```
+
+## `export` — portable eval format
+
+Export a validated finding to a portable eval format (offline).
+
+Options: `target`; `--format eval-yaml`; `--out PATH`.
+
+## `doctor` — preflight the provider
+
+Diagnose provider connectivity before a live scan. Exit `4` if unreachable.
+
+Options: `--provider`, `--model`, `--config`.
+
+```bash
+mylonite doctor --provider anthropic
+```
+
+## `taxonomy list` — browse the threat data
+
+List entries from a bundled threat taxonomy. See [Standards mapping](standards-mapping.md).
+
+```bash
+mylonite taxonomy list --framework owasp-llm
+```
+
+## `version`
+
+Print the installed version.
+
+```bash
+mylonite version
+```
+
+---
+
+### Run config (`mylonite.yaml`)
+
+`scan` and `gate` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)
+to declare `target_file` / `authorize` / `provider` / `model` / budget once. An explicit
+flag always wins. `doctor` reads it too, so it pings the same model your scan will use.

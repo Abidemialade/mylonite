@@ -43,7 +43,21 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="mylonite",
-    help="AI-layer security testing. Finds AI-agent weaknesses and writes the regression tests that close them.",
+    help=(
+        "Mylonite -- AI-layer security testing.\n\n"
+        "Finds app-specific weaknesses in your AI agent's attack surface (system prompt, "
+        "tool/function schemas, MCP tools, RAG, memory), proves each one with a differential "
+        "oracle, and writes the pytest regression test that gates CI."
+    ),
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite demo` -- try it on the bundled vulnerable agent (no setup).\n\n"
+        "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
+        "`mylonite init-target --command 'python server.py' -o app.yaml` -- scaffold a target.yaml.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
+        "Docs: https://abidemialade.github.io/mylonite/ -- "
+        "run 'mylonite COMMAND --help' for any command."
+    ),
     add_completion=False,
     no_args_is_help=True,
 )
@@ -909,7 +923,17 @@ def _run_memory_poison(
         typer.echo(f"Next: mylonite generate {scan_dir}")
 
 
-@app.command()
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
+        "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
+        "`mylonite scan reference:vulnerable --adaptive` -- strategist refines until it lands.\n\n"
+        "`mylonite scan reference:vulnerable --synthesize` -- chain 2+ tools to a harmful sink.\n\n"
+        "`mylonite scan reference:vulnerable --memory` -- cross-turn memory poisoning.\n\n"
+        "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
+    )
+)
 def scan(
     target: Annotated[
         str | None,
@@ -990,14 +1014,23 @@ def scan(
         str | None,
         typer.Option(
             "--customiser-model",
-            help="Override the model that crafts/refines attack payloads. Defaults to --model.",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads (the red-team side, "
+                "incl. the --adaptive strategist). Defaults to --model. Mylonite separates "
+                "three model roles: planner (the agent under test), customiser (the attacker), "
+                "and judge (the verdict) -- set them independently to mix a strong attacker "
+                "against a cheaper target, etc."
+            ),
         ),
     ] = None,
     judge_model: Annotated[
         str | None,
         typer.Option(
             "--judge-model",
-            help="Override the model for the LLM-judge verdict. Defaults to --model.",
+            help=(
+                "Override the model that JUDGES whether an attack landed (the LLM-judge leg, "
+                "used only when the deterministic predicate is inconclusive). Defaults to --model."
+            ),
         ),
     ] = None,
     max_llm_calls: Annotated[
@@ -2317,7 +2350,16 @@ def _run_cross_model_validation(
     raise typer.Exit(code=EXIT_SUCCESS if all_durable else EXIT_NOT_KEPT)
 
 
-@app.command()
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the moat).\n\n"
+        "`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n"
+        "`mylonite validate <dir> --models haiku,sonnet` -- prove it holds across model upgrades.\n\n"
+        "`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\n"
+        "Exit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected)."
+    )
+)
 def validate(
     target: Annotated[
         Path,
@@ -2646,7 +2688,15 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
-@app.command()
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite report .mylonite/scans/<dir>` -- terminal trust panel (offline, no LLM).\n\n"
+        "`mylonite report <dir> --html report.html` -- shareable, self-contained HTML dashboard.\n\n"
+        "`mylonite report <dir> --sarif out.sarif` -- GitHub code scanning (Security tab + PR checks).\n\n"
+        "`mylonite report <dir> --json finding.json` -- machine-readable bundle (dashboards/SIEM/bots)."
+    )
+)
 def report(
     target: Annotated[
         Path,
@@ -3281,7 +3331,14 @@ def _post_gate_annotations(
         return
 
 
-@app.command()
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite gate reference:vulnerable` -- the magic moment on the demo target.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me` -- gate YOUR app (writes test + workflows).\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- also open the gating PR via gh."
+    )
+)
 def gate(
     target: Annotated[
         str | None,

@@ -219,7 +219,9 @@ that keep the gate running forever:
 - **Enterprise / air-gapped support** documented in
   `docs/enterprise-networking.md` (OS trust-store, `SSL_CERT_FILE`,
   self-hosted runners, offline fixture replay without egress).
-- **`pip install mylonite`** on PyPI lands with this release.
+- **`pip install mylonite`** on PyPI — shipped (first publish landed with
+  v0.7.0 via the Trusted-Publishing workflow). The `mcp-kitchen-sink` reference
+  target is not yet published.
 
 *Expected outcome:* a one-command demo a stranger can run on their own
 agent and get a committed, gating regression test, with the CI gate
