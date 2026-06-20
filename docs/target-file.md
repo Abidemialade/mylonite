@@ -43,7 +43,7 @@ seed_arm:
   # id_pattern: 'note_(\d+)'   # ...or a regex to extract the id
   # id_from: first_int         # ...or "first integer in the result"
 
-# --- how to confirm the damage materialised (recommended for custom targets) 
+# --- how to confirm the damage materialised (recommended for custom targets)
 effect_probe:
   verify_tool: list_notes
   verify_args_template: {}
