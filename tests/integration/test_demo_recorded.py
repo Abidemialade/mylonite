@@ -5,7 +5,7 @@ These run fully offline against the committed fixtures under
 They prove three things:
 
 * the recorded happy path loads via ``importlib.resources`` with deterministic
-  note IDs and yields the 4-vs-0 differential that is the Phase 2 oracle;
+  note IDs and yields the 4-vs-0 differential that is the validation oracle;
 * replay genuinely never touches the network (litellm.acompletion is patched to
   explode, and ``run_demo`` still succeeds);
 * a missing fixture surfaces as the friendly ``DemoFixtureError`` (→ CLI exit 2)

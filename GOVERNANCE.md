@@ -48,8 +48,8 @@ The registry is a public good. Patterns submitted via the
 2. **Differential-oracle proof.** Each pattern must come with (a) a seed
    vulnerable target it reliably exploits and (b) a guarded variant of that
    target it reliably does not exploit. Proof is the registry CI passing the
-   differential check across five runs. (Phase 2 deliverable; before Phase 2
-   lands, hand-verified evidence is accepted.)
+   differential check across five runs. (Where automated differential proof
+   isn't yet wired for a contribution, hand-verified evidence is accepted.)
 3. **No live targeting.** Patterns must reproduce their behaviour on a
    bundled local target, not on a public third-party service.
 4. **Public-domain or Apache-2.0 contribution.** Submissions are accepted

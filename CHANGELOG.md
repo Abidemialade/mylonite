@@ -245,11 +245,11 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ### Added
 
-- **Control-efficacy oracle on real targets (Slice 1).** Mylonite can now prove
+- **Control-efficacy oracle on real targets.** Mylonite can now prove
   which safeguard is load-bearing on a real MCP target, not just the bundled
   reference twin. A `ControlServerShim` (`mylonite.scan.control_shim`) synthesizes
   a *guarded twin* of a real target by applying a canonical control at the adapter
-  boundary (Slice 1 ships **W2**, the untrusted-data envelope) — the model is held
+  boundary (**W2**, the untrusted-data envelope) — the model is held
   constant, so the differential measures the *control's* marginal contribution.
   Only the planner's view is guarded; the attacker's plant and the effect probe
   bypass the shim, so the measurement stays honest. `DifferentialValidator` gains
@@ -346,7 +346,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ### Added
 
-- **Driver 2 — app-specific tool-chaining synthesis (`scan --synthesize`).**
+- **App-specific tool-chaining synthesis (`scan --synthesize`).**
   Synthesizes a multi-tool exploit chain from the target's own tool surface (a
   store/plant tool → a harmful sink, e.g. `read_note → send_email`) — the
   app-specific depth generic probe libraries can't reach — then **differentially
@@ -354,7 +354,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   blocked on the guarded twin across a flakiness filter, or it is not a finding.
   `ChainSynthesizer` proposes the chain (deterministic tool selection + one
   constrained LLM call, with a deterministic skeleton on fallback);
-  `ChainAttackDriver` executes it by reusing the Driver 1 adaptive loop and
+  `ChainAttackDriver` executes it by reusing the adaptive loop and
   escalates to multi-turn steering when a single drive doesn't reach the sink;
   `ChainDifferentialValidator` is the moat. A validated chain emits an
   `ExploitRecord` with the chain embedded for replay, and `mylonite generate`
@@ -436,7 +436,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - CLI help clarity: `taxonomy list --framework` is marked required; `report
   --html` documents that it takes a file-path argument.
 
-### Added — Pre-Phase-4 readiness: flow + verification legibility
+### Added — flow + verification legibility
 
 - **`mylonite export` — eval/CI interop.** Mylonite is the validation layer;
   `mylonite export <dir|exploit.json> --format eval-yaml` hands a
@@ -501,7 +501,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   reports remain valid. `SeedKill` and `ReproducibilityEvidence` are exported
   from `mylonite.contracts`.
 
-### Added — Phase 3: CI gating + the magic moment
+### Added — CI gating + the magic moment
 
 - **`mylonite gate` command** — the end-to-end magic moment: `scan →
   generate → validate → (opt-in) open a gating PR`. Writes all artefacts
@@ -905,7 +905,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ## [0.4.0] - 2026-06-10
 
-### Added — Phase 2 "the validation engine" (scan → generate → validate)
+### Added — the validation engine (scan → generate → validate)
 
 - **`mylonite generate` and `mylonite validate` now work** (replacing the
   not-implemented stubs), wiring the pytest generator to the
@@ -1020,7 +1020,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   differential agreement fraction, metamorphic robustness rate) and
   `ValidationReport` gains an optional `mutation_score: float | None` (fraction of
   the seeded-weakness bank the generated test correctly catches). Both default to
-  `None`, so the change is backward-compatible. These make the Phase 2 validation
+  `None`, so the change is backward-compatible. These make the the validator validation
   engine's two headline numbers headline-able, chart-able, and CI-gate-able.
 
 ### Changed
@@ -1034,7 +1034,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ## [0.3.0] - 2026-06-10
 
-### Added — Phase 1.5 "the Quarry" playground
+### Added — the Quarry playground
 
 - **`mylonite demo`** — a zero-config, **offline, deterministic** playground.
   It runs the real scan twice against the bundled deliberately-vulnerable
@@ -1080,7 +1080,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ## [0.2.2] - 2026-06-09
 
-### Added — Phase 1 truly complete (real OSS MCP agents)
+### Added — real open-source MCP agents
 
 - **MCP stdio transport adapter** — `mylonite.plugins._mcp.stdio_adapter.MCPStdioAdapter`
   spawns a bundled MCP server as a fresh subprocess per `invoke()`, drives
@@ -1139,7 +1139,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - **Three new entry points** registered under `mylonite.target_adapters`:
   `mcp_filesystem`, `mcp_fetch`, `mcp_github`.
 
-### Acceptance criteria — Phase 1 truly complete
+### Acceptance criteria
 
 - `mylonite scan mcp:filesystem:<sandbox> --authorize <sandbox>` produces
   ≥1 finding whose predicate reason names `write_file` with attacker-
@@ -1152,7 +1152,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 ## [0.2.1] - 2026-06-09
 
-### Added — Phase 1 completion (W3 + W4)
+### Added — W3 + W4
 
 - **`ExcessiveAgencyAttackModule`** (entry point `excessive_agency`) —
   the W3 + W4 attack family. Tagged OWASP LLM06, ASI02 + ASI05,
@@ -1182,7 +1182,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - **Integration tests** — `test_scan_vulnerable_excessive_agency.py`
   proves W3 + W4 both fire on `reference:vulnerable`;
   `test_scan_guarded_excessive_agency.py` proves both stay clean on
-  `reference:guarded`. The Phase 1 truth-table now covers all four
+  `reference:guarded`. The the scan loop truth-table now covers all four
   weakness families.
 
 ### Changed
@@ -1195,14 +1195,14 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 
 - Generic CLI module filter (current allowlist is explicit; v0.3 should
   match "any non-stub attack module").
-- Real-network MCP transport — still Phase 1.5 / 2 territory.
+- Real-network MCP transport — a later release.
 - Multi-turn planner exercises.
 - Ensemble LLM-judge.
-- All other Phase 2+ items in v0.2.0's deferred list.
+- All other later items in v0.2.0's deferred list.
 
 ## [0.2.0] - 2026-06-09
 
-### Added — Phase 1
+### Added
 
 - **`mylonite scan <target>` is real.** v0.2 supports `reference:vulnerable`
   and `reference:guarded` as targets out of the box. Flags:
@@ -1229,15 +1229,15 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
     Maps `aborted` to exit code 3 (budget) or 4 (provider unreachable).
   - `artefacts.py` — `write_artefacts` + `render_summary` (Rich).
 - **`LLMPlanner` in the reference target.** Async LiteLLM tool-calling loop
-  (default 8-iteration cap). Lives alongside the scripted Phase 0 planners
-  so Phase 2's differential oracle still has its deterministic fixtures.
+  (default 8-iteration cap). Lives alongside the scripted planners
+  so the differential oracle still has its deterministic fixtures.
 - **`InProcessReferenceAdapter`** with `AsyncTargetAdapterBase`. Two
   0-arg subclasses (`InProcessVulnerableReferenceAdapter`,
   `InProcessGuardedReferenceAdapter`) registered as separate entry points.
   Raises `AdapterInvocationSkipped` on planner failure so the engine
   records `outcome="skipped_planner_failure"` without false judgments.
 - **`PromptInjectionAttackModule`** (entry point `prompt_injection`) — the
-  real W1+W2 attack family. The Phase 0 stub `ReferenceAttackModule`
+  real W1+W2 attack family. The the foundations stub `ReferenceAttackModule`
   remains as `reference_example` for plugin authors.
 - **`ScanReport` + `ScanAttempt` contracts** under
   `mylonite.contracts._types`, with JSON schemas
@@ -1245,7 +1245,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   `scripts/regenerate_schemas.py` and CI-checked for idempotency.
 - **`LiteLLMRecorder` + `ScriptedLLM`** under `tests/integration/` —
   recorder hashes (model, messages) and replays from JSON fixtures
-  (record once with `MYLONITE_TEST_RECORD=1`). Phase 1's integration
+  (record once with `MYLONITE_TEST_RECORD=1`). the integration
   tests use the scripted stub; recorder fixtures land in v0.2.1+ once
   captured against a real provider.
 
@@ -1258,22 +1258,22 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   `reference_example` to distinguish from the real attack module.
 - Mypy overrides extended to include `mcp_kitchen_sink.*`.
 
-### Not yet in v0.2 (deferred to v0.2.1 or later phases)
+### Not yet in v0.2 (deferred to later releases)
 
-- Real-network MCP transport (stdio / HTTP) — Phase 1.5 or 2.
-- Real open-source MCP target adapters — Phase 1.5.
+- Real-network MCP transport (stdio / HTTP) — a later release.
+- Real open-source MCP target adapters — a later release.
 - W3 (unrestricted `web_fetch` / SSRF) and W4 (unconfirmed
   `send_email` / excessive agency) attack modules.
 - Multi-turn planner exercises.
-- `mylonite generate` (test emission) — Phase 2.
+- `mylonite generate` (test emission) — a later release.
 - Differential-oracle / 5-run flakiness / metamorphic robustness —
-  Phase 2 (the moat).
-- Ensemble LLM-judge — Phase 2+.
-- HTML report rendering — Phase 4.
-- Iterative LLM payload refinement (failure → refine → retry) — Phase 5.
-- `mylonite init` config scaffold — Phase 3 DX polish.
-- Community attack-pattern registry contribution flow — Phase 4.
-- Hosted CI / dashboards / compliance evidence packs — Phase 6.
+  the validator (the moat).
+- Ensemble LLM-judge — a later release.
+- HTML report rendering — a later release.
+- Iterative LLM payload refinement (failure → refine → retry) — a later release.
+- `mylonite init` config scaffold — later DX polish.
+- Community attack-pattern registry contribution flow — a later release.
+- Hosted CI / dashboards / compliance evidence packs — a later release.
 
 ## [0.1.0] - 2026-06-09
 
@@ -1303,7 +1303,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   reference implementation per contract.
 - Deliberately-vulnerable reference MCP agent under
   `reference_targets/mcp_kitchen_sink/`, in vulnerable and guarded variants,
-  for use as differential-oracle ground truth in Phase 2.
+  for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
 [Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.0...HEAD

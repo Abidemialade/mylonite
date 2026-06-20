@@ -2,9 +2,9 @@
 
 Two implementations ship here:
 
-* ``NullValidator`` — the Phase 0 stub. Returns a "not implemented" report;
+* ``NullValidator`` — the no-op stub. Returns a "not implemented" report;
   useful as a default and as the ``null`` entry point.
-* ``DifferentialValidator`` — the Phase 2 validation-engine **moat**. It proves
+* ``DifferentialValidator`` — the validation-engine **moat**. It proves
   a generated security test is *meaningful* by running the full attack scan
   against BOTH reference twins across a multi-run flakiness filter, then
   reporting a mutation score and one metamorphic-perturbation check.
@@ -185,7 +185,7 @@ class NullValidator(ValidatorBase):
                 ValidationOutcome(
                     stage="build",
                     passed=False,
-                    detail="NullValidator: real validation engine arrives in Phase 2.",
+                    detail="NullValidator: a no-op stub; use DifferentialValidator.",
                 ),
             ],
             kept=False,
@@ -254,7 +254,7 @@ class _Decision:
 
 
 class DifferentialValidator(ValidatorBase):
-    """Differential-oracle validator — the Phase 2 validation-engine moat.
+    """Differential-oracle validator — the validation-engine moat.
 
     Config lives in ``__init__`` because the contract ``validate`` signature is
     fixed (it cannot take extra params). ``completion_fn=None`` is the live

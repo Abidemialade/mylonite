@@ -32,8 +32,8 @@ The Quarry is a small MCP-style agent (notes, web fetch, email) seeded with
 four catalogued weaknesses, **W1–W4**, plus a guarded twin in which each
 weakness is closed by a specific mitigation. The interesting part is the
 *differential*: every exploit Mylonite finds must land on the vulnerable twin
-and come up clean on the guarded twin. That same differential becomes the
-**Phase 2 validation oracle** — a generated regression test is only accepted
+and come up clean on the guarded twin. That same differential is the
+**validation oracle** — a generated regression test is only accepted
 if it FAILS on the vulnerable twin and PASSES on the guarded one. See
 [Concepts](concepts.md) for the full validation-engine story.
 
@@ -93,10 +93,10 @@ from your run):
  W4        unconfirmed-email-send                   LLM06 / ASI02                             FOUND       clean
 
 the Quarry: 4 exploits on vulnerable, 0 on guarded — this differential is the
-oracle that will validate generated tests in Phase 2
+oracle that validates every generated regression test
 
-Phase 2 (in progress): each finding becomes a generated regression test,
-validated against this same vulnerable/guarded oracle.
+Each finding becomes a committed regression test, validated against this same
+vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable
 
 Try it on a real target next: mylonite scan mcp:fetch --authorize fetch
 (needs an LLM API key + uv) — see docs/quarry.md
@@ -132,7 +132,7 @@ user's intent.
   `AML.T0051`
 - **The guard that closes it:** the guarded twin's `list_tools` applies a
   description allowlist and refuses parenthetical instruction text.
-- **Why it matters for Phase 2:** an exploit that fires on the vulnerable
+- **Why it matters:** an exploit that fires on the vulnerable
   twin but not on the guarded twin is exactly the FAIL/PASS pair the
   differential oracle needs to certify a generated test.
 
@@ -152,7 +152,7 @@ the injected text.
 - **The guard that closes it:** the guarded twin's `read_note` wraps note
   bodies in `<untrusted>` markers, so the planner treats them as data, not
   instruction.
-- **Why it matters for Phase 2:** the guarded twin defines the expected
+- **Why it matters:** the guarded twin defines the expected
   post-fix behaviour; a regression test generated from this finding is valid
   only if the `<untrusted>` quarantine makes it pass.
 
@@ -168,7 +168,7 @@ a note) both end with the agent egressing to `attacker.example.com`.
   ATLAS `AML.T0049`
 - **The guard that closes it:** the guarded twin's `web_fetch` enforces a
   hostname allowlist; the attacker host is simply refused.
-- **Why it matters for Phase 2:** the fetch either lands or it doesn't — a
+- **Why it matters:** the fetch either lands or it doesn't — a
   crisp, deterministic differential the oracle can re-check on every run of
   a generated test.
 
@@ -184,7 +184,7 @@ note body) both cause mail to leave without anyone confirming.
 - **The guard that closes it:** the guarded twin requires a two-step flow —
   `send_email` only stages the message, and a separate `confirm_send` must
   run before anything dispatches.
-- **Why it matters for Phase 2:** the staged-vs-sent distinction gives the
+- **Why it matters:** the staged-vs-sent distinction gives the
   oracle a precise predicate: a generated test must observe a send on the
   vulnerable twin and only a staged message on the guarded one.
 

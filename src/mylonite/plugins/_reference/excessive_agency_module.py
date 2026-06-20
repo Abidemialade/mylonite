@@ -6,7 +6,7 @@ SSRF) and W4 (unconfirmed ``send_email``) seeds. No LLM call inside the
 plugin — ``ScanEngine`` handles customisation between ``generate_payloads``
 and ``adapter.invoke``.
 
-Metadata wiring matches PR 5 of Phase 1: every emitted ``Payload`` carries
+Metadata wiring: every emitted ``Payload`` carries
 ``seed_id``, ``weakness``, ``predicate``, ``setup``, ``drive``, and
 ``needs_customisation``.
 """

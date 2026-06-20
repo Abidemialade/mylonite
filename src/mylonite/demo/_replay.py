@@ -144,7 +144,7 @@ class LiteLLMRecorder:
     ``last_error``.
 
     Instance state is cumulative across calls — construct one recorder per
-    run or call :meth:`reset` between runs (Phase 2's multi-run flakiness
+    run or call :meth:`reset` between runs (the multi-run flakiness
     filter is the motivating case). The recorder is not thread-safe, and
     ``last_error`` reflects only the most recent failure — under concurrent
     calls use the counters as the aggregate signal; the demo runner drives

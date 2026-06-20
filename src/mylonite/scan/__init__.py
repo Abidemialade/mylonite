@@ -1,4 +1,4 @@
-"""Phase 1 exploit-finding loop.
+"""The exploit-finding loop.
 
 Modules:
 

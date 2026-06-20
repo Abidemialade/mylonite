@@ -147,7 +147,7 @@ tool-chain `{pattern_id}` against `{target_id}`.
 Compliance: OWASP LLM {owasp_llm} · OWASP ASI {owasp_asi} · \
 MITRE ATLAS {mitre_atlas} · NIST {nist}.
 
-This replays a Driver 2 SYNTHESIZED multi-tool exploit chain against the guarded
+This replays a SYNTHESIZED multi-tool exploit chain against the guarded
 twin and asserts it still RESISTS — it FAILS if the guard regresses and the chain
 reaches its sink. It re-drives the planner live, so it is gated behind
 MYLONITE_LIVE_TARGET=1.
@@ -239,7 +239,7 @@ class ReferencePytestGenerator(TestGeneratorBase):
             inline_parts.append(nist_id)
         compliance_inline = " · ".join(inline_parts) if inline_parts else "no tags"
 
-        # A synthesized chain (Driver 2) replays via assert_synthesized_chain_resists;
+        # A synthesized chain replays via assert_synthesized_chain_resists;
         # a control-efficacy finding (synthetic_control metadata) replays via
         # assert_control_holds; otherwise reference targets replay against the bundled
         # twin (byte-for-byte unchanged) and a CUSTOM target re-drives the REAL app via

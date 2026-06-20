@@ -2,7 +2,7 @@
 
 Three predicates ship here.
 
-Contract with the adapter (PR 4c / PR 5):
+Contract with the adapter:
 - ``response.tool_calls`` — list of tool names invoked.
 - ``response.metadata["mcp_trace_planner"]`` — JSON string of
   ``[{"tool": ..., "args": ...}]`` for the planner-driven calls only.

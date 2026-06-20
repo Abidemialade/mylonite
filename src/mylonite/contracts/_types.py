@@ -368,8 +368,8 @@ class ScanAttempt(BaseModel):
 class ScanReport(BaseModel):
     """Run-metadata sibling of ExploitRecord; written to scan_report.json.
 
-    Phase 1 ships this schema-validated under ``scripts/regenerate_schemas.py``
-    so CI catches drift and Phase 2 / future CI consumers can validate the
+    This is schema-validated under ``scripts/regenerate_schemas.py``
+    so CI catches drift and downstream consumers can validate the
     report shape without depending on the Python package.
     """
 
@@ -411,7 +411,7 @@ class ScanReport(BaseModel):
     single_run: bool = Field(
         default=True,
         description=(
-            "Phase 1 runs each seed once. Phase 2's 5-run flakiness filter will "
+            "A single-shot scan runs each seed once. The 5-run flakiness filter "
             "set this to False when those replays land."
         ),
     )

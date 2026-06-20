@@ -12,8 +12,8 @@ RAG pipeline, agent planner — and emits **validated regression tests** that
 gate CI. It deliberately does *not* test the surrounding traditional code;
 that work belongs to SAST/DAST tools.
 
-The full product thesis, market positioning, and phased build plan live in
-[ROADMAP.md](./ROADMAP.md).
+See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and the
+[documentation site](https://abidemialade.github.io/mylonite/) for guides and reference.
 
 > **Status:** the full `scan → generate → validate → gate` pipeline works end to end,
 > against the bundled Quarry twins and your own MCP app (`--target-file`). v0.6.0

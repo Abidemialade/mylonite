@@ -1,8 +1,8 @@
 """Validator extension point — Mylonite's validation engine moat.
 
-Phase 0 ships only the Protocol and a ``NullValidator`` reference plugin.
+This module defines the Protocol and ships a ``NullValidator`` reference plugin.
 The real differential-oracle pipeline (build -> differential-seeded check
--> 5-run flakiness filter -> metamorphic robustness) arrives in Phase 2 of
+-> 5-run flakiness filter -> metamorphic robustness) is implemented in
 ``ROADMAP.md``.
 
 A vulnerable oracle is a deliberately-unguarded variant of the target. A
@@ -41,7 +41,7 @@ CONTRACT_VERSION: str = "0.5.0"
 class VulnerableOracle(Protocol):
     """A deliberately-unguarded variant of a target.
 
-    Phase 2 will flesh this out. The Protocol is here so the Validator
+    The Protocol is defined here so the Validator
     signature is stable from v0.1.0.
     """
 

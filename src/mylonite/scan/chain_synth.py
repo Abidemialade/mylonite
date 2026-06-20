@@ -1,6 +1,6 @@
-"""Tool-chaining exploit synthesis (Driver 2 / Slice 1).
+"""Tool-chaining exploit synthesis.
 
-Driver 1 made the INJECTION app-specific and adaptive. Driver 2 finds exploits
+The adaptive loop makes the INJECTION app-specific. Synthesis finds exploits
 that require COMBINING several of the target's own tools to reach a harmful sink
 (e.g. read_note -> send_email) — the app-specific depth generic probe libraries
 can't reach. This slice synthesizes the chain; later slices execute and
@@ -41,7 +41,7 @@ class SynthesizedChain:
 
     ``plant_tool``/``plant_args`` use the literal ``{payload}``/``{id}`` tokens
     (same shape as ``AttackPlan``) so the Slice-2 driver can execute it by reusing
-    the Driver 1 adaptive loop.
+    the adaptive loop.
     """
 
     plant_tool: str

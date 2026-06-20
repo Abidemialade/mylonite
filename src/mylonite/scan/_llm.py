@@ -12,7 +12,7 @@ Closes the two issues the eng review surfaced:
   and an async entry point.
 
 The counter is a context manager so callers can nest scopes (the
-``ScanEngine`` in PR 6 will wrap the whole run; individual calls increment via
+``ScanEngine`` wraps the whole run; individual calls increment via
 the active context). If no context is active, calls still execute — useful for
 ad-hoc tests — but no budget enforcement happens.
 """

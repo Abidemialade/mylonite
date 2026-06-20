@@ -1,23 +1,21 @@
 """Typer CLI for Mylonite.
 
-Phase 1 (v0.2) lights up ``mylonite scan``:
+The end-to-end pipeline (each command also documented via ``--help``):
 
-* ``mylonite version`` — print the package version.
-* ``mylonite taxonomy list --framework <id>`` — list entries from a bundled
-  threat taxonomy.
-* ``mylonite scan <target> [--provider --model --dry-run ...]`` — run the
-  exploit-finding loop against a target. Phase 1 ships in-process reference
-  targets only (``reference:vulnerable`` / ``reference:guarded``). Real
-  out-of-process MCP adapters arrive in Phase 1.5/2.
+* ``mylonite scan <target>`` — run the exploit-finding loop against a target
+  (the in-process reference twins, a bundled MCP family, or your own app via
+  ``--target-file``); supports ``--adaptive`` / ``--synthesize`` / ``--memory``.
+* ``mylonite generate`` — emit a pytest regression test from a confirmed exploit
+  (offline, deterministic, no LLM).
+* ``mylonite validate`` — run a generated test through the differential-oracle
+  validator (live); ``--models`` re-proves it across model versions.
+* ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
+* ``mylonite report`` — render a scan/validation as a panel, HTML, SARIF, or JSON.
+* ``mylonite ablate`` / ``init-target`` / ``demo`` / ``doctor`` / ``taxonomy`` /
+  ``export`` / ``version`` — control-efficacy scoring, target scaffolding, the
+  Quarry playground, diagnostics, and supporting utilities.
 
-Phase 2 (v0.2) lights up ``mylonite generate`` and ``mylonite validate``:
-
-* ``mylonite generate [SCAN_PATH] [--latest] [--out DIR]`` — emit a pytest
-  regression test from a confirmed exploit (offline, deterministic, no LLM).
-* ``mylonite validate TARGET [--iterations N]`` — run a generated test through
-  the differential-oracle validator (live by default — real LLM, Haiku).
-
-``init`` remains a stub (Phase 3 work).
+See the documentation site for guides and the full reference.
 """
 
 from __future__ import annotations
@@ -615,7 +613,7 @@ def _run_synthesis(
     judge_model: str,
     output_dir: Path,
 ) -> None:
-    """Driver 2 flow: synthesize a tool-chain and differentially validate it, then
+    """Tool-chaining flow: synthesize a tool-chain and differentially validate it, then
     write the validated finding as scan artefacts.
 
     For a reference target the differential uses the bundled twins; for a custom
@@ -1102,7 +1100,7 @@ def scan(
         typer.Option(
             "--synthesize",
             help=(
-                "Opt-in Driver 2 tool-chaining synthesis: synthesize an "
+                "Opt-in tool-chaining synthesis: synthesize an "
                 "app-specific multi-tool exploit chain from the tool surface, then "
                 "differentially validate it against the twins (needs a reference "
                 "twin target, e.g. reference:vulnerable). Off by default."
@@ -1173,7 +1171,7 @@ def scan(
     effective_customiser_model = _resolve_role_model(customiser_model)
     effective_judge_model = _resolve_role_model(judge_model)
 
-    # Driver 2: tool-chaining synthesis is a distinct flow (synthesize -> twin
+    # Tool-chaining synthesis is a distinct flow (synthesize -> twin
     # differential validation), not the per-seed engine. Branch early and return.
     if synthesize and memory:
         typer.echo("--synthesize and --memory are distinct flows; pass only one.", err=True)

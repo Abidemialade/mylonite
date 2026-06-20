@@ -1,8 +1,8 @@
 """In-process reference TargetAdapter.
 
 Drives the bundled ``mcp_kitchen_sink`` reference target via direct Python
-calls — no MCP wire transport. The Phase 1 scan loop attacks the LLM-backed
-planner (``LLMPlanner`` from PR 3); the scripted planners stay as Phase 2
+calls — no MCP wire transport. The scan loop attacks the LLM-backed
+planner (``LLMPlanner``); the scripted planners stay as
 fixtures.
 
 Three classes ship here:
@@ -252,7 +252,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
             data_sources=["in-process note store"],
             notes=(
                 "Bundled reference target — in-process Python; no MCP wire "
-                "transport in Phase 1. Two variants share the same tool "
+                "transport. Two variants share the same tool "
                 f"surface; this is the {self._variant} one."
             ),
         )

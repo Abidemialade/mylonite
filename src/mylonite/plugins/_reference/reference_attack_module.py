@@ -1,7 +1,7 @@
 """Reference attack module — canned indirect-injection payload.
 
 **Example only.** This is a minimal worked example for plugin authors and for
-the Phase 0 discovery tests; it is NOT a live attack. ``discover()`` returns it
+the discovery tests; it is NOT a live attack. ``discover()`` returns it
 alongside the two real families, but the ``scan``/``demo`` paths filter it out
 (only ``prompt-injection-family`` and ``excessive-agency-family`` run), so
 enumerating ``mylonite.attack_modules`` shows three modules while a scan uses

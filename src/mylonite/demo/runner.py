@@ -1,15 +1,15 @@
-"""Offline demo runner for ``mylonite demo`` (v0.3.0, PR A, Task A3).
+"""Offline demo runner for ``mylonite demo``.
 
 Runs the existing :class:`~mylonite.scan.engine.ScanEngine` twice — once
 against ``reference:vulnerable`` and once against ``reference:guarded`` — and
 returns both ``ScanResult``s plus the resolved mode/provider/model so the CLI
-(Task A5) can hand them straight to ``render_demo``.
+can hand them straight to ``render_demo``.
 
 Single source of wiring truth
 ------------------------------
 :func:`mylonite.scan.wiring.build_scan` (re-exported here as ``_build_scan``)
 is the ONE place that wires adapter + customiser + judge + attack modules +
-config into a ``ScanEngine``. The record script (Task A4) imports and reuses
+config into a ``ScanEngine``. The record script imports and reuses
 *this exact function* so the (model, messages) pairs it records are
 byte-for-byte the ones replay will look up. Any wiring drift between record and
 replay means every fixture misses — so do not duplicate this wiring anywhere
@@ -42,7 +42,7 @@ from mylonite.scan.engine import ScanResult
 from mylonite.scan.wiring import build_scan, note_id_counter
 
 #: Back-compat private aliases. The neutral wiring helpers were promoted to
-#: :mod:`mylonite.scan.wiring` (Phase 2 PR 1); these names keep existing
+#: :mod:`mylonite.scan.wiring`; these names keep existing
 #: importers (the record script, the CLI, and tests that monkeypatch
 #: ``runner._build_scan``) working unchanged.
 _build_scan = build_scan

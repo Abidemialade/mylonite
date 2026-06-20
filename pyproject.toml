@@ -31,7 +31,7 @@ keywords = [
     "test-generation",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Information Technology",
     "License :: OSI Approved :: Apache Software License",
@@ -209,7 +209,7 @@ exclude_lines = [
 [tool.bandit]
 # Product code only. The deliberately-vulnerable reference targets under
 # reference_targets/ are the project's ground-truth oracle and MUST NOT be
-# "hardened" (see CLAUDE.md Phase 0 invariants); the recorded demo fixtures and
+# "hardened" (they are intentionally insecure by design); the recorded demo fixtures and
 # test fakes are data, not runnable code. The CI security job scans
 # `src/mylonite` explicitly; these exclusions keep an ad-hoc `bandit -r .` from
 # flagging the intentional vulns or fixtures.

@@ -3,8 +3,7 @@
 The configuration object is intentionally strict:
 
 * The LLM provider has **no default** — every consumer must declare one before
-  any LLM call. Phase 0 does not call LLMs, but the schema is in place so
-  Phase 1 callers fail loudly on misconfiguration rather than silently
+  Call sites fail loudly on misconfiguration rather than silently
   defaulting to a hosted model.
 * Target authorization is opt-in per scan: ``AuthorizationConfig.authorize``
   must be set to ``True`` and the target hostname/identifier must appear in
@@ -129,7 +128,7 @@ class MyloniteSettings(BaseSettings):
     def require_llm(self) -> LLMConfig:
         """Return the LLM config or raise.
 
-        Phase 1+ call sites use this so the error surfaces at the call site
+        Call sites use this so the error surfaces at the call site
         rather than as a confusing ``None`` later.
         """
         if self.llm is None:

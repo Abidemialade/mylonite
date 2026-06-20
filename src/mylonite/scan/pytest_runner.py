@@ -1,6 +1,6 @@
-"""Programmatic pytest runner used by the validation engine (Phase 2).
+"""Programmatic pytest runner used by the validation engine.
 
-The validator (PR 5) hands an *emitted* pytest file to ``run_test_file`` and
+The validator hands an *emitted* pytest file to ``run_test_file`` and
 needs a clean pass/fail signal plus captured output. This runner shells out to
 ``sys.executable -m pytest`` in a **subprocess** rather than calling
 ``pytest.main()`` in-process, deliberately:

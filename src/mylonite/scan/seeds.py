@@ -1,10 +1,10 @@
-"""Declarative seed catalogue for the Phase 1 prompt-injection attack module.
+"""Declarative seed catalogue for the prompt-injection attack module.
 
 Each ``SeedPattern`` describes one attack shape: the channel the payload rides
 on, the adapter choreography needed to surface it (``setup`` + ``drive``), and
 the deterministic predicate that confirms the planner fell for it.
 
-Phase 1 seeds target W1 (tool-description instruction smuggling) and W2
+These seeds target W1 (tool-description instruction smuggling) and W2
 (indirect injection via note body) — the catalogue at
 ``reference_targets/mcp_kitchen_sink/seeds/seeds.yaml``. W3 / W4 land in later
 attack modules; see ``ROADMAP.md``.
@@ -54,7 +54,7 @@ SeedDrive = Literal[
 class SeedPattern(BaseModel):
     """One declarative attack shape, ready for per-target LLM customisation.
 
-    Customisation (PR 2) refines ``seed_body`` for the specific target's tool
+    Customisation refines ``seed_body`` for the specific target's tool
     names and prompt; channel/setup/drive/predicate stay fixed.
     """
 
@@ -78,7 +78,7 @@ class SeedPattern(BaseModel):
     seed_body: str = Field(
         ...,
         description=(
-            "Pre-customisation payload body. PR 2's PayloadCustomiser refines "
+            "Pre-customisation payload body. The PayloadCustomiser refines "
             "this against the actual target tools / system prompt."
         ),
     )
@@ -474,7 +474,7 @@ GITHUB_W4_DIRECT_CREATE_ISSUE_ATTACKER = SeedPattern(
 
 
 SEED_CATALOGUE: tuple[SeedPattern, ...] = (
-    # Kitchen-sink (Phase 1 + v0.2.1)
+    # Kitchen-sink seeds
     W1_TOOL_DESCRIPTION_SUMMARY_SMUGGLE,
     W2_NOTE_BODY_DIRECT,
     W2_NOTE_BODY_ROLEPLAY,

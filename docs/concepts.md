@@ -27,7 +27,7 @@ The hard part is proving the test is meaningful, not just plausible.
 
 ## The validation engine — Mylonite's moat
 
-The validation engine that lands in Phase 2 layers four mechanisms:
+The validation engine layers four mechanisms:
 
 1. **Build / collect** — the generated test must compile and run.
 2. **Differential seeded-vulnerability oracle** — the generated test must
@@ -42,7 +42,7 @@ The validation engine that lands in Phase 2 layers four mechanisms:
    / lowered in case, must still fail on the vulnerable variant. This
    catches brittle, over-fit tests.
 
-Phase 0 ships the contracts, the bundled threat taxonomy, and the
+The framework ships the contracts, the bundled threat taxonomy, and the
 **vulnerable reference MCP agent** under
 [`reference_targets/mcp_kitchen_sink/`](https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink)
 that the differential oracle will use as its ground truth.
@@ -149,24 +149,13 @@ carry secrets). If a declared raw launch doesn't actually disable the guard, the
 raw side simply never fires and Mylonite says so rather than reporting a wrong
 verdict.
 
-## Where Phase 0 stopped
+## Built to extend
 
-Phase 0 was foundations only. What it put in place:
-
-- Five versioned extension contracts (attack module, target adapter, test
-  generator, validator, compliance mapper).
-- A bundled threat taxonomy: OWASP LLM Top 10 (2025), OWASP Agentic
-  Security Initiative (2026), MITRE ATLAS (`v2026.05`), NIST AI RMF.
-- The deliberately-vulnerable reference MCP agent and its guarded twin.
-- OSS scaffolding.
-
-What Phase 0 deliberately left to later phases:
-
-- The LLM-driven exploit-finding agent (Phase 1 — **since delivered**: the
-  scan loop works today; see the [Quickstart](quickstart.md)).
-- A real (non-stub) pytest generator (Phase 1).
-- The differential-oracle validator (Phase 2).
-- A GitHub Action that opens a PR with a committed test (Phase 3).
-- A community attack-pattern registry (Phase 4).
-- More target adapters (RAG, custom HTTP) and a jest generator (Phase 5).
-- Audit-evidence packs (Phase 6).
+Everything above is reached through five versioned extension contracts — attack
+module, target adapter, test generator, validator, and compliance mapper — shipped as
+stable `Protocol`s with JSON schemas, reference implementations, and entry-point-based
+plugin loading. The bundled threat taxonomy (OWASP LLM Top 10 2025, OWASP Agentic
+Security Initiative 2026, MITRE ATLAS `v2026.05`, NIST AI RMF) and the
+deliberately-vulnerable reference agent are part of that foundation. To add a target
+type, an attack class, a test framework, or a compliance mapping, see
+[Plugin authoring](plugin-authoring.md) and the [architecture map](architecture.md).

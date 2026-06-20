@@ -2,7 +2,7 @@
 
 Importing this package triggers eager registration of the per-target
 predicate modules (filesystem, fetch, github) against the
-``mylonite.scan.predicates`` registry. PR 4c's ``MCPStdioAdapter``
+``mylonite.scan.predicates`` registry. The ``MCPStdioAdapter``
 constructor imports ``mylonite.plugins._mcp`` (this package) before doing
 anything else, so any user invoking ``mylonite scan mcp:<family>:<scope>``
 gets the predicates resolved by the time engine startup validates seeds.

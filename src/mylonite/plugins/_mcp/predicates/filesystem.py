@@ -3,7 +3,7 @@
 Two predicates ship here. Both register with the global
 ``mylonite.scan.predicates`` registry via the ``@predicate(...)`` decorator.
 
-Contract with the adapter (PR 4c / PR 5):
+Contract with the adapter:
 - ``response.tool_calls`` — flat list of tool names the planner invoked.
 - ``response.metadata["mcp_trace_planner"]`` — JSON string of
   ``[{"tool": ..., "args": ...}]`` for the planner-driven calls only.

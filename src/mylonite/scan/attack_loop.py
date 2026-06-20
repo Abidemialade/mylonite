@@ -1,13 +1,13 @@
-"""Adaptive attack loop (Driver 1 / Slice 2).
+"""Adaptive attack loop.
 
 When a single indirect-injection attempt does not fire — typically an aligned
 planner refusing a poisoned note — an LLM strategist inspects the planner trace
 and the judge's reason, re-crafts the INJECTION payload, and retries against a
 fresh session, within a budget. The loop carries the refinement learning across
-attempts; each attempt is an isolated session (Slice 1).
+attempts; each attempt is an isolated session.
 
-Slice 2 consumes an ``AttackPlan`` describing how to plant + drive for the
-target; Slice 3 will auto-discover that plan from the tool surface.
+It consumes an ``AttackPlan`` describing how to plant + drive for the
+target, and can auto-discover that plan from the tool surface.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
-"""ScanEngine — the Phase 1 orchestrator.
+"""ScanEngine — the scan orchestrator.
 
-Pulls together: TargetAdapter (PR 4) → AttackModule (PR 5) → PayloadCustomiser
-(PR 2) → adapter.invoke (PR 4) → SuccessJudge (PR 2). Closes P1 (async-first
+Pulls together: TargetAdapter → AttackModule → PayloadCustomiser →
+adapter.invoke → SuccessJudge. Async-first
 with asyncio.gather + Semaphore), A1 (process-wide budget counter wraps every
 LLM call), A3 (skip planner failures), A4 (validate Payload metadata at
 runtime), and C4 (distinct exit-code signal via ``aborted`` field).

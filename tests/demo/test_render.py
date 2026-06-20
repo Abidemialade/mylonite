@@ -1,9 +1,9 @@
-"""Tests for the ``mylonite demo`` differential renderer (PR A, Task A2).
+"""Tests for the ``mylonite demo`` differential renderer.
 
 ``render_demo`` takes the two ScanResults the demo runner produced
 (reference:vulnerable / reference:guarded), aggregates the 8 kitchen-sink
 seed attempts into the 4 weakness rows W1-W4, and prints the safety banner,
-differential table, computed headline, Phase 2 teaser, next-step line, and
+differential table, computed headline, next-steps teaser, next-step line, and
 mode/elapsed footer through a ``rich.Console``.
 
 The ScanResults are built from the real dataclasses / Pydantic models — no
@@ -113,7 +113,7 @@ def test_render_clean_differential() -> None:
     # Headline computed from the actual ScanResults.
     assert (
         "the Quarry: 2 exploits on vulnerable, 0 on guarded — this differential "
-        "is the oracle that will validate generated tests in Phase 2"
+        "is the oracle that validates every generated regression test"
     ) in output
     assert "unexpected finding on the guarded twin" not in output
 
@@ -131,8 +131,9 @@ def test_render_clean_differential() -> None:
 
     # Teaser, next step, and footer.
     assert (
-        "Phase 2 (in progress): each finding becomes a generated regression "
-        "test, validated against this same vulnerable/guarded oracle."
+        "Each finding becomes a committed regression test, validated against this "
+        "same vulnerable/guarded oracle. Turn one into a gating test: "
+        "mylonite gate reference:vulnerable"
     ) in output
     assert "mylonite scan mcp:fetch --authorize fetch" in output
     assert "needs an LLM API key + uv" in output

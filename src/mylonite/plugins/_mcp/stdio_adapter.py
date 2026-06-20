@@ -7,9 +7,9 @@ Generic adapter that spawns a bundled MCP server as a subprocess (per
 
 This is the load-bearing module. The 0-arg subclasses
 (``FilesystemMCPAdapter`` / ``FetchMCPAdapter`` / ``GitHubMCPAdapter``)
-land in PR 5 alongside the new per-target seeds.
+accompany the per-target seeds.
 
-Lifecycle: fresh subprocess per ``invoke()`` call. Mirrors Phase 1's in-
+Lifecycle: fresh subprocess per ``invoke()`` call. Mirrors the in-
 process adapter (fresh ``NoteStore`` per attempt). The SDK's
 ``stdio_client`` context manager guarantees subprocess cleanup.
 
@@ -165,7 +165,7 @@ async def _open_mcp_session(
 class MCPStdioAdapter(AsyncTargetAdapterBase):
     """Generic MCP stdio adapter.
 
-    Subclasses (PR 5) wire family + scope to a 0-arg construction shape
+    Subclasses wire family + scope to a 0-arg construction shape
     matching the in-process reference adapter's ``InProcessVulnerableReferenceAdapter``
     pattern, so the plugin registry's entry-point loader can instantiate
     them with no args.
@@ -913,7 +913,7 @@ class GitHubMCPAdapter(MCPStdioAdapter):
     """Bundled github MCP target.
 
     Scope is ``owner/repo``. The CLI passes the user-supplied GITHUB_TOKEN
-    via ``extra_env`` in PR 6's live e2e tests; the unit tests sidestep that
+    via ``extra_env`` in the live e2e tests; the unit tests sidestep that
     via the ``_fake_open`` patch.
     """
 

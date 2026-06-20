@@ -1,14 +1,14 @@
-"""Shared Pydantic data types for the Phase 1 scan loop.
+"""Shared Pydantic data types for the scan loop.
 
 ``Verdict`` is the output of a ``SuccessJudge``-or-predicate decision: a single
 attempt either succeeded (the exploit landed), was inconclusive (no signal), or
 was skipped (planner failure / invalid metadata). Predicates return
 ``Verdict | None`` — ``None`` means "the predicate did not fire," and the
-``SuccessJudge`` falls back to the LLM-judge rubric (PR 2).
+``SuccessJudge`` falls back to the LLM-judge rubric.
 
 These types live under ``scan/_types.py`` rather than ``scan/judge.py`` so the
-predicate functions (PR 1) can return ``Verdict`` without forward references to
-judge code that lands in PR 2.
+predicate functions can return ``Verdict`` without forward references to
+the judge code.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _FROZEN = ConfigDict(frozen=True, extra="forbid")
 class AdapterInvocationSkipped(RuntimeError):
     """Raised by a TargetAdapter's ``invoke()`` when an attempt cannot be judged.
 
-    Phase 1's in-process adapter (and future MCP-wire adapters) raise this on
+    The in-process adapter (and the MCP-wire adapters) raise this on
     planner failure (A3 from the eng review) — the LLM call inside the planner
     threw, so the trace is partial and judging it would produce false signals.
 
