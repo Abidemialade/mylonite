@@ -1,4 +1,4 @@
-"""Differential validation of a synthesized chain (Driver 2 / Slice 3).
+"""Differential validation of a synthesized chain.
 
 A synthesized chain counts as a *finding* only if it differentially validates:
 the synthesized sink is reached on the VULNERABLE twin and blocked on the GUARDED

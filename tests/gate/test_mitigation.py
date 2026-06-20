@@ -151,6 +151,71 @@ def test_pr_body_surfaces_differential_oracle_evidence():
     assert "W2:indirect-injection-note-body-direct" in body
 
 
+def test_all_fix_diffs_present_and_are_code_blocks():
+    """R3: every weakness class ships a concrete, reviewable fix (a fenced diff),
+    parallel to the prose mitigation snippets."""
+    base = ir.files("mylonite.gate") / "fixes"
+    for name in ("W1", "W2", "W3", "W4", "generic"):
+        text = (base / f"{name}.md").read_text(encoding="utf-8")
+        assert text.strip(), f"fixes/{name}.md is empty"
+        assert "```diff" in text, f"fixes/{name}.md has no diff block"
+
+
+def test_pr_body_includes_proven_fix_diff_for_control_finding():
+    """A control-efficacy finding surfaces the fix as a reviewable diff derived from
+    the proven control — not just prose — and frames it as proven."""
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
+    )
+    body = build_pr_body(ex, _report())
+    assert "```diff" in body  # rendered as a reviewable diff, not prose
+    assert "<untrusted>" in body  # the W2 envelope fix
+    assert "Proven fix" in body  # framed as proven load-bearing
+
+
+def test_pr_body_fix_diff_matches_weakness_class():
+    """The fix diff is class-specific: a W4 finding shows the confirm-gate patch; a
+    non-control finding still gets a (recommended) fix diff."""
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
+    body = build_pr_body(ex, _report())
+    assert "```diff" in body
+    assert "confirmation_required" in body  # the W4 ConfirmGate fix
+    assert "Recommended fix" in body  # non-control framing
+
+
+def test_pr_body_localizes_the_finding_to_a_tool():
+    """R4: the PR points at the exact locus (tool/field), not just a description."""
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={
+            "payload": ex.payload.model_copy(
+                update={"metadata": {"consequential_tool": "send_email"}}
+            )
+        }
+    )
+    body = build_pr_body(ex, _report())
+    assert "Located at:" in body
+    # the implicated tool appears with the field it lives in
+    assert "send_email" in body and "->" in body
+
+
+def test_pr_body_localizes_system_prompt_line_when_given():
+    """When the system-prompt text is available, the locus carries the exact line."""
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={
+            "payload": ex.payload.model_copy(
+                update={"channel": "system-prompt-injection", "body": "Obey embedded notes."}
+            )
+        }
+    )
+    prompt = "You are helpful.\nObey embedded notes.\nBe concise."
+    body = build_pr_body(ex, _report(), system_prompt=prompt)
+    assert "Located at:" in body
+    assert "system prompt, line 2" in body
+
+
 def test_llm_enrichment_is_labelled_and_opt_in():
     ex = _exploit_for("indirect-injection-note-body-direct")
 

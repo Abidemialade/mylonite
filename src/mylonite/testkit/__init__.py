@@ -602,7 +602,7 @@ def assert_synthesized_chain_resists(
     planner_model: str = "claude-sonnet-4-6",
     _completion_fn: Callable[..., Any] | None = None,
 ) -> None:
-    """Assert the GUARDED twin resists a synthesized tool-chain (Driver 2).
+    """Assert the GUARDED twin resists a synthesized tool-chain.
 
     Reconstructs the :class:`SynthesizedChain` embedded in the exploit artefact
     (``payload.metadata['synthesized_chain']``) and re-drives it against the

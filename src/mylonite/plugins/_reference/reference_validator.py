@@ -2,9 +2,9 @@
 
 Two implementations ship here:
 
-* ``NullValidator`` — the Phase 0 stub. Returns a "not implemented" report;
+* ``NullValidator`` — the no-op stub. Returns a "not implemented" report;
   useful as a default and as the ``null`` entry point.
-* ``DifferentialValidator`` — the Phase 2 validation-engine **moat**. It proves
+* ``DifferentialValidator`` — the validation-engine **moat**. It proves
   a generated security test is *meaningful* by running the full attack scan
   against BOTH reference twins across a multi-run flakiness filter, then
   reporting a mutation score and one metamorphic-perturbation check.
@@ -39,18 +39,18 @@ The pipeline (per ``mylonite.contracts.validator``):
    headline ``mutation_score`` is ``killed / total`` in [0,1]; the per-seed
    matrix (``W1:…✓ W2:…✓ W3:…✗ …``) is surfaced in the report notes. Computed
    for free from the full scans already run.
-5. **metamorphic** (report-only) — apply MULTIPLE deterministic, neutral
-   perturbations (paraphrase / casing / whitespace / unicode confusables — pure
-   string transforms, NO LLM, NO randomness) to the exploit body and GENUINELY
-   run each reworded payload through BOTH reference twins + the judge (the
-   adapter writes the perturbed body into the poisoned note the planner reads,
-   so the reworded attack is actually executed — not a catalogue re-run of the
-   original seed); report the ROBUSTNESS fraction (held / total) in [0,1] plus a
-   per-strategy breakdown.
+5. **metamorphic** (GATING) — apply MULTIPLE deterministic, neutral perturbations
+   (paraphrase / casing / whitespace / unicode confusables — pure string
+   transforms, NO LLM, NO randomness) to the exploit body and GENUINELY run each
+   reworded payload through BOTH reference twins + the judge (the adapter writes
+   the perturbed body into the poisoned note the planner reads, so the reworded
+   attack is actually executed — not a catalogue re-run of the original seed);
+   report the ROBUSTNESS fraction (held / total) in [0,1]. A test must survive a
+   MAJORITY of rewordings (default 0.6) to be kept, so it can't be over-fit to one
+   literal payload.
 
-``kept = build ∧ differential ∧ flakiness``. Mutation + metamorphic are
-*reported*, not gating, for the MVP — even if EVERY perturbation breaks, ``kept``
-is unaffected.
+``kept = build ∧ differential ∧ flakiness ∧ metamorphic``. Mutation is *reported*,
+not gating (near-free observability).
 
 The live-vs-offline seam is ``completion_fn``: ``None`` ⇒ the real
 ``litellm.acompletion`` path (genuine, stochastic validation); an injected
@@ -62,6 +62,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -83,6 +84,7 @@ from mylonite.plugins._reference.reference_target_adapter import InProcessRefere
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
 from mylonite.scan.pytest_runner import run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
@@ -96,6 +98,28 @@ logger = logging.getLogger(__name__)
 _KITCHEN_SINK_SEEDS: tuple[tuple[str, str], ...] = tuple(
     (s.pattern_id, s.weakness) for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
 )
+
+
+#: Exfil literals (email / URL) the model must EMIT for the attack to land — the
+#: success predicate keys on them, so an evasion encoding must leave them verbatim.
+_EXFIL_LITERAL_RE = re.compile(r"[\w.+-]+@[\w.-]+|https?://\S+")
+
+
+def _protect_exfil(body: str, fn: Callable[[str], str]) -> str:
+    """Apply ``fn`` to ``body`` everywhere EXCEPT inside exfil email/URL literals.
+
+    Mirrors ``obfuscate._outside_protected`` but keyed on a generic email/URL
+    pattern (no payload needed), so a re-encoding strategy disguises the
+    *instruction* without breaking the *destination* the predicate matches.
+    """
+    out: list[str] = []
+    last = 0
+    for m in _EXFIL_LITERAL_RE.finditer(body):
+        out.append(fn(body[last : m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(fn(body[last:]))
+    return "".join(out)
 
 
 def _deterministic_strategies() -> dict[str, Callable[[str], str]]:
@@ -117,6 +141,14 @@ def _deterministic_strategies() -> dict[str, Callable[[str], str]]:
         "whitespace": lambda body: "\n".join(body.split()),
         # Unicode confusables: a fixed ASCII -> fullwidth substitution.
         "unicode": _unicode_confusables,
+        # Real-world evasion encodings (X1): the useful idea from the retired
+        # standalone --obfuscate, promoted into the GATING layer so a kept test must
+        # survive re-encoding (EchoLeak's invisible text, RAG unicode/split tricks),
+        # not just rewording. Each preserves any exfil email/URL literal so the
+        # attack still lands and the majority stays honest.
+        "unicode-tag": lambda body: _protect_exfil(body, _zero_width),
+        "split": lambda body: _protect_exfil(body, _split_words),
+        "multilingual": lambda body: _MULTILINGUAL_PREFIX + body,
     }
 
 
@@ -153,7 +185,7 @@ class NullValidator(ValidatorBase):
                 ValidationOutcome(
                     stage="build",
                     passed=False,
-                    detail="NullValidator: real validation engine arrives in Phase 2.",
+                    detail="NullValidator: a no-op stub; use DifferentialValidator.",
                 ),
             ],
             kept=False,
@@ -222,7 +254,7 @@ class _Decision:
 
 
 class DifferentialValidator(ValidatorBase):
-    """Differential-oracle validator — the Phase 2 validation-engine moat.
+    """Differential-oracle validator — the validation-engine moat.
 
     Config lives in ``__init__`` because the contract ``validate`` signature is
     fixed (it cannot take extra params). ``completion_fn=None`` is the live
@@ -250,6 +282,7 @@ class DifferentialValidator(ValidatorBase):
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
         metamorphic_strategies: list[str] | None = None,
+        metamorphic_robustness_threshold: float = 0.6,
         target_adapter_factory: Callable[[], Any] | None = None,
         guarded_adapter_factory: Callable[[], Any] | None = None,
         control_weakness: str | None = None,
@@ -327,6 +360,12 @@ class DifferentialValidator(ValidatorBase):
         self._metamorphic_strategies: list[tuple[str, Callable[[str], str]]] = [
             (name, all_strategies[name]) for name in chosen
         ]
+        # M2: metamorphic robustness now GATES `kept` — a test must survive a MAJORITY
+        # of semantically-neutral rewordings (default 0.6) so it cannot be over-fit to
+        # one literal payload ("teaching to the test"). A threshold (not all-or-nothing)
+        # means a single aggressive rewording that doesn't reproduce won't reject a
+        # genuine finding.
+        self._metamorphic_threshold = metamorphic_robustness_threshold
 
     # -- public contract ------------------------------------------------------
 
@@ -411,7 +450,7 @@ class DifferentialValidator(ValidatorBase):
         # guarded fixtures and run the on-disk committed test offline (full pass).
         build = self._build_outcome(test, tallies)
 
-        kept = build.passed and differential.passed and flakiness.passed
+        kept = build.passed and differential.passed and flakiness.passed and metamorphic.passed
         notes = (
             f"statistical differential: vulnerable fired {vuln_fires}/{self._iterations} "
             f"({vuln_rate:.0%}), guarded leaked {guard_fires}/{self._iterations} "
@@ -420,8 +459,9 @@ class DifferentialValidator(ValidatorBase):
             f"mutation: killed {mutation.killed}/{mutation.total} kitchen-sink seeds "
             f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
             f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
-            f"(report-only, not gating); "
-            f"{'KEPT' if kept else 'REJECTED'} (kept = build ∧ differential ∧ flakiness)."
+            f"(need >= {self._metamorphic_threshold:.0%}, gates kept); "
+            f"{'KEPT' if kept else 'REJECTED'} "
+            "(kept = build ∧ differential ∧ flakiness ∧ metamorphic)."
         )
 
         return ValidationReport(
@@ -430,8 +470,8 @@ class DifferentialValidator(ValidatorBase):
             kept=kept,
             notes=notes,
             mutation_score=mutation.score,
-            gating_formula="kept = build AND differential AND flakiness",
-            gating_legs=["build", "differential", "flakiness"],
+            gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+            gating_legs=["build", "differential", "flakiness", "metamorphic"],
             reproducibility=ReproducibilityEvidence(
                 iterations=self._iterations,
                 vuln_fired=vuln_fires,
@@ -907,16 +947,16 @@ class DifferentialValidator(ValidatorBase):
         total = len(results)
         held_count = sum(1 for _, held in results if held)
         robustness = held_count / total if total else 0.0
-        all_held = total > 0 and held_count == total
+        passed = total > 0 and robustness >= self._metamorphic_threshold
         breakdown = ", ".join(f"{name}:{'held' if held else 'broke'}" for name, held in results)
         return ValidationOutcome(
             stage="metamorphic",
-            passed=all_held,
+            passed=passed,
             detail=(
                 f"{total} deterministic perturbation(s) of the exploit body, each "
                 f"driven verbatim through both twins (pure string transforms, no "
-                f"LLM): {breakdown} (robustness={robustness:.2f}); report-only — "
-                f"does not gate kept"
+                f"LLM): {breakdown} (robustness={robustness:.2f}, "
+                f"need >= {self._metamorphic_threshold:.0%}); gates kept"
             ),
             metric=robustness,
         )

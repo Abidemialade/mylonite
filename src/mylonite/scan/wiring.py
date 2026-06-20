@@ -1,6 +1,6 @@
 """Neutral scan-wiring home — the single source of truth for assembling a
 vulnerable/guarded reference ScanEngine. Imported by the demo, the record
-script, mylonite.testkit (Phase 2), and the validator. Lives under scan/ (not
+script, mylonite.testkit, and the validator. Lives under scan/ (not
 demo/) so non-demo consumers don't import the playground surface.
 """
 
@@ -53,7 +53,7 @@ def build_scan(
     """Build a ready-to-run ``ScanEngine`` for one reference variant.
 
     THE single source of wiring truth for the demo — the record script
-    (Task A4) imports and reuses this exact function so recorded and replayed
+    The record script imports and reuses this exact function so recorded and replayed
     (model, messages) keys match. ``completion_fn=None`` makes the adapter,
     customiser, and judge fall back to the real ``litellm.acompletion`` (the
     live path). The attack modules are instantiated directly here, not via

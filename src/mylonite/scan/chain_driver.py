@@ -1,7 +1,7 @@
-"""Execute a synthesized tool-chain (Driver 2 / Slice 2).
+"""Execute a synthesized tool-chain.
 
-Slice 1 synthesizes a :class:`SynthesizedChain`; this slice executes it against a
-session-capable target by *reusing the Driver 1 adaptive loop*. The chain becomes
+The synthesizer produces a :class:`SynthesizedChain`; this module executes it against
+a session-capable target by *reusing the adaptive loop*. The chain becomes
 a synthetic seed (its predicate is the generic effect-aware
 ``consequential_action_executed``, keyed on the chain's sink via the
 ``consequential_tool`` metadata) plus an ``AttackPlan`` — so plant → drive →
@@ -66,7 +66,7 @@ def _synthetic_seed(chain: SynthesizedChain) -> SeedPattern:
 
 
 class ChainAttackDriver:
-    """Runs a synthesized chain via the Driver 1 adaptive loop, with multi-turn
+    """Runs a synthesized chain via the adaptive loop, with multi-turn
     escalation when the single-drive path does not reach the sink."""
 
     def __init__(

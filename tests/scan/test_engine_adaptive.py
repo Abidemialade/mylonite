@@ -96,6 +96,12 @@ async def test_adaptive_path_turns_refusal_into_a_finding() -> None:
     (attempt,) = result.report.attempts
     assert attempt.outcome == "finding"
     assert attempt.judge_evidence["adaptive_attempts"] == "2"
+    # D2: the per-round refinement trace is persisted in the finding evidence, so
+    # a finding records HOW the strategist reached it, not just how many tries.
+    log = _json.loads(attempt.judge_evidence["adaptive_log"])
+    assert [e["attempt"] for e in log] == [1, 2]
+    assert log[0]["success"] is False and log[1]["success"] is True
+    assert log[0]["reason"]  # round 1 records why it failed
     # Provenance carried (0.5.0): no "session-drive" sentinel leaks into findings.
     (exploit,) = result.exploits
     assert exploit.response.payload_pattern_id == _W2_SEED

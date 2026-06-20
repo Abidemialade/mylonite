@@ -11,7 +11,7 @@ exposing ``list_tools`` + ``call_tool`` and drives it with a user message,
 returning a ``PlannerTrace`` for the adapter to inspect.
 
 The completion entry point is injected via ``completion_fn`` (defaults to
-``litellm.acompletion``). Phase 1's in-process adapter wraps the default
+``litellm.acompletion``). The in-process adapter wraps the default
 with the budget counter from ``mylonite.scan._llm``; standalone callers can
 pass their own wrapper.
 """

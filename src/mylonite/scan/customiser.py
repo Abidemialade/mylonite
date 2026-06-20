@@ -1,6 +1,6 @@
 """Per-target LLM customisation of seed payloads.
 
-PR 2 implements the customiser — one async LiteLLM call per seed that refines
+The customiser makes one async LiteLLM call per seed that refines
 the seed body for the specific target's tool names and prompt. If the LLM
 returns non-JSON or omits the expected ``body`` key, we fall back to the seed
 body unchanged (caught by the ``litellm_json_call_async`` helper).

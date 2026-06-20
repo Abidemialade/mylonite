@@ -1069,6 +1069,78 @@ def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert "remediation" in result.output
 
 
+def test_validate_exposes_models_flag() -> None:
+    """--models (T2 cross-model durability) is wired into the validate command."""
+    import typer
+
+    from mylonite.cli import app as _app
+
+    cmd = typer.main.get_command(_app).commands["validate"]  # type: ignore[attr-defined]
+    assert "models" in {p.name for p in cmd.params}
+
+
+def _patch_cross_model_validator(
+    monkeypatch: pytest.MonkeyPatch, scripted: dict[str, bool]
+) -> None:
+    """Patch DifferentialValidator to return a per-MODEL kept verdict (no live call)."""
+    from mylonite.contracts import ReproducibilityEvidence, ValidationReport
+    from mylonite.plugins._reference import reference_validator
+
+    reports = {
+        model: ValidationReport(
+            test_filename="t.py",
+            kept=kept,
+            notes="canned",
+            reproducibility=ReproducibilityEvidence(
+                iterations=5, vuln_fired=5, guard_resisted=5 if kept else 1
+            ),
+        )
+        for model, kept in scripted.items()
+    }
+
+    class _FakeValidator:
+        def __init__(self, *, model: str = "", **_: Any) -> None:
+            self._model = model
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return reports[self._model]
+
+    monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+
+def test_validate_models_flags_cross_model_re_emergence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--models re-proves the differential per model; a model where the weakness
+    re-emerges is flagged and the command exits non-zero (CI-gating)."""
+    import json as _json
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_cross_model_validator(monkeypatch, {"m-stable": True, "m-new": False})
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--models", "m-stable,m-new"])
+    assert result.exit_code == EXIT_NOT_KEPT, result.output
+    assert "RE-EMERGES" in result.output and "m-new" in result.output
+    assert "Durability gap" in result.output
+    cm = _json.loads((out_dir / "cross_model_report.json").read_text(encoding="utf-8"))
+    assert cm["all_durable"] is False
+    assert {m["model"]: m["kept"] for m in cm["models"]} == {"m-stable": True, "m-new": False}
+
+
+def test_validate_models_all_durable_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When every model keeps the test, the fix is durable to upgrade → exit 0."""
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_cross_model_validator(monkeypatch, {"m1": True, "m2": True})
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--models", "m1,m2"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "holds across all tested models" in result.output.lower()
+
+
 def test_validate_provider_unreachable_exit_4(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1495,16 +1567,32 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
-def test_report_html_export(tmp_path: Path) -> None:
+def test_report_html_export_terminal_style(tmp_path: Path) -> None:
+    """The 'terminal' style preserves the raw trust-panel export (kill matrix)."""
     gen = tmp_path / "gen"
     _write_validation_report_json(gen)
     html = tmp_path / "panel.html"
-    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    result = runner.invoke(
+        app, ["report", str(gen), "--html", str(html), "--html-style", "terminal"]
+    )
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert html.is_file()
     body = html.read_text(encoding="utf-8")
     assert "<html" in body.lower()
     assert "kill matrix" in body
+
+
+def test_report_html_export_dashboard_is_default(tmp_path: Path) -> None:
+    """`report --html` defaults to the structured dashboard (self-contained)."""
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    html = tmp_path / "panel.html"
+    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    body = html.read_text(encoding="utf-8")
+    assert "<!doctype html" in body.lower()
+    assert "Mylonite validation report" in body
+    assert "<script" not in body.lower()  # self-contained, no JS
 
 
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
@@ -1695,3 +1783,399 @@ def test_scan_synthesize_custom_target_requires_authorize(tmp_path: Path) -> Non
     result = runner.invoke(app, ["scan", "--synthesize", "--target-file", str(tf)])
     assert result.exit_code == EXIT_CONFIG
     assert "authorize" in result.output.lower()
+
+
+def test_scan_exposes_memory_flag() -> None:
+    """--memory (T1 cross-turn memory poisoning) is wired into the scan command."""
+    import typer
+
+    from mylonite.cli import app
+
+    scan_cmd = typer.main.get_command(app).commands["scan"]  # type: ignore[attr-defined]
+    assert "memory" in {p.name for p in scan_cmd.params}
+
+
+def test_scan_memory_needs_reference_or_target_file() -> None:
+    """--memory with a bare non-reference target (no --target-file) is refused with a
+    clear notice pointing at both routes — no LLM call is made."""
+    result = runner.invoke(app, ["scan", "mcp:filesystem:/sandbox", "--memory"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "reference twin" in result.output and "--target-file" in result.output
+
+
+def test_scan_memory_custom_target_requires_authorize(tmp_path: Path) -> None:
+    """A custom --target-file memory-poisoning run routes to the synthetic-guarded-twin
+    path but requires --authorize first — no subprocess/LLM work without it."""
+    tf = tmp_path / "t.yaml"
+    tf.write_text("family: kitchen-sink\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", "--memory", "--target-file", str(tf)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "authorize" in result.output.lower()
+
+
+def test_scan_synthesize_and_memory_are_mutually_exclusive() -> None:
+    """--synthesize and --memory are distinct flows; passing both is refused early."""
+    result = runner.invoke(app, ["scan", "reference:vulnerable", "--synthesize", "--memory"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "only one" in result.output.lower()
+
+
+# --- Theme B: _vulnerable_adapter honors vulnerable_launch ------------------
+
+
+def test_vulnerable_adapter_uses_vulnerable_launch_when_declared() -> None:
+    """The raw side of a differential launches the declared unguarded variant."""
+    from mylonite.cli import _vulnerable_adapter
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(
+            family="vuln-srv",
+            command="python",
+            args=["-m", "srv"],
+            env={"BASE": "1"},
+            vulnerable_launch={
+                "command": "python",
+                "args": ["-m", "srv", "--raw"],
+                "env": {"PROFILE": "vuln"},
+            },
+        )
+        spec = build_target_spec(tf)
+        target_registry.register_target(spec)
+        adapter = _vulnerable_adapter(spec, None, "m")
+        assert adapter._launch_command == "python"
+        assert adapter._launch_args == ["-m", "srv", "--raw"]
+        assert adapter._launch_env == {"BASE": "1", "PROFILE": "vuln"}
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_vulnerable_adapter_is_default_when_no_vulnerable_launch() -> None:
+    """No vulnerable_launch → the default adapter (today's behaviour) — no overrides."""
+    from mylonite.cli import _vulnerable_adapter
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(family="plain-srv", command="python", args=["-m", "srv"])
+        spec = build_target_spec(tf)
+        target_registry.register_target(spec)
+        adapter = _vulnerable_adapter(spec, None, "m")
+        assert adapter._launch_command is None
+        assert adapter._launch_args is None
+        assert adapter._launch_env is None
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+# --- Theme C: generate --prove-control emits assert_control_holds ------------
+
+
+def test_generate_prove_control_emits_assert_control_holds(tmp_path: Path) -> None:
+    """generate --prove-control on a custom finding emits a committable control-
+    efficacy test (assert_control_holds) — closing the oracle->test loop without
+    needing the full gate pipeline."""
+    import json as _json
+
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    tf = tmp_path / "target.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "gen"
+    result = runner.invoke(
+        app,
+        ["generate", str(ep), "--prove-control", "--target-file", str(tf), "--out", str(out)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    test_files = list(out.glob("test_security_*.py"))
+    assert test_files, list(out.iterdir())
+    src = test_files[0].read_text(encoding="utf-8")
+    assert "assert_control_holds" in src
+    assert 'control="W2"' in src
+
+
+def test_generate_prove_control_passes_through_reference_target(tmp_path: Path) -> None:
+    """A reference finding can't be proven load-bearing via a custom target.yaml,
+    so --prove-control passes it through to the standard guard test."""
+    import json as _json
+
+    exploit = _sample_exploit()  # reference:vulnerable
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--prove-control", "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    src = next(out.glob("test_security_*.py")).read_text(encoding="utf-8")
+    assert "assert_control_holds" not in src
+    assert "assert_guard_holds" in src
+
+
+# --- Theme E1: gate reads mylonite.yaml (parity with scan) -------------------
+
+
+def test_gate_reads_target_file_from_mylonite_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate auto-discovers ./mylonite.yaml and fills target_file/authorize, so it
+    no longer exits 2 'no target given' when the project config declares them."""
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "target.yaml"
+    target.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mylonite.yaml").write_text(
+        f"target_file: {target}\nauthorize: myapp\n", encoding="utf-8"
+    )
+
+    class _ReachedRunGate(Exception):
+        pass
+
+    def _stub(**_: Any) -> Any:
+        raise _ReachedRunGate()
+
+    monkeypatch.setattr("mylonite.gate.run_gate", _stub)
+    result = runner.invoke(app, ["gate"])
+    # Config resolved the target → we reached run_gate, not "no target given".
+    assert isinstance(result.exception, _ReachedRunGate), result.output
+    assert "no target given" not in result.output
+
+
+def test_gate_without_config_or_target_still_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["gate"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "no target given" in result.output
+
+
+# --- Theme E2: generate --latest on a clean (0-exploit) scan -----------------
+
+
+def test_generate_latest_clean_scan_explains_it_is_a_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A clean latest scan (0 exploits) exits with a message that frames it as a
+    PASS and points at targeting an earlier scan, not a bare error."""
+    scans_root = tmp_path / ".mylonite" / "scans"
+    (scans_root / "2026-06-10T12-00-00Z").mkdir(parents=True)
+    (scans_root / "2026-06-10T12-00-00Z" / "scan_report.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["generate", "--latest"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "no exploits" in result.output
+    assert "PASS" in result.output
+    assert "earlier scan" in result.output
+
+
+# --- Theme D1: adaptive budget auto-size ------------------------------------
+
+
+def test_adaptive_budget_autosizes_untouched_default() -> None:
+    """An active --adaptive run with the untouched default (50) auto-raises to an
+    adaptive-appropriate budget so an 8-seed run doesn't abort mid-way."""
+    from mylonite.cli import ADAPTIVE_DEFAULT_MAX_LLM_CALLS, _adaptive_budget
+
+    budget, raised = _adaptive_budget(50, adaptive_active=True)
+    assert budget == ADAPTIVE_DEFAULT_MAX_LLM_CALLS
+    assert ADAPTIVE_DEFAULT_MAX_LLM_CALLS >= 150
+    assert raised is True
+
+
+def test_adaptive_budget_respects_explicit_value() -> None:
+    from mylonite.cli import _adaptive_budget
+
+    assert _adaptive_budget(300, adaptive_active=True) == (300, False)
+    # An explicit lower value is respected (the user opted in), not silently raised.
+    assert _adaptive_budget(80, adaptive_active=True) == (80, False)
+
+
+def test_adaptive_budget_untouched_when_not_adaptive() -> None:
+    from mylonite.cli import _adaptive_budget
+
+    assert _adaptive_budget(50, adaptive_active=False) == (50, False)
+
+
+# --- Theme G: NIST enriched at mint (report parity with test marks) ---------
+
+
+def test_generate_colocated_exploit_carries_nist_for_report(tmp_path: Path) -> None:
+    """The co-located exploit JSON that `report` reads must carry the SAME NIST
+    tags the generated test's marks do. Previously NIST was derived only inline at
+    mark emission, while the persisted exploit (what the report reads) stayed
+    un-enriched — so NIST showed in the pytest marks but not the report (claim 11)."""
+    import json as _json
+
+    exploit = _sample_exploit()  # owasp_llm=['LLM01'] cross-refs to NIST, no nist yet
+    assert exploit.compliance.nist_ai_rmf == []  # precondition: raw has no NIST
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(_json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    colocated = next(out.glob("exploit_*.json"))
+    data = _json.loads(colocated.read_text(encoding="utf-8"))
+    assert data["compliance"]["nist_ai_rmf"], (
+        "co-located exploit (what `report` reads) must carry the derived NIST tags"
+    )
+
+
+def test_report_scan_dir_shows_derived_nist(tmp_path: Path) -> None:
+    """report enriches compliance on read, so NIST appears even when the persisted
+    exploit only carried OWASP tags (claim 11: NIST in marks, absent from report)."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    assert exploit.compliance.nist_ai_rmf == []  # persisted shape: OWASP only, no NIST
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # NIST (e.g. MEASURE-2.7 derived from LLM01) now shows in the report compliance.
+    assert "MEASURE" in result.output or "GOVERN" in result.output or "MAP-" in result.output
+
+
+# --- M1: differential gates real targets by default -------------------------
+
+
+def test_differential_plan_default_runs_for_controllable_weakness() -> None:
+    from mylonite.cli import _differential_plan
+
+    run, cw, note = _differential_plan(_sample_exploit(), fast=False)
+    assert run is True
+    assert cw == "W2"
+    assert "differential" in note.lower()
+
+
+def test_differential_plan_fast_skips() -> None:
+    from mylonite.cli import _differential_plan
+
+    run, cw, note = _differential_plan(_sample_exploit(), fast=True)
+    assert run is False and cw is None
+    assert "fast" in note.lower()
+
+
+def test_differential_plan_no_control_falls_back_loudly() -> None:
+    from mylonite.cli import _differential_plan
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    ex = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id="unknown-weakness-shape",
+        payload=Payload(pattern_id="unknown-weakness-shape", channel="user-message", body="x"),
+        response=AdapterResponse(
+            payload_pattern_id="unknown-weakness-shape", raw_response="", tool_calls=[]
+        ),
+        success_reason="x",
+        compliance=ComplianceTags(),
+    )
+    run, cw, note = _differential_plan(ex, fast=False)
+    assert run is False and cw is None
+    assert "no boundary control" in note.lower() and "weaker" in note.lower()
+
+
+def test_validate_custom_runs_differential_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M1: a real-target validation builds the boundary-guarded twin (differential
+    leg) BY DEFAULT; --fast skips it."""
+    from types import SimpleNamespace
+
+    from mylonite.cli import _validate_custom
+    from mylonite.plugins._mcp import target_registry
+
+    captured: dict[str, Any] = {}
+
+    class _StubValidator:
+        def __init__(self, **kw: Any) -> None:
+            captured.update(kw)
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return SimpleNamespace(kept=True, gating_legs=[])
+
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
+    )
+    tf = tmp_path / "t.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
+    target_registry.clear_runtime_targets()
+    try:
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False)
+        assert captured["guarded_adapter_factory"] is not None  # differential ON by default
+        assert captured["control_weakness"] == "W2"
+        captured.clear()
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True)
+        assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_report_sarif_emits_valid_document(tmp_path: Path) -> None:
+    """report --sarif writes a SARIF 2.1.0 doc (GitHub code scanning) from findings."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    sarif = tmp_path / "out.sarif"
+    result = runner.invoke(app, ["report", str(scan_dir), "--sarif", str(sarif)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    doc = _json.loads(sarif.read_text(encoding="utf-8"))
+    assert doc["version"] == "2.1.0"
+    assert doc["runs"][0]["tool"]["driver"]["name"] == "Mylonite"
+    res = doc["runs"][0]["results"]
+    assert len(res) == 1 and res[0]["ruleId"] == "indirect-injection-note-body-direct"
+    assert "LLM01" in res[0]["properties"]["tags"]  # compliance enriched on read
+
+
+def test_report_json_bundle_emits_machine_readable_findings(tmp_path: Path) -> None:
+    """report --json writes a self-contained finding bundle (dashboards / SIEM)."""
+    import json as _json
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=1)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    (scan_dir / "exploit_indirect-injection-note-body-direct.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json")), encoding="utf-8"
+    )
+    out = tmp_path / "finding.json"
+    result = runner.invoke(app, ["report", str(scan_dir), "--json", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    bundle = _json.loads(out.read_text(encoding="utf-8"))
+    assert bundle["schema_version"] and bundle["tool"]["name"] == "Mylonite"
+    f = bundle["findings"]
+    assert len(f) == 1 and f[0]["pattern_id"] == "indirect-injection-note-body-direct"
+    assert "LLM01" in f[0]["compliance"]["owasp_llm"]  # compliance enriched on read
+    assert "localization" in f[0] and "severity" in f[0]

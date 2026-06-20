@@ -26,7 +26,7 @@ server state; the control only changes what the model is shown on read. If a
 future change routes the plant or the probe through this shim, the measurement
 is no longer honest.
 
-Slice 1 ships W2 (untrusted-data envelope). W1/W3/W4 land in Slice 2.
+Implements the W1-W4 boundary controls (e.g. the W2 untrusted-data envelope).
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ class BoundaryControl:
 
 # Tool-name hints for "retrieval/read" tools whose results carry untrusted
 # content back to the planner (the W2 indirect-injection surface). Substring,
-# case-insensitive. Slice 2 replaces this heuristic with tool_roles classification.
+# case-insensitive; tool_roles classification refines this heuristic.
 _READ_HINTS: tuple[str, ...] = (
     "read",
     "get",
@@ -299,7 +299,7 @@ class ControlServerShim:
 
 # Registry keyed by weakness class, mirroring gate/mitigations/{W*}.md. A factory
 # so each invoke gets a fresh control instance (controls may hold per-run state in
-# later slices). Slice 1 implements W2 only.
+# the boundary control set).
 def make_control(
     weakness: str,
     *,

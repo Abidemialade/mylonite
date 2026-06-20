@@ -10,8 +10,8 @@ ANY real MCP target WITHOUT importing the optional ``mcp_kitchen_sink`` package
 Keep every function pure (no I/O, no LLM, no randomness) so it is trivially
 testable and deterministic across the differential's flakiness filter.
 
-Slice 1 ships only the W2 (untrusted-data envelope) transform. The W1/W3/W4
-primitives land with the full control set in Slice 2.
+Implements the boundary-control transforms (e.g. the W2 untrusted-data envelope)
+across the W1-W4 control set.
 """
 
 from __future__ import annotations

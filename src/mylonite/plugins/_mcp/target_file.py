@@ -21,6 +21,7 @@ Prefer an absolute path and verify the target actually opened it.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -29,9 +30,12 @@ from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
     InvalidTargetScope,
+    LaunchOverride,
     SeedArmSpec,
     TargetSpec,
 )
+
+_WEAKNESS_CLASSES = frozenset({"W1", "W2", "W3", "W4"})
 
 _DEFAULT_CUSTOM_PROMPT = (
     "You are a helpful assistant with access to the connected tools. Use them "
@@ -57,6 +61,12 @@ class TargetFile(BaseModel):
     seed_arm: SeedArmSpec | None = None
     effect_probe: EffectProbeSpec | None = None
     control_config: ControlConfig | None = None
+    # Server-layer twin launch: how to start a genuinely UNGUARDED variant of
+    # this server (vulnerable_launch) and/or per-control env toggles that disable
+    # a single server-layer guard (control_env). Optional; omitting both keeps
+    # today's behaviour. See docs/quarry.md and SECURITY.md (--authorize gate).
+    vulnerable_launch: LaunchOverride | None = None
+    control_env: dict[str, dict[str, str]] = {}
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -65,6 +75,13 @@ class TargetFile(BaseModel):
             raise ValueError(msg)
         if self.family in {"filesystem", "fetch", "github"}:
             msg = f"family {self.family!r} is reserved for a bundled target; choose another name"
+            raise ValueError(msg)
+        bad = sorted(set(self.control_env) - _WEAKNESS_CLASSES)
+        if bad:
+            msg = (
+                f"control_env keys must be weakness classes {sorted(_WEAKNESS_CLASSES)}; "
+                f"got unknown key(s): {bad}"
+            )
             raise ValueError(msg)
         return self
 
@@ -106,6 +123,8 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         seed_arm=tf.seed_arm,
         effect_probe=tf.effect_probe,
         control_config=tf.control_config,
+        vulnerable_launch=tf.vulnerable_launch,
+        control_env={k: dict(v) for k, v in tf.control_env.items()},
     )
 
 
@@ -209,3 +228,44 @@ def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> lis
             "(those seeds will be reported NOT TESTED, not clean)."
         )
     return errors
+
+
+def needs_seed_arm_autowire(tf: TargetFile) -> bool:
+    """True when the target declares an indirect-injection-only weakness (W2) but no
+    ``seed_arm`` — the case M3 auto-wires from the tool surface so a real app needs
+    near-zero config instead of a hard pre-flight block."""
+    return tf.seed_arm is None and bool(set(tf.weakness_classes) & _INDIRECT_ONLY_WEAKNESS_CLASSES)
+
+
+def infer_seed_arm(tools: list[Any]) -> tuple[SeedArmSpec | None, str]:
+    """Derive a ``seed_arm`` (how to plant untrusted content) from the tool surface.
+
+    Reuses the deterministic tool-role heuristics (``_classify_tools``). Only returns
+    a seed_arm when a NO-id recall path exists, so the planted payload is *guaranteed*
+    to be surfaced back to the planner — avoiding the "plants but never lands" trap (a
+    store whose only readback needs the new record's id the planner never learns). The
+    caller prints the note; the operator can override the inferred value in the file.
+    """
+    from mylonite.scan.tool_roles import _classify_tools
+
+    roles = _classify_tools(tools)
+    if roles.seed_arm_tool and roles.seed_arm_param and roles.retrieve_tool:
+        spec = SeedArmSpec(
+            tool=roles.seed_arm_tool,
+            args_template={roles.seed_arm_param: "{payload}"},
+        )
+        note = (
+            f"inferred seed_arm: {roles.seed_arm_tool}({roles.seed_arm_param}='{{payload}}') "
+            f"with recall via {roles.retrieve_tool!r} — override in the target file if wrong."
+        )
+        return spec, note
+    if roles.seed_arm_tool:
+        return None, (
+            f"found a content-storing tool ({roles.seed_arm_tool!r}) but NO id-free recall path: "
+            "an auto-wired plant could not be delivered back to the planner. Declare a seed_arm "
+            "(+ matching drive) in the target file."
+        )
+    return None, (
+        "no content-storing tool found on the target's surface — declare a seed_arm in the "
+        "target file to test indirect injection (W2)."
+    )

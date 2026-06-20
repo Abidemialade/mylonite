@@ -7,9 +7,9 @@ Generic adapter that spawns a bundled MCP server as a subprocess (per
 
 This is the load-bearing module. The 0-arg subclasses
 (``FilesystemMCPAdapter`` / ``FetchMCPAdapter`` / ``GitHubMCPAdapter``)
-land in PR 5 alongside the new per-target seeds.
+accompany the per-target seeds.
 
-Lifecycle: fresh subprocess per ``invoke()`` call. Mirrors Phase 1's in-
+Lifecycle: fresh subprocess per ``invoke()`` call. Mirrors the in-
 process adapter (fresh ``NoteStore`` per attempt). The SDK's
 ``stdio_client`` context manager guarantees subprocess cleanup.
 
@@ -134,19 +134,24 @@ async def _open_mcp_session(
     scope: str | None,
     *,
     extra_env: dict[str, str] | None = None,
+    command: str | None = None,
+    args: list[str] | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Spawn the MCP server and yield an initialised ``ClientSession``.
 
     Both ``stdio_client`` and ``ClientSession`` are async context managers;
     composing them here keeps the call sites in ``describe`` / ``invoke``
     flat. Subprocess cleanup is guaranteed by the SDK on exit.
+
+    ``command``/``args`` default to the spec's launch; a caller can override them
+    to start a target's deliberately-unguarded (``vulnerable_launch``) variant.
     """
     env = dict(os.environ)
     if extra_env:
         env.update(extra_env)
     params = StdioServerParameters(
-        command=spec.command,
-        args=spec.render_args(scope),
+        command=command or spec.command,
+        args=args if args is not None else spec.render_args(scope),
         env=env,
     )
     async with (
@@ -160,7 +165,7 @@ async def _open_mcp_session(
 class MCPStdioAdapter(AsyncTargetAdapterBase):
     """Generic MCP stdio adapter.
 
-    Subclasses (PR 5) wire family + scope to a 0-arg construction shape
+    Subclasses wire family + scope to a 0-arg construction shape
     matching the in-process reference adapter's ``InProcessVulnerableReferenceAdapter``
     pattern, so the plugin registry's entry-point loader can instantiate
     them with no args.
@@ -177,6 +182,9 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         completion_fn: Callable[..., Any] | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
         controls: list[BoundaryControl] | None = None,
+        launch_env: dict[str, str] | None = None,
+        launch_command: str | None = None,
+        launch_args: list[str] | None = None,
     ) -> None:
         self._spec = target_registry.resolve_target(family, scope)
         self._family = family
@@ -187,6 +195,20 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         # Boundary controls synthesize a guarded twin of THIS real target: they
         # guard only the planner's view (see invoke()). Empty = raw target.
         self._controls: list[BoundaryControl] = controls or []
+        # Server-layer launch overrides (Theme B). When None, the env is the
+        # spec's extra_env and command/args default — today's behaviour. A caller
+        # (ablation / prove-control / chain) supplies these to drive a genuinely
+        # unguarded variant of a server-layer-controlled target. Never logged.
+        self._launch_env = launch_env
+        self._launch_command = launch_command
+        self._launch_args = launch_args
+
+    def _effective_env(self) -> dict[str, str]:
+        """Env passed to ``_open_mcp_session`` — the caller's launch_env, else the
+        spec's extra_env (byte-for-byte today's behaviour when not overridden)."""
+        if self._launch_env is not None:
+            return dict(self._launch_env)
+        return dict(self._spec.extra_env)
 
     def _target_id(self) -> str:
         if self._scope is None:
@@ -195,7 +217,11 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
 
     async def describe(self) -> TargetDescriptor:
         async with _open_mcp_session(
-            self._spec, self._scope, extra_env=dict(self._spec.extra_env)
+            self._spec,
+            self._scope,
+            extra_env=self._effective_env(),
+            command=self._launch_command,
+            args=self._launch_args,
         ) as session:
             shim = MCPSessionAsServerLike(session)
             tools = _serialise_tools(await shim.list_tools())
@@ -250,7 +276,11 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
 
         try:
             async with _open_mcp_session(
-                self._spec, self._scope, extra_env=dict(self._spec.extra_env)
+                self._spec,
+                self._scope,
+                extra_env=self._effective_env(),
+                command=self._launch_command,
+                args=self._launch_args,
             ) as session:
                 shim = MCPSessionAsServerLike(session)
 
@@ -402,7 +432,13 @@ class MCPStdioAdapter(AsyncTargetAdapterBase):
         does not apply. The engine probes this once (open+close) before activating
         the adaptive path and degrades to single-shot if it raises.
         """
-        cm = _open_mcp_session(self._spec, self._scope, extra_env=dict(self._spec.extra_env))
+        cm = _open_mcp_session(
+            self._spec,
+            self._scope,
+            extra_env=self._effective_env(),
+            command=self._launch_command,
+            args=self._launch_args,
+        )
         session = await cm.__aenter__()
         return _MCPAttackSession(self, cm, session)
 
@@ -877,7 +913,7 @@ class GitHubMCPAdapter(MCPStdioAdapter):
     """Bundled github MCP target.
 
     Scope is ``owner/repo``. The CLI passes the user-supplied GITHUB_TOKEN
-    via ``extra_env`` in PR 6's live e2e tests; the unit tests sidestep that
+    via ``extra_env`` in the live e2e tests; the unit tests sidestep that
     via the ``_fake_open`` patch.
     """
 

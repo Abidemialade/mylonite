@@ -99,7 +99,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Run-metadata sibling of ExploitRecord; written to scan_report.json.\n\nPhase 1 ships this schema-validated under ``scripts/regenerate_schemas.py``\nso CI catches drift and Phase 2 / future CI consumers can validate the\nreport shape without depending on the Python package.",
+  "description": "Run-metadata sibling of ExploitRecord; written to scan_report.json.\n\nThis is schema-validated under ``scripts/regenerate_schemas.py``\nso CI catches drift and downstream consumers can validate the\nreport shape without depending on the Python package.",
   "properties": {
     "aborted": {
       "anyOf": [
@@ -164,7 +164,7 @@
     },
     "single_run": {
       "default": true,
-      "description": "Phase 1 runs each seed once. Phase 2's 5-run flakiness filter will set this to False when those replays land.",
+      "description": "A single-shot scan runs each seed once. The 5-run flakiness filter set this to False when those replays land.",
       "title": "Single Run",
       "type": "boolean"
     },

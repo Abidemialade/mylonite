@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from mylonite.contracts._types import ExploitRecord, ValidationReport
+from mylonite.gate.localize import localize
 from mylonite.scan.seeds import SEED_CATALOGUE
 
 _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
@@ -40,6 +41,18 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
 
 def _snippet(weakness_class: str) -> str:
     base = _ir.files("mylonite.gate") / "mitigations"
+    return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
+
+
+def _fix_block(weakness_class: str) -> str:
+    """The concrete, reviewable fix (a fenced diff) for a weakness class (R3).
+
+    Parallel to ``_snippet`` (prose rationale) but actionable: it renders the
+    server-side change that implements the boundary control the differential
+    proved load-bearing, so the PR carries "here's the fix we proved works", not
+    a guess. Class-keyed (W1-W4/generic) — the control name rides in the prose.
+    """
+    base = _ir.files("mylonite.gate") / "fixes"
     return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
 
 
@@ -106,12 +119,18 @@ def build_pr_body(
     *,
     llm_enrich: bool = False,
     completion_fn: Callable[..., Any] | None = None,
+    system_prompt: str | None = None,
 ) -> str:
-    """Assemble the gating PR description (deterministic; opt-in LLM enrichment)."""
+    """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
+
+    ``system_prompt`` (the target's ingested prompt, when available) lets the
+    locus line pin a system-prompt finding to an exact line (R4).
+    """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
     control = exploit.payload.metadata.get("synthetic_control") or ""
     is_control = bool(control)
+    loc = localize(exploit, system_prompt=system_prompt)
 
     if is_control:
         repro = report.reproducibility
@@ -165,7 +184,19 @@ def build_pr_body(
         "## Suggested mitigation",
         "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
         "",
+        f"**Located at:** {loc.label}. {loc.why}",
+        "",
         _snippet(wc),
+        "",
+        (
+            "**Proven fix** — implement the control the differential verified load-bearing, "
+            "server-side, then re-point the committed test at it:"
+            if is_control
+            else "**Recommended fix** — implement this control server-side, then re-point the "
+            "committed test at your implementation:"
+        ),
+        "",
+        _fix_block(wc),
     ]
     if is_reference:
         sections += [

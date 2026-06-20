@@ -1,23 +1,21 @@
 """Typer CLI for Mylonite.
 
-Phase 1 (v0.2) lights up ``mylonite scan``:
+The end-to-end pipeline (each command also documented via ``--help``):
 
-* ``mylonite version`` — print the package version.
-* ``mylonite taxonomy list --framework <id>`` — list entries from a bundled
-  threat taxonomy.
-* ``mylonite scan <target> [--provider --model --dry-run ...]`` — run the
-  exploit-finding loop against a target. Phase 1 ships in-process reference
-  targets only (``reference:vulnerable`` / ``reference:guarded``). Real
-  out-of-process MCP adapters arrive in Phase 1.5/2.
+* ``mylonite scan <target>`` — run the exploit-finding loop against a target
+  (the in-process reference twins, a bundled MCP family, or your own app via
+  ``--target-file``); supports ``--adaptive`` / ``--synthesize`` / ``--memory``.
+* ``mylonite generate`` — emit a pytest regression test from a confirmed exploit
+  (offline, deterministic, no LLM).
+* ``mylonite validate`` — run a generated test through the differential-oracle
+  validator (live); ``--models`` re-proves it across model versions.
+* ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
+* ``mylonite report`` — render a scan/validation as a panel, HTML, SARIF, or JSON.
+* ``mylonite ablate`` / ``init-target`` / ``demo`` / ``doctor`` / ``taxonomy`` /
+  ``export`` / ``version`` — control-efficacy scoring, target scaffolding, the
+  Quarry playground, diagnostics, and supporting utilities.
 
-Phase 2 (v0.2) lights up ``mylonite generate`` and ``mylonite validate``:
-
-* ``mylonite generate [SCAN_PATH] [--latest] [--out DIR]`` — emit a pytest
-  regression test from a confirmed exploit (offline, deterministic, no LLM).
-* ``mylonite validate TARGET [--iterations N]`` — run a generated test through
-  the differential-oracle validator (live by default — real LLM, Haiku).
-
-``init`` remains a stub (Phase 3 work).
+See the documentation site for guides and the full reference.
 """
 
 from __future__ import annotations
@@ -43,7 +41,21 @@ logger = logging.getLogger(__name__)
 
 app = typer.Typer(
     name="mylonite",
-    help="AI-layer security testing. Finds AI-agent weaknesses and writes the regression tests that close them.",
+    help=(
+        "Mylonite -- AI-layer security testing.\n\n"
+        "Finds app-specific weaknesses in your AI agent's attack surface (system prompt, "
+        "tool/function schemas, MCP tools, RAG, memory), proves each one with a differential "
+        "oracle, and writes the pytest regression test that gates CI."
+    ),
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite demo` -- try it on the bundled vulnerable agent (no setup).\n\n"
+        "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
+        "`mylonite init-target --command 'python server.py' -o app.yaml` -- scaffold a target.yaml.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
+        "Docs: https://abidemialade.github.io/mylonite/ -- "
+        "run 'mylonite COMMAND --help' for any command."
+    ),
     add_completion=False,
     no_args_is_help=True,
 )
@@ -328,6 +340,30 @@ def _not_implemented(name: str) -> None:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+#: Default LLM-call budget for an active ``--adaptive`` scan. The single-shot
+#: default (50) aborts a multi-seed adaptive run mid-way — each seed can spend
+#: ~10-15 calls across its retry budget (customise + plant/drive/judge, then up
+#: to DEFAULT_MAX_ATTEMPTS strategist refinements). 200 clears a full 8-seed run.
+ADAPTIVE_DEFAULT_MAX_LLM_CALLS = 200
+
+#: The untouched default of the ``--max-llm-calls`` option; only this exact value
+#: is treated as "not set by the user" (an explicit value, even 50, is honoured).
+_DEFAULT_MAX_LLM_CALLS = 50
+
+
+def _adaptive_budget(max_llm_calls: int, *, adaptive_active: bool) -> tuple[int, bool]:
+    """Auto-size the LLM-call budget for an active adaptive run.
+
+    Returns ``(budget, raised)``. When the adaptive loop is active and the budget
+    is the untouched default, raise it to ``ADAPTIVE_DEFAULT_MAX_LLM_CALLS`` so the
+    run doesn't silently abort partway through; any explicit value (flag or
+    mylonite.yaml) — including a deliberately low one — is respected unchanged.
+    """
+    if adaptive_active and max_llm_calls == _DEFAULT_MAX_LLM_CALLS:
+        return ADAPTIVE_DEFAULT_MAX_LLM_CALLS, True
+    return max_llm_calls, False
+
+
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
@@ -577,7 +613,7 @@ def _run_synthesis(
     judge_model: str,
     output_dir: Path,
 ) -> None:
-    """Driver 2 flow: synthesize a tool-chain and differentially validate it, then
+    """Tool-chaining flow: synthesize a tool-chain and differentially validate it, then
     write the validated finding as scan artefacts.
 
     For a reference target the differential uses the bundled twins; for a custom
@@ -633,10 +669,22 @@ def _run_synthesis(
             err=True,
         )
 
+        if spec.vulnerable_launch is not None:
+            typer.echo(
+                f"--synthesize: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                "Env values are never logged.",
+                err=True,
+            )
+
         def factory(variant: str) -> Any:
-            controls = None if variant == "vulnerable" else [_boundary_control("W2", spec)]
+            if variant == "vulnerable":
+                return _vulnerable_adapter(spec, tf.scope, planner_model)
             return MCPStdioAdapter(
-                family=spec.family, scope=tf.scope, model=planner_model, controls=controls
+                family=spec.family,
+                scope=tf.scope,
+                model=planner_model,
+                controls=[_boundary_control("W2", spec)],
             )
 
         descriptor = asyncio.run(
@@ -710,7 +758,180 @@ def _run_synthesis(
         typer.echo(f"Next: mylonite generate {scan_dir}")
 
 
-@app.command()
+def _run_memory_poison(
+    *,
+    target: str | None,
+    target_file: Path | None = None,
+    authorize: str | None = None,
+    provider: str,
+    model: str,
+    planner_model: str,
+    judge_model: str,
+    output_dir: Path,
+) -> None:
+    """T1 flow: plant poison, let it PERSIST across a benign turn, then drive a later
+    retrieval that surfaces and acts on it — differentially validated against the twins.
+
+    Mirrors ``--synthesize``: a reference target uses the bundled twins; a custom
+    ``--target-file`` uses the SYNTHETIC W2 boundary-guarded twin (the control shim),
+    so the differential proves the *memory* control — quarantining recalled content —
+    is load-bearing. The poison is planted once and retrieved a turn later, modelling
+    the cross-session slow-drip ("zombie agent") shape single-turn scans miss.
+    """
+    is_reference = bool(target and target.startswith("reference:"))
+    if not is_reference and target_file is None:
+        typer.echo(
+            "--memory needs a reference twin target (e.g. reference:vulnerable) or a "
+            "custom --target-file.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+    from mylonite.scan.artefacts import render_summary, write_artefacts
+    from mylonite.scan.engine import ScanResult
+    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.memory_poison import MemoryPoisonRunner
+    from mylonite.scan.seeds import SEED_CATALOGUE
+
+    seed = next(s for s in SEED_CATALOGUE if s.pattern_id == "indirect-injection-note-body-direct")
+    # One innocent turn between the plant and the retrieval, so the poison is acted on
+    # in a later turn than it was planted (the defining memory-poisoning separation).
+    benign_turns = ("Please give me a brief status update on my recent activity.",)
+
+    if is_reference:
+        report_target = target or "reference:vulnerable"
+
+        def factory(variant: str) -> Any:
+            return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
+
+        descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
+    else:
+        if not authorize:
+            typer.echo(
+                "--authorize is required to test memory poisoning against a custom target.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        from mylonite.plugins._mcp import target_registry
+        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            tf = load_target_file(target_file)  # type: ignore[arg-type]
+            spec = build_target_spec(tf)
+        except Exception as exc:
+            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+        report_target = target or f"mcp:{spec.family}"
+        typer.echo(
+            f"--memory on custom target {spec.family!r}: validating raw vs a W2 boundary-"
+            "guarded twin (the synthetic guarded side quarantines recalled memory).",
+            err=True,
+        )
+        if spec.vulnerable_launch is not None:
+            typer.echo(
+                f"--memory: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                "Env values are never logged.",
+                err=True,
+            )
+
+        def factory(variant: str) -> Any:
+            if variant == "vulnerable":
+                return _vulnerable_adapter(spec, tf.scope, planner_model)
+            return MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=planner_model,
+                controls=[_boundary_control("W2", spec)],
+            )
+
+        descriptor = asyncio.run(
+            MCPStdioAdapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
+        )
+
+    runner = MemoryPoisonRunner(
+        adapter_factory=factory,
+        judge=SuccessJudge(model=judge_model),
+        seed=seed,
+        target_id=report_target,
+        benign_turns=benign_turns,
+    )
+    try:
+        result = asyncio.run(runner.run(descriptor))
+    finally:
+        if not is_reference:
+            from mylonite.plugins._mcp import target_registry
+
+            target_registry.clear_runtime_targets()
+
+    exploits = [result.exploit] if result.exploit is not None else []
+    if result.plan is None:
+        attempts = [
+            ScanAttempt(
+                seed_id="memory-poisoning",
+                pattern_id="memory-poisoning",
+                outcome="no_finding",
+                verdict_reason=(
+                    "no plant+retrieve surface discoverable for cross-turn memory poisoning"
+                ),
+            )
+        ]
+    else:
+        pid = result.exploit.pattern_id if result.exploit is not None else "memory-poisoning"
+        attempts = [
+            ScanAttempt(
+                seed_id=pid,
+                pattern_id=pid,
+                outcome="finding" if result.exploit is not None else "no_finding",
+                verdict_reason=(
+                    result.exploit.success_reason
+                    if result.exploit is not None
+                    else "cross-turn memory poisoning did not differentially validate"
+                ),
+            )
+        ]
+    report = ScanReport(
+        target_id=report_target,
+        attack_modules=["memory-poisoning"],
+        provider=provider,
+        model=model,
+        elapsed_seconds=0.0,
+        attempts=attempts,
+        findings_count=len(exploits),
+        inconclusive_attempts=0,
+        fallback_breakdown={},
+        aborted=None,
+        single_run=False,
+        mylonite_version=__version__,
+    )
+    scan_result = ScanResult(report=report, exploits=exploits)
+
+    from mylonite._redaction import redact
+
+    scan_dir = write_artefacts(scan_result, output_dir)
+    typer.echo(redact(render_summary(scan_result)))
+    typer.echo(f"Artefacts: {scan_dir}")
+    if exploits:
+        typer.echo("")
+        typer.echo(f"Next: mylonite generate {scan_dir}")
+
+
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
+        "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
+        "`mylonite scan reference:vulnerable --adaptive` -- strategist refines until it lands.\n\n"
+        "`mylonite scan reference:vulnerable --synthesize` -- chain 2+ tools to a harmful sink.\n\n"
+        "`mylonite scan reference:vulnerable --memory` -- cross-turn memory poisoning.\n\n"
+        "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
+    )
+)
 def scan(
     target: Annotated[
         str | None,
@@ -791,14 +1012,23 @@ def scan(
         str | None,
         typer.Option(
             "--customiser-model",
-            help="Override the model that crafts/refines attack payloads. Defaults to --model.",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads (the red-team side, "
+                "incl. the --adaptive strategist). Defaults to --model. Mylonite separates "
+                "three model roles: planner (the agent under test), customiser (the attacker), "
+                "and judge (the verdict) -- set them independently to mix a strong attacker "
+                "against a cheaper target, etc."
+            ),
         ),
     ] = None,
     judge_model: Annotated[
         str | None,
         typer.Option(
             "--judge-model",
-            help="Override the model for the LLM-judge verdict. Defaults to --model.",
+            help=(
+                "Override the model that JUDGES whether an attack landed (the LLM-judge leg, "
+                "used only when the deterministic predicate is inconclusive). Defaults to --model."
+            ),
         ),
     ] = None,
     max_llm_calls: Annotated[
@@ -853,26 +1083,40 @@ def scan(
             ),
         ),
     ] = False,
-    obfuscate: Annotated[
-        str | None,
+    verbose_strategist: Annotated[
+        bool,
         typer.Option(
-            "--obfuscate",
+            "--verbose-strategist",
             help=(
-                "Obfuscate the payload body to test filter generalization "
-                "(unicode-tag | split | multilingual | base64-wrapper). The exfil "
-                "destination stays literal so detection still fires."
+                "With --adaptive, echo each refinement round live (the injection "
+                "tried, the planner's tool calls, and why it failed) so the "
+                "strategist's reasoning is observable, not just an attempt count. "
+                "Payloads are redacted before display."
             ),
         ),
-    ] = None,
+    ] = False,
     synthesize: Annotated[
         bool,
         typer.Option(
             "--synthesize",
             help=(
-                "Opt-in Driver 2 tool-chaining synthesis: synthesize an "
+                "Opt-in tool-chaining synthesis: synthesize an "
                 "app-specific multi-tool exploit chain from the tool surface, then "
                 "differentially validate it against the twins (needs a reference "
                 "twin target, e.g. reference:vulnerable). Off by default."
+            ),
+        ),
+    ] = False,
+    memory: Annotated[
+        bool,
+        typer.Option(
+            "--memory",
+            help=(
+                "Opt-in stateful memory-poisoning test: plant poison, let it persist "
+                "across a benign turn, then drive a later retrieval that surfaces and "
+                "acts on it — the cross-session slow-drip ('zombie agent') shape. "
+                "Differentially validated against the twins (reference, or a custom "
+                "--target-file's synthetic W2-guarded twin). Off by default."
             ),
         ),
     ] = False,
@@ -927,8 +1171,11 @@ def scan(
     effective_customiser_model = _resolve_role_model(customiser_model)
     effective_judge_model = _resolve_role_model(judge_model)
 
-    # Driver 2: tool-chaining synthesis is a distinct flow (synthesize -> twin
+    # Tool-chaining synthesis is a distinct flow (synthesize -> twin
     # differential validation), not the per-seed engine. Branch early and return.
+    if synthesize and memory:
+        typer.echo("--synthesize and --memory are distinct flows; pass only one.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
     if synthesize:
         _run_synthesis(
             target=target,
@@ -938,6 +1185,21 @@ def scan(
             model=effective_model,
             planner_model=effective_planner_model,
             customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
+            output_dir=output_dir,
+        )
+        return
+
+    # T1: stateful cross-turn memory poisoning is a distinct flow (plant -> persist ->
+    # retrieve, twin-differentially validated), not the per-seed engine. Branch and return.
+    if memory:
+        _run_memory_poison(
+            target=target,
+            target_file=target_file,
+            authorize=authorize,
+            provider=effective_provider,
+            model=effective_model,
+            planner_model=effective_planner_model,
             judge_model=effective_judge_model,
             output_dir=output_dir,
         )
@@ -976,13 +1238,40 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
-        from mylonite.plugins._mcp.target_file import dump_target_file, validate_for_scan
+        from mylonite.plugins._mcp.target_file import (
+            dump_target_file,
+            infer_seed_arm,
+            needs_seed_arm_autowire,
+            validate_for_scan,
+        )
+
+        # M3: auto-wire the seed_arm from the LIVE tool surface when a W2 target omits
+        # it, so a real app needs near-zero config instead of the hard block below.
+        # Only when a no-id recall path exists (else the plant wouldn't be delivered —
+        # the "plants but never lands" trap). Best-effort: a describe failure leaves the
+        # pre-flight block to handle it. Skipped on --dry-run / --allow-no-seed-arm.
+        if needs_seed_arm_autowire(tf) and not dry_run and not allow_no_seed_arm:
+            try:
+                _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
+                _descriptor = asyncio.run(asyncio.wait_for(_probe.describe(), timeout=20))
+            except Exception as exc:
+                _descriptor = None
+                typer.echo(
+                    f"auto-wire: could not describe the target to infer a seed_arm "
+                    f"({type(exc).__name__}); falling back to the pre-flight check.",
+                    err=True,
+                )
+            if _descriptor is not None:
+                _spec, _note = infer_seed_arm(_descriptor.tools)
+                typer.echo(f"auto-wire: {_note}", err=True)
+                if _spec is not None:
+                    tf = tf.model_copy(update={"seed_arm": _spec})
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
         # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
-        # set. A --dry-run only enumerates seeds (no clean/finding verdict to
-        # mislead), so there we downgrade the block to a warning.
+        # set (or M3 auto-wired one above). A --dry-run only enumerates seeds (no
+        # clean/finding verdict to mislead), so there we downgrade the block to a warning.
         preflight_errors = validate_for_scan(tf, allow_no_seed_arm=allow_no_seed_arm)
         if preflight_errors:
             for err in preflight_errors:
@@ -1058,10 +1347,22 @@ def scan(
     attack_driver = None
     if adaptive:
         if isinstance(adapter, SupportsAttackSession):
-            from mylonite.scan.attack_loop import AdaptiveAttackDriver
+            from mylonite._redaction import redact
+            from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttemptStep
+
+            def _echo_step(step: AttemptStep) -> None:
+                status = "FOUND" if step.success else "failed"
+                typer.echo(
+                    f"  strategist round {step.attempt}: {status} — "
+                    f"{redact(step.reason)[:160]} | tools={list(step.tool_calls)} | "
+                    f"injection={redact(step.injection)[:120]}",
+                    err=True,
+                )
 
             attack_driver = AdaptiveAttackDriver(
-                judge=judge, strategist_model=effective_customiser_model
+                judge=judge,
+                strategist_model=effective_customiser_model,
+                on_step=_echo_step if verbose_strategist else None,
             )
         else:
             typer.echo(
@@ -1070,15 +1371,19 @@ def scan(
                 err=True,
             )
 
-    if obfuscate is not None:
-        from mylonite.scan.obfuscate import STRATEGY_NAMES
-
-        if obfuscate not in STRATEGY_NAMES:
-            typer.echo(
-                f"--obfuscate: unknown strategy {obfuscate!r}; choose from {list(STRATEGY_NAMES)}",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
+    # Auto-size the budget for an active adaptive run so it doesn't abort mid-way
+    # on the single-shot default (the assessment's seed-3-of-8 abort). An explicit
+    # --max-llm-calls (or mylonite.yaml) always wins.
+    max_llm_calls, _budget_raised = _adaptive_budget(
+        max_llm_calls, adaptive_active=adaptive and attack_driver is not None
+    )
+    if _budget_raised:
+        typer.echo(
+            f"--adaptive: raised the LLM-call budget to {max_llm_calls} (the default "
+            f"{_DEFAULT_MAX_LLM_CALLS} aborts a multi-seed adaptive run mid-way). "
+            "Pass --max-llm-calls to override.",
+            err=True,
+        )
 
     config = ScanConfig(
         target_id=report_target_id,
@@ -1092,7 +1397,6 @@ def scan(
         output_dir=output_dir,
         dry_run=dry_run,
         adaptive=adaptive and attack_driver is not None,
-        obfuscate=obfuscate,
     )
 
     engine = ScanEngine(
@@ -1360,7 +1664,10 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
         if not found:
             typer.echo(
                 f"the latest scan ({scan_dir}) found no exploits — nothing to generate. "
-                "Run `mylonite scan <target>` against a vulnerable target first.",
+                "A no-finding scan is a PASS, not an error: it usually means the target "
+                "is clean or guarded. To generate from an earlier scan that DID find "
+                "something, pass that scan dir explicitly, e.g. "
+                "`mylonite generate .mylonite/scans/<earlier-run>`.",
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
@@ -1402,7 +1709,13 @@ def _emit_generated_test(
         ReferencePytestGenerator,
     )
 
-    generated = ReferencePytestGenerator().emit(_map_compliance(exploit))
+    # Enrich compliance ONCE (derives NIST from the OWASP cross-refs) and use the
+    # SAME enriched record for both the emitted test's marks and the co-located
+    # exploit JSON. Writing the raw record here left the persisted exploit (what
+    # `mylonite report` reads) without the NIST tags the marks carried — the
+    # marks-vs-report inconsistency from the v0.7.0 assessment.
+    enriched = _map_compliance(exploit)
+    generated = ReferencePytestGenerator().emit(enriched)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
@@ -1410,9 +1723,9 @@ def _emit_generated_test(
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
-    colocated_exploit = out_dir / f"exploit_{exploit.pattern_id}.json"
+    colocated_exploit = out_dir / f"exploit_{enriched.pattern_id}.json"
     colocated_exploit.write_text(
-        json_mod.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json_mod.dumps(enriched.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -1474,6 +1787,41 @@ def _emit_generated_test(
         typer.echo(f"Next: mylonite validate {out_dir}")
 
 
+def _tag_control_for_generate(exploit: Any) -> Any:
+    """Stamp ``synthetic_control`` so the generator emits an ``assert_control_holds``
+    test (``generate --prove-control``), turning the control-efficacy oracle's
+    verdict into a committable CI gate.
+
+    Passes the exploit through unchanged (with a notice) for a reference target or
+    a weakness with no boundary control — those can't be emitted as a committable
+    custom-target control test. Mirrors the tagging ``gate --prove-control`` does.
+    """
+    from mylonite.gate.mitigation import weakness_class_for
+    from mylonite.scan.control_shim import make_control
+
+    if exploit.target_id.startswith("reference:"):
+        typer.echo(
+            f"--prove-control: {exploit.pattern_id} targets a reference twin; emitting "
+            "the standard guard test instead.",
+            err=True,
+        )
+        return exploit
+    cw = weakness_class_for(exploit)
+    try:
+        make_control(cw)
+    except ValueError:
+        typer.echo(
+            f"--prove-control: no boundary control for weakness {cw!r} "
+            f"({exploit.pattern_id}); emitting the standard target-resists test instead.",
+            err=True,
+        )
+        return exploit
+    meta = {**exploit.payload.metadata, "synthetic_control": cw}
+    return exploit.model_copy(
+        update={"payload": exploit.payload.model_copy(update={"metadata": meta})}
+    )
+
+
 @app.command()
 def generate(
     scan_path: Annotated[
@@ -1507,6 +1855,19 @@ def generate(
             ),
         ),
     ] = None,
+    prove_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-control",
+            help=(
+                "Emit a control-efficacy test (assert_control_holds) that proves the "
+                "control blocking this finding is load-bearing — the attack lands "
+                "without it and is resisted with it — instead of the standard "
+                "resists/guard test. Custom targets only (needs --target-file); a "
+                "reference or non-controllable finding falls back to the standard test."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Emit a pytest regression test from a confirmed exploit.
 
@@ -1514,7 +1875,9 @@ def generate(
     by ``mylonite scan``), renders a testkit-based pytest file, and writes it next
     to a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a
     CUSTOM target, pass ``--target-file`` so the target YAML is co-located as
-    ``target.yaml`` (the live test needs it). Prints what to run next.
+    ``target.yaml`` (the live test needs it). With ``--prove-control`` the emitted
+    test asserts the control is load-bearing (``assert_control_holds``) rather than
+    just that the target resists. Prints what to run next.
     """
     import json
 
@@ -1534,6 +1897,9 @@ def generate(
         except (FileNotFoundError, ValueError) as exc:
             typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
             raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        if prove_control:
+            exploit = _tag_control_for_generate(exploit)
 
         # With multiple findings, give each its own subdir so tests don't clobber
         # each other; a single finding keeps the exact dir the operator chose.
@@ -1567,6 +1933,71 @@ def _boundary_control(weakness: str, spec: Any) -> Any:
     )
 
 
+def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
+    """Adapter for the RAW/vulnerable side of a differential.
+
+    Honors a target's ``vulnerable_launch`` (its declared, deliberately-unguarded
+    variant) so the raw side of a SERVER-LAYER-controlled target is genuinely
+    unguarded — otherwise the "raw" side would launch the guarded server and the
+    differential would never fire. When ``vulnerable_launch`` is undeclared this is
+    byte-for-byte the default adapter (today's behaviour). SECURITY: launching the
+    unguarded variant is announced loudly by the caller; env values are never logged.
+    """
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+
+    if getattr(spec, "vulnerable_launch", None) is None:
+        return MCPStdioAdapter(family=spec.family, scope=scope, model=model)
+    return MCPStdioAdapter(
+        family=spec.family,
+        scope=scope,
+        model=model,
+        launch_env=spec.launch_env(vulnerable=True),
+        launch_command=spec.launch_command(vulnerable=True),
+        launch_args=spec.launch_args(scope, vulnerable=True),
+    )
+
+
+def _differential_plan(exploit: Any, *, fast: bool) -> tuple[bool, str | None, str]:
+    """Decide whether the differential leg gates a real-target finding (M1).
+
+    The differential — re-driving a boundary-guarded twin to prove the *safeguard*,
+    not the model, carries the security — is the moat. It now runs BY DEFAULT for a
+    custom/real target whenever a boundary control can be built for the finding's
+    weakness; ``--fast`` opts out (it doubles the live runs per finding). When no
+    control is inferable we run WITHOUT it, loudly (never a silently weaker gate).
+
+    Returns ``(run, control_weakness, note)`` — pure (``make_control`` is
+    deterministic), so it is unit-tested without a live target.
+    """
+    if fast:
+        return (
+            False,
+            None,
+            "--fast: skipping the differential leg "
+            "(weaker guarantee: kept = build ∧ stability ∧ effect ∧ consensus).",
+        )
+    from mylonite.gate.mitigation import weakness_class_for
+    from mylonite.scan.control_shim import make_control
+
+    cw = weakness_class_for(exploit)
+    try:
+        make_control(cw)
+    except ValueError:
+        return (
+            False,
+            None,
+            f"no boundary control implemented for weakness {cw!r} — running WITHOUT the "
+            "differential leg (weaker guarantee: kept = build ∧ stability ∧ effect ∧ "
+            "consensus). Add a control for this weakness, or pass --fast to silence.",
+        )
+    return (
+        True,
+        cw,
+        f"differential ON (default): proving control {cw} is load-bearing — "
+        "the differential gates `kept` (the safeguard, not the model, carries the security).",
+    )
+
+
 def _validate_custom(
     generated: Any,
     target_file: Path | None,
@@ -1577,6 +2008,7 @@ def _validate_custom(
     prove_control: bool = False,
     randomize_exfil: bool = False,
     adaptive: bool = False,
+    fast: bool = False,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
@@ -1604,31 +2036,32 @@ def _validate_custom(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
+    if spec.vulnerable_launch is not None:
+        typer.echo(
+            f"validate: the raw side launches the DELIBERATELY-UNGUARDED variant of "
+            f"{spec.family!r} (vulnerable_launch) — ensure you are authorized to run it. "
+            "Env values are never logged.",
+            err=True,
+        )
+
     def _factory() -> Any:
-        return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=model)
+        return _vulnerable_adapter(spec, tf.scope, model)
 
-    # --prove-control: synthesize a boundary-guarded twin of the SAME real target
-    # (model held constant) so the differential leg can prove the control carries
-    # the security. Off by default — the path is the prior stability/effect/
-    # consensus gate.
+    # M1: the differential leg (re-driving a boundary-guarded twin of the SAME real
+    # target, model held constant) gates `kept` BY DEFAULT — proving the *safeguard*,
+    # not the model, carries the security. `--fast` opts out (it doubles the live runs
+    # per finding); a weakness with no inferable control falls back loudly to the
+    # stability/effect/consensus gate. `--prove-control` is now the default behaviour
+    # and kept only for back-compat.
+    del prove_control
+    run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
+    typer.echo(f"validate: {diff_note}", err=True)
     guarded_factory: Any = None
-    control_weakness: str | None = None
     control_context: str | None = None
-    if prove_control:
-        from mylonite.gate.mitigation import _snippet, weakness_class_for
-        from mylonite.scan.control_shim import make_control
+    if run_diff and control_weakness is not None:
+        from mylonite.gate.mitigation import _snippet
 
-        cw = weakness_class_for(generated.exploit)
-        try:
-            make_control(cw)
-        except ValueError:
-            typer.echo(
-                f"--prove-control: no boundary control implemented for weakness {cw!r} yet "
-                "(Slice 1 ships W2). Re-run without --prove-control.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from None
-        control_weakness = cw
+        cw = control_weakness
         # Feed the strategist what control it is up against (adaptive-aware oracle).
         control_context = f"Control {cw}: {_snippet(cw)}"
 
@@ -1641,15 +2074,12 @@ def _validate_custom(
             )
 
         guarded_factory = _guarded
-        mode = (
-            "under ADAPTIVE PRESSURE (strategist evades the control)"
-            if adaptive
-            else "via a boundary-guarded twin"
-        )
-        typer.echo(
-            f"--prove-control: proving control {cw} is load-bearing {mode} (model held constant).",
-            err=True,
-        )
+        if adaptive:
+            typer.echo(
+                f"--adaptive: grading control {cw} UNDER ADAPTIVE PRESSURE "
+                "(the strategist tries to evade it).",
+                err=True,
+            )
 
     typer.echo(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
@@ -1664,7 +2094,7 @@ def _validate_custom(
         guarded_adapter_factory=guarded_factory,
         control_weakness=control_weakness,
         randomize_exfil=randomize_exfil,
-        adaptive_guarded=adaptive and prove_control,
+        adaptive_guarded=adaptive and guarded_factory is not None,
         control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
@@ -1851,7 +2281,83 @@ def _provider_preflight(provider: str, model: str) -> bool:
     return result.report.aborted != "provider_unreachable"
 
 
-@app.command()
+def _run_cross_model_validation(
+    generated: Any, models_csv: str, iterations: int, provider: str, test_path: Path
+) -> None:
+    """Re-prove the reference differential across several models; flag re-emergence (T2).
+
+    Runs the full differential oracle once per model and writes a durability table +
+    ``cross_model_report.json``. Exits non-zero if ANY model fails to keep the test —
+    that model is one a team could upgrade to and silently re-introduce the weakness.
+    """
+    import json as _json
+
+    from mylonite.plugins._reference.reference_validator import (
+        DifferentialValidator,
+        ReferenceVulnerableOracle,
+    )
+    from mylonite.scan.cross_model import row_from_report, summarize_cross_model
+
+    model_list = [m.strip() for m in models_csv.split(",") if m.strip()]
+    if not model_list:
+        typer.echo("--models was empty; pass e.g. --models m1,m2", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    rows = []
+    for m in model_list:
+        typer.echo(f"Cross-model durability: re-validating against {m} …", err=True)
+        if not _provider_preflight(provider, m):
+            typer.echo(
+                f"model {m!r} is unreachable — set the provider/key or drop it from "
+                "--models. Aborting rather than reporting a misleading durability result.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_PROVIDER)
+        validator = DifferentialValidator(iterations=iterations, provider=provider, model=m)
+        report = validator.validate(
+            generated, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+        )
+        rows.append(row_from_report(m, report))
+
+    all_durable, summary = summarize_cross_model(rows)
+    typer.echo("")
+    typer.echo(summary)
+
+    out_path = test_path.parent / "cross_model_report.json"
+    out_path.write_text(
+        _json.dumps(
+            {
+                "all_durable": all_durable,
+                "models": [
+                    {
+                        "model": r.model,
+                        "kept": r.kept,
+                        "vuln_fired": r.vuln_fired,
+                        "guard_resisted": r.guard_resisted,
+                        "iterations": r.iterations,
+                    }
+                    for r in rows
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    typer.echo(f"Cross-model report: {out_path}")
+    raise typer.Exit(code=EXIT_SUCCESS if all_durable else EXIT_NOT_KEPT)
+
+
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the moat).\n\n"
+        "`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n"
+        "`mylonite validate <dir> --models haiku,sonnet` -- prove it holds across model upgrades.\n\n"
+        "`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\n"
+        "Exit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected)."
+    )
+)
 def validate(
     target: Annotated[
         Path,
@@ -1878,6 +2384,19 @@ def validate(
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
+    ] = None,
+    models: Annotated[
+        str | None,
+        typer.Option(
+            "--models",
+            help=(
+                "Cross-model durability (T2): comma-separated models to RE-PROVE the "
+                "differential across (e.g. 'claude-haiku-4-5,claude-sonnet-4-6'). Flags "
+                "any model where the weakness re-emerges / the control fails — a fix can "
+                "silently reappear on a model upgrade. Reference targets only; exits "
+                "non-zero if any model fails. Overrides --model."
+            ),
+        ),
     ] = None,
     target_file: Annotated[
         Path | None,
@@ -1907,10 +2426,19 @@ def validate(
         typer.Option(
             "--prove-control",
             help=(
-                "Prove the safeguard is load-bearing: synthesize a boundary-guarded twin "
-                "of the real target (model held constant) and add a differential leg that "
-                "passes only if the attack fires on the raw target and is resisted with the "
-                "control applied (Slice 1 ships W2)."
+                "Deprecated/back-compat: the differential leg now runs BY DEFAULT for a "
+                "real target, so this flag is a no-op. Pass --fast to skip the differential."
+            ),
+        ),
+    ] = False,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help=(
+                "Skip the differential leg (the boundary-guarded twin). Faster/cheaper "
+                "(~half the live runs) but a WEAKER guarantee: kept = build ∧ stability ∧ "
+                "effect ∧ consensus, without proving the safeguard carries the security."
             ),
         ),
     ] = False,
@@ -1994,6 +2522,22 @@ def validate(
     )
 
     is_custom = not exploit.target_id.startswith("reference:")
+
+    # T2: cross-model durability is a distinct flow — re-prove the differential across
+    # several models and flag any where the weakness re-emerges. Reference twins only
+    # (the differential needs the bundled guarded twin). Branch early and return.
+    if models is not None:
+        if is_custom:
+            typer.echo(
+                "--models (cross-model durability) needs a reference target — the "
+                "differential re-runs against the bundled twins across each model. A "
+                "custom target has no in-repo guarded twin to re-prove.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        _run_cross_model_validation(generated, models, iterations, effective_provider, test_path)
+        return
+
     # Auto-resolve the target YAML co-located with the test (written by `generate`)
     # so the operator needn't re-pass --target-file. Explicit --target-file wins.
     if target_file is None and is_custom:
@@ -2002,10 +2546,10 @@ def validate(
             target_file = candidate
             typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
-        if adaptive and not prove_control:
+        if adaptive and fast:
             typer.echo(
-                "--adaptive requires --prove-control (it grades the control under adaptive "
-                "pressure). Re-run with both, or drop --adaptive.",
+                "--adaptive grades the control under adaptive pressure, which needs the "
+                "differential twin — but --fast skips it. Drop --fast to use --adaptive.",
                 err=True,
             )
             raise typer.Exit(code=EXIT_CONFIG)
@@ -2019,6 +2563,7 @@ def validate(
             prove_control=prove_control,
             randomize_exfil=randomize_exfil,
             adaptive=adaptive,
+            fast=fast,
         )
     else:
         typer.echo(
@@ -2062,6 +2607,14 @@ def validate(
             ReferenceVulnerableOracle().adapter(),
             ReferenceVulnerableOracle(),
         )
+
+    # T2: stamp the model the differential was proven against, so the committed
+    # regression is honest about which model version it gates (a fix can silently
+    # re-emerge on a model upgrade — see `validate --models`).
+    _stamp = f"validated against model: {effective_model}"
+    report = report.model_copy(
+        update={"notes": (f"{report.notes}\n{_stamp}" if report.notes else _stamp)}
+    )
 
     # Persist the full ValidationReport (incl. the PR2 structured evidence) next
     # to the test so `mylonite report` can re-render the trust panel offline and
@@ -2133,7 +2686,15 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
-@app.command()
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite report .mylonite/scans/<dir>` -- terminal trust panel (offline, no LLM).\n\n"
+        "`mylonite report <dir> --html report.html` -- shareable, self-contained HTML dashboard.\n\n"
+        "`mylonite report <dir> --sarif out.sarif` -- GitHub code scanning (Security tab + PR checks).\n\n"
+        "`mylonite report <dir> --json finding.json` -- machine-readable bundle (dashboards/SIEM/bots)."
+    )
+)
 def report(
     target: Annotated[
         Path,
@@ -2149,8 +2710,41 @@ def report(
         typer.Option(
             "--html",
             help=(
-                "Also write a standalone, shareable HTML trust panel. Takes a file "
-                "PATH argument, e.g. --html trust.html (not a bare flag)."
+                "Also write a standalone, shareable HTML report. Takes a file "
+                "PATH argument, e.g. --html report.html (not a bare flag)."
+            ),
+        ),
+    ] = None,
+    html_style: Annotated[
+        str,
+        typer.Option(
+            "--html-style",
+            help=(
+                "HTML style: 'dashboard' (structured exec summary + per-finding "
+                "severity + compliance + collapsible evidence, default) or 'terminal' "
+                "(the raw trust-panel export). Both are self-contained (no JS/CDN)."
+            ),
+        ),
+    ] = "dashboard",
+    sarif: Annotated[
+        Path | None,
+        typer.Option(
+            "--sarif",
+            help=(
+                "Also write a SARIF 2.1.0 file for GitHub code scanning (the Security "
+                "tab + PR checks). Each result carries severity, compliance tags, and "
+                "the differential proof (fired N/N, resisted M/M). Takes a PATH."
+            ),
+        ),
+    ] = None,
+    json_bundle: Annotated[
+        Path | None,
+        typer.Option(
+            "--json",
+            help=(
+                "Also write a machine-readable JSON finding bundle (severity, "
+                "compliance, localization, differential proof, proven control) for "
+                "dashboards / SIEM / bots. Takes a PATH."
             ),
         ),
     ] = None,
@@ -2164,15 +2758,28 @@ def report(
     coverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no
     loadable artefact is found.
     """
-    import json
-
     from rich.console import Console as _Console
 
+    if html is not None and html_style not in ("dashboard", "terminal"):
+        typer.echo(
+            f"--html-style {html_style!r} is not valid; choose 'dashboard' or 'terminal'.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
     kind, path = _locate_report_artefact(target)
-    # A recording console only when exporting HTML (keeps the terminal path lean).
-    console = _Console(record=html is not None)
+    # A recording console only when exporting the terminal HTML style.
+    record = html is not None and html_style == "terminal"
+    console = _Console(record=record)
+
+    # Captured for the dashboard renderer (enriched so NIST is present everywhere).
+    vreport: Any = None
+    sreport: Any = None
+    dashboard_exploit: Any = None
+    dashboard_exploits: list[Any] = []
 
     if kind == "validation":
+        from mylonite import testkit
         from mylonite.contracts import ValidationReport
 
         try:
@@ -2184,16 +2791,22 @@ def report(
         # Compliance tags from the co-located exploit, if present.
         exploit_matches = sorted(path.parent.glob("exploit_*.json"))
         if exploit_matches:
-            from mylonite import testkit
-
             try:
-                exploit = testkit.load_exploit(exploit_matches[0])
-                console.print(f"compliance: {_compliance_tags_line(exploit.compliance)}")
-                console.print(f"target: {exploit.target_id}  pattern: {exploit.pattern_id}")
+                # Enrich on read (derive NIST from the OWASP cross-refs) so the
+                # report's compliance line matches the emitted test's marks even
+                # for artefacts whose persisted exploit predates enrichment. Captured
+                # for the dashboard renderer.
+                dashboard_exploit = _map_compliance(testkit.load_exploit(exploit_matches[0]))
+                console.print(f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}")
+                console.print(
+                    f"target: {dashboard_exploit.target_id}  "
+                    f"pattern: {dashboard_exploit.pattern_id}"
+                )
             except (FileNotFoundError, ValueError):
                 pass
         console.print(f"artefacts: {path.parent}")
     else:
+        from mylonite import testkit
         from mylonite.contracts._types import ScanReport
         from mylonite.scan.artefacts import render_summary
         from mylonite.scan.engine import ScanResult
@@ -2206,24 +2819,61 @@ def report(
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console.print(render_summary(result), markup=False)
-        # Compliance tags aggregated across the co-located exploit files.
+        # Compliance tags aggregated across the co-located exploit files, enriched
+        # on read (derive NIST from the OWASP cross-refs) so the report matches the
+        # emitted test's marks even for scan dirs whose persisted exploits predate
+        # enrichment.
         tags: set[str] = set()
         target_id = sreport.target_id
         for exploit_file in sorted(path.parent.glob("exploit_*.json")):
             try:
-                data = json.loads(exploit_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                exploit = _map_compliance(testkit.load_exploit(exploit_file))
+            except (FileNotFoundError, ValueError, OSError):
                 continue
-            c = data.get("compliance", {})
-            for key in ("owasp_llm", "owasp_asi", "mitre_atlas", "nist_ai_rmf"):
-                tags.update(c.get(key) or [])
+            dashboard_exploits.append(exploit)
+            c = exploit.compliance
+            for ids in (c.owasp_llm, c.owasp_asi, c.mitre_atlas, c.nist_ai_rmf):
+                tags.update(ids)
         if tags:
             console.print(f"compliance: {', '.join(sorted(tags))}")
         console.print(f"target: {target_id}  artefacts: {path.parent}")
 
     if html is not None:
-        html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
-        typer.echo(f"Wrote HTML trust panel: {html}")
+        if html_style == "dashboard":
+            from mylonite.report import render_scan_html, render_validation_html
+
+            page = (
+                render_validation_html(vreport, dashboard_exploit)
+                if kind == "validation"
+                else render_scan_html(sreport, dashboard_exploits)
+            )
+            html.write_text(page, encoding="utf-8")
+        else:
+            html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
+        typer.echo(f"Wrote HTML report: {html} (style: {html_style})")
+
+    if sarif is not None or json_bundle is not None:
+        import json as _json
+
+        # The same finding set feeds both machine-readable exports: a validation
+        # carries its differential-proof report; a scan has exploits with no report.
+        if kind == "validation":
+            findings = [(dashboard_exploit, vreport)] if dashboard_exploit is not None else []
+        else:
+            findings = [(e, None) for e in dashboard_exploits]
+
+        if sarif is not None:
+            from mylonite.report import to_sarif
+
+            sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
+            typer.echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
+        if json_bundle is not None:
+            from mylonite.report import to_bundle
+
+            json_bundle.write_text(
+                _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
+            )
+            typer.echo(f"Wrote JSON finding bundle: {json_bundle}")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
@@ -2632,7 +3282,61 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 """
 
 
-@app.command()
+def _post_gate_annotations(
+    repo_root: Path, exploit: Any, report: Any, target_file: Path | None, pr_mod: Any
+) -> None:
+    """Best-effort GitHub check-run annotation for a finding that maps to a committed
+    prompt line (R4). Untestable live glue (needs a real PR + ``checks:write``); the
+    payload assembly and localization it calls are unit-tested. Never raises."""
+    try:
+        from mylonite.gate.annotate import (
+            annotations_from_findings,
+            check_run_payload,
+            post_check_run,
+        )
+
+        sp_path: str | None = None
+        sp_text: str | None = None
+        if target_file is not None:
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            tf = load_target_file(target_file)
+            if tf.system_prompt_file is not None:
+                spf = Path(tf.system_prompt_file)
+                sp_text = spf.read_text(encoding="utf-8")
+                try:
+                    sp_path = str(spf.resolve().relative_to(repo_root.resolve()))
+                except ValueError:
+                    sp_path = str(spf)
+
+        anns = annotations_from_findings(
+            [(exploit, report)], system_prompt=sp_path, system_prompt_text=sp_text
+        )
+        if not anns:
+            return
+        head = pr_mod._default_run(["git", "rev-parse", "HEAD"], cwd=str(repo_root))
+        head_sha = (getattr(head, "stdout", "") or "").strip()
+        if not head_sha:
+            return
+        payload = check_run_payload(
+            head_sha=head_sha,
+            annotations=anns,
+            title="Mylonite AI-layer findings",
+            summary=f"{len(anns)} finding(s) localized to a source line.",
+        )
+        post_check_run(repo_root, payload, _run=pr_mod._default_run)
+    except Exception:  # live glue must never break the gate
+        return
+
+
+@app.command(
+    epilog=(
+        "Examples:\n\n"
+        "`mylonite gate reference:vulnerable` -- the magic moment on the demo target.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me` -- gate YOUR app (writes test + workflows).\n\n"
+        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- also open the gating PR via gh."
+    )
+)
 def gate(
     target: Annotated[
         str | None,
@@ -2649,6 +3353,17 @@ def gate(
         typer.Option(
             "--target-file",
             help="Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
+        ),
+    ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / budget) — the same one `scan` reads. Auto-discovered "
+                "from ./mylonite.yaml when present; an explicit flag always wins."
+            ),
         ),
     ] = None,
     authorize: Annotated[
@@ -2707,10 +3422,19 @@ def gate(
         typer.Option(
             "--prove-control",
             help=(
-                "Prove which safeguard is load-bearing: for a controllable finding "
-                "(Slice 1: W2), synthesize a boundary-guarded twin and gate on the control's "
-                "differential contribution; the emitted test + PR are reframed to "
-                "'control verified'."
+                "Deprecated/back-compat: for a custom target the differential now runs BY "
+                "DEFAULT (the emitted test is the control-verified one). Pass --fast to skip it."
+            ),
+        ),
+    ] = False,
+    fast: Annotated[
+        bool,
+        typer.Option(
+            "--fast",
+            help=(
+                "Skip the differential leg for a custom target (no boundary-guarded twin). "
+                "Faster/cheaper but a WEAKER guarantee — the kept test no longer proves the "
+                "safeguard, not the model, carries the security."
             ),
         ),
     ] = False,
@@ -2734,6 +3458,32 @@ def gate(
         DifferentialValidator,
         ReferenceVulnerableOracle,
     )
+
+    # Declarative run config (mylonite.yaml): mirror `scan` so `gate` fills any flag
+    # the user omitted (target_file / authorize / provider / model / budget) from a
+    # project config. Auto-discovered from ./mylonite.yaml when present and no
+    # --config is passed; an explicit flag always wins. Closes the parity gap where
+    # `gate` required --target-file even though the project's mylonite.yaml set it.
+    config_path = run_config_path
+    if config_path is None and Path("mylonite.yaml").is_file():
+        config_path = Path("mylonite.yaml")
+    if config_path is not None:
+        from mylonite.config import load_run_config
+
+        try:
+            rc = load_run_config(config_path)
+        except Exception as exc:
+            typer.echo(f"invalid config {config_path}: {exc}", err=True)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        if run_config_path is None:
+            typer.echo(f"gate: using {config_path} (auto-discovered).", err=True)
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        if max_llm_calls == 50 and rc.max_llm_calls is not None:
+            # 50 is the option default; only the config overrides an untouched flag.
+            max_llm_calls = rc.max_llm_calls
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
@@ -2833,11 +3583,13 @@ def gate(
         # Enrich compliance (derive NIST) once so both the emitted test and the PR
         # carry it.
         exploits = [_map_compliance(ex) for ex in result.exploits]
-        if not prove_control:
+        # M1: tag each controllable CUSTOM finding BY DEFAULT so generate_fn emits the
+        # control test and validate_fn runs the differential (the safeguard, not the
+        # model, carries the security). --fast opts out; reference targets use the
+        # in-repo differential and are not tagged here. --prove-control is now the
+        # default behaviour and kept for back-compat.
+        if fast or is_reference:
             return exploits
-        # --prove-control: tag each controllable finding so generate_fn emits the
-        # control test and validate_fn runs the differential. W2 only in Slice 1;
-        # non-controllable findings pass through untagged.
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
 
@@ -2933,13 +3685,20 @@ def gate(
                 target_file.read_text(encoding="utf-8"), encoding="utf-8"
             )
         paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
-        return pr_mod.open_or_print_pr(
+        pr = pr_mod.open_or_print_pr(
             paths,
             branch=f"mylonite/gate-{exploit.pattern_id}",
             pr_title=f"Mylonite gate: {exploit.pattern_id}",
             pr_body=body,
             open_pr=open_pr,
         )
+        # R4: best-effort inline check-run annotation on the exact prompt line, when
+        # the AI layer is a committed file GitHub can render against. Tool loci (a
+        # remote MCP description/handler/return path) have no source line and ride in
+        # the PR body + SARIF instead. Live-only glue; never fails the gate.
+        if open_pr and getattr(pr, "opened", False):
+            _post_gate_annotations(repo_root, exploit, report, target_file, pr_mod)
+        return pr
 
     result = run_gate(
         out_dir=out,
@@ -3073,22 +3832,37 @@ def ablate(
         typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
+    # Server-layer mode: the target bakes its guards into the server (toggled by
+    # env / a security profile), so the differential's "raw" side is produced by
+    # DISABLING them via control_env — not by emptying the adapter shim, which
+    # cannot reach a server-layer guard. This is what lets ablation classify
+    # load-bearing/theater on the common real architecture instead of returning
+    # no-attack for every control.
+    server_layer = bool(spec.control_env)
+
     if controls:
         chosen = [c.strip().upper() for c in controls.split(",") if c.strip()]
     elif spec.control_config and spec.control_config.declared:
         chosen = list(spec.control_config.declared)
     elif spec.control_config and spec.control_config.synthetic:
         chosen = list(spec.control_config.synthetic)
+    elif server_layer:
+        chosen = list(spec.control_env)
     else:
         chosen = [w for w in tf.weakness_classes if w in REP_SEED_BY_WEAKNESS]
 
     usable: list[str] = []
     for c in chosen:
-        try:
-            make_control(c)
-        except ValueError:
-            typer.echo(f"skipping {c}: no boundary control implemented", err=True)
-            continue
+        if server_layer:
+            if c not in spec.control_env:
+                typer.echo(f"skipping {c}: no control_env toggle declared", err=True)
+                continue
+        else:
+            try:
+                make_control(c)
+            except ValueError:
+                typer.echo(f"skipping {c}: no boundary control implemented", err=True)
+                continue
         if c not in REP_SEED_BY_WEAKNESS:
             typer.echo(f"skipping {c}: no representative seed", err=True)
             continue
@@ -3108,19 +3882,32 @@ def ablate(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     mode = "all-minus-c (redundancy)" if redundancy else "on/off"
+    layer = "server-layer (env toggles)" if server_layer else "adapter-shim"
     typer.echo(
         f"ablate re-drives {spec.family!r} live, toggling {', '.join(usable)} {mode} "
-        f"({iterations} run(s) each) — ~{total_scans} scoped scans.",
+        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans.",
         err=True,
     )
 
     def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
-        adapter = MCPStdioAdapter(
-            family=spec.family,
-            scope=tf.scope,
-            model=effective_model,
-            controls=[_boundary_control(w, spec) for w in applied],
-        )
+        if server_layer:
+            # ``applied`` = controls currently ON. The raw side (applied=()) turns
+            # them all OFF; the "only C" side leaves only C on. Translate to the
+            # complement and disable those server-layer guards via the launch env.
+            disable = tuple(c for c in usable if c not in applied)
+            adapter = MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=effective_model,
+                launch_env=spec.launch_env(disable_controls=disable),
+            )
+        else:
+            adapter = MCPStdioAdapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=effective_model,
+                controls=[_boundary_control(w, spec) for w in applied],
+            )
         return scan_target_fires(
             adapter,
             pattern_id,
@@ -3144,6 +3931,13 @@ def ablate(
         target_registry.clear_runtime_targets()
 
     _render_ablation_matrix(results)
+    if server_layer and results and all(r.status == "no-attack" for r in results):
+        typer.echo(
+            "hint: every control classified 'no-attack' — the raw side never fired. "
+            "Check that control_env actually disables the server's guard for these "
+            "weakness classes, and that the representative seeds reach the surface.",
+            err=True,
+        )
 
 
 @app.command()

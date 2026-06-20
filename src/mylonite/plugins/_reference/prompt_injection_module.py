@@ -1,16 +1,16 @@
-"""W1 + W2 prompt-injection AttackModule (the real Phase 1 attack).
+"""W1 + W2 prompt-injection AttackModule.
 
 Yields seed-shape Payloads from ``mylonite.scan.seeds.SEED_CATALOGUE``. The
 plugin itself makes no LLM calls — per the eng review's layered architecture,
-``PayloadCustomiser`` (PR 2) is what refines each seed body against the
-specific target, and ``ScanEngine`` (PR 6) drives the customisation pass
+``PayloadCustomiser`` is what refines each seed body against the
+specific target, and ``ScanEngine`` drives the customisation pass
 between ``generate_payloads`` and ``adapter.invoke``.
 
 Metadata wiring is the contract between this plugin, the customiser, the
 adapter, and the judge: every emitted Payload carries ``seed_id``,
 ``weakness``, ``predicate``, ``setup``, ``drive``, and
 ``needs_customisation`` keys so each downstream layer can find what it
-needs without modifying the Phase 0 ``AttackModule`` Protocol (eng review A4
+needs without modifying the ``AttackModule`` Protocol (design note
 keeps the contract locked; the engine validates metadata at runtime).
 """
 

@@ -1,7 +1,7 @@
-"""ScanEngine — the Phase 1 orchestrator.
+"""ScanEngine — the scan orchestrator.
 
-Pulls together: TargetAdapter (PR 4) → AttackModule (PR 5) → PayloadCustomiser
-(PR 2) → adapter.invoke (PR 4) → SuccessJudge (PR 2). Closes P1 (async-first
+Pulls together: TargetAdapter → AttackModule → PayloadCustomiser →
+adapter.invoke → SuccessJudge. Async-first
 with asyncio.gather + Semaphore), A1 (process-wide budget counter wraps every
 LLM call), A3 (skip planner failures), A4 (validate Payload metadata at
 runtime), and C4 (distinct exit-code signal via ``aborted`` field).
@@ -14,6 +14,7 @@ The engine returns a ``ScanResult`` (in-process wrapper around a serialisable
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Sequence
@@ -32,7 +33,6 @@ from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttackPlan, discover
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
-from mylonite.scan.obfuscate import obfuscate_payload
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
 from mylonite.version import __version__
 
@@ -131,16 +131,6 @@ class ScanConfig(BaseModel):
             "whether the control/target GENERALIZES rather than blocking the one "
             "demo address. Default False preserves existing behaviour (and the "
             "recorded-fixture replay path, which must NOT randomize)."
-        ),
-    )
-    obfuscate: str | None = Field(
-        default=None,
-        description=(
-            "Apply a deterministic obfuscation transform to the payload body after "
-            "customisation (unicode-tag / split / multilingual / base64-wrapper) to "
-            "test whether a control/filter catches only plaintext. The exfil "
-            "destination stays literal so detection still fires. Default None; never "
-            "applied on the fixture/replay path."
         ),
     )
 
@@ -530,12 +520,6 @@ class ScanEngine:
         if self._config.randomize_exfil:
             payload = randomize_payload_exfil(payload)
 
-        # Obfuscation tier (opt-in): rewrite the body to test whether a control/
-        # filter catches only plaintext. Applied AFTER randomize so the minted
-        # destination stays literal (predicate still matches). Never on fixtures.
-        if self._config.obfuscate:
-            payload = obfuscate_payload(payload, self._config.obfuscate)
-
         # Invoke + judge the (customised) payload `runs` times (scan-time flakiness
         # filter). A structural skip or error on ANY pass is terminal — retrying a
         # missing seed arm, an undelivered payload, or a planner outage tests
@@ -583,11 +567,9 @@ class ScanEngine:
             # is the fallback for catalogue-unknown seeds (which never reach here —
             # they return `skipped_unknown_seed` above — but kept for safety).
             resolved_compliance = seed.compliance if seed is not None else compliance
-            # Attack-tier provenance (no contract change — rides payload.metadata):
-            # single-shot is "static", or "obfuscated" when an obfuscation tier ran.
-            tier = "obfuscated" if payload.metadata.get("obfuscation") else "static"
+            # Attack-tier provenance (no contract change — rides payload.metadata).
             tiered_payload = payload.model_copy(
-                update={"metadata": {**payload.metadata, "attack_tier": tier}}
+                update={"metadata": {**payload.metadata, "attack_tier": "static"}}
             )
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
@@ -668,14 +650,29 @@ class ScanEngine:
 
         verdict = outcome.verdict
         evidence: dict[str, str] = {"adaptive_attempts": str(outcome.attempts)}
+        if outcome.attempts_log:
+            # Persist the strategist's refinement trace (the per-round story) so a
+            # finding records HOW it was reached, not just how many tries. Artefacts
+            # are stored un-redacted (replayable data); the CLI redacts on display.
+            evidence["adaptive_log"] = json.dumps(
+                [
+                    {
+                        "attempt": s.attempt,
+                        "injection": s.injection,
+                        "tool_calls": list(s.tool_calls),
+                        "success": s.success,
+                        "reason": s.reason[:300],
+                    }
+                    for s in outcome.attempts_log
+                ]
+            )
         if verdict is not None:
             evidence.update({k: str(v) for k, v in verdict.evidence.items()})
         trace = list(outcome.response.tool_calls) if outcome.response is not None else []
-        tier = "adaptive+obfuscated" if payload.metadata.get("obfuscation") else "adaptive"
         final_payload = payload.model_copy(
             update={
                 "body": outcome.final_body,
-                "metadata": {**payload.metadata, "attack_tier": tier},
+                "metadata": {**payload.metadata, "attack_tier": "adaptive"},
             }
         )
 

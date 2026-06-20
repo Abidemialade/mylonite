@@ -125,6 +125,100 @@ def test_user_message_unknown_drive_falls_back_to_body() -> None:
     assert "DO STUFF" in msg
 
 
+# --- MCPStdioAdapter: server-layer launch threading (Theme B) ---------------
+
+
+@pytest.mark.asyncio
+async def test_adapter_threads_launch_env_to_session() -> None:
+    """A caller-supplied launch_env (e.g. ablation's server-layer toggle) is the
+    env passed to _open_mcp_session, overriding the spec's default extra_env."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    captured: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+        captured["env"] = extra_env
+        captured["command"] = command
+        captured["args"] = args
+        yield _FakeSession()
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(
+            family="custom-srv",
+            command="python",
+            args=["-m", "srv"],
+            env={"BASE": "1"},
+            control_env={"W2": {"OFF": "1"}},
+        )
+        target_registry.register_target(build_target_spec(tf))
+        adapter = MCPStdioAdapter(
+            family="custom-srv", scope=None, launch_env={"BASE": "1", "OFF": "1"}
+        )
+        with patch.object(stdio_adapter, "_open_mcp_session", _capture_open):
+            await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    assert captured["env"] == {"BASE": "1", "OFF": "1"}
+    # No command/args override → falls through to the spec's launch.
+    assert captured["command"] is None
+    assert captured["args"] is None
+
+
+@pytest.mark.asyncio
+async def test_adapter_threads_vulnerable_launch_command_and_args() -> None:
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    captured: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+        captured["command"] = command
+        captured["args"] = args
+        yield _FakeSession()
+
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(family="custom-srv", command="python", args=["-m", "srv"])
+        target_registry.register_target(build_target_spec(tf))
+        adapter = MCPStdioAdapter(
+            family="custom-srv",
+            scope=None,
+            launch_command="python",
+            launch_args=["-m", "srv", "--raw"],
+        )
+        with patch.object(stdio_adapter, "_open_mcp_session", _capture_open):
+            await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    assert captured["command"] == "python"
+    assert captured["args"] == ["-m", "srv", "--raw"]
+
+
+@pytest.mark.asyncio
+async def test_adapter_default_launch_unchanged_for_bundled_family(tmp_path: Path) -> None:
+    """No launch_* args → env is the spec's extra_env and command/args default
+    (today's behaviour, byte-for-byte for the bundled families)."""
+    captured: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+        captured["env"] = extra_env
+        captured["command"] = command
+        captured["args"] = args
+        yield _FakeSession()
+
+    adapter = MCPStdioAdapter(family="filesystem", scope=str(tmp_path))
+    with patch.object(stdio_adapter, "_open_mcp_session", _capture_open):
+        await adapter.describe()
+    assert captured["env"] == {}  # filesystem has no extra_env
+    assert captured["command"] is None
+    assert captured["args"] is None
+
+
 # --- MCPStdioAdapter --------------------------------------------------------------
 
 

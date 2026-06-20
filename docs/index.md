@@ -12,22 +12,25 @@ work belongs to SAST/DAST tools.
 The phased build plan lives in
 [`ROADMAP.md`](https://github.com/Abidemialade/mylonite/blob/main/ROADMAP.md).
 
-!!! info "Status: Phase 1.5"
-    The exploit-finding scan loop works today: `mylonite scan` runs against
-    the bundled Quarry reference twins and real MCP stdio servers
-    (filesystem / fetch / github), and `mylonite demo` shows the
-    vulnerable-vs-guarded differential offline with no API key. The test
-    generator and differential-oracle validation engine are Phase 2, in
-    progress. See [the changelog](https://github.com/Abidemialade/mylonite/blob/main/CHANGELOG.md).
+!!! success "Status: the full pipeline works"
+    `scan` → `generate` → `validate` → `gate` runs end to end against the bundled
+    Quarry twins and your own MCP app (`--target-file`). Findings are proven by the
+    [differential oracle](validation.md), emitted as committed pytest regression tests,
+    and surfaced as a gating PR, [SARIF](reading-results.md), or a JSON bundle. Recent
+    depth: stateful [memory poisoning](attack-modes.md#memory-poisoning), tool-chaining
+    synthesis, control-efficacy ablation, and [cross-model durability](validation.md#cross-model-durability).
+    See [the changelog](https://github.com/Abidemialade/mylonite/blob/main/CHANGELOG.md).
 
 ## Where to go next
 
-- [Quickstart](quickstart.md) — install + the commands that work today.
-- [The Quarry](quarry.md) — a 60-second offline demo against a deliberately
-  vulnerable reference agent, and the bridge to scanning a real MCP server.
-- [Concepts](concepts.md) — the AI-attack-surface scope and the
-  differential-oracle moat, in plain English.
-- [Plugin authoring](plugin-authoring.md) — the five extension contracts.
+- [Quickstart](quickstart.md) — install and the magic moment in a few commands.
+- [Try it — the Quarry](quarry.md) — a 60-second offline demo against a deliberately
+  vulnerable reference agent.
+- [Test your own app](test-your-app.md) — point Mylonite at your MCP server.
+- [Weakness classes](weakness-classes.md) — what's tested and how an attack is proven.
+- [Attack modes](attack-modes.md) — single-shot, adaptive, tool-chaining, memory poisoning.
+- [The validation engine](validation.md) — the differential oracle (the moat).
+- [CLI reference](cli-reference.md) · [Architecture](architecture.md) · [Plugin authoring](plugin-authoring.md).
 - [Standards mapping](standards-mapping.md) — OWASP LLM / OWASP ASI / MITRE
   ATLAS / NIST AI RMF.
 - [Security](security.md) — responsible-use and dual-use policy.

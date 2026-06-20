@@ -2,7 +2,7 @@
 
 Tags an :class:`ExploitRecord` with OWASP LLM Top 10, OWASP Agentic Security
 Initiative, MITRE ATLAS, and NIST AI RMF identifiers. This is the basis for
-the audit-evidence packs in Phase 6.
+audit-evidence reporting.
 """
 
 from __future__ import annotations

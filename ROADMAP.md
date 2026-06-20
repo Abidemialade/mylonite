@@ -7,9 +7,10 @@ app-specific weakness, and emits a **validated regression test** that gates
 CI. It deliberately does *not* test the surrounding traditional code; that
 work belongs to SAST/DAST tools.
 
-This document covers what we are building, in what order, and why. For the
-pitch and the install instructions, see [README.md](./README.md). For
-contribution mechanics, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+This document covers what Mylonite does, how it's built, and where it's going.
+For the pitch and install instructions, see [README.md](./README.md); for
+contribution mechanics, see [CONTRIBUTING.md](./CONTRIBUTING.md); for guides and
+reference, see the [documentation site](https://abidemialade.github.io/mylonite/).
 
 ## Scope
 
@@ -43,8 +44,8 @@ Eight components organised around a single core use case:
 3. **Attack / exploit engine and probe modules.** A pluggable registry of
    attack modules; the LLM layer customises each to the specific app's
    prompt, tools, and data.
-4. **Test-generation layer.** Emits a self-contained `pytest` file (jest
-   later) that reproduces the exploit as an assertion.
+4. **Test-generation layer.** Emits a self-contained `pytest` file that
+   reproduces the exploit as an assertion.
 5. **Validation engine — the moat.** See [§ Validation engine](#validation-engine)
    below.
 6. **CI integration.** A GitHub Action that runs the committed suite on
@@ -71,22 +72,21 @@ Apache-2.0.
 This is the most important and most defensible piece. A "generated security
 test" is only useful if it actually means something — if it would fail on a
 real weakness and would pass when the weakness is fixed. The validation
-engine proves that, in four layers:
+engine proves that, in five layers:
 
-1. **Build → reliably pass → coverage / improvement.** The well-tested
-   filter sequence from Meta's TestGen-LLM work, with a **5-run flakiness
-   filter** to absorb LLM stochasticity.
+1. **Build → reliably pass → coverage / improvement.** A filter sequence with
+   a **flakiness filter** to absorb LLM stochasticity.
 2. **Differential seeded-vulnerability oracle (the novel extension).** Ship
    a deliberately *unguarded* variant of the reference target alongside the
    *guarded* one. A generated test is meaningful iff it **FAILS on the
    unguarded variant AND PASSES on the guarded one**, across repeated runs.
    The fail-on-vulnerable side is the security analog of "killing a mutant"
    in mutation testing.
-3. **Metamorphic robustness.** Auto-generate semantically-neutral
-   perturbations of the exploit (paraphrase, encoding, casing, language).
-   A robust guard resists all variants; a violation reveals a brittle,
-   over-fit test.
-4. **Optional security mutation score.** Maintain a bank of distinct seeded
+3. **Metamorphic robustness (gating).** Apply semantically-neutral
+   perturbations of the exploit (paraphrase, casing, encoding, language,
+   real-world evasion encodings) and re-drive each through both twins. A robust
+   guard resists a majority; a violation reveals a brittle, over-fit test.
+4. **Security mutation score.** Maintain a bank of distinct seeded
    weaknesses and report the fraction a generated test correctly fails on
    — a quantitative quality signal per emitted test.
 5. **Control-efficacy oracle (the extension that generalises the moat).** On a
@@ -96,10 +96,8 @@ engine proves that, in four layers:
    raw target and is resisted with the control applied — proving the *control*
    carries the security. The plant and effect probe bypass the boundary shim so
    the attack stays undiluted; the result is reported as a boundary proxy with an
-   explicit fidelity caveat and a server-side fix. `validate --prove-control`
-   proves one control load-bearing (with `--adaptive`, whether it survives an
-   adaptive attacker); `mylonite ablate` scores the whole control set as
-   load-bearing / theater / redundant.
+   explicit fidelity caveat and a server-side fix. `mylonite ablate` scores the
+   whole control set as load-bearing / theater / redundant.
 
 The deliberately-vulnerable reference target (`reference_targets/mcp_kitchen_sink/`)
 exists from v0.1.0 onwards for exactly this purpose. It is intentionally
@@ -121,131 +119,40 @@ Every generated test carries compliance metadata at generation time:
 The bundled taxonomy lives under `src/mylonite/taxonomy/data/`. Each file
 cites its upstream publisher in `SOURCE.md`.
 
-## Phases
+## Status & direction
 
-### Phase 0 — Foundations, OSS scaffolding, and threat-model grounding
+The end-to-end pipeline is complete and in active use: `scan → generate →
+validate → gate` runs against the bundled reference agent and your own MCP app,
+proves each finding with the differential oracle, and emits a committed regression
+test that gates CI.
 
-**Status:** shipped in v0.1.0.
+**Available today:**
 
-Deliverables:
+- Ingestion of MCP/tool-using agents over in-process and stdio transports, plus
+  three bundled real open-source MCP targets (filesystem, fetch, github).
+- The four weakness classes — W1 tool-description smuggling, W2 indirect injection,
+  W3 excessive egress / SSRF, W4 unconfirmed consequential action — with
+  deterministic predicates and an LLM-judge fallback.
+- Attack depth: an adaptive refinement loop, app-specific tool-chaining synthesis,
+  and stateful cross-turn memory poisoning.
+- The full validation engine above, including the control-efficacy oracle and
+  control ablation.
+- Custom-target support via a declarative `target.yaml`, the one-command
+  `mylonite gate` flow, a reusable GitHub Action, and CI workflow templates.
+- Results in every format teams consume — a terminal trust panel, an HTML
+  dashboard, SARIF for GitHub code scanning, a machine-readable JSON bundle, and a
+  gating PR with a proven-fix diff — all carrying OWASP / OWASP-ASI / MITRE ATLAS /
+  NIST compliance tags.
+- Cross-model durability checks, so a fix doesn't silently regress on a model upgrade.
 
-- Apache-2.0 `LICENSE` + `NOTICE`; full contributor scaffolding
-  (`CONTRIBUTING`, `CODE_OF_CONDUCT`, `GOVERNANCE`, `SECURITY` with
-  responsible-disclosure and dual-use policies); `CHANGELOG`; semantic
-  versioning from v0.1.0; `.github/` templates + `CODEOWNERS`; the
-  project's own CI (ruff / mypy / pytest matrix) and pre-commit hooks.
-- Typed config schema (Pydantic Settings, required LLM provider — no
-  default).
-- Five versioned extension-point contracts (Protocols + ABCs + JSON
-  schemas) with `CONTRACT_VERSION` checks in the plugin registry. One
-  reference implementation per contract.
-- Threat-taxonomy module encoding OWASP LLM Top 10 2025, OWASP ASI 2026
-  (ASI01–ASI10), relevant MITRE ATLAS techniques, and NIST AI RMF
-  function tags.
-- Deliberately-vulnerable reference MCP agent (`mcp_kitchen_sink`) with a
-  guarded twin and a seeded-weakness catalogue.
-- `mkdocs-material` docs scaffold.
-
-### Phase 1 — Ingestion + exploit-finding on one target
-
-**Status:** shipped in v0.2.0 (W1+W2) → v0.2.1 (W3+W4) →
-**v0.2.2 (in-process AND stdio MCP transport)**.
-
-Implements both an in-process target adapter against the bundled
-reference MCP agent (`reference:vulnerable` / `reference:guarded`)
-**and** an MCP stdio transport adapter against three bundled real
-open-source MCP servers (filesystem, fetch, github). The exploit-finding
-agent covers W1 (tool-description instruction smuggling), W2 (indirect
-injection via tool result / note body / file body / issue body), W3
-(unrestricted egress / SSRF), and W4 (unconfirmed sensitive actions).
-Deterministic predicates first with an LLM-judge fallback. Async-first
-via `asyncio.gather` + `Semaphore`. Fresh subprocess per `invoke()`
-isolates per-attempt state.
-
-*Expected outcome (delivered):* the tool reliably finds ≥1 W1-W4
-exploit on `reference:vulnerable` and zero on `reference:guarded`, AND
-≥1 app-specific exploit on each of the three bundled real OSS MCP
-agents (`mcp:filesystem:<sandbox>`, `mcp:fetch`, `mcp:github:<owner/repo>`)
-where the finding names a target-specific tool with attacker-controlled
-arguments and execution evidence.
-
-**Deferred to v0.3+:** MCP Streamable HTTP transport; more OSS targets
-(brave-search, puppeteer, postgres, slack); `.mylonite/targets.yaml`
-pre-registered targets config; multi-target scan in one command.
-
-### Phase 2 — Test generation + the validation engine
-
-**Status:** shipped in v0.4.0 (core engine) → v0.5.0 (multi-provider +
-custom MCP targets + effect-aware findings + custom-target validation +
-runnable emitted tests).
-
-Emit `pytest` reproductions; implement the validation pipeline (build
-→ differential seeded-vulnerability oracle → 5-run flakiness filter →
-metamorphic variants). v0.5.0 extended the validator to cover custom
-MCP targets (no in-repo twin) via stability + effect probe + adversarial
-multi-judge consensus, and added first-class custom-target support across
-`scan`, `generate`, `validate`, and `init-target`.
-
-*Delivered:* generated tests that are *proven* meaningful — each fails on
-the unguarded agent and passes on the guarded one across repeated runs;
-a measurable "kept-test" survival ratio; emitted tests runnable out of
-the box against the bundled or real target.
-
-### Phase 3 — CI gating + the magic moment, end-to-end
-
-**Status:** shipped in v0.6.0.
-
-Delivers the `scan → generate → validate → open gating PR` end-to-end
-flow in a single command, plus the GitHub Action and CI workflow templates
-that keep the gate running forever:
-
-- **`mylonite gate`** — the one-command magic moment. Runs scan →
-  generate → validate, writes the regression test and two CI workflow
-  templates under `.mylonite/gate/`, then prints (or with `--open-pr`
-  opens via `gh`) a gating PR carrying the finding, its OWASP/ASI/ATLAS/NIST
-  compliance tags, the validation evidence, and a deterministic suggested-fix
-  PR body. Optional `--llm-enrich` appends a labelled (unverified) LLM fix
-  suggestion.
-- **`mylonite.gate` package** — deterministic PR-body renderer; per-weakness-class
-  remediation snippets; opt-in labelled LLM enrichment cleanly separated from
-  the deterministic path.
-- **Two scaffolded CI workflow templates** (per-PR gate + nightly discovery)
-  encoding the cost-tier split: the cheap per-PR job replays the committed
-  offline fixture in seconds; the nightly job re-runs the full live scan to
-  catch regressions and discover new weaknesses. `--runs-on` lets operators
-  target a self-hosted runner for in-perimeter MCP backends.
-- **Reusable composite Action** (`Abidemialade/mylonite/gate-action@v1`) so
-  any repo can add the gate in three lines of workflow YAML.
-- **Enterprise / air-gapped support** documented in
-  `docs/enterprise-networking.md` (OS trust-store, `SSL_CERT_FILE`,
-  self-hosted runners, offline fixture replay without egress).
-- **`pip install mylonite`** on PyPI lands with this release.
-
-*Expected outcome:* a one-command demo a stranger can run on their own
-agent and get a committed, gating regression test, with the CI gate
-running on every subsequent PR.
-
-### Phase 4 — Launch and community
-
-Public launch, attack-pattern registry, positioning content.
-
-*Expected outcome:* initial GitHub traction, first external contributors,
-first registry contributions.
-
-### Phase 5 — Platform expansion
-
-Add target adapters (RAG, custom HTTP agents), a `jest` generator, more
-attack classes (memory/context poisoning ASI06, inter-agent ASI07,
-cascading ASI08), additional compliance mappers, and the self-improving
-registry contribution loop.
-
-*Expected outcome:* coverage across the full ASI Top 10 and a
-multi-language test-output story.
-
-### Phase 6 — Open-core monetisation (demand-gated)
-
-Hosted CI, dashboards, and compliance/audit evidence packs mapped to the
-four frameworks.
+**Direction.** Near-term work deepens what exists rather than widening it: broader
+real-world threat coverage on the existing machinery, richer developer-facing
+results, and bringing the bundled target families fully under the differential moat.
+Longer-term themes include additional target adapters (RAG, custom HTTP agents), a
+second test-output language, more attack classes across the OWASP ASI Top 10, a
+contributable attack-pattern registry, and — demand permitting — hosted CI,
+dashboards, and compliance/audit evidence packs. See [the changelog](./CHANGELOG.md)
+for what shipped in each release.
 
 ## Open-source engineering standards
 
@@ -272,8 +179,4 @@ norms from the first commit, not retrofitted later. Concretely:
 Substantive scope changes (new attack classes, new target adapters,
 contract-API changes) go through an RFC-style issue labelled
 `contract-change` or `scope-change`. Routine bug fixes and improvements
-flow through normal PRs.
-
-Strategy for the project lives with the maintainer; the technical
-roadmap lives here. Issues tagged `roadmap` track delivery against the
-phases above.
+flow through normal PRs. Issues tagged `roadmap` track the direction above.

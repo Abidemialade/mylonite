@@ -1,4 +1,4 @@
-"""Live payload-obfuscation tiers — test whether a control/filter GENERALIZES.
+"""Payload-obfuscation transforms — test whether a control/filter GENERALIZES.
 
 A control or target that catches a *plaintext* injection but not an encoded /
 split / disguised one is not robust. These transforms rewrite the injected body
@@ -7,15 +7,20 @@ the success predicate — which keys on the destination the model *emits*
 (`exfil.email_present`/`host_present`), not on the input body — still fires when
 the attack lands.
 
-Mirrors `exfil.randomize_payload_exfil`: deterministic, pure, applied at the
-engine seam after customisation (and after randomize, so the minted destination
-stays plaintext), stamping `metadata["obfuscation"]`. Off by default.
+As of v0.7.3 these are no longer a standalone, report-only ``scan --obfuscate``
+tier (X1): the useful evasion encodings (zero-width / split / multilingual) are
+promoted into the GATING metamorphic layer of the differential oracle
+(``reference_validator._deterministic_strategies``), so a kept test must survive
+re-encoding, not just rewording. The segment transforms below are reused there;
+``obfuscate_payload`` remains a deterministic, exfil-literal-preserving payload
+obfuscator utility.
 
 Strategies: ``unicode-tag`` (invisible zero-width chars break keyword filters,
 model still reads through them), ``split`` (payload-splitting inside keywords),
 ``multilingual`` (foreign-language framing an English-only filter misses),
 ``base64-wrapper`` (encode the instruction framing; experimental — the model may
-not decode it, which is itself an honest negative result).
+not decode it, which is itself an honest negative result, so it is NOT in the
+gating set).
 """
 
 from __future__ import annotations

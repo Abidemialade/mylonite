@@ -4,7 +4,7 @@ Two predicates ship here. The fetch server has a single primary tool —
 ``fetch`` — so the predicates focus on URL inspection rather than tool
 sequencing.
 
-Contract with the adapter (PR 4c / PR 5):
+Contract with the adapter:
 - ``response.tool_calls`` — list of tool names invoked.
 - ``response.metadata["mcp_trace_planner"]`` — JSON string of
   ``[{"tool": ..., "args": ...}]`` for the planner-driven calls only.

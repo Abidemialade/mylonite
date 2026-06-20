@@ -2,7 +2,7 @@
 
 An attack module declares static metadata (an :class:`AttackPattern`) and a
 streaming method that produces payloads tailored to a specific target. The
-Phase 1 exploit-finding agent will iterate over registered attack modules,
+The exploit-finding agent iterates over registered attack modules,
 ask each to generate candidates against the current target descriptor, and
 score the responses.
 

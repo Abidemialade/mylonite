@@ -7,15 +7,249 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-19
+
+Second depth-first release. Deepens the moat into the #1 real-world agentic threat
+(stateful memory poisoning), proves a fix durable across model upgrades, promotes the
+real evasion encodings from a report-only sideshow into the gating layer, and opens a
+machine-readable findings channel. No new attack classes or adapters; no
+contract-version bump.
+
+### Added
+
+- **Stateful memory-poisoning attack + differential validation (T1).** Models the
+  threat the single-turn loop misses: poison planted ONCE, left to PERSIST across
+  unrelated turns, then retrieved and acted on in a LATER turn (the "zombie agent" /
+  slow-drip shape). `MemoryPoisoningDriver` runs plant → N benign turns → retrieve
+  over one persistent `AttackSession`; `MemoryPoisonValidator` re-drives that
+  cross-turn attack against both twins and keeps it as a finding only when it fires
+  on the vulnerable twin and is resisted on the guarded one (which quarantines the
+  *recalled* memory) across a flakiness filter — the same differential moat applied
+  to memory poisoning. `MemoryPoisonRunner` discovers the plant/retrieve plan from
+  the live tool surface, validates, and emits a finding stamped
+  `attack_shape=memory_poisoning` with the plant/retrieve turn separation. It also
+  confirms the poison resurfaced in the retrieval turn (`cross_turn_delivered`), so a
+  non-delivery reads as NOT TESTED rather than a false clean pass. No new attack class
+  or adapter — deepens W2 over existing session machinery. New `scan/memory_poison.py`.
+  Exposed as **`scan --memory`** (mirrors `--synthesize`): a reference twin uses the
+  bundled twins; a custom `--target-file` uses the synthetic W2-boundary-guarded twin,
+  so the differential proves the *memory* control (quarantining recalled content) is
+  load-bearing.
+- **Machine-readable JSON finding bundle (`report --json <path>`).** A self-contained
+  `finding.json` (severity, weakness class, compliance tags, R4 localization, the R2
+  differential proof, and the proven control) for teams not on GitHub/pytest —
+  dashboards, SIEM, chat bots, custom CI. Reuses the exact data the SARIF/HTML
+  reports already compute; no new analysis. New `report/bundle.py`.
+
+### Changed
+
+- **Cross-model durability (`validate --models a,b,c`).** A weakness fixed and gated
+  against one model can silently re-emerge when a team upgrades the model — a blind
+  spot with no regression. Because Mylonite is model-agnostic, it now re-proves the
+  *same* differential across several models and flags the ones where the guarantee no
+  longer holds ("durable on A and B, RE-EMERGES on C"), exiting non-zero if any model
+  fails and writing a `cross_model_report.json`. Single-model `validate` now also
+  stamps the validated model into the report so the committed regression is honest
+  about which model version it gates. New `scan/cross_model.py`.
+- **Real-world evasion encodings are now GATING, not a report-only sideshow.** The
+  differential oracle's metamorphic layer gained three new strategies — zero-width
+  (`unicode-tag`), word-`split`, and `multilingual` framing — so a kept test must
+  survive re-encoding (EchoLeak's invisible text, RAG unicode/split tricks), not just
+  rewording. Each preserves the exfil email/URL literal so the attack still lands and
+  the majority threshold stays honest.
+
+### Removed
+
+- **The standalone `scan --obfuscate` tier.** It was report-only with no path into
+  the moat; its one useful idea (the evasion encodings above) now lives in the
+  *gating* metamorphic layer, so this is strictly less surface for more depth. The
+  `obfuscate_payload` transform utility remains (now feeding the metamorphic gate).
+
+## [0.7.2] - 2026-06-18
+
+Depth-first release (no new attack classes or adapters): makes the differential
+oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic
+robustness to a gating leg so the moat is enforced rather than merely reported, and
+surfaces findings + proven fixes where developers already consume them (GitHub code
+scanning, the gating PR). No breaking changes; no contract-version bump.
+
+### Changed
+
+- **The differential oracle now gates real (`--target-file`) targets BY DEFAULT.**
+  Previously a custom-target finding was kept on `build ∧ stability ∧ effect ∧
+  consensus` and the differential leg (re-driving a boundary-guarded twin to prove
+  the *safeguard*, not the model, carries the security) ran only with
+  `--prove-control` — so a real app's regression test could be kept even if its
+  safeguard was broken, as long as the attack reproduced. `validate` and `gate`
+  now build the guarded twin and run the differential automatically whenever a
+  boundary control can be inferred for the finding's weakness. `--fast` opts out
+  (≈ half the live runs, but the weaker stability+consensus gate); a weakness with
+  no inferable control falls back to that gate **loudly** (never silently weaker).
+  `--prove-control` is now the default behaviour and kept for back-compat; on
+  `validate`, `--adaptive` no longer requires it.
+- **Metamorphic robustness now GATES the kept decision (was report-only).** The
+  reference oracle's gate is now `kept = build ∧ differential ∧ flakiness ∧
+  metamorphic`: a generated test must survive a MAJORITY (default 60%) of
+  deterministic, semantically-neutral rewordings of the exploit body (paraphrase /
+  casing / whitespace / unicode confusables, each genuinely re-driven through both
+  twins) to be committed. This makes the fourth named moat mechanism actually
+  enforce — a test over-fit to one literal payload ("teaching to the test") is now
+  rejected. A majority threshold (not all-or-nothing, configurable via
+  `metamorphic_robustness_threshold`) avoids rejecting a real finding just because a
+  single aggressive rewording didn't reproduce. Mutation score stays near-free
+  observability (not gating).
+
+### Added
+
+- **SARIF 2.1.0 output (`report --sarif <path>`) for GitHub code scanning.** AI-layer
+  findings now land in the GitHub **Security tab** and PR checks — where developers
+  already triage every other finding — instead of only a terminal/HTML panel. Each
+  SARIF result carries a severity (`security-severity` + level), the compliance tags
+  (OWASP-LLM/ASI · MITRE ATLAS · NIST), and — the trust signal — the **differential
+  proof** in its message ("fired N/N on the vulnerable target, resisted M/M with the
+  control — the safeguard, not the model, carries the security"). Reuses the existing
+  exploit/validation data and the dashboard's severity rule; no new finding logic.
+- **Auto-wired `seed_arm` from the tool surface (frictionless real-target on-ramp).**
+  When a custom `--target-file` declares an indirect-injection weakness (W2) but no
+  `seed_arm`, `scan` now describes the target's live tool surface and infers how to
+  plant untrusted content — so a real MCP app can be tested with near-zero config
+  instead of hitting a hard pre-flight block. To avoid the "plants but never lands"
+  trap, it auto-wires **only when a no-id recall path exists** (so the planted
+  payload is guaranteed to be surfaced back to the planner); otherwise it explains
+  why and leaves the seed_arm to the operator. The inferred value is printed
+  (`auto-wire: inferred seed_arm: …`) and overridable in the target file. New
+  `infer_seed_arm` / `needs_seed_arm_autowire` reuse the existing `_classify_tools`
+  heuristics — no new attack logic.
+- **Proven fix rendered as a reviewable diff in the gating PR.** The "Suggested
+  mitigation" section now carries a concrete, class-specific code diff (the
+  server-side change that implements the boundary control the differential proved
+  load-bearing) alongside the prose rationale — "here's the fix we proved works",
+  not a guess. For a control-efficacy finding it is framed as a **Proven fix**; for
+  other findings as a **Recommended fix**. New `gate/fixes/{W1-W4,generic}.md`.
+- **Findings are localized to their exact locus, and rendered where developers
+  read.** Mylonite ingests the AI layer, so it now pins each finding to the precise
+  place to fix it — which tool's *description* smuggled the instruction, which tool's
+  *returned content* was trusted, which action *handler* fired without a guard, or
+  which *system-prompt line* is at fault — derived deterministically from data every
+  finding already carries. The locus shows as a **Located at:** line in the gating
+  PR and as a SARIF `logicalLocation` (plus a real prompt-file line where available)
+  so GitHub code scanning pins it. With `--open-pr`, a finding that maps to a
+  committed prompt line also posts a best-effort inline **check-run annotation**
+  (GitHub Checks API); loci with no source line (a remote MCP tool) ride in the PR
+  body + SARIF instead — never silently dropped. New `gate/localize.py` +
+  `gate/annotate.py`.
+
+## [0.7.1] - 2026-06-18
+
+Responds to an external v0.7.0 effectiveness assessment: hardens the differential
+oracle's precision, extends the differential machinery to server-layer-controlled
+real targets, and closes several CLI / report / packaging gaps. No breaking
+changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
+`contracts/`).
+
+### Added
+
+- **Server-layer twin launch for the differential machinery.** Ablation,
+  `validate --prove-control`, and `scan --synthesize` previously synthesised the
+  "raw"/unguarded side by emptying the *adapter-shim* controls — blind to targets
+  that bake their guards into the **server** (env-/profile-driven, the common real
+  architecture): the raw side stayed fully guarded, so ablation classified every
+  control `no-attack`. A target file can now declare how to run a genuinely
+  unguarded variant:
+  - `control_env` — a per-weakness map of env vars that disable one server-layer
+    guard. `mylonite ablate` toggles controls individually through it (raw side
+    disables all; "only control C" leaves just C on), restoring per-control
+    load-bearing/theater attribution on server-layer targets.
+  - `vulnerable_launch` — an alternate `command`/`args`/`env` that starts a fully
+    unguarded variant, used as the raw side by `validate --prove-control` and
+    `scan --synthesize`.
+  Both fields are optional and additive (omitting them is byte-for-byte today's
+  behaviour). Launching a deliberately-unguarded server is gated by `--authorize`,
+  announced on stderr, and env **values are never logged**. When a declared raw
+  launch doesn't actually disable the guard, the raw side never fires and the tool
+  says so (`no-attack` + a hint) rather than emitting a wrong verdict.
+- **`generate --prove-control`.** The standalone `generate` command can now emit a
+  control-efficacy test (`assert_control_holds`) — proving the control blocking a
+  finding is load-bearing (the attack lands without it, is resisted with it) —
+  instead of only the standard resists/guard test. Previously this assertion was
+  reachable only through the full `gate --prove-control` pipeline. Custom targets
+  only (needs `--target-file`); a reference or non-controllable finding falls back
+  to the standard test with a notice.
+- **Strategist observability for `--adaptive`.** The adaptive loop now records a
+  per-round log (the injection tried, the planner's tool calls, and *why* that
+  round failed — the input the strategist refines from), where previously only the
+  attempt *count* survived. The trace is persisted in the finding's evidence
+  (`adaptive_log`) so a finding records HOW it was reached, and a new
+  `--verbose-strategist` flag echoes each round live to stderr (payloads redacted).
+- **Stakeholder HTML report dashboard (`report --html`).** `mylonite report --html`
+  now writes a structured, self-contained dashboard by default: an executive
+  summary (target / verdict / run metadata), per-finding cards with a **severity
+  badge** (High = a consequential action materialized or an exfil/egress/
+  excessive-agency weakness landed; Medium = fires without a damaging effect;
+  Low = situational), compliance chips (OWASP-LLM / ASI / ATLAS / NIST), and
+  collapsible raw evidence via native `<details>` — interactivity with **zero
+  JavaScript**, no CDN, and no web fonts, so it still screenshots cleanly in CI.
+  The previous raw trust-panel export is preserved as `--html-style terminal`.
+- **Windows install guide** (`docs/install-windows.md`) covering the platform
+  friction: selecting a supported Python (3.11–3.13, not 3.14), cloning with the
+  schannel TLS backend behind a corporate proxy, the separate `mcp_kitchen_sink`
+  editable install, OS-trust-store TLS, and `PYTHONUTF8=1` for the console.
+
+### Changed
+
+- **`gate` reads `mylonite.yaml` like `scan`.** `gate` now accepts `--config` and
+  auto-discovers `./mylonite.yaml`, filling `target_file` / `authorize` /
+  `provider` / `model` / `max_llm_calls` from it when the matching flag is omitted
+  (an explicit flag always wins). Previously `gate` ignored the project run config
+  and exited 2 ("no target given") unless you re-passed `--target-file`.
+- **`--adaptive` auto-sizes its LLM-call budget.** An active adaptive scan that
+  leaves `--max-llm-calls` at the single-shot default (50) now raises it to an
+  adaptive-appropriate default (200) with a notice, instead of silently aborting
+  partway through a multi-seed run. Any explicit value (flag or `mylonite.yaml`) —
+  including a deliberately low one — is respected unchanged.
+- **Clearer `generate --latest` message on a clean scan.** When the newest scan
+  found no exploits, the message frames it as a PASS (a clean/guarded target), not
+  a bare error, and points at passing an earlier scan dir explicitly.
+- **`truststore` is now in the `[dev]` extra** (as well as `[enterprise]`), so a
+  dev install gives contributors behind a corporate proxy OS-trust-store TLS for
+  the live-gated tests and `mylonite doctor` without extra steps. The `[dev]`
+  extra also documents the separate `pip install -e ./reference_targets/mcp_kitchen_sink`
+  the full test suite needs.
+
+### Fixed
+
+- **Oracle precision: W1/W4 false positives on the guarded side.** Two
+  deterministic success-predicates over-fired on a guarded target when the planner
+  model behaved benignly, destabilising the differential oracle (a single benign
+  guarded-side fire trips the strict 5-run flakiness filter and rejects an
+  otherwise-valid regression test). Both are now model-robust and target-agnostic:
+  - `planner_summarised_against_user_intent` (W1) is **drive-aware** — it stays
+    inconclusive when the seed's `drive` explicitly solicits a summary (e.g.
+    `read_note_for_summary`); the summary-marker set was tightened to high-signal
+    *unsolicited* phrasings (dropping incidental `summary:` / `tl;dr`).
+  - `send_email_without_confirmation` (W4) returns a confident `success=False`
+    (short-circuiting the permissive LLM judge) when an approval step ran or
+    `send_email` only staged without dispatch — instead of `None`, which let the
+    judge re-introduce a finding on the guarded twin. The approval step generalises
+    beyond the reference `confirm_send` via `payload.metadata['approval_tool']` /
+    `['confirmation_tool']`.
+- **NIST AI RMF tags now appear in `mylonite report`, matching the emitted test's
+  marks.** NIST was derived (from the OWASP cross-refs) only inline when emitting a
+  test's pytest marks, while the persisted exploit JSON `report` reads stayed
+  un-enriched — so NIST showed in the test but not the report. `generate` now
+  persists the enriched exploit, and `report` enriches compliance on read, so
+  OWASP / ASI / ATLAS / NIST are consistent across the test, the scan report, and
+  the validation report.
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
 
-- **Control-efficacy oracle on real targets (Slice 1).** Mylonite can now prove
+- **Control-efficacy oracle on real targets.** Mylonite can now prove
   which safeguard is load-bearing on a real MCP target, not just the bundled
   reference twin. A `ControlServerShim` (`mylonite.scan.control_shim`) synthesizes
   a *guarded twin* of a real target by applying a canonical control at the adapter
-  boundary (Slice 1 ships **W2**, the untrusted-data envelope) — the model is held
+  boundary (**W2**, the untrusted-data envelope) — the model is held
   constant, so the differential measures the *control's* marginal contribution.
   Only the planner's view is guarded; the attacker's plant and the effect probe
   bypass the shim, so the measurement stays honest. `DifferentialValidator` gains
@@ -112,7 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Driver 2 — app-specific tool-chaining synthesis (`scan --synthesize`).**
+- **App-specific tool-chaining synthesis (`scan --synthesize`).**
   Synthesizes a multi-tool exploit chain from the target's own tool surface (a
   store/plant tool → a harmful sink, e.g. `read_note → send_email`) — the
   app-specific depth generic probe libraries can't reach — then **differentially
@@ -120,7 +354,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blocked on the guarded twin across a flakiness filter, or it is not a finding.
   `ChainSynthesizer` proposes the chain (deterministic tool selection + one
   constrained LLM call, with a deterministic skeleton on fallback);
-  `ChainAttackDriver` executes it by reusing the Driver 1 adaptive loop and
+  `ChainAttackDriver` executes it by reusing the adaptive loop and
   escalates to multi-turn steering when a single drive doesn't reach the sink;
   `ChainDifferentialValidator` is the moat. A validated chain emits an
   `ExploitRecord` with the chain embedded for replay, and `mylonite generate`
@@ -202,7 +436,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI help clarity: `taxonomy list --framework` is marked required; `report
   --html` documents that it takes a file-path argument.
 
-### Added — Pre-Phase-4 readiness: flow + verification legibility
+### Added — flow + verification legibility
 
 - **`mylonite export` — eval/CI interop.** Mylonite is the validation layer;
   `mylonite export <dir|exploit.json> --format eval-yaml` hands a
@@ -267,7 +501,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports remain valid. `SeedKill` and `ReproducibilityEvidence` are exported
   from `mylonite.contracts`.
 
-### Added — Phase 3: CI gating + the magic moment
+### Added — CI gating + the magic moment
 
 - **`mylonite gate` command** — the end-to-end magic moment: `scan →
   generate → validate → (opt-in) open a gating PR`. Writes all artefacts
@@ -671,7 +905,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-06-10
 
-### Added — Phase 2 "the validation engine" (scan → generate → validate)
+### Added — the validation engine (scan → generate → validate)
 
 - **`mylonite generate` and `mylonite validate` now work** (replacing the
   not-implemented stubs), wiring the pytest generator to the
@@ -786,7 +1020,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differential agreement fraction, metamorphic robustness rate) and
   `ValidationReport` gains an optional `mutation_score: float | None` (fraction of
   the seeded-weakness bank the generated test correctly catches). Both default to
-  `None`, so the change is backward-compatible. These make the Phase 2 validation
+  `None`, so the change is backward-compatible. These make the the validator validation
   engine's two headline numbers headline-able, chart-able, and CI-gate-able.
 
 ### Changed
@@ -800,7 +1034,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-06-10
 
-### Added — Phase 1.5 "the Quarry" playground
+### Added — the Quarry playground
 
 - **`mylonite demo`** — a zero-config, **offline, deterministic** playground.
   It runs the real scan twice against the bundled deliberately-vulnerable
@@ -846,7 +1080,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2] - 2026-06-09
 
-### Added — Phase 1 truly complete (real OSS MCP agents)
+### Added — real open-source MCP agents
 
 - **MCP stdio transport adapter** — `mylonite.plugins._mcp.stdio_adapter.MCPStdioAdapter`
   spawns a bundled MCP server as a fresh subprocess per `invoke()`, drives
@@ -905,7 +1139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Three new entry points** registered under `mylonite.target_adapters`:
   `mcp_filesystem`, `mcp_fetch`, `mcp_github`.
 
-### Acceptance criteria — Phase 1 truly complete
+### Acceptance criteria
 
 - `mylonite scan mcp:filesystem:<sandbox> --authorize <sandbox>` produces
   ≥1 finding whose predicate reason names `write_file` with attacker-
@@ -918,7 +1152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.1] - 2026-06-09
 
-### Added — Phase 1 completion (W3 + W4)
+### Added — W3 + W4
 
 - **`ExcessiveAgencyAttackModule`** (entry point `excessive_agency`) —
   the W3 + W4 attack family. Tagged OWASP LLM06, ASI02 + ASI05,
@@ -948,7 +1182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Integration tests** — `test_scan_vulnerable_excessive_agency.py`
   proves W3 + W4 both fire on `reference:vulnerable`;
   `test_scan_guarded_excessive_agency.py` proves both stay clean on
-  `reference:guarded`. The Phase 1 truth-table now covers all four
+  `reference:guarded`. The the scan loop truth-table now covers all four
   weakness families.
 
 ### Changed
@@ -961,14 +1195,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Generic CLI module filter (current allowlist is explicit; v0.3 should
   match "any non-stub attack module").
-- Real-network MCP transport — still Phase 1.5 / 2 territory.
+- Real-network MCP transport — a later release.
 - Multi-turn planner exercises.
 - Ensemble LLM-judge.
-- All other Phase 2+ items in v0.2.0's deferred list.
+- All other later items in v0.2.0's deferred list.
 
 ## [0.2.0] - 2026-06-09
 
-### Added — Phase 1
+### Added
 
 - **`mylonite scan <target>` is real.** v0.2 supports `reference:vulnerable`
   and `reference:guarded` as targets out of the box. Flags:
@@ -995,15 +1229,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Maps `aborted` to exit code 3 (budget) or 4 (provider unreachable).
   - `artefacts.py` — `write_artefacts` + `render_summary` (Rich).
 - **`LLMPlanner` in the reference target.** Async LiteLLM tool-calling loop
-  (default 8-iteration cap). Lives alongside the scripted Phase 0 planners
-  so Phase 2's differential oracle still has its deterministic fixtures.
+  (default 8-iteration cap). Lives alongside the scripted planners
+  so the differential oracle still has its deterministic fixtures.
 - **`InProcessReferenceAdapter`** with `AsyncTargetAdapterBase`. Two
   0-arg subclasses (`InProcessVulnerableReferenceAdapter`,
   `InProcessGuardedReferenceAdapter`) registered as separate entry points.
   Raises `AdapterInvocationSkipped` on planner failure so the engine
   records `outcome="skipped_planner_failure"` without false judgments.
 - **`PromptInjectionAttackModule`** (entry point `prompt_injection`) — the
-  real W1+W2 attack family. The Phase 0 stub `ReferenceAttackModule`
+  real W1+W2 attack family. The the foundations stub `ReferenceAttackModule`
   remains as `reference_example` for plugin authors.
 - **`ScanReport` + `ScanAttempt` contracts** under
   `mylonite.contracts._types`, with JSON schemas
@@ -1011,7 +1245,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/regenerate_schemas.py` and CI-checked for idempotency.
 - **`LiteLLMRecorder` + `ScriptedLLM`** under `tests/integration/` —
   recorder hashes (model, messages) and replays from JSON fixtures
-  (record once with `MYLONITE_TEST_RECORD=1`). Phase 1's integration
+  (record once with `MYLONITE_TEST_RECORD=1`). the integration
   tests use the scripted stub; recorder fixtures land in v0.2.1+ once
   captured against a real provider.
 
@@ -1024,22 +1258,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reference_example` to distinguish from the real attack module.
 - Mypy overrides extended to include `mcp_kitchen_sink.*`.
 
-### Not yet in v0.2 (deferred to v0.2.1 or later phases)
+### Not yet in v0.2 (deferred to later releases)
 
-- Real-network MCP transport (stdio / HTTP) — Phase 1.5 or 2.
-- Real open-source MCP target adapters — Phase 1.5.
+- Real-network MCP transport (stdio / HTTP) — a later release.
+- Real open-source MCP target adapters — a later release.
 - W3 (unrestricted `web_fetch` / SSRF) and W4 (unconfirmed
   `send_email` / excessive agency) attack modules.
 - Multi-turn planner exercises.
-- `mylonite generate` (test emission) — Phase 2.
+- `mylonite generate` (test emission) — a later release.
 - Differential-oracle / 5-run flakiness / metamorphic robustness —
-  Phase 2 (the moat).
-- Ensemble LLM-judge — Phase 2+.
-- HTML report rendering — Phase 4.
-- Iterative LLM payload refinement (failure → refine → retry) — Phase 5.
-- `mylonite init` config scaffold — Phase 3 DX polish.
-- Community attack-pattern registry contribution flow — Phase 4.
-- Hosted CI / dashboards / compliance evidence packs — Phase 6.
+  the validator (the moat).
+- Ensemble LLM-judge — a later release.
+- HTML report rendering — a later release.
+- Iterative LLM payload refinement (failure → refine → retry) — a later release.
+- `mylonite init` config scaffold — later DX polish.
+- Community attack-pattern registry contribution flow — a later release.
+- Hosted CI / dashboards / compliance evidence packs — a later release.
 
 ## [0.1.0] - 2026-06-09
 
@@ -1069,7 +1303,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference implementation per contract.
 - Deliberately-vulnerable reference MCP agent under
   `reference_targets/mcp_kitchen_sink/`, in vulnerable and guarded variants,
-  for use as differential-oracle ground truth in Phase 2.
+  for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
 [Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.0...HEAD

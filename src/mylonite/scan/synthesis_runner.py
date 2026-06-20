@@ -1,6 +1,6 @@
-"""Orchestrate synthesize -> validate -> finding for Driver 2 (Slice 5).
+"""Orchestrate synthesize -> validate -> finding for tool-chaining synthesis.
 
-Ties the Driver 2 pieces into one user-facing flow: synthesize a chain from the
+Ties the synthesis pieces into one user-facing flow: synthesize a chain from the
 tool surface (S1), differentially validate it against the twins (S3, which runs
 S2's execution + S4's escalation), and — only when it validates — emit an
 ``ExploitRecord`` with the chain embedded for replay. Reference-twin targets

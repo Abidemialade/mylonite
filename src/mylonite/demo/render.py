@@ -1,9 +1,9 @@
-"""Differential renderer for ``mylonite demo`` (v0.3.0, PR A, Task A2).
+"""Differential renderer for ``mylonite demo``.
 
 Takes the two ScanResults the demo runner produced (reference:vulnerable /
 reference:guarded), aggregates the 8 kitchen-sink seed attempts into the 4
 seeded-weakness rows W1-W4, and prints the safety banner, side-by-side
-differential table, computed headline, Phase 2 teaser, next-step line, and
+differential table, computed headline, next-steps teaser, next-step line, and
 mode/elapsed footer.
 
 All output flows through a ``rich.Console`` — Rich degrades the ✗/✓/⚠ glyphs
@@ -37,14 +37,14 @@ SAFETY_BANNER: Final[str] = (
 
 _HEADLINE_TEMPLATE: Final[str] = (
     "the Quarry: {n_vuln} exploits on vulnerable, {n_guard} on guarded — this "
-    "differential is the oracle that will validate generated tests in Phase 2"
+    "differential is the oracle that validates every generated regression test"
 )
 _GUARDED_FINDING_NOTE: Final[str] = (
     "⚠ unexpected finding on the guarded twin — LLM-judge noise or a real bug"
 )
 _TEASER: Final[str] = (
-    "Phase 2 (in progress): each finding becomes a generated regression test, "
-    "validated against this same vulnerable/guarded oracle."
+    "Each finding becomes a committed regression test, validated against this same "
+    "vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable"
 )
 _NEXT_STEP: Final[str] = (
     "Try it on a real target next: mylonite scan mcp:fetch --authorize fetch "

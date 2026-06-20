@@ -27,7 +27,7 @@ The hard part is proving the test is meaningful, not just plausible.
 
 ## The validation engine — Mylonite's moat
 
-The validation engine that lands in Phase 2 layers four mechanisms:
+The validation engine layers four mechanisms:
 
 1. **Build / collect** — the generated test must compile and run.
 2. **Differential seeded-vulnerability oracle** — the generated test must
@@ -42,7 +42,7 @@ The validation engine that lands in Phase 2 layers four mechanisms:
    / lowered in case, must still fail on the vulnerable variant. This
    catches brittle, over-fit tests.
 
-Phase 0 ships the contracts, the bundled threat taxonomy, and the
+The framework ships the contracts, the bundled threat taxonomy, and the
 **vulnerable reference MCP agent** under
 [`reference_targets/mcp_kitchen_sink/`](https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink)
 that the differential oracle will use as its ground truth.
@@ -74,16 +74,21 @@ They leave the single-shot path unchanged when off.
   synthetic guarded twin. A validated chain emits a replay-backed regression
   test.
 
-- **`--obfuscate <strategy>` (attack tiers).** Re-encodes the payload body —
-  `unicode-tag` (invisible-tag ASCII smuggling), `split`, `multilingual`,
-  `base64-wrapper` — while keeping the exfil destination literal, to test
-  whether a control or filter generalises beyond plaintext. Every exploit
-  carries an `attack_tier` (static / obfuscated / adaptive / adaptive+obfuscated)
-  surfaced in the gating PR and the emitted test.
+- **`--memory` (stateful memory poisoning).** Models the cross-session
+  "zombie agent" shape single-turn scans miss: poison is planted *once*, persists
+  across unrelated turns, and is retrieved and acted on a *later* turn. Same
+  differential bar — fires on the vulnerable twin, resisted on the guarded one whose
+  control quarantines the *recalled* memory — and it confirms the poison actually
+  resurfaced (else NOT TESTED, never a false clean). See [Attack modes](attack-modes.md).
 
 All reuse the same moat below — a finding is never "the agent did something,"
 only "a weakness that fires on the raw/vulnerable variant and is blocked on the
 guarded one."
+
+> The real-world evasion encodings (zero-width / split / multilingual) that used to be a
+> standalone, report-only `--obfuscate` tier are now folded into the **gating**
+> metamorphic layer of the oracle (see [The validation engine](validation.md)), so a
+> *kept* test must survive re-encoding — not merely report on it.
 
 ## Control efficacy — which safeguard is load-bearing?
 
@@ -93,31 +98,64 @@ does it hold?" Mylonite answers it by **holding the model constant and varying
 only the safeguard**: it synthesizes a *guarded twin* of any real target by
 applying a canonical control (W1–W4) at the adapter boundary, then keeps a
 finding only when the attack fires on the raw target and is resisted with the
-control applied. `validate --prove-control` proves a single control load-bearing
-(add `--adaptive` to grade whether it survives an adaptive attacker);
+control applied. For a real (`--target-file`) target this differential runs **by
+default** in `validate`/`gate`, proving the control load-bearing (add `--adaptive` to
+grade whether it survives an adaptive attacker; `--prove-control` is a back-compat
+no-op, `--fast` skips it);
 `mylonite ablate` scores the whole control set as load-bearing / theater /
 redundant. The plant and effect probe always bypass the boundary shim, so the
 control is measured against an undiluted attack. Full treatment in
 [the validation engine](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
 
-## Where Phase 0 stopped
+### When the controls live in the server, not the adapter
 
-Phase 0 was foundations only. What it put in place:
+The boundary shim synthesizes a guarded twin by guarding the *planner's view* —
+which works when Mylonite can add the control. But many real MCP apps bake their
+guards into the **server itself**, toggled by an env var or a security profile
+(e.g. `SECURITY_PROFILE=strict`). The shim can't strip a guard it doesn't own, so
+its "raw" side would still be fully guarded — and ablation would (correctly but
+uselessly) classify every control `no-attack`, because the attack never fires on
+the raw side.
 
-- Five versioned extension contracts (attack module, target adapter, test
-  generator, validator, compliance mapper).
-- A bundled threat taxonomy: OWASP LLM Top 10 (2025), OWASP Agentic
-  Security Initiative (2026), MITRE ATLAS (`v2026.05`), NIST AI RMF.
-- The deliberately-vulnerable reference MCP agent and its guarded twin.
-- OSS scaffolding.
+For those targets, declare in your target file **how to run the server with its
+guards off**, and Mylonite drives a genuinely raw side:
 
-What Phase 0 deliberately left to later phases:
+- `control_env` — a per-weakness map of env vars that *disable* one server-layer
+  guard. `mylonite ablate` uses it to toggle controls individually: the raw side
+  disables all of them; the "only control C" side leaves just C on. This restores
+  per-control load-bearing/theater attribution on a server-layer architecture.
+- `vulnerable_launch` — an alternate `command`/`args`/`env` that starts a fully
+  **unguarded** variant. `validate --prove-control` and `scan --synthesize` use it
+  as the raw side of their differential.
 
-- The LLM-driven exploit-finding agent (Phase 1 — **since delivered**: the
-  scan loop works today; see the [Quickstart](quickstart.md)).
-- A real (non-stub) pytest generator (Phase 1).
-- The differential-oracle validator (Phase 2).
-- A GitHub Action that opens a PR with a committed test (Phase 3).
-- A community attack-pattern registry (Phase 4).
-- More target adapters (RAG, custom HTTP) and a jest generator (Phase 5).
-- Audit-evidence packs (Phase 6).
+```yaml
+family: my-agent
+command: python
+args: [-m, my_agent.server]
+weakness_classes: [W2, W4]
+# Per-control env toggles (ablation): each disables ONE server guard.
+control_env:
+  W2: { DISABLE_DATA_MARKING: "1" }
+  W4: { AUTONOMY_OVERRIDE: "full" }
+# Or a single fully-unguarded launch (prove-control / synthesize):
+vulnerable_launch:
+  env: { SECURITY_PROFILE: "off" }
+```
+
+Both fields are optional and additive: omit them and behaviour is exactly as
+before. Launching a deliberately-unguarded server is a real action — it is gated
+by `--authorize`, announced loudly, and env **values are never logged** (they may
+carry secrets). If a declared raw launch doesn't actually disable the guard, the
+raw side simply never fires and Mylonite says so rather than reporting a wrong
+verdict.
+
+## Built to extend
+
+Everything above is reached through five versioned extension contracts — attack
+module, target adapter, test generator, validator, and compliance mapper — shipped as
+stable `Protocol`s with JSON schemas, reference implementations, and entry-point-based
+plugin loading. The bundled threat taxonomy (OWASP LLM Top 10 2025, OWASP Agentic
+Security Initiative 2026, MITRE ATLAS `v2026.05`, NIST AI RMF) and the
+deliberately-vulnerable reference agent are part of that foundation. To add a target
+type, an attack class, a test framework, or a compliance mapping, see
+[Plugin authoring](plugin-authoring.md) and the [architecture map](architecture.md).
