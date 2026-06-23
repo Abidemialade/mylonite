@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mylonite"
 version = "0.7.3"
-description = "Open-source framework for AI-layer security testing — finds AI-agent weaknesses and writes the regression tests that close them."
+description = "Open-source AI-layer security testing — probes your AI agent for weaknesses and writes a validated regression test for each one it finds, gating CI."
 readme = "README.md"
 # Upper bound tracks litellm: litellm>=1.83.8 declares Requires-Python
 # >=3.10,<3.14, so there is no installable litellm on 3.14. Declaring the
@@ -61,6 +61,14 @@ dependencies = [
     # as an optional dep since its in-process server doesn't need wire
     # transport.
     "mcp>=1.0",
+    # OS trust-store TLS, BASE dependency: many users sit behind a TLS-inspecting
+    # corporate proxy or local AV whose CA lives in the OS store but not in certifi's
+    # bundle, so HTTPS to the LLM provider fails with CERTIFICATE_VERIFY_FAILED out of
+    # the box. The CLI auto-enables it (mylonite._bootstrap.enable_truststore) — opt
+    # out with MYLONITE_NO_TRUSTSTORE=1. Small, pure-Python, zero transitive deps, and
+    # a no-op in CI (the OS store already trusts standard CAs). Not "enterprise" — it's
+    # the common case; the [enterprise] extra is kept as a back-compat alias.
+    "truststore>=0.9",
     # Security floors for litellm's transitive deps (pinned to patched
     # releases; we don't import these directly):
     "aiohttp>=3.14.0",  # CVE-2026-34993, CVE-2026-47265
@@ -77,24 +85,29 @@ dev = [
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.22",
-    # OS-trust-store TLS so contributors behind a corporate proxy (and Windows
-    # devs whose certifi bundle lacks the org CA) can run the live-gated tests and
-    # `mylonite doctor` without CERTIFICATE_VERIFY_FAILED. Also in `[enterprise]`
-    # for end users; the CLI auto-enables it when present.
-    "truststore>=0.9",
 ]
-# NOTE: the bundled reference target `mcp_kitchen_sink` is a SEPARATE editable
-# package (a deliberately-vulnerable server used as differential-oracle ground
-# truth). The full test suite imports it, so after `pip install -e ".[dev]"` also
-# run:  pip install -e ./reference_targets/mcp_kitchen_sink
-# (kept separate so a plain `pip install mylonite` never pulls the vulnerable agent).
+# The reference target `mcp_kitchen_sink` (a deliberately-vulnerable but FULLY MOCKED
+# in-process server — no real I/O, can't bind a network) is NOT a base dependency:
+# it is onboarding/test scaffolding, not something a user needs to scan their own app.
+# The full test suite imports it, so an editable checkout also needs:
+#   pip install -e ".[dev]" && pip install -e ./reference_targets/mcp_kitchen_sink
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
 ]
-# Enterprise environments behind a TLS-inspecting proxy: truststore lets
-# Python use the OS trust store (which holds the corporate CA) instead of the
-# bundled certifi bundle. When installed, the CLI enables it automatically.
+# Opt-in offline demo: `pip install "mylonite[demo]"` pulls the deliberately-
+# vulnerable reference target so `mylonite demo` and `scan reference:*` run with no
+# clone and no API key. Kept out of the base install so a plain `pip install mylonite`
+# never pulls the vulnerable agent. REQUIRES `mcp-kitchen-sink` to be PUBLISHED to
+# PyPI — until then this extra cannot resolve (the graceful CLI error documents both
+# this and the editable-checkout path).
+demo = [
+    "mcp-kitchen-sink>=0.1.0",
+]
+# Back-compat alias: `truststore` (OS trust store for TLS-inspecting proxies / local
+# AV CAs) is now a BASE dependency, so `pip install mylonite` already handles the
+# corporate-proxy case out of the box. This extra is kept only so existing
+# `pip install "mylonite[enterprise]"` instructions keep working.
 enterprise = [
     "truststore>=0.9",
 ]
@@ -141,6 +154,9 @@ mylonite = "mylonite.testkit._pytest_plugin"
 # --- Tooling ---------------------------------------------------------------
 
 [tool.hatch.build.targets.wheel]
+# Base wheel ships ONLY the tool that scans your app. The deliberately-vulnerable
+# reference target `mcp_kitchen_sink` is NOT bundled — it is an onboarding/test
+# artifact, available opt-in via the `[demo]` extra (see optional-dependencies).
 packages = ["src/mylonite"]
 # The gate package's data files (mitigations/*.md, fixes/*.md, templates/*.yml) are shipped
 # by the default package selection above — hatchling includes all files under a
@@ -187,6 +203,9 @@ ignore_missing_imports = true
 minversion = "8.0"
 addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
 testpaths = ["tests", "reference_targets/mcp_kitchen_sink/tests"]
+# Make the top-level `verification/` harness (excluded from the wheel) importable
+# in tests without installing it.
+pythonpath = ["."]
 asyncio_mode = "auto"
 python_classes = ["Test*"]
 python_files = ["test_*.py"]

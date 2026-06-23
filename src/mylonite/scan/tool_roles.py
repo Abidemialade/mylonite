@@ -13,7 +13,10 @@ Every assignment is a HINT — never authoritative for any verdict.
 
 from __future__ import annotations
 
+import re
 from typing import Any, NamedTuple
+
+from mylonite.scan._control_primitives import sanitize_tool_description
 
 
 class _ToolRoles(NamedTuple):
@@ -170,6 +173,96 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
         verify_tool=verify_tool,
         sink_tools=sink_tools,
     )
+
+
+# --- delivery-channel detectors (v0.7.x) -------------------------------------
+# These widen Mylonite beyond the kitchen-sink store->recall shape so seeds can
+# be delivered through the channels a REAL target actually exposes:
+#   * direct_content  — a tool that processes attacker-supplied free text
+#                       (process_document/summarize/analyze): the payload rides
+#                       in as that argument; no plant, no recall.
+#   * tool_description — an existing tool whose OWN description carries an
+#                        instruction aimed at the agent (tool poisoning): no
+#                        delivery needed; drive the planner to use the tool.
+
+#: Tool-name fragments that denote "processes free-text content the user supplies"
+#: (as opposed to STORING it). Drives the direct_content channel.
+_PROCESSOR_NAME_HINTS = _words(
+    "process summarize summarise analyze analyse answer translate review ingest "
+    "parse classify extract explain read scan check evaluate respond chat ask query"
+)
+
+#: Imperative-prose patterns that signal a tool description is steering the agent
+#: (plain-prose tool poisoning — the gap sanitize_tool_description documents).
+_INSTRUCTION_PROSE = re.compile(
+    r"\b("
+    r"you must|you should|you need to|always |never |before (you|responding|answering)|"
+    r"after (you|reading|calling)|first .{0,40}\bthen\b|do not (mention|tell|reveal)|"
+    r"ignore (the |all |previous|prior)|disregard |as an ai|system override|"
+    r"important:|note:|when (this tool|you|the user|called)|make sure to|be sure to|"
+    r"in addition,? (also|you)|additionally,? (call|send|include|fetch)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def description_carries_instruction(description: str) -> str | None:
+    """Return a short excerpt if a tool description appears to steer the agent.
+
+    Catches BOTH the structured smuggle forms ``sanitize_tool_description`` strips
+    (``<IMPORTANT>``/brackets/parentheticals) AND plain imperative prose aimed at
+    the agent (the gap that sanitiser documents). ``None`` means the description
+    reads as a normal capability description.
+    """
+    if not description:
+        return None
+    # Structured smuggle: sanitising changes the text -> a smuggle form was present.
+    if sanitize_tool_description(description) != description:
+        return description.strip()[:240]
+    # Plain-prose steering: an imperative directed at the agent.
+    m = _INSTRUCTION_PROSE.search(description)
+    if m:
+        # Return the sentence around the match for the judge's context.
+        start = description.rfind(".", 0, m.start()) + 1
+        end = description.find(".", m.end())
+        end = end + 1 if end != -1 else len(description)
+        return description[start:end].strip()[:240]
+    return None
+
+
+def instruction_bearing_tools(tools: list[Any]) -> list[tuple[str, str]]:
+    """Tools whose own description steers the agent → (name, suspicious excerpt).
+
+    The candidates for the W1 ``tool_description`` channel.
+    """
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        desc = getattr(tool, "description", "") or ""
+        excerpt = description_carries_instruction(desc)
+        if name and excerpt:
+            out.append((name, excerpt))
+    return out
+
+
+def content_processor_tools(tools: list[Any]) -> list[tuple[str, str]]:
+    """Tools that process attacker-suppliable free text → (name, content param).
+
+    The candidates for the W2 ``direct_content`` channel: a tool with a genuine
+    free-text content slot whose name reads as "process this content" (not store).
+    """
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        low = name.lower()
+        param = _genuine_content_param(tool)
+        if not name or param is None:
+            continue
+        is_store = any(h in low for h in _STORE_NAME_HINTS)
+        is_processor = any(h in low for h in _PROCESSOR_NAME_HINTS)
+        if is_processor and not is_store:
+            out.append((name, param))
+    return out
 
 
 def _read_by_id_tool(tools: list[Any]) -> str | None:

@@ -26,12 +26,18 @@ internal LiteLLM proxy, a Bedrock VPC endpoint), Mylonite routes there via
 LiteLLM (`--provider`/`--model` and the provider's `api_base`). With a
 local or small model the provider need never be public egress.
 
-## 3. TLS-inspecting corporate proxy
+## 3. TLS-inspecting corporate proxy (or local AV)
 
-Mylonite uses the OS trust store automatically
-(`pip install "mylonite[enterprise]"`), so a proxy CA is trusted without
-disabling verification. Escape hatches: `MYLONITE_NO_TRUSTSTORE=1` or
-`SSL_CERT_FILE=/path/to/ca.pem`.
+This is the common case, not an "enterprise" one: a proxy or local antivirus
+presents a MITM certificate whose CA lives in your **OS trust store** but not in
+Python's bundled `certifi` bundle, so HTTPS to the LLM provider fails with
+`CERTIFICATE_VERIFY_FAILED`. Mylonite ships [`truststore`](https://pypi.org/project/truststore/)
+as a **base dependency** and enables it automatically, so a plain
+`pip install mylonite` trusts your OS-installed CA out of the box — no cert files,
+and a no-op in CI (the runner's OS already trusts standard CAs). Escape hatches:
+`MYLONITE_NO_TRUSTSTORE=1` (disable) or `SSL_CERT_FILE=/path/to/ca.pem` (point at a
+specific CA bundle). The legacy `pip install "mylonite[enterprise]"` still works as
+a back-compat alias but is no longer required.
 
 ## Not just GitHub
 

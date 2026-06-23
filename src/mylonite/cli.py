@@ -390,6 +390,26 @@ def _route_model(provider: str | None, model: str) -> str:
     return model
 
 
+def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
+    """Map a missing reference target to a friendly EXIT_CONFIG, else return.
+
+    The deliberately-vulnerable reference target is opt-in (not a base dependency):
+    PyPI users get it with ``pip install "mylonite[demo]"``; an editable checkout
+    needs ``pip install -e ./reference_targets/mcp_kitchen_sink``. Without it,
+    ``demo`` / ``scan reference:*`` / ``validate`` raise ``ModuleNotFoundError`` deep
+    in the adapter. Translate that one cause into a clear message everywhere (instead
+    of a raw traceback on the scan path); re-raise anything unrelated by returning.
+    """
+    if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+        typer.echo(
+            "the Quarry reference target isn't installed (it's opt-in) — run "
+            '`pip install "mylonite[demo]"`, or from a checkout '
+            "`pip install -e ./reference_targets/mcp_kitchen_sink`.",
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
 def _build_adapter_for_reference(target: str, model: str) -> Any:
     from mylonite.plugins._reference.reference_target_adapter import (
         InProcessGuardedReferenceAdapter,
@@ -494,14 +514,14 @@ def _target_file_from_flags(
 
 
 def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: str) -> Any:
-    """Register a custom ``TargetFile`` and return a generic ``MCPStdioAdapter``.
+    """Register a custom ``TargetFile`` and return the transport-matched adapter.
 
     Shared by ``--target-file`` and ``mcp:custom`` flags. Enforces the same
     ``--authorize`` ownership rule as bundled targets, then registers the spec
     so the generic adapter (and seed selection) can resolve it.
     """
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, payload_placement_warnings
 
     # R7: warn (don't block) if the planted {payload} isn't a bare natural-language
@@ -526,7 +546,7 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
     ) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
-    return MCPStdioAdapter(family=spec.family, scope=target_file.scope, model=model)
+    return build_mcp_adapter(family=spec.family, scope=target_file.scope, model=model)
 
 
 def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> Any:
@@ -632,12 +652,17 @@ def _run_synthesis(
 
     from mylonite.contracts._types import ScanAttempt, ScanReport
     from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-    from mylonite.scan.artefacts import render_summary, write_artefacts
+    from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, render_summary, write_artefacts
     from mylonite.scan.chain_synth import ChainSynthesizer
     from mylonite.scan.chain_validator import ChainDifferentialValidator
     from mylonite.scan.engine import ScanResult
     from mylonite.scan.judge import SuccessJudge
     from mylonite.scan.synthesis_runner import SynthesisRunner
+
+    # Operator-declared plant/sinks (custom targets): let synthesis exercise an app
+    # whose tool names don't match the discovery heuristics, instead of no-op'ing.
+    synth_seed_arm: Any = None
+    synth_extra_sinks: tuple[str, ...] = ()
 
     if is_reference:
         report_target = target or "reference:vulnerable"
@@ -651,7 +676,7 @@ def _run_synthesis(
             typer.echo("--authorize is required to synthesize against a custom target.", err=True)
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.factory import build_mcp_adapter
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
         try:
@@ -663,32 +688,45 @@ def _run_synthesis(
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
         report_target = target or f"mcp:{spec.family}"
+        synth_seed_arm = tf.seed_arm
+        synth_extra_sinks = (
+            tuple(spec.control_config.consequential_tools) if spec.control_config else ()
+        )
         typer.echo(
             f"--synthesize on custom target {spec.family!r}: validating the chain raw vs a "
-            "W2 boundary-guarded twin (the synthetic guarded side).",
+            "W2-guarded twin (your server-layer twin if control_env declares W2, else the "
+            "synthetic boundary shim).",
             err=True,
         )
 
-        if spec.vulnerable_launch is not None:
+        # The synth differential controls W2 (untrusted-content quarantine). When the
+        # target declares a server-layer toggle for W2 (control_env), measure the REAL
+        # server guard (parity with validate/ablate): the raw side env-disables W2, the
+        # guarded twin is the real default launch. Otherwise both sides use the shim.
+        cw = "W2"
+        server_layer = cw in spec.control_env
+        if spec.vulnerable_launch is not None or server_layer:
             typer.echo(
-                f"--synthesize: the raw side launches the DELIBERATELY-UNGUARDED variant of "
-                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                f"--synthesize: the raw side runs {spec.family!r} with the {cw} guard "
+                "DISABLED (deliberately unguarded) — ensure you are authorized. "
                 "Env values are never logged.",
                 err=True,
             )
 
         def factory(variant: str) -> Any:
             if variant == "vulnerable":
+                if server_layer:
+                    return build_mcp_adapter(
+                        family=spec.family,
+                        scope=tf.scope,
+                        model=planner_model,
+                        launch_env=spec.launch_env(disable_controls=(cw,)),
+                    )
                 return _vulnerable_adapter(spec, tf.scope, planner_model)
-            return MCPStdioAdapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=planner_model,
-                controls=[_boundary_control("W2", spec)],
-            )
+            return _guarded_factory(spec, tf.scope, planner_model, cw)
 
         descriptor = asyncio.run(
-            MCPStdioAdapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
+            build_mcp_adapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
         )
 
     runner = SynthesisRunner(
@@ -701,7 +739,9 @@ def _run_synthesis(
         target_id=report_target,
     )
     try:
-        result = asyncio.run(runner.run(descriptor))
+        result = asyncio.run(
+            runner.run(descriptor, seed_arm=synth_seed_arm, extra_sinks=synth_extra_sinks)
+        )
     finally:
         if not is_reference:
             from mylonite.plugins._mcp import target_registry
@@ -710,12 +750,21 @@ def _run_synthesis(
 
     exploits = [result.exploit] if result.exploit is not None else []
     if result.chain is None:
+        # No plant+sink surface: the mode did NOT run an attack. This must read as
+        # NOT TESTED, never as a clean no_finding (which would let a vulnerable
+        # target pass). Name what we looked for vs the target's actual tools.
+        tool_names = [getattr(t, "name", "?") for t in getattr(descriptor, "tools", [])]
         attempts = [
             ScanAttempt(
                 seed_id="tool-chaining-synthesis",
                 pattern_id="tool-chaining-synthesis",
-                outcome="no_finding",
-                verdict_reason="no plant+sink pair discoverable on the tool surface",
+                outcome="skipped_payload_not_delivered",
+                verdict_reason=(
+                    "NOT TESTED: no plant+sink surface for tool-chaining - looked for a "
+                    "content-storing tool and a consequential sink (send/post/delete/...); "
+                    f"target tools: {tool_names}. Declare control_config.consequential_tools "
+                    "or a seed_arm, or point at a target that exposes such a surface."
+                ),
             )
         ]
     else:
@@ -756,6 +805,10 @@ def _run_synthesis(
     if exploits:
         typer.echo("")
         typer.echo(f"Next: mylonite generate {scan_dir}")
+    # A NOT-TESTED outcome (no plant+sink surface) must not exit 0 — a CI gate would
+    # read that as "clean". Non-zero so the gap is actionable, after the summary.
+    if any(a.outcome in NOT_TESTED_OUTCOMES for a in attempts):
+        raise typer.Exit(code=EXIT_CONFIG)
 
 
 def _run_memory_poison(
@@ -789,7 +842,7 @@ def _run_memory_poison(
 
     from mylonite.contracts._types import ScanAttempt, ScanReport
     from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-    from mylonite.scan.artefacts import render_summary, write_artefacts
+    from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, render_summary, write_artefacts
     from mylonite.scan.engine import ScanResult
     from mylonite.scan.judge import SuccessJudge
     from mylonite.scan.memory_poison import MemoryPoisonRunner
@@ -799,6 +852,9 @@ def _run_memory_poison(
     # One innocent turn between the plant and the retrieval, so the poison is acted on
     # in a later turn than it was planted (the defining memory-poisoning separation).
     benign_turns = ("Please give me a brief status update on my recent activity.",)
+    # Operator-declared plant (custom targets): lets discovery exercise an app whose
+    # store tool doesn't match the discovery heuristics, instead of silently no-op'ing.
+    declared_seed_arm: Any = None
 
     if is_reference:
         report_target = target or "reference:vulnerable"
@@ -815,7 +871,7 @@ def _run_memory_poison(
             )
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.factory import build_mcp_adapter
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
         try:
@@ -827,31 +883,38 @@ def _run_memory_poison(
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
         report_target = target or f"mcp:{spec.family}"
+        declared_seed_arm = tf.seed_arm
         typer.echo(
-            f"--memory on custom target {spec.family!r}: validating raw vs a W2 boundary-"
-            "guarded twin (the synthetic guarded side quarantines recalled memory).",
+            f"--memory on custom target {spec.family!r}: validating raw vs a W2-guarded twin "
+            "(your server-layer twin if control_env declares W2, else the synthetic boundary "
+            "shim that quarantines recalled memory).",
             err=True,
         )
-        if spec.vulnerable_launch is not None:
+        # See _run_synthesis: server-layer parity for the W2 differential.
+        cw = "W2"
+        server_layer = cw in spec.control_env
+        if spec.vulnerable_launch is not None or server_layer:
             typer.echo(
-                f"--memory: the raw side launches the DELIBERATELY-UNGUARDED variant of "
-                f"{spec.family!r} (vulnerable_launch) — ensure you are authorized. "
+                f"--memory: the raw side runs {spec.family!r} with the {cw} guard "
+                "DISABLED (deliberately unguarded) — ensure you are authorized. "
                 "Env values are never logged.",
                 err=True,
             )
 
         def factory(variant: str) -> Any:
             if variant == "vulnerable":
+                if server_layer:
+                    return build_mcp_adapter(
+                        family=spec.family,
+                        scope=tf.scope,
+                        model=planner_model,
+                        launch_env=spec.launch_env(disable_controls=(cw,)),
+                    )
                 return _vulnerable_adapter(spec, tf.scope, planner_model)
-            return MCPStdioAdapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=planner_model,
-                controls=[_boundary_control("W2", spec)],
-            )
+            return _guarded_factory(spec, tf.scope, planner_model, cw)
 
         descriptor = asyncio.run(
-            MCPStdioAdapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
+            build_mcp_adapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
         )
 
     runner = MemoryPoisonRunner(
@@ -860,6 +923,7 @@ def _run_memory_poison(
         seed=seed,
         target_id=report_target,
         benign_turns=benign_turns,
+        seed_arm=declared_seed_arm,
     )
     try:
         result = asyncio.run(runner.run(descriptor))
@@ -871,13 +935,19 @@ def _run_memory_poison(
 
     exploits = [result.exploit] if result.exploit is not None else []
     if result.plan is None:
+        # No plant+retrieve surface: the mode did NOT run. Report NOT TESTED, never a
+        # clean no_finding, and name what we looked for vs the target's actual tools.
+        tool_names = [getattr(t, "name", "?") for t in getattr(descriptor, "tools", [])]
         attempts = [
             ScanAttempt(
                 seed_id="memory-poisoning",
                 pattern_id="memory-poisoning",
-                outcome="no_finding",
+                outcome="skipped_payload_not_delivered",
                 verdict_reason=(
-                    "no plant+retrieve surface discoverable for cross-turn memory poisoning"
+                    "NOT TESTED: no plant+retrieve surface for cross-turn memory poisoning - "
+                    "looked for a content-storing tool and an id-free recall path; target "
+                    f"tools: {tool_names}. Declare a seed_arm (+ a recall the planner can drive) "
+                    "or point at a target that exposes such a surface."
                 ),
             )
         ]
@@ -919,6 +989,9 @@ def _run_memory_poison(
     if exploits:
         typer.echo("")
         typer.echo(f"Next: mylonite generate {scan_dir}")
+    # NOT-TESTED (no plant+retrieve surface) must not exit 0 — see _run_synthesis.
+    if any(a.outcome in NOT_TESTED_OUTCOMES for a in attempts):
+        raise typer.Exit(code=EXIT_CONFIG)
 
 
 @app.command(
@@ -1240,6 +1313,7 @@ def scan(
             )
         from mylonite.plugins._mcp.target_file import (
             dump_target_file,
+            effect_probe_warnings,
             infer_seed_arm,
             needs_seed_arm_autowire,
             validate_for_scan,
@@ -1250,6 +1324,10 @@ def scan(
         # Only when a no-id recall path exists (else the plant wouldn't be delivered —
         # the "plants but never lands" trap). Best-effort: a describe failure leaves the
         # pre-flight block to handle it. Skipped on --dry-run / --allow-no-seed-arm.
+        # When no plantable store->recall pair exists, a content-processing tool
+        # (e.g. process_document) makes W2 testable via the direct_content channel
+        # (descriptor synthesis), so the seed-arm pre-flight must NOT block.
+        synth_covers_indirect = False
         if needs_seed_arm_autowire(tf) and not dry_run and not allow_no_seed_arm:
             try:
                 _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
@@ -1266,19 +1344,38 @@ def scan(
                 typer.echo(f"auto-wire: {_note}", err=True)
                 if _spec is not None:
                     tf = tf.model_copy(update={"seed_arm": _spec})
+                else:
+                    from mylonite.scan.tool_roles import content_processor_tools
+
+                    if content_processor_tools(_descriptor.tools):
+                        synth_covers_indirect = True
+                        typer.echo(
+                            "auto-wire: no store->recall pair, but a content-processing "
+                            "tool exposes the direct_content channel — W2 is tested via "
+                            "descriptor synthesis (no seed_arm needed).",
+                            err=True,
+                        )
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
         # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
         # set (or M3 auto-wired one above). A --dry-run only enumerates seeds (no
         # clean/finding verdict to mislead), so there we downgrade the block to a warning.
-        preflight_errors = validate_for_scan(tf, allow_no_seed_arm=allow_no_seed_arm)
+        preflight_errors = validate_for_scan(
+            tf, allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect
+        )
         if preflight_errors:
             for err in preflight_errors:
                 level = "warning" if dry_run else "error"
                 typer.echo(f"{level}: {err}", err=True)
             if not dry_run:
                 raise typer.Exit(code=EXIT_CONFIG)
+
+        # Non-fatal: a W3/W4 (side-effecting) target with no effect_probe can't
+        # confirm the effect on a real target, so a vulnerable target may read as
+        # clean. Warn loudly (the scan still runs) — never a silent under-detection.
+        for warn in effect_probe_warnings(tf):
+            typer.echo(f"warning: {warn}", err=True)
 
         # Copy the source YAML verbatim (preserves operator comments/structure)
         # when given a file; otherwise serialise the inline mcp:custom flags so the
@@ -1408,7 +1505,14 @@ def scan(
         attack_driver=attack_driver,
     )
 
-    result = asyncio.run(engine.run())
+    try:
+        result = asyncio.run(engine.run())
+    except (ModuleNotFoundError, ImportError) as exc:
+        # `scan reference:*` lazily imports the bundled reference target inside the
+        # adapter; on an editable checkout without it this surfaces here. Fail with
+        # the same friendly message `demo` gives, not a raw traceback.
+        _exit_if_missing_kitchen_sink(exc)
+        raise
 
     from mylonite._redaction import redact
 
@@ -1527,13 +1631,7 @@ def demo(
             run_demo,
         )
     except (ModuleNotFoundError, ImportError) as exc:
-        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-            typer.echo(
-                "the Quarry reference target isn't installed — run "
-                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _exit_if_missing_kitchen_sink(exc)
         raise
 
     # Replay is pinned to the recorded provider/model — never silently drop the
@@ -1561,13 +1659,7 @@ def demo(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     except (ModuleNotFoundError, ImportError) as exc:
-        if getattr(exc, "name", None) == "mcp_kitchen_sink":
-            typer.echo(
-                "the Quarry reference target isn't installed — run "
-                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _exit_if_missing_kitchen_sink(exc)
         raise
 
     # Build a fresh Console here (not the module-level _console, which was
@@ -1933,6 +2025,30 @@ def _boundary_control(weakness: str, spec: Any) -> Any:
     )
 
 
+def _guarded_factory(spec: Any, scope: str | None, model: str, weakness: str) -> Any:
+    """Build the GUARDED side of a custom-target differential for ``weakness``.
+
+    Parity with ``ablate``'s server-layer mode: when the target declares a
+    server-layer toggle for this weakness (``control_env``), the guarded twin is
+    the REAL default launch (the server's own guard ON), so the differential
+    measures the actual server-layer control. Otherwise it falls back to the
+    adapter-boundary shim — a low-fidelity stand-in that cannot see server-side
+    guards (the verdict is reframed honestly in that case; see
+    ``DifferentialValidator(guarded_is_server_layer=...)``).
+    """
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
+
+    if weakness in getattr(spec, "control_env", {}):
+        # Real server, guard ON (default launch) — no boundary shim, no env toggle.
+        return build_mcp_adapter(family=spec.family, scope=scope, model=model)
+    return build_mcp_adapter(
+        family=spec.family,
+        scope=scope,
+        model=model,
+        controls=[_boundary_control(weakness, spec)],
+    )
+
+
 def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
     """Adapter for the RAW/vulnerable side of a differential.
 
@@ -1943,11 +2059,11 @@ def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
     byte-for-byte the default adapter (today's behaviour). SECURITY: launching the
     unguarded variant is announced loudly by the caller; env values are never logged.
     """
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
 
     if getattr(spec, "vulnerable_launch", None) is None:
-        return MCPStdioAdapter(family=spec.family, scope=scope, model=model)
-    return MCPStdioAdapter(
+        return build_mcp_adapter(family=spec.family, scope=scope, model=model)
+    return build_mcp_adapter(
         family=spec.family,
         scope=scope,
         model=model,
@@ -2012,7 +2128,7 @@ def _validate_custom(
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
     from mylonite.plugins._reference.reference_validator import (
         DifferentialValidator,
@@ -2036,26 +2152,49 @@ def _validate_custom(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
-    if spec.vulnerable_launch is not None:
-        typer.echo(
-            f"validate: the raw side launches the DELIBERATELY-UNGUARDED variant of "
-            f"{spec.family!r} (vulnerable_launch) — ensure you are authorized to run it. "
-            "Env values are never logged.",
-            err=True,
-        )
-
-    def _factory() -> Any:
-        return _vulnerable_adapter(spec, tf.scope, model)
-
-    # M1: the differential leg (re-driving a boundary-guarded twin of the SAME real
-    # target, model held constant) gates `kept` BY DEFAULT — proving the *safeguard*,
-    # not the model, carries the security. `--fast` opts out (it doubles the live runs
-    # per finding); a weakness with no inferable control falls back loudly to the
+    # M1: the differential leg (re-driving a guarded twin of the SAME real target,
+    # model held constant) gates `kept` BY DEFAULT — proving the *safeguard*, not the
+    # model, carries the security. `--fast` opts out (it doubles the live runs per
+    # finding); a weakness with no inferable control falls back loudly to the
     # stability/effect/consensus gate. `--prove-control` is now the default behaviour
     # and kept only for back-compat.
     del prove_control
     run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
     typer.echo(f"validate: {diff_note}", err=True)
+    if not randomize_exfil:
+        typer.echo(
+            "tip: pass --randomize-exfil so the result proves the target blocks exfil to ANY "
+            "attacker address, not just the one demo literal (avoids 'teaching to the test').",
+            err=True,
+        )
+
+    # Does the target declare a SERVER-LAYER toggle for this control (control_env)?
+    # If so, the differential measures the REAL server guard at parity with `ablate`:
+    # the raw side env-disables THIS control (other guards stay ON), the guarded side
+    # is the real default launch. Otherwise both sides use the adapter-boundary shim —
+    # a low-fidelity stand-in that cannot see server-side guards, so the verdict is
+    # reframed honestly (DifferentialValidator(guarded_is_server_layer=...)).
+    server_layer = control_weakness is not None and control_weakness in spec.control_env
+
+    if spec.vulnerable_launch is not None or server_layer:
+        typer.echo(
+            f"validate: the raw side runs {spec.family!r} with the "
+            f"{control_weakness or 'target'} guard DISABLED (deliberately unguarded) — "
+            "ensure you are authorized to run it. Env values are never logged.",
+            err=True,
+        )
+
+    def _factory() -> Any:
+        if server_layer:
+            assert control_weakness is not None  # narrowed by server_layer
+            return build_mcp_adapter(
+                family=spec.family,
+                scope=tf.scope,
+                model=model,
+                launch_env=spec.launch_env(disable_controls=(control_weakness,)),
+            )
+        return _vulnerable_adapter(spec, tf.scope, model)
+
     guarded_factory: Any = None
     control_context: str | None = None
     if run_diff and control_weakness is not None:
@@ -2066,12 +2205,7 @@ def _validate_custom(
         control_context = f"Control {cw}: {_snippet(cw)}"
 
         def _guarded() -> Any:
-            return MCPStdioAdapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=model,
-                controls=[_boundary_control(cw, spec)],
-            )
+            return _guarded_factory(spec, tf.scope, model, cw)
 
         guarded_factory = _guarded
         if adaptive:
@@ -2081,9 +2215,10 @@ def _validate_custom(
                 err=True,
             )
 
+    twin_kind = "real server-layer twin" if server_layer else "synthetic boundary twin"
     typer.echo(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
-        "+ multi-judge consensus + effect probe (no in-repo twin).",
+        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).",
         err=True,
     )
     validator = DifferentialValidator(
@@ -2095,6 +2230,7 @@ def _validate_custom(
         control_weakness=control_weakness,
         randomize_exfil=randomize_exfil,
         adaptive_guarded=adaptive and guarded_factory is not None,
+        guarded_is_server_layer=server_layer,
         control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
@@ -2247,9 +2383,28 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         console.print(f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
     else:
         console.print(f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
+        # The differential remediation must not accuse a real (server-layer) control
+        # of being theater when the guarded side was only the SYNTHETIC boundary shim.
+        # The validator stamps a [guarded-twin=...] marker into notes; key off it.
+        notes = getattr(report, "notes", "") or ""
+        if "guarded-twin=synthetic-boundary" in notes:
+            diff_remediation = (
+                "differential fail: the SYNTHETIC boundary twin did not block the attack. "
+                "If your real control is server-layer (an approval gate / allowlist enforced "
+                "inside the server), declare control_env / vulnerable_launch in the target file "
+                "so the differential measures it - the boundary twin cannot see server-side "
+                "guards, so this is NOT evidence your control is ineffective."
+            )
+        elif "guarded-twin=server-layer" in notes:
+            diff_remediation = (
+                "differential fail: the server-layer control did not discriminate (raw and "
+                "guarded behaved alike) - the control as configured did not stop this attack."
+            )
+        else:
+            diff_remediation = "differential fail: no discriminating power between the twins."
         _remediation = {
             "build": "build fail: emitted test didn't collect; re-run `mylonite generate`.",
-            "differential": "differential fail: no discriminating power between the twins.",
+            "differential": diff_remediation,
             "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
             "stability": "stability fail: the attack did not reproduce against the real target.",
             "effect": "effect fail: the target's effect probe did not confirm the damage materialised.",
@@ -2449,7 +2604,8 @@ def validate(
             help=(
                 "Mint a unique exfil destination per run instead of the demo address, so "
                 "the run proves the control/target stops exfil to ANY attacker destination "
-                "(generalizes) rather than blocking one literal."
+                "(generalizes) rather than blocking one literal address (avoids 'teaching "
+                "to the test'). Recommended for live custom-target runs."
             ),
         ),
     ] = False,
@@ -2501,13 +2657,7 @@ def validate(
             ReferenceVulnerableOracle,
         )
     except (ModuleNotFoundError, ImportError) as exc:
-        if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-            typer.echo(
-                "the Quarry reference target isn't installed — run "
-                "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _exit_if_missing_kitchen_sink(exc)
         raise
 
     # Validate the ACTUAL committed test on disk (NOT a re-render) — so a live
@@ -2576,13 +2726,7 @@ def validate(
         try:
             reachable = _provider_preflight(effective_provider, effective_model)
         except (ModuleNotFoundError, ImportError) as exc:
-            if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-                typer.echo(
-                    "the Quarry reference target isn't installed — run "
-                    "`pip install -e ./reference_targets/mcp_kitchen_sink` from the checkout.",
-                    err=True,
-                )
-                raise typer.Exit(code=EXIT_CONFIG) from exc
+            _exit_if_missing_kitchen_sink(exc)
             raise
         if not reachable:
             typer.echo(
@@ -3073,7 +3217,7 @@ def init_target(
     import yaml
 
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec
 
     if output.exists() and not force:
@@ -3101,7 +3245,7 @@ def init_target(
 
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
-    adapter = MCPStdioAdapter(
+    adapter = build_mcp_adapter(
         family=spec.family, scope=tf.scope, model=model or "claude-haiku-4-5-20251001"
     )
 
@@ -3445,7 +3589,8 @@ def gate(
             help=(
                 "Mint a unique exfil destination per run so the finding proves the "
                 "control/target stops exfil to ANY attacker destination, not just the "
-                "demo address."
+                "demo address (avoids 'teaching to the test'). Recommended for live "
+                "custom-target runs."
             ),
         ),
     ] = False,
@@ -3631,7 +3776,7 @@ def gate(
             )
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+        from mylonite.plugins._mcp.factory import build_mcp_adapter
         from mylonite.plugins._mcp.target_file import build_target_spec
 
         spec = build_target_spec(tf)
@@ -3639,7 +3784,7 @@ def gate(
         target_registry.register_target(spec)
 
         def _factory() -> Any:
-            return MCPStdioAdapter(family=spec.family, scope=tf.scope, model=effective_model)
+            return build_mcp_adapter(family=spec.family, scope=tf.scope, model=effective_model)
 
         # --prove-control: a controllable finding (tagged in scan_fn) gets a
         # boundary-guarded twin so the differential leg proves the control is
@@ -3650,7 +3795,7 @@ def gate(
             cw: str = control_weakness
 
             def _guarded() -> Any:
-                return MCPStdioAdapter(
+                return build_mcp_adapter(
                     family=spec.family,
                     scope=tf.scope,
                     model=effective_model,
@@ -3801,7 +3946,7 @@ def ablate(
     actually carries the security. LIVE: launches the target's MCP server + provider.
     """
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
     from mylonite.scan.ablation import (
         REP_SEED_BY_WEAKNESS,
@@ -3895,14 +4040,14 @@ def ablate(
             # them all OFF; the "only C" side leaves only C on. Translate to the
             # complement and disable those server-layer guards via the launch env.
             disable = tuple(c for c in usable if c not in applied)
-            adapter = MCPStdioAdapter(
+            adapter = build_mcp_adapter(
                 family=spec.family,
                 scope=tf.scope,
                 model=effective_model,
                 launch_env=spec.launch_env(disable_controls=disable),
             )
         else:
-            adapter = MCPStdioAdapter(
+            adapter = build_mcp_adapter(
                 family=spec.family,
                 scope=tf.scope,
                 model=effective_model,

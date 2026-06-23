@@ -62,13 +62,20 @@ def _noun_from_id_param(pid: str) -> str:
     return pid
 
 
-def discover_attack_plan(descriptor: Any) -> AttackPlan | None:
+def discover_attack_plan(descriptor: Any, *, seed_arm: Any = None) -> AttackPlan | None:
     """Build an :class:`AttackPlan` from a target's tool surface, or ``None``.
 
     Retires the hand-authored ``seed_arm``/``effect_probe`` choreography for the
     indirect-injection shape: pick a store tool with a genuine free-text content
     slot for the payload, mint ``{id}`` into its id param if it has one, and
     drive a retrieval that surfaces the planted content back to the planner.
+
+    When the target *declares* a ``seed_arm`` (how to plant untrusted content),
+    that is used directly — so a real app whose store tool does not match the
+    name heuristics (``_STORE_NAME_HINTS``) is still exercised instead of
+    silently no-op'ing. Otherwise the plant tool is discovered from the surface.
+    The drive (a retrieval that surfaces the planted content) is always derived
+    from the surface.
 
     Because the loop controls the id (it mints it and embeds it in the drive
     message), a store/read-by-id pair is exploitable here even though the
@@ -77,23 +84,30 @@ def discover_attack_plan(descriptor: Any) -> AttackPlan | None:
     path — the surface does not support indirect injection.
     """
     tools = list(getattr(descriptor, "tools", None) or [])
+    by_name = {(getattr(t, "name", "") or ""): t for t in tools}
+
     plant_tool: str | None = None
-    content_param: str | None = None
-    for tool in tools:
-        name = getattr(tool, "name", "") or ""
-        if not any(h in name.lower() for h in _STORE_NAME_HINTS):
-            continue
-        param = _genuine_content_param(tool)
-        if param is not None:
-            plant_tool, content_param = name, param
-            break
-    if plant_tool is None or content_param is None:
+    plant_args: dict[str, str] | None = None
+    declared_tool = getattr(seed_arm, "tool", None) if seed_arm is not None else None
+    if declared_tool is not None and declared_tool in by_name:
+        # Operator-declared plant wins over the name heuristics.
+        plant_tool = declared_tool
+        plant_args = dict(getattr(seed_arm, "args_template", {}) or {})
+    else:
+        for tool in tools:
+            name = getattr(tool, "name", "") or ""
+            if not any(h in name.lower() for h in _STORE_NAME_HINTS):
+                continue
+            param = _genuine_content_param(tool)
+            if param is not None:
+                plant_tool = name
+                plant_args = {param: "{payload}"}
+                break
+    if plant_tool is None or plant_args is None:
         return None
 
-    by_name = {(getattr(t, "name", "") or ""): t for t in tools}
-    plant_args: dict[str, str] = {content_param: "{payload}"}
     pid_param = _id_param(by_name[plant_tool])
-    if pid_param is not None:
+    if pid_param is not None and pid_param not in plant_args:
         plant_args[pid_param] = "{id}"
 
     drive_message: str | None = None
@@ -145,6 +159,11 @@ class AdaptiveOutcome:
     verdict: Verdict | None
     #: Per-round observability log (one entry per attempt, in order).
     attempts_log: tuple[AttemptStep, ...] = ()
+    #: Why the loop stopped early WITHOUT a success, when that reason is not the
+    #: target resisting. ``"strategist_refusal"`` means the attacker model declined
+    #: to craft a more effective payload (an aligned-model limitation) — this is NOT
+    #: evidence the target is safe. ``None`` = ran to budget / target genuinely held.
+    aborted_reason: str | None = None
 
 
 DEFAULT_MAX_ATTEMPTS = 4
@@ -227,6 +246,7 @@ class AdaptiveAttackDriver:
         last_response: AdapterResponse | None = None
         last_verdict: Verdict | None = None
         log: list[AttemptStep] = []
+        aborted_reason: str | None = None
         while attempt < self._max_attempts:
             attempt += 1
             try:
@@ -290,10 +310,14 @@ class AdaptiveAttackDriver:
                     verdict=verdict,
                     attempts_log=tuple(log),
                 )
-            refined = await self._refine_injection(
+            refined, stop_reason = await self._refine_injection(
                 weakness=seed.weakness, current_body=body, response=response, verdict=verdict
             )
             if refined is None:
+                # An empty/unparseable strategist result (an aligned attacker
+                # declining) is a tooling limit, NOT target evidence — flag it so the
+                # report never reads the abort as "the target resisted".
+                aborted_reason = "strategist_refusal" if stop_reason == "refusal" else None
                 break
             body = refined
         return AdaptiveOutcome(
@@ -303,6 +327,7 @@ class AdaptiveAttackDriver:
             response=last_response,
             verdict=last_verdict,
             attempts_log=tuple(log),
+            aborted_reason=aborted_reason,
         )
 
     async def _attempt(
@@ -334,8 +359,14 @@ class AdaptiveAttackDriver:
         current_body: str,
         response: AdapterResponse,
         verdict: Verdict,
-    ) -> str | None:
-        """Ask the strategist for a re-crafted injection. None = give up (no usable change)."""
+    ) -> tuple[str | None, str]:
+        """Ask the strategist for a re-crafted injection.
+
+        Returns ``(refined, stop_reason)``. ``refined`` is the new injection, or
+        ``None`` to give up; ``stop_reason`` is ``""`` on success, ``"refusal"`` when
+        the strategist produced nothing usable (empty/unparseable — typically an
+        aligned attacker declining), or ``"no_change"`` when it echoed the input.
+        """
         defense_block = (
             f"ACTIVE DEFENSE TO EVADE:\n{self._control_context}\n\n"
             if self._control_context
@@ -362,6 +393,8 @@ class AdaptiveAttackDriver:
         )
         pop_fallback_cause(result)
         refined = str(result.get("injection") or "").strip()
-        if not refined or refined == current_body:
-            return None
-        return refined
+        if not refined:
+            return None, "refusal"
+        if refined == current_body:
+            return None, "no_change"
+        return refined, ""

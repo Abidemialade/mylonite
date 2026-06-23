@@ -22,7 +22,7 @@ import re
 import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from mylonite.contracts._types import AdapterResponse, ExploitRecord, Payload, TargetDescriptor
 from mylonite.contracts.target_adapter import AttackSession, SupportsAttackSession
@@ -283,6 +283,7 @@ class MemoryPoisonRunner:
         benign_turns: Sequence[str] = (),
         id_factory: Callable[[], str] = _mint_id,
         runs: int = DEFAULT_RUNS,
+        seed_arm: Any = None,
     ) -> None:
         self._adapter_factory = adapter_factory
         self._judge = judge
@@ -291,9 +292,13 @@ class MemoryPoisonRunner:
         self._benign_turns = tuple(benign_turns)
         self._id_factory = id_factory
         self._runs = runs
+        # Operator-declared plant (SeedArmSpec): lets discovery exercise a real app
+        # whose store tool name doesn't match the discovery heuristics, instead of
+        # silently no-op'ing. None = pure tool-surface discovery (today's behaviour).
+        self._seed_arm = seed_arm
 
     async def run(self, descriptor: TargetDescriptor) -> MemoryPoisonRunnerResult:
-        plan = discover_attack_plan(descriptor)
+        plan = discover_attack_plan(descriptor, seed_arm=self._seed_arm)
         if plan is None:
             return MemoryPoisonRunnerResult(plan=None, validation=None, exploit=None)
         validator = MemoryPoisonValidator(

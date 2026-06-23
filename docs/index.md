@@ -1,7 +1,7 @@
 # Mylonite
 
-> Point it at your AI agent; it finds a real weakness and writes the
-> regression test that closes it forever — in your repo, gating your CI.
+> Point it at your AI agent; when it finds a real weakness, it writes the
+> **validated** regression test that closes it — in your repo, gating your CI.
 
 Mylonite is an open-source framework for **AI-layer security testing**. It
 targets the AI/agentic part of an application — system prompt, tools, RAG

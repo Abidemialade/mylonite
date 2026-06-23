@@ -787,6 +787,31 @@ def test_demo_missing_kitchen_sink_via_real_import_maps_to_exit_2(
     assert "Traceback" not in out
 
 
+def test_scan_reference_missing_kitchen_sink_maps_to_exit_2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`scan reference:*` without the reference target → friendly exit 2, not a raw
+    traceback (parity with `demo`). The adapter imports mcp_kitchen_sink lazily in
+    describe(); the engine re-raises and the scan command now maps it like demo."""
+
+    class _BlockKitchenSink(MetaPathFinder):
+        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+            if fullname == "mcp_kitchen_sink" or fullname.startswith("mcp_kitchen_sink."):
+                raise ModuleNotFoundError(f"No module named '{fullname}'", name="mcp_kitchen_sink")
+            return None
+
+    for name in list(sys.modules):
+        if name == "mcp_kitchen_sink" or name.startswith("mcp_kitchen_sink."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BlockKitchenSink(), *sys.meta_path])
+
+    result = runner.invoke(app, ["scan", "reference:vulnerable", "--output-dir", str(tmp_path)])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    assert "Traceback" not in out
+
+
 def test_demo_corrupt_fixture_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
     """A corrupt fixture surfaces as exit 2 with the underlying message."""
     from mylonite.demo import runner as demo_runner
@@ -1820,6 +1845,41 @@ def test_scan_synthesize_and_memory_are_mutually_exclusive() -> None:
     assert "only one" in result.output.lower()
 
 
+def test_scan_synthesize_no_surface_reports_not_tested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No plant+sink surface => NOT TESTED (not a clean no_finding) + non-zero exit,
+    so a CI gate can't read the silent no-op as 'safe'."""
+    from mylonite.scan.synthesis_runner import SynthesisResult, SynthesisRunner
+
+    async def _no_chain(self: object, descriptor: object, **_: object) -> SynthesisResult:
+        return SynthesisResult(chain=None, validation=None, exploit=None)
+
+    monkeypatch.setattr(SynthesisRunner, "run", _no_chain)
+    result = runner.invoke(
+        app, ["scan", "--synthesize", "reference:vulnerable", "--output-dir", str(tmp_path)]
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "NOT TESTED" in result.output
+
+
+def test_scan_memory_no_surface_reports_not_tested(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """No plant+retrieve surface => NOT TESTED + non-zero exit (never a clean no_finding)."""
+    from mylonite.scan.memory_poison import MemoryPoisonRunner, MemoryPoisonRunnerResult
+
+    async def _no_plan(self: object, descriptor: object, **_: object) -> MemoryPoisonRunnerResult:
+        return MemoryPoisonRunnerResult(plan=None, validation=None, exploit=None)
+
+    monkeypatch.setattr(MemoryPoisonRunner, "run", _no_plan)
+    result = runner.invoke(
+        app, ["scan", "--memory", "reference:vulnerable", "--output-dir", str(tmp_path)]
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "NOT TESTED" in result.output
+
+
 # --- Theme B: _vulnerable_adapter honors vulnerable_launch ------------------
 
 
@@ -1867,6 +1927,60 @@ def test_vulnerable_adapter_is_default_when_no_vulnerable_launch() -> None:
         assert adapter._launch_command is None
         assert adapter._launch_args is None
         assert adapter._launch_env is None
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+# --- Theme B: _guarded_factory server-layer parity (validate differential) ---
+
+
+def test_guarded_factory_uses_real_default_launch_for_server_layer_control() -> None:
+    """When control_env declares the weakness, the guarded twin is the REAL default
+    launch (no boundary shim) so the differential measures the server-layer guard —
+    parity with ablate. This is the fix for the 'oracle can't model server controls'
+    finding: the guarded side was previously ALWAYS the synthetic shim."""
+    from mylonite.cli import _guarded_factory
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        spec = build_target_spec(
+            TargetFile(
+                family="srv-sl",
+                command="python",
+                args=["-m", "srv"],
+                weakness_classes=["W2"],
+                control_env={"W2": {"DISABLE_MARKING": "1"}},
+            )
+        )
+        target_registry.register_target(spec)
+        guarded = _guarded_factory(spec, None, "m", "W2")
+        # Real server, guard ON: no adapter-boundary shim applied.
+        assert guarded._controls == []
+        assert guarded._launch_env is None
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_guarded_factory_falls_back_to_boundary_shim_without_control_env() -> None:
+    """No control_env for the weakness → the boundary shim (byte-identical to the
+    prior default behaviour). Honesty about the low-fidelity twin lives in the
+    verdict, not here."""
+    from mylonite.cli import _guarded_factory
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    try:
+        spec = build_target_spec(
+            TargetFile(
+                family="srv-bd", command="python", args=["-m", "srv"], weakness_classes=["W2"]
+            )
+        )
+        target_registry.register_target(spec)
+        guarded = _guarded_factory(spec, None, "m", "W2")
+        assert len(guarded._controls) == 1  # synthetic boundary control
     finally:
         target_registry.clear_runtime_targets()
 

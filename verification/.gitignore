@@ -1,0 +1,9 @@
+# Fetched third-party data is never committed (provenance is in SOURCE.md;
+# fetch.py re-downloads + verifies on demand).
+.cache/
+
+# Generated reports + recorded transcripts (reproducible via the runner).
+reports/
+
+# Committed fixtures under layer2_datasets/fixtures/ are the exception and ARE
+# tracked (they are small, synthetic, and used by the CI-safe test).

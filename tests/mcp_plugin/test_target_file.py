@@ -10,6 +10,7 @@ from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.target_file import (
     TargetFile,
     build_target_spec,
+    effect_probe_warnings,
     load_target_file,
     payload_placement_warnings,
 )
@@ -163,6 +164,30 @@ def test_payload_warnings_flag_missing_placeholder() -> None:
 def test_payload_warnings_none_without_seed_arm() -> None:
     """A target with no seed_arm has nothing to plant — no warnings."""
     assert payload_placement_warnings(_tf()) == []
+
+
+def test_effect_probe_warning_for_side_effecting_weakness_without_probe() -> None:
+    """W3/W4 without an effect_probe can't confirm the effect on a real target —
+    the seed under-detects, so warn (a vulnerable target could read clean)."""
+    for cls in ("W3", "W4"):
+        warnings = effect_probe_warnings(_tf(weakness_classes=[cls]))
+        assert any("effect_probe" in w and cls in w for w in warnings), cls
+
+
+def test_effect_probe_warning_silent_when_probe_declared() -> None:
+    """With an effect_probe declared, the effect is confirmable — no warning."""
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    tf = _tf(
+        weakness_classes=["W4"],
+        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="attacker@example.com"),
+    )
+    assert effect_probe_warnings(tf) == []
+
+
+def test_effect_probe_warning_silent_for_non_effecting_weakness() -> None:
+    """W1/W2 don't hinge on a side effect materialising — no effect_probe warning."""
+    assert effect_probe_warnings(_tf(weakness_classes=["W1", "W2"])) == []
 
 
 # --- Theme B: server-layer twin launch (vulnerable_launch + control_env) ------

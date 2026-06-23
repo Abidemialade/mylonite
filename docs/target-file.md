@@ -69,10 +69,34 @@ control_env:                           # per-control env that disables ONE serve
   W3: { ALLOWLIST: "disabled" }
 ```
 
+## Remote targets (SSE / HTTP)
+
+By default a target is launched over **stdio** (`command`/`args` spawn a subprocess). To
+scan a *remote* MCP server, set `transport` and `url` instead — `command` becomes optional:
+
+```yaml
+family: my-remote-app
+transport: sse                 # stdio (default) | sse | http (streamable-HTTP)
+url: https://app.example.com/mcp
+headers:                       # optional; may carry auth
+  Authorization: Bearer my-token
+weakness_classes: [W2, W4]
+seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
+```
+
+- `url` is required for `sse`/`http` and rejected for `stdio`.
+- `headers` are passed to the transport but **never logged and never shown** in the target
+  descriptor (only the host appears). A target file keeps tokens out of shell history.
+- `command`/`args`/`env` and the server-layer `vulnerable_launch`/`control_env` toggles do
+  not apply to remote targets and are ignored.
+- Everything else (`seed_arm`, `effect_probe`, `weakness_classes`, `control_config`) works
+  exactly the same.
+
 ## Field groups
 
 - **Launch** (`family`, `command`, `args`, `env`, `scope`, `requires_scope`) — how the
-  stdio MCP server is started and labelled.
+  stdio MCP server is started and labelled. For remote servers use
+  `transport: sse|http` + `url` + optional `headers` instead of `command`/`args`.
 - **AI layer** (`system_prompt` / `system_prompt_file`, `primary_tools`,
   `weakness_classes`) — what the agent is and what to test. Set at most one of the two
   prompt fields.

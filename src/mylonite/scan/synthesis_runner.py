@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from mylonite.contracts._types import ExploitRecord, Payload, TargetDescriptor
 from mylonite.scan.chain_synth import ChainSynthesizer, SynthesizedChain
@@ -57,8 +58,16 @@ class SynthesisRunner:
         self._validator = validator
         self._target_id = target_id
 
-    async def run(self, descriptor: TargetDescriptor) -> SynthesisResult:
-        chain = await self._synthesizer.synthesize(descriptor)
+    async def run(
+        self,
+        descriptor: TargetDescriptor,
+        *,
+        seed_arm: Any = None,
+        extra_sinks: tuple[str, ...] = (),
+    ) -> SynthesisResult:
+        chain = await self._synthesizer.synthesize(
+            descriptor, seed_arm=seed_arm, extra_sinks=extra_sinks
+        )
         if chain is None:
             return SynthesisResult(chain=None, validation=None, exploit=None)
         validation = await self._validator.validate(chain)

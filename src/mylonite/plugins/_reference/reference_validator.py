@@ -288,6 +288,7 @@ class DifferentialValidator(ValidatorBase):
         control_weakness: str | None = None,
         randomize_exfil: bool = False,
         adaptive_guarded: bool = False,
+        guarded_is_server_layer: bool = False,
         control_context: str | None = None,
         consensus_judges: int = 3,
         iteration_timeout_s: float | None = None,
@@ -320,6 +321,12 @@ class DifferentialValidator(ValidatorBase):
         # driven by the adaptive loop (with control_context fed to the strategist),
         # grading whether the control holds UNDER ADAPTIVE PRESSURE vs falls to it.
         self._adaptive_guarded = adaptive_guarded
+        # Honesty flag: True when the guarded side of a custom-target differential is
+        # the REAL server with its server-layer guard ON (declared via control_env),
+        # False when it is the low-fidelity adapter-boundary shim. Shapes the verdict
+        # so a synthetic shim that "leaks" is never reported as proof the user's real
+        # (server-layer) control is theater.
+        self._guarded_is_server_layer = guarded_is_server_layer
         self._control_context = control_context
         self._consensus_judges = max(1, consensus_judges)
         # Defaults: vulnerable should fire almost-always (N-1), guard must
@@ -595,23 +602,50 @@ class DifferentialValidator(ValidatorBase):
             passed = decision.differential_passed and decision.flakiness_passed
             control = self._control_weakness or "boundary control"
             rate_gap = ((fired - guard_fired) / n) if n else 0.0
+            twin = "server-layer twin" if self._guarded_is_server_layer else "boundary twin"
+            counts = (
+                f"raw fired {fired}/{n}, guarded leaked {guard_fired}/{n}, "
+                f"success-rate gap {rate_gap:.2f}"
+            )
+            # A SYNTHETIC boundary twin that leaks cannot see server-side guards, so a
+            # rejection there is NOT evidence the user's real control is ineffective.
+            synthetic_caveat = (
+                " - note: this is the SYNTHETIC boundary twin, which cannot see "
+                "server-side guards; declare control_env/vulnerable_launch in the "
+                "target file to grade your real (server-layer) control"
+            )
             if self._adaptive_guarded:
-                phrase = (
-                    "holds UNDER ADAPTIVE PRESSURE (the adaptive loop could not make "
-                    "the guarded twin fire)"
-                    if passed
-                    else f"holds statically but FALLS TO ADAPTIVE (guarded leaked {guard_fired}/{n})"
-                )
+                if passed:
+                    phrase = (
+                        "holds UNDER ADAPTIVE PRESSURE (the adaptive loop could not make "
+                        "the guarded twin fire)"
+                    )
+                else:
+                    phrase = f"holds statically but FALLS TO ADAPTIVE (guarded leaked {guard_fired}/{n})"
+                    if not self._guarded_is_server_layer:
+                        phrase += synthetic_caveat
+                detail = f"control {control!r} ({twin}) {phrase}: {counts}"
+            elif passed:
                 detail = (
-                    f"control {control!r} {phrase}: raw fired {fired}/{n}, guarded leaked "
-                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f}"
+                    f"control {control!r} ({twin}): {counts} (need >= {self._min_rate_gap}); "
+                    "the safeguard - not the model - carries the security"
+                )
+            elif self._guarded_is_server_layer:
+                detail = (
+                    f"control {control!r} (server-layer twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); the server-layer control did not "
+                    "discriminate - raw and guarded behaved alike, so the control as "
+                    "configured did not stop this attack"
                 )
             else:
                 detail = (
-                    f"control {control!r}: raw fired {fired}/{n}, guarded leaked "
-                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f} "
-                    f"(need >= {self._min_rate_gap}); the safeguard - not the model "
-                    "- carries the security"
+                    f"control {control!r} (synthetic boundary twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); the SYNTHETIC boundary twin did not "
+                    "block this attack. If your real control is server-layer (an approval "
+                    "gate or allowlist enforced inside the server), declare control_env / "
+                    "vulnerable_launch in the target file so the differential measures it - "
+                    "the boundary twin cannot see server-side guards, so this is NOT "
+                    "evidence your control is ineffective"
                 )
             differential = ValidationOutcome(
                 stage="differential",
@@ -630,9 +664,17 @@ class DifferentialValidator(ValidatorBase):
                 rate_gap=rate_gap,
             )
             mode_suffix = " under adaptive pressure" if self._adaptive_guarded else ""
+            twin_label = (
+                "Server-layer-guarded twin"
+                if self._guarded_is_server_layer
+                else "Synthetic boundary-guarded twin"
+            )
+            # Machine-readable marker (parsed by the CLI to pick an honest remediation
+            # line on REJECT). Kept terse and ASCII; notes is serialized to JSON.
+            marker = "server-layer" if self._guarded_is_server_layer else "synthetic-boundary"
             notes_tail = (
-                f" Boundary-guarded twin (control {control!r}){mode_suffix}: leaked "
-                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}."
+                f" {twin_label} (control {control!r}){mode_suffix}: leaked "
+                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}. [guarded-twin={marker}]"
             )
 
         twin_note = (

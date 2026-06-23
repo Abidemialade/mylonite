@@ -2,10 +2,10 @@
 
 Mylonite is an open-source framework for **AI-layer security testing**. It
 ingests an application's AI/agentic layer — the system prompt, tool/function
-schemas, RAG pipeline, agent planning loop — autonomously finds an
-app-specific weakness, and emits a **validated regression test** that gates
-CI. It deliberately does *not* test the surrounding traditional code; that
-work belongs to SAST/DAST tools.
+schemas, RAG pipeline, agent planning loop — autonomously probes for
+app-specific weaknesses, and emits a **validated regression test** for each
+one it finds, gating CI. It deliberately does *not* test the surrounding
+traditional code; that work belongs to SAST/DAST tools.
 
 This document covers what Mylonite does, how it's built, and where it's going.
 For the pitch and install instructions, see [README.md](./README.md); for

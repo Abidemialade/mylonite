@@ -1,7 +1,7 @@
 # Mylonite
 
-> Point it at your AI agent; it finds a real weakness and writes the
-> regression test that closes it forever — in your repo, gating your CI.
+> Point it at your AI agent; when it finds a real weakness, it writes the
+> **validated** regression test that closes it — in your repo, gating your CI.
 
 [![CI](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml/badge.svg)](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
@@ -23,9 +23,8 @@ See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and t
 > GitHub code scanning, and proven-fix diffs in the PR. **v0.7.3** adds stateful
 > **memory-poisoning** (`scan --memory`), **cross-model durability**
 > (`validate --models`), and a machine-readable JSON bundle (`report --json`). See
-> [CHANGELOG.md](./CHANGELOG.md). `pip install mylonite` installs the CLI from PyPI;
-> the Quarry demo target (`mcp-kitchen-sink`) is not yet published, so the offline demo
-> walkthrough is still clone-first.
+> [CHANGELOG.md](./CHANGELOG.md). `pip install mylonite` installs the CLI from PyPI; the
+> offline Quarry demo target is an opt-in extra — `pip install "mylonite[demo]"`.
 
 ## Try it in 60 seconds
 
@@ -38,18 +37,19 @@ API key:
 *The `mylonite demo` playground running against the Quarry and its guarded
 twin. ([How this GIF is recorded.](docs/assets/recording-script.md))*
 
-**Install the CLI** — `mylonite` is on PyPI:
+**Install the CLI and run the demo** — `mylonite` is on PyPI. The base install is just
+the tool that scans your app; the offline Quarry demo target is an opt-in extra (a
+deliberately-vulnerable mock agent, never pulled by a plain install). Requires
+**Python 3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14 wheels yet,
+so create your virtualenv with a 3.11–3.13 interpreter. The CLI prints a clear note if
+it detects 3.14+.
 
 ```bash
-pip install mylonite
+pip install "mylonite[demo]"   # the [demo] extra adds the offline Quarry target
+mylonite demo                  # no clone, no API key
 ```
 
-The `mylonite demo` walkthrough below also needs the Quarry's
-deliberately-vulnerable agent (`mcp-kitchen-sink`), which is **not** published —
-so the demo is still **clone-first** with two editable installs. Requires
-**Python 3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14
-wheels yet, so create your virtualenv with a 3.11–3.13 interpreter. The CLI
-prints a clear note if it detects 3.14+.
+For a development checkout (to hack on Mylonite or the reference target):
 
 ```bash
 git clone https://github.com/Abidemialade/mylonite.git

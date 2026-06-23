@@ -79,6 +79,43 @@ def test_synthesize_none_without_a_plant() -> None:
     assert asyncio.run(synth.synthesize(descriptor)) is None
 
 
+def test_synthesize_uses_declared_consequential_tool_as_sink() -> None:
+    """A consequential tool whose NAME doesn't match the sink heuristics is still
+    usable when declared via control_config.consequential_tools (extra_sinks) — so
+    --synthesize doesn't silently no-op on a real app with custom tool names."""
+    descriptor = SimpleNamespace(
+        tools=[
+            _tool("write_note", ["note_id", "body"], ["note_id", "body"]),
+            _tool("wire_funds", ["account", "amount"], ["account", "amount"]),  # no sink hint
+        ]
+    )
+    synth = ChainSynthesizer(model="stub", completion_fn=_llm(_VALID_JSON))
+    assert asyncio.run(synth.synthesize(descriptor)) is None  # undiscoverable sink
+    chain = asyncio.run(synth.synthesize(descriptor, extra_sinks=("wire_funds",)))
+    assert chain is not None
+    assert chain.sink_tool == "wire_funds"
+
+
+def test_synthesize_uses_declared_seed_arm_plant() -> None:
+    """A store tool whose NAME doesn't match the plant heuristics is still usable
+    when declared via seed_arm (content param taken from the {payload} slot)."""
+    from mylonite.plugins._mcp.target_registry import SeedArmSpec
+
+    descriptor = SimpleNamespace(
+        tools=[
+            _tool("persist_blob", ["key", "payload_text"], ["key"]),  # no store hint
+            _tool("send_email", ["to", "subject", "body"], ["to", "subject", "body"]),
+        ]
+    )
+    synth = ChainSynthesizer(model="stub", completion_fn=_llm(_VALID_JSON))
+    assert asyncio.run(synth.synthesize(descriptor)) is None  # undiscoverable plant
+    seed_arm = SeedArmSpec(tool="persist_blob", args_template={"payload_text": "{payload}"})
+    chain = asyncio.run(synth.synthesize(descriptor, seed_arm=seed_arm))
+    assert chain is not None
+    assert chain.plant_tool == "persist_blob"
+    assert chain.plant_args["payload_text"] == "{payload}"
+
+
 def test_synthesize_on_reference_surface() -> None:
     from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 

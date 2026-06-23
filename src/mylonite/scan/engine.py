@@ -483,7 +483,14 @@ class ScanEngine:
         # cleanly (the engine still runs, just without LLM customisation for
         # those seeds).
         seed = _SEEDS_BY_ID.get(seed_id)
-        if seed is None:
+        needs_customisation = payload.metadata.get("needs_customisation") == "true"
+        # A catalogue-unknown seed_id is only fatal when the payload asks to be
+        # customised — the customiser prompt is built from the SeedPattern shape.
+        # Descriptor-synthesised seeds (direct_content / tool_description channels)
+        # set needs_customisation=false: their body is already target-shaped, so
+        # they run DIRECT instead of skipping. This is what makes Mylonite's probes
+        # port to real targets whose tool surface isn't the kitchen-sink shape.
+        if seed is None and needs_customisation:
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
@@ -491,8 +498,8 @@ class ScanEngine:
                     outcome="skipped_unknown_seed",
                     verdict_mechanism=None,
                     verdict_reason=(
-                        f"seed_id {seed_id!r} not in SEED_CATALOGUE; engine cannot "
-                        "drive customisation for this payload"
+                        f"seed_id {seed_id!r} not in SEED_CATALOGUE and requests "
+                        "customisation; engine cannot build a customiser prompt"
                     ),
                     error_detail=None,
                 ),
@@ -501,15 +508,15 @@ class ScanEngine:
 
         # Adaptive path (opt-in): plantable (indirect-injection) seeds run the
         # plant-drive-judge-refine loop instead of single-shot invoke. Direct
-        # (no_setup) seeds have nothing to plant, so they keep the single-shot
-        # path even when --adaptive is on.
-        if self._adaptive_active and seed.setup != "no_setup":
+        # (no_setup) seeds — and synthesised seeds (seed is None) — have nothing to
+        # plant, so they keep the single-shot path even when --adaptive is on.
+        if seed is not None and self._adaptive_active and seed.setup != "no_setup":
             return await self._run_payload_adaptive(
                 seed=seed, payload=payload, descriptor=descriptor, seed_id=seed_id
             )
 
         customiser_fallback = False
-        if self._config.customise and payload.metadata.get("needs_customisation") == "true":
+        if seed is not None and self._config.customise and needs_customisation:
             payload = await self._customiser.customise(seed, descriptor)
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
@@ -697,6 +704,29 @@ class ScanEngine:
                     judge_evidence=evidence,
                 ),
                 exploit=exploit,
+            )
+
+        # An aligned attacker model declining to craft a more effective payload is a
+        # TOOLING limit, not target evidence — report it as a skip (NOT a clean
+        # no_finding) so it is never read as "the target resisted".
+        if outcome.aborted_reason == "strategist_refusal":
+            return _PerPayloadOutcome(
+                attempt=ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=payload.pattern_id,
+                    outcome="skipped_planner_failure",
+                    verdict_mechanism=None,
+                    verdict_reason=(
+                        "adaptive aborted - the attacker model declined to refine the "
+                        "payload (alignment refusal) after "
+                        f"{outcome.attempts} attempt(s); this is an attacker-side limit, "
+                        "NOT evidence the target is safe"
+                    ),
+                    error_detail=None,
+                    tool_call_trace=trace,
+                    judge_evidence=evidence,
+                ),
+                exploit=None,
             )
 
         reason = (

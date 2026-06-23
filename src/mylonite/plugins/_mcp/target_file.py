@@ -21,7 +21,7 @@ Prefer an absolute path and verify the target actually opened it.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -49,9 +49,15 @@ class TargetFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     family: str
-    command: str
+    # Transport. Default "stdio" launches ``command``/``args`` as a subprocess.
+    # "sse"/"http" connect to a remote MCP server at ``url`` (``command`` is then
+    # optional/ignored; ``headers`` may carry auth and are never logged).
+    transport: Literal["stdio", "sse", "http"] = "stdio"
+    command: str = ""
     args: list[str] = []
     env: dict[str, str] = {}
+    url: str | None = None
+    headers: dict[str, str] = {}
     scope: str | None = None
     requires_scope: bool = False
     system_prompt: str | None = None
@@ -73,6 +79,14 @@ class TargetFile(BaseModel):
         if self.system_prompt is not None and self.system_prompt_file is not None:
             msg = "set at most one of system_prompt / system_prompt_file"
             raise ValueError(msg)
+        if self.transport == "stdio":
+            if not self.command:
+                raise ValueError("a stdio target requires a 'command' to launch the MCP server")
+            if self.url is not None:
+                raise ValueError("'url' is only valid for transport: sse|http")
+        else:  # sse | http — remote
+            if not self.url:
+                raise ValueError(f"transport {self.transport!r} requires a 'url'")
         if self.family in {"filesystem", "fetch", "github"}:
             msg = f"family {self.family!r} is reserved for a bundled target; choose another name"
             raise ValueError(msg)
@@ -125,6 +139,9 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         control_config=tf.control_config,
         vulnerable_launch=tf.vulnerable_launch,
         control_env={k: dict(v) for k, v in tf.control_env.items()},
+        transport=tf.transport,
+        url=tf.url,
+        headers=dict(tf.headers),
     )
 
 
@@ -228,6 +245,44 @@ def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> lis
             "(those seeds will be reported NOT TESTED, not clean)."
         )
     return errors
+
+
+# Weakness classes whose finding turns on a real SIDE EFFECT materialising — a
+# message actually sent (W4), a URL actually fetched (W3). Whether that effect
+# happened can only be confirmed by probing the target's OWN state; it is invisible
+# in the transcript. Without an effect_probe a real target under-detects these.
+_EFFECTFUL_WEAKNESS_CLASSES: frozenset[str] = frozenset({"W3", "W4"})
+
+
+def effect_probe_warnings(tf: TargetFile) -> list[str]:
+    """Non-fatal warnings: side-effecting weaknesses (W3/W4) need an ``effect_probe``.
+
+    A W3 (egress/SSRF) or W4 (unconfirmed consequential action) finding turns on
+    whether a real side effect MATERIALISED. On the bundled reference target that
+    lands in adapter-private metadata the deterministic predicates read; a REAL MCP
+    target does not surface it, so without an ``effect_probe`` (which queries the
+    target's own state) the effect cannot be confirmed and the seed silently
+    under-detects — a vulnerable target can read as clean.
+
+    Distinct from the W2 hard block in :func:`validate_for_scan`: W3/W4 also have
+    direct (non-indirect) variants and still exercise the surface, so this is a
+    WARNING (the scan proceeds; those seeds report NOT TESTED FOR EFFECT), not an
+    error. ``mylonite init-target`` auto-suggests an ``effect_probe`` candidate from
+    the tool surface.
+    """
+    warnings: list[str] = []
+    effectful = sorted(set(tf.weakness_classes) & _EFFECTFUL_WEAKNESS_CLASSES)
+    if effectful and tf.effect_probe is None:
+        warnings.append(
+            f"weakness class(es) {', '.join(effectful)} cause a real side effect "
+            "(a send/fetch/write) whose occurrence can only be confirmed by an "
+            "effect_probe that queries the target's own state. None is declared, so "
+            "those seeds cannot confirm the effect on a real target and a side-effecting "
+            "attack may read as clean. Add an effect_probe to the target file "
+            "(see docs/target-file; `mylonite init-target` suggests one) for end-to-end "
+            "damage confirmation."
+        )
+    return warnings
 
 
 def needs_seed_arm_autowire(tf: TargetFile) -> bool:

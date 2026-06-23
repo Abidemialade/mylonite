@@ -181,6 +181,13 @@ class TargetSpec:
     # and for targets whose controls live at the adapter shim — both unaffected.
     vulnerable_launch: LaunchOverride | None = None
     control_env: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Transport. ``"stdio"`` (default) spawns ``command``/``args`` as a subprocess;
+    # ``"sse"`` / ``"http"`` connect to a remote MCP server at ``url`` (headers may
+    # carry auth — never logged). Defaults keep every bundled/stdio target
+    # byte-for-byte. command/args/extra_env are ignored for remote transports.
+    transport: str = "stdio"
+    url: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""

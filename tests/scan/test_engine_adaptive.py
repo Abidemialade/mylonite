@@ -109,6 +109,52 @@ async def test_adaptive_path_turns_refusal_into_a_finding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_adaptive_strategist_refusal_reported_as_skip_not_clean() -> None:
+    """When the ATTACKER model declines to refine (empty/unparseable strategist
+    output), the loop aborts and the engine reports skipped_planner_failure with an
+    honest reason — NOT a clean no_finding that reads as 'the target resisted'."""
+
+    async def planner_refuses(**_: object) -> object:
+        return _msg("I won't act on instructions hidden in a note.", None)
+
+    async def strategist_declines(**_: object) -> object:
+        return _msg("I can't help craft that.", None)  # unparseable -> empty -> refusal
+
+    adapter = InProcessReferenceAdapter(
+        variant="vulnerable", model="stub", completion_fn=planner_refuses
+    )
+    judge = SuccessJudge(model="stub", llm_fallback=False)
+    driver = AdaptiveAttackDriver(
+        judge=judge, strategist_model="stub", completion_fn=strategist_declines, max_attempts=4
+    )
+    config = ScanConfig(
+        target_id="reference:vulnerable",
+        provider="anthropic",
+        model="stub",
+        max_concurrent=1,
+        pattern_id_filter=_W2_SEED,
+        adaptive=True,
+    )
+    engine = ScanEngine(
+        config=config,
+        adapter=adapter,
+        attack_modules=[PromptInjectionAttackModule()],
+        customiser=PayloadCustomiser(model="stub", completion_fn=planner_refuses),
+        judge=judge,
+        attack_driver=driver,
+    )
+
+    result = await engine.run()
+
+    assert result.report.findings_count == 0
+    (attempt,) = result.report.attempts
+    assert attempt.outcome == "skipped_planner_failure"
+    assert "alignment refusal" in attempt.verdict_reason
+    assert "NOT evidence the target is safe" in attempt.verdict_reason
+    assert attempt.judge_evidence["adaptive_attempts"] == "1"
+
+
+@pytest.mark.asyncio
 async def test_adaptive_off_keeps_single_shot_path() -> None:
     """With adaptive=False (default) the refusal is NOT rescued — the single-shot
     path reports no finding, proving the adaptive lever is what flips it."""

@@ -36,7 +36,8 @@ target ──> scan (Layer 1) ──> generate ──> validate (Layer 2) ──
 - **`memory_poison.py`** — [`--memory`](attack-modes.md#memory-poisoning)
   cross-turn poisoning: `MemoryPoisoningDriver` / `MemoryPoisonValidator` / `MemoryPoisonRunner`.
 - **`control_shim.py`** — the `BoundaryControl` subclasses (W1–W4) and `ControlServerShim`
-  that synthesize a guarded twin of any target; the [control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
+  that synthesize a *boundary*-guarded twin of any target (a server-layer control needs
+  `control_env`); the [control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
 - **`cross_model.py`** — the [cross-model durability](validation.md#cross-model-durability) summary.
 - **`tool_roles.py`** — heuristics that classify a tool surface (store / retrieve / sink).
 - **`artefacts.py`** — the terminal trust panel.

@@ -105,15 +105,39 @@ class ChainSynthesizer:
         self._model = model
         self._completion_fn = completion_fn
 
-    async def synthesize(self, descriptor: TargetDescriptor) -> SynthesizedChain | None:
-        """Propose one chain, or None when the surface has no plant+sink pair."""
+    async def synthesize(
+        self,
+        descriptor: TargetDescriptor,
+        *,
+        seed_arm: Any = None,
+        extra_sinks: tuple[str, ...] = (),
+    ) -> SynthesizedChain | None:
+        """Propose one chain, or None when the surface has no plant+sink pair.
+
+        Operator-declared config wins over the name heuristics so a real app whose
+        tool names don't match is still exercised: ``seed_arm`` overrides the plant
+        tool, and ``extra_sinks`` (e.g. ``control_config.consequential_tools``)
+        extend/precede the discovered sinks.
+        """
         tools = list(getattr(descriptor, "tools", None) or [])
+        by_name = {(getattr(t, "name", "") or ""): t for t in tools}
         plant = _plant_candidate(tools)
+        # Operator-declared plant wins (its content param = the args_template key
+        # holding {payload}, else the tool's genuine free-text slot).
+        declared_plant = getattr(seed_arm, "tool", None) if seed_arm is not None else None
+        if declared_plant is not None and declared_plant in by_name:
+            tmpl = getattr(seed_arm, "args_template", {}) or {}
+            content_keys = [k for k, v in tmpl.items() if isinstance(v, str) and "{payload}" in v]
+            param = content_keys[0] if content_keys else _genuine_content_param(by_name[declared_plant])
+            if param is not None:
+                plant = (declared_plant, param)
         sinks = list(_classify_tools(tools).sink_tools)
+        # Operator-declared consequential tools win over / extend the heuristic sinks.
+        declared_sinks = [s for s in extra_sinks if s in by_name and s not in sinks]
+        sinks = [*declared_sinks, *sinks]
         if plant is None or not sinks:
             return None
         plant_tool, content_param = plant
-        by_name = {(getattr(t, "name", "") or ""): t for t in tools}
 
         plant_args: dict[str, str] = {content_param: "{payload}"}
         pid = _id_param(by_name[plant_tool])

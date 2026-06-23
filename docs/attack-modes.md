@@ -137,3 +137,27 @@ the test realistic:
 mylonite scan --target-file app.yaml --authorize me \
   --planner-model claude-haiku-4-5 --customiser-model claude-sonnet-4-6 --adaptive
 ```
+
+---
+
+## Limitations (read this)
+
+These modes deepen coverage; they are not a guarantee of exhaustive attack discovery.
+The **validation oracle is the moat — not attack cleverness.** Two honest limits:
+
+- **The attacker is an aligned model, so it under-explores injection.** The strategist
+  (`--customiser-model`) is itself a safety-aligned LLM. Against an obviously-malicious
+  goal it may **decline to craft a more effective payload**. When that happens the
+  adaptive loop aborts and the attempt is reported as **skipped (attacker refusal)** with
+  the reason *"alignment refusal … NOT evidence the target is safe"* — never as a clean
+  pass. This is a tooling ceiling: do not read a refusal as a secure target, and bring
+  your own payload corpus when you need to push harder. Mylonite will not jailbreak its
+  own attacker.
+
+- **`--synthesize` / `--memory` need a real surface, and say so when it's missing.** They
+  discover a plant + sink (synthesis) or plant + recall (memory) from the tool surface.
+  When the surface exposes none — and you haven't declared a `seed_arm` /
+  `control_config.consequential_tools` to point them at the right tools — the run reports
+  **NOT TESTED** (a non-zero exit), never a clean `no_finding`. Declare those fields in
+  your [`target.yaml`](target-file.md) to exercise an app whose tool names don't match
+  the discovery heuristics.
