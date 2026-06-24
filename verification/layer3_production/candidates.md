@@ -15,6 +15,13 @@ vulnerable. Any finding here is a false positive — a Mylonite bug to fix.
 Well-built, non-deliberately-vulnerable MCP servers to scan for false positives.
 All must be **trusted** (reputable author, clear license) and run in a sandbox:
 
+- **`server-fetch` *with* a host allowlist** (the defended counterpart to the W3
+  external differential — see `verification/KEYSTONE.md`). Once upstream issue #2317
+  lands, or with a wrapper that blocks internal IPs, this server should yield **0
+  findings** — the first external 0-FP precision number (closes the C2/B4 gap). A
+  finding here is a Mylonite FP to fix.
+- **`mcp-server-email` *with* a confirmation/staging control applied** (the defended
+  counterpart to the W4 external differential) — should also yield 0 findings.
 - Official `@modelcontextprotocol/server-*` reference servers (filesystem, fetch,
   git, …) pointed at benign, empty scopes — they are not hardened against
   injection but they also carry no planted attack, so a *finding* would be a
