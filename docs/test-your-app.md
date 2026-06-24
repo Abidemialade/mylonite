@@ -10,12 +10,12 @@ stdio MCP server), this is the end-to-end path: scaffold a target file, scan, an
 
 ## 1. Scaffold a target file
 
-`init-target` launches your MCP server, lists its tools (no LLM call), infers the
-likely weakness classes and the plant/retrieve tools, and writes a commented
-`target.yaml` starter:
+`scan --scaffold` launches your MCP server, lists its tools (no LLM call, no attack),
+infers the likely weakness classes and the plant/retrieve tools, and writes a commented
+`target.yaml` starter (no `--authorize` needed — nothing is attacked):
 
 ```bash
-mylonite init-target --command "python" --arg "my_server.py" -o app.yaml
+mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml
 ```
 
 It suggests `weakness_classes` (W1/W2 baseline; W3 if it sees an egress tool; W4 if it

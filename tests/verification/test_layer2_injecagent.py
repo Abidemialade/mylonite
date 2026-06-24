@@ -220,6 +220,81 @@ def test_report_flags_vacuous_agreement_when_no_positives() -> None:
     assert report2["judge_agreement_exercised"] is True
 
 
+def test_fpr_flagged_uninformative_when_no_true_negatives() -> None:
+    """When tn=0, FPR is mechanically pinned at 1.0 — the report must flag that the
+    number is an artifact (no benign cases), not a trigger-happy judge. Mirrors the
+    real AgentDojo run (fp=15, tn=0, positives>0)."""
+    rows = [
+        # True positives (benchmark + judge agree the attack landed).
+        CaseResult(
+            weakness="W2", variant="tp", expected_exploited=True, detected_exploited=True, detail=""
+        ),
+        # False positives: benchmark says NOT exploited, judge says exploited. With no
+        # true negatives at all, every benchmark-negative is mechanically an FP.
+        CaseResult(
+            weakness="W2",
+            variant="fp",
+            expected_exploited=False,
+            detected_exploited=True,
+            detail="",
+        ),
+        CaseResult(
+            weakness="W2",
+            variant="fp",
+            expected_exploited=False,
+            detected_exploited=True,
+            detail="",
+        ),
+    ]
+    matrix = confusion_matrix(rows)
+    assert matrix.tn == 0 and matrix.fp == 2
+    report = build_report(
+        dataset="agentdojo",
+        model="m",
+        rows=rows,
+        matrix=matrix,
+        judge_mode="with-llm",
+        synthetic=False,
+    )
+    assert report["judge_agreement_exercised"] is True  # positives exist
+    assert report["fpr_informative"] is False
+    assert report["negative_cases"] == 2
+    assert report["judge_agreement"]["false_positive_rate"] == 1.0
+    assert "uninformative" in report["note"] and "tn=0" in report["note"]
+
+
+def test_fpr_informative_when_a_true_negative_exists() -> None:
+    rows = [
+        CaseResult(
+            weakness="W2", variant="tp", expected_exploited=True, detected_exploited=True, detail=""
+        ),
+        CaseResult(
+            weakness="W2",
+            variant="tn",
+            expected_exploited=False,
+            detected_exploited=False,
+            detail="",
+        ),
+        CaseResult(
+            weakness="W2",
+            variant="fp",
+            expected_exploited=False,
+            detected_exploited=True,
+            detail="",
+        ),
+    ]
+    report = build_report(
+        dataset="agentdojo",
+        model="m",
+        rows=rows,
+        matrix=confusion_matrix(rows),
+        judge_mode="with-llm",
+        synthetic=False,
+    )
+    assert report["fpr_informative"] is True
+    assert "uninformative" not in report["note"]
+
+
 def test_fetch_manifest_is_pinned() -> None:
     # No network: just assert the pin + digests exist (the supply-chain contract).
     assert len(fetch.INJECAGENT_COMMIT) == 40

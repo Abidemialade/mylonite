@@ -267,7 +267,7 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
     Distinct from the W2 hard block in :func:`validate_for_scan`: W3/W4 also have
     direct (non-indirect) variants and still exercise the surface, so this is a
     WARNING (the scan proceeds; those seeds report NOT TESTED FOR EFFECT), not an
-    error. ``mylonite init-target`` auto-suggests an ``effect_probe`` candidate from
+    error. ``mylonite scan --scaffold`` auto-suggests an ``effect_probe`` candidate from
     the tool surface.
     """
     warnings: list[str] = []
@@ -279,7 +279,7 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
             "effect_probe that queries the target's own state. None is declared, so "
             "those seeds cannot confirm the effect on a real target and a side-effecting "
             "attack may read as clean. Add an effect_probe to the target file "
-            "(see docs/target-file; `mylonite init-target` suggests one) for end-to-end "
+            "(see docs/target-file; `mylonite scan --scaffold` suggests one) for end-to-end "
             "damage confirmation."
         )
     return warnings

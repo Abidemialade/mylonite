@@ -3,17 +3,18 @@
 The end-to-end pipeline (each command also documented via ``--help``):
 
 * ``mylonite scan <target>`` — run the exploit-finding loop against a target
-  (the in-process reference twins, a bundled MCP family, or your own app via
-  ``--target-file``); supports ``--adaptive`` / ``--synthesize`` / ``--memory``.
+  (the in-process reference twins or your own app via ``--target-file``); pass
+  ``--scaffold app.yaml`` (with ``--command``) to introspect a server and write
+  a starter target.yaml instead of scanning.
 * ``mylonite generate`` — emit a pytest regression test from a confirmed exploit
   (offline, deterministic, no LLM).
 * ``mylonite validate`` — run a generated test through the differential-oracle
-  validator (live); ``--models`` re-proves it across model versions.
+  validator (live).
 * ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
-* ``mylonite report`` — render a scan/validation as a panel, HTML, SARIF, or JSON.
-* ``mylonite ablate`` / ``init-target`` / ``demo`` / ``doctor`` / ``taxonomy`` /
-  ``export`` / ``version`` — control-efficacy scoring, target scaffolding, the
-  Quarry playground, diagnostics, and supporting utilities.
+* ``mylonite report`` — render a scan/validation as a terminal panel, SARIF, or JSON.
+* ``mylonite ablate`` — score which controls are load-bearing vs. theater.
+* ``mylonite demo`` / ``doctor`` / ``taxonomy`` / ``version`` — the Quarry
+  playground, diagnostics, and supporting utilities.
 
 See the documentation site for guides and the full reference.
 """
@@ -51,7 +52,7 @@ app = typer.Typer(
         "Examples:\n\n"
         "`mylonite demo` -- try it on the bundled vulnerable agent (no setup).\n\n"
         "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
-        "`mylonite init-target --command 'python server.py' -o app.yaml` -- scaffold a target.yaml.\n\n"
+        "`mylonite scan --command 'python server.py' --scaffold app.yaml` -- scaffold a target.yaml.\n\n"
         "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
         "Docs: https://abidemialade.github.io/mylonite/ -- "
         "run 'mylonite COMMAND --help' for any command."
@@ -999,9 +1000,8 @@ def _run_memory_poison(
         "Examples:\n\n"
         "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
         "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
-        "`mylonite scan reference:vulnerable --adaptive` -- strategist refines until it lands.\n\n"
-        "`mylonite scan reference:vulnerable --synthesize` -- chain 2+ tools to a harmful sink.\n\n"
-        "`mylonite scan reference:vulnerable --memory` -- cross-turn memory poisoning.\n\n"
+        "`mylonite scan --command 'python server.py' --scaffold app.yaml` -- introspect a\n"
+        "server and write a starter target.yaml (no LLM call, no attack).\n\n"
         "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
     )
 )
@@ -1010,10 +1010,10 @@ def scan(
         str | None,
         typer.Argument(
             help=(
-                "Target ID: 'reference:vulnerable' / 'reference:guarded', a "
-                "bundled 'mcp:<family>[:<scope>]' (filesystem/fetch/github), or "
-                "'mcp:custom' with --command/--arg flags. Omit when using "
-                "--target-file. Non-reference targets require --authorize."
+                "Target ID: 'reference:vulnerable' / 'reference:guarded' (the "
+                "bundled twins), or 'mcp:custom' with --command/--arg flags. "
+                "Omit when using --target-file (your own MCP app). Non-reference "
+                "targets require --authorize."
             )
         ),
     ] = None,
@@ -1061,6 +1061,22 @@ def scan(
             help="mcp:custom — a weakness class the target exposes, e.g. W2/W4 (repeatable).",
         ),
     ] = None,
+    scaffold: Annotated[
+        Path | None,
+        typer.Option(
+            "--scaffold",
+            help=(
+                "Scaffold mode: introspect the MCP server (via --command, no LLM call, "
+                "no attack) and write a commented starter target.yaml to this PATH "
+                "instead of scanning. Fill in seed_arm/effect_probe, then scan with "
+                "--target-file."
+            ),
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="With --scaffold, overwrite the output file if it exists."),
+    ] = False,
     provider: Annotated[
         str | None,
         typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
@@ -1086,8 +1102,8 @@ def scan(
         typer.Option(
             "--customiser-model",
             help=(
-                "Override the model that CRAFTS/REFINES attack payloads (the red-team side, "
-                "incl. the --adaptive strategist). Defaults to --model. Mylonite separates "
+                "Override the model that CRAFTS/REFINES attack payloads (the red-team / "
+                "attacker side). Defaults to --model. Mylonite separates "
                 "three model roles: planner (the agent under test), customiser (the attacker), "
                 "and judge (the verdict) -- set them independently to mix a strong attacker "
                 "against a cheaper target, etc."
@@ -1154,6 +1170,7 @@ def scan(
                 "target, e.g. reference:*). Off by default; the single-shot path "
                 "is unchanged."
             ),
+            hidden=True,
         ),
     ] = False,
     verbose_strategist: Annotated[
@@ -1166,6 +1183,7 @@ def scan(
                 "strategist's reasoning is observable, not just an attempt count. "
                 "Payloads are redacted before display."
             ),
+            hidden=True,
         ),
     ] = False,
     synthesize: Annotated[
@@ -1178,6 +1196,7 @@ def scan(
                 "differentially validate it against the twins (needs a reference "
                 "twin target, e.g. reference:vulnerable). Off by default."
             ),
+            hidden=True,
         ),
     ] = False,
     memory: Annotated[
@@ -1191,6 +1210,7 @@ def scan(
                 "Differentially validated against the twins (reference, or a custom "
                 "--target-file's synthetic W2-guarded twin). Off by default."
             ),
+            hidden=True,
         ),
     ] = False,
     authorize: Annotated[
@@ -1243,6 +1263,23 @@ def scan(
     effective_planner_model = _resolve_role_model(planner_model)
     effective_customiser_model = _resolve_role_model(customiser_model)
     effective_judge_model = _resolve_role_model(judge_model)
+
+    # Scaffold mode: introspect a custom MCP server and write a starter target.yaml
+    # instead of scanning. No LLM call and no attack, so it does NOT require
+    # --authorize (this folds the former `init-target` command into `scan`).
+    if scaffold is not None:
+        _scaffold_target_file(
+            output=scaffold,
+            command=command,
+            arg=arg,
+            env=env,
+            scope=scope,
+            system_prompt=system_prompt,
+            system_prompt_file=system_prompt_file,
+            model=model,
+            force=force,
+        )
+        return
 
     # Tool-chaining synthesis is a distinct flow (synthesize -> twin
     # differential validation), not the per-seed engine. Branch early and return.
@@ -2551,6 +2588,7 @@ def validate(
                 "silently reappear on a model upgrade. Reference targets only; exits "
                 "non-zero if any model fails. Overrides --model."
             ),
+            hidden=True,
         ),
     ] = None,
     target_file: Annotated[
@@ -2834,7 +2872,6 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
     epilog=(
         "Examples:\n\n"
         "`mylonite report .mylonite/scans/<dir>` -- terminal trust panel (offline, no LLM).\n\n"
-        "`mylonite report <dir> --html report.html` -- shareable, self-contained HTML dashboard.\n\n"
         "`mylonite report <dir> --sarif out.sarif` -- GitHub code scanning (Security tab + PR checks).\n\n"
         "`mylonite report <dir> --json finding.json` -- machine-readable bundle (dashboards/SIEM/bots)."
     )
@@ -2849,27 +2886,6 @@ def report(
             ),
         ),
     ],
-    html: Annotated[
-        Path | None,
-        typer.Option(
-            "--html",
-            help=(
-                "Also write a standalone, shareable HTML report. Takes a file "
-                "PATH argument, e.g. --html report.html (not a bare flag)."
-            ),
-        ),
-    ] = None,
-    html_style: Annotated[
-        str,
-        typer.Option(
-            "--html-style",
-            help=(
-                "HTML style: 'dashboard' (structured exec summary + per-finding "
-                "severity + compliance + collapsible evidence, default) or 'terminal' "
-                "(the raw trust-panel export). Both are self-contained (no JS/CDN)."
-            ),
-        ),
-    ] = "dashboard",
     sarif: Annotated[
         Path | None,
         typer.Option(
@@ -2904,19 +2920,11 @@ def report(
     """
     from rich.console import Console as _Console
 
-    if html is not None and html_style not in ("dashboard", "terminal"):
-        typer.echo(
-            f"--html-style {html_style!r} is not valid; choose 'dashboard' or 'terminal'.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
     kind, path = _locate_report_artefact(target)
-    # A recording console only when exporting the terminal HTML style.
-    record = html is not None and html_style == "terminal"
-    console = _Console(record=record)
+    console = _Console()
 
-    # Captured for the dashboard renderer (enriched so NIST is present everywhere).
+    # Captured for the machine-readable exports below (SARIF / JSON bundle),
+    # enriched so NIST is present everywhere.
     vreport: Any = None
     sreport: Any = None
     dashboard_exploit: Any = None
@@ -2982,20 +2990,6 @@ def report(
             console.print(f"compliance: {', '.join(sorted(tags))}")
         console.print(f"target: {target_id}  artefacts: {path.parent}")
 
-    if html is not None:
-        if html_style == "dashboard":
-            from mylonite.report import render_scan_html, render_validation_html
-
-            page = (
-                render_validation_html(vreport, dashboard_exploit)
-                if kind == "validation"
-                else render_scan_html(sreport, dashboard_exploits)
-            )
-            html.write_text(page, encoding="utf-8")
-        else:
-            html.write_text(console.export_html(inline_styles=True), encoding="utf-8")
-        typer.echo(f"Wrote HTML report: {html} (style: {html_style})")
-
     if sarif is not None or json_bundle is not None:
         import json as _json
 
@@ -3018,80 +3012,6 @@ def report(
                 _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
             )
             typer.echo(f"Wrote JSON finding bundle: {json_bundle}")
-    raise typer.Exit(code=EXIT_SUCCESS)
-
-
-def _exploit_for_export(target: Path) -> Path:
-    """Resolve an export TARGET (a dir or an exploit_*.json) to an exploit file."""
-    if target.is_file():
-        return target
-    if target.is_dir():
-        matches = sorted(target.glob("exploit_*.json"))
-        if matches:
-            return matches[0]
-        typer.echo(
-            f"no exploit_*.json found in {target}. Run `mylonite scan`/`generate` first.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    typer.echo(
-        f"path not found: {target}. Pass a scan/generated dir or an exploit_*.json.", err=True
-    )
-    raise typer.Exit(code=EXIT_CONFIG)
-
-
-@app.command(name="export")
-def export_cmd(
-    target: Annotated[
-        Path,
-        typer.Argument(
-            help=(
-                "A validated/generated dir, a scan dir, or an exploit_*.json. "
-                "The validated finding to export."
-            ),
-        ),
-    ],
-    fmt: Annotated[
-        str,
-        typer.Option("--format", help="Export format. Currently 'eval-yaml' (the default)."),
-    ] = "eval-yaml",
-    out: Annotated[
-        Path | None,
-        typer.Option("--out", help="Write to this file instead of stdout."),
-    ] = None,
-) -> None:
-    """Export a validated finding into a portable eval format (offline, no LLM).
-
-    Mylonite is the validation layer; this hands a differential-oracle-validated
-    finding to the eval/CI harness a team already runs. ``--format eval-yaml``
-    emits a portable eval test case (the attack as input + a rubric assert that
-    the agent must resist it) carrying the compliance tags and a provenance
-    marker, so the team gets a Mylonite-validated regression in their suite.
-    """
-    from mylonite import testkit
-    from mylonite.export import SUPPORTED_FORMATS, to_eval_config
-
-    if fmt not in SUPPORTED_FORMATS:
-        typer.echo(
-            f"unknown --format {fmt!r}. Supported: {', '.join(SUPPORTED_FORMATS)}.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    exploit_path = _exploit_for_export(target)
-    try:
-        exploit = testkit.load_exploit(exploit_path)
-    except (FileNotFoundError, ValueError) as exc:
-        typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-    rendered = to_eval_config(exploit)
-    if out is not None:
-        out.write_text(rendered, encoding="utf-8")
-        typer.echo(f"Wrote {fmt} export: {out}")
-        typer.echo("Next: wire your agent under `providers`, then run it in your eval/CI harness.")
-    else:
-        typer.echo(rendered)
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
@@ -3164,61 +3084,37 @@ def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
     return flagged
 
 
-@app.command(name="init-target")
-def init_target(
-    command: Annotated[
-        str,
-        typer.Option("--command", help="The MCP server launch command (e.g. 'python', 'node')."),
-    ],
-    arg: Annotated[
-        list[str] | None,
-        typer.Option("--arg", help="A server arg (repeatable, in order)."),
-    ] = None,
-    env: Annotated[
-        list[str] | None,
-        typer.Option("--env", help="A KEY=VALUE env var for the server (repeatable)."),
-    ] = None,
-    scope: Annotated[
-        str | None,
-        typer.Option("--scope", help="Optional scope label (must later match --authorize)."),
-    ] = None,
-    family: Annotated[
-        str,
-        typer.Option("--family", help="A short name for your target (used in report ids)."),
-    ] = "custom",
-    system_prompt_file: Annotated[
-        Path | None,
-        typer.Option("--system-prompt-file", help="Read the target's system prompt from a file."),
-    ] = None,
-    output: Annotated[
-        Path,
-        typer.Option("--output", "-o", help="Where to write the scaffolded target YAML."),
-    ] = Path("target.yaml"),
-    model: Annotated[
-        str | None,
-        typer.Option(
-            "--model", help="Model id used only to construct the adapter (no LLM call is made)."
-        ),
-    ] = None,
-    force: Annotated[
-        bool,
-        typer.Option("--force", help="Overwrite the output file if it already exists."),
-    ] = False,
+def _scaffold_target_file(
+    *,
+    output: Path,
+    command: str | None,
+    arg: list[str] | None,
+    env: list[str] | None,
+    scope: str | None,
+    system_prompt: str | None,
+    system_prompt_file: Path | None,
+    model: str | None,
+    force: bool,
 ) -> None:
-    """Scaffold a custom-target YAML by launching your MCP server and listing its tools.
+    """Implement ``scan --scaffold``: launch the MCP server, list its tools, and
+    write a commented ``target.yaml`` starter (NO LLM call, no attack).
 
-    Launches the server once (NO LLM call), introspects its tools, and writes a
-    commented ``target.yaml`` starter with SUGGESTED ``weakness_classes`` /
-    ``primary_tools`` and a ``seed_arm`` + ``effect_probe`` template for you to
-    fill in. The suggestions are hints grounded in the bundled OWASP-LLM/ASI
-    taxonomy — you own the consequential-capability + effect-probe declarations,
-    so review and edit before scanning.
+    Introspects the live tool surface and writes a starter with SUGGESTED
+    ``weakness_classes`` / ``primary_tools`` and a ``seed_arm`` + ``effect_probe``
+    template for the operator to fill in. The suggestions are hints grounded in
+    the bundled OWASP-LLM/ASI taxonomy — the operator owns the
+    consequential-capability + effect-probe declarations, so they review and edit
+    before scanning.
     """
     import yaml
 
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec
+
+    if not command:
+        typer.echo("--scaffold needs --command (the MCP server launch command).", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
 
     if output.exists() and not force:
         typer.echo(f"{output} already exists — pass --force to overwrite.", err=True)
@@ -3229,13 +3125,11 @@ def init_target(
         args=arg,
         env=env,
         scope=scope,
-        system_prompt=None,
+        system_prompt=system_prompt,
         system_prompt_file=system_prompt_file,
         primary_tools=None,
         weakness_classes=None,
     )
-    # Allow a custom --family (the flag helper hardcodes 'custom').
-    tf = tf.model_copy(update={"family": family})
 
     try:
         spec = build_target_spec(tf)
@@ -3321,7 +3215,7 @@ def init_target(
     typer.echo(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
-        f"`mylonite scan mcp:custom --target-file {output} --authorize {family}`.",
+        f"`mylonite scan --target-file {output} --authorize custom`.",
         err=True,
     )
 
@@ -3391,7 +3285,7 @@ def _render_target_scaffold(
         else ""
     )
     return f"""\
-# Mylonite custom-target scaffold — generated by `mylonite init-target`.
+# Mylonite custom-target scaffold — generated by `mylonite scan --scaffold`.
 # Review and EDIT before scanning: the suggestions below are hints, not gospel.
 family: {tf.family}
 command: {tf.command}
@@ -4083,17 +3977,6 @@ def ablate(
             "weakness classes, and that the representative seeds reach the surface.",
             err=True,
         )
-
-
-@app.command()
-def init() -> None:
-    """Deprecated alias — use `mylonite init-target` to scaffold a target YAML."""
-    typer.echo(
-        "`mylonite init` is now `mylonite init-target` — it scaffolds a custom-target "
-        "YAML by launching your MCP server. Run `mylonite init-target --help`.",
-        err=True,
-    )
-    raise typer.Exit(code=EXIT_CONFIG)
 
 
 @taxonomy_app.command("list")

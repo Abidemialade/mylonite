@@ -126,33 +126,48 @@ validate → gate` runs against the bundled reference agent and your own MCP app
 proves each finding with the differential oracle, and emits a committed regression
 test that gates CI.
 
-**Available today:**
+**The thesis the evidence supports: model robustness ≠ app security.** A
+[third-party verification harness](https://abidemialade.github.io/mylonite/verification/)
+runs Mylonite against external ground truth it did not author (DVMCP, InjecAgent,
+AgentDojo). The result that reframes the product: a frontier model resisted *generic*
+injection everywhere, but the *same model* was caught immediately where the **app's own
+design** was the flaw — a `send_email` dispatched with no approval step. Mylonite's
+demonstrable value is **app-flaw detection, differential/control-efficacy validation,
+regression gating, and honesty** (NOT-TESTED is never reported as clean), not
+out-fooling frontier alignment. The product surface is scoped to exactly that.
 
-- Ingestion of MCP/tool-using agents over in-process and stdio transports, plus
-  three bundled real open-source MCP targets (filesystem, fetch, github).
+**Available today (the proven core):**
+
+- Ingestion of MCP/tool-using agents over in-process and stdio transports.
 - The four weakness classes — W1 tool-description smuggling, W2 indirect injection,
   W3 excessive egress / SSRF, W4 unconfirmed consequential action — with
   deterministic predicates and an LLM-judge fallback.
-- Attack depth: an adaptive refinement loop, app-specific tool-chaining synthesis,
-  and stateful cross-turn memory poisoning.
-- The full validation engine above, including the control-efficacy oracle and
-  control ablation.
-- Custom-target support via a declarative `target.yaml`, the one-command
-  `mylonite gate` flow, a reusable GitHub Action, and CI workflow templates.
-- Results in every format teams consume — a terminal trust panel, an HTML
-  dashboard, SARIF for GitHub code scanning, a machine-readable JSON bundle, and a
-  gating PR with a proven-fix diff — all carrying OWASP / OWASP-ASI / MITRE ATLAS /
-  NIST compliance tags.
-- Cross-model durability checks, so a fix doesn't silently regress on a model upgrade.
+- The full validation engine above, including the **control-efficacy oracle** and
+  **control ablation** (which safeguard is load-bearing vs. theater).
+- Custom-target support via a declarative `target.yaml` (scaffolded by
+  `scan --scaffold`), the one-command `mylonite gate` flow, a reusable GitHub
+  Action, and CI workflow templates.
+- Results in the formats teams consume — a terminal trust panel, SARIF for GitHub
+  code scanning, a machine-readable JSON bundle, and a gating PR with a proven-fix
+  diff — all carrying OWASP / OWASP-ASI / MITRE ATLAS / NIST compliance tags.
+- The third-party verification harness itself, with a published honest scorecard
+  (negatives included).
 
-**Direction.** Near-term work deepens what exists rather than widening it: broader
-real-world threat coverage on the existing machinery, richer developer-facing
-results, and bringing the bundled target families fully under the differential moat.
-Longer-term themes include additional target adapters (RAG, custom HTTP agents), a
-second test-output language, more attack classes across the OWASP ASI Top 10, a
-contributable attack-pattern registry, and — demand permitting — hosted CI,
-dashboards, and compliance/audit evidence packs. See [the changelog](./CHANGELOG.md)
-for what shipped in each release.
+**Experimental (in the tree, runnable, not yet headline).** Deeper attack tactics —
+an adaptive refinement loop, app-specific tool-chaining synthesis, stateful cross-turn
+memory poisoning — plus cross-model durability checks, the bundled real-OSS MCP target
+families (filesystem, fetch, github), and the remote SSE/HTTP transport. These stay in
+the tree and return to the headline once they're proven on third-party ground truth.
+
+**Direction.** Near-term work strengthens and externally *proves* the core rather than
+widening it: land a real external differential (a non-self-seeded finding that fires
+unguarded, is resisted with the control, and survives the flakiness gate), triage judge
+precision against independent labels, and bring the experimental tactics under the same
+verification bar before re-headlining them. Longer-term themes include additional target
+adapters (RAG, custom HTTP agents), a second test-output language, more attack classes
+across the OWASP ASI Top 10, a contributable attack-pattern registry, and — demand
+permitting — hosted CI, dashboards, and compliance/audit evidence packs. See [the
+changelog](./CHANGELOG.md) for what shipped in each release.
 
 ## Open-source engineering standards
 

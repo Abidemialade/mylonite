@@ -2,8 +2,8 @@
 
 A target file is how you point Mylonite at a custom MCP server (`--target-file`). One
 YAML declares how to launch the server, which weakness classes it exposes, and how to
-plant and verify attacks. `mylonite init-target` scaffolds one for you; this page is the
-full field reference. Source: `mylonite.plugins._mcp.target_file.TargetFile`.
+plant and verify attacks. `mylonite scan --scaffold app.yaml` scaffolds one for you; this
+page is the full field reference. Source: `mylonite.plugins._mcp.target_file.TargetFile`.
 
 ## Minimal
 

@@ -2,7 +2,7 @@
 checks), where developers already triage every other finding.
 
 Reuses the data Mylonite already captures: the ``ExploitRecord`` (pattern, target,
-compliance), the ``severity_for`` rule (shared with the HTML dashboard), and the
+compliance), the ``severity_for`` rule (shared with the JSON bundle), and the
 ``ValidationReport``'s differential proof. The proof rides in each result's message
 so the GitHub UI shows *why a finding is real* (fired N/N on the vulnerable target,
 resisted M/M with the control) — our anti-false-positive trust signal.
@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from mylonite.gate.localize import localize
-from mylonite.report.html import severity_for
+from mylonite.report.severity import severity_for
 from mylonite.version import __version__
 
 _SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"

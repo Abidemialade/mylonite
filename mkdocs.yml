@@ -52,6 +52,7 @@ nav:
       - Weakness classes & how attacks work: weakness-classes.md
       - Attack modes: attack-modes.md
       - The validation engine: validation.md
+      - Independent verification: verification.md
       - Concepts: concepts.md
       - Standards mapping: standards-mapping.md
   - Reference:

@@ -11,24 +11,33 @@ LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not k
 
 ## `scan` — find weaknesses
 
-Run the exploit-finding loop against a target. Default is the [single-shot
-engine](attack-modes.md); opt into `--adaptive`, `--synthesize`, or `--memory`.
+Run the exploit-finding loop against a target.
 
-**Target** (positional): `reference:vulnerable` / `reference:guarded`, a bundled
-`mcp:<family>[:<scope>]` (`filesystem`/`fetch`/`github`), or `mcp:custom` with
-`--command`/`--arg`. Omit when using `--target-file`. Non-reference targets need
-`--authorize`.
+**Target** (positional): `reference:vulnerable` / `reference:guarded` (the bundled
+twins), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
+(your own MCP app). Non-reference targets need `--authorize`.
 
-Key options: `--target-file PATH`, `--authorize NAME`, `--adaptive`,
-`--verbose-strategist`, `--synthesize`, `--memory`, `--provider`, `--model`,
+Key options: `--target-file PATH`, `--authorize NAME`, `--provider`, `--model`,
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
-`--allow-no-seed-arm`. For `mcp:custom`: `--command`, `--arg`, `--env`, `--scope`,
+`--allow-no-seed-arm`. For a custom target: `--command`, `--arg`, `--env`, `--scope`,
 `--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
 
+**Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
+(one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
+commented starter `target.yaml` with suggested `weakness_classes` and auto-detected
+`seed_arm`/`effect_probe` candidates. Add `--force` to overwrite. Edit it, then scan
+with `--target-file`.
+
 ```bash
-mylonite scan --target-file app.yaml --authorize me --adaptive
+mylonite scan --command python --arg my_server.py --scaffold app.yaml   # generate the target file
+mylonite scan --target-file app.yaml --authorize me                     # then scan it
 ```
+
+> **Experimental (hidden from `--help`, still runnable):** `--adaptive`,
+> `--verbose-strategist`, `--synthesize`, `--memory`. These deeper attack tactics stay
+> in the tree but aren't yet proven on third-party ground truth — see
+> [attack modes](attack-modes.md).
 
 ## `generate` — emit the regression test
 
@@ -49,16 +58,17 @@ Run the generated test through the [differential-oracle validator](validation.md
 A test is **kept** only when it discriminates reliably.
 
 Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
-`--model`; **`--models a,b,c`** ([cross-model durability](validation.md#cross-model-durability)
-— re-prove across models, flags re-emergence, reference targets only); `--target-file
-PATH` (re-drive your REAL app instead of the twin); `--fast` (skip the differential leg
-— faster, weaker); `--randomize-exfil`; `--adaptive` (grade the control under adaptive
-pressure); `--iteration-timeout S`. `--prove-control` is a back-compat no-op (the
-differential is now default).
+`--model`; `--target-file PATH` (re-drive your REAL app instead of the twin); `--fast`
+(skip the differential leg — faster, weaker); `--randomize-exfil`; `--iteration-timeout
+S`. `--prove-control` is a back-compat no-op (the differential is now default).
 
 ```bash
-mylonite validate .mylonite/generated/my-finding --models claude-haiku-4-5,claude-sonnet-4-6
+mylonite validate .mylonite/generated/my-finding --target-file app.yaml
 ```
+
+> **Experimental (hidden from `--help`, still runnable):** `--models a,b,c`
+> (cross-model durability — re-prove across models, flag re-emergence) and `--adaptive`
+> (grade the control under adaptive pressure).
 
 ## `gate` — scan → generate → validate → PR (the magic moment)
 
@@ -76,11 +86,12 @@ mylonite gate --target-file app.yaml --authorize me --open-pr
 
 ## `report` — render findings
 
-Render a saved scan or validation, offline. See [Reading the results](reading-results.md).
+Render a saved scan or validation as a terminal trust panel, offline. See [Reading the
+results](reading-results.md).
 
-Options: `target` (a scan/validated dir or `*_report.json`); `--html PATH`
-(`--html-style dashboard|terminal`); `--sarif PATH` (GitHub code scanning); `--json
-PATH` (machine-readable bundle).
+Options: `target` (a scan/validated dir or `*_report.json`); `--sarif PATH` (SARIF 2.1.0
+for GitHub code scanning); `--json PATH` (machine-readable finding bundle). Both carry
+the differential proof and the OWASP/ASI/ATLAS/NIST tags.
 
 ```bash
 mylonite report .mylonite/validated/my-finding --sarif out.sarif --json finding.json
@@ -99,17 +110,9 @@ Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
 mylonite ablate --target-file app.yaml --authorize me --controls W2,W4 --redundancy
 ```
 
-## `init-target` — scaffold a `target.yaml`
-
-Launch your MCP server, list its tools (no LLM call), and write a commented target file.
-See [Test your own app](test-your-app.md) and the [target.yaml reference](target-file.md).
-
-Options: `--command` (required); `--arg`, `--env`; `--scope`; `--family`;
-`--system-prompt-file`; `--output/-o PATH`; `--model`; `--force`.
-
-```bash
-mylonite init-target --command python --arg my_server.py -o app.yaml
-```
+> **Scaffolding moved.** The old `mylonite init-target` command is now `mylonite scan
+> --scaffold PATH` (see [`scan`](#scan-find-weaknesses) above). See [Test your own
+> app](test-your-app.md) and the [target.yaml reference](target-file.md).
 
 ## `demo` — the Quarry playground
 
@@ -120,12 +123,6 @@ Replays recorded fixtures by default; `--live` makes real calls. See [the Quarry
 mylonite demo            # offline, instant
 mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
 ```
-
-## `export` — portable eval format
-
-Export a validated finding to a portable eval format (offline).
-
-Options: `target`; `--format eval-yaml`; `--out PATH`.
 
 ## `doctor` — preflight the provider
 

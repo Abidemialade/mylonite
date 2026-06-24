@@ -12,6 +12,9 @@ digests (`SOURCE.md`), never vendored.
 > **Read [`FINDINGS.md`](FINDINGS.md) for what the system actually showed** — the
 > evidence-backed scorecard (real catch, recall, judge agreement, precision) and
 > the honest gaps. Headline: *model robustness ≠ app security.*
+>
+> **To land the strongest moat proof** — one external (non-self-seeded) differential —
+> follow the maintainer-run recipe in [`KEYSTONE.md`](KEYSTONE.md).
 
 ## Layers
 

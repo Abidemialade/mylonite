@@ -14,7 +14,7 @@ from typing import Any
 
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
-from mylonite.report.html import severity_for
+from mylonite.report.severity import severity_for
 from mylonite.version import __version__
 
 #: Bump on any backward-incompatible change to the finding shape.

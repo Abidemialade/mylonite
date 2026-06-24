@@ -47,8 +47,9 @@ _TEASER: Final[str] = (
     "vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable"
 )
 _NEXT_STEP: Final[str] = (
-    "Try it on a real target next: mylonite scan mcp:fetch --authorize fetch "
-    "(needs an LLM API key + uv) — details: docs/quarry.md"
+    "Try it on YOUR app next: mylonite scan --command 'python server.py' --scaffold "
+    "app.yaml, then mylonite scan --target-file app.yaml --authorize my-app "
+    "(needs an LLM API key) — details: docs/test-your-app.md"
 )
 
 _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]

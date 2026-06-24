@@ -110,12 +110,6 @@ def test_taxonomy_list_owasp_asi() -> None:
         assert f"ASI{i:02d}" in result.stdout
 
 
-def test_init_is_deprecated_alias() -> None:
-    result = runner.invoke(app, ["init"])
-    assert result.exit_code == EXIT_CONFIG
-    assert "init-target" in (result.stderr or result.output)
-
-
 def _fake_descriptor_with_tools() -> Any:
     from mylonite.contracts import TargetDescriptor, ToolSpec
 
@@ -140,7 +134,7 @@ def _fake_descriptor_with_tools() -> Any:
 
 
 def _patch_fake_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make init-target's MCPStdioAdapter return canned tools (no subprocess)."""
+    """Make `scan --scaffold`'s MCPStdioAdapter return canned tools (no subprocess)."""
     from mylonite.plugins._mcp import stdio_adapter
 
     class _FakeAdapter:
@@ -153,34 +147,34 @@ def _patch_fake_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stdio_adapter, "MCPStdioAdapter", _FakeAdapter)
 
 
-def test_init_target_scaffolds_valid_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """init-target launches the server, lists tools, and writes a valid target YAML."""
+def test_scan_scaffold_writes_valid_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`scan --scaffold` launches the server, lists tools, and writes a valid target YAML."""
     _patch_fake_adapter(monkeypatch)
     out = tmp_path / "target.yaml"
     result = runner.invoke(
         app,
         [
-            "init-target",
+            "scan",
             "--command",
             "python",
             "--arg",
             "-m",
             "--arg",
             "my_server",
-            "--family",
-            "myapp",
-            "--output",
+            "--scaffold",
             str(out),
         ],
     )
     assert result.exit_code == 0, result.output
     assert out.exists()
+    # Scaffolding introspects only — it must NOT require --authorize (no attack runs).
+    assert "--authorize is required" not in (result.stderr or "")
 
     # The scaffold round-trips back to a TargetFile.
     from mylonite.plugins._mcp.target_file import load_target_file
 
     tf = load_target_file(out)
-    assert tf.family == "myapp"
+    assert tf.family == "custom"
     assert tf.command == "python"
     assert tf.args == ["-m", "my_server"]
     # Discovered tools surfaced as primary_tools; suggestions present.
@@ -188,6 +182,15 @@ def test_init_target_scaffolds_valid_yaml(tmp_path: Path, monkeypatch: pytest.Mo
     assert "web_fetch" in tf.primary_tools
     # W2 baseline + W3 (url-shaped) + W4 (consequential) suggested from the surface.
     assert {"W2", "W3", "W4"}.issubset(set(tf.weakness_classes))
+
+
+def test_scan_scaffold_requires_command(tmp_path: Path) -> None:
+    """`scan --scaffold` with no --command is a config error, not a silent no-op."""
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(app, ["scan", "--scaffold", str(out)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--command" in (result.stderr or result.output)
+    assert not out.exists()
 
 
 def test_classify_tools_happy_path() -> None:
@@ -244,7 +247,7 @@ def test_classify_tools_detects_save_note_trap() -> None:
     assert roles.retrieve_tool is None  # the trap: no id-free readback
 
 
-def test_init_target_scaffold_prefills_seed_arm_candidate(
+def test_scan_scaffold_prefills_seed_arm_candidate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The scaffold pre-fills a concrete seed_arm candidate from the tool schemas."""
@@ -275,7 +278,7 @@ def test_init_target_scaffold_prefills_seed_arm_candidate(
 
     monkeypatch.setattr(stdio_adapter, "MCPStdioAdapter", _FakeAdapter)
     out = tmp_path / "target.yaml"
-    result = runner.invoke(app, ["init-target", "--command", "python", "--output", str(out)])
+    result = runner.invoke(app, ["scan", "--command", "python", "--scaffold", str(out)])
     assert result.exit_code == 0, result.output
     text = out.read_text(encoding="utf-8")
     assert "tool: remember" in text
@@ -283,19 +286,19 @@ def test_init_target_scaffold_prefills_seed_arm_candidate(
     assert "recall" in text  # the detected id-free retrieval path
 
 
-def test_init_target_refuses_overwrite_without_force(
+def test_scan_scaffold_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_fake_adapter(monkeypatch)
     out = tmp_path / "target.yaml"
     out.write_text("existing", encoding="utf-8")
-    result = runner.invoke(app, ["init-target", "--command", "python", "--output", str(out)])
+    result = runner.invoke(app, ["scan", "--command", "python", "--scaffold", str(out)])
     assert result.exit_code == EXIT_CONFIG
     assert "already exists" in (result.stderr or result.output)
     assert out.read_text(encoding="utf-8") == "existing"  # untouched
 
 
-def test_init_target_warns_on_relative_sqlite_path(
+def test_scan_scaffold_warns_on_relative_sqlite_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_fake_adapter(monkeypatch)
@@ -303,12 +306,12 @@ def test_init_target_warns_on_relative_sqlite_path(
     result = runner.invoke(
         app,
         [
-            "init-target",
+            "scan",
             "--command",
             "python",
             "--env",
             "DB_URL=sqlite:///data.db",
-            "--output",
+            "--scaffold",
             str(out),
         ],
     )
@@ -1592,34 +1595,6 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
-def test_report_html_export_terminal_style(tmp_path: Path) -> None:
-    """The 'terminal' style preserves the raw trust-panel export (kill matrix)."""
-    gen = tmp_path / "gen"
-    _write_validation_report_json(gen)
-    html = tmp_path / "panel.html"
-    result = runner.invoke(
-        app, ["report", str(gen), "--html", str(html), "--html-style", "terminal"]
-    )
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    assert html.is_file()
-    body = html.read_text(encoding="utf-8")
-    assert "<html" in body.lower()
-    assert "kill matrix" in body
-
-
-def test_report_html_export_dashboard_is_default(tmp_path: Path) -> None:
-    """`report --html` defaults to the structured dashboard (self-contained)."""
-    gen = tmp_path / "gen"
-    _write_validation_report_json(gen)
-    html = tmp_path / "panel.html"
-    result = runner.invoke(app, ["report", str(gen), "--html", str(html)])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    body = html.read_text(encoding="utf-8")
-    assert "<!doctype html" in body.lower()
-    assert "Mylonite validation report" in body
-    assert "<script" not in body.lower()  # self-contained, no JS
-
-
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -1630,39 +1605,8 @@ def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# PR6 — declarative run-config + eval/CI interop export.
+# PR6 — declarative run-config.
 # ---------------------------------------------------------------------------
-
-
-def test_export_eval_yaml_stdout(tmp_path: Path) -> None:
-    gen = tmp_path / "gen"
-    _write_exploit_json(gen / "exploit_pid.json")
-    result = runner.invoke(app, ["export", str(gen)])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    import yaml as _yaml
-
-    doc = _yaml.safe_load(result.output)
-    assert doc["tests"][0]["assert"][0]["type"] == "llm-rubric"
-    assert doc["tests"][0]["metadata"]["validated_by"] == "mylonite-differential-oracle"
-
-
-def test_export_eval_yaml_to_file(tmp_path: Path) -> None:
-    gen = tmp_path / "gen"
-    _write_exploit_json(gen / "exploit_pid.json")
-    out = tmp_path / "evalconfig.yaml"
-    result = runner.invoke(app, ["export", str(gen), "--out", str(out)])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    assert out.is_file()
-    assert "eval/CI harness" in result.output  # next-step hint
-    assert "llm-rubric" in out.read_text(encoding="utf-8")
-
-
-def test_export_unknown_format_exit_2(tmp_path: Path) -> None:
-    gen = tmp_path / "gen"
-    _write_exploit_json(gen / "exploit_pid.json")
-    result = runner.invoke(app, ["export", str(gen), "--format", "nope"])
-    assert result.exit_code == EXIT_CONFIG
-    assert "eval-yaml" in (result.stderr or result.output)
 
 
 def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1762,11 +1706,6 @@ def test_custom_target_flow_needs_target_file_at_most_once(
     assert list(gen.glob("test_security_*.py"))
     assert (gen / "target.yaml").is_file()  # co-located, ready for validate
     assert "Using target:" in r2.output
-
-    # 3) export the validated finding — also needs no flags beyond the dir.
-    r3 = runner.invoke(app, ["export", str(gen)])
-    assert r3.exit_code == EXIT_SUCCESS, r3.output
-    assert "validated_by" in r3.output
 
     target_registry.clear_runtime_targets()
 

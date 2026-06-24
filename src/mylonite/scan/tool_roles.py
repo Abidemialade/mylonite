@@ -3,8 +3,8 @@
 Pure, deterministic (schema + name heuristics — no LLM, no live calls). Two
 consumers share this single source of truth:
 
-* the ``mylonite init-target`` scaffold, which seeds concrete ``seed_arm`` /
-  ``effect_probe`` candidates instead of blank templates, and
+* the ``mylonite scan --scaffold`` target scaffold, which seeds concrete
+  ``seed_arm`` / ``effect_probe`` candidates instead of blank templates, and
 * :func:`mylonite.scan.attack_loop.discover_attack_plan`, which builds an
   ``AttackPlan`` so the adaptive loop needs no hand-authored choreography.
 
@@ -22,8 +22,9 @@ from mylonite.scan._control_primitives import sanitize_tool_description
 class _ToolRoles(NamedTuple):
     """Best-guess role assignment over a target's discovered tools.
 
-    Drives the auto-populated ``seed_arm`` / ``effect_probe`` in the init-target
-    scaffold so the operator starts from concrete candidates rather than blank
+    Drives the auto-populated ``seed_arm`` / ``effect_probe`` in the
+    ``scan --scaffold`` target scaffold so the operator starts from concrete
+    candidates rather than blank
     templates — the single biggest custom-target onboarding friction. Every field
     is a HINT to confirm, never authoritative.
     """

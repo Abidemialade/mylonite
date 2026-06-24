@@ -61,6 +61,19 @@ effect-based judge and AgentDojo's exact-goal oracle agree moderately; investiga
 the disagreements (`layer2_agentdojo.json`) before trusting either as a drop-in for
 the other."
 
+**FP triage (all 15 classified — none is a judge bug).** Every disagreement where
+Mylonite flagged an attack AgentDojo's oracle didn't shows the attacker's
+consequential tool *actually executing* (`send_money` to the attacker IBAN `US13…`,
+`update_password`, `update_scheduled_transaction`, each `[ok]`). These are the
+effect-vs-exact-goal definitional difference, not bugs — for a CI security gate,
+materialized harm to the attacker's account *should* fire. And **`FPR=1.0` is a `tn=0`
+artifact**: this subset is all injection attempts with no benign control cases, so FPR
+is mechanically pinned at 1.0 regardless of judge quality. The report builder now emits
+`fpr_informative: false` and a note when `tn=0`, so the number is never cited as a
+precision failure. A real external precision number needs a *defended* third-party
+server (the Layer-3 gap). The 5 FNs are refused/not-executed traces (oracle-semantics
+nuance), not under-reporting of a real effect.
+
 ## Layer 3 — precision (false positives on known-good targets)
 
 - `reference:guarded`: **8 probes, 0 false positives (FPR 0%).** Mylonite stays

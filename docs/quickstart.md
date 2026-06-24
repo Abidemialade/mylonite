@@ -130,12 +130,12 @@ render it in whatever format your pipeline consumes:
 ```bash
 mylonite gate --target-file app.yaml --authorize me --open-pr   # against YOUR app
 mylonite report .mylonite/validated/<dir> --sarif out.sarif     # GitHub code scanning
-mylonite validate <dir> --models claude-haiku-4-5,claude-sonnet-4-6   # durable across upgrades?
+mylonite report .mylonite/validated/<dir> --json finding.json   # dashboards / SIEM / bots
 ```
 
 ## Where to go next
 
-- [Test your own app](test-your-app.md) — the custom MCP on-ramp (`init-target` → scan → gate).
+- [Test your own app](test-your-app.md) — the custom MCP on-ramp (`scan --scaffold` → scan → gate).
 - [Try it — the Quarry](quarry.md) — the deliberately vulnerable playground (W1–W4 walkthrough).
 - [Attack modes](attack-modes.md) — single-shot, adaptive, tool-chaining, memory poisoning.
 - [The validation engine](validation.md) — why a generated test means what it claims.

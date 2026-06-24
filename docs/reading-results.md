@@ -10,7 +10,6 @@ generated/validated dir, or a `*_report.json`.
 
 ```bash
 mylonite report .mylonite/scans/<dir>                 # terminal trust panel
-mylonite report <dir> --html report.html              # shareable dashboard
 mylonite report <dir> --sarif out.sarif               # GitHub code scanning
 mylonite report <dir> --json finding.json             # dashboards / SIEM / bots
 ```
@@ -35,17 +34,6 @@ mutation score: 7/8   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST
 That panel is the **anti-false-positive trust signal**: ~46% of security alerts are
 false positives, so a finding that ships with a machine-checkable differential proof
 ("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.
-
-## HTML dashboard — `--html`
-
-A self-contained, screenshot-friendly HTML report (no JS, no CDN) for sharing with
-stakeholders: an executive summary, per-finding severity + compliance chips, and
-collapsible evidence (the gating formula, per-leg marks, the kill matrix). Two styles:
-
-```bash
-mylonite report <dir> --html report.html                      # dashboard (default)
-mylonite report <dir> --html panel.html --html-style terminal # raw trust-panel export
-```
 
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 

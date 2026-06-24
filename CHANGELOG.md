@@ -7,8 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> **Narrowed to the proven core.** The third-party verification harness
+> (`verification/`) showed where Mylonite's value is demonstrable — **app-flaw
+> detection, differential/control-efficacy validation, regression gating, and
+> honesty** — and where it isn't yet. This release guts the unproven surface and
+> quarantines the promising-but-unverified, so every headline claim has a backing
+> verification number. Because the project has no external users yet, this breaking
+> cut costs nothing now and only gets more expensive later. Quarantined features
+> stay in the tree and return to the headline once proven on third-party ground
+> truth.
+
+### Removed
+
+- **BREAKING:** the `mylonite export` command (portable eval-format bridge). Mylonite's
+  artifact is the validated, CI-gating pytest regression test; the eval-format export was
+  unproven surface. Consume the JSON bundle (`report --json`) or SARIF (`report --sarif`)
+  instead.
+- **BREAKING:** the `mylonite report --html` / `--html-style` dashboard and its HTML
+  renderer (`mylonite.report.html`). The terminal trust panel, SARIF (`--sarif`, for GitHub
+  code scanning), and the JSON finding bundle (`--json`) cover every consumer; the HTML
+  dashboard was redundant. The shared `severity_for` rule moves to `mylonite.report.severity`
+  (SARIF/JSON still import it).
+- **BREAKING:** the standalone `mylonite init-target` command and the deprecated `mylonite
+  init` alias — folded into `scan --scaffold` (see Changed).
+
+### Changed
+
+- **Folded target scaffolding into `scan`.** `mylonite scan --command 'python server.py'
+  --scaffold target.yaml` introspects a custom MCP server (one launch, **no LLM call and no
+  attack**, so it does **not** require `--authorize`) and writes the same commented starter
+  `target.yaml` — with suggested `weakness_classes`/`primary_tools` and auto-detected
+  `seed_arm`/`effect_probe` candidates — that `init-target` used to. One entry point instead
+  of two. Edit the scaffold, then scan it with `--target-file`.
+- **Narrowed the headline command surface to the proven core.** The unproven attack tactics
+  `scan --adaptive`, `scan --synthesize`, `scan --memory`, and `validate --models`, plus the
+  bundled `mcp:filesystem|fetch|github` shorthands, are now **experimental**: hidden from
+  `--help` and de-emphasised in the docs, but still runnable when passed explicitly (they stay
+  in the tree and return to the headline once proven on third-party ground truth). The
+  remote SSE/HTTP adapter likewise stays available but unheadlined. The supported core is
+  `scan` (W1–W4 over MCP stdio + your own `--target-file` app; `--scaffold` to generate a
+  target.yaml), `generate`, `validate` (the differential / control-efficacy oracle), `gate`,
+  `report` (terminal / JSON / SARIF), `ablate`, `demo`, `doctor`, `taxonomy`, and `version`.
+
 ### Added
 
+- **Verification report: false-positive-rate honesty rail.** The Layer-2 judge-agreement
+  report (`verification/report.py`) now emits `fpr_informative` and `negative_cases`, and
+  appends a note when `tn=0` — the case where false-positive rate is mechanically pinned
+  at 1.0 by the absence of any benign / true-negative control cases (e.g. the AgentDojo
+  injection subset), so the number is never misread as a trigger-happy judge. Triaging the
+  15 AgentDojo disagreements confirmed every one is the effect-based-judge vs
+  exact-goal-oracle *definitional* difference (the attacker's consequential tool actually
+  executed), not a judge bug — recorded in `verification/FINDINGS.md`.
 - **Descriptor-driven seed delivery channels (seed portability).** Mylonite's seeds
   no longer assume the kitchen-sink store→recall workflow. `mylonite.scan.seed_synth`
   synthesises a probe for the channel a target's *introspected tool surface* actually
