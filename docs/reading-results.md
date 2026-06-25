@@ -60,7 +60,7 @@ For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom
 A single `finding.json` (versioned `schema_version`) with, per finding: `pattern_id`,
 `weakness_class`, `severity`, `attack_shape`, the full `compliance` block, the R4
 `localization` (tool/field/line), the `proof` (vuln/guard counts + `kept`), and the
-`proven_control`. It reuses the exact data the SARIF/HTML reports compute — no new
+`proven_control`. It reuses the exact data the SARIF report computes — no new
 analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR
@@ -83,7 +83,7 @@ When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 
 ## Compliance metadata (everywhere)
 
-Every emitted artefact — exploit JSON, validation report, HTML, SARIF, JSON bundle, PR
+Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
 body — carries the compliance mapping for the finding: **OWASP LLM Top 10 (2025)**,
 **OWASP ASI (2026)**, **MITRE ATLAS** technique IDs, and a **NIST AI RMF** function tag.
 This is near-free at generation time and is the foundation of audit/compliance reporting

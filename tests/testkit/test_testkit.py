@@ -318,13 +318,11 @@ def test_public_surface() -> None:
         "TestkitFixtureError",
         "assert_control_holds",
         "assert_guard_holds",
-        "assert_synthesized_chain_resists",
         "assert_target_resists",
         "load_exploit",
     ]
     assert callable(testkit.assert_control_holds)
     assert callable(testkit.assert_guard_holds)
-    assert callable(testkit.assert_synthesized_chain_resists)
     assert callable(testkit.load_exploit)
     assert issubclass(testkit.TestkitFixtureError, Exception)
 

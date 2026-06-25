@@ -5,17 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.4] - 2026-06-24
 
-> **Narrowed to the proven core.** The third-party verification harness
-> (`verification/`) showed where Mylonite's value is demonstrable — **app-flaw
-> detection, differential/control-efficacy validation, regression gating, and
-> honesty** — and where it isn't yet. This release guts the unproven surface and
-> quarantines the promising-but-unverified, so every headline claim has a backing
-> verification number. Because the project has no external users yet, this breaking
-> cut costs nothing now and only gets more expensive later. Quarantined features
-> stay in the tree and return to the headline once proven on third-party ground
-> truth.
+> **Narrowed to the provable core — *model robustness ≠ app security*.** The third-party
+> verification harness (`verification/`) showed where Mylonite's value is demonstrable —
+> **app-flaw detection, control-efficacy validation, regression gating, and honesty** — and
+> where it isn't. The doctrine for this release: every shipped feature has to run on an MCP
+> app we did **not** author and have a path to third-party proof; everything else is **cut,
+> not hidden**. The **control-efficacy oracle** — which proves a control is load-bearing on
+> any single-build app by holding the model constant and toggling only the safeguard — is now
+> the headline moat; the two-build differential (fail-on-vulnerable, pass-on-guarded) is the
+> bundled-twin / `demo` case. The remote SSE/HTTP transport is promoted to first-class (real
+> MCP apps are remote). Because the project has no external users yet, this breaking cut costs
+> nothing now.
 
 ### Removed
 
@@ -30,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (SARIF/JSON still import it).
 - **BREAKING:** the standalone `mylonite init-target` command and the deprecated `mylonite
   init` alias — folded into `scan --scaffold` (see Changed).
+- **BREAKING:** the deeper attack *tactics* — `scan --adaptive` / `--verbose-strategist`,
+  `scan --synthesize` (tool-chaining synthesis), `scan --memory` (stateful memory poisoning),
+  and `validate --models` (cross-model durability) — plus their modules (`scan/attack_loop.py`,
+  `chain_synth`, `chain_driver`, `chain_validator`, `synthesis_runner`, `memory_poison`,
+  `cross_model`), the `validate --adaptive` grading leg, and `testkit.assert_synthesized_chain_resists`.
+  They were never the moat (the control-efficacy oracle is), were beaten by frontier-aligned
+  models on every external target (DVMCP recall 0/8, InjecAgent 0/60), and had no third-party
+  proof path. The single-shot W1–W4 engine, the control-efficacy oracle, and `ablate` are
+  unaffected. The code lives in git history and returns only if a real external need
+  re-justifies it.
 
 ### Changed
 
@@ -39,15 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `target.yaml` — with suggested `weakness_classes`/`primary_tools` and auto-detected
   `seed_arm`/`effect_probe` candidates — that `init-target` used to. One entry point instead
   of two. Edit the scaffold, then scan it with `--target-file`.
-- **Narrowed the headline command surface to the proven core.** The unproven attack tactics
-  `scan --adaptive`, `scan --synthesize`, `scan --memory`, and `validate --models`, plus the
-  bundled `mcp:filesystem|fetch|github` shorthands, are now **experimental**: hidden from
-  `--help` and de-emphasised in the docs, but still runnable when passed explicitly (they stay
-  in the tree and return to the headline once proven on third-party ground truth). The
-  remote SSE/HTTP adapter likewise stays available but unheadlined. The supported core is
-  `scan` (W1–W4 over MCP stdio + your own `--target-file` app; `--scaffold` to generate a
-  target.yaml), `generate`, `validate` (the differential / control-efficacy oracle), `gate`,
-  `report` (terminal / JSON / SARIF), `ablate`, `demo`, `doctor`, `taxonomy`, and `version`.
+- **Crowned the control-efficacy oracle as the moat; promoted remote MCP to supported.**
+  `validate` and `gate` lead with the **control-efficacy oracle** (it synthesizes a guarded
+  twin of your single-build app at the adapter boundary and proves the control carries the
+  security); the two-build differential is now framed as the bundled-twin / `demo` case. The
+  **remote SSE/HTTP transport** is no longer "experimental" — declare `transport: sse|http`
+  + `url` in `target.yaml`. The supported surface is `scan` (W1–W4 over MCP **stdio or remote
+  SSE/HTTP** + your own `--target-file` app; `--scaffold` to generate a target.yaml),
+  `generate`, `validate`, `gate`, `report` (terminal / SARIF / JSON), `ablate`, `demo`,
+  `doctor`, `taxonomy`, and `version`. README / ROADMAP / docs reposition on "model robustness
+  ≠ app security" and "any MCP app" (not "any LLM-native app").
 
 ### Added
 
@@ -1477,7 +1490,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.0...HEAD
+[0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
 [0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.5.0

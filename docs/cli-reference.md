@@ -34,11 +34,6 @@ mylonite scan --command python --arg my_server.py --scaffold app.yaml   # genera
 mylonite scan --target-file app.yaml --authorize me                     # then scan it
 ```
 
-> **Experimental (hidden from `--help`, still runnable):** `--adaptive`,
-> `--verbose-strategist`, `--synthesize`, `--memory`. These deeper attack tactics stay
-> in the tree but aren't yet proven on third-party ground truth — see
-> [attack modes](attack-modes.md).
-
 ## `generate` — emit the regression test
 
 Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no
@@ -54,8 +49,10 @@ mylonite generate --latest --out .mylonite/generated/my-finding
 
 ## `validate` — prove the test (the moat)
 
-Run the generated test through the [differential-oracle validator](validation.md), LIVE.
-A test is **kept** only when it discriminates reliably.
+Run the generated test through the [validation engine](validation.md), LIVE. On a real
+`--target-file` app the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat)
+holds the model constant and toggles only the safeguard; against the bundled twins it
+runs the two-build differential. A test is **kept** only when it discriminates reliably.
 
 Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
 `--model`; `--target-file PATH` (re-drive your REAL app instead of the twin); `--fast`
@@ -65,10 +62,6 @@ S`. `--prove-control` is a back-compat no-op (the differential is now default).
 ```bash
 mylonite validate .mylonite/generated/my-finding --target-file app.yaml
 ```
-
-> **Experimental (hidden from `--help`, still runnable):** `--models a,b,c`
-> (cross-model durability — re-prove across models, flag re-emergence) and `--adaptive`
-> (grade the control under adaptive pressure).
 
 ## `gate` — scan → generate → validate → PR (the magic moment)
 
@@ -100,7 +93,7 @@ mylonite report .mylonite/validated/my-finding --sarif out.sarif --json finding.
 ## `ablate` — score the safeguards
 
 Toggle each AI safeguard and report which are **load-bearing**, **security-theater**, or
-**redundant**. See [the control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
+**redundant**. See [the control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat).
 
 Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);

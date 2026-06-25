@@ -29,16 +29,12 @@ target ──> scan (Layer 1) ──> generate ──> validate (Layer 2) ──
 - **`seeds.py`** / **`predicates.py`** — the bundled attack seeds (W1–W4) and the
   deterministic success predicates.
 - **`judge.py`** — the Layer-1 success ladder (predicate → LLM judge → effect probe).
-- **`attack_loop.py`** — `AdaptiveAttackDriver`: the [`--adaptive`](attack-modes.md#adaptive)
-  strategist refinement loop and `discover_attack_plan` (auto-find plant/retrieve tools).
-- **`chain_synth.py` / `chain_driver.py` / `chain_validator.py` / `synthesis_runner.py`**
-  — [`--synthesize`](attack-modes.md#synthesis) tool-chaining.
-- **`memory_poison.py`** — [`--memory`](attack-modes.md#memory-poisoning)
-  cross-turn poisoning: `MemoryPoisoningDriver` / `MemoryPoisonValidator` / `MemoryPoisonRunner`.
+- **`attack_loop.py`** — `discover_attack_plan` / `AttackPlan`: auto-find the
+  plant/retrieve tools from a target's tool surface so indirect injection works with
+  near-zero configuration.
 - **`control_shim.py`** — the `BoundaryControl` subclasses (W1–W4) and `ControlServerShim`
   that synthesize a *boundary*-guarded twin of any target (a server-layer control needs
-  `control_env`); the [control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle).
-- **`cross_model.py`** — the [cross-model durability](validation.md#cross-model-durability) summary.
+  `control_env`); the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat).
 - **`tool_roles.py`** — heuristics that classify a tool surface (store / retrieve / sink).
 - **`artefacts.py`** — the terminal trust panel.
 
@@ -51,15 +47,18 @@ plus the custom-target legs **stability · effect · consensus**. The honesty in
 ### Targets — `mylonite.plugins._mcp` & `_reference`
 - **`_mcp/stdio_adapter.py`** — `MCPStdioAdapter` (drives any stdio MCP server) + the
   bundled family adapters (filesystem/fetch/github) + the `AttackSession` (stateful,
-  multi-turn) used by the adaptive/synthesis/memory drivers.
+  multi-turn) used to plant and drive across turns.
+- **`_mcp/remote_adapter.py`** — `MCPRemoteAdapter`: connects to a remote MCP server over
+  **SSE / streamable-HTTP** (`transport: sse|http` + `url` in the
+  [`target.yaml`](target-file.md)), a first-class transport alongside stdio.
 - **`_mcp/target_file.py`** — the [`target.yaml`](target-file.md) model + auto-wiring.
 - **`_mcp/target_registry.py`** — the bundled family `TargetSpec`s.
 - **`_reference/reference_target_adapter.py`** — the in-process **Quarry** twins
   (`reference:vulnerable` / `reference:guarded`), the ground-truth differential.
 
 ### Outputs — `mylonite.report` & `mylonite.gate`
-- **`report/html.py`**, **`report/sarif.py`**, **`report/bundle.py`** — the
-  [HTML / SARIF / JSON](reading-results.md) renderers.
+- **`report/sarif.py`**, **`report/bundle.py`**, **`report/severity.py`** — the
+  [SARIF / JSON](reading-results.md) renderers + shared severity rule.
 - **`gate/orchestrator.py`** — the scan→generate→validate→PR sequence + exit codes.
 - **`gate/mitigation.py`** + **`gate/fixes/`** — the PR body and the **proven-fix diff**.
 - **`gate/localize.py`** + **`gate/annotate.py`** — pin a finding to its locus and post
@@ -90,8 +89,7 @@ an API change — see [Plugin authoring](plugin-authoring.md).
 
 - **All LLM access flows through LiteLLM** — no provider SDKs imported directly; there's
   no default provider (you must configure one). This is what makes the
-  [model roles](attack-modes.md#composing-modes-with-the-model-roles) and cross-model
-  durability possible.
+  [model roles](attack-modes.md#composing-the-model-roles) possible.
 - **The reference twin is ground truth.** The bundled `mcp_kitchen_sink` vulnerable/guarded
   pair is *intentionally* (un)guarded; the differential is proven against it.
 - **Scope discipline.** Only the AI attack surface — no general SAST/DAST, no non-AI test

@@ -47,7 +47,7 @@ def _finding(exploit: Any, report: Any | None) -> dict[str, Any]:
         if weakness in {"W1", "W2", "W3", "W4"}
         else weakness_class_for(exploit),
         "severity": severity_for(weakness, effect),
-        # static / obfuscated / memory_poisoning / synthesized-chain ...
+        # static / obfuscated / ... (attack tier or shape metadata, generic)
         "attack_shape": str(md.get("attack_shape") or md.get("attack_tier") or "static"),
         "success_reason": str(exploit.success_reason),
         "compliance": {

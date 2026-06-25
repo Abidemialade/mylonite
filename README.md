@@ -10,15 +10,16 @@
 [![CI](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml/badge.svg)](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-Point Mylonite at your MCP agent. It attacks the AI/agentic layer — the system prompt,
-tool/function schemas, RAG pipeline, and agent memory — finds app-specific weaknesses,
-and for each one emits a **validated, CI-gating `pytest` regression test**. The
-validation is the moat: a **differential oracle** keeps a finding only when the attack
-*fires* on the unguarded app and is *resisted* once the control is applied, across a
-flakiness filter — proving the **control**, not the model's mood, carries the security.
-Every headline claim is backed by an independent [verification
-harness](./docs/verification.md) that scores Mylonite against external ground truth it
-did not author.
+Point Mylonite at any MCP app — whatever model or framework is behind it. It attacks the
+AI/agentic layer — the system prompt, tool/function schemas, RAG pipeline, and agent
+memory — finds app-specific weaknesses, and for each one emits a **validated, CI-gating
+`pytest` regression test**. The moat is the **control-efficacy oracle**: it holds the
+model constant and toggles only the safeguard, keeping a finding only when the attack
+*fires* on your app and is *resisted* once the control is applied, across a flakiness
+filter — proving the **control**, not the model's mood, carries the security, on a single
+real app (no second build required). Every headline claim is backed by an independent
+[verification harness](./docs/verification.md) that scores Mylonite against external
+ground truth it did not author.
 
 It deliberately does *not* test the surrounding traditional code; that work belongs to
 SAST/DAST tools.
@@ -34,15 +35,14 @@ See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and t
 [documentation site](https://abidemialade.github.io/mylonite/) for guides and reference.
 
 > **Status:** the full `scan → generate → validate → gate` pipeline works end to end,
-> against the bundled Quarry twins and your own MCP app (`--target-file`). The
-> **control-efficacy oracle** proves which safeguard is load-bearing; `mylonite ablate`
-> scores the whole control set (load-bearing vs. theater). A third-party
-> [verification harness](./docs/verification.md) checks every claim against external
-> ground truth. The command surface is deliberately narrow — deeper attack tactics
-> (`--adaptive`, `--synthesize`, `--memory`, cross-model `--models`) and the remote
-> SSE/HTTP adapter ship as **experimental** until they're proven on third-party targets.
-> See [CHANGELOG.md](./CHANGELOG.md). `pip install mylonite` installs the CLI from PyPI;
-> the offline Quarry demo target is an opt-in extra — `pip install "mylonite[demo]"`.
+> against your own MCP app over stdio or remote SSE/HTTP (`--target-file`) and the bundled
+> Quarry twins. The **control-efficacy oracle** proves which safeguard is load-bearing on
+> any single-build app; `mylonite ablate` scores the whole control set (load-bearing
+> vs. theater). A third-party [verification harness](./docs/verification.md) checks every
+> claim against external ground truth. The command surface is deliberately narrow: every
+> shipped feature runs on an MCP app you didn't author and is on a path to third-party
+> proof. See [CHANGELOG.md](./CHANGELOG.md). `pip install mylonite` installs the CLI from
+> PyPI; the offline Quarry demo target is an opt-in extra — `pip install "mylonite[demo]"`.
 
 ## Try it in 60 seconds
 
@@ -125,7 +125,7 @@ mylonite scan --target-file app.yaml --authorize my-app                     # th
 ## From scan to a gating PR
 
 `mylonite gate` runs the whole magic moment — find an exploit, write a regression
-test, validate it against the differential oracle, and (opt-in) open a PR that
+test, validate it against the control-efficacy oracle, and (opt-in) open a PR that
 gates CI on it:
 
 ```bash
@@ -160,14 +160,14 @@ The proven core — every command here has a backing
   newest scan, or `--target-file` when the scan was against a custom target.
   Emitted tests carry OWASP/ASI/ATLAS/NIST tags (NIST auto-derived) and the
   attack tier.
-- **`mylonite validate <generated-dir>`** — run the differential-oracle
-  validator live (real LLM, Haiku) to prove the test is meaningful: it must
-  fail on the vulnerable twin and pass on the guarded one across a flakiness
-  filter *and* survive the gating metamorphic rewrites. Pass `--target-file`
-  for custom targets (re-drives the real app); `--fast` skips the differential
-  leg for a faster, weaker gate. The **control-efficacy oracle** runs **by
-  default** on a real target — it holds the model constant and proves the
-  *control*, not the model, carries the security (a synthetic guarded twin).
+- **`mylonite validate <generated-dir>`** — prove the emitted test is meaningful,
+  live (real LLM, Haiku). The **control-efficacy oracle** is the moat and runs **by
+  default** on your own app (`--target-file`): it holds the model constant and toggles
+  only the safeguard, proving the *control* — not the model — carries the security
+  (it synthesizes a guarded twin of your single-build app at the boundary), across a
+  flakiness filter plus gating metamorphic rewrites. `--fast` skips that leg for a
+  weaker gate. Against the bundled twins it instead runs the two-build differential
+  (fail-on-vulnerable, pass-on-guarded) — the reference/demo case.
 - **`mylonite ablate <target>`** — the control-ablation matrix: scores each
   safeguard's marginal contribution (**load-bearing vs. security-theater**), with
   `--redundancy` to find controls another control already covers and
@@ -190,17 +190,13 @@ The proven core — every command here has a backing
   against external ground truth it did not author (DVMCP, InjecAgent, AgentDojo),
   with an honest scorecard including the negatives. See
   [docs/verification.md](./docs/verification.md).
+- **Remote MCP transport** — scan an app over **SSE / streamable-HTTP**, not just
+  stdio: declare `transport: sse|http` + `url` in your `target.yaml`. Real-world MCP
+  apps are remote, so this is what lets Mylonite reach them.
 - **Versioned extension contracts + plugins** — five Python Protocols
   (attack modules, target adapters, test generators, validators, compliance
   mappers) with reference implementations and entry-point-based plugin
   loading.
-
-**Experimental** (in the tree, runnable when passed explicitly, hidden from `--help`
-until proven on third-party ground truth): deeper attack tactics `scan --adaptive`
-(a strategist refines the injection until it lands), `scan --synthesize` (tool-chaining
-to a sink), `scan --memory` (stateful cross-turn memory poisoning), cross-model
-durability `validate --models`, the bundled `mcp:filesystem|fetch|github` shorthands,
-and the remote SSE/HTTP transport. See [attack modes](./docs/attack-modes.md).
 
 ## Documentation
 

@@ -46,10 +46,9 @@ seed_arm:                    # how to plant untrusted content (required for W2)
 mylonite scan --target-file app.yaml --authorize me
 ```
 
-This runs the [single-shot engine](attack-modes.md); add `--adaptive` to refine
-injections that an aligned planner resists, `--synthesize` for tool-chains, or
-`--memory` for cross-turn poisoning. Findings land under `.mylonite/scans/`. Use the
-[model roles](attack-modes.md#composing-modes-with-the-model-roles) to point the
+This runs the [single-shot engine](attack-modes.md). Findings land under
+`.mylonite/scans/`. Use the
+[model roles](attack-modes.md#composing-the-model-roles) to point the
 *planner* at a representatively exploitable model.
 
 ## 3. Gate it (the magic moment)
@@ -63,7 +62,7 @@ mylonite gate --target-file app.yaml --authorize me --open-pr  # also opens the 
 ```
 
 Because you have no in-repo guarded twin, the validator synthesizes one at the adapter
-boundary (the [control-efficacy oracle](validation.md#beyond-the-bundled-twin-the-control-efficacy-oracle))
+boundary (the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat))
 and proves the finding *differentially* by default — the emitted test gates on the
 **control** being load-bearing, with the boundary-proxy caveat stated on the label. See
 [CI gating](ci-gating.md) for the committed workflows and the PR anatomy.
@@ -72,8 +71,6 @@ and proves the finding *differentially* by default — the emitted test gates on
 
 - **`mylonite ablate --target-file app.yaml --authorize me`** — score each safeguard:
   load-bearing, security-theater, or (with `--redundancy`) redundant.
-- **`mylonite validate <dir> --models a,b,c`** — re-prove the finding across model
-  versions, so a fix that silently re-emerges on a model upgrade is caught.
 
 ## Bundled targets
 

@@ -341,30 +341,6 @@ def _not_implemented(name: str) -> None:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
-#: Default LLM-call budget for an active ``--adaptive`` scan. The single-shot
-#: default (50) aborts a multi-seed adaptive run mid-way — each seed can spend
-#: ~10-15 calls across its retry budget (customise + plant/drive/judge, then up
-#: to DEFAULT_MAX_ATTEMPTS strategist refinements). 200 clears a full 8-seed run.
-ADAPTIVE_DEFAULT_MAX_LLM_CALLS = 200
-
-#: The untouched default of the ``--max-llm-calls`` option; only this exact value
-#: is treated as "not set by the user" (an explicit value, even 50, is honoured).
-_DEFAULT_MAX_LLM_CALLS = 50
-
-
-def _adaptive_budget(max_llm_calls: int, *, adaptive_active: bool) -> tuple[int, bool]:
-    """Auto-size the LLM-call budget for an active adaptive run.
-
-    Returns ``(budget, raised)``. When the adaptive loop is active and the budget
-    is the untouched default, raise it to ``ADAPTIVE_DEFAULT_MAX_LLM_CALLS`` so the
-    run doesn't silently abort partway through; any explicit value (flag or
-    mylonite.yaml) — including a deliberately low one — is respected unchanged.
-    """
-    if adaptive_active and max_llm_calls == _DEFAULT_MAX_LLM_CALLS:
-        return ADAPTIVE_DEFAULT_MAX_LLM_CALLS, True
-    return max_llm_calls, False
-
-
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
@@ -622,379 +598,6 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     raise typer.Exit(code=EXIT_CONFIG)
 
 
-def _run_synthesis(
-    *,
-    target: str | None,
-    target_file: Path | None = None,
-    authorize: str | None = None,
-    provider: str,
-    model: str,
-    planner_model: str,
-    customiser_model: str,
-    judge_model: str,
-    output_dir: Path,
-) -> None:
-    """Tool-chaining flow: synthesize a tool-chain and differentially validate it, then
-    write the validated finding as scan artefacts.
-
-    For a reference target the differential uses the bundled twins; for a custom
-    ``--target-file`` it uses the SYNTHETIC guarded twin (raw vs a W2 boundary-
-    guarded variant via the control shim), reusing the control-efficacy machinery.
-    Uses the live provider for the planner/strategist/synthesizer.
-    """
-    is_reference = bool(target and target.startswith("reference:"))
-    if not is_reference and target_file is None:
-        typer.echo(
-            "--synthesize needs a reference twin target (e.g. reference:vulnerable) or a "
-            "custom --target-file.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    from mylonite.contracts._types import ScanAttempt, ScanReport
-    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-    from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, render_summary, write_artefacts
-    from mylonite.scan.chain_synth import ChainSynthesizer
-    from mylonite.scan.chain_validator import ChainDifferentialValidator
-    from mylonite.scan.engine import ScanResult
-    from mylonite.scan.judge import SuccessJudge
-    from mylonite.scan.synthesis_runner import SynthesisRunner
-
-    # Operator-declared plant/sinks (custom targets): let synthesis exercise an app
-    # whose tool names don't match the discovery heuristics, instead of no-op'ing.
-    synth_seed_arm: Any = None
-    synth_extra_sinks: tuple[str, ...] = ()
-
-    if is_reference:
-        report_target = target or "reference:vulnerable"
-
-        def factory(variant: str) -> Any:
-            return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
-
-        descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
-    else:
-        if not authorize:
-            typer.echo("--authorize is required to synthesize against a custom target.", err=True)
-            raise typer.Exit(code=EXIT_CONFIG)
-        from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.factory import build_mcp_adapter
-        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
-
-        try:
-            tf = load_target_file(target_file)  # type: ignore[arg-type]
-            spec = build_target_spec(tf)
-        except Exception as exc:
-            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        target_registry.clear_runtime_targets()
-        target_registry.register_target(spec)
-        report_target = target or f"mcp:{spec.family}"
-        synth_seed_arm = tf.seed_arm
-        synth_extra_sinks = (
-            tuple(spec.control_config.consequential_tools) if spec.control_config else ()
-        )
-        typer.echo(
-            f"--synthesize on custom target {spec.family!r}: validating the chain raw vs a "
-            "W2-guarded twin (your server-layer twin if control_env declares W2, else the "
-            "synthetic boundary shim).",
-            err=True,
-        )
-
-        # The synth differential controls W2 (untrusted-content quarantine). When the
-        # target declares a server-layer toggle for W2 (control_env), measure the REAL
-        # server guard (parity with validate/ablate): the raw side env-disables W2, the
-        # guarded twin is the real default launch. Otherwise both sides use the shim.
-        cw = "W2"
-        server_layer = cw in spec.control_env
-        if spec.vulnerable_launch is not None or server_layer:
-            typer.echo(
-                f"--synthesize: the raw side runs {spec.family!r} with the {cw} guard "
-                "DISABLED (deliberately unguarded) — ensure you are authorized. "
-                "Env values are never logged.",
-                err=True,
-            )
-
-        def factory(variant: str) -> Any:
-            if variant == "vulnerable":
-                if server_layer:
-                    return build_mcp_adapter(
-                        family=spec.family,
-                        scope=tf.scope,
-                        model=planner_model,
-                        launch_env=spec.launch_env(disable_controls=(cw,)),
-                    )
-                return _vulnerable_adapter(spec, tf.scope, planner_model)
-            return _guarded_factory(spec, tf.scope, planner_model, cw)
-
-        descriptor = asyncio.run(
-            build_mcp_adapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
-        )
-
-    runner = SynthesisRunner(
-        synthesizer=ChainSynthesizer(model=customiser_model),
-        validator=ChainDifferentialValidator(
-            adapter_factory=factory,
-            judge=SuccessJudge(model=judge_model),
-            strategist_model=customiser_model,
-        ),
-        target_id=report_target,
-    )
-    try:
-        result = asyncio.run(
-            runner.run(descriptor, seed_arm=synth_seed_arm, extra_sinks=synth_extra_sinks)
-        )
-    finally:
-        if not is_reference:
-            from mylonite.plugins._mcp import target_registry
-
-            target_registry.clear_runtime_targets()
-
-    exploits = [result.exploit] if result.exploit is not None else []
-    if result.chain is None:
-        # No plant+sink surface: the mode did NOT run an attack. This must read as
-        # NOT TESTED, never as a clean no_finding (which would let a vulnerable
-        # target pass). Name what we looked for vs the target's actual tools.
-        tool_names = [getattr(t, "name", "?") for t in getattr(descriptor, "tools", [])]
-        attempts = [
-            ScanAttempt(
-                seed_id="tool-chaining-synthesis",
-                pattern_id="tool-chaining-synthesis",
-                outcome="skipped_payload_not_delivered",
-                verdict_reason=(
-                    "NOT TESTED: no plant+sink surface for tool-chaining - looked for a "
-                    "content-storing tool and a consequential sink (send/post/delete/...); "
-                    f"target tools: {tool_names}. Declare control_config.consequential_tools "
-                    "or a seed_arm, or point at a target that exposes such a surface."
-                ),
-            )
-        ]
-    else:
-        pid = f"synthesized-chain-{result.chain.sink_tool}"
-        attempts = [
-            ScanAttempt(
-                seed_id=pid,
-                pattern_id=pid,
-                outcome="finding" if result.exploit is not None else "no_finding",
-                verdict_reason=(
-                    result.exploit.success_reason
-                    if result.exploit is not None
-                    else "synthesized chain did not differentially validate"
-                ),
-            )
-        ]
-    report = ScanReport(
-        target_id=report_target,
-        attack_modules=["tool-chaining-synthesis"],
-        provider=provider,
-        model=model,
-        elapsed_seconds=0.0,
-        attempts=attempts,
-        findings_count=len(exploits),
-        inconclusive_attempts=0,
-        fallback_breakdown={},
-        aborted=None,
-        single_run=False,
-        mylonite_version=__version__,
-    )
-    scan_result = ScanResult(report=report, exploits=exploits)
-
-    from mylonite._redaction import redact
-
-    scan_dir = write_artefacts(scan_result, output_dir)
-    typer.echo(redact(render_summary(scan_result)))
-    typer.echo(f"Artefacts: {scan_dir}")
-    if exploits:
-        typer.echo("")
-        typer.echo(f"Next: mylonite generate {scan_dir}")
-    # A NOT-TESTED outcome (no plant+sink surface) must not exit 0 — a CI gate would
-    # read that as "clean". Non-zero so the gap is actionable, after the summary.
-    if any(a.outcome in NOT_TESTED_OUTCOMES for a in attempts):
-        raise typer.Exit(code=EXIT_CONFIG)
-
-
-def _run_memory_poison(
-    *,
-    target: str | None,
-    target_file: Path | None = None,
-    authorize: str | None = None,
-    provider: str,
-    model: str,
-    planner_model: str,
-    judge_model: str,
-    output_dir: Path,
-) -> None:
-    """T1 flow: plant poison, let it PERSIST across a benign turn, then drive a later
-    retrieval that surfaces and acts on it — differentially validated against the twins.
-
-    Mirrors ``--synthesize``: a reference target uses the bundled twins; a custom
-    ``--target-file`` uses the SYNTHETIC W2 boundary-guarded twin (the control shim),
-    so the differential proves the *memory* control — quarantining recalled content —
-    is load-bearing. The poison is planted once and retrieved a turn later, modelling
-    the cross-session slow-drip ("zombie agent") shape single-turn scans miss.
-    """
-    is_reference = bool(target and target.startswith("reference:"))
-    if not is_reference and target_file is None:
-        typer.echo(
-            "--memory needs a reference twin target (e.g. reference:vulnerable) or a "
-            "custom --target-file.",
-            err=True,
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    from mylonite.contracts._types import ScanAttempt, ScanReport
-    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-    from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, render_summary, write_artefacts
-    from mylonite.scan.engine import ScanResult
-    from mylonite.scan.judge import SuccessJudge
-    from mylonite.scan.memory_poison import MemoryPoisonRunner
-    from mylonite.scan.seeds import SEED_CATALOGUE
-
-    seed = next(s for s in SEED_CATALOGUE if s.pattern_id == "indirect-injection-note-body-direct")
-    # One innocent turn between the plant and the retrieval, so the poison is acted on
-    # in a later turn than it was planted (the defining memory-poisoning separation).
-    benign_turns = ("Please give me a brief status update on my recent activity.",)
-    # Operator-declared plant (custom targets): lets discovery exercise an app whose
-    # store tool doesn't match the discovery heuristics, instead of silently no-op'ing.
-    declared_seed_arm: Any = None
-
-    if is_reference:
-        report_target = target or "reference:vulnerable"
-
-        def factory(variant: str) -> Any:
-            return InProcessReferenceAdapter(variant=variant, model=planner_model)  # type: ignore[arg-type]
-
-        descriptor = asyncio.run(InProcessReferenceAdapter(variant="vulnerable").describe())
-    else:
-        if not authorize:
-            typer.echo(
-                "--authorize is required to test memory poisoning against a custom target.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
-        from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.factory import build_mcp_adapter
-        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
-
-        try:
-            tf = load_target_file(target_file)  # type: ignore[arg-type]
-            spec = build_target_spec(tf)
-        except Exception as exc:
-            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        target_registry.clear_runtime_targets()
-        target_registry.register_target(spec)
-        report_target = target or f"mcp:{spec.family}"
-        declared_seed_arm = tf.seed_arm
-        typer.echo(
-            f"--memory on custom target {spec.family!r}: validating raw vs a W2-guarded twin "
-            "(your server-layer twin if control_env declares W2, else the synthetic boundary "
-            "shim that quarantines recalled memory).",
-            err=True,
-        )
-        # See _run_synthesis: server-layer parity for the W2 differential.
-        cw = "W2"
-        server_layer = cw in spec.control_env
-        if spec.vulnerable_launch is not None or server_layer:
-            typer.echo(
-                f"--memory: the raw side runs {spec.family!r} with the {cw} guard "
-                "DISABLED (deliberately unguarded) — ensure you are authorized. "
-                "Env values are never logged.",
-                err=True,
-            )
-
-        def factory(variant: str) -> Any:
-            if variant == "vulnerable":
-                if server_layer:
-                    return build_mcp_adapter(
-                        family=spec.family,
-                        scope=tf.scope,
-                        model=planner_model,
-                        launch_env=spec.launch_env(disable_controls=(cw,)),
-                    )
-                return _vulnerable_adapter(spec, tf.scope, planner_model)
-            return _guarded_factory(spec, tf.scope, planner_model, cw)
-
-        descriptor = asyncio.run(
-            build_mcp_adapter(family=spec.family, scope=tf.scope, model=planner_model).describe()
-        )
-
-    runner = MemoryPoisonRunner(
-        adapter_factory=factory,
-        judge=SuccessJudge(model=judge_model),
-        seed=seed,
-        target_id=report_target,
-        benign_turns=benign_turns,
-        seed_arm=declared_seed_arm,
-    )
-    try:
-        result = asyncio.run(runner.run(descriptor))
-    finally:
-        if not is_reference:
-            from mylonite.plugins._mcp import target_registry
-
-            target_registry.clear_runtime_targets()
-
-    exploits = [result.exploit] if result.exploit is not None else []
-    if result.plan is None:
-        # No plant+retrieve surface: the mode did NOT run. Report NOT TESTED, never a
-        # clean no_finding, and name what we looked for vs the target's actual tools.
-        tool_names = [getattr(t, "name", "?") for t in getattr(descriptor, "tools", [])]
-        attempts = [
-            ScanAttempt(
-                seed_id="memory-poisoning",
-                pattern_id="memory-poisoning",
-                outcome="skipped_payload_not_delivered",
-                verdict_reason=(
-                    "NOT TESTED: no plant+retrieve surface for cross-turn memory poisoning - "
-                    "looked for a content-storing tool and an id-free recall path; target "
-                    f"tools: {tool_names}. Declare a seed_arm (+ a recall the planner can drive) "
-                    "or point at a target that exposes such a surface."
-                ),
-            )
-        ]
-    else:
-        pid = result.exploit.pattern_id if result.exploit is not None else "memory-poisoning"
-        attempts = [
-            ScanAttempt(
-                seed_id=pid,
-                pattern_id=pid,
-                outcome="finding" if result.exploit is not None else "no_finding",
-                verdict_reason=(
-                    result.exploit.success_reason
-                    if result.exploit is not None
-                    else "cross-turn memory poisoning did not differentially validate"
-                ),
-            )
-        ]
-    report = ScanReport(
-        target_id=report_target,
-        attack_modules=["memory-poisoning"],
-        provider=provider,
-        model=model,
-        elapsed_seconds=0.0,
-        attempts=attempts,
-        findings_count=len(exploits),
-        inconclusive_attempts=0,
-        fallback_breakdown={},
-        aborted=None,
-        single_run=False,
-        mylonite_version=__version__,
-    )
-    scan_result = ScanResult(report=report, exploits=exploits)
-
-    from mylonite._redaction import redact
-
-    scan_dir = write_artefacts(scan_result, output_dir)
-    typer.echo(redact(render_summary(scan_result)))
-    typer.echo(f"Artefacts: {scan_dir}")
-    if exploits:
-        typer.echo("")
-        typer.echo(f"Next: mylonite generate {scan_dir}")
-    # NOT-TESTED (no plant+retrieve surface) must not exit 0 — see _run_synthesis.
-    if any(a.outcome in NOT_TESTED_OUTCOMES for a in attempts):
-        raise typer.Exit(code=EXIT_CONFIG)
-
-
 @app.command(
     epilog=(
         "Examples:\n\n"
@@ -1159,60 +762,6 @@ def scan(
             ),
         ),
     ] = False,
-    adaptive: Annotated[
-        bool,
-        typer.Option(
-            "--adaptive",
-            help=(
-                "Opt-in adaptive attack loop: for indirect-injection seeds, plant "
-                "the payload, drive the planner, and on failure re-craft the "
-                "injection and retry within a budget (needs a session-capable "
-                "target, e.g. reference:*). Off by default; the single-shot path "
-                "is unchanged."
-            ),
-            hidden=True,
-        ),
-    ] = False,
-    verbose_strategist: Annotated[
-        bool,
-        typer.Option(
-            "--verbose-strategist",
-            help=(
-                "With --adaptive, echo each refinement round live (the injection "
-                "tried, the planner's tool calls, and why it failed) so the "
-                "strategist's reasoning is observable, not just an attempt count. "
-                "Payloads are redacted before display."
-            ),
-            hidden=True,
-        ),
-    ] = False,
-    synthesize: Annotated[
-        bool,
-        typer.Option(
-            "--synthesize",
-            help=(
-                "Opt-in tool-chaining synthesis: synthesize an "
-                "app-specific multi-tool exploit chain from the tool surface, then "
-                "differentially validate it against the twins (needs a reference "
-                "twin target, e.g. reference:vulnerable). Off by default."
-            ),
-            hidden=True,
-        ),
-    ] = False,
-    memory: Annotated[
-        bool,
-        typer.Option(
-            "--memory",
-            help=(
-                "Opt-in stateful memory-poisoning test: plant poison, let it persist "
-                "across a benign turn, then drive a later retrieval that surfaces and "
-                "acts on it — the cross-session slow-drip ('zombie agent') shape. "
-                "Differentially validated against the twins (reference, or a custom "
-                "--target-file's synthetic W2-guarded twin). Off by default."
-            ),
-            hidden=True,
-        ),
-    ] = False,
     authorize: Annotated[
         str | None,
         typer.Option(
@@ -1278,40 +827,6 @@ def scan(
             system_prompt_file=system_prompt_file,
             model=model,
             force=force,
-        )
-        return
-
-    # Tool-chaining synthesis is a distinct flow (synthesize -> twin
-    # differential validation), not the per-seed engine. Branch early and return.
-    if synthesize and memory:
-        typer.echo("--synthesize and --memory are distinct flows; pass only one.", err=True)
-        raise typer.Exit(code=EXIT_CONFIG)
-    if synthesize:
-        _run_synthesis(
-            target=target,
-            target_file=target_file,
-            authorize=authorize,
-            provider=effective_provider,
-            model=effective_model,
-            planner_model=effective_planner_model,
-            customiser_model=effective_customiser_model,
-            judge_model=effective_judge_model,
-            output_dir=output_dir,
-        )
-        return
-
-    # T1: stateful cross-turn memory poisoning is a distinct flow (plant -> persist ->
-    # retrieve, twin-differentially validated), not the per-seed engine. Branch and return.
-    if memory:
-        _run_memory_poison(
-            target=target,
-            target_file=target_file,
-            authorize=authorize,
-            provider=effective_provider,
-            model=effective_model,
-            planner_model=effective_planner_model,
-            judge_model=effective_judge_model,
-            output_dir=output_dir,
         )
         return
 
@@ -1473,52 +988,6 @@ def scan(
     customiser = PayloadCustomiser(model=effective_customiser_model)
     judge = SuccessJudge(model=effective_judge_model)
 
-    # Adaptive loop is opt-in. Build the driver only when asked; warn (don't
-    # fail) if the chosen target can't open sessions, so --adaptive degrades to
-    # the single-shot path instead of erroring.
-    from mylonite.contracts.target_adapter import SupportsAttackSession
-
-    attack_driver = None
-    if adaptive:
-        if isinstance(adapter, SupportsAttackSession):
-            from mylonite._redaction import redact
-            from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttemptStep
-
-            def _echo_step(step: AttemptStep) -> None:
-                status = "FOUND" if step.success else "failed"
-                typer.echo(
-                    f"  strategist round {step.attempt}: {status} — "
-                    f"{redact(step.reason)[:160]} | tools={list(step.tool_calls)} | "
-                    f"injection={redact(step.injection)[:120]}",
-                    err=True,
-                )
-
-            attack_driver = AdaptiveAttackDriver(
-                judge=judge,
-                strategist_model=effective_customiser_model,
-                on_step=_echo_step if verbose_strategist else None,
-            )
-        else:
-            typer.echo(
-                "note: --adaptive ignored — this target does not support multi-step "
-                "sessions; using the single-shot path.",
-                err=True,
-            )
-
-    # Auto-size the budget for an active adaptive run so it doesn't abort mid-way
-    # on the single-shot default (the assessment's seed-3-of-8 abort). An explicit
-    # --max-llm-calls (or mylonite.yaml) always wins.
-    max_llm_calls, _budget_raised = _adaptive_budget(
-        max_llm_calls, adaptive_active=adaptive and attack_driver is not None
-    )
-    if _budget_raised:
-        typer.echo(
-            f"--adaptive: raised the LLM-call budget to {max_llm_calls} (the default "
-            f"{_DEFAULT_MAX_LLM_CALLS} aborts a multi-seed adaptive run mid-way). "
-            "Pass --max-llm-calls to override.",
-            err=True,
-        )
-
     config = ScanConfig(
         target_id=report_target_id,
         provider=effective_provider,
@@ -1530,7 +999,6 @@ def scan(
         max_concurrent=max_concurrent,
         output_dir=output_dir,
         dry_run=dry_run,
-        adaptive=adaptive and attack_driver is not None,
     )
 
     engine = ScanEngine(
@@ -1539,7 +1007,6 @@ def scan(
         attack_modules=attack_modules,
         customiser=customiser,
         judge=judge,
-        attack_driver=attack_driver,
     )
 
     try:
@@ -2160,7 +1627,6 @@ def _validate_custom(
     iteration_timeout_s: float | None = None,
     prove_control: bool = False,
     randomize_exfil: bool = False,
-    adaptive: bool = False,
     fast: bool = False,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
@@ -2238,19 +1704,13 @@ def _validate_custom(
         from mylonite.gate.mitigation import _snippet
 
         cw = control_weakness
-        # Feed the strategist what control it is up against (adaptive-aware oracle).
+        # Name the control in force for the report (control-efficacy oracle).
         control_context = f"Control {cw}: {_snippet(cw)}"
 
         def _guarded() -> Any:
             return _guarded_factory(spec, tf.scope, model, cw)
 
         guarded_factory = _guarded
-        if adaptive:
-            typer.echo(
-                f"--adaptive: grading control {cw} UNDER ADAPTIVE PRESSURE "
-                "(the strategist tries to evade it).",
-                err=True,
-            )
 
     twin_kind = "real server-layer twin" if server_layer else "synthetic boundary twin"
     typer.echo(
@@ -2266,7 +1726,6 @@ def _validate_custom(
         guarded_adapter_factory=guarded_factory,
         control_weakness=control_weakness,
         randomize_exfil=randomize_exfil,
-        adaptive_guarded=adaptive and guarded_factory is not None,
         guarded_is_server_layer=server_layer,
         control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
@@ -2473,79 +1932,11 @@ def _provider_preflight(provider: str, model: str) -> bool:
     return result.report.aborted != "provider_unreachable"
 
 
-def _run_cross_model_validation(
-    generated: Any, models_csv: str, iterations: int, provider: str, test_path: Path
-) -> None:
-    """Re-prove the reference differential across several models; flag re-emergence (T2).
-
-    Runs the full differential oracle once per model and writes a durability table +
-    ``cross_model_report.json``. Exits non-zero if ANY model fails to keep the test —
-    that model is one a team could upgrade to and silently re-introduce the weakness.
-    """
-    import json as _json
-
-    from mylonite.plugins._reference.reference_validator import (
-        DifferentialValidator,
-        ReferenceVulnerableOracle,
-    )
-    from mylonite.scan.cross_model import row_from_report, summarize_cross_model
-
-    model_list = [m.strip() for m in models_csv.split(",") if m.strip()]
-    if not model_list:
-        typer.echo("--models was empty; pass e.g. --models m1,m2", err=True)
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    rows = []
-    for m in model_list:
-        typer.echo(f"Cross-model durability: re-validating against {m} …", err=True)
-        if not _provider_preflight(provider, m):
-            typer.echo(
-                f"model {m!r} is unreachable — set the provider/key or drop it from "
-                "--models. Aborting rather than reporting a misleading durability result.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_PROVIDER)
-        validator = DifferentialValidator(iterations=iterations, provider=provider, model=m)
-        report = validator.validate(
-            generated, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
-        )
-        rows.append(row_from_report(m, report))
-
-    all_durable, summary = summarize_cross_model(rows)
-    typer.echo("")
-    typer.echo(summary)
-
-    out_path = test_path.parent / "cross_model_report.json"
-    out_path.write_text(
-        _json.dumps(
-            {
-                "all_durable": all_durable,
-                "models": [
-                    {
-                        "model": r.model,
-                        "kept": r.kept,
-                        "vuln_fired": r.vuln_fired,
-                        "guard_resisted": r.guard_resisted,
-                        "iterations": r.iterations,
-                    }
-                    for r in rows
-                ],
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    typer.echo(f"Cross-model report: {out_path}")
-    raise typer.Exit(code=EXIT_SUCCESS if all_durable else EXIT_NOT_KEPT)
-
-
 @app.command(
     epilog=(
         "Examples:\n\n"
         "`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the moat).\n\n"
         "`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n"
-        "`mylonite validate <dir> --models haiku,sonnet` -- prove it holds across model upgrades.\n\n"
         "`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\n"
         "Exit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected)."
     )
@@ -2576,20 +1967,6 @@ def validate(
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
-    ] = None,
-    models: Annotated[
-        str | None,
-        typer.Option(
-            "--models",
-            help=(
-                "Cross-model durability (T2): comma-separated models to RE-PROVE the "
-                "differential across (e.g. 'claude-haiku-4-5,claude-sonnet-4-6'). Flags "
-                "any model where the weakness re-emerges / the control fails — a fix can "
-                "silently reappear on a model upgrade. Reference targets only; exits "
-                "non-zero if any model fails. Overrides --model."
-            ),
-            hidden=True,
-        ),
     ] = None,
     target_file: Annotated[
         Path | None,
@@ -2647,17 +2024,6 @@ def validate(
             ),
         ),
     ] = False,
-    adaptive: Annotated[
-        bool,
-        typer.Option(
-            "--adaptive",
-            help=(
-                "Adaptive-aware oracle (use with --prove-control): drive the guarded twin "
-                "with the adaptive loop so the strategist tries to EVADE the control, "
-                "grading whether it holds under adaptive pressure vs falls to it."
-            ),
-        ),
-    ] = False,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
@@ -2711,21 +2077,6 @@ def validate(
 
     is_custom = not exploit.target_id.startswith("reference:")
 
-    # T2: cross-model durability is a distinct flow — re-prove the differential across
-    # several models and flag any where the weakness re-emerges. Reference twins only
-    # (the differential needs the bundled guarded twin). Branch early and return.
-    if models is not None:
-        if is_custom:
-            typer.echo(
-                "--models (cross-model durability) needs a reference target — the "
-                "differential re-runs against the bundled twins across each model. A "
-                "custom target has no in-repo guarded twin to re-prove.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
-        _run_cross_model_validation(generated, models, iterations, effective_provider, test_path)
-        return
-
     # Auto-resolve the target YAML co-located with the test (written by `generate`)
     # so the operator needn't re-pass --target-file. Explicit --target-file wins.
     if target_file is None and is_custom:
@@ -2734,13 +2085,6 @@ def validate(
             target_file = candidate
             typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
     if is_custom:
-        if adaptive and fast:
-            typer.echo(
-                "--adaptive grades the control under adaptive pressure, which needs the "
-                "differential twin — but --fast skips it. Drop --fast to use --adaptive.",
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CONFIG)
         report = _validate_custom(
             generated,
             target_file,
@@ -2750,7 +2094,6 @@ def validate(
             iteration_timeout_s=iteration_timeout,
             prove_control=prove_control,
             randomize_exfil=randomize_exfil,
-            adaptive=adaptive,
             fast=fast,
         )
     else:

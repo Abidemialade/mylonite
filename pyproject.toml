@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mylonite"
-version = "0.7.3"
+version = "0.7.4"
 description = "Open-source AI-layer security testing — probes your AI agent for weaknesses and writes a validated regression test for each one it finds, gating CI."
 readme = "README.md"
 # Upper bound tracks litellm: litellm>=1.83.8 declares Requires-Python
