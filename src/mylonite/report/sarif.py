@@ -10,6 +10,7 @@ resisted M/M with the control) — our anti-false-positive trust signal.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from mylonite.gate.localize import localize
@@ -89,11 +90,28 @@ def _result(
     }
     if report is not None:
         props["kept"] = bool(getattr(report, "kept", False))
+    # GitHub code scanning dedups alerts across commits by partialFingerprints. Our
+    # AI-layer findings have no stable source-line hash (the locus is a tool/field, and
+    # a remote MCP tool has no repo file at all), so key the fingerprint on the STABLE
+    # identity of the finding — pattern + weakness class + implicated locus + target —
+    # not a line number. This keeps the same weakness on the same tool a single alert
+    # even as line numbers or scan order move.
+    fp_seed = "|".join(
+        [
+            str(exploit.pattern_id),
+            weakness,
+            loc.tool or "",
+            loc.field or "",
+            uri,
+        ]
+    )
+    fingerprint = hashlib.sha256(fp_seed.encode("utf-8")).hexdigest()[:16]
     return {
         "ruleId": str(exploit.pattern_id),
         "level": _LEVEL.get(sev, "warning"),
         "message": {"text": message},
         "locations": [location],
+        "partialFingerprints": {"mylonitePatternLocus/v1": fingerprint},
         "properties": props,
     }
 

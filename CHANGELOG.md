@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `doctor`, `taxonomy`, and `version`. README / ROADMAP / docs reposition on "model robustness
   ≠ app security" and "any MCP app" (not "any LLM-native app").
 
+### Fixed
+
+- **SARIF `partialFingerprints`.** `report --sarif` now emits a per-result
+  `partialFingerprints` (`mylonitePatternLocus/v1`) keyed on the finding's stable identity
+  (pattern + weakness class + implicated tool/field locus + target), so GitHub code scanning
+  correctly dedups the same weakness into a single alert across commits instead of
+  re-raising it on every line move. Found by running Mylonite's own SARIF output against the
+  GitHub ingestion requirements during third-party verification.
+
 ### Added
 
 - **Verification report: false-positive-rate honesty rail.** The Layer-2 judge-agreement

@@ -31,6 +31,27 @@ tools.json                   e21a8f70b1d5de4677d6d52642936a322655d79b17a72c84f60
 | Source | Upstream | License | Pinned commit | Status |
 | --- | --- | --- | --- | --- |
 | DVMCP | https://github.com/harishsg993010/damn-vulnerable-MCP-server | README claims MIT, **no LICENSE file in repo** | `79734c19f5104cd11486c90926d245560f53befa` | built — fetch-at-runtime (`fetch.fetch_dvmcp`, gated `--include-unlicensed`), never vendored |
+| **MCPSecBench** | https://github.com/AIS2Lab/MCPSecBench | **MIT** (clean OSI license — no opt-in gate) | _TBD — pin at first fetch_ | planned (capability-matrix workhorse) — runnable vulnerable servers + **toggleable defense modes** (none / MCIP / AIM-MCP); peer-reviewed arXiv:2508.13220; per-server → W-class catalogue authored in `layer1_runnable/mcpsecbench.py` at fetch time |
+
+## Layer 3 — defended targets (precision / false-positive control)
+
+| Source | Upstream | License | Pinned commit | Status |
+| --- | --- | --- | --- | --- |
+| **Enkrypt AI Secure MCP Gateway** | https://github.com/enkryptai/secure-mcp-gateway | **Apache-2.0** | _TBD — pin at first fetch_ | planned — hardened/defended MCP gateway with toggleable guardrails; the external **0-FP precision baseline** (closes the Layer-3 external-defended gap) |
+
+## Compliance-tag + SARIF canonical references (offline checks)
+
+| Source | Upstream | License | Use |
+| --- | --- | --- | --- |
+| MITRE ATLAS data | https://github.com/mitre-atlas/atlas-data (`dist/ATLAS-latest.yaml`, STIX) | Apache-2.0 | diff emitted ATLAS technique IDs (`atlas-navigator-data` is **deprecated** — use this) |
+| NIST AI RMF 1.0 | https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf (NIST.AI.100-1) | NIST public | validate NIST function tags (GOVERN / MAP / MEASURE / MANAGE) |
+| OWASP GenAI (LLM Top 10 2025 / ASI Threats & Mitigations v1.0) | https://genai.owasp.org | CC-BY-SA-4.0 | validate OWASP LLM / ASI IDs (numbered IDs live on genai.owasp.org, not the repo landing page) |
+| OASIS SARIF spec | https://github.com/oasis-tcs/sarif-spec (2.1.0 schema) | OASIS | canonical SARIF 2.1.0 schema |
+| Microsoft SARIF SDK | https://github.com/microsoft/sarif-sdk (`Sarif.Multitool validate`) | MIT | smart SARIF validator (beyond JSON-schema) for `report --sarif` output |
+
+Both MCPSecBench and Enkrypt are clean OSI licenses, so (unlike DVMCP) they need **no
+`--include-unlicensed` gate**. Commits are pinned on first fetch and recorded here with their
+sha256, mirroring the DVMCP discipline.
 
 **DVAA rejected (verified 2026-06-22).** An earlier research pass named DVAA
 (`opena2a-org/damn-vulnerable-ai-agent`) as "Apache-2.0, MCP servers on ports

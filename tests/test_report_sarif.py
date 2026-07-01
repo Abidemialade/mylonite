@@ -66,10 +66,28 @@ def test_to_sarif_structure_and_differential_proof() -> None:
     assert "5/5" in res["message"]["text"]
     assert "safeguard" in res["message"]["text"].lower()
     assert res["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    # GitHub code scanning dedups alerts across commits via partialFingerprints.
+    assert res["partialFingerprints"]["mylonitePatternLocus/v1"]
     props = res["properties"]
     assert props["security-severity"] == "8.0"  # GitHub numeric severity for High
     assert "LLM01" in props["tags"] and "MEASURE-2.7" in props["tags"]
     json.dumps(doc)  # fully serialisable / self-contained
+
+
+def test_partial_fingerprint_is_stable_and_distinct() -> None:
+    """The fingerprint keys on the finding's IDENTITY (pattern + weakness + locus + target),
+    not a line number — so GitHub keeps the same weakness one alert across commits, and two
+    different weakness classes are two alerts."""
+    from mylonite.report.sarif import to_sarif
+
+    def fp(exploit: object) -> str:
+        r = to_sarif([(exploit, None)])["runs"][0]["results"][0]
+        return str(r["partialFingerprints"]["mylonitePatternLocus/v1"])
+
+    # Same finding twice → identical fingerprint (stable dedup).
+    assert fp(_exploit("W2")) == fp(_exploit("W2"))
+    # Different weakness class → different fingerprint (distinct alert).
+    assert fp(_exploit("W2")) != fp(_exploit("W1"))
 
 
 def test_to_sarif_levels_by_severity() -> None:
