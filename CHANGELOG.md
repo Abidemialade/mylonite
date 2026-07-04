@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into the JSON reply) — no MCP wrapper, no changes to the app under test. A black-box agent
   has no tool surface, so it is tested for the prompt-injection / goal-hijack class (`W2`),
   judged on the reply. See `docs/http-agent.md`. `request.headers` may carry auth and are
-  never logged.
+  never logged. `scan --scaffold OUT --rest-url URL` writes a runnable HTTP-agent target
+  file in one command (no hand-editing).
 - **`--purpose "…"` on `scan` and `gate`** (and a `purpose` field in `target.yaml`): a
   one-line description of what the app is for, threaded into the payload customiser so
   probes are tailored to the app's domain. Persisted for a custom target so
