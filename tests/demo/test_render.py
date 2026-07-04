@@ -103,19 +103,19 @@ def test_render_clean_differential() -> None:
     output = _render(vulnerable, guarded)
 
     # Safety banner — exact wording, modulo Rich line wrapping.
-    assert "Quarry" in output
+    assert "reference app" in output
     assert "DEMO ONLY" in output
-    assert "deliberately vulnerable in-process reference agent" in output
+    assert "deliberately vulnerable in-process agent" in output
     assert "It never binds to a network." in output
     assert "Never point Mylonite at a system you don't own or operate" in output
     assert "(see SECURITY.md)" in output
 
     # Headline computed from the actual ScanResults.
     assert (
-        "the Quarry: 2 exploits on vulnerable, 0 on guarded — this differential "
+        "reference app: 2 exploits on vulnerable, 0 on guarded — this differential "
         "is the oracle that validates every generated regression test"
     ) in output
-    assert "unexpected finding on the guarded twin" not in output
+    assert "unexpected finding on the guarded build" not in output
 
     # Per-weakness table: names + taxonomy IDs from the seed catalogue.
     assert "tool-description-instruction-smuggling" in output
@@ -158,7 +158,7 @@ def test_render_guarded_finding_is_reported_not_hardcoded() -> None:
 
     assert "1 exploits on vulnerable, 1 on guarded" in output
     assert "0 on guarded" not in output
-    assert ("unexpected finding on the guarded twin — LLM-judge noise or a real bug") in output
+    assert ("unexpected finding on the guarded build — LLM-judge noise or a real bug") in output
 
 
 def test_render_skipped_and_error_outcomes_do_not_crash() -> None:

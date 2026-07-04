@@ -1,8 +1,12 @@
 # Test your own app
 
-The bundled [Quarry](quarry.md) proves the machinery. The point of Mylonite is to run
+The bundled [reference app](quarry.md) proves the machinery. The point of Mylonite is to run
 it against **your** AI agent. If your app exposes its tools over MCP (or any
 stdio MCP server), this is the end-to-end path: scaffold a target file, scan, and gate.
+
+> **No MCP?** If your agent is a plain HTTP endpoint (a prompt in, a reply out),
+> use the [`rest` transport](http-agent.md) — describe the request shape in the
+> target file and change nothing in your app.
 
 > **Authorisation.** Mylonite finds and reproduces working exploits, so every
 > non-reference target requires an explicit `--authorize <you>` flag asserting you
@@ -38,7 +42,7 @@ seed_arm:                    # how to plant untrusted content (required for W2)
 > **Auto-wiring.** For a W2 target, if you omit `seed_arm`, `scan` will infer it from
 > the live tool surface when a no-id recall path exists (so the planted payload is
 > guaranteed to be surfaced back) — printing what it inferred. Otherwise it blocks
-> loudly rather than silently skipping the W2 seeds and reading as clean.
+> loudly rather than silently skipping the W2 attack patterns and reading as clean.
 
 ## 2. Scan it
 
@@ -51,7 +55,7 @@ This runs the [single-shot engine](attack-modes.md). Findings land under
 [model roles](attack-modes.md#composing-the-model-roles) to point the
 *planner* at a representatively exploitable model.
 
-## 3. Gate it (the magic moment)
+## 3. Gate it (the full pipeline)
 
 `gate` runs the whole pipeline — scan → generate → validate → (optionally) open a PR —
 and only a **kept** test makes it through:
@@ -61,8 +65,8 @@ mylonite gate --target-file app.yaml --authorize me            # writes test + C
 mylonite gate --target-file app.yaml --authorize me --open-pr  # also opens the PR via gh
 ```
 
-Because you have no in-repo guarded twin, the validator synthesizes one at the adapter
-boundary (the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat))
+Because you have no in-repo guarded build, the validator synthesizes one at the adapter
+boundary (the [control-efficacy check](validation.md#the-control-efficacy-check))
 and proves the finding *differentially* by default — the emitted test gates on the
 **control** being load-bearing, with the boundary-proxy caveat stated on the label. See
 [CI gating](ci-gating.md) for the committed workflows and the PR anatomy.
@@ -70,7 +74,7 @@ and proves the finding *differentially* by default — the emitted test gates on
 ## 4. Keep it honest over time
 
 - **`mylonite ablate --target-file app.yaml --authorize me`** — score each safeguard:
-  load-bearing, security-theater, or (with `--redundancy`) redundant.
+  load-bearing, security theater, or (with `--redundancy`) redundant.
 
 ## Bundled targets
 
@@ -88,5 +92,5 @@ mylonite scan mcp:filesystem:/tmp/sandbox --authorize me
 ```
 
 > These bundled families are **attack-only** today (they scan but don't yet route
-> through the differential moat); routing them through the on-ramp so they can emit a
+> through the differential oracle); routing them through the on-ramp so they can emit a
 > gating test is planned. For a CI-gating test against a real app, use `--target-file`.

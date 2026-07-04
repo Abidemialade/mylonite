@@ -8,7 +8,7 @@ one it finds, gating CI. It deliberately does *not* test the surrounding
 traditional code; that work belongs to SAST/DAST tools.
 
 This document covers what Mylonite does, how it's built, and where it's going.
-For the pitch and install instructions, see [README.md](./README.md); for
+For an overview and install instructions, see [README.md](./README.md); for
 contribution mechanics, see [CONTRIBUTING.md](./CONTRIBUTING.md); for guides and
 reference, see the [documentation site](https://abidemialade.github.io/mylonite/).
 
@@ -27,7 +27,7 @@ This boundary is technical as much as strategic:
 
 The tool **will not** add general application-code scanning, traditional
 SAST/DAST behaviours, or non-AI test generation. Drifting off the AI layer
-destroys the validation moat.
+destroys the core differentiator.
 
 ## Architecture
 
@@ -46,7 +46,7 @@ Eight components organised around a single core use case:
    prompt, tools, and data.
 4. **Test-generation layer.** Emits a self-contained `pytest` file that
    reproduces the exploit as an assertion.
-5. **Validation engine — the moat.** See [§ Validation engine](#validation-engine)
+5. **Validation engine — the core differentiator.** See [§ Validation engine](#validation-engine)
    below.
 6. **CI integration.** A GitHub Action that runs the committed suite on
    PRs, posts pass/fail, and gates merges on thresholds (e.g.,
@@ -84,14 +84,14 @@ engine proves that, in five layers:
    in mutation testing.
 3. **Metamorphic robustness (gating).** Apply semantically-neutral
    perturbations of the exploit (paraphrase, casing, encoding, language,
-   real-world evasion encodings) and re-drive each through both twins. A robust
+   real-world evasion encodings) and re-drive each through both builds. A robust
    guard resists a majority; a violation reveals a brittle, over-fit test.
 4. **Security mutation score.** Maintain a bank of distinct seeded
    weaknesses and report the fraction a generated test correctly fails on
    — a quantitative quality signal per emitted test.
-5. **Control-efficacy oracle (the extension that generalises the moat).** On a
+5. **Control-efficacy check (the extension that generalises the core differentiator).** On a
    real target with no second build, hold the model constant and vary only the
-   safeguard: synthesize a *guarded twin* by applying a canonical control (W1–W4)
+   safeguard: synthesize a *guarded build* by applying a canonical control (W1–W4)
    at the adapter boundary, and keep a finding only when the attack fires on the
    raw target and is resisted with the control applied — proving the *control*
    carries the security. The plant and effect probe bypass the boundary shim so
@@ -123,10 +123,10 @@ cites its upstream publisher in `SOURCE.md`.
 
 The end-to-end pipeline is complete and in active use: `scan → generate →
 validate → gate` runs against the bundled reference agent and your own MCP app,
-proves each finding with the control-efficacy oracle (the differential generalised to
+proves each finding with the control-efficacy check (the differential generalised to
 any single-build app), and emits a committed regression test that gates CI.
 
-**The thesis the evidence supports: model robustness ≠ app security.** A
+**What the evidence shows: model robustness ≠ app security.** A
 [third-party verification harness](https://abidemialade.github.io/mylonite/verification/)
 runs Mylonite against external ground truth it did not author (DVMCP, InjecAgent,
 AgentDojo). The result that reframes the product: a frontier model resisted *generic*
@@ -143,8 +143,8 @@ out-fooling frontier alignment. The product surface is scoped to exactly that.
 - The four weakness classes — W1 tool-description smuggling, W2 indirect injection,
   W3 excessive egress / SSRF, W4 unconfirmed consequential action — with
   deterministic predicates and an LLM-judge fallback.
-- The full validation engine above, including the **control-efficacy oracle** and
-  **control ablation** (which safeguard is load-bearing vs. theater).
+- The full validation engine above, including the **control-efficacy check** and
+  **control ablation** (which safeguard is load-bearing vs. security theater).
 - Custom-target support via a declarative `target.yaml` (scaffolded by
   `scan --scaffold`), the one-command `mylonite gate` flow, a reusable GitHub
   Action, and CI workflow templates.
@@ -156,7 +156,7 @@ out-fooling frontier alignment. The product surface is scoped to exactly that.
 
 **Removed (v0.7.4), by design.** Deeper attack *tactics* — an adaptive refinement loop,
 tool-chaining synthesis, stateful memory poisoning, and cross-model durability — were
-cut, not just hidden. They were never the moat (the control-efficacy oracle is), they
+cut, not just hidden. They were never the core differentiator (the control-efficacy check is), they
 were beaten by frontier-aligned models on every external target, and none had a
 third-party proof path. Their value was the lesson (model robustness ≠ app security),
 which is banked into the positioning; the code lives in git history and returns only if

@@ -13,7 +13,7 @@ The end-to-end pipeline (each command also documented via ``--help``):
 * ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
 * ``mylonite report`` — render a scan/validation as a terminal panel, SARIF, or JSON.
 * ``mylonite ablate`` — score which controls are load-bearing vs. theater.
-* ``mylonite demo`` / ``doctor`` / ``taxonomy`` / ``version`` — the Quarry
+* ``mylonite demo`` / ``doctor`` / ``taxonomy`` / ``version`` — the reference-app
   playground, diagnostics, and supporting utilities.
 
 See the documentation site for guides and the full reference.
@@ -332,15 +332,6 @@ def doctor(
     typer.echo(f"provider OK — {effective_provider}/{base_model} reachable (routed: {routed}).")
 
 
-def _not_implemented(name: str) -> None:
-    typer.echo(
-        f"`{name}` is not implemented in v{__version__}. "
-        "It arrives in a later release — see ROADMAP.md and the issue tracker.",
-        err=True,
-    )
-    raise typer.Exit(code=EXIT_CONFIG)
-
-
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
@@ -379,7 +370,7 @@ def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
     """
     if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
         typer.echo(
-            "the Quarry reference target isn't installed (it's opt-in) — run "
+            "the reference app target isn't installed (it's opt-in) — run "
             '`pip install "mylonite[demo]"`, or from a checkout '
             "`pip install -e ./reference_targets/mcp_kitchen_sink`.",
             err=True,
@@ -769,6 +760,18 @@ def scan(
             help="Required for non-reference targets; assert ownership of the target.",
         ),
     ] = None,
+    purpose: Annotated[
+        str | None,
+        typer.Option(
+            "--purpose",
+            help=(
+                "One-line description of what the app is for (e.g. 'an email-triage "
+                "assistant that can send replies'). Tailors the probes to the app's "
+                "domain. Overrides 'purpose' in the target file; persisted for a custom "
+                "target so generate/validate reuse it."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run the exploit-finding loop against a target.
 
@@ -811,6 +814,10 @@ def scan(
 
     effective_planner_model = _resolve_role_model(planner_model)
     effective_customiser_model = _resolve_role_model(customiser_model)
+    # Effective app purpose: the --purpose flag, else the target file's declared
+    # purpose (resolved in the custom-target branch below). None for a reference
+    # target unless the flag is set.
+    effective_purpose = purpose
     effective_judge_model = _resolve_role_model(judge_model)
 
     # Scaffold mode: introspect a custom MCP server and write a starter target.yaml
@@ -880,7 +887,15 @@ def scan(
         # (e.g. process_document) makes W2 testable via the direct_content channel
         # (descriptor synthesis), so the seed-arm pre-flight must NOT block.
         synth_covers_indirect = False
-        if needs_seed_arm_autowire(tf) and not dry_run and not allow_no_seed_arm:
+        # A rest (HTTP-agent) target has no tool surface to introspect or plant into;
+        # W2 rides in as direct prompt injection (seed_synth), so skip seed_arm
+        # auto-wiring and let the (rest-exempt) pre-flight pass.
+        if (
+            tf.transport != "rest"
+            and needs_seed_arm_autowire(tf)
+            and not dry_run
+            and not allow_no_seed_arm
+        ):
             try:
                 _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
                 _descriptor = asyncio.run(asyncio.wait_for(_probe.describe(), timeout=20))
@@ -929,12 +944,20 @@ def scan(
         for warn in effect_probe_warnings(tf):
             typer.echo(f"warning: {warn}", err=True)
 
+        # Resolve the effective purpose: an explicit --purpose flag wins and is
+        # persisted into the target so generate/validate reuse it; otherwise the
+        # target file's declared purpose is used.
+        if purpose is not None:
+            tf = tf.model_copy(update={"purpose": purpose})
+        effective_purpose = tf.purpose
+
         # Copy the source YAML verbatim (preserves operator comments/structure)
         # when given a file; otherwise serialise the inline mcp:custom flags so the
-        # exact target is reproducible from the scan dir alone.
+        # exact target is reproducible from the scan dir alone. A --purpose override
+        # (or an inline target) is serialised so the persisted YAML carries it.
         custom_target_yaml = (
             target_file.read_text(encoding="utf-8")
-            if target_file is not None
+            if target_file is not None and purpose is None
             else dump_target_file(tf)
         )
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
@@ -985,7 +1008,7 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
-    customiser = PayloadCustomiser(model=effective_customiser_model)
+    customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
     judge = SuccessJudge(model=effective_judge_model)
 
     config = ScanConfig(
@@ -1112,7 +1135,7 @@ def demo(
         ),
     ] = None,
 ) -> None:
-    """Run the zero-config Quarry playground: vulnerable vs guarded differential.
+    """Run the zero-config reference-app playground: vulnerable vs guarded differential.
 
     Default (offline replay) replays recorded fixtures — no network, no API key,
     deterministic. Pass --live to make real LLM calls against the in-process
@@ -1581,7 +1604,7 @@ def _differential_plan(exploit: Any, *, fast: bool) -> tuple[bool, str | None, s
     """Decide whether the differential leg gates a real-target finding (M1).
 
     The differential — re-driving a boundary-guarded twin to prove the *safeguard*,
-    not the model, carries the security — is the moat. It now runs BY DEFAULT for a
+    not the model, carries the security — is the core differentiator. It now runs BY DEFAULT for a
     custom/real target whenever a boundary control can be built for the finding's
     weakness; ``--fast`` opts out (it doubles the live runs per finding). When no
     control is inferable we run WITHOUT it, loudly (never a silently weaker gate).
@@ -1666,8 +1689,9 @@ def _validate_custom(
     typer.echo(f"validate: {diff_note}", err=True)
     if not randomize_exfil:
         typer.echo(
-            "tip: pass --randomize-exfil so the result proves the target blocks exfil to ANY "
-            "attacker address, not just the one demo literal (avoids 'teaching to the test').",
+            "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
+            "one demo literal, not exfil to ANY attacker address. Drop it (randomization is the "
+            "default for custom targets) to avoid 'teaching to the test'.",
             err=True,
         )
 
@@ -1718,6 +1742,18 @@ def _validate_custom(
         f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).",
         err=True,
     )
+    if not server_layer:
+        bar = "=" * 74
+        typer.echo(
+            f"{bar}\n"
+            "BOUNDARY-PROXY CAVEAT: the guarded side is a SYNTHETIC control Mylonite\n"
+            "applies at the adapter boundary, NOT your server's own guard. A kept\n"
+            "finding proves a canonical control WOULD be load-bearing for this model --\n"
+            "not that your implementation is. For the strong, server-side claim, declare\n"
+            "control_env or vulnerable_launch in your target.yaml (see docs/concepts.md).\n"
+            f"{bar}",
+            err=True,
+        )
     validator = DifferentialValidator(
         iterations=iterations,
         provider=provider,
@@ -1776,7 +1812,7 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
 def _render_validation_report(report: Any, console: Console | None = None) -> None:
     """Render a per-leg Rich report (F4): one row per ValidationOutcome.
 
-    This is the moat's SHOWCASE surface, so it is made ASCII-safe independently
+    This is the core differentiator's SHOWCASE surface, so it is made ASCII-safe independently
     of the root callback's UTF-8 forcing: a legacy cp1252 Windows console must
     never crash on the pass/fail marks or the title dash (Issue #9). Shows the
     per-leg result + metric + detail; the gating formula with live per-leg marks,
@@ -1818,7 +1854,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
 
     console.print(table)
 
-    # --- the differential-oracle EVIDENCE (PR2: make the moat legible) --------
+    # --- the differential-oracle EVIDENCE (PR2: make the differential legible) --------
     # The gating formula with live per-leg marks, the fires/resists counts, and
     # the per-seed kill matrix were previously buried in report.notes (rendered
     # nowhere). Surface them so a "KEPT" verdict shows WHY it's trustworthy.
@@ -1935,7 +1971,7 @@ def _provider_preflight(provider: str, model: str) -> bool:
 @app.command(
     epilog=(
         "Examples:\n\n"
-        "`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the moat).\n\n"
+        "`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the validation engine).\n\n"
         "`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n"
         "`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\n"
         "Exit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected)."
@@ -2013,17 +2049,18 @@ def validate(
         ),
     ] = False,
     randomize_exfil: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--randomize-exfil",
+            "--randomize-exfil/--no-randomize-exfil",
             help=(
                 "Mint a unique exfil destination per run instead of the demo address, so "
                 "the run proves the control/target stops exfil to ANY attacker destination "
                 "(generalizes) rather than blocking one literal address (avoids 'teaching "
-                "to the test'). Recommended for live custom-target runs."
+                "to the test'). Defaults ON for live custom-target runs; the reference/replay "
+                "path never randomizes."
             ),
         ),
-    ] = False,
+    ] = None,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
@@ -2076,6 +2113,14 @@ def validate(
     )
 
     is_custom = not exploit.target_id.startswith("reference:")
+
+    # Randomize the exfil destination by DEFAULT on live custom-target runs, so a kept
+    # finding proves the control blocks ANY attacker address, not the one demo literal
+    # (avoids 'teaching to the test'). The reference/replay path must never randomize —
+    # it replays committed fixtures pinned to the demo address. Explicit
+    # --randomize-exfil / --no-randomize-exfil always wins.
+    if randomize_exfil is None:
+        randomize_exfil = is_custom
 
     # Auto-resolve the target YAML co-located with the test (written by `generate`)
     # so the operator needn't re-pass --target-file. Explicit --target-file wins.
@@ -2713,7 +2758,7 @@ def _post_gate_annotations(
 @app.command(
     epilog=(
         "Examples:\n\n"
-        "`mylonite gate reference:vulnerable` -- the magic moment on the demo target.\n\n"
+        "`mylonite gate reference:vulnerable` -- the full pipeline on the demo target.\n\n"
         "`mylonite gate --target-file app.yaml --authorize me` -- gate YOUR app (writes test + workflows).\n\n"
         "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- also open the gating PR via gh."
     )
@@ -2752,6 +2797,16 @@ def gate(
         typer.Option(
             "--authorize",
             help="Required for non-reference targets; assert ownership of the target.",
+        ),
+    ] = None,
+    purpose: Annotated[
+        str | None,
+        typer.Option(
+            "--purpose",
+            help=(
+                "One-line description of what the app is for; tailors the probes to the "
+                "app's domain. Overrides 'purpose' in the target file."
+            ),
         ),
     ] = None,
     open_pr: Annotated[
@@ -2820,19 +2875,33 @@ def gate(
         ),
     ] = False,
     randomize_exfil: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--randomize-exfil",
+            "--randomize-exfil/--no-randomize-exfil",
             help=(
                 "Mint a unique exfil destination per run so the finding proves the "
                 "control/target stops exfil to ANY attacker destination, not just the "
-                "demo address (avoids 'teaching to the test'). Recommended for live "
-                "custom-target runs."
+                "demo address (avoids 'teaching to the test'). Defaults ON for a live "
+                "custom target (--target-file); the reference target never randomizes."
             ),
         ),
-    ] = False,
+    ] = None,
+    iterations: Annotated[
+        int,
+        typer.Option(
+            "--iterations",
+            help=(
+                "Differential iterations for the validation leg (default 3). The kept "
+                "verdict then reflects reproducibility across runs — the guarded side "
+                "must resist every run and the attack must fire in all but one. Pass 1 "
+                "for the fastest, weakest gate (fire once)."
+            ),
+        ),
+    ] = 3,
 ) -> None:
-    """Scan -> generate -> validate -> (optionally) open a gating PR. The magic moment."""
+    """Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline."""
+    if randomize_exfil is None:
+        randomize_exfil = target_file is not None
     from mylonite.gate import pr as pr_mod
     from mylonite.gate import run_gate
     from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
@@ -2958,7 +3027,9 @@ def gate(
             config=config,
             adapter=adapter,
             attack_modules=attack_modules,
-            customiser=PayloadCustomiser(model=effective_model),
+            customiser=PayloadCustomiser(
+                model=effective_model, purpose=purpose or (tf.purpose if tf else None)
+            ),
             judge=SuccessJudge(model=effective_model),
         )
         result = asyncio.run(engine.run())
@@ -3041,12 +3112,14 @@ def gate(
 
             guarded_factory = _guarded
 
-        # gate is the fast magic-moment path: one re-drive that must FIRE at least once
-        # (vuln_threshold=1, not the default iterations-1=0). Deeper multi-iteration
-        # rigor lives in nightly discovery + the committed test's regression assert.
+        # gate validates across `iterations` re-drives (default 3) so the kept verdict
+        # reflects reproducibility: the attack must fire in all but one run
+        # (vuln_threshold = iterations - 1) and the guarded side must resist every run.
+        # `--iterations 1` restores the fastest, weakest gate (fire once). Deeper nightly
+        # discovery still complements this via the committed test's regression assert.
         validator = DifferentialValidator(
-            iterations=1,
-            vuln_threshold=1,
+            iterations=iterations,
+            vuln_threshold=max(1, iterations - 1),
             provider=effective_provider,
             model=effective_model,
             target_adapter_factory=_factory,

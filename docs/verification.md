@@ -19,7 +19,7 @@ everywhere we threw it — but the *same model* was caught immediately where the
 own design** was the flaw. Mylonite's demonstrable value is **app-flaw detection +
 regression gating + honesty**, not out-fooling frontier alignment.
 
-## The keystone: same model, app design decides
+## Example: same model, app design decides
 
 Same Claude Haiku 4.5, two targets:
 
@@ -41,8 +41,8 @@ You can reproduce this leg yourself in one command, offline and with no API key 
 8 in-scope challenges from [DVMCP](https://github.com/harishsg993010/damn-vulnerable-MCP-server)
 scanned over SSE (the remote adapter), same model:
 
-- **Coverage: 8/8 attempted.** Before the seed-portability fix, **all 8 skipped** with
-  `SeedArmUnavailable` — Mylonite's seeds were shaped around the bundled kitchen-sink's
+- **Coverage: 8/8 attempted.** Before the attack-pattern-portability fix, **all 8 skipped** with
+  `SeedArmUnavailable` — Mylonite's attack patterns were shaped around the bundled kitchen-sink's
   tool surface and didn't fit a different server. Synthesising the probe for each target's
   *introspected* tool surface fixed that.
 - **Recall: 0/8.** Haiku resisted every model-fooling attack, including an unguarded
@@ -114,7 +114,7 @@ AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
   marking. The harness even caught the source research's own errors (it mis-stated two
   external targets' licenses and a third's nature — all verified wrong via the GitHub API
   before any number was produced).
-- Coverage portability: seeds now run on real non-kitchen-sink targets.
+- Coverage portability: attack patterns now run on real non-kitchen-sink targets.
 - Precision on a defended app (0 FP).
 - Judge positive-class verified on real third-party positives (AgentDojo).
 
@@ -132,10 +132,10 @@ The harness lives in [`verification/`](https://github.com/Abidemialade/mylonite/
 (outside the wheel; external data fetched at pinned commits, never vendored — see
 `verification/SOURCE.md`). Three tiers, easiest first:
 
-**1. The keystone, offline, no API key.** The differential that the whole product rests on:
+**1. The core example, offline, no API key.** The differential that the whole product rests on:
 
 ```bash
-mylonite demo        # same model, vulnerable twin vs guarded twin — 2 findings vs 0
+mylonite demo        # same model, vulnerable build vs guarded build — 2 findings vs 0
 ```
 
 **2. The harness wiring, offline, no API key.** Hermetic tests that guard the plumbing

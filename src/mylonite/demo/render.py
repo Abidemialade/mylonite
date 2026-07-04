@@ -29,18 +29,18 @@ from mylonite.scan.engine import ScanResult
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, Weakness
 
 SAFETY_BANNER: Final[str] = (
-    "DEMO ONLY — the Quarry is a deliberately vulnerable in-process reference "
+    "DEMO ONLY — the reference app is a deliberately vulnerable in-process "
     "agent. It never binds to a network. Never point Mylonite at a system you "
     "don't own or operate"
 )
 """Bolded part of the safety banner; ``(see SECURITY.md).`` is appended unbolded."""
 
 _HEADLINE_TEMPLATE: Final[str] = (
-    "the Quarry: {n_vuln} exploits on vulnerable, {n_guard} on guarded — this "
+    "reference app: {n_vuln} exploits on vulnerable, {n_guard} on guarded — this "
     "differential is the oracle that validates every generated regression test"
 )
 _GUARDED_FINDING_NOTE: Final[str] = (
-    "⚠ unexpected finding on the guarded twin — LLM-judge noise or a real bug"
+    "⚠ unexpected finding on the guarded build — LLM-judge noise or a real bug"
 )
 _TEASER: Final[str] = (
     "Each finding becomes a committed regression test, validated against this same "
@@ -132,7 +132,7 @@ def render_demo(
     console.print(Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow"))
 
     table = Table(
-        title="the Quarry — vulnerable vs guarded twin",
+        title="the reference app — vulnerable vs guarded build",
         title_justify="left",
         show_lines=False,
     )

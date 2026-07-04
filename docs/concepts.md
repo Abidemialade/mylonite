@@ -13,7 +13,7 @@ whole product. Either way, the unit Mylonite targets is the same:
 
 Mylonite stops at that boundary. Traditional code paths — auth, billing,
 SQL — are ceded to SAST/DAST tools. This is both a market choice and a
-technical one: the validation-engine moat below has power only where
+technical one: the validation engine below only has discriminating power where
 behaviour is non-deterministic, which is exactly the AI layer.
 
 ## What "validated regression test" means
@@ -25,7 +25,7 @@ test that fails if a future code change reintroduces the same weakness.
 
 The hard part is proving the test is meaningful, not just plausible.
 
-## The validation engine — Mylonite's moat
+## The validation engine
 
 The validation engine layers four mechanisms:
 
@@ -35,9 +35,9 @@ The validation engine layers four mechanisms:
    variant. This is what proves the test *means* what it claims; without it
    you can't tell "found a real weakness" from "asserted something trivially
    true." On a real single-build app the
-   [control-efficacy oracle](#control-efficacy-which-safeguard-is-load-bearing)
+   [control-efficacy check](#control-efficacy-which-safeguard-is-load-bearing)
    below produces this differential by toggling the safeguard; the bundled
-   reference twins produce it directly (two builds).
+   reference app produces it directly (two builds).
 3. **Flakiness filter (5 runs)** — LLM stochasticity makes single-run
    evidence weak. Tests are kept only if they hold across at least five
    repeated runs.
@@ -57,24 +57,24 @@ that the reference differential uses as its ground truth.
 
 ## Control efficacy — which safeguard is load-bearing?
 
-This is the headline validation mechanism — the **control-efficacy oracle**, and
-the moat. A customer app has **one** build, so the classic two-build differential
-(fail-on-vulnerable, pass-on-guarded) only applies to the bundled reference twins.
-The control-efficacy oracle generalises the idea to *any* single-build MCP app: it
+This is the headline validation mechanism — the **control-efficacy check**, and
+the core differentiator. A customer app has **one** build, so the classic two-build
+differential (fail-on-vulnerable, pass-on-guarded) only applies to the bundled reference
+app. The control-efficacy check generalises the idea to *any* single-build MCP app: it
 **holds the model constant and varies only the safeguard**, synthesizing a *guarded
-twin* of any real target by applying a canonical control (W1–W4) at the adapter
+build* of any real target by applying a canonical control (W1–W4) at the adapter
 boundary, then keeps a finding only when the attack fires on the raw target and is
-resisted with the control applied — proving the *control*, not the model's mood,
-carries the security. For a real (`--target-file`) target this differential runs **by
-default** in `validate`/`gate` (`--prove-control` is a back-compat no-op, `--fast`
-skips it); `mylonite ablate` scores the whole control set as load-bearing / theater /
-redundant. The plant and effect probe always bypass the boundary shim, so the
-control is measured against an undiluted attack. Full treatment in
-[the validation engine](validation.md#the-control-efficacy-oracle-the-moat).
+resisted with the control applied — proving the *control*, not the model's current
+behaviour, carries the security. For a real (`--target-file`) target this differential
+runs **by default** in `validate`/`gate` (`--prove-control` is a back-compat no-op,
+`--fast` skips it); `mylonite ablate` scores the whole control set as load-bearing /
+theater / redundant. The plant and effect probe always bypass the boundary shim, so
+the control is measured against an undiluted attack. Full treatment in
+[the validation engine](validation.md#the-control-efficacy-check).
 
 ### When the controls live in the server, not the adapter
 
-The boundary shim synthesizes a guarded twin by guarding the *planner's view* —
+The boundary shim synthesizes a guarded build by guarding the *planner's view* —
 which works when Mylonite can add the control. But many real MCP apps bake their
 guards into the **server itself**, toggled by an env var or a security profile
 (e.g. `SECURITY_PROFILE=strict`). The shim can't strip a guard it doesn't own, so

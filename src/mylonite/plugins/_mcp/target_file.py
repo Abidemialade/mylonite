@@ -31,6 +31,7 @@ from mylonite.plugins._mcp.target_registry import (
     EffectProbeSpec,
     InvalidTargetScope,
     LaunchOverride,
+    RequestSpec,
     SeedArmSpec,
     TargetSpec,
 )
@@ -52,7 +53,8 @@ class TargetFile(BaseModel):
     # Transport. Default "stdio" launches ``command``/``args`` as a subprocess.
     # "sse"/"http" connect to a remote MCP server at ``url`` (``command`` is then
     # optional/ignored; ``headers`` may carry auth and are never logged).
-    transport: Literal["stdio", "sse", "http"] = "stdio"
+    # "rest" drives a plain HTTP agent (no MCP) described by ``request``.
+    transport: Literal["stdio", "sse", "http", "rest"] = "stdio"
     command: str = ""
     args: list[str] = []
     env: dict[str, str] = {}
@@ -62,6 +64,12 @@ class TargetFile(BaseModel):
     requires_scope: bool = False
     system_prompt: str | None = None
     system_prompt_file: Path | None = None
+    # One-line description of what the app is for (e.g. "an email-triage assistant
+    # that reads inbox messages and can send replies"). Optional; when set it is
+    # threaded into the payload customiser so probes are tailored to the app's
+    # domain and the actions a real user could take. Persisted so generate/validate
+    # reuse it. Overridable per-run with `--purpose`.
+    purpose: str | None = None
     primary_tools: list[str] = []
     weakness_classes: list[str] = []
     seed_arm: SeedArmSpec | None = None
@@ -73,6 +81,8 @@ class TargetFile(BaseModel):
     # today's behaviour. See docs/quarry.md and SECURITY.md (--authorize gate).
     vulnerable_launch: LaunchOverride | None = None
     control_env: dict[str, dict[str, str]] = {}
+    # transport: rest — the plain HTTP agent request shape (endpoint + body template).
+    request: RequestSpec | None = None
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -84,7 +94,18 @@ class TargetFile(BaseModel):
                 raise ValueError("a stdio target requires a 'command' to launch the MCP server")
             if self.url is not None:
                 raise ValueError("'url' is only valid for transport: sse|http")
-        else:  # sse | http — remote
+        elif self.transport == "rest":
+            if self.request is None:
+                raise ValueError(
+                    "a rest (HTTP-agent) target requires a 'request' block (url + body "
+                    "template with a {prompt} placeholder)"
+                )
+            if "{prompt}" not in self.request.body:
+                raise ValueError(
+                    "request.body must contain a {prompt} placeholder — that is where the "
+                    "attack payload is substituted into the HTTP request"
+                )
+        else:  # sse | http — remote MCP
             if not self.url:
                 raise ValueError(f"transport {self.transport!r} requires a 'url'")
         if self.family in {"filesystem", "fetch", "github"}:
@@ -142,6 +163,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         transport=tf.transport,
         url=tf.url,
         headers=dict(tf.headers),
+        request=tf.request,
     )
 
 
@@ -235,6 +257,11 @@ def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> lis
     seeds then report NOT TESTED, which the summary surfaces loudly).
     """
     errors: list[str] = []
+    # A black-box HTTP agent (transport: rest) has no tool surface to plant into; W2
+    # is delivered by DIRECT prompt injection (see seed_synth), so a seed_arm does
+    # not apply and its absence is not an error.
+    if tf.transport == "rest":
+        return errors
     indirect = sorted(set(tf.weakness_classes) & _INDIRECT_ONLY_WEAKNESS_CLASSES)
     if indirect and tf.seed_arm is None and not allow_no_seed_arm:
         errors.append(

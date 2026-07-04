@@ -113,3 +113,36 @@ async def test_customise_never_leaks_fallback_sentinels_into_metadata() -> None:
     cust = PayloadCustomiser(model="stub", completion_fn=stub)
     payload = await cust.customise(_seed(), _descriptor())
     assert not any(k.startswith("_mylonite_") for k in payload.metadata)
+
+
+@pytest.mark.asyncio
+async def test_customise_threads_purpose_into_prompt() -> None:
+    """--purpose is surfaced to the customiser LLM so probes are app-tailored."""
+    seen: dict[str, Any] = {}
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.update(kwargs)
+        return _stub_response('{"body": "REFINED"}')
+
+    cust = PayloadCustomiser(
+        model="stub",
+        completion_fn=stub,
+        purpose="an email-triage assistant that can send replies",
+    )
+    await cust.customise(_seed(), _descriptor())
+    blob = str(seen)
+    assert "TARGET PURPOSE" in blob
+    assert "email-triage assistant" in blob
+
+
+@pytest.mark.asyncio
+async def test_customise_omits_purpose_block_when_unset() -> None:
+    seen: dict[str, Any] = {}
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.update(kwargs)
+        return _stub_response('{"body": "REFINED"}')
+
+    cust = PayloadCustomiser(model="stub", completion_fn=stub)  # no purpose
+    await cust.customise(_seed(), _descriptor())
+    assert "TARGET PURPOSE" not in str(seen)

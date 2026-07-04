@@ -5,13 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "mcp-kitchen-sink"
 version = "0.1.0"
-description = "Deliberately-insecure reference MCP agent used as differential-oracle ground truth for Mylonite."
+description = "Deliberately-vulnerable, fully mocked (network-less) reference MCP agent — the test target for the Mylonite AI-security scanner. NOT for production use."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "Mylonite contributors" },
 ]
+keywords = ["mylonite", "ai-security", "mcp", "test-target", "deliberately-vulnerable"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -34,6 +35,11 @@ dependencies = [
     # `mcp` SDK is optional at this layer so unit tests that don't need a
     # live MCP server can still run.
 ]
+
+[project.urls]
+Homepage = "https://github.com/Abidemialade/mylonite"
+Source = "https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink"
+Issues = "https://github.com/Abidemialade/mylonite/issues"
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]

@@ -1,6 +1,6 @@
 # `mcp_kitchen_sink` — deliberately-insecure reference MCP agent
 
-**a.k.a. "the Quarry"** — Mylonite's built-in proving ground. The Quarry,
+**a.k.a. "the reference app"** — Mylonite's built-in proving ground. The reference app,
 the `mcp-kitchen-sink` pip package, and the `reference:vulnerable` /
 `reference:guarded` scan targets are all the **same artifact** under three
 names. The canonical walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
@@ -11,7 +11,7 @@ names. The canonical walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 > Both server variants refuse to bind to non-loopback interfaces by default.
 > See `mylonite/SECURITY.md` for the project's dual-use policy.
 >
-> **DEMO ONLY — the Quarry is a deliberately vulnerable in-process reference
+> **DEMO ONLY — the reference app is a deliberately vulnerable in-process reference
 > agent. It never binds to a network. Never point Mylonite at a system you
 > don't own or operate** (see SECURITY.md).
 
@@ -41,7 +41,7 @@ vulnerable-vs-guarded matchup.
 ## The four seeded weaknesses
 
 The full catalogue (loci, summaries) is in
-[`seeds/seeds.yaml`](seeds/seeds.yaml); the scan seeds that exercise each
+[`seeds/seeds.yaml`](seeds/seeds.yaml); the attack patterns that exercise each
 weakness live in `src/mylonite/scan/seeds.py`. The scenario-by-scenario
 walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 
@@ -58,7 +58,7 @@ walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 mylonite demo
 ```
 
-Runs Mylonite's real scan pipeline against both twins of the Quarry —
+Runs Mylonite's real scan pipeline against both builds of the reference app —
 offline, no API key — and prints one row per weakness above plus the
 vulnerable-vs-guarded differential headline. See
 [`docs/quarry.md`](../../docs/quarry.md) for the expected output and the

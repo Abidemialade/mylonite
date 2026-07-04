@@ -17,9 +17,9 @@ def _tool(name: str, description: str = "", schema: dict | None = None) -> ToolS
     return ToolSpec(name=name, description=description, json_schema=schema or {"type": "object"})
 
 
-def _descriptor(weaknesses: list[str], tools: list[ToolSpec]):
+def _descriptor(weaknesses: list[str], tools: list[ToolSpec], kind: str = "mcp"):
     return SimpleNamespace(
-        target_id="mcp:custom-app", weakness_classes=weaknesses, tools=tools, kind="mcp"
+        target_id="mcp:custom-app", weakness_classes=weaknesses, tools=tools, kind=kind
     )
 
 
@@ -126,3 +126,30 @@ def test_seeds_for_descriptor_falls_back_when_no_channel() -> None:
     tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
     selected = seeds.seeds_for_descriptor(_descriptor(["W2"], tools))
     assert any(s.pattern_id == "indirect-injection-note-body-direct" for s in selected)
+
+
+# --- black-box HTTP agent (transport: rest) ----------------------------------
+
+
+def test_synthesize_black_box_agent_gets_direct_injection_seed() -> None:
+    # A tool-less http-agent target (no tools to plant into) gets a single DIRECT
+    # prompt-injection probe judged on the reply.
+    descriptor = _descriptor(["W2"], [], kind="http-agent")
+    out = seed_synth.synthesize_seeds(descriptor)
+    assert [s.pattern_id for s in out] == ["synth-w2-direct-injection-agent"]
+    seed = out[0]
+    assert seed.channel == "user-message"
+    assert seed.setup == "no_setup"
+    assert seed.weakness == "W2"
+
+
+def test_black_box_agent_without_w2_synthesizes_nothing() -> None:
+    # W1/W3/W4 need a tool surface a black box doesn't have.
+    assert seed_synth.synthesize_seeds(_descriptor(["W1", "W4"], [], kind="http-agent")) == []
+
+
+def test_seeds_for_descriptor_black_box_uses_only_direct_injection() -> None:
+    # No kitchen-sink fallback for a black box: the direct-injection seed is the
+    # only channel, so kitchen-sink store->recall seeds must NOT be added.
+    selected = seeds.seeds_for_descriptor(_descriptor(["W2"], [], kind="http-agent"))
+    assert [s.pattern_id for s in selected] == ["synth-w2-direct-injection-agent"]

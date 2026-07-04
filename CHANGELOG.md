@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-07-04
+
+> **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP
+> wrapper and no changes to the app under test; sharpen probes with a one-line `--purpose`;
+> and read docs written as plain technical English instead of a pitch. The demo install
+> path is fixed end to end.
+
+### Added
+
+- **Generic HTTP-agent adapter (`transport: rest`).** Point Mylonite at any plain HTTP
+  agent by declaring its request shape in a `target.yaml` `request` block (`url`, `method`,
+  `headers`, a `body` template with a `{prompt}` placeholder, and a dotted `response_path`
+  into the JSON reply) — no MCP wrapper, no changes to the app under test. A black-box agent
+  has no tool surface, so it is tested for the prompt-injection / goal-hijack class (`W2`),
+  judged on the reply. See `docs/http-agent.md`. `request.headers` may carry auth and are
+  never logged.
+- **`--purpose "…"` on `scan` and `gate`** (and a `purpose` field in `target.yaml`): a
+  one-line description of what the app is for, threaded into the payload customiser so
+  probes are tailored to the app's domain. Persisted for a custom target so
+  `generate`/`validate` reuse it.
+- **`--iterations N` on `gate`** (default 3): the gate's validation leg now runs the
+  differential across several iterations by default, so the `kept` verdict reflects
+  reproducibility (the attack must fire in all but one run and the guarded side must resist
+  every run). Pass `--iterations 1` for the fastest, weakest gate.
+
+### Changed
+
+- **`--randomize-exfil` defaults ON for live custom-target runs** (now a tri-state
+  `--randomize-exfil/--no-randomize-exfil`). A kept finding proves the control blocks
+  exfiltration to *any* attacker address, not just the one demo literal — no more accidental
+  teaching-to-the-test. The reference/replay path never randomizes.
+- **Documentation rebranded to plain technical English.** Removed the pitch vocabulary
+  (`moat`, `magic moment`, `keystone result`, `the thesis`, "the pitch") from every shipped
+  doc, and renamed the coined terms to plain ones: **the Quarry → the reference app**,
+  **twins → the vulnerable and guarded builds**, **seeds (as a concept) → attack patterns**.
+  The `control-efficacy oracle` section is now `control-efficacy check`. README trimmed to
+  the essentials.
+- **The boundary-proxy caveat is surfaced up front** in `validate` output (a prominent
+  banner) when the guarded side is the synthetic boundary control rather than your real
+  server-side guard — matching what the gate PR body already stated.
+
+### Fixed
+
+- **The `pip install "mylonite[demo]"` path now resolves** end to end: the reference target
+  `mcp-kitchen-sink` is published to PyPI, so `mylonite demo` runs with no clone. Reconciled
+  the README/quickstart contradictions — Python **3.11–3.13** (litellm has no 3.14 wheels),
+  one canonical (illustrative, model-dependent) demo count, and a single Windows activation
+  command.
+- Removed a dead CLI helper and stale local working artifacts; no product behaviour change.
+
 ## [0.7.4] - 2026-06-24
 
 > **Narrowed to the provable core — *model robustness ≠ app security*.** The third-party

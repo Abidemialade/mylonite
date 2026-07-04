@@ -680,7 +680,7 @@ def test_scan_exit_4_on_provider_failure(
 
 
 # ---------------------------------------------------------------------------
-# `mylonite demo` — the offline Quarry playground (v0.3.0, PR A, Task A5).
+# `mylonite demo` — the offline reference-app playground (v0.3.0, PR A, Task A5).
 #
 # These tests MUST be plain `def` (not async): the command body calls
 # asyncio.run() internally, and pytest's asyncio_mode="auto" would otherwise
@@ -693,7 +693,7 @@ def test_demo_replay_smoke() -> None:
     """Default (offline replay) demo renders the differential and exits 0."""
     result = runner.invoke(app, ["demo"])
     assert result.exit_code == EXIT_SUCCESS, result.output
-    assert "Quarry" in result.output
+    assert "reference app" in result.output
     assert "0 on guarded" in result.output
 
 
@@ -2023,3 +2023,61 @@ def test_report_json_bundle_emits_machine_readable_findings(tmp_path: Path) -> N
     assert len(f) == 1 and f[0]["pattern_id"] == "indirect-injection-note-body-direct"
     assert "LLM01" in f[0]["compliance"]["owasp_llm"]  # compliance enriched on read
     assert "localization" in f[0] and "severity" in f[0]
+
+
+# ---------------------------------------------------------------------------
+# WS6 product-quality fixes: randomize-exfil default-on for live custom runs,
+# and a surfaced --iterations on gate so the kept verdict reflects reproducibility.
+# ---------------------------------------------------------------------------
+
+
+def _command_option_names(command_name: str) -> set[str]:
+    """All option strings (primary + secondary) for a CLI subcommand, via Click introspection.
+
+    Robust offline alternative to grepping ``--help`` text (Rich wraps/truncates it).
+    """
+    import typer
+
+    group = typer.main.get_command(app)
+    cmd = group.commands[command_name]  # type: ignore[attr-defined]
+    names: set[str] = set()
+    for param in cmd.params:
+        names.update(param.opts)
+        names.update(param.secondary_opts)
+    return names
+
+
+def _command_default(command_name: str, option: str) -> object:
+    import typer
+
+    group = typer.main.get_command(app)
+    cmd = group.commands[command_name]  # type: ignore[attr-defined]
+    for param in cmd.params:
+        if option in param.opts:
+            return param.default
+    raise AssertionError(f"{option} not found on {command_name}")
+
+
+def test_gate_surfaces_iterations_and_randomize_toggle() -> None:
+    """gate exposes --iterations (default 3) and the randomize-exfil toggle (default-on custom)."""
+    opts = _command_option_names("gate")
+    assert "--iterations" in opts
+    assert "--randomize-exfil" in opts
+    assert "--no-randomize-exfil" in opts  # tri-state: user can force off
+    assert _command_default("gate", "--iterations") == 3
+    # None default = "decide from the target" (on for custom, off for reference/replay).
+    assert _command_default("gate", "--randomize-exfil") is None
+
+
+def test_validate_surfaces_randomize_toggle() -> None:
+    """validate exposes the --randomize-exfil/--no-randomize-exfil toggle (default-on custom)."""
+    opts = _command_option_names("validate")
+    assert "--randomize-exfil" in opts
+    assert "--no-randomize-exfil" in opts
+    assert _command_default("validate", "--randomize-exfil") is None
+
+
+def test_scan_and_gate_expose_purpose_flag() -> None:
+    """--purpose (app description → tailored probes) is available on scan and gate."""
+    assert "--purpose" in _command_option_names("scan")
+    assert "--purpose" in _command_option_names("gate")

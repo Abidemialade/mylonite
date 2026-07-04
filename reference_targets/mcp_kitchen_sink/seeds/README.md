@@ -1,13 +1,13 @@
 # Seed catalogue index
 
 Human index for [`seeds.yaml`](seeds.yaml) — the source of truth for the
-Quarry's four seeded weaknesses (IDs, summaries, loci, taxonomy tags).
-The Mylonite scan seeds that exercise each weakness live in
+reference app's four seeded weaknesses (IDs, summaries, loci, taxonomy tags).
+The Mylonite attack patterns that exercise each weakness live in
 `src/mylonite/scan/seeds.py` (kitchen-sink subset shown below). Taxonomy IDs
 and guards are tabulated in the [package README](../README.md); the full
 walkthrough is [`docs/quarry.md`](../../../docs/quarry.md).
 
-| W  | Name                                    | Vulnerable locus (`server_vulnerable`) | Guarded locus (`server_guarded`)            | Exercised by scan seeds (`pattern_id`)                                                                                       |
+| W  | Name                                    | Vulnerable locus (`server_vulnerable`) | Guarded locus (`server_guarded`)            | Exercised by attack patterns (`pattern_id`)                                                                                 |
 |----|-----------------------------------------|----------------------------------------|---------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
 | W1 | tool-description-instruction-smuggling | `list_tools`                            | `list_tools` (description allowlist)        | `tool-description-summary-smuggle`                                                                                            |
 | W2 | indirect-injection-via-note-body       | `call_tool` (read_note branch)          | `call_tool` (read_note wraps `<untrusted>`) | `indirect-injection-note-body-direct`, `indirect-injection-note-body-roleplay`, `indirect-injection-note-body-tool-chain`     |

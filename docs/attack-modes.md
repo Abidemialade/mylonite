@@ -8,7 +8,7 @@ Mylonite runs a single-shot attack engine that exercises the four
 
 ## Single-shot (the engine)
 
-For each applicable seed, the engine customises a payload, invokes the target once,
+For each applicable attack pattern, the engine customises a payload, invokes the target once,
 and judges the result. With `--runs > 1` it applies a **scan-time flakiness filter**:
 a payload only counts as a finding if it fires in a strict majority of runs, rejecting
 a one-in-N fluke.
@@ -44,7 +44,7 @@ mylonite scan --target-file app.yaml --authorize me \
 ## Limitations (read this)
 
 The single-shot engine is not a guarantee of exhaustive attack discovery. The
-**validation oracle is the moat — not attack cleverness.** One honest limit:
+**validation oracle is the core differentiator — not attack cleverness.** One honest limit:
 
 - **The attacker is an aligned model, so it under-explores injection.** The payload
   crafter (`--customiser-model`) is itself a safety-aligned LLM. Against an

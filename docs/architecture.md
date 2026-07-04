@@ -12,7 +12,7 @@ Everything in Mylonite answers one of two questions:
   **predicate**, then an **LLM judge** if inconclusive, then an **effect probe**. See
   [Weakness classes](weakness-classes.md#how-did-it-land-is-decided-layer-1).
 - **Layer 2 — "is the finding worth a committed test that gates CI?"** (is it *kept*) →
-  the **differential oracle**. This is the moat. See [The validation engine](validation.md).
+  the **differential oracle**. See [The validation engine](validation.md).
 
 ## The flow
 
@@ -33,12 +33,12 @@ target ──> scan (Layer 1) ──> generate ──> validate (Layer 2) ──
   plant/retrieve tools from a target's tool surface so indirect injection works with
   near-zero configuration.
 - **`control_shim.py`** — the `BoundaryControl` subclasses (W1–W4) and `ControlServerShim`
-  that synthesize a *boundary*-guarded twin of any target (a server-layer control needs
-  `control_env`); the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat).
+  that synthesize a *boundary*-guarded build of any target (a server-layer control needs
+  `control_env`); the [control-efficacy check](validation.md#the-control-efficacy-check).
 - **`tool_roles.py`** — heuristics that classify a tool surface (store / retrieve / sink).
 - **`artefacts.py`** — the terminal trust panel.
 
-### The validation moat — `mylonite.plugins._reference.reference_validator`
+### The validation engine — `mylonite.plugins._reference.reference_validator`
 `DifferentialValidator` implements the oracle legs: **build · differential · flakiness ·
 metamorphic** (gating, incl. the evasion encodings) **· mutation score** (report-only),
 plus the custom-target legs **stability · effect · consensus**. The honesty invariant
@@ -53,7 +53,7 @@ plus the custom-target legs **stability · effect · consensus**. The honesty in
   [`target.yaml`](target-file.md)), a first-class transport alongside stdio.
 - **`_mcp/target_file.py`** — the [`target.yaml`](target-file.md) model + auto-wiring.
 - **`_mcp/target_registry.py`** — the bundled family `TargetSpec`s.
-- **`_reference/reference_target_adapter.py`** — the in-process **Quarry** twins
+- **`_reference/reference_target_adapter.py`** — the in-process **reference app** builds
   (`reference:vulnerable` / `reference:guarded`), the ground-truth differential.
 
 ### Outputs — `mylonite.report` & `mylonite.gate`
@@ -90,7 +90,7 @@ an API change — see [Plugin authoring](plugin-authoring.md).
 - **All LLM access flows through LiteLLM** — no provider SDKs imported directly; there's
   no default provider (you must configure one). This is what makes the
   [model roles](attack-modes.md#composing-the-model-roles) possible.
-- **The reference twin is ground truth.** The bundled `mcp_kitchen_sink` vulnerable/guarded
+- **The reference app is ground truth.** The bundled `mcp_kitchen_sink` vulnerable/guarded
   pair is *intentionally* (un)guarded; the differential is proven against it.
 - **Scope discipline.** Only the AI attack surface — no general SAST/DAST, no non-AI test
   generation.

@@ -1,4 +1,4 @@
-# Recording the Quarry demo GIF
+# Recording the reference app demo GIF
 
 This page is the controller script for producing `docs/assets/quarry-demo.gif`
 — the GIF embedded at the top of the README. **The actual recording is a
@@ -53,8 +53,8 @@ Budget against the ≤ 60s target:
 | -------- | ------------------------------------------------------------------- |
 | 0–2s     | Blank prompt; type `mylonite demo` and hit enter.                   |
 | 2–6s     | **Safety banner** appears: in-process, loopback-only, no network.   |
-| 6–18s    | Scan #1 runs against the **vulnerable** Quarry — W1–W4 land.        |
-| 18–30s   | Scan #2 runs against the **guarded** twin — all clean.              |
+| 6–18s    | Scan #1 runs against the **vulnerable** reference app — W1–W4 land. |
+| 18–30s   | Scan #2 runs against the **guarded** build — all clean.             |
 | 30–40s   | The **W1–W4 weakness table** with OWASP / ASI / ATLAS taxonomy IDs. |
 | 40–48s   | The headline: **`4 exploits on vulnerable, 0 on guarded`**.         |
 | 48–55s   | The `mode: replay (offline)` line; hold a beat on the final frame.  |
