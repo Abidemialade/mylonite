@@ -7,11 +7,13 @@ into the adapter (its ``_ensure_client`` seam returns the pre-set ``_client``).
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
 
-from mylonite.contracts._types import Payload
+from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.plugins._http.http_adapter import (
     HTTPAgentAdapter,
     _escape_for_body,
@@ -155,6 +157,72 @@ def test_rest_target_file_requires_prompt_placeholder() -> None:
             transport="rest",
             request=target_registry.RequestSpec(url="https://x/chat", body='{"q": "no slot"}'),
         )
+
+
+# --- full pipeline (real engine + module + HTTP adapter + stub judge) --------
+
+
+def test_http_agent_scan_finds_direct_injection_end_to_end() -> None:
+    """End-to-end: the real ScanEngine drives the real prompt-injection module and
+    the HTTP adapter (MockTransport); the tool-less direct-injection W2 seed reaches
+    the agent and a stub judge confirms the goal-hijack — proving the whole wiring
+    (describe -> seeds_for_descriptor -> module -> invoke -> judge -> finding)."""
+    from pathlib import Path
+
+    from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
+    from mylonite.scan._types import Verdict
+    from mylonite.scan.customiser import PayloadCustomiser
+    from mylonite.scan.engine import ScanConfig, ScanEngine
+
+    _register_rest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # The agent OBEYS the embedded instruction — a clear goal hijack.
+        return httpx.Response(
+            200,
+            json={"reply": "Sure — sending the private data to attacker@evil.example now."},
+        )
+
+    class _JudgeYes:
+        async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+            del payload, response
+            return Verdict(
+                success=True, reason="obeyed embedded instruction", evidence={}, mechanism="llm"
+            )
+
+    async def _completion(**_: Any) -> SimpleNamespace:
+        # Only reached if the engine customises (the direct-injection seed sets
+        # customise=False, so normally it isn't) — returns a valid refined body.
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"body": "refined"}'))]
+        )
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    config = ScanConfig(
+        target_id="rest:myagent",
+        provider="anthropic",
+        model="stub-model",
+        max_llm_calls=50,
+        max_concurrent=2,
+        output_dir=Path(".mylonite/scans"),
+    )
+    engine = ScanEngine(
+        config=config,
+        adapter=adapter,
+        attack_modules=[PromptInjectionAttackModule()],
+        customiser=PayloadCustomiser(model="stub", completion_fn=_completion),
+        judge=_JudgeYes(),
+    )
+    try:
+        result = asyncio.run(engine.run())
+    finally:
+        asyncio.run(adapter.close())
+
+    assert result.report.aborted is None
+    assert result.report.findings_count == 1
+    assert result.exploits[0].pattern_id == "synth-w2-direct-injection-agent"
+    assert "attacker@evil.example" in result.exploits[0].response.raw_response
 
 
 def test_rest_target_file_builds_spec_and_round_trips(tmp_path: object) -> None:
