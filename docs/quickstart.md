@@ -45,9 +45,6 @@ mylonite taxonomy list --framework owasp-llm
 mylonite demo
 mylonite scan reference:vulnerable
 mylonite scan mcp:fetch --authorize fetch
-mylonite scan reference:vulnerable --adaptive      # strategist refines until it lands
-mylonite scan reference:vulnerable --synthesize    # chain 2+ tools to a sink
-mylonite scan reference:vulnerable --memory        # cross-turn memory poisoning
 mylonite gate reference:vulnerable                 # scan -> test -> validate, the magic moment
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
@@ -68,16 +65,10 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
   `mcp:fetch` (spawns via `uvx`), Node.js for `mcp:filesystem` /
   `mcp:github` (spawn via `npx`). Add `--dry-run` to enumerate seeds
   without an API key.
-- `mylonite scan <target> --adaptive` — opt-in adaptive loop: when an
-  indirect-injection attempt doesn't fire, an LLM strategist re-crafts the
-  injection and retries within a budget (needs a session-capable target, e.g.
-  `reference:*`). Off by default.
-- `mylonite scan <target> --synthesize` / `--memory` — opt-in tool-chaining
-  synthesis and stateful cross-turn memory poisoning. See [Attack modes](attack-modes.md).
 - `mylonite gate <target>` — the whole pipeline (scan → generate → validate → optional
   PR) in one command; only a kept test makes it through. See [CI gating](ci-gating.md).
-- `mylonite report <dir>` — render a scan/validation as a terminal panel, HTML
-  dashboard, `--sarif` (GitHub code scanning), or `--json` bundle. See
+- `mylonite report <dir>` — render a scan/validation as a terminal panel,
+  `--sarif` (GitHub code scanning), or `--json` bundle. See
   [Reading the results](reading-results.md).
 
 ## The full flow: scan → generate → validate
@@ -130,13 +121,13 @@ render it in whatever format your pipeline consumes:
 ```bash
 mylonite gate --target-file app.yaml --authorize me --open-pr   # against YOUR app
 mylonite report .mylonite/validated/<dir> --sarif out.sarif     # GitHub code scanning
-mylonite validate <dir> --models claude-haiku-4-5,claude-sonnet-4-6   # durable across upgrades?
+mylonite report .mylonite/validated/<dir> --json finding.json   # dashboards / SIEM / bots
 ```
 
 ## Where to go next
 
-- [Test your own app](test-your-app.md) — the custom MCP on-ramp (`init-target` → scan → gate).
+- [Test your own app](test-your-app.md) — the custom MCP on-ramp (`scan --scaffold` → scan → gate).
 - [Try it — the Quarry](quarry.md) — the deliberately vulnerable playground (W1–W4 walkthrough).
-- [Attack modes](attack-modes.md) — single-shot, adaptive, tool-chaining, memory poisoning.
+- [Attack modes](attack-modes.md) — the single-shot W1–W4 attack engine.
 - [The validation engine](validation.md) — why a generated test means what it claims.
 - [Reading the results](reading-results.md) · [CLI reference](cli-reference.md).

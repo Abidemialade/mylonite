@@ -44,12 +44,14 @@ committed:
 
 1. **The differential proof.** At validation time the
    [`DifferentialValidator`](concepts.md#the-validation-engine-mylonites-moat)
-   runs the *same* attack against **both** twins — the deliberately-unguarded
-   variant and the guarded one. A test is only kept if the exploit **fires on
-   the vulnerable twin and resists on the guarded twin**. A vacuous test
-   (asserting something trivially true) cannot show this differential: it would
-   pass on *both* sides. The differential is the discrimination signal a
-   tautology can never produce.
+   runs the *same* attack against **both** sides — the *unguarded* one and the
+   *guarded* one. On a real single-build app those two sides come from the
+   [control-efficacy oracle](#the-control-efficacy-oracle-the-moat) toggling the
+   safeguard; the bundled reference twins supply them as two builds directly. A
+   test is only kept if the exploit **fires unguarded and resists guarded**. A
+   vacuous test (asserting something trivially true) cannot show this
+   differential: it would pass on *both* sides. The differential is the
+   discrimination signal a tautology can never produce.
 
 2. **The 5-run flakiness filter.** Because the behaviour is stochastic, a
    single run is weak evidence. The validator repeats the differential across
@@ -100,17 +102,18 @@ preserves the exfil destination so the attack still lands and the majority stays
 honest. This is what makes a kept test robust to the exact tricks real injections use
 (EchoLeak's invisible text, RAG unicode/split games) — not just to rewording.
 
-## Beyond the bundled twin: the control-efficacy oracle
+## The control-efficacy oracle (the moat)
 
-The differential above proves a weakness is real by comparing a *vulnerable*
-build to a *guarded* one. But on a **real target you don't have two builds of**,
-the sharper question is not "is there a weakness?" — it's *"which safeguard is
-actually carrying the security, and does it hold?"* That is what the
-**control-efficacy oracle** answers, and it is the deepened moat. For a real
-(`--target-file`) target it now runs **by default** — `validate` and `gate` build the
-synthetic guarded twin and prove the control automatically. (`--prove-control` is kept
-as a back-compat no-op; pass `--fast` to *skip* the differential for a faster, weaker
-gate.)
+The two-build differential above proves a weakness is real by comparing a *vulnerable*
+build to a *guarded* one — but that needs **two builds**, which only the bundled
+reference twins have. A customer app has **one** build. The
+**control-efficacy oracle** is the mechanism that carries Mylonite's value on any real
+single-build MCP app, and it is **the moat**. On a target you don't have two builds of,
+the sharper question is not "is there a weakness?" — it's *"which safeguard is actually
+carrying the security, and does it hold?"* For a real (`--target-file`) target it runs
+**by default** — `validate` and `gate` synthesize the guarded twin at the adapter
+boundary and prove the control automatically. (`--prove-control` is kept as a back-compat
+no-op; pass `--fast` to *skip* the differential for a faster, weaker gate.)
 
 The move is to **hold the model constant and vary only the safeguard**. Mylonite
 synthesizes a *guarded twin* of any real target by applying a canonical control
@@ -140,35 +143,10 @@ toggles each safeguard and reports which are **load-bearing**, which are
 `--redundancy` — which are **redundant** (another control already covers the
 weakness).
 
-### Holding under an adaptive attacker
-
-`validate --prove-control --adaptive` drives the *guarded* leg under the
-[adaptive loop](concepts.md#adaptive-attacks-and-tool-chaining-synthesis), with
-the active control fed to the strategist so it crafts injections to evade *that
-specific* defense. The verdict then separates a control that **holds under
-adaptive pressure** from one that **holds against static probes but falls to an
-adaptive attacker** — grading control *robustness*, which a single-shot check
-can't see.
-
-## Cross-model durability
-
-A weakness you fixed and gated against one model can silently **re-emerge** when your
-team upgrades the model — a blind spot you otherwise have no regression for. Because
-every Mylonite call flows through LiteLLM, it can re-prove the *same* differential
-across model versions:
-
-```bash
-mylonite validate <dir> --models claude-haiku-4-5,claude-sonnet-4-6
-```
-
-It runs the full oracle once per model and prints a durability table, flagging any model
-where the test is **not kept** ("durable on A and B, **RE-EMERGES** on C"). It exits
-non-zero if any model fails — so CI catches a model your team could upgrade to and
-silently re-introduce the weakness — and writes a `cross_model_report.json`.
-Single-model `validate` also stamps the model it proved the test against into the
+Single-model `validate` stamps the model it proved the test against into the
 report, so the committed regression is honest about which version it gates.
 
-## The bundled reference twin
+## The bundled reference twin (the reference/demo differential)
 
 The bundled **reference agent** — [the Quarry](quarry.md)'s `mcp_kitchen_sink`
 server in its vulnerable and guarded variants — remains the ground-truth twin

@@ -34,18 +34,23 @@ _W1_W2 = frozenset({"W1", "W2"})
 
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
+    metadata = {
+        "seed_id": seed.pattern_id,
+        "weakness": seed.weakness,
+        "predicate": seed.predicate,
+        "setup": seed.setup,
+        "drive": seed.drive,
+        "needs_customisation": "true" if seed.customise else "false",
+    }
+    # Evaluator-only context (W1 tool-description seeds) — passed to the judge,
+    # never to the planner-under-test.
+    if seed.judge_context:
+        metadata["judge_context"] = seed.judge_context
     return Payload(
         pattern_id=seed.pattern_id,
         channel=seed.channel,
         body=seed.seed_body,
-        metadata={
-            "seed_id": seed.pattern_id,
-            "weakness": seed.weakness,
-            "predicate": seed.predicate,
-            "setup": seed.setup,
-            "drive": seed.drive,
-            "needs_customisation": "true",
-        },
+        metadata=metadata,
     )
 
 

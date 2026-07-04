@@ -5,7 +5,200 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.4] - 2026-06-24
+
+> **Narrowed to the provable core — *model robustness ≠ app security*.** The third-party
+> verification harness (`verification/`) showed where Mylonite's value is demonstrable —
+> **app-flaw detection, control-efficacy validation, regression gating, and honesty** — and
+> where it isn't. The doctrine for this release: every shipped feature has to run on an MCP
+> app we did **not** author and have a path to third-party proof; everything else is **cut,
+> not hidden**. The **control-efficacy oracle** — which proves a control is load-bearing on
+> any single-build app by holding the model constant and toggling only the safeguard — is now
+> the headline moat; the two-build differential (fail-on-vulnerable, pass-on-guarded) is the
+> bundled-twin / `demo` case. The remote SSE/HTTP transport is promoted to first-class (real
+> MCP apps are remote). Because the project has no external users yet, this breaking cut costs
+> nothing now.
+
+### Removed
+
+- **BREAKING:** the `mylonite export` command (portable eval-format bridge). Mylonite's
+  artifact is the validated, CI-gating pytest regression test; the eval-format export was
+  unproven surface. Consume the JSON bundle (`report --json`) or SARIF (`report --sarif`)
+  instead.
+- **BREAKING:** the `mylonite report --html` / `--html-style` dashboard and its HTML
+  renderer (`mylonite.report.html`). The terminal trust panel, SARIF (`--sarif`, for GitHub
+  code scanning), and the JSON finding bundle (`--json`) cover every consumer; the HTML
+  dashboard was redundant. The shared `severity_for` rule moves to `mylonite.report.severity`
+  (SARIF/JSON still import it).
+- **BREAKING:** the standalone `mylonite init-target` command and the deprecated `mylonite
+  init` alias — folded into `scan --scaffold` (see Changed).
+- **BREAKING:** the deeper attack *tactics* — `scan --adaptive` / `--verbose-strategist`,
+  `scan --synthesize` (tool-chaining synthesis), `scan --memory` (stateful memory poisoning),
+  and `validate --models` (cross-model durability) — plus their modules (`scan/attack_loop.py`,
+  `chain_synth`, `chain_driver`, `chain_validator`, `synthesis_runner`, `memory_poison`,
+  `cross_model`), the `validate --adaptive` grading leg, and `testkit.assert_synthesized_chain_resists`.
+  They were never the moat (the control-efficacy oracle is), were beaten by frontier-aligned
+  models on every external target (DVMCP recall 0/8, InjecAgent 0/60), and had no third-party
+  proof path. The single-shot W1–W4 engine, the control-efficacy oracle, and `ablate` are
+  unaffected. The code lives in git history and returns only if a real external need
+  re-justifies it.
+
+### Changed
+
+- **Folded target scaffolding into `scan`.** `mylonite scan --command 'python server.py'
+  --scaffold target.yaml` introspects a custom MCP server (one launch, **no LLM call and no
+  attack**, so it does **not** require `--authorize`) and writes the same commented starter
+  `target.yaml` — with suggested `weakness_classes`/`primary_tools` and auto-detected
+  `seed_arm`/`effect_probe` candidates — that `init-target` used to. One entry point instead
+  of two. Edit the scaffold, then scan it with `--target-file`.
+- **Crowned the control-efficacy oracle as the moat; promoted remote MCP to supported.**
+  `validate` and `gate` lead with the **control-efficacy oracle** (it synthesizes a guarded
+  twin of your single-build app at the adapter boundary and proves the control carries the
+  security); the two-build differential is now framed as the bundled-twin / `demo` case. The
+  **remote SSE/HTTP transport** is no longer "experimental" — declare `transport: sse|http`
+  + `url` in `target.yaml`. The supported surface is `scan` (W1–W4 over MCP **stdio or remote
+  SSE/HTTP** + your own `--target-file` app; `--scaffold` to generate a target.yaml),
+  `generate`, `validate`, `gate`, `report` (terminal / SARIF / JSON), `ablate`, `demo`,
+  `doctor`, `taxonomy`, and `version`. README / ROADMAP / docs reposition on "model robustness
+  ≠ app security" and "any MCP app" (not "any LLM-native app").
+
+### Fixed
+
+- **SARIF `partialFingerprints`.** `report --sarif` now emits a per-result
+  `partialFingerprints` (`mylonitePatternLocus/v1`) keyed on the finding's stable identity
+  (pattern + weakness class + implicated tool/field locus + target), so GitHub code scanning
+  correctly dedups the same weakness into a single alert across commits instead of
+  re-raising it on every line move. Found by running Mylonite's own SARIF output against the
+  GitHub ingestion requirements during third-party verification.
+
+### Added
+
+- **Verification report: false-positive-rate honesty rail.** The Layer-2 judge-agreement
+  report (`verification/report.py`) now emits `fpr_informative` and `negative_cases`, and
+  appends a note when `tn=0` — the case where false-positive rate is mechanically pinned
+  at 1.0 by the absence of any benign / true-negative control cases (e.g. the AgentDojo
+  injection subset), so the number is never misread as a trigger-happy judge. Triaging the
+  15 AgentDojo disagreements confirmed every one is the effect-based-judge vs
+  exact-goal-oracle *definitional* difference (the attacker's consequential tool actually
+  executed), not a judge bug — recorded in `verification/FINDINGS.md`.
+- **Descriptor-driven seed delivery channels (seed portability).** Mylonite's seeds
+  no longer assume the kitchen-sink store→recall workflow. `mylonite.scan.seed_synth`
+  synthesises a probe for the channel a target's *introspected tool surface* actually
+  exposes: **direct_content** (a tool that processes attacker-supplied free text, e.g.
+  `process_document`) and **tool_description** (an existing tool whose own description
+  steers the agent — plain-prose tool poisoning, which `sanitize_tool_description` only
+  partially caught). New `tool_roles` detectors (`content_processor_tools`,
+  `instruction_bearing_tools`, `description_carries_instruction`), a `verbatim` seed
+  drive, a `judge_context` field (tells the judge about a tool-description smuggle
+  without revealing it to the planner), and a `customise` flag (synthesised seeds run
+  direct). The scan pre-flight is channel-aware (W2 no longer hard-blocks when a
+  content-processing tool provides the direct_content channel). Verified live: on a real
+  MCP server Mylonite didn't write (DVMCP), W1/W2 seeds that previously *skipped*
+  (`SeedArmUnavailable`) now run real attacks and are honestly judged.
+- **Remote MCP transport (SSE / streamable-HTTP).** A new `MCPRemoteAdapter`
+  (`mylonite.plugins._mcp.remote_adapter`) connects to a remote MCP server over SSE or
+  streamable-HTTP, alongside the existing stdio adapter. Target files gain additive
+  `transport: stdio|sse|http`, `url`, and `headers` fields — `stdio` stays the default and
+  existing target files are byte-for-byte unchanged. A transport-aware factory
+  (`mylonite.plugins._mcp.factory.build_mcp_adapter`) picks the adapter. The `TargetAdapter`
+  contract is unchanged: this is an additive implementation behind the existing protocol, so
+  there is **no `CONTRACT_VERSION` bump**. Auth headers are passed to the transport but never
+  logged and never shown in the target descriptor (host only). Remote MCP is the dominant
+  real-world deployment, so this is what lets Mylonite scan apps it didn't author.
+- **Third-party verification harness (`verification/`).** A tiered system that scores
+  Mylonite against external ground truth it did not author (lives outside `src/`, excluded
+  from the wheel; external data fetched at pinned commits/digests, never vendored — see
+  `verification/SOURCE.md`). Layer 2 ships first: InjecAgent (MIT) judge-agreement via a
+  `record → score` runner that compares Mylonite's success-judge to the benchmark's own
+  success rule (reusing `corpus.ConfusionMatrix`), with a CI-safe hermetic test on a
+  synthetic fixture. Layer 1 ships as scaffolding: DVMCP (the runnable vulnerable MCP
+  server) is fetched at a pinned commit and gated behind `--include-unlicensed` (its
+  README claims MIT but it ships no LICENSE file), with a challenge→W-class catalogue and a
+  recall scorer; the live SSE scan is a documented user step. The one Mylonite-authored
+  input (the label→W-class crosswalk/catalogue) is isolated for audit. See
+  `verification/README.md` and `verification/SOURCE.md` (which also records why the
+  research-suggested DVAA target was verified unusable). All external data is fetched at
+  pinned commits/digests, never vendored. Layer 3 (precision / false-positive control on a
+  known-good target) ships a scorer + `reference:guarded` clean baseline. Layer 2 adds an
+  opt-in `--elicit-positives` record mode (a compliant agent that manufactures successful
+  attacks so the judge's positive class can be verified) and a `judge_agreement_exercised`
+  honesty flag (precision/recall are vacuous at ASR=0). Layer 2 also adds **AgentDojo** as a
+  second dataset, scored from its **released runs** (real third-party transcripts incl.
+  positives from a model that fell for attacks) — closing judge-positive-class verification
+  live without a model run. An opt-in `.github/workflows/verification.yml` runs the larger-N
+  live numbers on dispatch/schedule; the hermetic checks gate every PR via
+  `tests/verification/`. `verification/FINDINGS.md` records what the live runs showed
+  (headline: model robustness ≠ app security; a robust model is still caught on app-design
+  flaws like an unconfirmed `send_email`).
+
+The remainder of Unreleased is an accuracy & honesty pass from an independent evaluation
+against a real, server-guarded MCP target. One theme: **never report "couldn't test" or
+"low-fidelity test" as "tested-and-clean / confirmed."** That pass added no new attack
+classes and no contract-version bump (schemas unchanged).
+
+### Fixed
+
+- **W4 false negative on real targets.** `send_email_without_confirmation` read the
+  reference-adapter-private `store_emails_sent` metadata; on a real MCP target that key
+  is *absent*, so the predicate returned a confident `success=False` (a guaranteed false
+  negative whenever the agent actually sent). It now returns *inconclusive* (`None`) when
+  the evidence key is absent — distinct from a present-but-empty blob (a genuinely
+  staged/queued send, still a confident non-finding). Detection now defers to the effect
+  probe / LLM judge instead of falsely vouching the target is safe.
+- **W1 false positive on apps that summarize by default.** The tool-description
+  summary-smuggle predicate fired on any summary marker. When the *target's own system
+  prompt* mandates a summary, the marker can't be attributed to the smuggle. The
+  customiser now flags that baseline (`baseline_solicits_summary`) and the predicate
+  stays inconclusive, deferring to the differential oracle. The bundled reference finding
+  is unaffected (its summary lives in a tool description, not the system prompt).
+- **`scan reference:*` dumped a raw traceback** when the reference target wasn't
+  importable (editable checkout without `pip install -e ./reference_targets/...`). It now
+  fails with the same friendly message `demo` gives (shared `_exit_if_missing_kitchen_sink`
+  helper).
+
+### Changed
+
+- **Offline demo target is now an opt-in `[demo]` extra.** The base `pip install mylonite`
+  stays "just the tool that scans your app" and never pulls the deliberately-vulnerable
+  reference agent. `pip install "mylonite[demo]"` adds it so `mylonite demo` and
+  `scan reference:*` run offline with no clone and no API key; the graceful CLI error
+  points users to the extra (or the editable-checkout path). NOTE: the extra requires
+  `mcp-kitchen-sink` to be published to PyPI to resolve — until then the demo remains
+  clone-first.
+- **`truststore` is now a base dependency** (was the `[enterprise]` extra). Users behind a
+  TLS-inspecting corporate proxy or local AV — whose CA is in the OS trust store but not
+  certifi's bundle — no longer hit `CERTIFICATE_VERIFY_FAILED` out of the box. Auto-enabled
+  (opt out with `MYLONITE_NO_TRUSTSTORE=1`), pure-Python, zero transitive deps, a no-op in
+  CI. `[enterprise]` is kept as a back-compat alias.
+- **`validate` differential measures real server-layer controls.** Its guarded twin was
+  always the synthetic adapter-boundary shim, so a control enforced inside the server (an
+  approval gate, an allowlist) "leaked" and the test was rejected with a verdict that read
+  as "your protection is theater." When the target declares `control_env` for the control,
+  the differential now uses the REAL server (raw side env-disables the guard; guarded side
+  is the default launch) — at parity with `ablate`'s server-layer mode (shared
+  `_guarded_factory`, also used by `--synthesize`/`--memory`). When only the synthetic shim
+  is available, a rejection is reframed honestly: it points to `control_env`/
+  `vulnerable_launch` and states the boundary twin cannot see server-side guards, rather
+  than implying the control is ineffective.
+- **`--memory` / `--synthesize` no longer silently no-op.** When no plant+retrieve /
+  plant+sink surface is discoverable they reported a clean `no_finding` in 0.0s; they now
+  report a loud **NOT TESTED** outcome (naming the tools they looked for vs the target's
+  actual tools) and exit non-zero, so a CI gate can't read the no-op as "safe." Discovery
+  also consults a declared `seed_arm` / `control_config.consequential_tools` before the
+  name heuristics, so a real app whose tool names don't match is still exercised.
+- **Adaptive attacker-refusal is reported distinctly.** When the (aligned) strategist
+  declines to refine an obviously-malicious payload, the loop aborts and the attempt is
+  reported as *skipped (alignment refusal) — NOT evidence the target is safe*, instead of
+  a clean no_finding that read as "the target resisted." `--randomize-exfil` help now
+  recommends it for live custom-target runs (with an inline nudge); documented the
+  aligned-attacker ceiling in `docs/attack-modes.md`.
+
+### Added
+
+- **Pre-flight warning that side-effecting weaknesses (W3/W4) need an `effect_probe`.** On
+  a real target without one, those seeds can't confirm the effect and may read as clean;
+  the scan now warns loudly (and `mylonite init-target` already suggests an `effect_probe`
+  candidate from the tool surface).
 
 ## [0.7.3] - 2026-06-19
 
@@ -1306,7 +1499,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.0...HEAD
+[0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
 [0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.5.0

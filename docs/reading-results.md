@@ -10,7 +10,6 @@ generated/validated dir, or a `*_report.json`.
 
 ```bash
 mylonite report .mylonite/scans/<dir>                 # terminal trust panel
-mylonite report <dir> --html report.html              # shareable dashboard
 mylonite report <dir> --sarif out.sarif               # GitHub code scanning
 mylonite report <dir> --json finding.json             # dashboards / SIEM / bots
 ```
@@ -35,17 +34,6 @@ mutation score: 7/8   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST
 That panel is the **anti-false-positive trust signal**: ~46% of security alerts are
 false positives, so a finding that ships with a machine-checkable differential proof
 ("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.
-
-## HTML dashboard — `--html`
-
-A self-contained, screenshot-friendly HTML report (no JS, no CDN) for sharing with
-stakeholders: an executive summary, per-finding severity + compliance chips, and
-collapsible evidence (the gating formula, per-leg marks, the kill matrix). Two styles:
-
-```bash
-mylonite report <dir> --html report.html                      # dashboard (default)
-mylonite report <dir> --html panel.html --html-style terminal # raw trust-panel export
-```
 
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 
@@ -72,7 +60,7 @@ For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom
 A single `finding.json` (versioned `schema_version`) with, per finding: `pattern_id`,
 `weakness_class`, `severity`, `attack_shape`, the full `compliance` block, the R4
 `localization` (tool/field/line), the `proof` (vuln/guard counts + `kept`), and the
-`proven_control`. It reuses the exact data the SARIF/HTML reports compute — no new
+`proven_control`. It reuses the exact data the SARIF report computes — no new
 analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR
@@ -95,7 +83,7 @@ When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 
 ## Compliance metadata (everywhere)
 
-Every emitted artefact — exploit JSON, validation report, HTML, SARIF, JSON bundle, PR
+Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
 body — carries the compliance mapping for the finding: **OWASP LLM Top 10 (2025)**,
 **OWASP ASI (2026)**, **MITRE ATLAS** technique IDs, and a **NIST AI RMF** function tag.
 This is near-free at generation time and is the foundation of audit/compliance reporting

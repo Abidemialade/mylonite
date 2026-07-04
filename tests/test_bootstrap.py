@@ -63,6 +63,17 @@ def test_enable_truststore_absent_is_silent_noop(monkeypatch: pytest.MonkeyPatch
     assert enable_truststore() is False  # best-effort, no raise
 
 
+def test_truststore_is_a_base_dependency() -> None:
+    """truststore is a BASE dependency (corporate-proxy / local-AV TLS works out of
+    the box), so it imports with no optional extra installed — and enable_truststore
+    therefore succeeds on a default install."""
+    import importlib
+
+    assert importlib.import_module("truststore") is not None
+    # Real (non-faked) path: importable => injects and returns True.
+    assert enable_truststore() is True
+
+
 def test_cost_map_default_set_at_package_import(monkeypatch: pytest.MonkeyPatch) -> None:
     """Importing mylonite sets LITELLM_LOCAL_MODEL_COST_MAP=True when unset.
 

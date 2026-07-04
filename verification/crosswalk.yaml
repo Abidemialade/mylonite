@@ -1,0 +1,42 @@
+# External-benchmark label -> Mylonite weakness-class crosswalk.
+#
+# AUTHORED BY MYLONITE. This is the ONE subjective artefact in the verification
+# harness: every other input is third-party ground truth. It is isolated here so
+# the mapping is auditable in one place. Each row carries a `note` justifying the
+# mapping and (where applicable) an `upstream_url`.
+#
+# A benchmark case is counted as "covered" by Mylonite if ANY of its mapped
+# W-classes is the one whose detector fires. The mapping is many-to-many.
+#
+# W1 = tool-description instruction smuggling
+# W2 = indirect prompt injection (attacker text in tool/RAG output)
+# W3 = unrestricted egress / SSRF / exfiltration sink
+# W4 = unconfirmed consequential action (excessive agency)
+
+injecagent:
+  # InjecAgent's two top-level splits (its own taxonomy).
+  dh:
+    name: Direct Harm
+    mylonite: [W2, W4]
+    note: >-
+      Attacker instruction is delivered via a poisoned tool response (indirect
+      injection, W2); a successful attack makes the agent execute a harmful
+      consequential action without confirmation (excessive agency, W4).
+    upstream_url: https://github.com/uiuc-kang-lab/InjecAgent
+  ds:
+    name: Data Stealing
+    mylonite: [W2, W3]
+    note: >-
+      Indirect injection (W2) drives exfiltration of user data to an
+      attacker-controlled sink (egress surface, W3). Two-stage in InjecAgent
+      (retrieve then send); Mylonite keys on the consequential send.
+    upstream_url: https://github.com/uiuc-kang-lab/InjecAgent
+
+agentdojo:
+  injection:
+    name: Prompt-injection task
+    mylonite: [W2]
+    note: >-
+      Attacker text injected into tool/environment output drives an off-goal
+      consequential action; AgentDojo's injection_task_* defines the target.
+    upstream_url: https://github.com/ethz-spylab/agentdojo

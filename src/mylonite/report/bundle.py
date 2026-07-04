@@ -14,7 +14,7 @@ from typing import Any
 
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
-from mylonite.report.html import severity_for
+from mylonite.report.severity import severity_for
 from mylonite.version import __version__
 
 #: Bump on any backward-incompatible change to the finding shape.
@@ -47,7 +47,7 @@ def _finding(exploit: Any, report: Any | None) -> dict[str, Any]:
         if weakness in {"W1", "W2", "W3", "W4"}
         else weakness_class_for(exploit),
         "severity": severity_for(weakness, effect),
-        # static / obfuscated / memory_poisoning / synthesized-chain ...
+        # static / obfuscated / ... (attack tier or shape metadata, generic)
         "attack_shape": str(md.get("attack_shape") or md.get("attack_tier") or "static"),
         "success_reason": str(exploit.success_reason),
         "compliance": {

@@ -135,9 +135,10 @@ def test_render_clean_differential() -> None:
         "same vulnerable/guarded oracle. Turn one into a gating test: "
         "mylonite gate reference:vulnerable"
     ) in output
-    assert "mylonite scan mcp:fetch --authorize fetch" in output
-    assert "needs an LLM API key + uv" in output
-    assert "docs/quarry.md" in output
+    assert "mylonite scan --command 'python server.py' --scaffold app.yaml" in output
+    assert "mylonite scan --target-file app.yaml --authorize my-app" in output
+    assert "needs an LLM API key" in output
+    assert "docs/test-your-app.md" in output
     assert "mode: replay (offline)" in output
     assert "0.8s" in output
 

@@ -2,10 +2,10 @@
 
 Mylonite is an open-source framework for **AI-layer security testing**. It
 ingests an application's AI/agentic layer — the system prompt, tool/function
-schemas, RAG pipeline, agent planning loop — autonomously finds an
-app-specific weakness, and emits a **validated regression test** that gates
-CI. It deliberately does *not* test the surrounding traditional code; that
-work belongs to SAST/DAST tools.
+schemas, RAG pipeline, agent planning loop — autonomously probes for
+app-specific weaknesses, and emits a **validated regression test** for each
+one it finds, gating CI. It deliberately does *not* test the surrounding
+traditional code; that work belongs to SAST/DAST tools.
 
 This document covers what Mylonite does, how it's built, and where it's going.
 For the pitch and install instructions, see [README.md](./README.md); for
@@ -123,36 +123,55 @@ cites its upstream publisher in `SOURCE.md`.
 
 The end-to-end pipeline is complete and in active use: `scan → generate →
 validate → gate` runs against the bundled reference agent and your own MCP app,
-proves each finding with the differential oracle, and emits a committed regression
-test that gates CI.
+proves each finding with the control-efficacy oracle (the differential generalised to
+any single-build app), and emits a committed regression test that gates CI.
 
-**Available today:**
+**The thesis the evidence supports: model robustness ≠ app security.** A
+[third-party verification harness](https://abidemialade.github.io/mylonite/verification/)
+runs Mylonite against external ground truth it did not author (DVMCP, InjecAgent,
+AgentDojo). The result that reframes the product: a frontier model resisted *generic*
+injection everywhere, but the *same model* was caught immediately where the **app's own
+design** was the flaw — a `send_email` dispatched with no approval step. Mylonite's
+demonstrable value is **app-flaw detection, differential/control-efficacy validation,
+regression gating, and honesty** (NOT-TESTED is never reported as clean), not
+out-fooling frontier alignment. The product surface is scoped to exactly that.
 
-- Ingestion of MCP/tool-using agents over in-process and stdio transports, plus
-  three bundled real open-source MCP targets (filesystem, fetch, github).
+**Available today (the proven core):**
+
+- Ingestion of MCP/tool-using agents over in-process, stdio, and remote
+  SSE / streamable-HTTP transports — any app that speaks MCP.
 - The four weakness classes — W1 tool-description smuggling, W2 indirect injection,
   W3 excessive egress / SSRF, W4 unconfirmed consequential action — with
   deterministic predicates and an LLM-judge fallback.
-- Attack depth: an adaptive refinement loop, app-specific tool-chaining synthesis,
-  and stateful cross-turn memory poisoning.
-- The full validation engine above, including the control-efficacy oracle and
-  control ablation.
-- Custom-target support via a declarative `target.yaml`, the one-command
-  `mylonite gate` flow, a reusable GitHub Action, and CI workflow templates.
-- Results in every format teams consume — a terminal trust panel, an HTML
-  dashboard, SARIF for GitHub code scanning, a machine-readable JSON bundle, and a
-  gating PR with a proven-fix diff — all carrying OWASP / OWASP-ASI / MITRE ATLAS /
-  NIST compliance tags.
-- Cross-model durability checks, so a fix doesn't silently regress on a model upgrade.
+- The full validation engine above, including the **control-efficacy oracle** and
+  **control ablation** (which safeguard is load-bearing vs. theater).
+- Custom-target support via a declarative `target.yaml` (scaffolded by
+  `scan --scaffold`), the one-command `mylonite gate` flow, a reusable GitHub
+  Action, and CI workflow templates.
+- Results in the formats teams consume — a terminal trust panel, SARIF for GitHub
+  code scanning, a machine-readable JSON bundle, and a gating PR with a proven-fix
+  diff — all carrying OWASP / OWASP-ASI / MITRE ATLAS / NIST compliance tags.
+- The third-party verification harness itself, with a published honest scorecard
+  (negatives included).
 
-**Direction.** Near-term work deepens what exists rather than widening it: broader
-real-world threat coverage on the existing machinery, richer developer-facing
-results, and bringing the bundled target families fully under the differential moat.
-Longer-term themes include additional target adapters (RAG, custom HTTP agents), a
-second test-output language, more attack classes across the OWASP ASI Top 10, a
-contributable attack-pattern registry, and — demand permitting — hosted CI,
-dashboards, and compliance/audit evidence packs. See [the changelog](./CHANGELOG.md)
-for what shipped in each release.
+**Removed (v0.7.4), by design.** Deeper attack *tactics* — an adaptive refinement loop,
+tool-chaining synthesis, stateful memory poisoning, and cross-model durability — were
+cut, not just hidden. They were never the moat (the control-efficacy oracle is), they
+were beaten by frontier-aligned models on every external target, and none had a
+third-party proof path. Their value was the lesson (model robustness ≠ app security),
+which is banked into the positioning; the code lives in git history and returns only if
+a real external need re-justifies it. Every shipped feature now runs on an MCP app we
+did not author and is on a path to third-party proof.
+
+**Direction.** Near-term work strengthens and externally *proves* the core rather than
+widening it: land a real external differential (a non-self-seeded finding that fires
+unguarded, is resisted with the control, and survives the flakiness gate, on a real OSS
+MCP app), and triage judge precision against independent labels. Longer-term themes
+include additional target adapters (RAG, custom HTTP agents), a second test-output
+language, more attack classes across the OWASP ASI Top 10, a contributable
+attack-pattern registry, and — demand permitting — hosted CI, dashboards, and
+compliance/audit evidence packs. See [the changelog](./CHANGELOG.md) for what shipped in
+each release.
 
 ## Open-source engineering standards
 

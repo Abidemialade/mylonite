@@ -14,7 +14,6 @@ The engine returns a ``ScanResult`` (in-process wrapper around a serialisable
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections.abc import Sequence
@@ -26,10 +25,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
-from mylonite.contracts.target_adapter import SupportsAttackSession
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
-from mylonite.scan.attack_loop import AdaptiveAttackDriver, AttackPlan, discover_attack_plan
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
@@ -111,18 +108,6 @@ class ScanConfig(BaseModel):
             "(default) means no wall-clock limit."
         ),
     )
-    adaptive: bool = Field(
-        default=False,
-        description=(
-            "Opt-in adaptive attack loop. When True AND the adapter supports "
-            "AttackSession AND an AttackPlan is discoverable from the tool "
-            "surface, plantable (indirect-injection) seeds run the "
-            "AdaptiveAttackDriver — plant, drive, judge, then re-craft the "
-            "injection on failure — instead of the single-shot invoke path. "
-            "Non-plantable seeds and unsupported adapters keep the single-shot "
-            "path. Default False preserves existing behaviour exactly."
-        ),
-    )
     randomize_exfil: bool = Field(
         default=False,
         description=(
@@ -191,19 +176,12 @@ class ScanEngine:
         attack_modules: Sequence[Any],  # _AttackModuleProtocol
         customiser: PayloadCustomiser,
         judge: SuccessJudge,
-        attack_driver: AdaptiveAttackDriver | None = None,
     ) -> None:
         self._config = config
         self._adapter = adapter
         self._attack_modules = list(attack_modules)
         self._customiser = customiser
         self._judge = judge
-        self._attack_driver = attack_driver
-        # Resolved once per run() from the descriptor when the adaptive path is
-        # active (config.adaptive + a session-capable adapter + a discoverable
-        # plan); None means every seed takes the single-shot path.
-        self._attack_plan: AttackPlan | None = None
-        self._adaptive_active = False
 
     async def run(self) -> ScanResult:
         counter = LiteLLMCallCounter(cap=self._config.max_llm_calls)
@@ -233,44 +211,6 @@ class ScanEngine:
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
-
-            # Opt-in adaptive path: discover the plant/drive plan once from the
-            # tool surface. Inert unless --adaptive is set, the adapter supports
-            # sessions, and a plan is discoverable — so the default scan is
-            # byte-for-byte unchanged.
-            self._adaptive_active = False
-            self._attack_plan = None
-            adapter_sess = (
-                self._adapter if isinstance(self._adapter, SupportsAttackSession) else None
-            )
-            if (
-                self._config.adaptive
-                and self._attack_driver is not None
-                and adapter_sess is not None
-            ):
-                self._attack_plan = discover_attack_plan(descriptor)
-                if self._attack_plan is None:
-                    logger.warning(
-                        "ScanEngine: --adaptive set but no AttackPlan was discoverable "
-                        "from the tool surface; falling back to the single-shot path"
-                    )
-                else:
-                    # Probe that a stateful session actually opens (a real MCP
-                    # subprocess can fail to spawn / hit a transport error). Without
-                    # this, every adaptive attempt would error and the scan would
-                    # report a misleading "nothing found"; degrade to single-shot.
-                    try:
-                        _probe = await adapter_sess.open_session()
-                        await _probe.close()
-                        self._adaptive_active = True
-                    except BudgetExceededError:
-                        raise
-                    except Exception:
-                        logger.warning(
-                            "ScanEngine: --adaptive set but the target could not open a "
-                            "stateful session; falling back to the single-shot path",
-                            exc_info=True,
-                        )
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(self._config.max_concurrent)
@@ -483,7 +423,14 @@ class ScanEngine:
         # cleanly (the engine still runs, just without LLM customisation for
         # those seeds).
         seed = _SEEDS_BY_ID.get(seed_id)
-        if seed is None:
+        needs_customisation = payload.metadata.get("needs_customisation") == "true"
+        # A catalogue-unknown seed_id is only fatal when the payload asks to be
+        # customised — the customiser prompt is built from the SeedPattern shape.
+        # Descriptor-synthesised seeds (direct_content / tool_description channels)
+        # set needs_customisation=false: their body is already target-shaped, so
+        # they run DIRECT instead of skipping. This is what makes Mylonite's probes
+        # port to real targets whose tool surface isn't the kitchen-sink shape.
+        if seed is None and needs_customisation:
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
@@ -491,25 +438,16 @@ class ScanEngine:
                     outcome="skipped_unknown_seed",
                     verdict_mechanism=None,
                     verdict_reason=(
-                        f"seed_id {seed_id!r} not in SEED_CATALOGUE; engine cannot "
-                        "drive customisation for this payload"
+                        f"seed_id {seed_id!r} not in SEED_CATALOGUE and requests "
+                        "customisation; engine cannot build a customiser prompt"
                     ),
                     error_detail=None,
                 ),
                 exploit=None,
             )
 
-        # Adaptive path (opt-in): plantable (indirect-injection) seeds run the
-        # plant-drive-judge-refine loop instead of single-shot invoke. Direct
-        # (no_setup) seeds have nothing to plant, so they keep the single-shot
-        # path even when --adaptive is on.
-        if self._adaptive_active and seed.setup != "no_setup":
-            return await self._run_payload_adaptive(
-                seed=seed, payload=payload, descriptor=descriptor, seed_id=seed_id
-            )
-
         customiser_fallback = False
-        if self._config.customise and payload.metadata.get("needs_customisation") == "true":
+        if seed is not None and self._config.customise and needs_customisation:
             payload = await self._customiser.customise(seed, descriptor)
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
@@ -610,112 +548,6 @@ class ScanEngine:
             judge_fallback_cause=verdict.fallback_cause,
             customiser_fallback=customiser_fallback,
             run_disagreement=run_disagreement,
-        )
-
-    async def _run_payload_adaptive(
-        self,
-        *,
-        seed: SeedPattern,
-        payload: Payload,
-        descriptor: TargetDescriptor,
-        seed_id: str,
-    ) -> _PerPayloadOutcome:
-        """Run the adaptive plant-drive-judge-refine loop for one plantable seed.
-
-        Maps the :class:`AdaptiveOutcome` onto the same ``ScanAttempt`` /
-        ``ExploitRecord`` shapes the single-shot path produces, so a finding from
-        the loop is indistinguishable downstream — except the refined body and
-        the ``adaptive_attempts`` evidence record how it was reached.
-        """
-        assert self._attack_driver is not None and self._attack_plan is not None
-        try:
-            outcome = await self._attack_driver.run(
-                seed=seed, adapter=self._adapter, plan=self._attack_plan
-            )
-        except BudgetExceededError:
-            raise
-        except Exception as exc:
-            logger.exception("ScanEngine: adaptive driver raised unexpectedly")
-            return _PerPayloadOutcome(
-                attempt=ScanAttempt(
-                    seed_id=seed_id,
-                    pattern_id=payload.pattern_id,
-                    outcome="error",
-                    verdict_mechanism=None,
-                    verdict_reason=str(exc),
-                    error_detail=type(exc).__name__,
-                ),
-                exploit=None,
-            )
-
-        verdict = outcome.verdict
-        evidence: dict[str, str] = {"adaptive_attempts": str(outcome.attempts)}
-        if outcome.attempts_log:
-            # Persist the strategist's refinement trace (the per-round story) so a
-            # finding records HOW it was reached, not just how many tries. Artefacts
-            # are stored un-redacted (replayable data); the CLI redacts on display.
-            evidence["adaptive_log"] = json.dumps(
-                [
-                    {
-                        "attempt": s.attempt,
-                        "injection": s.injection,
-                        "tool_calls": list(s.tool_calls),
-                        "success": s.success,
-                        "reason": s.reason[:300],
-                    }
-                    for s in outcome.attempts_log
-                ]
-            )
-        if verdict is not None:
-            evidence.update({k: str(v) for k, v in verdict.evidence.items()})
-        trace = list(outcome.response.tool_calls) if outcome.response is not None else []
-        final_payload = payload.model_copy(
-            update={
-                "body": outcome.final_body,
-                "metadata": {**payload.metadata, "attack_tier": "adaptive"},
-            }
-        )
-
-        if outcome.success and verdict is not None and outcome.response is not None:
-            exploit = ExploitRecord(
-                target_id=descriptor.target_id,
-                pattern_id=payload.pattern_id,
-                payload=final_payload,
-                response=outcome.response,
-                success_reason=verdict.reason,
-                compliance=seed.compliance,
-            )
-            return _PerPayloadOutcome(
-                attempt=ScanAttempt(
-                    seed_id=seed_id,
-                    pattern_id=payload.pattern_id,
-                    outcome="finding",
-                    verdict_mechanism=verdict.mechanism,
-                    verdict_reason=verdict.reason,
-                    error_detail=None,
-                    tool_call_trace=trace,
-                    judge_evidence=evidence,
-                ),
-                exploit=exploit,
-            )
-
-        reason = (
-            verdict.reason
-            if verdict is not None
-            else "adaptive loop exhausted its attempt budget without a finding"
-        )
-        return _PerPayloadOutcome(
-            attempt=ScanAttempt(
-                seed_id=seed_id,
-                pattern_id=payload.pattern_id,
-                outcome="no_finding",
-                verdict_mechanism=verdict.mechanism if verdict is not None else None,
-                verdict_reason=reason,
-                error_detail=None,
-                tool_call_trace=trace,
-                judge_evidence=evidence,
-            ),
-            exploit=None,
         )
 
     async def _one_pass(

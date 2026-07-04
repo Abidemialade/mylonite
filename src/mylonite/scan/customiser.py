@@ -87,6 +87,14 @@ class PayloadCustomiser:
             "setup": seed.setup,
             "drive": seed.drive,
         }
+        # W1 attribution guard: if the TARGET's own system prompt mandates summaries,
+        # a summary is baseline behaviour — the W1 marker cannot be attributed to the
+        # tool-description smuggle (the Triagent false positive). Flag it so the
+        # predicate stays inconclusive and defers to the differential oracle. The
+        # reference target's summary lives only in a tool DESCRIPTION (not the system
+        # prompt), so this never suppresses the genuine reference finding.
+        if "summar" in (target.system_prompt or "").lower():
+            metadata["baseline_solicits_summary"] = "1"
         if body == seed.seed_body:
             metadata["customiser"] = "fallback"
         return Payload(

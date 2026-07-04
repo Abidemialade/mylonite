@@ -48,6 +48,10 @@ SeedDrive = Literal[
     "fetch_attacker_url",
     "get_issue_and_act",
     "create_issue_direct",
+    # The user message IS the (customised) seed body verbatim. Used by
+    # descriptor-synthesised seeds (direct_content / tool_description channels)
+    # that bake a target-shaped drive instead of relying on a fixed template.
+    "verbatim",
 ]
 
 
@@ -102,6 +106,24 @@ class SeedPattern(BaseModel):
     predicate: str = Field(
         ...,
         description="Predicate-registry key — validated at engine startup.",
+    )
+    judge_context: str = Field(
+        default="",
+        description=(
+            "Optional evaluator-only context for the LLM judge, NOT shown to the "
+            "agent-under-test. Used by W1 tool-description seeds to tell the judge "
+            "what smuggled instruction lives in the tool description (which the "
+            "neutral drive must not reveal to the planner)."
+        ),
+    )
+    customise: bool = Field(
+        default=True,
+        description=(
+            "Whether the per-seed LLM customiser should refine this seed's body for "
+            "the target. Descriptor-synthesised seeds (not in SEED_CATALOGUE) set "
+            "False: their body is already target-shaped and the engine cannot look "
+            "them up to build a customiser prompt, so they run direct."
+        ),
     )
     applicable_targets: list[str] = Field(
         ...,
@@ -541,10 +563,24 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
     """
     classes = set(getattr(descriptor, "weakness_classes", None) or [])
     if classes:
-        return [
+        # Descriptor-driven channel synthesis: for each declared weakness, build a
+        # seed that rides the channel THIS target's tool surface actually exposes
+        # (direct_content / tool_description) instead of the kitchen-sink
+        # store->recall shape. Deferred import breaks the seeds<->seed_synth cycle.
+        from mylonite.scan import seed_synth
+
+        synthesized = seed_synth.synthesize_seeds(descriptor)
+        covered = {s.weakness for s in synthesized}
+        # Kitchen-sink fallback only for declared classes the synthesis couldn't
+        # cover from the tool surface (keeps honest "NOT TESTED" instead of nothing,
+        # and preserves the store->recall path for targets that DO have it).
+        kitchen = [
             s
             for s in SEED_CATALOGUE
-            if s.weakness in classes and "kitchen-sink" in s.applicable_targets
+            if s.weakness in classes
+            and s.weakness not in covered
+            and "kitchen-sink" in s.applicable_targets
         ]
+        return [*synthesized, *kitchen]
     family = target_family(descriptor.target_id)
     return [s for s in SEED_CATALOGUE if family in s.applicable_targets]

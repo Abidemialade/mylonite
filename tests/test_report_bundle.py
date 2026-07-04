@@ -65,10 +65,10 @@ def test_bundle_structure_and_reuses_finding_data() -> None:
 def test_bundle_carries_proven_control_and_attack_shape() -> None:
     from mylonite.report.bundle import to_bundle
 
-    ex = _exploit("W2", metadata={"synthetic_control": "W2", "attack_shape": "memory_poisoning"})
+    ex = _exploit("W2", metadata={"synthetic_control": "W2", "attack_shape": "static"})
     f = to_bundle([(ex, _report())])["findings"][0]
     assert f["proven_control"] == "W2"
-    assert f["attack_shape"] == "memory_poisoning"
+    assert f["attack_shape"] == "static"
 
 
 def test_bundle_without_report_has_null_proof() -> None:

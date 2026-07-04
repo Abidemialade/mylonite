@@ -287,7 +287,7 @@ class DifferentialValidator(ValidatorBase):
         guarded_adapter_factory: Callable[[], Any] | None = None,
         control_weakness: str | None = None,
         randomize_exfil: bool = False,
-        adaptive_guarded: bool = False,
+        guarded_is_server_layer: bool = False,
         control_context: str | None = None,
         consensus_judges: int = 3,
         iteration_timeout_s: float | None = None,
@@ -316,10 +316,12 @@ class DifferentialValidator(ValidatorBase):
         # differential proves the control/target stops exfil to ANY attacker
         # address, not just the demo literal. Off by default.
         self._randomize_exfil = randomize_exfil
-        # Adaptive-aware oracle: when set, the GUARDED side of the differential is
-        # driven by the adaptive loop (with control_context fed to the strategist),
-        # grading whether the control holds UNDER ADAPTIVE PRESSURE vs falls to it.
-        self._adaptive_guarded = adaptive_guarded
+        # Honesty flag: True when the guarded side of a custom-target differential is
+        # the REAL server with its server-layer guard ON (declared via control_env),
+        # False when it is the low-fidelity adapter-boundary shim. Shapes the verdict
+        # so a synthetic shim that "leaks" is never reported as proof the user's real
+        # (server-layer) control is theater.
+        self._guarded_is_server_layer = guarded_is_server_layer
         self._control_context = control_context
         self._consensus_judges = max(1, consensus_judges)
         # Defaults: vulnerable should fire almost-always (N-1), guard must
@@ -569,18 +571,14 @@ class DifferentialValidator(ValidatorBase):
             # "vulnerable" side; only the guarded runs are new. The success-RATE
             # gap is the control's marginal contribution — proof the safeguard,
             # not the model, carries the security.
-            mode_label = (
-                "adaptive guarded twin" if self._adaptive_guarded else "boundary-guarded twin"
-            )
             guard_runs = []
             for i in range(n):
-                self._progress(f"{mode_label}: differential run {i + 1}/{n}")
+                self._progress(f"boundary-guarded twin: differential run {i + 1}/{n}")
                 guard_runs.append(
                     self._run_custom_iteration(
                         target,
                         pattern_id,
                         factory=self._guarded_adapter_factory,
-                        adaptive=self._adaptive_guarded,
                     )
                 )
             guard_fired = sum(1 for r in guard_runs if r.finding)
@@ -595,23 +593,32 @@ class DifferentialValidator(ValidatorBase):
             passed = decision.differential_passed and decision.flakiness_passed
             control = self._control_weakness or "boundary control"
             rate_gap = ((fired - guard_fired) / n) if n else 0.0
-            if self._adaptive_guarded:
-                phrase = (
-                    "holds UNDER ADAPTIVE PRESSURE (the adaptive loop could not make "
-                    "the guarded twin fire)"
-                    if passed
-                    else f"holds statically but FALLS TO ADAPTIVE (guarded leaked {guard_fired}/{n})"
-                )
+            twin = "server-layer twin" if self._guarded_is_server_layer else "boundary twin"
+            counts = (
+                f"raw fired {fired}/{n}, guarded leaked {guard_fired}/{n}, "
+                f"success-rate gap {rate_gap:.2f}"
+            )
+            if passed:
                 detail = (
-                    f"control {control!r} {phrase}: raw fired {fired}/{n}, guarded leaked "
-                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f}"
+                    f"control {control!r} ({twin}): {counts} (need >= {self._min_rate_gap}); "
+                    "the safeguard - not the model - carries the security"
+                )
+            elif self._guarded_is_server_layer:
+                detail = (
+                    f"control {control!r} (server-layer twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); the server-layer control did not "
+                    "discriminate - raw and guarded behaved alike, so the control as "
+                    "configured did not stop this attack"
                 )
             else:
                 detail = (
-                    f"control {control!r}: raw fired {fired}/{n}, guarded leaked "
-                    f"{guard_fired}/{n}, success-rate gap {rate_gap:.2f} "
-                    f"(need >= {self._min_rate_gap}); the safeguard - not the model "
-                    "- carries the security"
+                    f"control {control!r} (synthetic boundary twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); the SYNTHETIC boundary twin did not "
+                    "block this attack. If your real control is server-layer (an approval "
+                    "gate or allowlist enforced inside the server), declare control_env / "
+                    "vulnerable_launch in the target file so the differential measures it - "
+                    "the boundary twin cannot see server-side guards, so this is NOT "
+                    "evidence your control is ineffective"
                 )
             differential = ValidationOutcome(
                 stage="differential",
@@ -629,10 +636,17 @@ class DifferentialValidator(ValidatorBase):
                 guard_fired=guard_fired,
                 rate_gap=rate_gap,
             )
-            mode_suffix = " under adaptive pressure" if self._adaptive_guarded else ""
+            twin_label = (
+                "Server-layer-guarded twin"
+                if self._guarded_is_server_layer
+                else "Synthetic boundary-guarded twin"
+            )
+            # Machine-readable marker (parsed by the CLI to pick an honest remediation
+            # line on REJECT). Kept terse and ASCII; notes is serialized to JSON.
+            marker = "server-layer" if self._guarded_is_server_layer else "synthetic-boundary"
             notes_tail = (
-                f" Boundary-guarded twin (control {control!r}){mode_suffix}: leaked "
-                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}."
+                f" {twin_label} (control {control!r}): leaked "
+                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}. [guarded-twin={marker}]"
             )
 
         twin_note = (
@@ -665,15 +679,11 @@ class DifferentialValidator(ValidatorBase):
         pattern_id: str,
         *,
         factory: Callable[[], Any] | None = None,
-        adaptive: bool = False,
     ) -> _CustomRun:
         """Run the attack once against the real target, scoped to one seed.
 
         ``factory`` overrides the adapter source for this run (e.g. the
         boundary-guarded twin factory); it defaults to the raw target factory.
-        ``adaptive`` drives the run through the adaptive plant-drive-refine loop
-        (with the validator's ``control_context`` fed to the strategist) — used by
-        the adaptive-aware oracle to attack the guarded twin under adaptive pressure.
         """
         from mylonite.plugins.registry import discover
         from mylonite.scan.customiser import PayloadCustomiser
@@ -697,19 +707,8 @@ class DifferentialValidator(ValidatorBase):
             pattern_id_filter=pattern_id,
             wall_clock_timeout_s=self._iteration_timeout_s,
             randomize_exfil=self._randomize_exfil,
-            adaptive=adaptive,
         )
         judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
-        attack_driver = None
-        if adaptive:
-            from mylonite.scan.attack_loop import AdaptiveAttackDriver
-
-            attack_driver = AdaptiveAttackDriver(
-                judge=judge,
-                strategist_model=self._customiser_model,
-                completion_fn=self._completion_fn,
-                control_context=self._control_context,
-            )
         engine = ScanEngine(
             config=config,
             adapter=adapter,
@@ -718,7 +717,6 @@ class DifferentialValidator(ValidatorBase):
                 model=self._customiser_model, completion_fn=self._completion_fn
             ),
             judge=judge,
-            attack_driver=attack_driver,
         )
         result = asyncio.run(engine.run())
         if result.exploits:

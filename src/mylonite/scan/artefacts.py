@@ -186,9 +186,11 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     if not_tested:
         console.print(
             f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
-            "(planted payload undelivered or no seed_arm) - those seeds proved "
-            "NOTHING. This is not a clean result for them; declare a seed_arm so "
-            "the indirect-injection payload is planted, then re-scan.[/bold red]"
+            "(planted payload undelivered, no seed_arm, or no plant/sink/recall "
+            "surface) - those seeds proved NOTHING. This is not a clean result for "
+            "them; declare a seed_arm (and for the tool-chaining / memory modes, "
+            "ensure the target exposes a plant + sink/recall surface), then "
+            "re-scan.[/bold red]"
         )
     if report.aborted:
         console.print(f"[red]aborted: {report.aborted}[/red]")
