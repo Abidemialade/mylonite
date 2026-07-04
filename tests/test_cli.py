@@ -2081,3 +2081,42 @@ def test_scan_and_gate_expose_purpose_flag() -> None:
     """--purpose (app description → tailored probes) is available on scan and gate."""
     assert "--purpose" in _command_option_names("scan")
     assert "--purpose" in _command_option_names("gate")
+
+
+def test_scan_scaffold_rest_writes_runnable_http_target(tmp_path: Path) -> None:
+    """`scan --scaffold OUT --rest-url URL` writes a runnable HTTP-agent target.yaml."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    out = tmp_path / "myagent.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--scaffold",
+            str(out),
+            "--rest-url",
+            "https://agent.example/chat",
+            "--rest-response-path",
+            "reply",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert out.exists()
+    tf = load_target_file(out)  # runnable = loads + validates with no hand-editing
+    assert tf.transport == "rest"
+    assert tf.weakness_classes == ["W2"]
+    assert tf.request is not None
+    assert tf.request.url == "https://agent.example/chat"
+    assert tf.request.response_path == "reply"
+    assert "{prompt}" in tf.request.body
+    assert tf.family == "myagent"
+
+
+def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> None:
+    out = tmp_path / "bad.yaml"
+    result = runner.invoke(
+        app,
+        ["scan", "--scaffold", str(out), "--rest-url", "https://x/chat", "--rest-body", "no slot"],
+    )
+    assert result.exit_code != EXIT_SUCCESS
+    assert not out.exists()

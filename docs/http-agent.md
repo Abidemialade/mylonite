@@ -19,6 +19,20 @@ side-effect probe a black box can't provide. If your agent exposes tools, prefer
 the [MCP transports](test-your-app.md); if it can report a side effect over HTTP,
 declare an `effect_probe`.
 
+## Scaffold it in one command
+
+You don't have to hand-write the target file. Point `--scaffold` at your endpoint and it
+writes a **runnable** `target.yaml` (no MCP server to introspect, so it's ready as-is):
+
+```bash
+mylonite scan --scaffold my-agent.yaml \
+  --rest-url https://my-agent.internal/v1/chat \
+  --rest-response-path choices.0.message.content
+```
+
+Then edit the request block if needed (auth headers, body shape) and scan it. Or write the
+file by hand:
+
 ## The target file
 
 ```yaml
