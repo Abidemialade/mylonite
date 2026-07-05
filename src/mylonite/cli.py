@@ -1743,6 +1743,22 @@ def _validate_custom(
     # reframed honestly (DifferentialValidator(guarded_is_server_layer=...)).
     server_layer = control_weakness is not None and control_weakness in spec.control_env
 
+    # A black-box HTTP agent (transport: rest) has no adapter-boundary control we can
+    # apply — HTTPAgentAdapter has no tool surface for the W1/W2 envelope, so a
+    # boundary-guarded twin would be BYTE-IDENTICAL to the raw target and wrongly
+    # REJECT a real finding. Fall back to the non-differential gate (stability +
+    # effect + consensus) unless the target declares a server-layer toggle. (Full
+    # control-efficacy over HTTP is future work — see docs/http-agent.md.)
+    if spec.transport == "rest" and not server_layer:
+        run_diff = False
+        typer.echo(
+            "validate: rest (HTTP-agent) target — the boundary-control differential does "
+            "not apply to a black box, so `kept` is decided by stability + effect + consensus "
+            "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
+            "for a server-layer differential.",
+            err=True,
+        )
+
     if spec.vulnerable_launch is not None or server_layer:
         typer.echo(
             f"validate: the raw side runs {spec.family!r} with the "
@@ -1776,13 +1792,18 @@ def _validate_custom(
 
         guarded_factory = _guarded
 
-    twin_kind = "real server-layer twin" if server_layer else "synthetic boundary twin"
+    if server_layer:
+        twin_kind = "real server-layer twin"
+    elif run_diff:
+        twin_kind = "synthetic boundary twin"
+    else:
+        twin_kind = "none (differential not applicable to a black-box target)"
     typer.echo(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
         f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).",
         err=True,
     )
-    if not server_layer:
+    if run_diff and not server_layer:
         bar = "=" * 74
         typer.echo(
             f"{bar}\n"
@@ -2541,7 +2562,9 @@ def _scaffold_rest_target_file(
         typer.echo("--rest-body must contain a {prompt} placeholder.", err=True)
         raise typer.Exit(code=EXIT_CONFIG)
 
-    stem = output.stem.replace(".", "-").strip("-") or "http-agent"
+    import re
+
+    stem = re.sub(r"[^a-z0-9]+", "-", output.stem.lower()).strip("-") or "http-agent"
     family = "http-agent" if stem in _RESERVED_FAMILIES else stem
 
     try:
@@ -2995,7 +3018,12 @@ def gate(
 ) -> None:
     """Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline."""
     if randomize_exfil is None:
-        randomize_exfil = target_file is not None
+        # Default ON for any LIVE target (custom --target-file OR a bundled mcp:<family>);
+        # only the in-process reference targets replay fixtures and must not randomize.
+        randomize_exfil = not (target is not None and target.startswith("reference:"))
+    if iterations < 1:
+        typer.echo("--iterations must be >= 1.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
     from mylonite.gate import pr as pr_mod
     from mylonite.gate import run_gate
     from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
@@ -3136,6 +3164,17 @@ def gate(
         # in-repo differential and are not tagged here. --prove-control is now the
         # default behaviour and kept for back-compat.
         if fast or is_reference:
+            return exploits
+        if tf is not None and tf.transport == "rest":
+            # A black-box HTTP agent has no adapter-boundary control to apply, so a
+            # boundary-guarded twin would equal the raw target and wrongly REJECT a
+            # real finding. Don't tag; the gate is decided by stability/effect/consensus.
+            typer.echo(
+                "gate: rest (HTTP-agent) target — the control-efficacy differential does not "
+                "apply to a black box; the emitted test is gated by stability + effect + "
+                "consensus. Declare control_env / vulnerable_launch for a server-layer differential.",
+                err=True,
+            )
             return exploits
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control

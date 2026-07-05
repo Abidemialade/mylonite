@@ -58,11 +58,11 @@ def teardown_function() -> None:
 
 
 def test_escape_for_body_makes_payload_json_safe() -> None:
-    escaped = _escape_for_body('hi "there"\nnewline\\slash', "{prompt}")
-    # Substituting into a JSON string must keep it valid JSON.
-    body = '{"prompt": "' + escaped + '"}'
     import json
 
+    body_template = '{"prompt": "{prompt}"}'  # a JSON body → payload must be JSON-escaped
+    escaped = _escape_for_body('hi "there"\nnewline\\slash', body_template)
+    body = body_template.replace("{prompt}", escaped)
     assert json.loads(body)["prompt"] == 'hi "there"\nnewline\\slash'
 
 
@@ -71,10 +71,25 @@ def test_extract_reply_dotted_path_and_list_index() -> None:
     assert _extract_reply(raw, "choices.0.message.content") == "hello"
 
 
-def test_extract_reply_falls_back_to_raw_on_miss_or_nonjson() -> None:
+def test_extract_reply_non_json_falls_back_to_raw() -> None:
+    # A tolerant plain-text agent: no JSON to walk, judge the whole body.
     assert _extract_reply("plain text, not json", "reply") == "plain text, not json"
-    assert _extract_reply('{"other": 1}', "reply") == '{"other": 1}'
     assert _extract_reply("whole body", None) == "whole body"
+
+
+def test_extract_reply_raises_when_declared_path_misses_json() -> None:
+    # A declared response_path that misses on a JSON body is a misconfig — must NOT
+    # silently judge the whole blob (that would let a bad path read as clean).
+    with pytest.raises(RuntimeError, match="did not resolve"):
+        _extract_reply('{"other": 1}', "reply")
+
+
+def test_escape_for_body_leaves_non_json_templates_raw() -> None:
+    # Form-encoded / plain-text template: JSON-escaping would corrupt the payload.
+    assert _escape_for_body('hi "there"\nx', "prompt={prompt}") == 'hi "there"\nx'
+    # JSON template: still escaped.
+    escaped = _escape_for_body('hi "there"\nx', '{"p": "{prompt}"}')
+    assert escaped == 'hi \\"there\\"\\nx'
 
 
 # --- adapter behaviour -------------------------------------------------------
@@ -127,6 +142,22 @@ def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:
     adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
         with pytest.raises(RuntimeError, match="returned 404"):
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+
+
+def test_invoke_raises_on_empty_200_body() -> None:
+    """A 200 with an empty reply must fail loud, not read as a clean scan."""
+    _register_rest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"reply": "   "})
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="empty/blank reply"):
             asyncio.run(adapter.invoke(_payload("hi")))
     finally:
         asyncio.run(adapter.close())

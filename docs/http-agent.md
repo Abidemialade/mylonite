@@ -75,11 +75,12 @@ mylonite gate --target-file my-http-agent.yaml --authorize my-http-agent
 
 ## Notes
 
-- **Control-efficacy on a black box.** The control-efficacy check needs a way to
-  toggle a safeguard. For an endpoint you can run with guards on and off, declare
-  `vulnerable_launch` / `control_env` (see [Concepts](concepts.md)) so `validate`
-  runs the two-build differential. Otherwise use `--fast`, which skips the
-  differential leg for a weaker gate.
+- **Control-efficacy on a black box.** The control-efficacy differential needs a way
+  to toggle a safeguard, and a black box exposes none — so `validate`/`gate`
+  **automatically** decide `kept` by stability + effect + consensus for a `rest`
+  target (a finding is never falsely rejected for lack of a differential). To get the
+  full two-build differential, declare `vulnerable_launch` / `control_env` (see
+  [Concepts](concepts.md)) so Mylonite can run the endpoint with its guard on and off.
 - **Scope.** This is still AI-layer testing — it exercises the agent's prompt
   handling, not the surrounding HTTP service. Traditional endpoint security belongs
   to DAST tools.

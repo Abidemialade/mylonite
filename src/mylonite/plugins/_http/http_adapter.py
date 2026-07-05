@@ -32,13 +32,18 @@ from mylonite.plugins._mcp import target_registry
 def _escape_for_body(text: str, body: str) -> str:
     """Return ``text`` safe to substitute into the ``{prompt}`` slot of ``body``.
 
-    The default (and typical LLM-API) body is JSON, so the payload must be
-    JSON-string-escaped (quotes, backslashes, newlines) to keep the body valid.
-    We escape whenever the body parses as JSON *after* a trial substitution would
-    otherwise break it — practically: JSON-escape unless the template is clearly
-    not JSON (contains ``{prompt}`` at a non-JSON position). Keeping it simple and
-    robust: always JSON-escape (``json.dumps`` then strip the surrounding quotes).
+    A JSON body (the default and typical LLM-API shape) needs the payload
+    JSON-string-escaped (quotes, backslashes, newlines) to stay valid. A non-JSON
+    template (form-encoded, plain text) must NOT be JSON-escaped or the payload is
+    corrupted (a newline becomes a literal ``\\n``, a quote becomes ``\\"``). Detect
+    which by trial-substituting a placeholder and checking whether the result parses
+    as JSON.
     """
+    probe = body.replace("{prompt}", "MYLONITE_PROMPT_SLOT")
+    try:
+        json.loads(probe)
+    except (ValueError, TypeError):
+        return text  # non-JSON template: substitute raw
     return json.dumps(text)[1:-1]
 
 
@@ -46,16 +51,19 @@ def _extract_reply(raw: str, response_path: str | None) -> str:
     """Pull the agent's reply out of the HTTP response body.
 
     ``response_path`` is a dotted path into the JSON body (integer segments index
-    into lists), e.g. ``choices.0.message.content``. When it is ``None``, or the
-    body isn't JSON, or the path misses, we fall back to the whole raw body so the
-    judge still has something to reason over rather than an empty string.
+    into lists), e.g. ``choices.0.message.content``. When it is ``None`` we return
+    the whole body. When the body isn't JSON we fall back to the whole body (a
+    tolerant plain-text agent). But when a path IS declared and the body IS JSON yet
+    the path misses, we RAISE — a declared path that doesn't resolve is a
+    misconfiguration, and silently judging the whole JSON blob would let a broken
+    ``response_path`` read as a clean scan.
     """
     if not response_path:
         return raw
     try:
         node: Any = json.loads(raw)
     except (ValueError, TypeError):
-        return raw
+        return raw  # non-JSON agent: judge the whole body
     for segment in response_path.split("."):
         try:
             if isinstance(node, list):
@@ -63,10 +71,17 @@ def _extract_reply(raw: str, response_path: str | None) -> str:
             elif isinstance(node, dict):
                 node = node[segment]
             else:
-                return raw
+                raise _response_path_error(response_path)
         except (KeyError, IndexError, ValueError):
-            return raw
+            raise _response_path_error(response_path) from None
     return node if isinstance(node, str) else json.dumps(node)
+
+
+def _response_path_error(response_path: str) -> RuntimeError:
+    return RuntimeError(
+        f"response_path {response_path!r} did not resolve in the JSON reply — check it "
+        "against your agent's response shape (a miss must not be judged as a clean scan)."
+    )
 
 
 class HTTPAgentAdapter(AsyncTargetAdapterBase):
@@ -135,6 +150,12 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
                 "file's request block — the attack payload never reached the agent."
             )
         reply = _extract_reply(response.text, req.response_path)
+        if not reply.strip():
+            raise RuntimeError(
+                f"HTTP agent at {req.url} returned a 200 with an empty/blank reply — check "
+                "the url and response_path; the attack payload may not have reached the agent "
+                "(an empty reply must not be judged as a clean scan)."
+            )
         return AdapterResponse(
             payload_pattern_id=payload.pattern_id,
             raw_response=reply,
