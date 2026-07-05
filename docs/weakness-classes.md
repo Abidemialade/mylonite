@@ -18,8 +18,8 @@ an attack actually *landed* (rather than the model just sounding compromised).
 | **W3** | Excessive egress / SSRF | `EgressAllowlistControl` |
 | **W4** | Excessive agency / unconfirmed consequential action | `ConfirmGateControl` |
 
-Each class has a **guarded twin** in the bundled reference agent ([the Quarry](quarry.md))
-that implements the control on the right — that twin is the ground truth the
+Each class has a **guarded build** in the bundled reference agent ([the reference app](quarry.md))
+that implements the control on the right — that build is the ground truth the
 [validation oracle](validation.md) proves findings against.
 
 ---
@@ -43,7 +43,7 @@ the discriminating signal that the tool description, not the user, was in contro
 is deterministic: it inspects the recorded tool calls and response, no second LLM
 needed.
 
-**Maps to:** OWASP-LLM `LLM01` · OWASP-ASI `ASI02` · seed `tool-description-summary-smuggle`.
+**Maps to:** OWASP-LLM `LLM01` · OWASP-ASI `ASI02` · attack pattern `tool-description-summary-smuggle`.
 
 ---
 
@@ -61,17 +61,17 @@ later read (`setup: seed_note`, `channel: tool-result`), then the user is nudged
 read/summarise it (`drive: read_note_for_summary`). The planted text instructs the
 agent to take a harmful action (e.g. forward the note to an attacker address).
 
-**How the predicate decides it landed.** Depending on the seed,
+**How the predicate decides it landed.** Depending on the attack pattern,
 `send_email_to_attacker` (did the agent email the attacker destination it was steered
 to?) or `read_note_returned_poisoned_content_acted_on` (did it act on the poisoned
 content at all?). Both key on the *destination the model emitted* or the *action it
 took* — structured signals from the recorded run — not on the input text.
 
-**The fix (guarded twin).** `UntrustedEnvelopeControl` wraps every retrieved/tool
+**The fix (guarded build).** `UntrustedEnvelopeControl` wraps every retrieved/tool
 result in an `<untrusted>…</untrusted>` envelope and instructs the planner that
 envelope contents are data, never commands.
 
-**Maps to:** OWASP-LLM `LLM01`/`LLM05` · OWASP-ASI `ASI01`/`ASI06` · seeds
+**Maps to:** OWASP-LLM `LLM01`/`LLM05` · OWASP-ASI `ASI01`/`ASI06` · attack patterns
 `indirect-injection-note-body-{direct,roleplay,tool-chain}`.
 
 ---
@@ -93,7 +93,7 @@ fetch to the attacker's destination — egress to *any* attacker host, which the
 `--randomize-exfil` flag generalises so a control must block the whole class, not one
 literal address.
 
-**The fix (guarded twin).** `EgressAllowlistControl` refuses fetches to hosts outside
+**The fix (guarded build).** `EgressAllowlistControl` refuses fetches to hosts outside
 an allowlist.
 
 **Maps to:** OWASP-LLM `LLM06` · OWASP-ASI `ASI02`/`ASI05`.
@@ -117,16 +117,16 @@ the consequential tool was called with **no** preceding confirmation tool in the
 It is a *confident-negative* predicate paired with an effect probe — it asserts the
 absence of a guard, then confirms the effect materialised.
 
-**The fix (guarded twin).** `ConfirmGateControl` returns a `confirmation_required`
+**The fix (guarded build).** `ConfirmGateControl` returns a `confirmation_required`
 preview and demands an explicit second, confirmed call before acting.
 
 **Maps to:** OWASP-LLM `LLM06` · OWASP-ASI `ASI02`.
 
 ---
 
-## The anatomy of a seed
+## The anatomy of an attack pattern
 
-Every bundled attack is a **seed** with these fields (see `mylonite.scan.seeds`):
+Every bundled attack is an **attack pattern** with these fields (see `mylonite.scan.seeds`):
 
 - **`channel`** — *where* the payload is delivered: `tool-description`, `tool-result`,
   `rag-document`, `system-prompt-injection`, or `user-message`.
@@ -143,7 +143,7 @@ Every bundled attack is a **seed** with these fields (see `mylonite.scan.seeds`)
 A single attack is judged a **finding** by a three-step ladder, cheapest first:
 
 1. **Deterministic predicate** — the structured check above. No LLM, no ambiguity.
-   This is the primary signal and most seeds resolve here.
+   This is the primary signal and most attack patterns resolve here.
 2. **LLM judge** — used only when the predicate is inconclusive; a model reads the
    trace and rules. (`--judge-model` overrides it.)
 3. **Effect probe** — for custom targets, an optional check that the *damage
@@ -154,5 +154,5 @@ A finding from Layer 1 is only half the story. Whether it becomes a **kept, comm
 regression test** is decided by Layer 2 — the [validation oracle](validation.md).
 
 > The bundled families ([filesystem / fetch / github](test-your-app.md#bundled-targets))
-> carry their own W1–W4 seeds (e.g. `github-indirect-injection-poisoned-issue-then-act`)
+> carry their own W1–W4 attack patterns (e.g. `github-indirect-injection-poisoned-issue-then-act`)
 > so the same four classes apply to real MCP servers, not just the reference agent.

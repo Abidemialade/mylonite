@@ -9,19 +9,38 @@ LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not k
 
 ---
 
+## `init` — guided setup
+
+Write a runnable `target.yaml` for your app, guided. Prompts for the transport (`rest`
+for a plain HTTP agent, `mcp` for a stdio server) and what each needs, then writes a
+ready-to-scan file. Pass the options to skip the prompts.
+
+Options: `output` (positional, default `target.yaml`); `--transport rest|mcp`; for rest:
+`--url`, `--rest-body`, `--rest-response-path`; for mcp: `--command`, `--arg`; `--force`.
+
+```bash
+mylonite init app.yaml --transport rest --url https://my-agent/v1/chat
+mylonite init app.yaml --transport mcp --command python --arg server.py
+```
+
+The interactive front-end over `scan --scaffold`; for HTTP agents see
+[docs/http-agent.md](http-agent.md).
+
 ## `scan` — find weaknesses
 
 Run the exploit-finding loop against a target.
 
 **Target** (positional): `reference:vulnerable` / `reference:guarded` (the bundled
-twins), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
+reference app builds), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
 (your own MCP app). Non-reference targets need `--authorize`.
 
 Key options: `--target-file PATH`, `--authorize NAME`, `--provider`, `--model`,
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
-`--allow-no-seed-arm`. For a custom target: `--command`, `--arg`, `--env`, `--scope`,
-`--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
+`--allow-no-seed-arm`, `--purpose "…"` (a one-line description of what the app is for;
+tailors the probes to its domain — overrides `purpose` in the target file, and is
+persisted so `generate`/`validate` reuse it). For a custom target: `--command`, `--arg`,
+`--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
 
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
@@ -47,31 +66,37 @@ your app); `--prove-control` (emit a control-efficacy test).
 mylonite generate --latest --out .mylonite/generated/my-finding
 ```
 
-## `validate` — prove the test (the moat)
+## `validate` — prove the test
 
 Run the generated test through the [validation engine](validation.md), LIVE. On a real
-`--target-file` app the [control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat)
-holds the model constant and toggles only the safeguard; against the bundled twins it
-runs the two-build differential. A test is **kept** only when it discriminates reliably.
+`--target-file` app the [control-efficacy check](validation.md#the-control-efficacy-check)
+holds the model constant and toggles only the safeguard; against the bundled reference app
+it runs the two-build differential. A test is **kept** only when it discriminates reliably.
 
 Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
-`--model`; `--target-file PATH` (re-drive your REAL app instead of the twin); `--fast`
-(skip the differential leg — faster, weaker); `--randomize-exfil`; `--iteration-timeout
-S`. `--prove-control` is a back-compat no-op (the differential is now default).
+`--model`; `--target-file PATH` (re-drive your REAL app instead of the reference build); `--fast`
+(skip the differential leg — faster, weaker); `--randomize-exfil/--no-randomize-exfil`
+(mint a unique exfil address per run so the finding proves the target blocks ANY attacker
+destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
+reference/replay path); `--iteration-timeout S`. `--prove-control` is a back-compat no-op
+(the differential is now default).
 
 ```bash
 mylonite validate .mylonite/generated/my-finding --target-file app.yaml
 ```
 
-## `gate` — scan → generate → validate → PR (the magic moment)
+## `gate` — scan → generate → validate → PR (the full pipeline)
 
 The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows.
 
 Options: `target` or `--target-file`; `--authorize`; `--open-pr` (push a branch + open
 the PR via `gh`); `--config`; `--provider`, `--model`; `--out PATH`; `--max-llm-calls`;
-`--runs-on LABEL` (GitHub runner; use a self-hosted label for in-perimeter MCP
-backends); `--workflows/--no-workflows`; `--llm-enrich` (append a labelled, unverified
-LLM fix suggestion); `--fast`; `--randomize-exfil`.
+`--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
+reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
+(GitHub runner; use a self-hosted label for in-perimeter MCP backends);
+`--workflows/--no-workflows`; `--llm-enrich` (append a labelled, unverified LLM fix
+suggestion); `--fast`; `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live
+custom target).
 
 ```bash
 mylonite gate --target-file app.yaml --authorize me --open-pr
@@ -92,8 +117,8 @@ mylonite report .mylonite/validated/my-finding --sarif out.sarif --json finding.
 
 ## `ablate` — score the safeguards
 
-Toggle each AI safeguard and report which are **load-bearing**, **security-theater**, or
-**redundant**. See [the control-efficacy oracle](validation.md#the-control-efficacy-oracle-the-moat).
+Toggle each AI safeguard and report which are **load-bearing**, **security theater**, or
+**redundant**. See [the control-efficacy check](validation.md#the-control-efficacy-check).
 
 Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
@@ -107,10 +132,10 @@ mylonite ablate --target-file app.yaml --authorize me --controls W2,W4 --redunda
 > --scaffold PATH` (see [`scan`](#scan-find-weaknesses) above). See [Test your own
 > app](test-your-app.md) and the [target.yaml reference](target-file.md).
 
-## `demo` — the Quarry playground
+## `demo` — the reference-app playground
 
 Zero-config: run the vulnerable-vs-guarded differential on the bundled reference agent.
-Replays recorded fixtures by default; `--live` makes real calls. See [the Quarry](quarry.md).
+Replays recorded fixtures by default; `--live` makes real calls. See [the reference app](quarry.md).
 
 ```bash
 mylonite demo            # offline, instant

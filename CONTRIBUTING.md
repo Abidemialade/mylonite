@@ -122,10 +122,10 @@ attack patterns. To submit one, open an issue using the
    guarded variant it does not. (Differential proof.)
 3. It does not target third-party services.
 
-## Contributing a Quarry scenario
+## Contributing a reference app scenario
 
-A "Quarry scenario" is a new seeded weakness for the bundled reference agent
-(the Quarry — `reference_targets/mcp_kitchen_sink/`) or for one of the real
+A "reference app scenario" is a new seeded weakness for the bundled reference agent
+(the reference app — `reference_targets/mcp_kitchen_sink/`) or for one of the real
 MCP target families. It is just a concrete instance of the
 [community attack-pattern registry](#community-attack-pattern-registry) flow
 above: open an issue with the **"Attack pattern submission"** template
@@ -137,7 +137,7 @@ spells out the differential gate, which is the part people get wrong.
 must *fire on the vulnerable variant and stay clean on the guarded variant*.
 Model your proof on
 `reference_targets/mcp_kitchen_sink/tests/test_differential.py`, which asserts
-exactly that twin behaviour and **runs in the main test suite** (it is on
+exactly that build behaviour and **runs in the main test suite** (it is on
 `testpaths`, so a broken differential fails CI for everyone — not just an
 opt-in job). A scenario without a green differential proof will not be merged.
 

@@ -43,9 +43,10 @@ nav:
   - Get started:
       - Quickstart: quickstart.md
       - Installing on Windows: install-windows.md
-      - Try it — the Quarry: quarry.md
+      - Try it — the reference app: quarry.md
   - Guides:
       - Test your own app: test-your-app.md
+      - Test a plain HTTP agent: http-agent.md
       - Gate CI: ci-gating.md
       - Reading the results: reading-results.md
   - How it works:

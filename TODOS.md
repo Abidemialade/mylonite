@@ -16,7 +16,7 @@ depend on the local SSL/cert environment or on tagging a release:
   (2026-06-18) via the Trusted-Publishing workflow
   ([`.github/workflows/release.yml`](./.github/workflows/release.yml): build →
   TestPyPI → PyPI); the TestPyPI + PyPI trusted publishers are registered.
-  **Remaining:** `mcp-kitchen-sink` (the Quarry reference target) is not
+  **Remaining:** `mcp-kitchen-sink` (the reference app target) is not
   published, so the `mylonite demo` walkthrough is still clone-first — see the
   Phase 4 item below.
 - **Demo GIF + reference-validation example.** See the two items below — both are

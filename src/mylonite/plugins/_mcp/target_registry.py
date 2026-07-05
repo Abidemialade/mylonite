@@ -40,6 +40,30 @@ class SeedArmSpec(BaseModel):
     id_pattern: str | None = None  # extract the handle via this regex (first capture group)
 
 
+class RequestSpec(BaseModel):
+    """How to reach a plain HTTP/REST agent (``transport: rest``).
+
+    A black-box HTTP agent takes a prompt in an HTTP request body and returns a
+    reply in the response. The operator declares the request shape once — no MCP
+    wrapper, no app changes — mirroring how a promptfoo HTTP provider is
+    configured. ``body`` is a template whose ``{prompt}`` placeholder is replaced
+    with the (JSON-escaped) attack payload at call time; ``response_path`` is a
+    dotted path into the JSON response to extract the agent's reply
+    (e.g. ``choices.0.message.content``), or ``None`` to use the whole body.
+
+    ``headers`` may carry auth (a bearer token / API key) and are NEVER logged.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    url: str
+    method: str = "POST"
+    headers: dict[str, str] = {}
+    body: str = '{"prompt": "{prompt}"}'
+    response_path: str | None = None
+    timeout_s: float = 30.0
+
+
 class EffectProbeSpec(BaseModel):
     """How a target confirms, end-to-end, that a damaging effect materialized.
 
@@ -188,6 +212,10 @@ class TargetSpec:
     transport: str = "stdio"
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    # ``transport: "rest"`` — a plain HTTP agent (no MCP). ``request`` carries the
+    # endpoint + body template; ``command``/``args``/``url`` are unused. None for
+    # every MCP/stdio target, so they are unaffected.
+    request: RequestSpec | None = None
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""

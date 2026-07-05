@@ -1,10 +1,11 @@
-# The validation engine (the moat)
+# The validation engine
 
 The attack library finds weaknesses. The **validation engine** is what makes
 Mylonite's output trustworthy — it proves a generated security test *means*
 what it claims, then ships that proof as a fast, offline CI gate. This is the
-moat: the novel piece is not the exploits, it's the machinery that separates a
-real, reproducible weakness from a plausible-looking but vacuous assertion.
+core of the tool: the novel piece is not the exploits, it's the machinery that
+separates a real, reproducible weakness from a plausible-looking but vacuous
+assertion.
 
 ## Two tiers: live discovery, offline gate
 
@@ -21,7 +22,7 @@ add a tool, or on a schedule — not on every commit.
 
 **Tier 2 — the committed regression test (OFFLINE, per-PR).**
 `mylonite generate` emits a pytest file that, at the CI gate, replays a
-*recorded* reproduction of the attack against the guarded twin. No API key. No
+*recorded* reproduction of the attack against the guarded build. No API key. No
 network. No LLM call. It is a normal, fast, deterministic pytest. That is what
 runs on every pull request: if a future change re-opens the weakness, the
 recorded attack now succeeds against the guard and the test fails.
@@ -43,11 +44,11 @@ circle, all of them at the **live validation tier**, before any fixture is
 committed:
 
 1. **The differential proof.** At validation time the
-   [`DifferentialValidator`](concepts.md#the-validation-engine-mylonites-moat)
+   [`DifferentialValidator`](concepts.md#the-validation-engine)
    runs the *same* attack against **both** sides — the *unguarded* one and the
    *guarded* one. On a real single-build app those two sides come from the
-   [control-efficacy oracle](#the-control-efficacy-oracle-the-moat) toggling the
-   safeguard; the bundled reference twins supply them as two builds directly. A
+   [control-efficacy check](#the-control-efficacy-check) toggling the
+   safeguard; the bundled reference app supplies them as two builds directly. A
    test is only kept if the exploit **fires unguarded and resists guarded**. A
    vacuous test (asserting something trivially true) cannot show this
    differential: it would pass on *both* sides. The differential is the
@@ -55,8 +56,8 @@ committed:
 
 2. **The 5-run flakiness filter.** Because the behaviour is stochastic, a
    single run is weak evidence. The validator repeats the differential across
-   five iterations and keeps the test only if the vulnerable twin fires
-   reliably (`>= iterations - 1` by default) **and** the guarded twin resists
+   five iterations and keeps the test only if the vulnerable build fires
+   reliably (`>= iterations - 1` by default) **and** the guarded build resists
    *every single run* (a guard that leaks even once is not a guard). The
    reported **reproducibility fraction** is `min(fires, resists) / iterations`.
 
@@ -87,44 +88,44 @@ Every validation reports three headline figures.
   test discriminates run-to-run; `1.0` means it fired and resisted on every
   iteration.
 - **Mutation score** (report-only) — the fraction of the four bundled
-  kitchen-sink weakness families (W1–W4) that show the differential (the
-  vulnerable twin fired ≥1 seed in the family **and** the guarded twin resisted
-  it). It is computed for free from the scans already run and gives a coverage
+  reference weakness families (W1–W4) that show the differential (the
+  vulnerable build fired ≥1 attack pattern in the family **and** the guarded build
+  resisted it). It is computed for free from the scans already run and gives a coverage
   read across the weakness bank, not just the single exploit under test.
 
 A fourth stage, **metamorphic**, is **gating**. It applies several deterministic,
 semantically-neutral rewrites of the exploit body — paraphrase, casing, whitespace,
 unicode confusables, and the real-world **evasion encodings** (zero-width / invisible
 chars, word-splitting, multilingual framing) — and genuinely re-drives each through
-*both* twins. A kept test must survive a **majority** (default 60%) of them, so it
-can't be over-fit to one literal payload ("teaching to the test"). Each rewrite
+*both* builds. A kept test must survive a **majority** (default 60%) of them, so it
+can't be over-fit to one literal payload (teaching to the test). Each rewrite
 preserves the exfil destination so the attack still lands and the majority stays
 honest. This is what makes a kept test robust to the exact tricks real injections use
 (EchoLeak's invisible text, RAG unicode/split games) — not just to rewording.
 
-## The control-efficacy oracle (the moat)
+## The control-efficacy check
 
 The two-build differential above proves a weakness is real by comparing a *vulnerable*
 build to a *guarded* one — but that needs **two builds**, which only the bundled
-reference twins have. A customer app has **one** build. The
-**control-efficacy oracle** is the mechanism that carries Mylonite's value on any real
-single-build MCP app, and it is **the moat**. On a target you don't have two builds of,
-the sharper question is not "is there a weakness?" — it's *"which safeguard is actually
-carrying the security, and does it hold?"* For a real (`--target-file`) target it runs
-**by default** — `validate` and `gate` synthesize the guarded twin at the adapter
-boundary and prove the control automatically. (`--prove-control` is kept as a back-compat
-no-op; pass `--fast` to *skip* the differential for a faster, weaker gate.)
+reference app has. A customer app has **one** build. The **control-efficacy check** is
+the mechanism that carries Mylonite's value on any real single-build MCP app, and it is
+the core differentiator. On a target you don't have two builds of, the sharper question
+is not "is there a weakness?" — it's *"which safeguard is actually carrying the security,
+and does it hold?"* For a real (`--target-file`) target it runs **by default** —
+`validate` and `gate` synthesize the guarded build at the adapter boundary and prove the
+control automatically. (`--prove-control` is kept as a back-compat no-op; pass `--fast`
+to *skip* the differential for a faster, weaker gate.)
 
 The move is to **hold the model constant and vary only the safeguard**. Mylonite
-synthesizes a *guarded twin* of any real target by applying a canonical control
+synthesizes a *guarded build* of any real target by applying a canonical control
 at the **adapter boundary** — a `ControlServerShim` that wraps the live target
 (W1 tool-description sanitiser, W2 untrusted-data envelope, W3 egress
 allowlist, W4 confirm-gate). The same model, the same tools, the same target;
 the only thing that changes between the two legs is whether the control is in
 the planner's path. A finding is kept only when the attack **fires on the raw
 target and is resisted with the control applied** — which proves the *control*,
-not the model's mood, is what stopped it. It is scored as a control-contribution
-rate gap across the same flakiness filter.
+not the model's current behaviour, is what stopped it. It is scored as a
+control-contribution rate gap across the same flakiness filter.
 
 Two honesty properties make this trustworthy:
 
@@ -139,20 +140,19 @@ Two honesty properties make this trustworthy:
 
 `mylonite ablate` generalises this across a target's whole control set: it
 toggles each safeguard and reports which are **load-bearing**, which are
-**security-theater** (the attack fires with or without them), and — with
+**security theater** (the attack fires with or without them), and — with
 `--redundancy` — which are **redundant** (another control already covers the
 weakness).
 
 Single-model `validate` stamps the model it proved the test against into the
 report, so the committed regression is honest about which version it gates.
 
-## The bundled reference twin (the reference/demo differential)
+## The bundled reference app (the reference/demo differential)
 
-The bundled **reference agent** — [the Quarry](quarry.md)'s `mcp_kitchen_sink`
-server in its vulnerable and guarded variants — remains the ground-truth twin
-for the seeded-vulnerability differential, which is why importing the testkit
-transitively imports the reference adapter. The machinery — differential,
-flakiness, mutation score, honest-fail gate, control-efficacy oracle — is the
-part that generalises to a consumer-owned agent (via `--target-file` and the
-synthetic guarded twin); the bundled twin is the ground truth it is proven
-against.
+The bundled **reference agent** — [the reference app](quarry.md)'s `mcp_kitchen_sink`
+server in its vulnerable and guarded variants — remains the ground-truth pair for the
+seeded-vulnerability differential, which is why importing the testkit transitively
+imports the reference adapter. The machinery — differential, flakiness, mutation score,
+honest-fail gate, control-efficacy check — is the part that generalises to a
+consumer-owned agent (via `--target-file` and the synthetic guarded build); the bundled
+reference app is the ground truth it is proven against.

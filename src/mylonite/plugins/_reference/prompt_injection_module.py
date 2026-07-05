@@ -82,9 +82,11 @@ class PromptInjectionAttackModule(AttackModuleBase):
         )
 
     def generate_payloads(self, target: TargetDescriptor) -> Iterable[Payload]:
-        # MCP-only attack family — refuse to emit payloads for other kinds so
-        # the engine doesn't waste calls on incompatible targets.
-        if target.kind != "mcp":
+        # Prompt-injection family: MCP targets and plain HTTP agents (a black-box
+        # http-agent gets the tool-less direct-injection W2 seed from
+        # seeds_for_descriptor). Refuse other kinds so the engine doesn't waste
+        # calls on incompatible targets.
+        if target.kind not in ("mcp", "http-agent"):
             return
         # Selection resolved centrally (descriptor-first) via the seeds module
         # namespace, so a single patch point governs applicability and custom

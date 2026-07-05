@@ -17,7 +17,7 @@ mylonite report <dir> --json finding.json             # dashboards / SIEM / bots
 ## The terminal trust panel
 
 The default. For a scan it shows the findings, coverage per weakness class, and any
-**NOT TESTED** gap (a seed that couldn't be delivered — surfaced loudly, never silently
+**NOT TESTED** gap (an attack pattern that couldn't be delivered — surfaced loudly, never silently
 counted as clean). For a validation it shows the verdict and the evidence behind it:
 
 ```

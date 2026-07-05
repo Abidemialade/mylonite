@@ -4,7 +4,7 @@
 validate it against the differential oracle, and (opt-in) open a PR that gates
 CI on it.
 
-## The 60-second magic moment (local)
+## The 60-second end-to-end flow (local)
 
 ```bash
 # against the bundled reference agent
@@ -33,7 +33,7 @@ The PR body is itself a result surface (see [Reading the results](reading-result
   prompt line, when the AI layer is a committed file.
 
 For a custom target the gate proves the finding **differentially by default** (the
-control-efficacy oracle); `--fast` skips that leg for a faster, cheaper check that no
+control-efficacy check); `--fast` skips that leg for a faster, cheaper check that no
 longer proves the safeguard carries the security — a deliberate trade-off, not the
 recommended default.
 

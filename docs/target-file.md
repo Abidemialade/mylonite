@@ -32,7 +32,7 @@ requires_scope: false          # set true to require a non-empty scope
 system_prompt: |               # the target's system prompt (inline)...
   You are a helpful assistant with access to the connected tools.
 # system_prompt_file: prompts/system.txt   # ...or read it from a file (one or the other)
-primary_tools: []              # optional: narrow seed selection to these tools
+primary_tools: []              # optional: narrow attack pattern selection to these tools
 weakness_classes: [W1, W2, W3, W4]   # which classes to test
 
 # --- how to plant poisoned content (required for indirect-injection W2) ----
@@ -50,14 +50,14 @@ effect_probe:
   expect_marker: "attacker@example.com"        # a string that proves the effect landed
   deferred_markers: ["queued for approval"]    # markers that mean DEFENDED, not fired
 
-# --- which tools implement which controls (for the synthetic guarded twin) -
+# --- which tools implement which controls (for the synthetic guarded build) -
 control_config:
   egress_tools: [web_fetch]            # W3: tools that reach the network
   egress_url_param: url                # the URL arg the allowlist guards
   fetch_allowlist: [example.com]       # hosts the egress control permits
   consequential_tools: [send_email]    # W4: high-impact actions to gate
   declared: [W2]                       # controls you've already implemented server-side
-  synthetic: true                      # let Mylonite synthesize the missing guarded twin
+  synthetic: true                      # let Mylonite synthesize the missing guarded build
 
 # --- optional: a genuinely unguarded build + per-control server-layer toggles
 vulnerable_launch:                     # how to launch a DELIBERATELY-unguarded variant
@@ -107,10 +107,10 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 - **`effect_probe`** (`EffectProbeSpec`) — confirms the damage end-to-end, not just that
   a tool was called. `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success.
-- **`control_config`** (`ControlConfig`) — tells the synthetic guarded twin which tools
+- **`control_config`** (`ControlConfig`) — tells the synthetic guarded build which tools
   carry egress (W3) and consequential actions (W4), the allowlist, which controls you've
   `declared`, and whether to `synthetic`-ally synthesize the rest.
-- **Server-layer twin** (`vulnerable_launch`, `control_env`) — optional: drive the
+- **Server-layer build** (`vulnerable_launch`, `control_env`) — optional: drive the
   differential against *your own* unguarded build and per-control env toggles, instead of
   the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
   of the server. See [Concepts](concepts.md) and [Security](security.md).
