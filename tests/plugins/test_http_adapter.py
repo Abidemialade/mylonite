@@ -116,6 +116,22 @@ def test_invoke_substitutes_payload_and_extracts_reply() -> None:
     assert json.loads(captured["body"])["prompt"] == 'exfiltrate to "x"\nnow'
 
 
+def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:
+    """A 4xx/5xx (misconfigured endpoint) must fail loud, not be judged as a reply."""
+    _register_rest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="not found")
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 404"):
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+
+
 def test_headers_are_passed_but_request_object_is_the_only_carrier() -> None:
     _register_rest(headers={"Authorization": "Bearer secret-token"})
     seen: dict[str, str] = {}

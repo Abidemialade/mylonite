@@ -95,7 +95,11 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
 
     def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self._request.timeout_s)
+            # follow_redirects: an agent endpoint behind a 301/302 should still be
+            # reached rather than silently returning an empty redirect body.
+            self._client = httpx.AsyncClient(
+                timeout=self._request.timeout_s, follow_redirects=True
+            )
         return self._client
 
     async def describe(self) -> TargetDescriptor:
@@ -119,6 +123,17 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
             headers=req.headers or None,
             content=body.encode("utf-8"),
         )
+        # Fail loud on a transport/config error (4xx/5xx) instead of judging the
+        # error body as if it were the agent's reply — a misconfigured endpoint must
+        # NOT read as a clean scan. The engine records this as an attempt error
+        # (never a clean pass). A well-behaved agent returns 200 with any refusal in
+        # the body.
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"HTTP agent at {req.url} returned {response.status_code} "
+                f"(method {req.method.upper()}). Check the url/method/body in the target "
+                "file's request block — the attack payload never reached the agent."
+            )
         reply = _extract_reply(response.text, req.response_path)
         return AdapterResponse(
             payload_pattern_id=payload.pattern_id,
