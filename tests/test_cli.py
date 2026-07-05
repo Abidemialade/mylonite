@@ -2083,6 +2083,12 @@ def test_scan_and_gate_expose_purpose_flag() -> None:
     assert "--purpose" in _command_option_names("gate")
 
 
+def test_validate_and_gate_expose_prove_input_control() -> None:
+    """--prove-input-control (HTTP input data-framing differential) on validate + gate."""
+    assert "--prove-input-control" in _command_option_names("validate")
+    assert "--prove-input-control" in _command_option_names("gate")
+
+
 def test_scan_scaffold_rest_writes_runnable_http_target(tmp_path: Path) -> None:
     """`scan --scaffold OUT --rest-url URL` writes a runnable HTTP-agent target.yaml."""
     from mylonite.plugins._mcp.target_file import load_target_file

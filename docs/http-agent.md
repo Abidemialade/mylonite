@@ -78,9 +78,16 @@ mylonite gate --target-file my-http-agent.yaml --authorize my-http-agent
 - **Control-efficacy on a black box.** The control-efficacy differential needs a way
   to toggle a safeguard, and a black box exposes none — so `validate`/`gate`
   **automatically** decide `kept` by stability + effect + consensus for a `rest`
-  target (a finding is never falsely rejected for lack of a differential). To get the
-  full two-build differential, declare `vulnerable_launch` / `control_env` (see
-  [Concepts](concepts.md)) so Mylonite can run the endpoint with its guard on and off.
+  target (a finding is never falsely rejected for lack of a differential).
+- **Test an input defence: `--prove-input-control`.** Opt into an **input
+  data-framing ("spotlighting")** differential — Mylonite drives the same attack
+  raw and again wrapped as untrusted data, and `kept` then means that input framing
+  **is load-bearing** for this attack on your agent. It's the black-box analogue of
+  the untrusted-data envelope; use it to check whether a realistic input guard would
+  defend you.
+- **Server-side differential.** To toggle a *server-side* guard instead, declare
+  `vulnerable_launch` / `control_env` (see [Concepts](concepts.md)) so Mylonite can
+  run the endpoint with its guard on and off.
 - **Scope.** This is still AI-layer testing — it exercises the agent's prompt
   handling, not the surrounding HTTP service. Traditional endpoint security belongs
   to DAST tools.

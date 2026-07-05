@@ -21,7 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has no tool surface, so it is tested for the prompt-injection / goal-hijack class (`W2`),
   judged on the reply. See `docs/http-agent.md`. `request.headers` may carry auth and are
   never logged. `scan --scaffold OUT --rest-url URL` writes a runnable HTTP-agent target
-  file in one command (no hand-editing).
+  file in one command (no hand-editing). `validate`/`gate --prove-input-control` opt into
+  an input data-framing ("spotlighting") differential that measures whether wrapping the
+  payload as untrusted data is load-bearing for the agent (the black-box analogue of the
+  untrusted-data envelope); by default a rest target is gated by stability + effect +
+  consensus, so a real finding is never falsely rejected.
 - **`--purpose "…"` on `scan` and `gate`** (and a `purpose` field in `target.yaml`): a
   one-line description of what the app is for, threaded into the payload customiser so
   probes are tailored to the app's domain. Persisted for a custom target so

@@ -1769,6 +1769,7 @@ def _validate_custom(
     prove_control: bool = False,
     randomize_exfil: bool = False,
     fast: bool = False,
+    prove_input_control: bool = False,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
     from mylonite.plugins._mcp import target_registry
@@ -1824,16 +1825,28 @@ def _validate_custom(
     # A black-box HTTP agent (transport: rest) has no adapter-boundary control we can
     # apply — HTTPAgentAdapter has no tool surface for the W1/W2 envelope, so a
     # boundary-guarded twin would be BYTE-IDENTICAL to the raw target and wrongly
-    # REJECT a real finding. Fall back to the non-differential gate (stability +
-    # effect + consensus) unless the target declares a server-layer toggle. (Full
-    # control-efficacy over HTTP is future work — see docs/http-agent.md.)
-    if spec.transport == "rest" and not server_layer:
+    # REJECT a real finding. By default fall back to the non-differential gate
+    # (stability + effect + consensus). With --prove-input-control the operator opts
+    # into an INPUT data-framing ("spotlighting") differential — raw vs a build that
+    # wraps the payload as untrusted data — to measure whether that realistic input
+    # defence is load-bearing for their agent.
+    rest_input_frame = prove_input_control and spec.transport == "rest" and not server_layer
+    if rest_input_frame:
+        run_diff = True
+        control_weakness = control_weakness or "W2"
+        typer.echo(
+            "validate: rest input-control differential — raw vs input data-framing "
+            "(spotlighting). `kept` means input framing IS load-bearing for this attack.",
+            err=True,
+        )
+    elif spec.transport == "rest" and not server_layer:
         run_diff = False
         typer.echo(
             "validate: rest (HTTP-agent) target — the boundary-control differential does "
             "not apply to a black box, so `kept` is decided by stability + effect + consensus "
             "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
-            "for a server-layer differential.",
+            "for a server-layer differential, or pass --prove-input-control to test input "
+            "data-framing.",
             err=True,
         )
 
@@ -1858,7 +1871,17 @@ def _validate_custom(
 
     guarded_factory: Any = None
     control_context: str | None = None
-    if run_diff and control_weakness is not None:
+    if run_diff and rest_input_frame:
+        # Guarded build = the SAME HTTP agent driven with input data-framing applied.
+        control_context = "Control: input data-framing (spotlighting)"
+
+        def _guarded() -> Any:
+            return build_mcp_adapter(
+                family=spec.family, scope=tf.scope, model=model, input_frame=True
+            )
+
+        guarded_factory = _guarded
+    elif run_diff and control_weakness is not None:
         from mylonite.gate.mitigation import _snippet
 
         cw = control_weakness
@@ -1872,6 +1895,8 @@ def _validate_custom(
 
     if server_layer:
         twin_kind = "real server-layer twin"
+    elif rest_input_frame:
+        twin_kind = "input data-framing guard"
     elif run_diff:
         twin_kind = "synthetic boundary twin"
     else:
@@ -1881,7 +1906,7 @@ def _validate_custom(
         f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).",
         err=True,
     )
-    if run_diff and not server_layer:
+    if run_diff and not server_layer and not rest_input_frame:
         bar = "=" * 74
         typer.echo(
             f"{bar}\n"
@@ -2176,6 +2201,18 @@ def validate(
             ),
         ),
     ] = False,
+    prove_input_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-input-control",
+            help=(
+                "For a black-box HTTP (rest) target: run an input data-framing "
+                "('spotlighting') differential — raw vs a build that wraps the payload as "
+                "untrusted data — to measure whether that input defence is load-bearing. "
+                "Opt-in; otherwise a rest target is gated by stability + effect + consensus."
+            ),
+        ),
+    ] = False,
     fast: Annotated[
         bool,
         typer.Option(
@@ -2279,6 +2316,7 @@ def validate(
             prove_control=prove_control,
             randomize_exfil=randomize_exfil,
             fast=fast,
+            prove_input_control=prove_input_control,
         )
     else:
         typer.echo(
@@ -3071,6 +3109,18 @@ def gate(
             ),
         ),
     ] = False,
+    prove_input_control: Annotated[
+        bool,
+        typer.Option(
+            "--prove-input-control",
+            help=(
+                "For a black-box HTTP (rest) target: run the input data-framing "
+                "('spotlighting') differential to measure whether that input defence is "
+                "load-bearing. Opt-in; otherwise a rest target is gated by "
+                "stability + effect + consensus."
+            ),
+        ),
+    ] = False,
     randomize_exfil: Annotated[
         bool | None,
         typer.Option(
@@ -3246,13 +3296,38 @@ def gate(
         if fast or is_reference:
             return exploits
         if tf is not None and tf.transport == "rest":
+            if prove_input_control:
+                # Opt-in: measure whether input data-framing (spotlighting) is
+                # load-bearing. Tag with the input-frame sentinel so validate_fn builds
+                # the framing-guarded HTTP build for the differential.
+                typer.echo(
+                    "gate: rest input-control differential — raw vs input data-framing "
+                    "(spotlighting).",
+                    err=True,
+                )
+                return [
+                    ex.model_copy(
+                        update={
+                            "payload": ex.payload.model_copy(
+                                update={
+                                    "metadata": {
+                                        **ex.payload.metadata,
+                                        "synthetic_control": "input-frame",
+                                    }
+                                }
+                            )
+                        }
+                    )
+                    for ex in exploits
+                ]
             # A black-box HTTP agent has no adapter-boundary control to apply, so a
             # boundary-guarded twin would equal the raw target and wrongly REJECT a
             # real finding. Don't tag; the gate is decided by stability/effect/consensus.
             typer.echo(
                 "gate: rest (HTTP-agent) target — the control-efficacy differential does not "
                 "apply to a black box; the emitted test is gated by stability + effect + "
-                "consensus. Declare control_env / vulnerable_launch for a server-layer differential.",
+                "consensus. Declare control_env / vulnerable_launch for a server-layer "
+                "differential, or pass --prove-input-control to test input data-framing.",
                 err=True,
             )
             return exploits
@@ -3312,7 +3387,16 @@ def gate(
         # load-bearing (model held constant).
         guarded_factory: Any = None
         control_weakness = generated.exploit.payload.metadata.get("synthetic_control")
-        if control_weakness:
+        if control_weakness == "input-frame":
+            # rest input-control: the guarded build is the SAME HTTP agent driven with
+            # input data-framing (spotlighting) applied.
+            def _guarded_framed() -> Any:
+                return build_mcp_adapter(
+                    family=spec.family, scope=tf.scope, model=effective_model, input_frame=True
+                )
+
+            guarded_factory = _guarded_framed
+        elif control_weakness:
             cw: str = control_weakness
 
             def _guarded() -> Any:
