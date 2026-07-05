@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differential across several iterations by default, so the `kept` verdict reflects
   reproducibility (the attack must fire in all but one run and the guarded side must resist
   every run). Pass `--iterations 1` for the fastest, weakest gate.
+- **`mylonite init`** — a guided setup command that writes a runnable `target.yaml` for
+  either a plain HTTP agent or an MCP stdio server (prompts for what it needs, or takes
+  flags to be scriptable). It is the interactive front-end over `scan --scaffold`; distinct
+  from the `init-target` command removed in 0.7.4.
 
 ### Changed
 

@@ -2120,3 +2120,42 @@ def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> 
     )
     assert result.exit_code != EXIT_SUCCESS
     assert not out.exists()
+
+
+def test_init_rest_scriptable_writes_runnable_target(tmp_path: Path) -> None:
+    """`mylonite init` with flags (no prompts) writes a runnable HTTP-agent target."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    out = tmp_path / "agent.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            str(out),
+            "--transport",
+            "rest",
+            "--url",
+            "https://agent.example/chat",
+            "--rest-response-path",
+            "reply",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    tf = load_target_file(out)
+    assert tf.transport == "rest"
+    assert tf.request is not None and tf.request.url == "https://agent.example/chat"
+
+
+def test_init_rest_prompts_interactively(tmp_path: Path) -> None:
+    """`mylonite init` with no flags prompts for transport + url, then writes the file."""
+    out = tmp_path / "agent.yaml"
+    result = runner.invoke(app, ["init", str(out)], input="rest\nhttps://agent.example/chat\n")
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert out.exists()
+
+
+def test_init_unknown_transport_errors(tmp_path: Path) -> None:
+    out = tmp_path / "agent.yaml"
+    result = runner.invoke(app, ["init", str(out), "--transport", "carrier-pigeon"])
+    assert result.exit_code != EXIT_SUCCESS
+    assert not out.exists()

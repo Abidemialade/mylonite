@@ -251,6 +251,84 @@ def version() -> None:
 
 
 @app.command()
+def init(
+    output: Annotated[
+        Path, typer.Argument(help="Where to write the target.yaml (default: ./target.yaml).")
+    ] = Path("target.yaml"),
+    transport: Annotated[
+        str | None,
+        typer.Option(
+            "--transport", help="'rest' (HTTP agent) or 'mcp' (stdio server). Prompted if omitted."
+        ),
+    ] = None,
+    url: Annotated[
+        str | None, typer.Option("--url", help="For rest: the agent endpoint URL.")
+    ] = None,
+    command: Annotated[
+        str | None, typer.Option("--command", help="For mcp: the server launch command.")
+    ] = None,
+    arg: Annotated[
+        list[str] | None, typer.Option("--arg", help="For mcp: a launch arg (repeatable).")
+    ] = None,
+    rest_body: Annotated[
+        str | None,
+        typer.Option("--rest-body", help="For rest: request body template containing {prompt}."),
+    ] = None,
+    rest_response_path: Annotated[
+        str | None,
+        typer.Option(
+            "--rest-response-path", help="For rest: dotted path into the JSON reply (e.g. reply)."
+        ),
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite the output file if it exists.")
+    ] = False,
+) -> None:
+    """Guided setup: write a runnable target.yaml for your app (HTTP agent or MCP server).
+
+    An interactive front-end over ``scan --scaffold``: it prompts for what it needs, then
+    writes a ready-to-scan target file. A plain HTTP agent needs nothing to introspect; an
+    MCP server is launched once to list its tools (no attack, no LLM call). Pass the options
+    to skip the prompts (scriptable); omit them to be guided.
+    """
+    t = (
+        (
+            transport
+            or typer.prompt(
+                "Transport — 'rest' (HTTP agent) or 'mcp' (stdio server)", default="rest"
+            )
+        )
+        .strip()
+        .lower()
+    )
+    if t in ("rest", "http", "http-agent"):
+        endpoint = url or typer.prompt("Agent endpoint URL (e.g. https://my-agent/v1/chat)")
+        _scaffold_rest_target_file(
+            output=output,
+            rest_url=endpoint,
+            rest_body=rest_body,
+            rest_response_path=rest_response_path,
+            force=force,
+        )
+    elif t == "mcp":
+        cmd = command or typer.prompt("MCP server launch command (e.g. python)")
+        _scaffold_target_file(
+            output=output,
+            command=cmd,
+            arg=arg,
+            env=None,
+            scope=None,
+            system_prompt=None,
+            system_prompt_file=None,
+            model=None,
+            force=force,
+        )
+    else:
+        typer.echo(f"unknown transport {t!r}; expected 'rest' or 'mcp'.", err=True)
+        raise typer.Exit(code=EXIT_CONFIG)
+
+
+@app.command()
 def doctor(
     provider: Annotated[
         str | None,
@@ -2811,8 +2889,10 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 # seed_arm:
 #   tool: {sa_tool}
 #   args_template: {{ {sa_param}: "{{payload}}" }}
-#   id_key: id                                 # JSON field holding the new handle
-#                                              # (or id_pattern: a regex; or id_from)
+#   id_key: id           # the field in the store tool's RESULT holding the new record's
+#                        # handle (look for: id, uuid, note_id, key, _id). ONLY needed when
+#                        # recall requires that id; a list/search-style recall does not.
+#                        # Alternatives: id_pattern (a regex) or id_from: first_int.
 
 # How to CONFIRM the damage materialised end-to-end (the effect probe). After the
 # attack, re-query the target and check the damaging side effect is present.

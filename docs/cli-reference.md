@@ -9,6 +9,23 @@ LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not k
 
 ---
 
+## `init` — guided setup
+
+Write a runnable `target.yaml` for your app, guided. Prompts for the transport (`rest`
+for a plain HTTP agent, `mcp` for a stdio server) and what each needs, then writes a
+ready-to-scan file. Pass the options to skip the prompts.
+
+Options: `output` (positional, default `target.yaml`); `--transport rest|mcp`; for rest:
+`--url`, `--rest-body`, `--rest-response-path`; for mcp: `--command`, `--arg`; `--force`.
+
+```bash
+mylonite init app.yaml --transport rest --url https://my-agent/v1/chat
+mylonite init app.yaml --transport mcp --command python --arg server.py
+```
+
+The interactive front-end over `scan --scaffold`; for HTTP agents see
+[docs/http-agent.md](http-agent.md).
+
 ## `scan` — find weaknesses
 
 Run the exploit-finding loop against a target.
