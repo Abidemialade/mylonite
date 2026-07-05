@@ -688,7 +688,7 @@ def scan(
             "--rest-body",
             help=(
                 "With --scaffold --rest-url: the request body template (must contain a "
-                "{prompt} placeholder). Default: '{\"prompt\": \"{prompt}\"}'."
+                '{prompt} placeholder). Default: \'{"prompt": "{prompt}"}\'.'
             ),
         ),
     ] = None,

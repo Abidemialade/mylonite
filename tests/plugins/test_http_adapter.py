@@ -164,11 +164,13 @@ def test_invoke_raises_on_empty_200_body() -> None:
 
 
 def test_headers_are_passed_but_request_object_is_the_only_carrier() -> None:
-    _register_rest(headers={"Authorization": "Bearer secret-token"})
+    # Declared request.headers reach the wire (auth headers ride this same path;
+    # a benign custom header is used here so the test carries no secret-shaped literal).
+    _register_rest(headers={"X-Client-Region": "eu-west"})
     seen: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen["auth"] = request.headers.get("Authorization", "")
+        seen["hdr"] = request.headers.get("X-Client-Region", "")
         return httpx.Response(200, json={"reply": "ok"})
 
     adapter = HTTPAgentAdapter(family="myagent")
@@ -177,7 +179,7 @@ def test_headers_are_passed_but_request_object_is_the_only_carrier() -> None:
         asyncio.run(adapter.invoke(_payload("hi")))
     finally:
         asyncio.run(adapter.close())
-    assert seen["auth"] == "Bearer secret-token"
+    assert seen["hdr"] == "eu-west"
 
 
 # --- factory routing ---------------------------------------------------------
@@ -281,7 +283,7 @@ def test_rest_target_file_builds_spec_and_round_trips(tmp_path: object) -> None:
         "weakness_classes: [W2]\n"
         "request:\n"
         "  url: https://agent.example/chat\n"
-        "  body: '{\"prompt\": \"{prompt}\"}'\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n'
         "  response_path: reply\n"
     )
     p = Path(tmp_path) / "agent.yaml"  # type: ignore[arg-type]

@@ -112,9 +112,7 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         if self._client is None:
             # follow_redirects: an agent endpoint behind a 301/302 should still be
             # reached rather than silently returning an empty redirect body.
-            self._client = httpx.AsyncClient(
-                timeout=self._request.timeout_s, follow_redirects=True
-            )
+            self._client = httpx.AsyncClient(timeout=self._request.timeout_s, follow_redirects=True)
         return self._client
 
     async def describe(self) -> TargetDescriptor:
