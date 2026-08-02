@@ -27,7 +27,7 @@ the phase that fixes their cited sites) — not before.
    DCR-0001/DCR-0002 — both in `reference_pytest_generator.py`)
 4. **Security controls fail closed.** An unrecognised tool is guarded, not passed
    through. A name-hint list is a convenience, never the gate.
-   (ground-truth-verification-review DCR-0032/DCR-0033/DCR-0034/DCR-0035)
+   (scan-engine-review DCR-0032/DCR-0033/DCR-0034/DCR-0035)
 5. **Absent evidence is inconclusive.** A predicate that cannot see the signal it
    needs should return `None`, never a confident verdict.
-   (ground-truth-verification-review DCR-0036/DCR-0038)
+   (scan-engine-review DCR-0036/DCR-0038)
