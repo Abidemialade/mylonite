@@ -216,6 +216,7 @@ from pydantic import BaseModel, ValidationError
 from mylonite._redaction import (
     redact_exception,
     redact_target_yaml,
+    redact_value,
 )
 
 
@@ -260,3 +261,34 @@ def test_redact_target_yaml_output_still_loads() -> None:
 
     out = redact_target_yaml("family: app\ncommand: python\nenv:\n  A: b\n")
     assert isinstance(yaml.safe_load(out), dict)
+
+
+# --- redact_value: key-name masking (spec-compliance follow-up) -------------
+
+
+def test_redact_value_masks_by_key_name_even_when_shape_is_plain() -> None:
+    """A credential-named argument must be masked even when its VALUE has no
+    provider-key shape (no sk-/AKIA/Bearer prefix, no embedded key=value, no URL
+    userinfo) — key name alone is enough signal. Reproduces the reviewer's
+    finding: redact_value only checked value shape, never the key."""
+    out = redact_value(
+        {
+            "password": "correcthorsebatterystaple",
+            "api_key": "sekritvalue1234567890",
+            "url": "https://attacker.example.com/x",
+        }
+    )
+    assert out["password"] == REDACTION_PLACEHOLDER
+    assert out["api_key"] == REDACTION_PLACEHOLDER
+    # A non-credential-named key is untouched when its value isn't secret-shaped —
+    # this is oracle-load-bearing (fetch/filesystem/github predicates read it).
+    assert out["url"] == "https://attacker.example.com/x"
+
+
+def test_redact_value_still_masks_by_shape_under_a_plain_key() -> None:
+    """The shape-based fallback must still fire for a non-credential-named key —
+    this is the regression guard for the key-name fix above."""
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    out = redact_value({"note": f"contains {secret}"})
+    assert secret not in out["note"]
+    assert REDACTION_PLACEHOLDER in out["note"]

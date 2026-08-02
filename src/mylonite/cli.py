@@ -2764,6 +2764,8 @@ def _render_target_scaffold(
     """
     import yaml
 
+    from mylonite._redaction import redact_env
+
     roles = roles or _ToolRoles(None, None, None, None, [])
 
     def _yaml_list(items: list[str]) -> str:
@@ -2773,8 +2775,11 @@ def _render_target_scaffold(
     env_block = ""
     if tf.env:
         # Dump as a proper YAML mapping so values with ':' (e.g. sqlite URLs) are
-        # quoted/escaped correctly — never hand-roll per-value scalars.
-        env_block = yaml.safe_dump({"env": dict(tf.env)}, default_flow_style=False)
+        # quoted/escaped correctly — never hand-roll per-value scalars. A credential-
+        # shaped --env value (e.g. a live GITHUB_TOKEN) must not reach the scaffold
+        # file on disk in cleartext — same leak class as the scan/generate/gate
+        # target.yaml writes, just a fourth, earlier origination path (DCR-0006).
+        env_block = yaml.safe_dump({"env": redact_env(dict(tf.env))}, default_flow_style=False)
     prompt_line = (
         f"system_prompt_file: {system_prompt_file}\n"
         if system_prompt_file is not None

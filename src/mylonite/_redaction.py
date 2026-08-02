@@ -33,6 +33,7 @@ __all__ = [
     "install_log_redaction",
     "looks_like_api_key",
     "redact",
+    "redact_env",
     "redact_exception",
     "redact_target_yaml",
     "redact_value",
@@ -136,22 +137,39 @@ def redact(text: str) -> str:
 
 
 def redact_value(value: object) -> object:
-    """Recursively apply :func:`redact` to every string leaf in ``value``.
+    """Recursively mask every credential leaf in ``value``, by key name OR shape.
 
     Used for a probed tool's call arguments (``_session_adapter.py``'s recorded
     ``mcp_trace_planner``): a target's tool schema can legitimately accept a
     credential-bearing parameter, and a planner steered by injected content may
     pass a real one, which then rides into the persisted exploit/scan-report JSON
-    (DCR-0003). Masking only credential-SHAPED leaves — rather than dropping every
-    argument value — keeps the oracle predicates that inspect those same values
-    (e.g. did ``fetch`` get called with an attacker-controlled URL, did
-    ``write_file`` carry an attacker marker) working: URLs and prose bodies never
-    match the credential patterns, so they pass through unchanged.
+    (DCR-0003). Two independent masking rules apply when recursing into a dict,
+    mirroring :func:`_is_secret_env`:
+
+    * a value whose KEY matches ``_KV_KEYS`` (``password``, ``api_key``,
+      ``token``, ``secret``, ...) is masked unconditionally, even if the value
+      itself doesn't independently look secret-shaped (e.g. a plain passphrase
+      with no provider-key prefix) — key name alone is enough signal;
+    * every other string value still goes through the shape-based :func:`redact`,
+      so a URL or prose body that happens to embed something secret-shaped is
+      still caught.
+
+    This keeps the oracle predicates that inspect argument values (e.g. did
+    ``fetch`` get called with an attacker-controlled URL, did ``write_file``
+    carry an attacker marker) working: neither rule touches a non-credential-
+    named string that isn't itself secret-shaped.
     """
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, dict):
-        return {k: redact_value(v) for k, v in value.items()}
+        return {
+            k: (
+                REDACTION_PLACEHOLDER
+                if isinstance(v, str) and re.search(_KV_KEYS, str(k), re.IGNORECASE)
+                else redact_value(v)
+            )
+            for k, v in value.items()
+        }
     if isinstance(value, list):
         return [redact_value(v) for v in value]
     if isinstance(value, tuple):
@@ -250,6 +268,19 @@ def _is_secret_env(key: str, value: object) -> bool:
     return looks_like_api_key(value) or redact(value) != value
 
 
+def redact_env(env: dict[str, str]) -> dict[str, str]:
+    """Mask every credential-shaped ``env`` entry, by key name OR value shape.
+
+    Shared by :func:`redact_target_yaml` (persisted/copied target.yaml files) and
+    the ``scan --scaffold`` / ``mylonite init --transport mcp`` starter renderer
+    (``cli.py``'s ``_render_target_scaffold``) — a FOURTH origination path for the
+    same DCR-0006/0010/0016/0019 leak class: a `--env` value (e.g. a live
+    ``GITHUB_TOKEN``) that reaches a target.yaml written to disk. Key names and
+    non-secret values survive so the file still documents the target.
+    """
+    return {k: (REDACTION_PLACEHOLDER if _is_secret_env(k, v) else v) for k, v in env.items()}
+
+
 def redact_target_yaml(text: str) -> str:
     """Return a copy of a ``target.yaml`` document safe to persist or publish.
 
@@ -289,8 +320,6 @@ def redact_target_yaml(text: str) -> str:
 
     env = data.get("env")
     if isinstance(env, dict):
-        data["env"] = {
-            k: (REDACTION_PLACEHOLDER if _is_secret_env(k, v) else v) for k, v in env.items()
-        }
+        data["env"] = redact_env(env)
 
     return _REDACTION_BANNER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)

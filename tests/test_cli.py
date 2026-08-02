@@ -319,6 +319,40 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
     assert "relative SQLite path" in (result.stderr or result.output)
 
 
+def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0006 (spec-compliance follow-up): `scan --scaffold` must not write a
+    credential-shaped --env value verbatim into the scaffold target.yaml — this
+    is a fourth, earlier-in-the-lifecycle origination path for the same leak the
+    scan/generate/gate target.yaml copies were already fixed for. The scaffold
+    output must still round-trip through load_target_file."""
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    secret = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--env",
+            f"GITHUB_TOKEN={secret}",
+            "--scaffold",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = out.read_text(encoding="utf-8")
+    assert secret not in text
+    assert "GITHUB_TOKEN" in text  # the key name still documents the target
+
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    tf = load_target_file(out)
+    assert tf.env["GITHUB_TOKEN"] != secret
+
+
 def test_env_file_loads_only_known_provider_vars(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
