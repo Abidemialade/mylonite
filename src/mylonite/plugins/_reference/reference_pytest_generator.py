@@ -147,7 +147,18 @@ def test_security_{slug}() -> None:
 #: seed_synth), so it is attacker-influenceable and is validated, not sanitised —
 #: silently rewriting it would desynchronise the emitted `load_exploit` filename
 #: from the artefact `_emit_generated_test` writes.
-_SAFE_PATTERN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+#:
+#: The trailing character is constrained the same as the leading one (must be
+#: alphanumeric, not `.`/`_`/`-`) because `_emit_generated_test` in cli.py
+#: writes the co-located exploit JSON via `safe_slug(pattern_id)`, and
+#: `safe_slug` strips trailing `.`/`_`/`-`. A pattern_id ending in one of
+#: those (e.g. "foo-") would pass this regex unstripped, so the emitted
+#: `load_exploit(here / 'exploit_foo-.json')` call would look for a file that
+#: doesn't exist -- `safe_slug` would have written `exploit_foo.json`. No
+#: pattern_id in this codebase currently ends that way, but the mismatch is
+#: exactly the desync class this validation exists to prevent, so it is
+#: closed here too rather than left dormant.
+_SAFE_PATTERN_ID = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$")
 
 
 class UnsafeExploitRecord(ValueError):

@@ -78,6 +78,18 @@ def test_emit_refuses_hostile_pattern_id(hostile: str) -> None:
         ReferencePytestGenerator().emit(_exploit(pattern_id=hostile))
 
 
+@pytest.mark.parametrize("trailer", ["foo-", "foo_", "foo."])
+def test_emit_refuses_pattern_id_ending_in_separator(trailer: str) -> None:
+    """A pattern_id ending in `.`/`_`/`-` would pass validation unstripped, but
+    `_emit_generated_test` (cli.py) writes the co-located exploit JSON via
+    `safe_slug(pattern_id)`, which STRIPS a trailing `.`/`_`/`-`. That desync
+    would make the emitted `load_exploit(here / 'exploit_foo-.json')` call
+    look for a file `safe_slug` never wrote (it writes `exploit_foo.json`).
+    """
+    with pytest.raises(UnsafeExploitRecord):
+        ReferencePytestGenerator().emit(_exploit(pattern_id=trailer))
+
+
 @pytest.mark.parametrize("hostile", _INJECTIONS)
 def test_emit_escapes_hostile_control_metadata(hostile: str) -> None:
     """DCR-0002: synthetic_control was interpolated unescaped into `control="..."`.
@@ -101,6 +113,37 @@ def test_emit_escapes_hostile_control_metadata(hostile: str) -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "exec" not in call_names
+
+
+def test_emit_escapes_control_metadata_that_would_break_the_docstring() -> None:
+    """A synthetic_control containing three consecutive double-quotes used to
+    terminate the emitted module's own triple-quoted docstring early (back
+    when ``{control}`` was interpolated bare into it, before
+    ``control_display = _slugify(control)``). The payload below reopens a
+    SECOND string literal right after an injected statement, which then
+    swallows the rest of the (unrelated) docstring prose up to the module's
+    real closing ``\"\"\"`` -- so the old bug didn't even need a SyntaxError to
+    show up; it silently ran the injected statement as live top-level code.
+    This is a break distinct from (and not fixed by) the ``control="..."``
+    code-site fix: ``repr()`` is safe as an ARGUMENT literal, but the same
+    escaped text is not safe once bare-embedded inside a *different*
+    (docstring) string.
+    """
+    hostile = 'x"""\nPWNED = True\n"""'
+    generated = ReferencePytestGenerator().emit(
+        _exploit(pattern_id="safe-id", synthetic_control=hostile)
+    )
+    tree = ast.parse(generated.source)  # must remain valid Python
+    # Stronger than "just parses": PWNED must never become a live top-level
+    # assignment -- proof the payload stayed inert display text, not code.
+    top_level_assigns = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "PWNED" not in top_level_assigns
 
 
 def test_emitted_source_always_parses() -> None:
