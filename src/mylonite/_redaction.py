@@ -31,7 +31,11 @@ __all__ = [
     "REDACTION_PLACEHOLDER",
     "SecretRedactingFilter",
     "install_log_redaction",
+    "looks_like_api_key",
     "redact",
+    "redact_exception",
+    "redact_target_yaml",
+    "redact_value",
 ]
 
 # Value shape shared by the key=value rule: long-ish credential-looking runs.
@@ -39,7 +43,7 @@ __all__ = [
 _KV_VALUE = r"[A-Za-z0-9_\-./+]{12,}"
 
 # Credential key names whose assigned value we mask (keeping the key name).
-_KV_KEYS = r"api[_-]?key|apikey|secret|token|password"
+_KV_KEYS = r"api[_-]?key|apikey|secret|token|password|passwd|pwd|credential"
 
 # Whole-token patterns: each match is replaced wholesale by the placeholder.
 _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
@@ -70,6 +74,18 @@ _KV_PATTERN: Final = re.compile(
 
 def _mask_kv(match: re.Match[str]) -> str:
     return f"{match.group('key')}{match.group('sep')}{REDACTION_PLACEHOLDER}"
+
+
+#: ``scheme://user:secret@host`` — the shape a DB/remote URL takes when it
+#: carries an inline credential. Masks only the password span so the host stays
+#: legible in an error message (DCR-0016 cli-config, DCR-0019 gate-report).
+_URL_CRED_PATTERN: Final = re.compile(
+    r"(?P<prefix>[A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]+:)(?P<secret>[^\s@/]+)(?P<at>@)"
+)
+
+
+def _mask_url_cred(match: re.Match[str]) -> str:
+    return f"{match.group('prefix')}{REDACTION_PLACEHOLDER}{match.group('at')}"
 
 
 #: API-key-shaped prefixes used by ``looks_like_api_key`` — a positive check
@@ -114,8 +130,33 @@ def redact(text: str) -> str:
     redacted = text
     for pattern in _FULL_PATTERNS:
         redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
+    redacted = _URL_CRED_PATTERN.sub(_mask_url_cred, redacted)
     redacted = _KV_PATTERN.sub(_mask_kv, redacted)
     return redacted
+
+
+def redact_value(value: object) -> object:
+    """Recursively apply :func:`redact` to every string leaf in ``value``.
+
+    Used for a probed tool's call arguments (``_session_adapter.py``'s recorded
+    ``mcp_trace_planner``): a target's tool schema can legitimately accept a
+    credential-bearing parameter, and a planner steered by injected content may
+    pass a real one, which then rides into the persisted exploit/scan-report JSON
+    (DCR-0003). Masking only credential-SHAPED leaves — rather than dropping every
+    argument value — keeps the oracle predicates that inspect those same values
+    (e.g. did ``fetch`` get called with an attacker-controlled URL, did
+    ``write_file`` carry an attacker marker) working: URLs and prose bodies never
+    match the credential patterns, so they pass through unchanged.
+    """
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: redact_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_value(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(redact_value(v) for v in value)
+    return value
 
 
 class SecretRedactingFilter(logging.Filter):
@@ -156,3 +197,100 @@ def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -
     if existing:
         return
     target.addFilter(SecretRedactingFilter())
+
+
+def redact_exception(exc: BaseException) -> str:
+    """Render ``exc`` safely for console/CI output.
+
+    A pydantic ``ValidationError``'s default ``str()`` embeds ``input_value`` —
+    the offending field's raw content. When the offending field is
+    ``request.headers`` or ``env``, that raw content is a live credential, and
+    printing ``f"...: {exc}"`` to the console puts it straight into a CI log
+    (DCR-0007, DCR-0011). So a ValidationError is rendered as field paths plus
+    messages only. Anything else is ``str()``-ed and passed through
+    :func:`redact`.
+    """
+    errors = getattr(exc, "errors", None)
+    if callable(errors):
+        try:
+            lines = [
+                f"{'.'.join(str(p) for p in err.get('loc', ())) or '<root>'}: "
+                f"{err.get('msg', '')}"
+                for err in errors()
+            ]
+        except Exception:  # a non-pydantic .errors() — fall through to str()
+            lines = []
+        if lines:
+            joined = "; ".join(redact(line) for line in lines)
+            return f"{type(exc).__name__}: {joined}"
+    return redact(f"{type(exc).__name__}: {exc}")
+
+
+#: Target-file sections whose values are credential-bearing by construction.
+#: An ``Authorization`` header is always a credential; masking the whole section
+#: is correct and needs no shape heuristic. ``headers`` is the sse/http transport's
+#: field; ``request.headers`` is the rest transport's own nested equivalent
+#: (``RequestSpec.headers`` — "may carry auth ... and are NEVER logged") and is
+#: just as live a leak if left unmasked when a rest target.yaml is copied/persisted.
+_ALWAYS_MASK_SECTIONS: Final[tuple[str, ...]] = ("headers",)
+_ALWAYS_MASK_NESTED_SECTIONS: Final[tuple[tuple[str, str], ...]] = (("request", "headers"),)
+
+_REDACTION_BANNER: Final = (
+    "# Written by mylonite. Credential-shaped values are masked with\n"
+    f"# {REDACTION_PLACEHOLDER} — restore them from your secret store before use.\n"
+)
+
+
+def _is_secret_env(key: str, value: object) -> bool:
+    """True when an ``env:`` entry should be masked before the file is persisted."""
+    if not isinstance(value, str):
+        return False
+    if re.search(_KV_KEYS, key, re.IGNORECASE):
+        return True
+    return looks_like_api_key(value) or redact(value) != value
+
+
+def redact_target_yaml(text: str) -> str:
+    """Return a copy of a ``target.yaml`` document safe to persist or publish.
+
+    Mylonite's own documented workflow tells the operator to commit the scan and
+    generated-test directories and to push the gate artefacts as a PR. Copying a
+    target file byte-for-byte into any of those puts a live bearer token or DB
+    password into git history (DCR-0006/0010/0016). This masks every ``headers``
+    value unconditionally (both the sse/http transport's top-level ``headers`` and
+    the rest transport's ``request.headers``) and every credential-shaped ``env``
+    value, leaving key names and structure intact so the copy still documents the
+    target and still round-trips through ``load_target_file``.
+
+    A document that does not parse as a YAML mapping falls back to
+    :func:`redact` over the raw text — a malformed file is never persisted
+    verbatim.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return redact(text)
+    if not isinstance(data, dict):
+        return redact(text)
+
+    for section in _ALWAYS_MASK_SECTIONS:
+        block = data.get(section)
+        if isinstance(block, dict):
+            data[section] = dict.fromkeys(block, REDACTION_PLACEHOLDER)
+
+    for parent_key, child_key in _ALWAYS_MASK_NESTED_SECTIONS:
+        parent = data.get(parent_key)
+        if isinstance(parent, dict):
+            block = parent.get(child_key)
+            if isinstance(block, dict):
+                parent[child_key] = dict.fromkeys(block, REDACTION_PLACEHOLDER)
+
+    env = data.get("env")
+    if isinstance(env, dict):
+        data["env"] = {
+            k: (REDACTION_PLACEHOLDER if _is_secret_env(k, v) else v) for k, v in env.items()
+        }
+
+    return _REDACTION_BANNER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)

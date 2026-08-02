@@ -75,13 +75,14 @@ The project enforces the following non-negotiables:
 3. **No payload-logging of live secrets.** Mylonite does not log raw model
    payloads or responses. As defense-in-depth, when `redact_secrets` is on (the
    default) the `mylonite` logger tree masks secret-shaped tokens (provider key
-   prefixes, AWS access-key ids, bearer tokens, PEM private-key blocks, and
-   `key=value` credential assignments) out of every log record, and the
-   rendered CLI scan/report strings are redacted before they are echoed.
-   Redaction is intentionally NOT applied to persisted replay fixtures,
-   `exploit_*.json` / `scan_report.json` artefacts, or generated test source —
-   those are deterministic and contain no raw provider secrets by construction,
-   and masking them would corrupt loadable/replayable data.
+   prefixes, AWS access-key ids, bearer tokens, PEM private-key blocks,
+   `scheme://user:pass@host` URL credentials, and `key=value` credential
+   assignments) out of every log record, and every human-facing CLI string is
+   redacted before it is printed (see "What Mylonite does with your
+   credentials" below). Redaction is intentionally NOT applied to persisted
+   replay fixtures or generated test source — those are deterministic and
+   contain no raw provider secrets by construction, and masking them would
+   corrupt loadable/replayable data.
 4. **No evasion features.** The project does not accept contributions that add
    detection-evasion, anti-forensics, or rate-limit-bypass capabilities. Any
    such PR will be closed.
@@ -94,6 +95,50 @@ These rules apply to all official extensions and to anything shipped through
 the community attack-pattern registry. Third-party plugins are out of our
 direct control, but the registry's contribution guidelines forbid patterns
 whose only use is offensive.
+
+## What Mylonite does with your credentials
+
+A `target.yaml` (or `mcp:custom` `--env`) can legitimately carry a live
+credential — a bearer token in `headers` / `request.headers`, a secret in
+`env` (a DB password, a provider API key for the app under test), or one
+embedded in a `--target-file` argument the probed planner echoes back. Every
+place that value could otherwise leave the machine unmasked is routed through
+`mylonite._redaction`:
+
+- **Console / CI output.** `src/` never calls `typer.echo` directly — every
+  human-facing string leaves through `mylonite._cli_io.echo` / `echo_err` /
+  `echo_exc`, which redact secret-shaped tokens first. This is enforced by a
+  test (`tests/test_cli_output_boundary.py`), not just convention.
+- **A pydantic validation error.** A malformed `--target-file` or `--env`
+  raises a `ValidationError` whose default `str()` embeds the offending raw
+  field value (`input_value`). `echo_exc` renders it via `redact_exception`,
+  which drops `input_value` and prints only the field path + message.
+- **Any `target.yaml` Mylonite writes or copies.** The scan-dir copy
+  (`mylonite scan`), the co-located copy (`mylonite generate`), and the gate
+  PR copy (`mylonite gate`) all go through `redact_target_yaml`: every
+  `headers` / `request.headers` value is masked unconditionally, and every
+  credential-shaped `env` value is masked, leaving key names and structure
+  intact so the file still documents the target and still loads. The same
+  masking is `dump_target_file`'s default for an inline `mcp:custom` target.
+- **The SARIF upload.** GitHub code scanning is a persistent, often
+  broadly-visible surface; a real exfiltration finding's narration is
+  redacted before it rides into the SARIF `message`.
+- **The retained attack-evidence trace.** A probed tool's schema can
+  legitimately accept a credential-bearing parameter, and a planner steered by
+  injected content may pass a real one. Recorded tool-call arguments
+  (`mcp_trace_planner`, persisted into `exploit_*.json` / `scan_report.json`)
+  mask only credential-shaped argument *values* — not all of them, and not the
+  keys — so the oracle predicates that inspect those same values (e.g. did
+  `fetch` target the attacker host, did `write_file` carry the attacker
+  marker) keep working; a URL or prose body never matches the credential
+  patterns and passes through unchanged.
+
+The one place a credential is used unmasked is the live subprocess/HTTP call
+to the target itself — that is the whole point of testing it. Redaction never
+runs on demo replay fixtures or the emitted test source, because those are
+deterministic and must round-trip byte-for-byte; masking them would corrupt
+the generate → validate → replay pipeline (see the module docstring in
+`src/mylonite/_redaction.py`).
 
 ## Scope
 

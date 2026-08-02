@@ -935,7 +935,17 @@ _MINIMAL_TARGET_YAML = (
 
 
 def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
-    """generate --target-file co-locates the YAML verbatim as target.yaml + prereq block."""
+    """generate --target-file co-locates the YAML as a (redaction-safe) target.yaml
+    + prereq block.
+
+    DCR-0010: the colocated copy is no longer byte-verbatim (it round-trips through
+    ``redact_target_yaml`` so a live credential never lands in a directory the
+    operator is told to commit) — but it must still describe the SAME target.
+    """
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
     exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
     _write_custom_exploit_json(exploit_json)
     target_yaml = tmp_path / "open.yaml"
@@ -949,8 +959,12 @@ def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_SUCCESS, result.output
     colocated = out_dir / "target.yaml"
     assert colocated.is_file()
-    # Verbatim copy (comments preserved).
-    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != _MINIMAL_TARGET_YAML
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(_MINIMAL_TARGET_YAML)
+    )
     # Prereq block (N5) for the live custom test.
     out = result.output
     assert "MYLONITE_LIVE_TARGET=1 pytest" in out
@@ -1177,7 +1191,13 @@ def test_validate_uses_on_disk_source_and_records(
 
 
 def test_dump_target_file_roundtrips() -> None:
-    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal."""
+    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal.
+
+    Uses ``redact_secrets=False`` — this exercises the in-memory round-trip
+    contract, distinct from the (default-on) persisted-copy path, which
+    deliberately masks credential-shaped values and so does NOT round-trip
+    (see ``test_dump_target_file_default_redacts_secrets`` below).
+    """
     import yaml
 
     from mylonite.plugins._mcp.target_file import (
@@ -1193,11 +1213,31 @@ def test_dump_target_file_roundtrips() -> None:
         weakness_classes=["W2", "W4"],
         primary_tools=["send_email"],
     )
-    text = dump_target_file(tf)
+    text = dump_target_file(tf, redact_secrets=False)
     # Re-loadable and equal (round-trip through the same validator the CLI uses).
     assert yaml.safe_load(text)  # valid YAML mapping
     reloaded = TargetFile.model_validate(yaml.safe_load(text))
     assert reloaded == tf
+
+
+def test_dump_target_file_default_redacts_secrets() -> None:
+    """DCR-0019: dump_target_file defaults to masking credential-shaped values."""
+    from mylonite._redaction import REDACTION_PLACEHOLDER
+    from mylonite.plugins._mcp.target_file import TargetFile, dump_target_file
+
+    tf = TargetFile(
+        family="myapp",
+        command="python",
+        env={"GITHUB_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyz1234", "LOG_LEVEL": "debug"},
+        headers={"Authorization": "Bearer sk-live-abcdefghijklmnopqrstuvwxyz"},
+        transport="sse",
+        url="https://example.invalid/mcp",
+    )
+    text = dump_target_file(tf)
+    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in text
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in text
+    assert "LOG_LEVEL: debug" in text
+    assert REDACTION_PLACEHOLDER in text
 
 
 def _canned_scan_result(target_id: str, *, findings: int) -> Any:
@@ -1233,9 +1273,13 @@ def _canned_scan_result(target_id: str, *, findings: int) -> Any:
 def test_scan_custom_persists_target_yaml_and_next_hint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A custom scan co-locates the resolved target YAML in the scan dir (verbatim)
-    and prints a `Next: mylonite generate` hint when it found something."""
+    """A custom scan co-locates the resolved target YAML in the scan dir
+    (redaction-safe, DCR-0006) and prints a `Next: mylonite generate` hint when
+    it found something."""
+    import yaml
+
     from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile
     from mylonite.scan.engine import ScanEngine
 
     target_registry.clear_runtime_targets()
@@ -1271,14 +1315,104 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
     assert len(scan_dirs) == 1, scan_dirs
     colocated = scan_dirs[0] / "target.yaml"
     assert colocated.is_file()
-    # Verbatim copy (operator comments/structure preserved).
-    assert colocated.read_text(encoding="utf-8") == source
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != source
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(source)
+    )
     assert "Next: mylonite generate" in result.output
     target_registry.clear_runtime_targets()
 
 
+def test_scan_persisted_target_yaml_has_no_secret_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0006: `scan` must not write a credential-shaped --env value verbatim
+    into the persisted scan-dir target.yaml."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    scan_root = tmp_path / "scans"
+
+    async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
+        return _canned_scan_result("mcp:myapp", findings=1)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "mcp:custom",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--env",
+            "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234",
+            "--weakness-class",
+            "W2",
+            "--authorize",
+            "custom",
+            "--output-dir",
+            str(scan_root),
+            "--allow-no-seed-arm",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    scan_dirs = [p for p in scan_root.iterdir() if p.is_dir()]
+    assert len(scan_dirs) == 1, scan_dirs
+    persisted = (scan_dirs[0] / "target.yaml").read_text(encoding="utf-8")
+    assert "ghp_" not in persisted
+    target_registry.clear_runtime_targets()
+
+
+def test_generate_colocated_target_yaml_has_no_auth_header(tmp_path: Path) -> None:
+    """DCR-0010: `generate` must not copy a live Authorization header verbatim
+    into a directory the operator is told to commit."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    target_yaml = tmp_path / "open.yaml"
+    source = (
+        "family: myapp\n"
+        "transport: sse\n"
+        "url: https://example.invalid/mcp\n"
+        "headers:\n"
+        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"
+        "weakness_classes: [W2]\n"
+    )
+    target_yaml.write_text(source, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(
+        app,
+        ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    colocated = (out_dir / "target.yaml").read_text(encoding="utf-8")
+    assert "sk-live-" not in colocated
+    assert "Authorization" in colocated  # key name still documents the target
+    # The masked copy still describes the same shape of target (minus the secret).
+    reloaded = TargetFile.model_validate(yaml.safe_load(colocated))
+    assert reloaded.transport == "sse"
+    assert reloaded.url == "https://example.invalid/mcp"
+
+
 def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
     """generate without --target-file picks up target.yaml from the scan dir."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
     scan_dir = tmp_path / "scans" / "s"
     _write_custom_exploit_json(scan_dir / "exploit_pid.json")
     # `scan` would have written this next to the exploit.
@@ -1290,7 +1424,12 @@ def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> 
     # Auto-resolved: co-located into the generated dir, no "re-run with --target-file" warning.
     colocated = out_dir / "target.yaml"
     assert colocated.is_file()
-    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != _MINIMAL_TARGET_YAML
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(_MINIMAL_TARGET_YAML)
+    )
     assert "Using target:" in result.output
     out = result.stderr or result.output
     assert "Re-run with" not in out

@@ -206,3 +206,57 @@ def test_looks_like_api_key_rejects_obvious_non_keys() -> None:
     assert not looks_like_api_key(r"C:\creds\key")
     assert not looks_like_api_key("too short with spaces")
     assert not looks_like_api_key("")
+
+
+# --- redact_exception / redact_target_yaml (Phase 1) ------------------------
+
+import pytest
+from pydantic import BaseModel, ValidationError
+
+from mylonite._redaction import (
+    redact_exception,
+    redact_target_yaml,
+)
+
+
+def test_redact_masks_url_userinfo_password() -> None:
+    text = "DATABASE_URL=postgres://user:realpass@prod-db/app"
+    out = redact(text)
+    assert "realpass" not in out
+    assert "prod-db" in out  # host survives; only the credential is masked
+
+
+def test_redact_exception_drops_pydantic_input_value() -> None:
+    class M(BaseModel):
+        headers: dict[str, str]
+
+    with pytest.raises(ValidationError) as excinfo:
+        M(headers="Bearer sk-live-abcdefghijklmnopqrstuvwxyz")  # type: ignore[arg-type]
+    rendered = redact_exception(excinfo.value)
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in rendered
+    assert "headers" in rendered  # the field path still helps the operator
+
+
+def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
+    src = (
+        "family: app\n"
+        "command: python\n"
+        "headers:\n"
+        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"
+        "env:\n"
+        "  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz1234\n"
+        "  LOG_LEVEL: debug\n"
+    )
+    out = redact_target_yaml(src)
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in out
+    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out
+    assert "LOG_LEVEL: debug" in out          # non-secret values survive
+    assert "Authorization" in out             # key names survive
+    assert REDACTION_PLACEHOLDER in out
+
+
+def test_redact_target_yaml_output_still_loads() -> None:
+    import yaml
+
+    out = redact_target_yaml("family: app\ncommand: python\nenv:\n  A: b\n")
+    assert isinstance(yaml.safe_load(out), dict)

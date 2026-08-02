@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Every persist/print/publish path now runs through redaction**, closing
+  several independently-discovered credential-leak findings (DCR-0003,
+  DCR-0006, DCR-0007, DCR-0010, DCR-0011, DCR-0016, DCR-0019, DCR-0021).
+  `install_log_redaction` only ever filtered `logging` records; every
+  `typer.echo` call bypassed it, and three review passes independently
+  rediscovered the same gap. `src/` no longer calls `typer.echo` directly —
+  every human-facing string leaves through a new console boundary
+  (`mylonite._cli_io.echo` / `echo_err` / `echo_exc`), enforced by
+  `tests/test_cli_output_boundary.py`. Specifically:
+  - A pydantic `ValidationError` from a malformed `--target-file`/`--env` no
+    longer echoes its raw `input_value` (e.g. an `Authorization` header or a
+    DB password) — `redact_exception` renders field path + message only.
+  - `mylonite scan`'s scan-dir copy, `mylonite generate`'s co-located copy,
+    and `mylonite gate`'s PR copy of a custom `target.yaml` are no longer
+    verbatim: `redact_target_yaml` masks every `headers` /
+    `request.headers` value and every credential-shaped `env` value before
+    the file is written, so a live bearer token or DB password never lands
+    in a directory the operator is told to commit. `dump_target_file` masks
+    by default for the same reason (`redact_secrets=False` opts out for the
+    in-memory-only round-trip).
+  - The `scan --scaffold` "relative SQLite path" warning (#18) no longer
+    prints the env value, only the key name.
+  - The SARIF artefact uploaded to GitHub code scanning redacts a finding's
+    narration before it is rendered into the `message`.
+  - The retained attack-evidence trace (`mcp_trace_planner`, persisted into
+    `exploit_*.json` / `scan_report.json`) masks credential-shaped tool-call
+    argument *values* while leaving non-secret values (URLs, prose bodies)
+    intact — the fetch/filesystem/github oracle predicates read those exact
+    values to detect exfiltration, so blanket-dropping them would have
+    silently disabled detection.
+  - `redact()` now also masks `scheme://user:pass@host` URL credentials.
+
+  See "What Mylonite does with your credentials" in `SECURITY.md`.
+
 ## [0.7.5] - 2026-07-04
 
 > **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP

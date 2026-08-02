@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from mylonite._redaction import redact
 from mylonite.gate.localize import localize
 from mylonite.report.severity import severity_for
 from mylonite.version import __version__
@@ -60,7 +61,9 @@ def _result(
     # R4: pin the finding to its locus (the implicated tool/field or prompt line) so
     # GitHub code scanning shows WHERE to fix, not just what.
     loc = localize(exploit, system_prompt=system_prompt)
-    message = f"{exploit.success_reason}\n\nLocated at: {loc.label}. {loc.why}"
+    # This artefact is uploaded to GitHub code scanning; a real exfil finding's
+    # success_reason can narrate the exfiltrated value itself (DCR-0021).
+    message = redact(f"{exploit.success_reason}\n\nLocated at: {loc.label}. {loc.why}")
     proof = _proof_text(report)
     if proof:
         message = f"{message}\n\n{proof}"

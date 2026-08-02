@@ -34,6 +34,7 @@ from mcp import ClientSession
 
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
+from mylonite._redaction import redact_value
 from mylonite.contracts import (
     AdapterResponse,
     AsyncTargetAdapterBase,
@@ -631,7 +632,19 @@ class _RecordingServerShim:
         # (server_shim propagates a guarded server's refusal); ``content`` lets a
         # target-declared effect probe / heuristic inspect the outcome. This is
         # what makes a finding mean "the damage happened", not "a tool was named".
-        entry: dict[str, Any] = {"tool": name, "args": dict(arguments)}
+        # A probed target's tool schema can legitimately accept a credential-
+        # bearing parameter, and a planner steered by injected content may pass a
+        # real one; recording it verbatim persisted it into the retained evidence
+        # trace (exploit_*.json / scan_report.json — DCR-0003). Mask only
+        # credential-SHAPED argument values (not drop them): the oracle predicates
+        # in plugins/_mcp/predicates/{fetch,filesystem,github}.py inspect these
+        # SAME values (e.g. does `fetch`'s url arg target the attacker host, does
+        # `write_file`'s content carry the attacker marker) via
+        # predicate_primitives.tool_was_called_with_arg, so blanket-dropping
+        # values would silently blind every one of those detectors. A URL or a
+        # prose body never matches the credential patterns, so this is a no-op
+        # for them and only fires on an actual secret-shaped value.
+        entry: dict[str, Any] = {"tool": name, "args": redact_value(dict(arguments))}
         self._sink.append(entry)
         result = await self._inner.call_tool(name, arguments)
         content = getattr(result, "content", "")

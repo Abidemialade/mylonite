@@ -35,6 +35,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from mylonite._cli_io import echo, echo_err, echo_exc
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
 
@@ -107,12 +108,10 @@ def _configure_stdio_encoding() -> None:
 def _warn_unsupported_python() -> None:
     """S4: a clear note on Python 3.14+, where litellm has no wheels yet."""
     if sys.version_info >= (3, 14):
-        typer.echo(
+        echo_err(
             "note: Mylonite supports Python 3.11-3.13. litellm has no 3.14 wheels "
             "yet, so live LLM calls may fail to import on this interpreter - use a "
-            "3.11-3.13 virtualenv for scan/validate/demo --live.",
-            err=True,
-        )
+            "3.11-3.13 virtualenv for scan/validate/demo --live.")
 
 
 def _provider_key_var_names() -> set[str]:
@@ -131,7 +130,7 @@ def _load_env_file(path: Path) -> None:
     for is a wrong key already in the shell), warning on stderr when it does.
     """
     if not path.exists():
-        typer.echo(f"env file {path} not found.", err=True)
+        echo_err(f"env file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
     known = _provider_key_var_names()
     loaded: list[str] = []
@@ -149,14 +148,12 @@ def _load_env_file(path: Path) -> None:
         if key not in known:
             continue
         if key in os.environ and os.environ[key] != value:
-            typer.echo(
-                f"warning: overriding ambient {key} with the value from {path}.",
-                err=True,
-            )
+            echo_err(
+                f"warning: overriding ambient {key} with the value from {path}.")
         os.environ[key] = value
         loaded.append(key)
     if loaded:
-        typer.echo(f"loaded {', '.join(sorted(loaded))} from {path}.", err=True)
+        echo_err(f"loaded {', '.join(sorted(loaded))} from {path}.")
 
 
 def _infer_key_env_var(key: str) -> str | None:
@@ -176,7 +173,7 @@ def _load_api_key_file(path: Path) -> None:
     A bare key's provider is inferred from its shape; never printed.
     """
     if not path.exists():
-        typer.echo(f"--api-key-file {path} not found.", err=True)
+        echo_err(f"--api-key-file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
     content = path.read_text(encoding="utf-8").strip()
     first = content.splitlines()[0] if content else ""
@@ -186,20 +183,16 @@ def _load_api_key_file(path: Path) -> None:
     key = content.split()[0] if content else ""
     var = _infer_key_env_var(key)
     if var is None:
-        typer.echo(
+        echo_err(
             "--api-key-file: couldn't infer the provider from the key shape. Use a "
             "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "
-            "or pass --env-file.",
-            err=True,
-        )
+            "or pass --env-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     if var in os.environ and os.environ[var] != key:
-        typer.echo(
-            f"warning: overriding ambient {var} with the value from {path}.",
-            err=True,
-        )
+        echo_err(
+            f"warning: overriding ambient {var} with the value from {path}.")
     os.environ[var] = key
-    typer.echo(f"loaded {var} from {path}.", err=True)
+    echo_err(f"loaded {var} from {path}.")
 
 
 @app.callback()
@@ -247,7 +240,7 @@ class _Framework(StrEnum):
 @app.command()
 def version() -> None:
     """Print the installed Mylonite version."""
-    typer.echo(__version__)
+    echo(__version__)
 
 
 @app.command()
@@ -324,7 +317,7 @@ def init(
             force=force,
         )
     else:
-        typer.echo(f"unknown transport {t!r}; expected 'rest' or 'mcp'.", err=True)
+        echo_err(f"unknown transport {t!r}; expected 'rest' or 'mcp'.")
         raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -370,7 +363,7 @@ def doctor(
         try:
             rc = load_run_config(run_config_path)
         except Exception as exc:
-            typer.echo(f"invalid --config {run_config_path}: {exc}", err=True)
+            echo_exc(f"invalid --config {run_config_path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         provider = provider or rc.provider
         model = model or rc.model
@@ -386,12 +379,10 @@ def doctor(
     for var in env_vars_for(resolved_provider):
         val = os.environ.get(var)
         if val and not looks_like_api_key(val):
-            typer.echo(
+            echo_err(
                 f"warning: {var} is set but doesn't look like an API key "
                 "(too short / contains spaces or path separators). Check it's the "
-                "real key, not a placeholder or file path.",
-                err=True,
-            )
+                "real key, not a placeholder or file path.")
 
     import litellm
 
@@ -403,21 +394,19 @@ def doctor(
         )
     except Exception as exc:  # one-shot probe — classify, don't propagate raw
         diag = classify_provider_error(exc, provider=resolved_provider)
-        typer.echo(f"provider check FAILED [{diag.category}] for {routed}", err=True)
-        typer.echo(f"  detail: {redact(diag.detail)}", err=True)
-        typer.echo(f"  remedy: {diag.remedy}", err=True)
+        echo_err(f"provider check FAILED [{diag.category}] for {routed}")
+        echo_err(f"  detail: {redact(diag.detail)}")
+        echo_err(f"  remedy: {diag.remedy}")
         raise typer.Exit(code=EXIT_PROVIDER) from exc
-    typer.echo(f"provider OK — {effective_provider}/{base_model} reachable (routed: {routed}).")
+    echo(f"provider OK — {effective_provider}/{base_model} reachable (routed: {routed}).")
 
 
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
-        typer.echo(
+        echo_err(
             f"invalid --model {model!r}: must be a non-empty model id with no "
-            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5.",
-            err=True,
-        )
+            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5.")
         raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -447,12 +436,10 @@ def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
     of a raw traceback on the scan path); re-raise anything unrelated by returning.
     """
     if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-        typer.echo(
+        echo_err(
             "the reference app target isn't installed (it's opt-in) — run "
             '`pip install "mylonite[demo]"`, or from a checkout '
-            "`pip install -e ./reference_targets/mcp_kitchen_sink`.",
-            err=True,
-        )
+            "`pip install -e ./reference_targets/mcp_kitchen_sink`.")
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
@@ -470,10 +457,8 @@ def _build_adapter_for_reference(target: str, model: str) -> Any:
     if variant == "guarded":
         del InProcessGuardedReferenceAdapter
         return InProcessReferenceAdapter(variant="guarded", model=model)
-    typer.echo(
-        f"unknown reference variant {variant!r}; expected reference:vulnerable or reference:guarded",
-        err=True,
-    )
+    echo_err(
+        f"unknown reference variant {variant!r}; expected reference:vulnerable or reference:guarded")
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -500,18 +485,14 @@ def _enforce_custom_authorize(
     """Apply the same --authorize rule custom targets share with bundled ones."""
     if requires_scope:
         if authorize != scope:
-            typer.echo(
+            echo_err(
                 f"--authorize must equal the scope for {family!r} "
-                f"(scope={scope!r}, authorize={authorize!r}).",
-                err=True,
-            )
+                f"(scope={scope!r}, authorize={authorize!r}).")
             raise typer.Exit(code=EXIT_CONFIG)
     elif authorize != family:
-        typer.echo(
+        echo_err(
             f"--authorize must equal the family name {family!r} for this stateless "
-            f"custom target (got authorize={authorize!r}).",
-            err=True,
-        )
+            f"custom target (got authorize={authorize!r}).")
         raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -532,12 +513,12 @@ def _target_file_from_flags(
     from mylonite.plugins._mcp.target_file import TargetFile
 
     if not command:
-        typer.echo("mcp:custom requires --command (the MCP server launch command).", err=True)
+        echo_err("mcp:custom requires --command (the MCP server launch command).")
         raise typer.Exit(code=EXIT_CONFIG)
     env_map: dict[str, str] = {}
     for item in env or []:
         if "=" not in item:
-            typer.echo(f"--env must be KEY=VALUE; got {item!r}.", err=True)
+            echo_err(f"--env must be KEY=VALUE; got {item!r}.")
             raise typer.Exit(code=EXIT_CONFIG)
         key, _, value = item.partition("=")
         env_map[key] = value
@@ -555,7 +536,7 @@ def _target_file_from_flags(
             weakness_classes=list(weakness_classes or []),
         )
     except ValidationError as exc:
-        typer.echo(f"invalid custom target: {exc}", err=True)
+        echo_exc("invalid custom target", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
@@ -574,7 +555,7 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
     # leaf, or is missing entirely — a silently-empty/ill-formed plant otherwise
     # reads as a clean scan.
     for warning in payload_placement_warnings(target_file):
-        typer.echo(f"warning: {warning}", err=True)
+        echo_err(f"warning: {warning}")
 
     spec = build_target_spec(target_file)
     _enforce_custom_authorize(spec.family, target_file.scope, spec.requires_scope, authorize)
@@ -590,7 +571,7 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
         target_registry.UnknownTargetFamily,
         ValueError,
     ) as exc:
-        typer.echo(str(exc), err=True)
+        echo_err(str(exc))
         raise typer.Exit(code=EXIT_CONFIG) from exc
     return build_mcp_adapter(family=spec.family, scope=target_file.scope, model=model)
 
@@ -617,42 +598,36 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     try:
         family, scope = _parse_mcp_target(target)
     except ValueError as exc:
-        typer.echo(str(exc), err=True)
+        echo_err(str(exc))
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # Step 2: --authorize scope-match check.
     if family not in target_registry.BUNDLED_TARGETS:
-        typer.echo(
+        echo_err(
             f"unknown MCP target family {family!r}. "
-            f"Known families: {sorted(target_registry.BUNDLED_TARGETS)}.",
-            err=True,
-        )
+            f"Known families: {sorted(target_registry.BUNDLED_TARGETS)}.")
         raise typer.Exit(code=EXIT_CONFIG)
     spec = target_registry.BUNDLED_TARGETS[family]
     if spec.requires_scope:
         if authorize != scope:
-            typer.echo(
+            echo_err(
                 f"--authorize must equal the scope segment for {family!r} "
                 f"(scope={scope!r}, authorize={authorize!r}). "
                 f"Example: mylonite scan mcp:{family}:{scope or '<scope>'} "
-                f"--authorize {scope or '<scope>'}",
-                err=True,
-            )
+                f"--authorize {scope or '<scope>'}")
             raise typer.Exit(code=EXIT_CONFIG)
     elif authorize != family:
-        typer.echo(
+        echo_err(
             f"--authorize must equal the family name for stateless target "
             f"{family!r} (got authorize={authorize!r}). "
-            f"Example: mylonite scan mcp:{family} --authorize {family}",
-            err=True,
-        )
+            f"Example: mylonite scan mcp:{family} --authorize {family}")
         raise typer.Exit(code=EXIT_CONFIG)
 
     # Step 3: registry resolution (validates scope shape).
     try:
         target_registry.resolve_target(family, scope)
     except (target_registry.InvalidTargetScope, target_registry.UnknownTargetFamily) as exc:
-        typer.echo(str(exc), err=True)
+        echo_err(str(exc))
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # Step 4: construct the right subclass.
@@ -663,7 +638,7 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     if family == "github":
         return GitHubMCPAdapter(scope=scope or "", model=model)
     # Unreachable — the registry check above already gated unknown families.
-    typer.echo(f"no subclass wired for family {family!r}", err=True)
+    echo_err(f"no subclass wired for family {family!r}")
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -896,7 +871,7 @@ def scan(
         try:
             rc = load_run_config(run_config_path)
         except Exception as exc:
-            typer.echo(f"invalid --config {run_config_path}: {exc}", err=True)
+            echo_exc(f"invalid --config {run_config_path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -967,7 +942,7 @@ def scan(
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
-            typer.echo("--authorize is required for custom targets. See SECURITY.md.", err=True)
+            echo_err("--authorize is required for custom targets. See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file
@@ -975,7 +950,7 @@ def scan(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:  # YAML / validation errors → exit 2
-                typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+                echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
         else:
             tf = _target_file_from_flags(
@@ -1019,14 +994,12 @@ def scan(
                 _descriptor = asyncio.run(asyncio.wait_for(_probe.describe(), timeout=20))
             except Exception as exc:
                 _descriptor = None
-                typer.echo(
+                echo_err(
                     f"auto-wire: could not describe the target to infer a seed_arm "
-                    f"({type(exc).__name__}); falling back to the pre-flight check.",
-                    err=True,
-                )
+                    f"({type(exc).__name__}); falling back to the pre-flight check.")
             if _descriptor is not None:
                 _spec, _note = infer_seed_arm(_descriptor.tools)
-                typer.echo(f"auto-wire: {_note}", err=True)
+                echo_err(f"auto-wire: {_note}")
                 if _spec is not None:
                     tf = tf.model_copy(update={"seed_arm": _spec})
                 else:
@@ -1034,12 +1007,10 @@ def scan(
 
                     if content_processor_tools(_descriptor.tools):
                         synth_covers_indirect = True
-                        typer.echo(
+                        echo_err(
                             "auto-wire: no store->recall pair, but a content-processing "
                             "tool exposes the direct_content channel — W2 is tested via "
-                            "descriptor synthesis (no seed_arm needed).",
-                            err=True,
-                        )
+                            "descriptor synthesis (no seed_arm needed).")
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
@@ -1052,7 +1023,7 @@ def scan(
         if preflight_errors:
             for err in preflight_errors:
                 level = "warning" if dry_run else "error"
-                typer.echo(f"{level}: {err}", err=True)
+                echo_err(f"{level}: {err}")
             if not dry_run:
                 raise typer.Exit(code=EXIT_CONFIG)
 
@@ -1060,7 +1031,7 @@ def scan(
         # confirm the effect on a real target, so a vulnerable target may read as
         # clean. Warn loudly (the scan still runs) — never a silent under-detection.
         for warn in effect_probe_warnings(tf):
-            typer.echo(f"warning: {warn}", err=True)
+            echo_err(f"warning: {warn}")
 
         # Resolve the effective purpose: an explicit --purpose flag wins and is
         # persisted into the target so generate/validate reuse it; otherwise the
@@ -1081,37 +1052,31 @@ def scan(
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
-        typer.echo(
-            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.",
-            err=True,
-        )
+        echo_err(
+            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
         adapter = _build_adapter_for_reference(target, effective_planner_model)
         report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
-            typer.echo(
+            echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md.",
-                err=True,
-            )
+                "See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         report_target_id = target
     else:
-        typer.echo(
+        echo_err(
             f"unknown target shape {target!r}. "
             "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', 'mcp:custom', "
-            "or --target-file.",
-            err=True,
-        )
+            "or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     try:
         all_modules: list[Any] = discover("mylonite.attack_modules")
     except Exception as exc:
-        typer.echo(f"plugin discovery failed: {exc}", err=True)
+        echo_exc("plugin discovery failed", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # v0.2 attack modules: filter to the real prompt-injection family. The
@@ -1119,11 +1084,9 @@ def scan(
     # for a real scan.
     attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
     if not attack_modules:
-        typer.echo(
+        echo_err(
             "no usable attack modules discovered "
-            "(looking for 'prompt-injection-family' or 'excessive-agency-family')",
-            err=True,
-        )
+            "(looking for 'prompt-injection-family' or 'excessive-agency-family')")
         raise typer.Exit(code=EXIT_CONFIG)
 
     customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
@@ -1159,7 +1122,7 @@ def scan(
         _exit_if_missing_kitchen_sink(exc)
         raise
 
-    from mylonite._redaction import redact
+    from mylonite._redaction import redact, redact_target_yaml
 
     if not dry_run:
         from mylonite.scan.artefacts import render_summary, write_artefacts
@@ -1169,19 +1132,24 @@ def scan(
         scan_dir = write_artefacts(result, output_dir)
         # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
         # it from the scan dir — the custom-target journey needs the path ONCE.
+        # Never persist it verbatim: request.headers and env may carry live
+        # credentials, and the scan dir is one the operator is told to commit
+        # (DCR-0006).
         if custom_target_yaml is not None:
-            (scan_dir / "target.yaml").write_text(custom_target_yaml, encoding="utf-8")
-        typer.echo(redact(render_summary(result)))
-        typer.echo(f"Artefacts: {scan_dir}")
+            (scan_dir / "target.yaml").write_text(
+                redact_target_yaml(custom_target_yaml), encoding="utf-8"
+            )
+        echo(redact(render_summary(result)))
+        echo(f"Artefacts: {scan_dir}")
         # "Next:" hint — point at the very next command so the flow is self-guiding.
         if result.report.findings_count > 0:
-            typer.echo("")
-            typer.echo(f"Next: mylonite generate {scan_dir}")
+            echo("")
+            echo(f"Next: mylonite generate {scan_dir}")
     else:
         # Dry-run: render summary without writing files.
         from mylonite.scan.artefacts import render_summary
 
-        typer.echo(redact(render_summary(result)))
+        echo(redact(render_summary(result)))
 
     # C4 / G5: map aborted reason to distinct exit code.
     if result.report.aborted == "budget_exceeded":
@@ -1191,31 +1159,25 @@ def scan(
     if result.report.aborted == "no_payloads":
         # Issue #3: nothing ran — a misconfigured/unknown target must not look
         # like a clean pass. Point the user at the on-ramp for custom targets.
-        typer.echo(
+        echo_err(
             "error: no seeds were applicable to this target, so nothing was scanned. "
             "If this is a custom MCP app, declare which weakness classes it exposes "
-            "via --target-file (weakness_classes) or --weakness-class.",
-            err=True,
-        )
+            "via --target-file (weakness_classes) or --weakness-class.")
         raise typer.Exit(code=EXIT_CONFIG)
     if result.report.aborted == "describe_failed":
         # The adapter couldn't describe the target (e.g. the MCP server failed to
         # launch). Zero attempts ran — must not exit 0 and read as a clean pass.
-        typer.echo(
+        echo_err(
             "error: could not describe the target (adapter.describe() failed); "
-            "nothing was scanned. Check the target command/scope and connectivity.",
-            err=True,
-        )
+            "nothing was scanned. Check the target command/scope and connectivity.")
         raise typer.Exit(code=EXIT_CONFIG)
     if result.report.aborted == "wall_clock_timeout":
         # The scan hit its wall-clock budget before finishing. Coverage is
         # incomplete, so it must not exit 0 and read as a clean pass (same honesty
         # rule as no_payloads / describe_failed).
-        typer.echo(
+        echo_err(
             "error: scan exceeded its wall-clock budget and stopped early; coverage "
-            "is incomplete. Raise the timeout or narrow the scan, then re-run.",
-            err=True,
-        )
+            "is incomplete. Raise the timeout or narrow the scan, then re-run.")
         raise typer.Exit(code=EXIT_CONFIG)
     raise typer.Exit(code=EXIT_SUCCESS)
 
@@ -1282,26 +1244,23 @@ def demo(
     # Replay is pinned to the recorded provider/model — never silently drop the
     # override flags.
     if not live and (provider is not None or model is not None):
-        typer.echo(
+        echo_err(
             "warning: --provider/--model are ignored in replay mode — the demo "
             f"replays fixtures recorded against {DEMO_PROVIDER}/{DEMO_MODEL} "
             "(claude-haiku-4-5-20251001). Pass --live to use a different "
-            "provider/model.",
-            err=True,
-        )
+            "provider/model.")
 
     try:
         result = asyncio.run(run_demo(live=live, provider=provider, model=model))
     except (MissingFixtureError, DemoFixtureError) as exc:
-        typer.echo(
+        echo_exc(
             "demo fixtures missing or stale — reinstall mylonite, or run "
-            "`mylonite demo --live` with a provider configured. "
-            f"{exc}",
-            err=True,
+            "`mylonite demo --live` with a provider configured",
+            exc,
         )
         raise typer.Exit(code=EXIT_CONFIG) from exc
     except CorruptFixtureError as exc:
-        typer.echo(str(exc), err=True)
+        echo_exc("demo", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     except (ModuleNotFoundError, ImportError) as exc:
         _exit_if_missing_kitchen_sink(exc)
@@ -1321,18 +1280,14 @@ def demo(
     # surface those as distinct exit codes. Replay never aborts this way.
     for variant in (result.vulnerable, result.guarded):
         if variant.report.aborted == "provider_unreachable":
-            typer.echo(
+            echo_err(
                 "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider.",
-                err=True,
-            )
+                "--provider/--model for another LiteLLM provider.")
             raise typer.Exit(code=EXIT_PROVIDER)
         if variant.report.aborted == "budget_exceeded":
-            typer.echo(
+            echo_err(
                 "demo budget exceeded before both variants completed "
-                "(max_llm_calls=100 per variant).",
-                err=True,
-            )
+                "(max_llm_calls=100 per variant).")
             raise typer.Exit(code=EXIT_BUDGET)
 
     raise typer.Exit(code=EXIT_SUCCESS)
@@ -1376,46 +1331,36 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
             found = _exploits_in_dir(scan_path)
             if found:
                 return found
-            typer.echo(
+            echo_err(
                 f"no exploit_*.json found in {scan_path}. "
-                "Run `mylonite scan <target>` first, or pass an exploit_*.json directly.",
-                err=True,
-            )
+                "Run `mylonite scan <target>` first, or pass an exploit_*.json directly.")
             raise typer.Exit(code=EXIT_CONFIG)
-        typer.echo(
+        echo_err(
             f"path not found: {scan_path}. Pass a scan dir or an exploit_*.json, "
-            "or run `mylonite scan <target>` first.",
-            err=True,
-        )
+            "or run `mylonite scan <target>` first.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     if latest:
         scan_dir = _find_latest_scan_dir(scans_root)
         if scan_dir is None:
-            typer.echo(
-                f"no scans found under {scans_root}. Run `mylonite scan <target>` first.",
-                err=True,
-            )
+            echo_err(
+                f"no scans found under {scans_root}. Run `mylonite scan <target>` first.")
             raise typer.Exit(code=EXIT_CONFIG)
         found = _exploits_in_dir(scan_dir)
         if not found:
-            typer.echo(
+            echo_err(
                 f"the latest scan ({scan_dir}) found no exploits — nothing to generate. "
                 "A no-finding scan is a PASS, not an error: it usually means the target "
                 "is clean or guarded. To generate from an earlier scan that DID find "
                 "something, pass that scan dir explicitly, e.g. "
-                "`mylonite generate .mylonite/scans/<earlier-run>`.",
-                err=True,
-            )
+                "`mylonite generate .mylonite/scans/<earlier-run>`.")
             raise typer.Exit(code=EXIT_CONFIG)
         return found
 
-    typer.echo(
+    echo_err(
         "no input given. Pass a SCAN_PATH (an exploit_*.json or a scan dir), or "
         "--latest to use the newest scan under .mylonite/scans/. Run "
-        "`mylonite scan <target>` first if you have no scans yet.",
-        err=True,
-    )
+        "`mylonite scan <target>` first if you have no scans yet.")
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -1442,6 +1387,7 @@ def _emit_generated_test(
     test per finding into per-pattern subdirs. The single-exploit output is
     unchanged.
     """
+    from mylonite._redaction import redact_target_yaml
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -1469,9 +1415,9 @@ def _emit_generated_test(
     fixtures_dir = out_dir / "fixtures"
     fixtures_dir.mkdir(parents=True, exist_ok=True)
 
-    typer.echo(f"Wrote test:    {test_path}")
-    typer.echo(f"Wrote exploit: {colocated_exploit}")
-    typer.echo(f"Fixtures dir:  {fixtures_dir}")
+    echo(f"Wrote test:    {test_path}")
+    echo(f"Wrote exploit: {colocated_exploit}")
+    echo(f"Fixtures dir:  {fixtures_dir}")
 
     # A custom-target test re-drives the REAL app, so it needs the target YAML
     # co-located as target.yaml. Co-locate it when given; otherwise warn loudly
@@ -1485,43 +1431,49 @@ def _emit_generated_test(
         candidate = exploit_path.parent / "target.yaml"
         if candidate.is_file():
             target_file = candidate
-            typer.echo(f"Using target:  {candidate} (from the scan dir)")
+            echo(f"Using target:  {candidate} (from the scan dir)")
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
         try:
             build_target_spec(load_target_file(target_file))  # validate before copying
         except Exception as exc:
-            typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+            echo_exc(f"invalid --target-file {target_file}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         colocated_target = out_dir / "target.yaml"
-        # Copy the text verbatim so the operator's comments/structure survive.
-        colocated_target.write_text(target_file.read_text(encoding="utf-8"), encoding="utf-8")
-        typer.echo(f"Wrote target:  {colocated_target}")
+        # Never copy a target file verbatim into a directory we tell the operator
+        # to commit: request.headers and env may carry live credentials (DCR-0010).
+        colocated_target.write_text(
+            redact_target_yaml(target_file.read_text(encoding="utf-8")), encoding="utf-8"
+        )
+        echo(f"Wrote target:  {colocated_target}")
+        echo_err(
+            "note: credential-shaped values in the copied target.yaml were masked. "
+            "Restore them from your secret store (or reference them via env) before "
+            "running the emitted test."
+        )
     elif is_custom:
-        typer.echo("")
-        typer.echo(
+        echo("")
+        echo_err(
             f"warning: {exploit.target_id} is a custom target - the emitted test re-drives "
             "your real app and needs a co-located target.yaml. Re-run with "
             "`--target-file <your-target>.yaml`, or copy your scan's target YAML into "
-            f"{out_dir} as target.yaml. Without it the test errors at runtime.",
-            err=True,
-        )
+            f"{out_dir} as target.yaml. Without it the test errors at runtime.")
 
-    typer.echo("")
+    echo("")
     if is_custom:
         # The custom test is LIVE (gated behind MYLONITE_LIVE_TARGET=1): it needs
         # pytest, a provider key, a runnable MCP server, and the co-located YAML.
-        typer.echo("Next - this is a LIVE custom-target test. To run it you need:")
-        typer.echo("  - pytest + mylonite installed in the consuming environment")
-        typer.echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
-        typer.echo("  - your target's MCP server runnable, and target.yaml co-located")
-        typer.echo("Then:")
-        typer.echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
+        echo("Next - this is a LIVE custom-target test. To run it you need:")
+        echo("  - pytest + mylonite installed in the consuming environment")
+        echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
+        echo("  - your target's MCP server runnable, and target.yaml co-located")
+        echo("Then:")
+        echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
         # validate auto-resolves the co-located target.yaml — no --target-file needed.
-        typer.echo(f"  mylonite validate {out_dir}")
+        echo(f"  mylonite validate {out_dir}")
     else:
-        typer.echo(f"Next: mylonite validate {out_dir}")
+        echo(f"Next: mylonite validate {out_dir}")
 
 
 def _tag_control_for_generate(exploit: Any) -> Any:
@@ -1537,21 +1489,17 @@ def _tag_control_for_generate(exploit: Any) -> Any:
     from mylonite.scan.control_shim import make_control
 
     if exploit.target_id.startswith("reference:"):
-        typer.echo(
+        echo_err(
             f"--prove-control: {exploit.pattern_id} targets a reference twin; emitting "
-            "the standard guard test instead.",
-            err=True,
-        )
+            "the standard guard test instead.")
         return exploit
     cw = weakness_class_for(exploit)
     try:
         make_control(cw)
     except ValueError:
-        typer.echo(
+        echo_err(
             f"--prove-control: no boundary control for weakness {cw!r} "
-            f"({exploit.pattern_id}); emitting the standard target-resists test instead.",
-            err=True,
-        )
+            f"({exploit.pattern_id}); emitting the standard target-resists test instead.")
         return exploit
     meta = {**exploit.payload.metadata, "synthetic_control": cw}
     return exploit.model_copy(
@@ -1625,14 +1573,14 @@ def generate(
     multi = len(exploit_paths) > 1
 
     if multi:
-        typer.echo(f"Found {len(exploit_paths)} findings - emitting one test each.")
-        typer.echo("")
+        echo(f"Found {len(exploit_paths)} findings - emitting one test each.")
+        echo("")
 
     for index, exploit_path in enumerate(exploit_paths):
         try:
             exploit = testkit.load_exploit(exploit_path)
         except (FileNotFoundError, ValueError) as exc:
-            typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
+            echo_exc(f"could not load exploit at {exploit_path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
         if prove_control:
@@ -1646,7 +1594,7 @@ def generate(
             this_out = Path(".mylonite/generated") / _slugify_pattern(exploit.pattern_id)
 
         if multi and index > 0:
-            typer.echo("")
+            echo("")
         _emit_generated_test(exploit, exploit_path, this_out, target_file, json_mod=json)
 
     raise typer.Exit(code=EXIT_SUCCESS)
@@ -1781,17 +1729,15 @@ def _validate_custom(
     )
 
     if target_file is None:
-        typer.echo(
+        echo_err(
             "validating a custom-target test requires --target-file (the same target "
-            "YAML you scanned); the validator re-drives the real target.",
-            err=True,
-        )
+            "YAML you scanned); the validator re-drives the real target.")
         raise typer.Exit(code=EXIT_CONFIG)
     try:
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
-        typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+        echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     target_registry.clear_runtime_targets()
@@ -1805,14 +1751,12 @@ def _validate_custom(
     # and kept only for back-compat.
     del prove_control
     run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
-    typer.echo(f"validate: {diff_note}", err=True)
+    echo_err(f"validate: {diff_note}")
     if not randomize_exfil:
-        typer.echo(
+        echo_err(
             "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
             "one demo literal, not exfil to ANY attacker address. Drop it (randomization is the "
-            "default for custom targets) to avoid 'teaching to the test'.",
-            err=True,
-        )
+            "default for custom targets) to avoid 'teaching to the test'.")
 
     # Does the target declare a SERVER-LAYER toggle for this control (control_env)?
     # If so, the differential measures the REAL server guard at parity with `ablate`:
@@ -1834,29 +1778,23 @@ def _validate_custom(
     if rest_input_frame:
         run_diff = True
         control_weakness = control_weakness or "W2"
-        typer.echo(
+        echo_err(
             "validate: rest input-control differential — raw vs input data-framing "
-            "(spotlighting). `kept` means input framing IS load-bearing for this attack.",
-            err=True,
-        )
+            "(spotlighting). `kept` means input framing IS load-bearing for this attack.")
     elif spec.transport == "rest" and not server_layer:
         run_diff = False
-        typer.echo(
+        echo_err(
             "validate: rest (HTTP-agent) target — the boundary-control differential does "
             "not apply to a black box, so `kept` is decided by stability + effect + consensus "
             "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
             "for a server-layer differential, or pass --prove-input-control to test input "
-            "data-framing.",
-            err=True,
-        )
+            "data-framing.")
 
     if spec.vulnerable_launch is not None or server_layer:
-        typer.echo(
+        echo_err(
             f"validate: the raw side runs {spec.family!r} with the "
             f"{control_weakness or 'target'} guard DISABLED (deliberately unguarded) — "
-            "ensure you are authorized to run it. Env values are never logged.",
-            err=True,
-        )
+            "ensure you are authorized to run it. Env values are never logged.")
 
     def _factory() -> Any:
         if server_layer:
@@ -1901,23 +1839,19 @@ def _validate_custom(
         twin_kind = "synthetic boundary twin"
     else:
         twin_kind = "none (differential not applicable to a black-box target)"
-    typer.echo(
+    echo_err(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
-        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).",
-        err=True,
-    )
+        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).")
     if run_diff and not server_layer and not rest_input_frame:
         bar = "=" * 74
-        typer.echo(
+        echo_err(
             f"{bar}\n"
             "BOUNDARY-PROXY CAVEAT: the guarded side is a SYNTHETIC control Mylonite\n"
             "applies at the adapter boundary, NOT your server's own guard. A kept\n"
             "finding proves a canonical control WOULD be load-bearing for this model --\n"
             "not that your implementation is. For the strong, server-side claim, declare\n"
             "control_env or vulnerable_launch in your target.yaml (see docs/concepts.md).\n"
-            f"{bar}",
-            err=True,
-        )
+            f"{bar}")
     validator = DifferentialValidator(
         iterations=iterations,
         provider=provider,
@@ -1929,7 +1863,7 @@ def _validate_custom(
         guarded_is_server_layer=server_layer,
         control_context=control_context,
         iteration_timeout_s=iteration_timeout_s,
-        progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+        progress_cb=lambda msg: echo_err(f"  … {msg}"),
     )
     return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
@@ -1946,28 +1880,22 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
     elif target.is_dir():
         gen_dir = target
     else:
-        typer.echo(
+        echo_err(
             f"target not found: {target}. Pass the dir (or test file) emitted by "
-            "`mylonite generate`.",
-            err=True,
-        )
+            "`mylonite generate`.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     exploit_matches = sorted(gen_dir.glob("exploit_*.json"))
     if not exploit_matches:
-        typer.echo(
+        echo_err(
             f"no exploit_*.json found in {gen_dir}. Re-run `mylonite generate` to "
-            "emit a test + its co-located exploit.",
-            err=True,
-        )
+            "emit a test + its co-located exploit.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     test_matches = sorted(gen_dir.glob("test_security_*.py"))
     if not test_matches:
-        typer.echo(
-            f"no test_security_*.py found in {gen_dir}. Re-run `mylonite generate`.",
-            err=True,
-        )
+        echo_err(
+            f"no test_security_*.py found in {gen_dir}. Re-run `mylonite generate`.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     return test_matches[0], exploit_matches[0]
@@ -2261,7 +2189,7 @@ def validate(
     try:
         exploit = testkit.load_exploit(exploit_path)
     except (FileNotFoundError, ValueError) as exc:
-        typer.echo(f"could not load exploit at {exploit_path}: {exc}", err=True)
+        echo_exc(f"could not load exploit at {exploit_path}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # The validator transitively imports mcp_kitchen_sink (via the reference
@@ -2304,7 +2232,7 @@ def validate(
         candidate = test_path.parent / "target.yaml"
         if candidate.is_file():
             target_file = candidate
-            typer.echo(f"Using target: {candidate} (co-located with the test)", err=True)
+            echo_err(f"Using target: {candidate} (co-located with the test)")
     if is_custom:
         report = _validate_custom(
             generated,
@@ -2319,11 +2247,9 @@ def validate(
             prove_input_control=prove_input_control,
         )
     else:
-        typer.echo(
+        echo_err(
             f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
-            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).",
-            err=True,
-        )
+            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).")
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
         try:
@@ -2332,11 +2258,9 @@ def validate(
             _exit_if_missing_kitchen_sink(exc)
             raise
         if not reachable:
-            typer.echo(
+            echo_err(
                 "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider.",
-                err=True,
-            )
+                "--provider/--model for another LiteLLM provider.")
             raise typer.Exit(code=EXIT_PROVIDER)
 
         validator = DifferentialValidator(
@@ -2347,7 +2271,7 @@ def validate(
             # and run the on-disk committed test offline as a full-pass build —
             # closing the validate→committed-artefact loop.
             record_fixtures_dir=test_path.parent / "fixtures",
-            progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+            progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
         report = validator.validate(
             generated,
@@ -2372,11 +2296,10 @@ def validate(
     _render_validation_report(report)
 
     if report.kept:
-        typer.echo("")
-        typer.echo(
+        echo("")
+        echo(
             "Next: commit the generated test + fixtures so CI can gate on it "
-            "(see `mylonite gate --help`)."
-        )
+            "(see `mylonite gate --help`).")
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
 
@@ -2407,11 +2330,9 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
             return "validation", target
         if target.name == "scan_report.json":
             return "scan", target
-        typer.echo(
+        echo_err(
             f"don't know how to report on {target.name}. Pass a scan dir, a "
-            "generated/validated dir, or a scan_report.json / validation_report.json.",
-            err=True,
-        )
+            "generated/validated dir, or a scan_report.json / validation_report.json.")
         raise typer.Exit(code=EXIT_CONFIG)
     if target.is_dir():
         vr = target / "validation_report.json"
@@ -2420,16 +2341,12 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
         sr = target / "scan_report.json"
         if sr.is_file():
             return "scan", sr
-        typer.echo(
+        echo_err(
             f"no validation_report.json or scan_report.json found in {target}. "
-            "Run `mylonite scan` or `mylonite validate` first.",
-            err=True,
-        )
+            "Run `mylonite scan` or `mylonite validate` first.")
         raise typer.Exit(code=EXIT_CONFIG)
-    typer.echo(
-        f"path not found: {target}. Pass a scan/validated dir or a report JSON.",
-        err=True,
-    )
+    echo_err(
+        f"path not found: {target}. Pass a scan/validated dir or a report JSON.")
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -2502,7 +2419,7 @@ def report(
         try:
             vreport = ValidationReport.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            typer.echo(f"could not load {path}: {exc}", err=True)
+            echo_exc(f"could not load {path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         _render_validation_report(vreport, console=console)
         # Compliance tags from the co-located exploit, if present.
@@ -2531,7 +2448,7 @@ def report(
         try:
             sreport = ScanReport.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            typer.echo(f"could not load {path}: {exc}", err=True)
+            echo_exc(f"could not load {path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
@@ -2569,14 +2486,14 @@ def report(
             from mylonite.report import to_sarif
 
             sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
-            typer.echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
+            echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
         if json_bundle is not None:
             from mylonite.report import to_bundle
 
             json_bundle.write_text(
                 _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
             )
-            typer.echo(f"Wrote JSON finding bundle: {json_bundle}")
+            echo(f"Wrote JSON finding bundle: {json_bundle}")
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
@@ -2670,12 +2587,12 @@ def _scaffold_rest_target_file(
     from mylonite.plugins._mcp.target_registry import RequestSpec
 
     if output.exists() and not force:
-        typer.echo(f"{output} already exists — pass --force to overwrite.", err=True)
+        echo_err(f"{output} already exists — pass --force to overwrite.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     body = rest_body or '{"prompt": "{prompt}"}'
     if "{prompt}" not in body:
-        typer.echo("--rest-body must contain a {prompt} placeholder.", err=True)
+        echo_err("--rest-body must contain a {prompt} placeholder.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     import re
@@ -2691,7 +2608,7 @@ def _scaffold_rest_target_file(
             request=RequestSpec(url=rest_url, body=body, response_path=rest_response_path),
         )
     except Exception as exc:
-        typer.echo(f"invalid rest target: {exc}", err=True)
+        echo_exc("invalid rest target", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     header = (
@@ -2701,8 +2618,8 @@ def _scaffold_rest_target_file(
         "# endpoint (auth goes in request.headers — never logged). See docs/http-agent.md.\n\n"
     )
     output.write_text(header + dump_target_file(tf), encoding="utf-8")
-    typer.echo(f"wrote runnable HTTP-agent target -> {output}")
-    typer.echo(f"next: mylonite scan --target-file {output} --authorize {family}", err=True)
+    echo(f"wrote runnable HTTP-agent target -> {output}")
+    echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")
 
 
 def _scaffold_target_file(
@@ -2734,11 +2651,11 @@ def _scaffold_target_file(
     from mylonite.plugins._mcp.target_file import build_target_spec
 
     if not command:
-        typer.echo("--scaffold needs --command (the MCP server launch command).", err=True)
+        echo_err("--scaffold needs --command (the MCP server launch command).")
         raise typer.Exit(code=EXIT_CONFIG)
 
     if output.exists() and not force:
-        typer.echo(f"{output} already exists — pass --force to overwrite.", err=True)
+        echo_err(f"{output} already exists — pass --force to overwrite.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     tf = _target_file_from_flags(
@@ -2755,7 +2672,7 @@ def _scaffold_target_file(
     try:
         spec = build_target_spec(tf)
     except Exception as exc:
-        typer.echo(f"invalid target flags: {exc}", err=True)
+        echo_exc("invalid target flags", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     target_registry.clear_runtime_targets()
@@ -2764,15 +2681,12 @@ def _scaffold_target_file(
         family=spec.family, scope=tf.scope, model=model or "claude-haiku-4-5-20251001"
     )
 
-    typer.echo(f"launching {command!r} to introspect its tools (no LLM call)…", err=True)
+    echo_err(f"launching {command!r} to introspect its tools (no LLM call)…")
     try:
         descriptor = asyncio.run(adapter.describe())
     except Exception as exc:
-        typer.echo(
-            f"could not launch / introspect the MCP server: {exc}\n"
-            "check --command/--arg/--env and that the server speaks MCP over stdio.",
-            err=True,
-        )
+        echo_exc("could not launch / introspect the MCP server", exc)
+        echo_err("check --command/--arg/--env and that the server speaks MCP over stdio.")
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     tools = list(descriptor.tools)
@@ -2782,11 +2696,11 @@ def _scaffold_target_file(
 
     # #18 footgun: warn (do not block) on a relative SQLite DB path.
     for key in _relative_sqlite_env_keys(tf.env):
-        typer.echo(
-            f"warning: env {key}={tf.env[key]!r} looks like a relative SQLite path. "
+        echo_err(
+            f"warning: env {key} looks like a relative SQLite path. "
             "On Windows a relative/ambiguous sqlite URL can open a DIFFERENT or empty "
-            "DB, making a vulnerable agent look clean (#18). Prefer an absolute path.",
-            err=True,
+            "DB, making a vulnerable agent look clean (#18). Prefer an absolute path. "
+            "(value withheld — env values may carry credentials)"
         )
 
     yaml_text = _render_target_scaffold(
@@ -2803,18 +2717,16 @@ def _scaffold_target_file(
     try:
         TargetFile.model_validate(yaml.safe_load(yaml_text))
     except Exception as exc:  # pragma: no cover - defensive; the scaffold is fixed-shape
-        typer.echo(f"internal error: scaffolded YAML failed validation: {exc}", err=True)
+        echo_exc("internal error: scaffolded YAML failed validation", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     output.write_text(yaml_text, encoding="utf-8")
-    typer.echo(f"wrote {output} — {len(tool_names)} tools discovered.")
-    typer.echo(
+    echo(f"wrote {output} — {len(tool_names)} tools discovered.")
+    echo_err(
         "  suggested weakness_classes "
-        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning).",
-        err=True,
-    )
+        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning).")
     if roles.seed_arm_tool is not None:
-        typer.echo(
+        echo_err(
             f"  seed_arm candidate: {roles.seed_arm_tool}(...{roles.seed_arm_param}='{{payload}}') "
             f"+ retrieval via {roles.retrieve_tool!r}."
             if roles.retrieve_tool is not None
@@ -2824,21 +2736,15 @@ def _scaffold_target_file(
                 "store whose only readback needs that id (the save_note/read_note trap) will never "
                 "deliver the poison. Confirm a list/recall/search-style tool exists, or expect those "
                 "seeds to report NOT TESTED."
-            ),
-            err=True,
-        )
+            ))
     elif "W2" in suggested_weaknesses:
-        typer.echo(
+        echo_err(
             "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
-            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED.",
-            err=True,
-        )
-    typer.echo(
+            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED.")
+    echo_err(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
-        f"`mylonite scan --target-file {output} --authorize custom`.",
-        err=True,
-    )
+        f"`mylonite scan --target-file {output} --authorize custom`.")
 
 
 def _render_target_scaffold(
@@ -3152,7 +3058,7 @@ def gate(
         # only the in-process reference targets replay fixtures and must not randomize.
         randomize_exfil = not (target is not None and target.startswith("reference:"))
     if iterations < 1:
-        typer.echo("--iterations must be >= 1.", err=True)
+        echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
     from mylonite.gate import pr as pr_mod
     from mylonite.gate import run_gate
@@ -3176,10 +3082,10 @@ def gate(
         try:
             rc = load_run_config(config_path)
         except Exception as exc:
-            typer.echo(f"invalid config {config_path}: {exc}", err=True)
+            echo_exc(f"invalid config {config_path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         if run_config_path is None:
-            typer.echo(f"gate: using {config_path} (auto-discovered).", err=True)
+            echo_err(f"gate: using {config_path} (auto-discovered).")
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
@@ -3201,7 +3107,7 @@ def gate(
         # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
         # exactly as scan does.
         if not authorize:
-            typer.echo("--authorize is required for custom targets. See SECURITY.md.", err=True)
+            echo_err("--authorize is required for custom targets. See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file
@@ -3209,41 +3115,33 @@ def gate(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:
-                typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+                echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
         else:
             # mcp:custom with inline flags — not supported via gate (no --command etc.)
-            typer.echo(
+            echo_err(
                 "gate --target-file <yaml> is the custom-target path; "
                 "inline mcp:custom flags are not wired in `gate`. "
-                "Pass a target YAML via --target-file.",
-                err=True,
-            )
+                "Pass a target YAML via --target-file.")
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_custom(tf, authorize, effective_model)
     elif target is None:
-        typer.echo(
-            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.",
-            err=True,
-        )
+        echo_err(
+            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif is_reference:
         adapter = _build_adapter_for_reference(target, effective_model)
     elif target.startswith("mcp:"):
         if not authorize:
-            typer.echo(
+            echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md.",
-                err=True,
-            )
+                "See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_model)
     else:
-        typer.echo(
+        echo_err(
             f"unknown target shape {target!r}. "
-            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file.",
-            err=True,
-        )
+            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     # --- closures injected into run_gate ---
@@ -3257,16 +3155,14 @@ def gate(
         try:
             all_modules: list[Any] = discover("mylonite.attack_modules")
         except Exception as exc:
-            typer.echo(f"plugin discovery failed: {exc}", err=True)
+            echo_exc("plugin discovery failed", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
         attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
         if not attack_modules:
-            typer.echo(
+            echo_err(
                 "no usable attack modules discovered "
-                "(looking for 'prompt-injection-family' or 'excessive-agency-family')",
-                err=True,
-            )
+                "(looking for 'prompt-injection-family' or 'excessive-agency-family')")
             raise typer.Exit(code=EXIT_CONFIG)
 
         config = ScanConfig(
@@ -3300,11 +3196,9 @@ def gate(
                 # Opt-in: measure whether input data-framing (spotlighting) is
                 # load-bearing. Tag with the input-frame sentinel so validate_fn builds
                 # the framing-guarded HTTP build for the differential.
-                typer.echo(
+                echo_err(
                     "gate: rest input-control differential — raw vs input data-framing "
-                    "(spotlighting).",
-                    err=True,
-                )
+                    "(spotlighting).")
                 return [
                     ex.model_copy(
                         update={
@@ -3323,13 +3217,11 @@ def gate(
             # A black-box HTTP agent has no adapter-boundary control to apply, so a
             # boundary-guarded twin would equal the raw target and wrongly REJECT a
             # real finding. Don't tag; the gate is decided by stability/effect/consensus.
-            typer.echo(
+            echo_err(
                 "gate: rest (HTTP-agent) target — the control-efficacy differential does not "
                 "apply to a black box; the emitted test is gated by stability + effect + "
                 "consensus. Declare control_env / vulnerable_launch for a server-layer "
-                "differential, or pass --prove-input-control to test input data-framing.",
-                err=True,
-            )
+                "differential, or pass --prove-input-control to test input data-framing.")
             return exploits
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
@@ -3357,7 +3249,7 @@ def gate(
                 provider=effective_provider,
                 model=effective_model,
                 record_fixtures_dir=out / "fixtures",
-                progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+                progress_cb=lambda msg: echo_err(f"  … {msg}"),
             )
             return validator.validate(
                 generated,
@@ -3366,10 +3258,8 @@ def gate(
             )
         # Custom target: mirror _validate_custom — re-drive the REAL target.
         if tf is None:
-            typer.echo(
-                "internal: expected a loaded TargetFile for custom validate_fn",
-                err=True,
-            )
+            echo_err(
+                "internal: expected a loaded TargetFile for custom validate_fn")
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
         from mylonite.plugins._mcp.factory import build_mcp_adapter
@@ -3423,18 +3313,21 @@ def gate(
             guarded_adapter_factory=guarded_factory,
             control_weakness=control_weakness,
             randomize_exfil=randomize_exfil,
-            progress_cb=lambda msg: typer.echo(f"  … {msg}", err=True),
+            progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
         return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
     def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
+        from mylonite._redaction import redact_target_yaml
         from mylonite.gate.workflows import write_workflows
 
         repo_root = Path.cwd()
         wf_files = write_workflows(repo_root, runs_on=runs_on) if workflows else []
         if target_file is not None:
+            # A gate PR is pushed to the operator's remote — never carry a live
+            # credential from request.headers/env into that history (DCR-0019).
             (out_dir / "target.yaml").write_text(
-                target_file.read_text(encoding="utf-8"), encoding="utf-8"
+                redact_target_yaml(target_file.read_text(encoding="utf-8")), encoding="utf-8"
             )
         paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
         pr = pr_mod.open_or_print_pr(
@@ -3564,12 +3457,11 @@ def ablate(
     from mylonite.scan.control_shim import make_control
 
     if target_file is None:
-        typer.echo(
-            "ablate requires --target-file (the app whose controls you want to score).", err=True
-        )
+        echo_err(
+            "ablate requires --target-file (the app whose controls you want to score).")
         raise typer.Exit(code=EXIT_CONFIG)
     if not authorize:
-        typer.echo("--authorize is required to ablate a custom target. See SECURITY.md.", err=True)
+        echo_err("--authorize is required to ablate a custom target. See SECURITY.md.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     effective_provider = provider or "anthropic"
@@ -3581,7 +3473,7 @@ def ablate(
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
-        typer.echo(f"invalid --target-file {target_file}: {exc}", err=True)
+        echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # Server-layer mode: the target bakes its guards into the server (toggled by
@@ -3607,24 +3499,22 @@ def ablate(
     for c in chosen:
         if server_layer:
             if c not in spec.control_env:
-                typer.echo(f"skipping {c}: no control_env toggle declared", err=True)
+                echo_err(f"skipping {c}: no control_env toggle declared")
                 continue
         else:
             try:
                 make_control(c)
             except ValueError:
-                typer.echo(f"skipping {c}: no boundary control implemented", err=True)
+                echo_err(f"skipping {c}: no boundary control implemented")
                 continue
         if c not in REP_SEED_BY_WEAKNESS:
-            typer.echo(f"skipping {c}: no representative seed", err=True)
+            echo_err(f"skipping {c}: no representative seed")
             continue
         usable.append(c)
     if not usable:
-        typer.echo(
+        echo_err(
             "no ablatable controls. Pass --controls W2,W3,W4 or declare weakness_classes / "
-            "control_config in the target file.",
-            err=True,
-        )
+            "control_config in the target file.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     seeds_by_weakness = seeds_for_weaknesses(usable, max_per_weakness=max_seeds)
@@ -3635,11 +3525,9 @@ def ablate(
     target_registry.register_target(spec)
     mode = "all-minus-c (redundancy)" if redundancy else "on/off"
     layer = "server-layer (env toggles)" if server_layer else "adapter-shim"
-    typer.echo(
+    echo_err(
         f"ablate re-drives {spec.family!r} live, toggling {', '.join(usable)} {mode} "
-        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans.",
-        err=True,
-    )
+        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans.")
 
     def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
         if server_layer:
@@ -3675,7 +3563,7 @@ def ablate(
             seeds_by_weakness=seeds_by_weakness,
             scan_fires=scan_fires,
             iterations=iterations,
-            progress=lambda msg: typer.echo(f"  … {msg}", err=True),
+            progress=lambda msg: echo_err(f"  … {msg}"),
             redundancy=redundancy,
             all_controls=usable,
         )
@@ -3684,12 +3572,10 @@ def ablate(
 
     _render_ablation_matrix(results)
     if server_layer and results and all(r.status == "no-attack" for r in results):
-        typer.echo(
+        echo_err(
             "hint: every control classified 'no-attack' — the raw side never fired. "
             "Check that control_env actually disables the server's guard for these "
-            "weakness classes, and that the representative seeds reach the surface.",
-            err=True,
-        )
+            "weakness classes, and that the representative seeds reach the surface.")
 
 
 @taxonomy_app.command("list")

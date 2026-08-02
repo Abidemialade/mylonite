@@ -176,7 +176,7 @@ def load_target_file(path: Path) -> TargetFile:
     return TargetFile.model_validate(data)
 
 
-def dump_target_file(tf: TargetFile) -> str:
+def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:
     """Serialise a ``TargetFile`` back to YAML.
 
     Used to persist an *inline* ``mcp:custom`` target (assembled from CLI flags,
@@ -184,9 +184,19 @@ def dump_target_file(tf: TargetFile) -> str:
     ``generate`` and ``validate`` can re-resolve the exact same target without the
     operator re-passing every flag. ``exclude_defaults`` keeps the file minimal and
     re-loadable: it round-trips back through ``load_target_file`` to an equal model.
+
+    ``redact_secrets`` defaults on: ``headers`` and credential-shaped ``env``
+    values are masked (DCR-0019), matching every other persisted target.yaml.
+    Pass ``False`` only for an in-memory round-trip that never touches disk or a
+    console — masking there would corrupt the reload.
     """
     data = tf.model_dump(mode="json", exclude_defaults=True)
-    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+    text = yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+    if not redact_secrets:
+        return text
+    from mylonite._redaction import redact_target_yaml
+
+    return redact_target_yaml(text)
 
 
 def payload_placement_warnings(tf: TargetFile) -> list[str]:
