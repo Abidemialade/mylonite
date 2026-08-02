@@ -42,15 +42,16 @@ The project enforces the following non-negotiables:
    service URL, or local-path) the user is asserting they own or are
    contractually authorized to test.
 
-   **One rule, one gate, applied by every command that live-drives a real
-   target** — `scan`, `gate`, `validate`, and `ablate`. The required value is
-   derived from the target's own data, never from a self-asserted flag:
+   **One rule, applied by every command that live-drives a real target** —
+   `scan`, `gate`, `validate`, and `ablate`. The required value is derived
+   from the target's own data, never from a self-asserted flag:
    - A target that declares a **scope** (`mcp:filesystem:<sandbox>`,
      `mcp:github:<owner/repo>`, or a custom target file with `scope:` set)
-     requires `--authorize == <scope>` exactly. This applies regardless of
-     whatever the target file's own `requires_scope` field says — a target
-     that names a scope IS asserting that scope is the sensitive resource,
-     and cannot downgrade the check by also setting `requires_scope: false`.
+     requires `--authorize == <scope>` exactly. For a custom target, this
+     applies regardless of whatever the target file's own `requires_scope`
+     field says — a target that names a scope IS asserting that scope is the
+     sensitive resource, and cannot downgrade the check by also setting
+     `requires_scope: false`.
    - A **stateless** target (`mcp:fetch`, or a custom target/target file
      with no `scope`) requires `--authorize == <family>` — for inline
      `mcp:custom`, the family is the literal `custom`.
@@ -62,9 +63,26 @@ The project enforces the following non-negotiables:
    was not always true (`validate` previously ran a custom target with no
    authorization check at all, and `ablate` previously accepted any non-empty
    value). A custom target can never register over a bundled family name.
-   See `src/mylonite/_authz.py` for the implementation
-   (`required_authorization` / `check_authorization`) shared by all four
-   commands.
+
+   That's one RULE, but two separate implementations, by design:
+   - **Custom targets** (`--target-file` / `mcp:custom`) — the document being
+     authorized (a target YAML, or CLI flags assembled into one) is
+     user-editable, which is exactly what let a target declare a sensitive
+     `scope` while also setting `requires_scope: false` to downgrade its own
+     gate (DCR-0008). `src/mylonite/_authz.py`
+     (`required_authorization` / `check_authorization`) is the single
+     implementation of the rule for this path, shared by `scan`, `gate`,
+     `validate`, and `ablate` — there is exactly one place that decides what
+     `--authorize` must equal for a custom target.
+   - **Bundled targets** (`mcp:filesystem`, `mcp:fetch`, `mcp:github`) — driven
+     only by `scan`/`gate`, via a separate inline check in
+     `_build_adapter_for_mcp` (`cli.py`) against `target_registry.BUNDLED_TARGETS`,
+     a hardcoded dict defined in source, not a user-editable document. The
+     DCR-0008 vulnerability class — a target smuggling a downgrade instruction
+     into the very document being authorized — does not apply to data the
+     operator cannot edit, so this path is intentionally left as its own
+     (smaller, equally-enforced) implementation of the same rule rather than
+     folded into `_authz.py`.
 
    **TLS / corporate proxies:** behind a TLS-inspecting proxy, provider calls
    can fail `CERTIFICATE_VERIFY_FAILED`. Install `pip install "mylonite[enterprise]"`

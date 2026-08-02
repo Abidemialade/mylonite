@@ -57,12 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   See "What Mylonite does with your credentials" in `SECURITY.md`.
 
-- **One `--authorize` gate for every command that live-drives a real target**
-  (DCR-0008, DCR-0009), replacing three independent, drifted implementations.
-  New `src/mylonite/_authz.py` (`required_authorization` / `check_authorization`)
-  derives the required `--authorize` value from the target's own data — its
-  declared `scope`, else its `family` name — and is now the single
-  implementation shared by `scan`, `gate`, `validate`, and `ablate`.
+- **One `--authorize` rule for every command that live-drives a real target**
+  (DCR-0008, DCR-0009), replacing three independent, drifted implementations
+  of it. New `src/mylonite/_authz.py` (`required_authorization` /
+  `check_authorization`) derives the required `--authorize` value from the
+  target's own data — its declared `scope`, else its `family` name — and is
+  now the single implementation of that rule for CUSTOM targets
+  (`--target-file` / `mcp:custom`), shared by `scan`, `gate`, `validate`, and
+  `ablate`. Bundled `mcp:` targets (`mcp:filesystem`/`mcp:fetch`/`mcp:github`)
+  keep their own separate enforcement against the hardcoded
+  `target_registry.BUNDLED_TARGETS` registry — same rule, different
+  implementation, unaffected by this change (see `SECURITY.md`).
   - **Fixed:** a custom target file could declare a sensitive `scope` (e.g.
     `scope: /home/alice/private`) while also setting `requires_scope: false`,
     downgrading the check to the guessable literal family name instead of the
