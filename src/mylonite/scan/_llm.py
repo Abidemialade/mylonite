@@ -20,6 +20,7 @@ ad-hoc tests — but no budget enforcement happens.
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
 import re
@@ -33,6 +34,37 @@ from json_repair import repair_json
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+def fence(*parts: str) -> str:
+    """A per-call delimiter tag for fencing target-controlled text in a prompt.
+
+    Shared by the customiser (``customiser._build_prompt``) and the judge
+    (``judge._build_judge_prompt``) — both build evaluator prompts that embed
+    target-controlled text (tool descriptions, system prompt, the target's
+    final response). Mylonite tests OTHER systems for exactly this class of
+    weakness (prompt injection via unfenced/predictably-labelled untrusted
+    text), so its own evaluator prompts should not be trivially splice-able by
+    a target that embeds "ignore the above" style content. A per-call tag
+    (rather than a fixed literal like ``TARGET TOOLS:``) is harder for a
+    generic, pre-written injection payload to guess and close.
+
+    Deliberately DETERMINISTIC (a hash of the call's own inputs), not
+    ``secrets``/``random``/a timestamp: this is a pure function of stable
+    identifiers (seed id, target id, ...), so the SAME seed run against the
+    SAME target builds the byte-identical prompt on a re-run — useful for
+    caching/debugging with zero security downside, since the fence's job is
+    defeating a generic, non-targeted splicing attempt, not withstanding an
+    adversary who already has source access to compute it. This also keeps
+    the customiser's/judge's ``(model, messages)`` pair reproducible. (Neither
+    is currently part of the recorded `mylonite demo` fixture path at all —
+    the demo runs with ``llm_assist=False``, which disables the customiser's
+    LLM call and the judge's LLM fallback entirely, see
+    ``wiring.build_scan`` — but staying deterministic costs nothing and
+    avoids relying on that fact.)
+    """
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"MYLONITE-FENCE-{digest}"
 
 
 class BudgetExceededError(RuntimeError):

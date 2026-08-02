@@ -149,10 +149,25 @@ def test_seeds_for_descriptor_uses_synthesis_not_kitchen_sink() -> None:
 
 
 def test_seeds_for_descriptor_falls_back_when_no_channel() -> None:
-    # W2 declared but NO content-processor and NO store+recall -> nothing to
-    # synthesise, so the kitchen-sink W2 seeds remain (honest NOT-TESTED, not silent).
+    """DCR-0031: W2 declared but NO content-processor and NO store+recall -> nothing
+    to synthesise. An arbitrary custom target's family ("custom-app") does not match
+    any bundled catalogue's applicable_targets, so the kitchen-sink W2 seeds (whose
+    setup='seed_note' this target has no equivalent for) do NOT silently fill in —
+    the honest result is NOT TESTED (empty), not a seed that would silently fail."""
     tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
     selected = seeds.seeds_for_descriptor(_descriptor(["W2"], tools))
+    assert selected == []
+
+
+def test_seeds_for_descriptor_kitchen_sink_fallback_when_family_matches() -> None:
+    """The positive case: when the target's family genuinely IS 'kitchen-sink'
+    (it really does have the store->recall shape this fallback assumes), the
+    kitchen-sink W2 seeds correctly fill the gap."""
+    tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
+    descriptor = SimpleNamespace(
+        target_id="mcp:kitchen-sink:scope", weakness_classes=["W2"], tools=tools, kind="mcp"
+    )
+    selected = seeds.seeds_for_descriptor(descriptor)
     assert any(s.pattern_id == "indirect-injection-note-body-direct" for s in selected)
 
 

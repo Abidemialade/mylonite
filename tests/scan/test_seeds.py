@@ -161,11 +161,47 @@ def test_seeds_for_descriptor_matches_legacy_family_mapping(target_id: str) -> N
     assert seeds_for_descriptor(_descriptor(target_id)) == legacy
 
 
-def test_seeds_for_descriptor_weakness_classes_selects_kitchen_sink_shapes() -> None:
-    """A custom target declaring weakness_classes gets the matching kitchen-sink seeds."""
-    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2", "W4"]))
-    assert got, "expected W2+W4 kitchen-sink seeds for a custom target"
-    assert {s.weakness for s in got} == {"W2", "W4"}
+def test_seeds_for_descriptor_weakness_classes_reports_not_tested_when_uncoverable() -> None:
+    """DCR-0031: an arbitrary custom target (no tool surface for synthesis, and a
+    family that doesn't match any bundled catalogue's applicable_targets) must NOT
+    fall back to a kitchen-sink seed whose setup='seed_note' it has no equivalent
+    for — that used to silently fail instead of honestly reporting NOT TESTED.
+    A seed_note-setup W2 seed plants into infrastructure this target lacks, so
+    it is honestly excluded (unlike a no_setup seed — see the sibling test)."""
+    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2"]))
+    assert got == []
+
+
+def test_seeds_for_descriptor_no_setup_kitchen_seed_still_reaches_any_target() -> None:
+    """A 'no_setup' kitchen-sink seed plants nothing — it just sends a direct
+    user message — so it is NOT restricted to a family match: it can always
+    run on an arbitrary custom target that opted into the weakness class,
+    worst case the target simply has no matching tool to call."""
+    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W4"]))
+    assert any(s.pattern_id == "excessive-agency-send-email-direct-unconfirmed" for s in got)
+    # The OTHER (seed_note-setup) W4 kitchen seed is still excluded.
+    assert not any(s.pattern_id == "excessive-agency-send-email-via-note-injection" for s in got)
+
+
+def test_seeds_for_descriptor_weakness_classes_logs_uncovered_classes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="mylonite.scan.seeds"):
+        seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2"]))
+    assert "W2" in caplog.text
+    assert "NOT TESTED" in caplog.text
+
+
+def test_seeds_for_descriptor_kitchen_fallback_when_family_actually_matches() -> None:
+    """When the target's OWN family literally matches a catalogue seed's
+    applicable_targets (e.g. a custom target genuinely named 'kitchen-sink'),
+    the fallback correctly applies — this is the positive case the family-aware
+    fix must not regress."""
+    got = seeds_for_descriptor(_descriptor("mcp:kitchen-sink:scope", weakness_classes=["W2"]))
+    assert got, "expected W2 kitchen-sink seeds when the family genuinely matches"
+    assert {s.weakness for s in got} == {"W2"}
     assert all("kitchen-sink" in s.applicable_targets for s in got)
 
 
@@ -195,6 +231,45 @@ def test_attack_modules_resolve_selection_dynamically() -> None:
     # injection, W3/W4 → excessive agency. No seed is emitted by both.
     assert pi_ids == [w2.pattern_id]
     assert ea_ids == [w4.pattern_id]
+
+
+# --- #9/#10 drive/family compatibility audit (DCR-0029/0030) ----------------
+
+# Which SeedDrive values are meaningful for each target family, keyed by the
+# real dispatch path each family is driven through: kitchen-sink seeds run via
+# the in-process reference adapter's own `_drive_user_message`
+# (plugins/_reference/reference_target_adapter.py); the bundled v0.2.2 MCP
+# families (filesystem/fetch/github) run via this module's
+# `_user_message_for_drive`. A seed whose drive names a DIFFERENT family's
+# artefact (e.g. a filesystem seed driven by "create_issue_direct", which asks
+# the planner to file a GitHub issue) never reaches the vulnerability it claims
+# to test — this is exactly the FILESYSTEM_W1/W4 bug DCR-0029/0030 fixed.
+_FAMILY_COMPATIBLE_DRIVES: dict[str, set[str]] = {
+    "kitchen-sink": {
+        "read_note_for_summary",
+        "read_note_direct",
+        "fetch_url_direct",
+        "send_email_direct",
+    },
+    "filesystem": {"read_file_for_summary", "read_file_direct", "write_file_direct"},
+    "fetch": {"fetch_attacker_url"},
+    "github": {"get_issue_and_act", "create_issue_direct"},
+}
+
+
+@pytest.mark.parametrize("seed", SEED_CATALOGUE, ids=[s.pattern_id for s in SEED_CATALOGUE])
+def test_every_seed_drive_is_compatible_with_its_family(seed: SeedPattern) -> None:
+    for family in seed.applicable_targets:
+        compatible = _FAMILY_COMPATIBLE_DRIVES.get(family)
+        if compatible is None:
+            continue  # a family outside this audit's scope (e.g. "synthesized")
+        assert seed.drive in compatible, (
+            f"seed {seed.pattern_id!r} (family {family!r}) uses drive "
+            f"{seed.drive!r}, which is not one of {sorted(compatible)} — the "
+            "planner would receive a user message shaped for a DIFFERENT "
+            "target family's tools and the attack would never reach the "
+            "vulnerability it claims to test"
+        )
 
 
 def test_registry_contains_all_v0_2_1_predicates() -> None:
