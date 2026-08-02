@@ -120,6 +120,48 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 > *different* databases on Windows — a silent way to scan an empty DB and wrongly
 > conclude the agent is clean. Prefer an absolute path and verify it opened.
 
+## The boundary controls fail closed
+
+The four boundary controls the adapter-boundary shim synthesizes (W1 description
+sanitizer, W2 untrusted-data envelope, W3 egress allowlist, W4 confirm-gate) each
+answer one question about a tool call: *does this control apply to this tool?* For
+W3 and W4, that answer is decided in this order:
+
+1. An explicit list in `control_config` (`egress_tools` / `consequential_tools`) — you
+   said so, and this is always the final word for that tool name.
+2. Structural evidence: W3 only — a call with a URL, a bare hostname, or an IP-literal
+   argument is treated as egress regardless of what the tool is called.
+3. A name heuristic (substrings like `fetch`/`http`/`web` for egress, `send`/`delete`/
+   `pay` for consequential actions) — a convenience, never the gate.
+4. **Otherwise: guarded.** A tool that matches none of the above is still treated as
+   in-scope for the control.
+
+This means a W3/W4 tool your target exposes that doesn't match any hint, and isn't
+declared, is now **refused** by default instead of silently passed through
+unguarded — an egress call with no destination Mylonite can identify gets
+`refused: ... no destination argument could be identified`, and an unhinted
+consequential call gets `deferred: ... requires explicit confirmation`. The first
+time this fires for a given tool name in a run, Mylonite logs a warning (once per
+tool name) with the exact snippet to paste into `control_config` to classify it
+precisely — either to confirm it as egress/consequential with the right argument
+name, or (by omitting it from a *non-empty* declared list) to exempt it entirely.
+W1 and W2 fail closed the same way but never refuse a call outright: W1 sanitizes
+every tool description regardless of name, and W2 wraps every non-error result in
+the `<untrusted>` envelope by default unless the tool is excluded via an explicit
+declared list (not yet a `control_config` field — construct
+`UntrustedEnvelopeControl` directly if you need to narrow it).
+
+If your custom target has an egress or consequential tool with an unusual name
+(e.g. `dispatch_widget`, `relay_message`), declare it up front so the run doesn't
+spend a refusal cycle discovering it:
+
+```yaml
+control_config:
+  egress_tools: [dispatch_widget]
+  egress_url_param: destination
+  consequential_tools: [relay_message]
+```
+
 ## Path containment
 
 `target.yaml` is a shareable, PR-editable document — a teammate can mail you one, or
