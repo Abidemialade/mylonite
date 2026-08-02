@@ -37,25 +37,34 @@ capability against systems the user does not own.
 The project enforces the following non-negotiables:
 
 1. **Targets-you-control by default.** The CLI refuses to run against a target
-   the user has not explicitly authorized. Authorization is opt-in per scan
+   the user has not explicitly authorized. Authorization is opt-in per run
    via a required `--authorize` flag plus a target identifier (hostname,
    service URL, or local-path) the user is asserting they own or are
    contractually authorized to test.
 
-   For **bundled MCP stdio targets** added in v0.2.2 (`mcp:filesystem:<sandbox>`,
-   `mcp:fetch`, `mcp:github:<owner/repo>`), `--authorize` is scope-matched:
-   - Scope-bearing families (`filesystem`, `github`) require
-     `--authorize == <scope>` exactly. Mismatched values exit 2 with both
-     the supplied authorize and the target's scope shown for diagnosis.
-   - Stateless families (`fetch`) require `--authorize == <family>` (the
-     literal `fetch`), making the user-intent assertion explicit even when
-     no scope segment is supplied.
+   **One rule, one gate, applied by every command that live-drives a real
+   target** — `scan`, `gate`, `validate`, and `ablate`. The required value is
+   derived from the target's own data, never from a self-asserted flag:
+   - A target that declares a **scope** (`mcp:filesystem:<sandbox>`,
+     `mcp:github:<owner/repo>`, or a custom target file with `scope:` set)
+     requires `--authorize == <scope>` exactly. This applies regardless of
+     whatever the target file's own `requires_scope` field says — a target
+     that names a scope IS asserting that scope is the sensitive resource,
+     and cannot downgrade the check by also setting `requires_scope: false`.
+   - A **stateless** target (`mcp:fetch`, or a custom target/target file
+     with no `scope`) requires `--authorize == <family>` — for inline
+     `mcp:custom`, the family is the literal `custom`.
 
-   **Custom targets** (`--target-file target.yaml` or `mcp:custom --command …`)
-   follow the same rule keyed on the target file's `requires_scope`: with a
-   `scope` declared, `--authorize == <scope>`; otherwise `--authorize == <family>`
-   (for inline `mcp:custom`, the family is the literal `custom`). A custom target
-   can never register over a bundled family name.
+   Mismatched or missing values exit 2 (config error) naming what
+   `--authorize` needed to equal. `mylonite validate` and `mylonite ablate`
+   re-drive the real target — including sending live attack payloads (e.g.
+   exfil) — exactly like `scan`/`gate`, so they are gated identically; this
+   was not always true (`validate` previously ran a custom target with no
+   authorization check at all, and `ablate` previously accepted any non-empty
+   value). A custom target can never register over a bundled family name.
+   See `src/mylonite/_authz.py` for the implementation
+   (`required_authorization` / `check_authorization`) shared by all four
+   commands.
 
    **TLS / corporate proxies:** behind a TLS-inspecting proxy, provider calls
    can fail `CERTIFICATE_VERIFY_FAILED`. Install `pip install "mylonite[enterprise]"`

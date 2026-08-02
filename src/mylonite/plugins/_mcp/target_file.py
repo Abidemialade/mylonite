@@ -123,6 +123,13 @@ class TargetFile(BaseModel):
                 f"got unknown key(s): {bad}"
             )
             raise ValueError(msg)
+        if self.scope and self.scope.strip() and not self.requires_scope:
+            # A declared scope IS a resource that must be authorized. Normalising
+            # here keeps any other consumer of this model honest (DCR-0008) — the
+            # --authorize gate derives its required value from `scope` regardless
+            # (see mylonite._authz), but this closes the gap for any future
+            # consumer of `requires_scope` that still trusts the flag.
+            self.requires_scope = True
         return self
 
 

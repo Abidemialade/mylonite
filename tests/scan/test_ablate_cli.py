@@ -47,7 +47,7 @@ def test_ablate_renders_load_bearing_and_theater(
             "--target-file",
             str(_write(tmp_path)),
             "--authorize",
-            "me",
+            "myapp-notes",
             "--controls",
             "W2,W4",
         ],
@@ -63,6 +63,19 @@ def test_ablate_requires_authorize(tmp_path: Path) -> None:
     result = _runner.invoke(app, ["ablate", "--target-file", str(_write(tmp_path))])
     assert result.exit_code != 0
     assert "authorize" in result.output.lower()
+
+
+def test_ablate_refuses_authorize_that_does_not_name_the_target(tmp_path: Path) -> None:
+    """One-gate consolidation (DCR-0008/0009): ablate used to accept ANY non-empty
+    --authorize value; it must now match the target's family (or scope), same as
+    scan/gate/validate."""
+    result = _runner.invoke(
+        app,
+        ["ablate", "--target-file", str(_write(tmp_path)), "--authorize", "not-the-family"],
+    )
+    assert result.exit_code != 0
+    out = result.stderr or result.output
+    assert "myapp-notes" in out
 
 
 # --- Theme B: server-layer ablation (control_env toggles) -------------------
@@ -110,7 +123,7 @@ def test_ablate_server_layer_toggles_via_control_env(
     p.write_text(_YAML_SERVER_LAYER, encoding="utf-8")
     result = _runner.invoke(
         app,
-        ["ablate", "--target-file", str(p), "--authorize", "me", "--controls", "W2,W4"],
+        ["ablate", "--target-file", str(p), "--authorize", "myapp-server", "--controls", "W2,W4"],
     )
     assert result.exit_code == 0, result.output
     assert "load-bearing" in result.output

@@ -57,6 +57,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   See "What Mylonite does with your credentials" in `SECURITY.md`.
 
+- **One `--authorize` gate for every command that live-drives a real target**
+  (DCR-0008, DCR-0009), replacing three independent, drifted implementations.
+  New `src/mylonite/_authz.py` (`required_authorization` / `check_authorization`)
+  derives the required `--authorize` value from the target's own data — its
+  declared `scope`, else its `family` name — and is now the single
+  implementation shared by `scan`, `gate`, `validate`, and `ablate`.
+  - **Fixed:** a custom target file could declare a sensitive `scope` (e.g.
+    `scope: /home/alice/private`) while also setting `requires_scope: false`,
+    downgrading the check to the guessable literal family name instead of the
+    scope (DCR-0008). The gate no longer trusts that self-asserted flag — a
+    declared scope is now always the required value, and `TargetFile`
+    normalises `requires_scope` to `true` whenever a `scope` is set, as
+    defense in depth for any other consumer of the field.
+  - **BEHAVIOUR CHANGE:** `mylonite validate` against a custom target
+    (`--target-file`) now requires `--authorize` and refuses (exit 2) without
+    it. Previously `validate` live-drove the real target — including sending
+    live attack payloads such as exfil probes — with **no authorization check
+    at all** (DCR-0009). Reference targets (`reference:vulnerable` /
+    `reference:guarded`) are unaffected; they never required `--authorize`.
+  - **BEHAVIOUR CHANGE:** `mylonite ablate` now validates that `--authorize`
+    actually names the target (its scope or family), not merely that some
+    non-empty value was supplied.
+
 ## [0.7.5] - 2026-07-04
 
 > **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP

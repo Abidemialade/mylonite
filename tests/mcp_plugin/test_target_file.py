@@ -42,6 +42,19 @@ def test_target_file_rejects_reserved_family() -> None:
         _tf(family="filesystem")
 
 
+def test_target_file_normalises_requires_scope_when_scope_declared() -> None:
+    """DCR-0008: a scope IS a resource that must be authorized — a target file
+    declaring `scope` but leaving `requires_scope: false` (accidentally or by a
+    PR-editable YAML trying to downgrade the gate) is normalised to true."""
+    tf = _tf(scope="/home/alice/private", requires_scope=False)
+    assert tf.requires_scope is True
+
+
+def test_target_file_leaves_requires_scope_false_with_no_scope() -> None:
+    tf = _tf(scope=None, requires_scope=False)
+    assert tf.requires_scope is False
+
+
 def test_target_file_carries_control_config() -> None:
     from mylonite.plugins._mcp.target_registry import ControlConfig
 

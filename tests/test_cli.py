@@ -1542,6 +1542,25 @@ def test_validate_custom_auto_resolves_colocated_target_yaml(
     assert (out_dir / "validation_report.json").is_file()
 
 
+def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> None:
+    """DCR-0009: `validate` live-drove a real third-party target — sending exfil
+    payloads — with no authorization gate at all. Same fixture shape as
+    ``test_validate_custom_auto_resolves_colocated_target_yaml`` above, but
+    driving the REAL ``_validate_custom`` (no monkeypatch) and omitting
+    --authorize, so the new gate must refuse before anything is driven."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    (out_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize" in (result.stderr or result.output)
+
+
 # ---------------------------------------------------------------------------
 # PR2 — verification legibility: the differential-oracle evidence renders in the
 # console report (gating formula with live marks, fires/resists, kill matrix).
@@ -2244,11 +2263,11 @@ def test_validate_custom_runs_differential_by_default(
     gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
     target_registry.clear_runtime_targets()
     try:
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False)
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False, authorize="myapp")
         assert captured["guarded_adapter_factory"] is not None  # differential ON by default
         assert captured["control_weakness"] == "W2"
         captured.clear()
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True)
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True, authorize="myapp")
         assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
     finally:
         target_registry.clear_runtime_targets()

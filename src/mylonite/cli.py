@@ -481,20 +481,29 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
 
 
 def _enforce_custom_authorize(
-    family: str, scope: str | None, requires_scope: bool, authorize: str | None
+    family: str,
+    scope: str | None,
+    requires_scope: bool,
+    authorize: str | None,
+    *,
+    command: str = "scan",
 ) -> None:
-    """Apply the same --authorize rule custom targets share with bundled ones."""
-    if requires_scope:
-        if authorize != scope:
-            echo_err(
-                f"--authorize must equal the scope for {family!r} "
-                f"(scope={scope!r}, authorize={authorize!r}).")
-            raise typer.Exit(code=EXIT_CONFIG)
-    elif authorize != family:
-        echo_err(
-            f"--authorize must equal the family name {family!r} for this stateless "
-            f"custom target (got authorize={authorize!r}).")
-        raise typer.Exit(code=EXIT_CONFIG)
+    """CLI shim over :func:`mylonite._authz.check_authorization`.
+
+    ``requires_scope`` is accepted for signature compatibility and deliberately
+    NOT consulted — the required token is derived from the scope itself
+    (DCR-0008: trusting the flag let a target file declare a sensitive scope
+    while leaving ``requires_scope: false`` and be authorized with the
+    guessable literal family name).
+    """
+    del requires_scope
+    from mylonite._authz import AuthorizationRefused, check_authorization
+
+    try:
+        check_authorization(family=family, scope=scope, authorize=authorize, command=command)
+    except AuthorizationRefused as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _target_file_from_flags(
@@ -541,7 +550,9 @@ def _target_file_from_flags(
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
-def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: str) -> Any:
+def _build_adapter_for_custom(
+    target_file: Any, authorize: str | None, model: str, *, command: str = "scan"
+) -> Any:
     """Register a custom ``TargetFile`` and return the transport-matched adapter.
 
     Shared by ``--target-file`` and ``mcp:custom`` flags. Enforces the same
@@ -559,7 +570,9 @@ def _build_adapter_for_custom(target_file: Any, authorize: str | None, model: st
         echo_err(f"warning: {warning}")
 
     spec = build_target_spec(target_file)
-    _enforce_custom_authorize(spec.family, target_file.scope, spec.requires_scope, authorize)
+    _enforce_custom_authorize(
+        spec.family, target_file.scope, spec.requires_scope, authorize, command=command
+    )
     try:
         # Start from a clean runtime registry so a long-lived/embedding process
         # that calls scan() repeatedly can't accumulate or shadow stale custom
@@ -1730,8 +1743,15 @@ def _validate_custom(
     randomize_exfil: bool = False,
     fast: bool = False,
     prove_input_control: bool = False,
+    authorize: str | None = None,
 ) -> Any:
-    """Validate a custom-target test by re-driving the REAL target (R1/R8)."""
+    """Validate a custom-target test by re-driving the REAL target (R1/R8).
+
+    DCR-0009: this re-drives a real third-party target — sending live attack
+    payloads (including exfil) — so it is gated by the same ``--authorize``
+    rule as ``scan``/``gate`` (:func:`_enforce_custom_authorize`), not zero
+    checks.
+    """
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -1752,6 +1772,9 @@ def _validate_custom(
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
+    _enforce_custom_authorize(
+        spec.family, tf.scope, spec.requires_scope, authorize, command="validate"
+    )
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
@@ -2182,6 +2205,17 @@ def validate(
             ),
         ),
     ] = None,
+    authorize: Annotated[
+        str | None,
+        typer.Option(
+            "--authorize",
+            help=(
+                "Required for a CUSTOM target (--target-file); assert ownership of the "
+                "target. validate live-drives it — including sending real attack payloads. "
+                "Not required for reference:* targets (bundled, safe-by-construction)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
@@ -2262,6 +2296,7 @@ def validate(
             randomize_exfil=randomize_exfil,
             fast=fast,
             prove_input_control=prove_input_control,
+            authorize=authorize,
         )
     else:
         echo_err(
@@ -3154,7 +3189,7 @@ def gate(
                 "inline mcp:custom flags are not wired in `gate`. "
                 "Pass a target YAML via --target-file.")
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_custom(tf, authorize, effective_model)
+        adapter = _build_adapter_for_custom(tf, authorize, effective_model, command="gate")
     elif target is None:
         echo_err(
             "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
@@ -3514,6 +3549,12 @@ def ablate(
     except Exception as exc:
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # DCR-0009/one-gate: ablate live-drives the real target exactly like scan/gate/
+    # validate — same rule, same derivation (scope if declared, else family name).
+    _enforce_custom_authorize(
+        spec.family, tf.scope, spec.requires_scope, authorize, command="ablate"
+    )
 
     # Server-layer mode: the target bakes its guards into the server (toggled by
     # env / a security profile), so the differential's "raw" side is produced by
