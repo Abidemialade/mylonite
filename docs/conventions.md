@@ -2,15 +2,18 @@
 
 These five conventions describe the target end state the plan is fixing
 toward, drawn from the 2026-08-01 reviews under `docs/reviews/`. Each was
-violated at multiple independent sites — in most cases across separate
-files (and in one case across separate review-sweep scopes that both
-independently caught the same bug), though convention 3 is two sites within
-a single file. None of them are true of the codebase yet: `_cli_io` and
-`_paths` are built in Phase 1 and Phase 2 respectively, and today `src/`
-calls `typer.echo` directly 156 times, all in `cli.py`. Each convention gets
-an enforcement test added in the phase that introduces the primitive (or,
-for conventions 3-5 which are enforceable against code that exists today,
-the phase that fixes their cited sites) — not before.
+violated at multiple independent sites within its own file — except
+convention 2 (path containment), which spans three separate files
+(`cli.py`, `target_registry.py`, `target_file.py`). Two of the underlying
+bugs were independently rediscovered by two different review sweeps at the
+identical line (`cli.py:1497` for convention 1; `cli.py:2952` for
+convention 2) — cross-checking rather than inflating the count. None of
+these conventions are true of the codebase yet: `_cli_io` and `_paths` are
+built in Phase 1 and Phase 2 respectively, and today `src/` calls
+`typer.echo` directly 156 times, all in `cli.py`. Each convention gets an
+enforcement test added in the phase that introduces the primitive (or, for
+conventions 3-5 which are enforceable against code that exists today, the
+phase that fixes their cited sites) — not before.
 
 1. **Redact before it leaves the machine.** Anything printed, persisted, pushed,
    or published will go through `mylonite._cli_io.echo` or `_redaction.redact*`
