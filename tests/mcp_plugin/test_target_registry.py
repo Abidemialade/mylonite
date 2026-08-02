@@ -45,6 +45,33 @@ def test_validate_filesystem_scope_rejects_root_and_traversal(scope: str) -> Non
         _validate_filesystem_scope(scope)
 
 
+def test_validate_filesystem_scope_rejects_nonexistent_directory(tmp_path: Path) -> None:
+    """A syntactically-valid absolute path that isn't a real directory is a
+    misconfiguration, not a scan target — the old validator never checked this."""
+    missing = tmp_path / "does_not_exist"
+    with pytest.raises(InvalidTargetScope, match="does not exist"):
+        _validate_filesystem_scope(str(missing))
+
+
+def test_validate_filesystem_scope_honours_scope_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MYLONITE_FS_SCOPE_ROOT is an opt-in hard ceiling: a scope inside it passes
+    validation, and one outside it is rejected even though it is otherwise a
+    perfectly valid, existing sandbox directory."""
+    root = tmp_path / "root"
+    inside = root / "inside"
+    inside.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("MYLONITE_FS_SCOPE_ROOT", str(root))
+
+    _validate_filesystem_scope(str(inside))  # inside the root — does not raise
+
+    with pytest.raises(InvalidTargetScope, match="MYLONITE_FS_SCOPE_ROOT"):
+        _validate_filesystem_scope(str(outside))
+
+
 def test_resolve_fetch_accepts_none_scope() -> None:
     spec = resolve_target("fetch", None)
     assert spec.family == "fetch"

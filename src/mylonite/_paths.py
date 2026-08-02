@@ -37,11 +37,11 @@ def resolve_contained(candidate: str | Path, *, base: str | Path, label: str) ->
     joined = raw if raw.is_absolute() else base_resolved / raw
     resolved = joined.resolve()
     if resolved != base_resolved and base_resolved not in resolved.parents:
-        msg = (
-            f"{label} {str(candidate)!r} resolves to {resolved}, which is outside "
-            f"{base_resolved}. Paths declared in a target file must stay inside the "
-            "directory that file lives in."
-        )
+        # Generic on purpose: this helper is shared by callers with different
+        # "base" concepts (a target file's own directory, an operator-configured
+        # scope root, ...). Each caller appends its own context-appropriate
+        # closing clause rather than this function guessing one.
+        msg = f"{label} {str(candidate)!r} resolves to {resolved}, which is outside {base_resolved}."
         raise PathEscapesBase(msg)
     return resolved
 

@@ -191,7 +191,11 @@ def _validate_filesystem_scope(scope: str | None) -> None:
         try:
             resolve_contained(resolved, base=root, label="filesystem scope")
         except PathEscapesBase as exc:
-            raise InvalidTargetScope(str(exc)) from exc
+            raise InvalidTargetScope(
+                f"{exc} MYLONITE_FS_SCOPE_ROOT={root!r} restricts every filesystem-scope "
+                "target to that directory (or a subdirectory of it); point the scope "
+                "inside it, or unset MYLONITE_FS_SCOPE_ROOT to lift the restriction."
+            ) from exc
     if not resolved.is_dir():
         raise InvalidTargetScope(
             f"filesystem scope {resolved} does not exist or is not a directory"

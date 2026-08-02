@@ -26,7 +26,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from mylonite._paths import resolve_contained
+from mylonite._paths import PathEscapesBase, resolve_contained
 from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
@@ -139,7 +139,13 @@ def resolved_system_prompt_path(tf: TargetFile) -> Path | None:
     if tf.system_prompt_file is None:
         return None
     base = tf.source_dir or Path.cwd()
-    return resolve_contained(tf.system_prompt_file, base=base, label="system_prompt_file")
+    try:
+        return resolve_contained(tf.system_prompt_file, base=base, label="system_prompt_file")
+    except PathEscapesBase as exc:
+        raise PathEscapesBase(
+            f"{exc} Paths declared in a target file must stay inside the directory "
+            "that file lives in."
+        ) from exc
 
 
 def resolved_system_prompt(tf: TargetFile) -> str:

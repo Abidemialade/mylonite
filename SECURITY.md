@@ -151,34 +151,19 @@ the generate → validate → replay pipeline (see the module docstring in
 ## What a `target.yaml` you received from someone else can and cannot do
 
 `target.yaml` is a shareable, PR-editable document: a teammate mails you one, or a
-pull request edits the one already in your repo. Two path-shaped fields were
-historically shape-checked only (`is_absolute()` is not a security check), which let
-a hostile document turn into an arbitrary-file-read or a whole-disk sandbox. Both are
-now contained (`mylonite._paths.resolve_contained`), not just shape-validated:
+pull request edits the one already in your repo. Every path-shaped field in it
+(`system_prompt_file`, the `mcp:filesystem` sandbox scope) is containment-checked, not
+just shape-checked (`is_absolute()` is not a security check) — it cannot read a file
+outside the target YAML's own directory, and it cannot point the filesystem sandbox at
+your whole disk, your home directory, or a nonexistent path. It CAN still launch an
+arbitrary `command`/`args` as a subprocess and carry credentials for that launch (that
+is the point of a custom target) — those are gated by `--authorize` and masked
+wherever Mylonite persists or prints them, per "What Mylonite does with your
+credentials" above, but the operator is still trusting the launch command itself, the
+same way they'd trust any script a PR asks them to run.
 
-- **It cannot make `system_prompt_file` read a file outside the directory the target
-  YAML itself lives in.** `system_prompt_file: ../../../../etc/passwd`, an absolute
-  path elsewhere on disk, or a symlink that points outside that directory are all
-  refused (`PathEscapesBase`) before the file is opened — whether the read is to build
-  the live agent's system prompt or to publish it into a GitHub check-run annotation
-  (`mylonite gate`). The document also cannot widen its own containment base: a
-  declared `source_dir` field in the YAML is ignored and always overwritten with the
-  file's real parent directory.
-- **It cannot point `mcp:filesystem`'s sandbox scope at your whole disk.** `/`, `C:\`,
-  your home directory, and any scope containing `..` are rejected outright, and the
-  directory must actually exist. Set `MYLONITE_FS_SCOPE_ROOT` to an absolute path to
-  additionally require every filesystem scope stay inside that root — an opt-in hard
-  ceiling worth setting in CI or on a shared runner that scans target files it did not
-  author.
-- **It can still launch an arbitrary `command`/`args` as a subprocess** (that is the
-  point of a custom target — it drives your app), and it can still carry credentials in
-  `env` / `headers` for that launch. Those are gated by `--authorize` (see above) and
-  masked wherever Mylonite persists or prints them (see "What Mylonite does with your
-  credentials" above) — but the operator is trusting the *launch command itself*, the
-  same way they would trust any script a PR asks them to run. Path containment closes
-  the two fields that looked like inert configuration but were not.
-
-See `docs/target-file.md#path-containment` for the field-level detail.
+See `docs/target-file.md#path-containment` for the full field-level detail, including
+`MYLONITE_FS_SCOPE_ROOT`.
 
 ## Scope
 
