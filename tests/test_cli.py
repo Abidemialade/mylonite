@@ -949,6 +949,45 @@ def test_generate_no_input_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "mylonite scan" in out or "--latest" in out
 
 
+def test_generate_unsafe_pattern_id_exits_cleanly(tmp_path: Path) -> None:
+    """A hand-edited (or stale, pre-validation) exploit_*.json with an unsafe
+    pattern_id must degrade to a clean EXIT_CONFIG error, not a raw traceback.
+
+    exploit_*.json is a user-editable artefact under .mylonite/scans/, not
+    just scanner output, so ReferencePytestGenerator.emit()'s
+    UnsafeExploitRecord must be caught at this CLI boundary too — it was
+    previously only unit-tested at the generator level.
+    """
+    import json
+
+    from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    pid = "foo\"); exec(\"import os; os.system('echo pwned')"
+    exploit = ExploitRecord(
+        target_id="reference:vulnerable",
+        pattern_id=pid,
+        payload=Payload(pattern_id=pid, channel="tool-result", body="x"),
+        response=AdapterResponse(payload_pattern_id=pid, raw_response="ok"),
+        success_reason="r",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    exploit_json = tmp_path / "scan" / "exploit_hostile.json"
+    exploit_json.parent.mkdir(parents=True, exist_ok=True)
+    exploit_json.write_text(
+        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit_json), "--out", str(out_dir)])
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "Traceback" not in out
+    assert "pattern_id" in out
+    assert not list(out_dir.glob("test_security_*.py"))
+
+
 def _write_custom_exploit_json(path: Path) -> Any:
     """A custom-target ExploitRecord (target_id != reference:*) for generate tests."""
     import json

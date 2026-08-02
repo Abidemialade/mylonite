@@ -176,26 +176,31 @@ def _py_literal(value: object) -> str:
     return repr("" if value is None else str(value))
 
 
-def _slugify(pattern_id: str) -> str:
-    """Turn a validated ``pattern_id`` into a valid Python identifier suffix.
+def _slugify(value: str) -> str:
+    """Turn ``value`` into a valid Python identifier suffix.
 
     ``str.isalnum()`` is true for non-ASCII alphanumerics (e.g. ``²``, ``ⅷ``)
     that are not all valid in every identifier position, so it was never the
     right proxy (DCR-0028). Restrict to ASCII alnum and prefix a digit-leading
     slug so the emitted ``def test_security_<slug>`` always parses.
 
-    Also reused as the DOCSTRING-safe preview of ``synthetic_control``: unlike
-    ``pattern_id``, ``control`` is not validated (it is rendered as a Python
-    literal for the code site instead, see :func:`_py_literal`), so a hostile
-    value can still contain three consecutive double-quote characters.
-    Embedding those — even ``repr()``-quoted — bare inside the emitted
-    module's triple-double-quoted docstring would terminate that docstring
-    early and turn the remainder of the file into executable code, an
-    injection distinct from (and not fixed by) quoting it as an argument
-    literal. Slugifying it for display removes that sequence too, and is a
-    no-op for realistic control names (e.g. ``"W2"``).
+    Two callers, both attacker-influenceable strings that need a display- or
+    identifier-safe form rather than rejection:
+
+    * A validated ``pattern_id`` (see :data:`_SAFE_PATTERN_ID`) -> the test
+      function's name suffix.
+    * An unvalidated ``synthetic_control`` -> the DOCSTRING-safe preview.
+      Unlike ``pattern_id``, ``control`` is rendered as a Python literal for
+      the CODE site instead (see :func:`_py_literal`), so a hostile value can
+      still contain three consecutive double-quote characters. Embedding
+      those — even ``repr()``-quoted — bare inside the emitted module's
+      triple-double-quoted docstring would terminate that docstring early and
+      turn the remainder of the file into executable code, an injection
+      distinct from (and not fixed by) quoting it as an argument literal.
+      Slugifying it for display removes that sequence too, and is a no-op for
+      realistic control names (e.g. ``"W2"``).
     """
-    slug = "".join(ch if (ch.isascii() and ch.isalnum()) else "_" for ch in pattern_id)
+    slug = "".join(ch if (ch.isascii() and ch.isalnum()) else "_" for ch in value)
     return f"_{slug}" if slug[:1].isdigit() else slug
 
 

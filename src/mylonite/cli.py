@@ -1568,6 +1568,9 @@ def generate(
     import json
 
     from mylonite import testkit
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        UnsafeExploitRecord,
+    )
 
     scans_root = Path(".mylonite/scans")
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
@@ -1596,7 +1599,15 @@ def generate(
 
         if multi and index > 0:
             echo("")
-        _emit_generated_test(exploit, exploit_path, this_out, target_file, json_mod=json)
+        # exploit_*.json is a user-editable artefact (hand-edited or stale from
+        # before pattern_id validation existed), so a hostile/unsafe pattern_id
+        # must degrade to a clean error here too, not just at the unit-tested
+        # ReferencePytestGenerator.emit() boundary.
+        try:
+            _emit_generated_test(exploit, exploit_path, this_out, target_file, json_mod=json)
+        except UnsafeExploitRecord as exc:
+            echo_exc(f"could not generate a test for {exploit_path}", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
     raise typer.Exit(code=EXIT_SUCCESS)
 
@@ -3078,7 +3089,10 @@ def gate(
         raise typer.Exit(code=EXIT_CONFIG)
     from mylonite.gate import pr as pr_mod
     from mylonite.gate import run_gate
-    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        ReferencePytestGenerator,
+        UnsafeExploitRecord,
+    )
     from mylonite.plugins._reference.reference_validator import (
         DifferentialValidator,
         ReferenceVulnerableOracle,
@@ -3257,7 +3271,16 @@ def gate(
         return tagged
 
     def generate_fn(exploit: Any) -> Any:
-        return ReferencePytestGenerator().emit(exploit)
+        # run_gate() is Typer-agnostic by design (its docstring: "Collaborators
+        # are injected so the Typer command supplies live ones") -- the CLI-
+        # framework-specific degrade-cleanly behaviour belongs in this closure,
+        # not in the orchestrator, mirroring scan_fn's own echo_exc + typer.Exit
+        # above for plugin-discovery failures.
+        try:
+            return ReferencePytestGenerator().emit(exploit)
+        except UnsafeExploitRecord as exc:
+            echo_exc("could not generate a regression test for this finding", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
     def validate_fn(generated: Any) -> Any:
         if is_reference:

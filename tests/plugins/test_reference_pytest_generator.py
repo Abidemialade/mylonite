@@ -9,6 +9,13 @@ Covers the four properties PR 4 promises:
 * **Determinism** — two ``emit()`` calls on the same exploit are identical.
 * **No skip leakage** — the emitted test is NOT ``@pytest.mark.skip`` and gates
   via the testkit.
+
+Also covers injection-safety regressions for the two attacker-influenceable
+values ``emit()`` embeds in generated source: a hostile ``pattern_id`` is
+REJECTED (``UnsafeExploitRecord``), and a hostile ``synthetic_control`` is
+safely rendered — both at its CODE site (``repr()``-quoted) and its docstring
+site (slugified, since ``repr()`` alone doesn't stop it from breaking out of a
+*different* enclosing string, i.e. the module's own docstring).
 """
 
 from __future__ import annotations
