@@ -56,6 +56,7 @@ control_config:
   egress_url_param: url                # the URL arg the allowlist guards
   fetch_allowlist: [example.com]       # hosts the egress control permits
   consequential_tools: [send_email]    # W4: high-impact actions to gate
+  read_tool_names: [read_note]         # W2: tools whose results get quarantined
   declared: [W2]                       # controls you've already implemented server-side
   synthetic: true                      # let Mylonite synthesize the missing guarded build
 
@@ -108,8 +109,9 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
   a tool was called. `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success.
 - **`control_config`** (`ControlConfig`) — tells the synthetic guarded build which tools
-  carry egress (W3) and consequential actions (W4), the allowlist, which controls you've
-  `declared`, and whether to `synthetic`-ally synthesize the rest.
+  carry egress (W3), consequential actions (W4), and untrusted-data results to quarantine
+  (`read_tool_names`, W2), the allowlist, which controls you've `declared`, and whether to
+  `synthetic`-ally synthesize the rest.
 - **Server-layer build** (`vulnerable_launch`, `control_env`) — optional: drive the
   differential against *your own* unguarded build and per-control env toggles, instead of
   the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
@@ -125,38 +127,43 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 The four boundary controls the adapter-boundary shim synthesizes (W1 description
 sanitizer, W2 untrusted-data envelope, W3 egress allowlist, W4 confirm-gate) each
 answer one question about a tool call: *does this control apply to this tool?* For
-W3 and W4, that answer is decided in this order:
+W2/W3/W4, that answer is decided in this order:
 
-1. An explicit list in `control_config` (`egress_tools` / `consequential_tools`) — you
-   said so, and this is always the final word for that tool name.
+1. An explicit list in `control_config` (`read_tool_names` / `egress_tools` /
+   `consequential_tools`) — you said so, and this is always the final word for that
+   tool name.
 2. Structural evidence: W3 only — a call with a URL, a bare hostname, or an IP-literal
    argument is treated as egress regardless of what the tool is called.
-3. A name heuristic (substrings like `fetch`/`http`/`web` for egress, `send`/`delete`/
-   `pay` for consequential actions) — a convenience, never the gate.
+3. A name heuristic (substrings like `read`/`fetch`/`list` for W2, `fetch`/`http`/`web`
+   for W3 egress, `send`/`delete`/`pay` for W4 consequential actions) — a convenience,
+   never the gate.
 4. **Otherwise: guarded.** A tool that matches none of the above is still treated as
    in-scope for the control.
 
-This means a W3/W4 tool your target exposes that doesn't match any hint, and isn't
-declared, is now **refused** by default instead of silently passed through
-unguarded — an egress call with no destination Mylonite can identify gets
-`refused: ... no destination argument could be identified`, and an unhinted
-consequential call gets `deferred: ... requires explicit confirmation`. The first
-time this fires for a given tool name in a run, Mylonite logs a warning (once per
-tool name) with the exact snippet to paste into `control_config` to classify it
-precisely — either to confirm it as egress/consequential with the right argument
-name, or (by omitting it from a *non-empty* declared list) to exempt it entirely.
-W1 and W2 fail closed the same way but never refuse a call outright: W1 sanitizes
-every tool description regardless of name, and W2 wraps every non-error result in
-the `<untrusted>` envelope by default unless the tool is excluded via an explicit
-declared list (not yet a `control_config` field — construct
-`UntrustedEnvelopeControl` directly if you need to narrow it).
+This means a W2/W3/W4 tool your target exposes that doesn't match any hint, and isn't
+declared, is now guarded by default instead of silently passed through unguarded:
+- W3 — an egress call with no destination Mylonite can identify is **refused**:
+  `refused: ... no destination argument could be identified`.
+- W4 — an unhinted consequential call is **deferred**:
+  `deferred: ... requires explicit confirmation`.
+- W2 — an unhinted (or simply undeclared) tool's non-error result is **wrapped** in
+  the `<untrusted>` envelope, same as an obvious read tool. With no `read_tool_names`
+  declared, this means EVERY tool's result gets wrapped, not just retrieval-shaped ones.
 
-If your custom target has an egress or consequential tool with an unusual name
-(e.g. `dispatch_widget`, `relay_message`), declare it up front so the run doesn't
-spend a refusal cycle discovering it:
+The first time this fires for a given tool name in a run, Mylonite logs a warning
+(once per tool name) with the exact `control_config` snippet to paste to classify it
+precisely — either to confirm it with the right list/argument name, or (by omitting it
+from a *non-empty* declared list) to exempt it entirely. W1 has no comparable warning:
+it sanitizes every tool description unconditionally, regardless of name, so there is
+nothing to classify or exempt.
+
+If your custom target has a read/egress/consequential tool with an unusual name (e.g.
+`materialise_record`, `dispatch_widget`, `relay_message`), declare it up front so the
+run doesn't spend a cycle discovering it:
 
 ```yaml
 control_config:
+  read_tool_names: [materialise_record]
   egress_tools: [dispatch_widget]
   egress_url_param: destination
   consequential_tools: [relay_message]

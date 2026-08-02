@@ -83,8 +83,9 @@ class BoundaryControl:
 
     def _warn_fail_closed_once(self, name: str, reason: str, snippet: str) -> None:
         """Log, once per (control instance, tool name), that ``name`` was
-        REFUSED by fail-closed classification rather than a declared
-        ``control_config`` entry (DCR-0034/0035's escape hatch).
+        GUARDED (refused, deferred, or wrapped) by fail-closed classification
+        rather than a declared ``control_config`` entry (the escape hatch for
+        DCR-0034/0035).
 
         Never fires for ``reason == "declared"`` — the operator already told us
         about that tool, so there is nothing to surface. State is per-instance
@@ -101,13 +102,16 @@ class BoundaryControl:
         if name in warned:
             return
         warned.add(name)
+        # "fail-closed default" IS the basis, so stating it once is enough; any
+        # other reason (e.g. "a destination-shaped argument", "name hint") is
+        # additional information worth keeping alongside it.
+        basis = reason if reason == "fail-closed default" else f"fail-closed default: {reason}"
         logger.warning(
-            "%s: %r was guarded by fail-closed default (%s), not a declared "
-            "control_config entry. To classify it precisely, add this to your "
-            "target file:\n%s",
+            "%s: %r was guarded by %s, not a declared control_config entry. To "
+            "classify it precisely, add this to your target file:\n%s",
             self.weakness,
             name,
-            reason,
+            basis,
             snippet,
         )
 
@@ -145,29 +149,38 @@ class UntrustedEnvelopeControl(BoundaryControl):
     def __init__(self, read_tool_names: frozenset[str] | None = None) -> None:
         # Optional explicit allowlist of tool names to wrap; when None, EVERY
         # tool's non-error result is wrapped by fail-closed default (see
-        # `_is_read_tool` / DCR-0035) — a zero-config custom target still
-        # works, and an unhinted retrieval tool is no longer silently
-        # unwrapped. Declare `read_tool_names` to narrow this to just the
-        # actual retrieval surface. Not yet exposed as a `control_config`
-        # target-file field (unlike W3/W4's declared lists) — a caller
-        # constructing this control directly can still narrow it.
+        # `_classify` / DCR-0035) — a zero-config custom target still works,
+        # and an unhinted retrieval tool is no longer silently unwrapped.
+        # Declare `read_tool_names` (or `control_config.read_tool_names` in a
+        # target file) to narrow this to just the actual retrieval surface.
         self._read_tool_names = read_tool_names
 
-    def _is_read_tool(self, name: str) -> bool:
+    def _classify(self, name: str) -> tuple[bool, str]:
         # Declared list -> name hint -> fail-closed default (DCR-0035). There is
         # no structural-evidence tier here (unlike W3's URL check): whether a
         # RESULT is untrusted data isn't decidable from the CALL arguments, only
         # from the tool's role, so name classification is all there is short of
         # an explicit declaration.
-        applies, _ = classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
-        return applies
+        return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
+
+    def _config_snippet(self, name: str) -> str:
+        return f"control_config:\n  read_tool_names: [{name}]"
 
     def transform_result(self, name: str, result: ToolResult) -> ToolResult:
         # Never wrap a guarded refusal (isError) — that would mangle the
         # structural signal the judge relies on. Only wrap content the planner
         # reads back as data.
-        if result.isError or not self._is_read_tool(name):
+        if result.isError:
             return result
+        applies, reason = self._classify(name)
+        if not applies:
+            return result
+        # DCR-0035's escape hatch: an operator whose custom target now has
+        # EVERY non-error result wrapped (no `read_tool_names` declared) gets a
+        # once-per-tool warning with the exact snippet to narrow it. No-ops
+        # when `reason == "declared"` — nothing to surface if the operator
+        # already told us this is a read tool.
+        self._warn_fail_closed_once(name, reason, self._config_snippet(name))
         return ToolResult(
             name=result.name,
             content=quarantine(result.content),
@@ -253,16 +266,18 @@ class EgressAllowlistControl(BoundaryControl):
             return [val] if isinstance(val, str) and looks_like_destination(val) else []
         return url_values(arguments)
 
-    def _classify(self, name: str, arguments: dict[str, Any]) -> tuple[bool, str]:
+    def _classify(self, name: str, arguments: dict[str, Any]) -> tuple[bool, str, list[str]]:
+        # Computed once here (not again in `intercept_call`): `_classify` is the
+        # single source of both the applies/reason decision and the destination
+        # list `intercept_call` needs next, since the structural-evidence tier
+        # already has to compute it to decide.
+        destinations = self._destinations_in(arguments)
         if self._egress_tools is not None:
-            return name in self._egress_tools, "declared"
-        if self._destinations_in(arguments):
-            return True, "a destination-shaped argument"
-        return classify(name, declared=None, hints=_EGRESS_HINTS)
-
-    def _is_egress(self, name: str, arguments: dict[str, Any]) -> bool:
-        applies, _ = self._classify(name, arguments)
-        return applies
+            return name in self._egress_tools, "declared", destinations
+        if destinations:
+            return True, "a destination-shaped argument", destinations
+        applies, reason = classify(name, declared=None, hints=_EGRESS_HINTS)
+        return applies, reason, destinations
 
     def _config_snippet(self, name: str) -> str:
         return (
@@ -272,10 +287,9 @@ class EgressAllowlistControl(BoundaryControl):
         )
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
-        applies, reason = self._classify(name, arguments)
+        applies, reason, destinations = self._classify(name, arguments)
         if not applies:
             return None
-        destinations = self._destinations_in(arguments)
         if not destinations:
             # An egress-classified tool whose destination we cannot identify is
             # REFUSED, not passed through. Failing open here meant the
@@ -328,10 +342,6 @@ class ConfirmGateControl(BoundaryControl):
 
     def _classify(self, name: str) -> tuple[bool, str]:
         return classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
-
-    def _is_consequential(self, name: str) -> bool:
-        applies, _ = self._classify(name)
-        return applies
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         applies, reason = self._classify(name)

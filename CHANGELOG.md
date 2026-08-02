@@ -24,10 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `refused: ... no destination argument could be identified` /
     `deferred: ... requires explicit confirmation` — instead of silently
     reaching the inner tool unguarded. The W2 untrusted-data envelope now wraps
-    every non-error tool result by the same default. The first refusal for a
-    given tool name in a run logs a warning (once per name) with the exact
-    `control_config` snippet to declare it precisely; see "The boundary
-    controls fail closed" in `docs/target-file.md`.
+    every non-error tool result by the same default. The first time this fires
+    for a given tool name in a run — a refusal (W3/W4) or a wrap (W2) driven by
+    a name hint or the fail-closed default, never a declared `control_config`
+    entry — logs a warning (once per name) with the exact `control_config`
+    snippet to declare it precisely; see "The boundary controls fail closed" in
+    `docs/target-file.md`.
+  - New `control_config.read_tool_names` (`ControlConfig`, `tuple[str, ...]`,
+    default `()`) lets an operator declare W2's read-tool surface from
+    `target.yaml` — the same declared-list precision W3 (`egress_tools`) and W4
+    (`consequential_tools`) already had, wired through `cli.py`'s
+    `_boundary_control` the same way.
   - **Fixed:** the W3 egress allowlist's destination extractor (`_url_in`)
     required a literal `"://"` on a single string argument, so a scheme-less
     call like `web_fetch(host="attacker.example")` or a list-valued

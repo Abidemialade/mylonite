@@ -1627,8 +1627,9 @@ def generate(
 
 def _boundary_control(weakness: str, spec: Any) -> Any:
     """Build a boundary control for ``weakness``, applying the target's ControlConfig
-    hints (declared egress / consequential tools, URL param, allowlist) when present;
-    falls back to the control's name heuristics otherwise."""
+    hints (declared egress / consequential / read tools, URL param, allowlist) when
+    present; falls back to the control's name heuristics, then a fail-closed default,
+    otherwise."""
     from mylonite.scan.control_shim import make_control
 
     cfg = getattr(spec, "control_config", None)
@@ -1636,6 +1637,7 @@ def _boundary_control(weakness: str, spec: Any) -> Any:
         return make_control(weakness)
     return make_control(
         weakness,
+        read_tool_names=frozenset(cfg.read_tool_names) or None,
         egress_tools=frozenset(cfg.egress_tools) or None,
         url_param=cfg.egress_url_param,
         fetch_allowlist=tuple(cfg.fetch_allowlist),

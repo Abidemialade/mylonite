@@ -90,11 +90,14 @@ class EffectProbeSpec(BaseModel):
 class ControlConfig(BaseModel):
     """Operator hints for the boundary controls (``--prove-control`` / ablation).
 
-    All optional: when omitted the controls fall back to name heuristics.
-    Declaring the egress / consequential tools (and which arg holds the URL) makes
-    the W3/W4 controls precise on an arbitrary custom tool surface. ``declared``
-    lists controls the app ALREADY implements (the higher-fidelity ablation path);
-    ``synthetic`` lists controls Mylonite should test at the boundary.
+    All optional: when omitted, the controls fall back to name heuristics and
+    then a fail-closed default (an unrecognised tool is guarded, not passed
+    through — see "The boundary controls fail closed" in ``target-file.md``).
+    Declaring the egress / consequential / read tools (and which arg holds the
+    URL) makes the W3/W4/W2 controls precise on an arbitrary custom tool
+    surface. ``declared`` lists controls the app ALREADY implements (the
+    higher-fidelity ablation path); ``synthetic`` lists controls Mylonite
+    should test at the boundary.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -103,6 +106,7 @@ class ControlConfig(BaseModel):
     egress_url_param: str | None = None
     fetch_allowlist: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
     consequential_tools: tuple[str, ...] = ()
+    read_tool_names: tuple[str, ...] = ()  # W2: narrows which results get quarantined
     declared: tuple[str, ...] = ()  # controls the app already has (for ablation)
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
 
