@@ -2010,7 +2010,7 @@ def test_generate_prove_control_emits_assert_control_holds(tmp_path: Path) -> No
     assert test_files, list(out.iterdir())
     src = test_files[0].read_text(encoding="utf-8")
     assert "assert_control_holds" in src
-    assert 'control="W2"' in src
+    assert "control='W2'" in src  # rendered via repr(), not a bare f-string
 
 
 def test_generate_prove_control_passes_through_reference_target(tmp_path: Path) -> None:

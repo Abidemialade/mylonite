@@ -25,6 +25,7 @@ entry point), so the file is warning-free even under ``filterwarnings = error``.
 
 from __future__ import annotations
 
+import re
 from typing import ClassVar, Literal
 
 from mylonite.contracts import ExploitRecord, GeneratedTest, TestGeneratorBase
@@ -56,7 +57,7 @@ from mylonite import testkit
 def test_security_{slug}() -> None:
     """The guarded twin must resist {pattern_id} ({compliance_inline})."""
     here = Path(__file__).parent
-    exploit = testkit.load_exploit(here / "exploit_{pattern_id}.json")
+    exploit = testkit.load_exploit(here / {exploit_filename})
     testkit.assert_guard_holds(exploit, fixtures_dir=here / "fixtures")
 '''
 
@@ -92,7 +93,7 @@ from mylonite import testkit
 def test_security_{slug}() -> None:
     """{target_id} must remain resistant to {pattern_id} ({compliance_inline})."""
     here = Path(__file__).parent
-    exploit = testkit.load_exploit(here / "exploit_{pattern_id}.json")
+    exploit = testkit.load_exploit(here / {exploit_filename})
     testkit.assert_target_resists(exploit, target_file=here / "target.yaml")
 '''
 
@@ -103,7 +104,7 @@ against `{target_id}`.
 Compliance: OWASP LLM {owasp_llm} · OWASP ASI {owasp_asi} · \
 MITRE ATLAS {mitre_atlas} · NIST {nist}.
 
-Control `{control}` is verified LOAD-BEARING for this target's model: the attack
+Control `{control_display}` is verified LOAD-BEARING for this target's model: the attack
 lands without it and is RESISTED with it (applied at the adapter boundary). This
 test FAILS if the control stops carrying the security — either the boundary
 control no longer blocks the attack, or (once you implement the control
@@ -133,21 +134,58 @@ from mylonite import testkit
     reason="re-drives the real target live; set MYLONITE_LIVE_TARGET=1 to run",
 )
 def test_security_{slug}() -> None:
-    """Control {control} must keep blocking {pattern_id} on {target_id} \
+    """Control {control_display} must keep blocking {pattern_id} on {target_id} \
 ({compliance_inline})."""
     here = Path(__file__).parent
-    exploit = testkit.load_exploit(here / "exploit_{pattern_id}.json")
-    testkit.assert_control_holds(exploit, target_file=here / "target.yaml", control="{control}")
+    exploit = testkit.load_exploit(here / {exploit_filename})
+    testkit.assert_control_holds(exploit, target_file=here / "target.yaml", control={control_literal})
 '''
 
 
-def _slugify(pattern_id: str) -> str:
-    """Turn a ``pattern_id`` into a valid Python identifier suffix.
+#: A pattern_id is a stable identifier that becomes BOTH a filename and a Python
+#: identifier suffix. It can originate in a probed target's tool name (via
+#: seed_synth), so it is attacker-influenceable and is validated, not sanitised —
+#: silently rewriting it would desynchronise the emitted `load_exploit` filename
+#: from the artefact `_emit_generated_test` writes.
+_SAFE_PATTERN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
-    Any character that is not a valid identifier char (``-``, ``.``, etc.) is
-    collapsed to ``_``. Deterministic and stable.
+
+class UnsafeExploitRecord(ValueError):
+    """Raised when an ExploitRecord carries a field unsafe to render into source."""
+
+
+def _py_literal(value: object) -> str:
+    """Render ``value`` as a Python source literal.
+
+    ``repr()`` of a ``str`` is always a valid, fully-escaped Python literal, so
+    a value containing quotes, backslashes, or newlines cannot terminate the
+    literal it sits in. Used for EVERY attacker-influenceable value the
+    generator embeds (DCR-0001, DCR-0002).
     """
-    return "".join(ch if ch.isalnum() else "_" for ch in pattern_id)
+    return repr("" if value is None else str(value))
+
+
+def _slugify(pattern_id: str) -> str:
+    """Turn a validated ``pattern_id`` into a valid Python identifier suffix.
+
+    ``str.isalnum()`` is true for non-ASCII alphanumerics (e.g. ``²``, ``ⅷ``)
+    that are not all valid in every identifier position, so it was never the
+    right proxy (DCR-0028). Restrict to ASCII alnum and prefix a digit-leading
+    slug so the emitted ``def test_security_<slug>`` always parses.
+
+    Also reused as the DOCSTRING-safe preview of ``synthetic_control``: unlike
+    ``pattern_id``, ``control`` is not validated (it is rendered as a Python
+    literal for the code site instead, see :func:`_py_literal`), so a hostile
+    value can still contain three consecutive double-quote characters.
+    Embedding those — even ``repr()``-quoted — bare inside the emitted
+    module's triple-double-quoted docstring would terminate that docstring
+    early and turn the remainder of the file into executable code, an
+    injection distinct from (and not fixed by) quoting it as an argument
+    literal. Slugifying it for display removes that sequence too, and is a
+    no-op for realistic control names (e.g. ``"W2"``).
+    """
+    slug = "".join(ch if (ch.isascii() and ch.isalnum()) else "_" for ch in pattern_id)
+    return f"_{slug}" if slug[:1].isdigit() else slug
 
 
 def _fmt_ids(ids: list[str]) -> str:
@@ -164,6 +202,15 @@ class ReferencePytestGenerator(TestGeneratorBase):
         return "pytest"
 
     def emit(self, exploit: ExploitRecord) -> GeneratedTest:
+        if not _SAFE_PATTERN_ID.fullmatch(exploit.pattern_id):
+            msg = (
+                f"pattern_id {exploit.pattern_id!r} is not safe to embed in generated "
+                "source or an artefact path. Expected "
+                f"{_SAFE_PATTERN_ID.pattern}. A pattern_id derived from a probed "
+                "target's tool name must be slugified at synthesis time."
+            )
+            raise UnsafeExploitRecord(msg)
+
         slug = _slugify(exploit.pattern_id)
         compliance = exploit.compliance
 
@@ -208,14 +255,19 @@ class ReferencePytestGenerator(TestGeneratorBase):
         # assert_control_holds; otherwise reference targets replay against the bundled
         # twin (byte-for-byte unchanged) and a CUSTOM target re-drives the REAL app via
         # assert_target_resists.
-        if "synthetic_control" in exploit.payload.metadata:
+        #
+        # Branch on the VALUE, not key presence: a present-but-empty
+        # synthetic_control previously selected the control template and
+        # emitted `control=""` (DCR-0022).
+        control = exploit.payload.metadata.get("synthetic_control") or ""
+        if control:
             template = _TEMPLATE_CONTROL
         elif exploit.target_id.startswith("reference:"):
             template = _TEMPLATE
         else:
             template = _TEMPLATE_CUSTOM
         source = template.format(
-            pattern_id=exploit.pattern_id,
+            pattern_id=exploit.pattern_id,  # validated above; docstring use only
             target_id=exploit.target_id,
             slug=slug,
             decorators=decorators,
@@ -224,8 +276,15 @@ class ReferencePytestGenerator(TestGeneratorBase):
             owasp_asi=_fmt_ids(compliance.owasp_asi),
             mitre_atlas=_fmt_ids(compliance.mitre_atlas),
             nist=_fmt_ids(compliance.nist_ai_rmf),
-            # Only the control template references {control}; harmless for the rest.
-            control=exploit.payload.metadata.get("synthetic_control", ""),
+            # Only the control template references these; harmless for the rest.
+            # Docstring preview: slugified, so a hostile control value can't
+            # smuggle a `"""` that terminates the enclosing docstring early.
+            control_display=_slugify(control),
+            # CODE-interpolation sites: rendered as Python literals, never as
+            # bare strings, so an attacker-influenceable value can't terminate
+            # the literal it sits in and start executing (DCR-0001, DCR-0002).
+            exploit_filename=_py_literal(f"exploit_{exploit.pattern_id}.json"),
+            control_literal=_py_literal(control),
         )
 
         return GeneratedTest(

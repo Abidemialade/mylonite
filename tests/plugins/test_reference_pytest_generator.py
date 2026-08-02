@@ -13,7 +13,10 @@ Covers the four properties PR 4 promises:
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
+
+import pytest
 
 from mylonite.contracts._types import (
     AdapterResponse,
@@ -23,8 +26,95 @@ from mylonite.contracts._types import (
 )
 from mylonite.plugins._reference.reference_pytest_generator import (
     ReferencePytestGenerator,
+    UnsafeExploitRecord,
 )
 from mylonite.scan.pytest_runner import run_test_file
+
+
+def _exploit(
+    *,
+    pattern_id: str = "safe-id",
+    synthetic_control: str | None = None,
+    target_id: str = "mcp:custom",
+) -> ExploitRecord:
+    """Minimal ``ExploitRecord`` factory for the injection-safety tests below.
+
+    Defaults to a CUSTOM (non-``reference:``) target so ``synthetic_control``
+    can freely select the control template without also needing to fake a
+    ``reference:`` target id.
+    """
+    metadata = {"synthetic_control": synthetic_control} if synthetic_control is not None else {}
+    return ExploitRecord(
+        target_id=target_id,
+        pattern_id=pattern_id,
+        payload=Payload(
+            pattern_id=pattern_id,
+            channel="tool-result",
+            body="irrelevant",
+            metadata=metadata,
+        ),
+        response=AdapterResponse(
+            payload_pattern_id=pattern_id,
+            raw_response="ok",
+            tool_calls=[],
+        ),
+        success_reason="test fixture",
+        compliance=ComplianceTags(owasp_llm=["LLM01"], owasp_asi=["ASI01"]),
+    )
+
+
+_INJECTIONS = [
+    "foo\"); exec(\"import os; os.system('echo pwned')",
+    "foo'); exec(compile('x=1','','exec')); ('",
+    'foo\\"bar',
+    "foo\nimport os\n",
+]
+
+
+@pytest.mark.parametrize("hostile", _INJECTIONS)
+def test_emit_refuses_hostile_pattern_id(hostile: str) -> None:
+    """DCR-0001: a pattern_id containing `"); exec(` executed on import."""
+    with pytest.raises(UnsafeExploitRecord):
+        ReferencePytestGenerator().emit(_exploit(pattern_id=hostile))
+
+
+@pytest.mark.parametrize("hostile", _INJECTIONS)
+def test_emit_escapes_hostile_control_metadata(hostile: str) -> None:
+    """DCR-0002: synthetic_control was interpolated unescaped into `control="..."`.
+
+    ``repr()`` (``_py_literal``) legitimately preserves the hostile text as
+    inert *string data* at the code site — that data can safely contain the
+    substring ``exec(`` without being unsafe, the same way a string literal
+    ``"rm -rf /"`` in source is inert. What actually matters, and what the
+    original bug allowed, is that the value could break OUT of its quoting
+    and become live, executable code. So the precise check walks the parsed
+    AST for an actual ``exec(...)`` *call* — proof nothing broke out — rather
+    than a blunt substring search that would also flag safe, quoted data.
+    """
+    generated = ReferencePytestGenerator().emit(
+        _exploit(pattern_id="safe-id", synthetic_control=hostile)
+    )
+    tree = ast.parse(generated.source)  # must remain valid Python
+    call_names = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "exec" not in call_names
+
+
+def test_emitted_source_always_parses() -> None:
+    generated = ReferencePytestGenerator().emit(_exploit(pattern_id="safe-id"))
+    ast.parse(generated.source)
+
+
+def test_falsy_synthetic_control_does_not_select_the_control_template() -> None:
+    """DCR-0022: `in` tested key presence, emitting `control=""`."""
+    generated = ReferencePytestGenerator().emit(
+        _exploit(pattern_id="safe-id", synthetic_control="")
+    )
+    assert "assert_control_holds" not in generated.source
+
 
 # A realistic confirmed exploit: indirect prompt injection via a note body,
 # tagged across all four compliance frameworks.
@@ -74,7 +164,7 @@ def test_emits_control_template_for_synthetic_control_metadata() -> None:
     )
     src = ReferencePytestGenerator().emit(exploit).source
     assert "testkit.assert_control_holds(" in src
-    assert 'control="W2"' in src
+    assert "control='W2'" in src  # rendered via repr(), not a bare f-string
     assert "load-bearing" in src.lower()
     # It must NOT fall back to the plain custom / reference templates.
     assert "assert_target_resists(" not in src
@@ -104,7 +194,7 @@ from mylonite import testkit
 def test_security_indirect_injection_note_body_direct() -> None:
     """The guarded twin must resist indirect-injection-note-body-direct (LLM01 · LLM05 · ASI01 · ASI06 · AML.T0051)."""
     here = Path(__file__).parent
-    exploit = testkit.load_exploit(here / "exploit_indirect-injection-note-body-direct.json")
+    exploit = testkit.load_exploit(here / 'exploit_indirect-injection-note-body-direct.json')
     testkit.assert_guard_holds(exploit, fixtures_dir=here / "fixtures")
 '''
 
