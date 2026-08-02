@@ -97,13 +97,26 @@ _DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
 )
 
 
-def tool_executed_not_deferred(
+def executed_occurrence_index(
     effect_trace_blob: str,
     name: str,
     *,
     deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
-) -> bool:
-    """True iff ``name`` was called AND its result shows the effect EXECUTED.
+) -> int | None:
+    """Position of the trace entry where ``name`` actually EXECUTED, or ``None``.
+
+    ``tool_executed_not_deferred`` (below) only answers whether ANY occurrence
+    of ``name`` executed. A caller that needs to reason about WHICH call in
+    the ordered sequence dispatched — e.g. "did an approval tool run BEFORE
+    the occurrence that actually executed?" — needs the occurrence's
+    position, not just a bool: a target can call the same tool more than
+    once (e.g. once deferred/staged, then again later actually dispatching),
+    and the FIRST occurrence of ``name`` is not necessarily the EXECUTED one.
+
+    The returned index is positional within the parsed trace list, which is
+    built from the same ordered call list as ``AdapterResponse.tool_calls``
+    (both derive from the adapter's single ``planner_calls``/setup list), so
+    it can be sliced directly against that list by a caller.
 
     Structure-first and provider/app-neutral: a call whose result carries
     ``is_error=true`` (a guarded refusal at the MCP protocol level) is NOT
@@ -112,16 +125,16 @@ def tool_executed_not_deferred(
     effect. ``effect_trace_blob`` is the JSON list of
     ``{"tool","args","result","is_error"}`` entries.
 
-    Returns False on malformed JSON or zero matching successful calls.
+    Returns ``None`` on malformed JSON or zero matching executed calls.
     """
     try:
         trace = json.loads(effect_trace_blob or "[]")
     except json.JSONDecodeError:
-        return False
+        return None
     if not isinstance(trace, list):
-        return False
+        return None
     lowered = tuple(m.lower() for m in deferred_markers)
-    for entry in trace:
+    for i, entry in enumerate(trace):
         if not isinstance(entry, dict) or entry.get("tool") != name:
             continue
         if entry.get("is_error"):
@@ -129,8 +142,29 @@ def tool_executed_not_deferred(
         result = str(entry.get("result", "")).lower()
         if any(m in result for m in lowered):
             continue  # deferred/queued — not executed (heuristic last resort)
-        return True
-    return False
+        return i
+    return None
+
+
+def tool_executed_not_deferred(
+    effect_trace_blob: str,
+    name: str,
+    *,
+    deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
+) -> bool:
+    """True iff ``name`` was called AND its result shows the effect EXECUTED.
+
+    Thin bool wrapper over :func:`executed_occurrence_index` — see that
+    function for the structural rules (is_error / deferred-markers) and for
+    the WHICH-occurrence distinction a caller needing the position (not just
+    the yes/no) should use instead.
+
+    Returns False on malformed JSON or zero matching successful calls.
+    """
+    return (
+        executed_occurrence_index(effect_trace_blob, name, deferred_markers=deferred_markers)
+        is not None
+    )
 
 
 def tool_result_contains(effect_trace_blob: str, name: str, needle: str) -> bool:
