@@ -77,6 +77,18 @@ def _mask_kv(match: re.Match[str]) -> str:
     return f"{match.group('key')}{match.group('sep')}{REDACTION_PLACEHOLDER}"
 
 
+def _key_looks_secret(name: str) -> bool:
+    """True when a field/env/argument KEY NAME alone signals a credential.
+
+    The single place the ``_KV_KEYS`` key-name rule lives — :func:`_is_secret_env`
+    and :func:`redact_value` both call this instead of each independently
+    running ``re.search(_KV_KEYS, ...)``, which is exactly the kind of
+    duplication that drifts the next time ``_KV_KEYS`` changes (a review found
+    the two copies already existed before this was extracted).
+    """
+    return bool(re.search(_KV_KEYS, name, re.IGNORECASE))
+
+
 #: ``scheme://user:secret@host`` — the shape a DB/remote URL takes when it
 #: carries an inline credential. Masks only the password span so the host stays
 #: legible in an error message (DCR-0016 cli-config, DCR-0019 gate-report).
@@ -143,21 +155,29 @@ def redact_value(value: object) -> object:
     ``mcp_trace_planner``): a target's tool schema can legitimately accept a
     credential-bearing parameter, and a planner steered by injected content may
     pass a real one, which then rides into the persisted exploit/scan-report JSON
-    (DCR-0003). Two independent masking rules apply when recursing into a dict,
-    mirroring :func:`_is_secret_env`:
+    (DCR-0003). Two independent masking rules apply when recursing into a dict:
 
     * a value whose KEY matches ``_KV_KEYS`` (``password``, ``api_key``,
-      ``token``, ``secret``, ...) is masked unconditionally, even if the value
-      itself doesn't independently look secret-shaped (e.g. a plain passphrase
-      with no provider-key prefix) — key name alone is enough signal;
+      ``token``, ``secret``, ...), via the shared :func:`_key_looks_secret`, is
+      masked unconditionally, even if the value itself doesn't independently
+      look secret-shaped (e.g. a plain passphrase with no provider-key prefix)
+      — key name alone is enough signal;
     * every other string value still goes through the shape-based :func:`redact`,
       so a URL or prose body that happens to embed something secret-shaped is
       still caught.
 
-    This keeps the oracle predicates that inspect argument values (e.g. did
-    ``fetch`` get called with an attacker-controlled URL, did ``write_file``
-    carry an attacker marker) working: neither rule touches a non-credential-
-    named string that isn't itself secret-shaped.
+    This DELIBERATELY does NOT also call :func:`looks_like_api_key` on the
+    shape-fallback path, unlike :func:`_is_secret_env`. ``looks_like_api_key``'s
+    permissive branch (any 32+-char, whitespace/slash-free token) is right for
+    an ``env:`` VALUE — a static, operator-supplied config string — but wrong
+    for a LIVE tool-call argument: a note id, a tool-call id, or a
+    planner-visible attacker-planted payload can easily be a long opaque
+    alnum/underscore run with no spaces or slashes, and the oracle predicates
+    (``plugins/_mcp/predicates/{fetch,filesystem,github}.py``, via
+    ``tool_was_called_with_arg``) need those values to survive UNMASKED to
+    detect the attack. :func:`redact`'s own docstring makes the same call for
+    exactly this reason ("deliberately do NOT match ... tool-call ids, or note
+    ids"); this keeps that contract instead of quietly widening it.
     """
     if isinstance(value, str):
         return redact(value)
@@ -165,7 +185,7 @@ def redact_value(value: object) -> object:
         return {
             k: (
                 REDACTION_PLACEHOLDER
-                if isinstance(v, str) and re.search(_KV_KEYS, str(k), re.IGNORECASE)
+                if isinstance(v, str) and _key_looks_secret(str(k))
                 else redact_value(v)
             )
             for k, v in value.items()
@@ -260,10 +280,17 @@ _REDACTION_BANNER: Final = (
 
 
 def _is_secret_env(key: str, value: object) -> bool:
-    """True when an ``env:`` entry should be masked before the file is persisted."""
+    """True when an ``env:`` entry should be masked before the file is persisted.
+
+    Unlike :func:`redact_value`'s shape-fallback, this also calls
+    :func:`looks_like_api_key` — appropriate here because an ``env:`` value is
+    static, operator-supplied config (never something an oracle predicate
+    needs to string-match against), so the broader "looks like an opaque key"
+    heuristic has no false-positive cost.
+    """
     if not isinstance(value, str):
         return False
-    if re.search(_KV_KEYS, key, re.IGNORECASE):
+    if _key_looks_secret(key):
         return True
     return looks_like_api_key(value) or redact(value) != value
 

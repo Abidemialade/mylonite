@@ -23,6 +23,8 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from mylonite._cli_io import console_print
+from mylonite._redaction import redact
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
@@ -110,12 +112,22 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
 
 
 def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str:
-    """Build a Rich-rendered summary table and return it as plain text.
+    """Build a Rich-rendered summary table and return it as REDACTED plain text.
 
     ``ascii_safe`` forces ASCII-only output (marks, box, separators) so the
     string is safe to print to a non-UTF-8 console; ``None`` auto-detects from
     ``sys.stdout``. A completed scan must never crash on output (Issue #9) — the
     CLI already forces UTF-8, but driver/embedded callers may not.
+
+    The returned string is passed through :func:`mylonite._redaction.redact`
+    before it comes back, so every current AND future caller is safe by
+    construction — one review found a caller (``mylonite report``) that
+    rendered this exact string to a real console with no redaction, even
+    though ``mylonite scan`` redacted it. Free-text cell values
+    (``attempt.verdict_reason``) are ALSO redacted before they reach the
+    table, not just here: Rich wraps a cell's text to fit the column width,
+    which can split a secret-shaped token across a line break and defeat a
+    regex over the final flattened string.
     """
     if ascii_safe is None:
         ascii_safe = _stdout_is_ascii_only()
@@ -142,16 +154,18 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             mark,
             attempt.seed_id,
             attempt.verdict_mechanism or "-",
-            attempt.verdict_reason or "",
+            # Free text (an LLM judge's rationale can quote target/response
+            # content) — redact before Rich's column-width wrapping, not after.
+            redact(attempt.verdict_reason or ""),
         )
 
-    console.print(table)
+    console_print(console, table)
     counts = (
         f"{len(report.attempts)} attempts{sep}{report.findings_count} findings{sep}"
         f"provider={report.provider}{sep}model={report.model}{sep}"
         f"{report.elapsed_seconds:.1f}s"
     )
-    console.print(counts)
+    console_print(console, counts)
     if report.inconclusive_attempts:
         judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
         denom = judged or report.inconclusive_attempts
@@ -162,21 +176,23 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         # A scan where every judged attempt fell back found nothing because it
         # could not judge; it must not read as clean.
         style = "bold red" if report.inconclusive_attempts >= denom else "yellow"
-        console.print(f"[{style}]{line}[/{style}]")
+        console_print(console, f"[{style}]{line}[/{style}]")
     # R7: a customiser fallback means a seed body was NOT refined for this target
     # (raw seed used) — surface it so a low-quality plant isn't invisible.
     customiser_fallbacks = report.fallback_breakdown.get("customiser_fallback", 0)
     if customiser_fallbacks:
-        console.print(
+        console_print(
+            console,
             f"[yellow]customiser: {customiser_fallbacks} payload(s) used the raw seed "
             "body (LLM customisation fell back) - the plant may be less target-tuned"
-            "[/yellow]"
+            "[/yellow]",
         )
     nrun_disagreements = report.fallback_breakdown.get("nrun_disagreement", 0)
     if nrun_disagreements:
-        console.print(
+        console_print(
+            console,
             f"[yellow]flakiness: {nrun_disagreements} payload(s) disagreed across runs "
-            "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]"
+            "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]",
         )
     # Correctness safeguard (PR3): an attempt that was NOT TESTED (poison never
     # delivered / no seed_arm to plant) proved nothing — it must not let a
@@ -184,14 +200,15 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     # can never be mistaken for safety.
     not_tested = sum(1 for a in report.attempts if a.outcome in NOT_TESTED_OUTCOMES)
     if not_tested:
-        console.print(
+        console_print(
+            console,
             f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
             "(planted payload undelivered, no seed_arm, or no plant/sink/recall "
             "surface) - those seeds proved NOTHING. This is not a clean result for "
             "them; declare a seed_arm (and for the tool-chaining / memory modes, "
             "ensure the target exposes a plant + sink/recall surface), then "
-            "re-scan.[/bold red]"
+            "re-scan.[/bold red]",
         )
     if report.aborted:
-        console.print(f"[red]aborted: {report.aborted}[/red]")
-    return buffer.getvalue()
+        console_print(console, f"[red]aborted: {report.aborted}[/red]")
+    return redact(buffer.getvalue())

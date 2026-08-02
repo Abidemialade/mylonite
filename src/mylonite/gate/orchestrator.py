@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mylonite._cli_io import echo
 from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.gate.mitigation import build_pr_body
 
@@ -39,7 +40,7 @@ def run_gate(
 ) -> GateResult:
     exploits = scan_fn()
     if not exploits:
-        print("Mylonite gate: no exploit found — nothing to gate.")
+        echo("Mylonite gate: no exploit found — nothing to gate.")
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
 
     exploit = exploits[0]
@@ -57,7 +58,7 @@ def run_gate(
     report = validate_fn(generated)
     assert report is not None  # noqa: S101  # removed in P9
     if not report.kept:
-        print("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
+        echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)
 
     body = build_pr_body(exploit, report, llm_enrich=llm_enrich)

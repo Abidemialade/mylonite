@@ -105,33 +105,41 @@ embedded in a `--target-file` argument the probed planner echoes back. Every
 place that value could otherwise leave the machine unmasked is routed through
 `mylonite._redaction`:
 
-- **Console / CI output.** `src/` never calls `typer.echo` directly — every
-  human-facing string leaves through `mylonite._cli_io.echo` / `echo_err` /
-  `echo_exc`, which redact secret-shaped tokens first. This is enforced by a
-  test (`tests/test_cli_output_boundary.py`), not just convention.
+- **Console / CI output.** `src/` never calls `typer.echo`, `console.print`,
+  or bare `print` directly — every human-facing string leaves through
+  `mylonite._cli_io` (`echo` / `echo_err` / `echo_exc` / `console_print`),
+  which redact secret-shaped tokens first. This is enforced by a test
+  (`tests/test_cli_output_boundary.py`), not just convention. A Rich `Table`'s
+  free-text cells (e.g. a validation leg's `detail`, a scan attempt's
+  `verdict_reason`) are redacted at the point they're inserted, before Rich's
+  column-width wrapping can split a secret-shaped token across a line break.
 - **A pydantic validation error.** A malformed `--target-file` or `--env`
   raises a `ValidationError` whose default `str()` embeds the offending raw
   field value (`input_value`). `echo_exc` renders it via `redact_exception`,
   which drops `input_value` and prints only the field path + message.
 - **Any `target.yaml` Mylonite writes or copies.** The scan-dir copy
-  (`mylonite scan`), the co-located copy (`mylonite generate`), and the gate
-  PR copy (`mylonite gate`) all go through `redact_target_yaml`: every
+  (`mylonite scan`), the co-located copy (`mylonite generate`), the gate PR
+  copy (`mylonite gate`), and the `scan --scaffold` / `mylonite init` starter
+  all go through the same `redact_env` / `redact_target_yaml` masking: every
   `headers` / `request.headers` value is masked unconditionally, and every
-  credential-shaped `env` value is masked, leaving key names and structure
+  credential-shaped `env` value — by key name (`password`, `api_key`,
+  `token`, ...) OR value shape — is masked, leaving key names and structure
   intact so the file still documents the target and still loads. The same
   masking is `dump_target_file`'s default for an inline `mcp:custom` target.
-- **The SARIF upload.** GitHub code scanning is a persistent, often
-  broadly-visible surface; a real exfiltration finding's narration is
-  redacted before it rides into the SARIF `message`.
+- **The SARIF upload and the JSON finding bundle.** Both are written to disk
+  unconditionally (`mylonite gate`, `mylonite report --json`) and the SARIF
+  one is uploaded to GitHub code scanning — a persistent, often
+  broadly-visible surface. A real exfiltration finding's narration
+  (`success_reason`) is redacted before it rides into either artefact.
 - **The retained attack-evidence trace.** A probed tool's schema can
   legitimately accept a credential-bearing parameter, and a planner steered by
   injected content may pass a real one. Recorded tool-call arguments
   (`mcp_trace_planner`, persisted into `exploit_*.json` / `scan_report.json`)
-  mask only credential-shaped argument *values* — not all of them, and not the
-  keys — so the oracle predicates that inspect those same values (e.g. did
-  `fetch` target the attacker host, did `write_file` carry the attacker
-  marker) keep working; a URL or prose body never matches the credential
-  patterns and passes through unchanged.
+  mask a credential-shaped argument *value* — by key name OR shape — but not
+  every value and not the keys, so the oracle predicates that inspect those
+  same values (e.g. did `fetch` target the attacker host, did `write_file`
+  carry the attacker marker) keep working; a URL or prose body never matches
+  the credential rules and passes through unchanged.
 
 The one place a credential is used unmasked is the live subprocess/HTTP call
 to the target itself — that is the whole point of testing it. Redaction never

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from mylonite._cli_io import echo
+
 Runner = Callable[..., Any]
 
 
@@ -91,7 +93,7 @@ def open_or_print_pr(
             f"gh pr create --base {base} --head {branch} "
             f"--title {shlex.quote(pr_title)} --body-file {rel_body}"
         )
-        print(
+        echo(
             f"\nGate artifacts committed to branch '{branch}'.\n"
             f"To open the gating PR, run:\n  git push -u origin {branch}\n  {gh_cmd}\n"
         )

@@ -24,6 +24,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from mylonite._cli_io import console_print
 from mylonite.scan.artefacts import OUTCOME_MARKS
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, Weakness
@@ -129,7 +130,7 @@ def render_demo(
     if console is None:
         console = Console()
 
-    console.print(Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow"))
+    console_print(console, Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow"))
 
     table = Table(
         title="the reference app — vulnerable vs guarded build",
@@ -151,13 +152,13 @@ def render_demo(
             _aggregate_mark(vulnerable, pattern_ids),
             _aggregate_mark(guarded, pattern_ids),
         )
-    console.print(table)
+    console_print(console, table)
 
     n_vuln = vulnerable.report.findings_count
     n_guard = guarded.report.findings_count
-    console.print(_HEADLINE_TEMPLATE.format(n_vuln=n_vuln, n_guard=n_guard), highlight=False)
+    console_print(console, _HEADLINE_TEMPLATE.format(n_vuln=n_vuln, n_guard=n_guard), highlight=False)
     if n_guard > 0:
-        console.print(f"[yellow]{_GUARDED_FINDING_NOTE}[/yellow]", highlight=False)
-    console.print(_TEASER, highlight=False)
-    console.print(_NEXT_STEP, highlight=False)
-    console.print(f"mode: {mode} — {elapsed_s:.1f}s", highlight=False)
+        console_print(console, f"[yellow]{_GUARDED_FINDING_NOTE}[/yellow]", highlight=False)
+    console_print(console, _TEASER, highlight=False)
+    console_print(console, _NEXT_STEP, highlight=False)
+    console_print(console, f"mode: {mode} — {elapsed_s:.1f}s", highlight=False)

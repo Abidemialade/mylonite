@@ -214,6 +214,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from mylonite._redaction import (
+    redact_env,
     redact_exception,
     redact_target_yaml,
     redact_value,
@@ -292,3 +293,37 @@ def test_redact_value_still_masks_by_shape_under_a_plain_key() -> None:
     out = redact_value({"note": f"contains {secret}"})
     assert secret not in out["note"]
     assert REDACTION_PLACEHOLDER in out["note"]
+
+
+# --- redact_env: direct unit coverage (spec-compliance follow-up) -----------
+
+
+def test_redact_env_masks_by_key_name() -> None:
+    """The key-match branch: a plain passphrase under a credential-named key is
+    masked even though it has no provider-key shape."""
+    out = redact_env({"PASSWORD": "correcthorsebatterystaple", "LOG_LEVEL": "debug"})
+    assert out["PASSWORD"] == REDACTION_PLACEHOLDER
+    assert out["LOG_LEVEL"] == "debug"
+
+
+def test_redact_env_masks_by_value_shape_under_a_plain_key() -> None:
+    """The shape-fallback branch: a non-credential-named key is still masked
+    when its value independently looks like a provider key (looks_like_api_key)
+    or matches redact()'s shape patterns."""
+    out = redact_env(
+        {
+            # "OPAQUE_ID" doesn't match _KV_KEYS — this exercises the shape
+            # fallback, not the key-name branch. No known provider prefix, but
+            # long/opaque/no-spaces-or-slashes — looks_like_api_key's permissive
+            # branch.
+            "OPAQUE_ID": "x" * 40,
+            "DB_URL": "postgres://user:realpass@prod-db/app",
+            "PORT": "8080",
+        }
+    )
+    assert out["OPAQUE_ID"] == REDACTION_PLACEHOLDER
+    # Unlike redact()'s partial in-place masking, an env value flagged secret-
+    # shaped is replaced WHOLESALE (the key name is what survives, not a
+    # partially-masked value) — matches redact_target_yaml's documented contract.
+    assert out["DB_URL"] == REDACTION_PLACEHOLDER
+    assert out["PORT"] == "8080"  # a plain non-secret value is untouched

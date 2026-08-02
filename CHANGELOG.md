@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     values to detect exfiltration, so blanket-dropping them would have
     silently disabled detection.
   - `redact()` now also masks `scheme://user:pass@host` URL credentials.
+  - `redact_value`/`redact_env` mask a credential-shaped value by KEY NAME
+    (`password`, `api_key`, `token`, ...) as well as by shape — a plain
+    passphrase with no provider-key prefix under a credential-named key
+    previously sailed through unmasked.
+  - `scan --scaffold` / `mylonite init --transport mcp` no longer writes a
+    `--env` value verbatim into the starter `target.yaml` it generates — a
+    fourth, earlier-in-the-lifecycle origination path for the same leak class
+    as the scan/generate/gate copy sites.
+  - The output boundary now also covers `console.print` and bare `print` —
+    not just `typer.echo`. `mylonite report` rendered a scan/validation
+    summary via a bare `console.print(...)` with no redaction, even though
+    `mylonite scan` redacted the exact same string.
+  - The JSON finding bundle (`report --json`) now redacts a finding's
+    narration the same way the SARIF artefact does.
 
   See "What Mylonite does with your credentials" in `SECURITY.md`.
 

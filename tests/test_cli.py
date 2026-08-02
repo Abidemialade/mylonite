@@ -1696,6 +1696,73 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
+def test_report_scan_console_output_redacts_secret_shaped_verdict_reason(tmp_path: Path) -> None:
+    """Spec-compliance follow-up (Important #1): `mylonite report` used to render
+    `render_summary()`'s output via a bare `console.print(...)` with NO redaction,
+    even though `mylonite scan` redacted the exact same string. This is the
+    concrete repro: a scan_report.json whose verdict_reason carries a secret-
+    shaped token must not leak it through `mylonite report`'s console output."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason=f"the target echoed {secret} back to the user",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    (scan_dir / "scan_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert secret not in result.output
+
+
+def test_report_validation_console_output_redacts_secret_shaped_detail(tmp_path: Path) -> None:
+    """The validation-report leg of the same gap: `_render_validation_report`'s
+    per-leg table embeds ValidationOutcome.detail (free text)."""
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    gen = tmp_path / "gen"
+    gen.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(
+                stage="build", passed=False, detail=f"collect failed: {secret}", metric=None
+            ),
+        ],
+        kept=False,
+    )
+    (gen / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert secret not in result.output
+
+
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()

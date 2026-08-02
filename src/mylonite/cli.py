@@ -35,7 +35,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from mylonite._cli_io import echo, echo_err, echo_exc
+from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
 
@@ -1914,6 +1914,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     """
     # ASCII-aware marks/separators so the showcase surface never crashes on a
     # legacy cp1252 console — independent of the root callback's UTF-8 forcing.
+    from mylonite._redaction import redact
     from mylonite.scan.artefacts import _stdout_is_ascii_only
 
     ascii_safe = _stdout_is_ascii_only()
@@ -1942,16 +1943,20 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     for outcome in report.outcomes:
         mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
         metric = f"{outcome.metric:.2f}" if outcome.metric is not None else "-"
-        table.add_row(outcome.stage, mark, metric, outcome.detail)
+        # outcome.detail is free text from the validation pipeline (e.g. an
+        # exception message) — redact it here, before Rich's column-width
+        # wrapping has a chance to split a secret-shaped token across a line
+        # break, which would defeat a post-render regex redaction.
+        table.add_row(outcome.stage, mark, metric, redact(outcome.detail))
 
-    console.print(table)
+    console_print(console, table)
 
     # --- the differential-oracle EVIDENCE (PR2: make the differential legible) --------
     # The gating formula with live per-leg marks, the fires/resists counts, and
     # the per-seed kill matrix were previously buried in report.notes (rendered
     # nowhere). Surface them so a "KEPT" verdict shows WHY it's trustworthy.
     # Metric legend — what the bare decimals in the table's metric column mean.
-    console.print(
+    console_print(console,
         "metric legend: "
         + sep.join(
             ["differential=agreement", "flakiness=reproducibility", "metamorphic=robustness (0-1)"]
@@ -1968,45 +1973,45 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             if leg in legs_by_stage
         )
         verdict = "KEPT" if report.kept else "REJECTED"
-        console.print(f"gate: kept = {rendered}  =>  {verdict}")
+        console_print(console, f"gate: kept = {rendered}  =>  {verdict}")
 
     # Reproducibility counts (fires/resists) behind differential + flakiness.
     repro = getattr(report, "reproducibility", None)
     if repro is not None:
         if repro.guard_resisted is not None:
-            console.print(
+            console_print(console,
                 f"reproducibility: vulnerable fired {repro.vuln_fired}/{repro.iterations}, "
                 f"guarded resisted {repro.guard_resisted}/{repro.iterations}"
             )
         else:
-            console.print(
+            console_print(console,
                 f"reproducibility: reproduced {repro.vuln_fired}/{repro.iterations} "
                 "against the real target (no in-repo guarded twin)"
             )
 
     if report.mutation_score is not None:
-        console.print(f"mutation score: {report.mutation_score:.2f}")
+        console_print(console, f"mutation score: {report.mutation_score:.2f}")
 
     # Per-seed kill matrix — the oracle's discrimination, seed by seed.
     matrix = getattr(report, "mutation_matrix", None) or []
     if matrix:
         killed = sum(1 for s in matrix if s.killed)
-        console.print(
+        console_print(console,
             f"kill matrix ({killed}/{len(matrix)} seeds killed = "
             "fired-on-vulnerable, resisted-on-guarded):"
         )
         for seed in matrix:
-            console.print(f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
+            console_print(console, f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
 
     # Metamorphic is report-only — say so explicitly so a failing metamorphic row
     # is never read as a gate failure.
     if any(o.stage == "metamorphic" for o in report.outcomes):
-        console.print("note: metamorphic robustness is report-only - it does not gate kept.")
+        console_print(console, "note: metamorphic robustness is report-only - it does not gate kept.")
 
     if report.kept:
-        console.print(f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
+        console_print(console, f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
     else:
-        console.print(f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
+        console_print(console, f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
         # The differential remediation must not accuse a real (server-layer) control
         # of being theater when the guarded side was only the SYNTHETIC boundary shim.
         # The validator stamps a [guarded-twin=...] marker into notes; key off it.
@@ -2036,7 +2041,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:
-                console.print(f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
+                console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
 
 
 def _provider_preflight(provider: str, model: str) -> bool:
@@ -2431,14 +2436,14 @@ def report(
                 # for artefacts whose persisted exploit predates enrichment. Captured
                 # for the dashboard renderer.
                 dashboard_exploit = _map_compliance(testkit.load_exploit(exploit_matches[0]))
-                console.print(f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}")
-                console.print(
+                console_print(console, f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}")
+                console_print(console,
                     f"target: {dashboard_exploit.target_id}  "
                     f"pattern: {dashboard_exploit.pattern_id}"
                 )
             except (FileNotFoundError, ValueError):
                 pass
-        console.print(f"artefacts: {path.parent}")
+        console_print(console, f"artefacts: {path.parent}")
     else:
         from mylonite import testkit
         from mylonite.contracts._types import ScanReport
@@ -2452,7 +2457,7 @@ def report(
             raise typer.Exit(code=EXIT_CONFIG) from exc
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
-        console.print(render_summary(result), markup=False)
+        console_print(console, render_summary(result), markup=False)
         # Compliance tags aggregated across the co-located exploit files, enriched
         # on read (derive NIST from the OWASP cross-refs) so the report matches the
         # emitted test's marks even for scan dirs whose persisted exploits predate
@@ -2469,8 +2474,8 @@ def report(
             for ids in (c.owasp_llm, c.owasp_asi, c.mitre_atlas, c.nist_ai_rmf):
                 tags.update(ids)
         if tags:
-            console.print(f"compliance: {', '.join(sorted(tags))}")
-        console.print(f"target: {target_id}  artefacts: {path.parent}")
+            console_print(console, f"compliance: {', '.join(sorted(tags))}")
+        console_print(console, f"target: {target_id}  artefacts: {path.parent}")
 
     if sarif is not None or json_bundle is not None:
         import json as _json
@@ -3385,16 +3390,16 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
             f"{r.contribution:+.0%}",
             f"{r.raw_fired}/{r.guarded_fired} of {r.total}",
         )
-    console.print(table)
+    console_print(console, table)
     load_bearing = [r.weakness for r in results if r.load_bearing]
     redundant = [r.weakness for r in results if r.status == "redundant"]
     theater = [r.weakness for r in results if r.status == "theater"]
     if load_bearing:
-        console.print(f"load-bearing: {', '.join(load_bearing)}")
+        console_print(console, f"load-bearing: {', '.join(load_bearing)}")
     if redundant:
-        console.print(f"redundant (another control covers it): {', '.join(redundant)}")
+        console_print(console, f"redundant (another control covers it): {', '.join(redundant)}")
     if theater:
-        console.print(f"security theater (no marginal contribution): {', '.join(theater)}")
+        console_print(console, f"security theater (no marginal contribution): {', '.join(theater)}")
 
 
 @app.command()
@@ -3612,4 +3617,4 @@ def taxonomy_list(
     table.add_column("Source")
     for entry in entries:
         table.add_row(entry.id, entry.name, entry.source_url)
-    _console.print(table)
+    console_print(_console, table)
