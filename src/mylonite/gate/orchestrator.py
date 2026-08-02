@@ -44,7 +44,7 @@ def run_gate(
 
     exploit = exploits[0]
     generated = generate_fn(exploit)
-    assert generated is not None
+    assert generated is not None  # noqa: S101  # removed in P9
 
     out_dir.mkdir(parents=True, exist_ok=True)
     test_path = out_dir / generated.filename
@@ -55,7 +55,7 @@ def run_gate(
     )
 
     report = validate_fn(generated)
-    assert report is not None
+    assert report is not None  # noqa: S101  # removed in P9
     if not report.kept:
         print("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)

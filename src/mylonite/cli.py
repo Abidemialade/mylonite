@@ -1860,7 +1860,7 @@ def _validate_custom(
 
     def _factory() -> Any:
         if server_layer:
-            assert control_weakness is not None  # narrowed by server_layer
+            assert control_weakness is not None  # narrowed by server_layer  # noqa: S101  # removed in P9
             return build_mcp_adapter(
                 family=spec.family,
                 scope=tf.scope,

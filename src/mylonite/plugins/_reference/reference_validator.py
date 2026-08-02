@@ -1094,7 +1094,7 @@ class DifferentialValidator(ValidatorBase):
         co-located exploit are written next to the recorded ``fixtures/`` so the
         emitted test resolves its data, then run offline as a FULL pass.
         """
-        assert self._record_fixtures_dir is not None  # guarded by caller
+        assert self._record_fixtures_dir is not None  # guarded by caller  # noqa: S101  # removed in P9
         fixtures_dir = self._record_fixtures_dir
         exploit = test.exploit
 

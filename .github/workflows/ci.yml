@@ -131,11 +131,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           pip install -e ./reference_targets/mcp_kitchen_sink
-          pip install bandit pip-audit detect-secrets
+          pip install bandit pip-audit==2.7.3 detect-secrets
       - name: Bandit (SAST, product code, medium+ severity)
         run: bandit -ll -r src/mylonite
       - name: detect-secrets (tracked tree vs committed baseline)
         run: git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
       - name: pip-audit (dependency CVEs, informational)
+        # Not --strict: this job installs mcp-kitchen-sink editable from a local
+        # path (it isn't published to PyPI yet — see pyproject.toml's `demo`
+        # extra comment), which pip-audit always reports as an un-auditable
+        # skip. --strict promotes ANY skip to a hard failure, even a skip
+        # produced by the deliberate --skip-editable flag (verified locally),
+        # so a strict gate here would fail on every run regardless of real
+        # CVEs. Verified locally against this exact dependency set
+        # (pip install -e ".[dev]" + -e ./reference_targets/mcp_kitchen_sink):
+        # `pip-audit` reports "No known vulnerabilities found". Revisit
+        # --strict once mcp-kitchen-sink is published to PyPI.
         continue-on-error: true
         run: pip-audit

@@ -361,13 +361,13 @@ def _supported_response_mode(model: str) -> str | None:
         if litellm.supports_response_schema(model=model):
             return "json_schema"
     except Exception:
-        pass
+        logger.debug("%s: supports_response_schema introspection failed; degrading", model)
     try:
         params = litellm.get_supported_openai_params(model=model) or []
         if "response_format" in params:
             return "json_object"
     except Exception:
-        pass
+        logger.debug("%s: get_supported_openai_params introspection failed; degrading", model)
     return None
 
 

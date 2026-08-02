@@ -219,7 +219,7 @@ class LiteLLMRecorder:
 
         real = await litellm.acompletion(model=model, messages=list(messages), **kwargs)
         serialised = json.dumps(_dictify_response(real), indent=2, sort_keys=True) + "\n"
-        assert isinstance(path, Path)  # __post_init__ enforces Path in record mode
+        assert isinstance(path, Path)  # __post_init__ enforces Path in record mode  # noqa: S101  # removed in P9
         if path.is_file():
             existing = path.read_text(encoding="utf-8")
             if existing != serialised:

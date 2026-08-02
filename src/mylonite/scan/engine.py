@@ -480,7 +480,7 @@ class ScanEngine:
             else:
                 fail_passes.append(result)
 
-        assert last_pass is not None  # runs >= 1 and every skip returned above
+        assert last_pass is not None  # runs >= 1 and every skip returned above  # noqa: S101  # removed in P9
         is_finding = success_count * 2 > runs  # strict majority (runs=1 → 1 pass)
         # Surface observed flakiness: the runs both fired and didn't.
         run_disagreement = (success_count, runs) if runs > 1 and 0 < success_count < runs else None
