@@ -36,6 +36,7 @@ from rich.console import Console
 from rich.table import Table
 
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
+from mylonite._paths import safe_slug
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
 
@@ -1406,7 +1407,7 @@ def _emit_generated_test(
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
-    colocated_exploit = out_dir / f"exploit_{enriched.pattern_id}.json"
+    colocated_exploit = out_dir / f"exploit_{safe_slug(enriched.pattern_id)}.json"
     colocated_exploit.write_text(
         json_mod.dumps(enriched.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -2875,16 +2876,21 @@ def _post_gate_annotations(
         sp_path: str | None = None
         sp_text: str | None = None
         if target_file is not None:
-            from mylonite.plugins._mcp.target_file import load_target_file
+            from mylonite.plugins._mcp.target_file import (
+                load_target_file,
+                resolved_system_prompt_path,
+            )
 
             tf = load_target_file(target_file)
-            if tf.system_prompt_file is not None:
-                spf = Path(tf.system_prompt_file)
+            spf = resolved_system_prompt_path(tf)  # raises PathEscapesBase on escape
+            if spf is not None:
                 sp_text = spf.read_text(encoding="utf-8")
                 try:
-                    sp_path = str(spf.resolve().relative_to(repo_root.resolve()))
+                    sp_path = str(spf.relative_to(repo_root.resolve()))
                 except ValueError:
-                    sp_path = str(spf)
+                    # Contained in the target-file dir but outside the repo — do not
+                    # publish content we cannot name relative to the PR.
+                    sp_text = None
 
         anns = annotations_from_findings(
             [(exploit, report)], system_prompt=sp_path, system_prompt_text=sp_text

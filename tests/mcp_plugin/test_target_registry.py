@@ -10,6 +10,7 @@ from mylonite.plugins._mcp.target_registry import (
     BUNDLED_TARGETS,
     InvalidTargetScope,
     UnknownTargetFamily,
+    _validate_filesystem_scope,
     resolve_target,
 )
 
@@ -34,6 +35,14 @@ def test_resolve_filesystem_rejects_empty_scope() -> None:
 def test_resolve_filesystem_rejects_relative_path() -> None:
     with pytest.raises(InvalidTargetScope, match="absolute path"):
         resolve_target("filesystem", "relative/path")
+
+
+@pytest.mark.parametrize("scope", ["/", "C:\\", "/tmp/sandbox/../../etc"])
+def test_validate_filesystem_scope_rejects_root_and_traversal(scope: str) -> None:
+    """DCR-0017: absolute-shape was the only check, so `/` collapsed the sandbox
+    to the whole disk and the target's read_file/write_file reached anything."""
+    with pytest.raises(InvalidTargetScope):
+        _validate_filesystem_scope(scope)
 
 
 def test_resolve_fetch_accepts_none_scope() -> None:

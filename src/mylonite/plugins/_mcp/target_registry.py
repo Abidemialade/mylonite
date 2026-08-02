@@ -14,12 +14,15 @@ finding **C2**.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+from mylonite._paths import PathEscapesBase, resolve_contained
 
 
 class SeedArmSpec(BaseModel):
@@ -155,13 +158,44 @@ class InvalidTargetScope(ValueError):
 
 
 def _validate_filesystem_scope(scope: str | None) -> None:
+    """Refuse a scope that is not a real, contained sandbox directory.
+
+    ``render_args`` appends this string verbatim to
+    ``@modelcontextprotocol/server-filesystem``'s argv, so it IS the launched
+    server's sandbox root. Checking only that it parses as an absolute path let
+    ``/``, ``C:\\`` and ``..``-escaping paths through, collapsing the sandbox to
+    the whole disk (DCR-0017).
+    """
     if not scope:
         raise InvalidTargetScope(
             "filesystem requires a sandbox path scope, e.g. mcp:filesystem:/tmp/sandbox"
         )
     p = Path(scope)
+    if ".." in p.parts:
+        raise InvalidTargetScope(f"filesystem scope must not contain '..'; got {scope!r}")
     if not p.is_absolute():
         raise InvalidTargetScope(f"filesystem scope must be an absolute path; got {scope!r}")
+    resolved = p.resolve()
+    if resolved.parent == resolved:
+        raise InvalidTargetScope(
+            f"filesystem scope {scope!r} is a filesystem root — that gives the target "
+            "server the whole disk. Point it at a dedicated sandbox directory."
+        )
+    if resolved == Path.home().resolve():
+        raise InvalidTargetScope(
+            f"filesystem scope {scope!r} is your home directory. Use a dedicated "
+            "sandbox directory instead."
+        )
+    root = os.environ.get("MYLONITE_FS_SCOPE_ROOT")
+    if root:
+        try:
+            resolve_contained(resolved, base=root, label="filesystem scope")
+        except PathEscapesBase as exc:
+            raise InvalidTargetScope(str(exc)) from exc
+    if not resolved.is_dir():
+        raise InvalidTargetScope(
+            f"filesystem scope {resolved} does not exist or is not a directory"
+        )
 
 
 def _validate_fetch_scope(scope: str | None) -> None:

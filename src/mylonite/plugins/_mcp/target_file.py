@@ -26,6 +26,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from mylonite._paths import resolve_contained
 from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
@@ -64,6 +65,10 @@ class TargetFile(BaseModel):
     requires_scope: bool = False
     system_prompt: str | None = None
     system_prompt_file: Path | None = None
+    #: Directory the YAML was loaded from. Set by ``load_target_file``; the base
+    #: every path field in this document is resolved against. ``None`` for an
+    #: in-memory TargetFile assembled from CLI flags, where the CWD is the base.
+    source_dir: Path | None = None
     # One-line description of what the app is for (e.g. "an email-triage assistant
     # that reads inbox messages and can send replies"). Optional; when set it is
     # threaded into the payload customiser so probes are tailored to the app's
@@ -121,11 +126,29 @@ class TargetFile(BaseModel):
         return self
 
 
-def _resolved_prompt(tf: TargetFile) -> str:
+def resolved_system_prompt_path(tf: TargetFile) -> Path | None:
+    """The contained, resolved ``system_prompt_file`` path, or ``None``.
+
+    The single place ``system_prompt_file`` becomes a real path. Two separate
+    code paths previously called ``Path(tf.system_prompt_file).read_text()``
+    with no containment check — one to build the live agent's system prompt
+    (DCR-0020) and one to publish it into a GitHub check-run annotation
+    (DCR-0012/DCR-0013) — turning a PR-editable field into arbitrary-file
+    disclosure. Both now go through here.
+    """
+    if tf.system_prompt_file is None:
+        return None
+    base = tf.source_dir or Path.cwd()
+    return resolve_contained(tf.system_prompt_file, base=base, label="system_prompt_file")
+
+
+def resolved_system_prompt(tf: TargetFile) -> str:
+    """The system prompt text: inline, from a contained file, or the default."""
     if tf.system_prompt is not None:
         return tf.system_prompt
-    if tf.system_prompt_file is not None:
-        return Path(tf.system_prompt_file).read_text(encoding="utf-8")
+    path = resolved_system_prompt_path(tf)
+    if path is not None:
+        return path.read_text(encoding="utf-8")
     return _DEFAULT_CUSTOM_PROMPT
 
 
@@ -149,7 +172,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         command=tf.command,
         args_template=tuple(tf.args),
         scope_validator=_validate_scope,
-        default_system_prompt=_resolved_prompt(tf),
+        default_system_prompt=resolved_system_prompt(tf),
         requires_scope=requires_scope,
         args_with_scope=False,
         primary_tools=tuple(tf.primary_tools),
@@ -169,10 +192,17 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
 
 def load_target_file(path: Path) -> TargetFile:
     """Parse a YAML target file into a validated ``TargetFile``."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    path = Path(path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         msg = f"target file {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)
+    # `source_dir` is derived bookkeeping — the containment base every path field
+    # in this document resolves against — never something the document itself
+    # should get to set. Always overwrite whatever the YAML says (even if it
+    # declares its own `source_dir`), so a PR-editable target.yaml can't hand
+    # itself a wider containment base and defeat resolve_contained.
+    data["source_dir"] = str(path.parent.resolve())
     return TargetFile.model_validate(data)
 
 
@@ -190,7 +220,7 @@ def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:
     Pass ``False`` only for an in-memory round-trip that never touches disk or a
     console — masking there would corrupt the reload.
     """
-    data = tf.model_dump(mode="json", exclude_defaults=True)
+    data = tf.model_dump(mode="json", exclude_defaults=True, exclude={"source_dir"})
     text = yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
     if not redact_secrets:
         return text

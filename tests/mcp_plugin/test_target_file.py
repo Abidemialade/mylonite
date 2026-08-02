@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from mylonite._paths import PathEscapesBase
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.target_file import (
     TargetFile,
@@ -13,6 +14,7 @@ from mylonite.plugins._mcp.target_file import (
     effect_probe_warnings,
     load_target_file,
     payload_placement_warnings,
+    resolved_system_prompt,
 )
 from mylonite.plugins._mcp.target_registry import InvalidTargetScope, SeedArmSpec
 
@@ -73,6 +75,20 @@ def test_target_file_control_config_round_trips_yaml(tmp_path: Path) -> None:
 def test_target_file_rejects_both_prompt_sources() -> None:
     with pytest.raises(ValueError, match="at most one"):
         _tf(system_prompt="a", system_prompt_file=Path("p.txt"))
+
+
+def test_system_prompt_file_cannot_escape_the_target_file_directory(tmp_path: Path) -> None:
+    """DCR-0020 / DCR-0012 / DCR-0013: a repo-editable YAML field became an
+    arbitrary-file-read primitive in two independent code paths."""
+    secret = tmp_path.parent / "id_rsa"
+    secret.write_text("PRIVATE", encoding="utf-8")
+    target = tmp_path / "app.yaml"
+    target.write_text(
+        "family: app\ncommand: python\nsystem_prompt_file: ../id_rsa\n", encoding="utf-8"
+    )
+    tf = load_target_file(target)
+    with pytest.raises(PathEscapesBase):
+        resolved_system_prompt(tf)
 
 
 def test_build_target_spec_shape() -> None:
@@ -273,16 +289,25 @@ def test_build_target_spec_carries_server_layer_fields() -> None:
 
 def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: Path) -> None:
     """Backward-compat: a target file that declares neither new field round-trips
-    unchanged (the optional fields are omitted on dump via exclude_defaults)."""
+    unchanged (the optional fields are omitted on dump via exclude_defaults).
+
+    Compares excluding ``source_dir``: that field is bookkeeping set by
+    ``load_target_file`` (the containment base for path fields in the document),
+    never part of the persisted YAML, so it legitimately differs between an
+    in-memory ``TargetFile`` (``source_dir=None``) and one loaded from ``p``
+    (``source_dir=p.parent``).
+    """
     from mylonite.plugins._mcp.target_file import dump_target_file
 
     tf = _tf(weakness_classes=["W2"])
     dumped = dump_target_file(tf)
     assert "control_env" not in dumped
     assert "vulnerable_launch" not in dumped
+    assert "source_dir" not in dumped
     p = tmp_path / "t.yaml"
     p.write_text(dumped, encoding="utf-8")
-    assert load_target_file(p) == tf
+    reloaded = load_target_file(p)
+    assert reloaded.model_dump(exclude={"source_dir"}) == tf.model_dump(exclude={"source_dir"})
 
 
 # --- M3: auto-wire seed_arm from the tool surface ---------------------------

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,6 +23,7 @@ from rich.console import Console
 from rich.table import Table
 
 from mylonite._cli_io import console_print
+from mylonite._paths import safe_slug
 from mylonite._redaction import redact
 from mylonite.scan.engine import ScanResult
 
@@ -73,7 +73,7 @@ def _stdout_is_ascii_only() -> bool:
 
 def _sanitise_filename(pattern_id: str) -> str:
     """Make ``pattern_id`` safe for filesystem use."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", pattern_id).strip("-_.") or "unknown"
+    return safe_slug(pattern_id)
 
 
 def _timestamped_subdir(root: Path) -> Path:

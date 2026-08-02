@@ -119,3 +119,26 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 > `sqlite:////c/Users/...` (4 slashes) and `sqlite:///C:/Users/...` (3 slashes) open
 > *different* databases on Windows — a silent way to scan an empty DB and wrongly
 > conclude the agent is clean. Prefer an absolute path and verify it opened.
+
+## Path containment
+
+`target.yaml` is a shareable, PR-editable document — a teammate can mail you one, or
+a pull request can edit the one already in your repo. Two fields resolve to a real
+filesystem path, and both are contained, not just shape-checked:
+
+- **`system_prompt_file`** resolves relative to the directory the target YAML itself
+  lives in (its `source_dir`), never the current working directory of whoever runs
+  `mylonite`. A value like `../../../../etc/passwd` — or a symlink that points outside
+  that directory — is refused before the file is ever opened; it cannot be used to read
+  an arbitrary file off your disk. See `mylonite._paths.resolve_contained`.
+- **`mcp:filesystem:<scope>`** (the sandbox path handed to
+  `@modelcontextprotocol/server-filesystem`) must be a real, existing, non-root
+  directory: `/`, `C:\`, your home directory, and any path containing `..` are all
+  rejected outright, and the directory must actually exist. Set `MYLONITE_FS_SCOPE_ROOT`
+  to an absolute directory to additionally require every filesystem scope stay inside
+  that root — an opt-in hard ceiling for CI/shared-runner environments that launch
+  scans against target files they didn't author.
+
+Both checks fail loud (`PathEscapesBase` / `InvalidTargetScope`) rather than silently
+reading or sandboxing the wrong thing. See `SECURITY.md` for what a `target.yaml` you
+received from someone else can and cannot do.
