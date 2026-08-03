@@ -306,6 +306,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (previously always claimed "the vulnerable scan would falsely show clean",
   even for a guarded-fixture problem); and `run_demo`'s live-mode
   provider/model resolution uses `is None` instead of `or`.
+- **Resolved the 7 quarantined scan-engine-review findings.** An earlier
+  review pass flagged 7 findings as "quarantined" (unverified) because a
+  tooling bug anchored each one's "evidence" to the linter's generic rule
+  text instead of the actual source line, so the specific line-number claim
+  couldn't be mechanically re-verified even though the underlying category of
+  concern was real. Each was independently re-checked against current source:
+  - `cli.py` assert in production code — **already fixed**, by the "fail loud"
+    pass above: the site now raises a typed `RuntimeError` on the
+    `control_weakness is None` invariant instead of asserting it.
+  - `plugins/_reference/reference_validator.py` assert in production code —
+    **already fixed**, same pass: `_record_and_full_pass` now raises a typed
+    `RuntimeError` if called with `_record_fixtures_dir is None` instead of
+    asserting it.
+  - `scan/engine.py` assert in production code — **already fixed**, same
+    pass: the per-payload pass loop now raises a typed `RuntimeError` if
+    `last_pass` is unexpectedly `None` after the loop instead of asserting it.
+  - `scan/_llm.py`, two sites: exception silently swallowed without logging —
+    **already fixed**: every `except` clause in the file now runs a
+    `logger.info(...)` call before falling back (confirmed by walking the
+    file's AST for `except` bodies that are bare `pass` — none found).
+  - `scan/pytest_runner.py` subprocess call, potential command-injection
+    risk — **confirmed false positive**: `run_test_file`'s `cmd` is a fixed
+    argv list (`sys.executable -m pytest <path> <flags>`) built from literal
+    strings and `str(Path)` values, passed to `subprocess.run(..., shell=False)`
+    with no shell string interpolation anywhere in the call — safe by
+    construction, as the existing `# noqa: S603` comment at the call site
+    documents.
+  - `scan/tool_roles.py` `_content_param`/id-hint substring matching —
+    **already fixed** (DCR-0015): hint matching now goes through
+    `_tokens`/`_hints_match`, which split a param name on non-alphanumeric
+    runs and camelCase boundaries and require an exact token match, so a name
+    like `video_url` (tokens `{video, url}`) no longer false-positively
+    matches the `id` hint the way a plain substring test would. Covered by
+    dedicated tests in `tests/scan/test_tool_roles.py` (the `guidance`/
+    `keyword`/`valid` substring-trap cases).
+  - No production code changes were needed for this pass — all 7 were already
+    resolved by earlier phases in this remediation plan; this entry exists so
+    the disposition of each is on the permanent record (the original review
+    file itself was never a tracked artifact).
 
 ## [0.7.5] - 2026-07-04
 
