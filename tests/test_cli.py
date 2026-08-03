@@ -1821,6 +1821,43 @@ def test_report_validation_console_output_redacts_secret_shaped_detail(tmp_path:
     assert secret not in result.output
 
 
+def test_report_validation_console_output_survives_rich_markup_in_detail(
+    tmp_path: Path,
+) -> None:
+    """DCR-0004, extended to the CLI validation table (`_render_validation_report`):
+    a ``ValidationOutcome.detail`` quoting target/exception output shaped like a
+    Rich closing tag (e.g. "[/bold]") must not crash `mylonite report` with
+    ``rich.errors.MarkupError`` — the same failure class `scan/artefacts.py`'s
+    `render_summary` was fixed for. ``detail`` is free text from the validation
+    pipeline (including third-party ``ValidatorBase`` plugins, per the versioned
+    extension contract), so it is attacker/target-influenced, unlike ``stage``
+    (a contract ``Literal``).
+    """
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    gen = tmp_path / "gen"
+    gen.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(
+                stage="build",
+                passed=False,
+                detail="collect failed: the response echoed [/bold] verbatim",
+                metric=None,
+            ),
+        ],
+        kept=False,
+    )
+    (gen / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "verbatim" in result.output
+
+
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()

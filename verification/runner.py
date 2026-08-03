@@ -80,7 +80,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         print(f"record: {data_path} missing - run `fetch` first", file=sys.stderr)
         return 2
     fetch._enable_truststore()
-    cases = injecagent.load_cases(data_path, args.split, limit=args.limit)
+    cases = injecagent.load_cases(data_path, args.split, limit=args.limit, setting=args.setting)
     # Each case is an independent, blocking litellm.completion call
     # (injecagent.record_case is sync). Farm them out to threads and await
     # them concurrently (bounded) instead of recording one case at a time.

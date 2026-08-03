@@ -33,6 +33,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
@@ -1987,10 +1988,16 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
         metric = f"{outcome.metric:.2f}" if outcome.metric is not None else "-"
         # outcome.detail is free text from the validation pipeline (e.g. an
-        # exception message) — redact it here, before Rich's column-width
+        # exception message, or a third-party ValidatorBase plugin's own
+        # detail string) — redact it here, before Rich's column-width
         # wrapping has a chance to split a secret-shaped token across a line
-        # break, which would defeat a post-render regex redaction.
-        table.add_row(outcome.stage, mark, metric, redact(outcome.detail))
+        # break, which would defeat a post-render regex redaction. Also
+        # escape Rich markup: a detail that quotes target/exception output
+        # shaped like a closing tag (e.g. "[/bold]") would otherwise raise
+        # rich.errors.MarkupError when the table renders (same class as
+        # scan/artefacts.py's render_summary fix, DCR-0004). outcome.stage is
+        # a contract Literal (not free text), so it needs neither.
+        table.add_row(outcome.stage, mark, metric, rich_escape(redact(outcome.detail)))
 
     console_print(console, table)
 
