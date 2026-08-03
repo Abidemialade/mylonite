@@ -323,9 +323,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     pass: the per-payload pass loop now raises a typed `RuntimeError` if
     `last_pass` is unexpectedly `None` after the loop instead of asserting it.
   - `scan/_llm.py`, two sites: exception silently swallowed without logging —
-    **already fixed**: every `except` clause in the file now runs a
-    `logger.info(...)` call before falling back (confirmed by walking the
-    file's AST for `except` bodies that are bare `pass` — none found).
+    **already fixed**: no `except` clause in the file is a bare `pass`
+    (confirmed by walking the file's AST for `except` bodies — none found).
+    Several narrow structural catches (`_extract_text`, `_tool_call_arguments`,
+    `_try_repair`) return a fallback value directly without logging in that
+    clause, but every such return propagates into `_parse_or_fallback`, which
+    logs a `"...using fallback"` message before its own fallback path returns —
+    so nothing is silently lost, though not every catch site logs itself.
   - `scan/pytest_runner.py` subprocess call, potential command-injection
     risk — **confirmed false positive**: `run_test_file`'s `cmd` is a fixed
     argv list (`sys.executable -m pytest <path> <flags>`) built from literal
