@@ -103,8 +103,57 @@ def test_escape_for_body_mixed_context_still_escapes_the_quoted_slot() -> None:
     escaped = _escape_for_body('he said "hi"\n', body)
     assert '\\"' in escaped
     # And substituting it into the quoted slot keeps that slot valid JSON.
-    quoted_only = '{"content": "%s"}' % escaped
+    quoted_only = f'{{"content": "{escaped}"}}'
     assert json.loads(quoted_only)["content"] == 'he said "hi"\n'
+
+
+def test_invoke_with_mixed_context_template_fails_loud_not_silent() -> None:
+    """The documented tradeoff in ``_escape_for_body`` for a MIXED template
+    (one quoted {prompt}, one bare): the bare slot ends up with escaped
+    (quote/backslash-escaped) text substituted where JSON expects a bare
+    value, so the overall request body is not valid JSON. This confirms
+    that reaches a real agent endpoint as a rejected request (a well-behaved
+    JSON API 400s on a malformed body) and that ``invoke``'s existing
+    non-2xx hard-error path catches it — never silently read as a clean
+    scan just because the quoted slot escaped correctly."""
+    import json
+
+    request = target_registry.RequestSpec(
+        url="https://agent.example/chat",
+        body='{"content": "{prompt}", "debug_echo": {prompt}}',
+    )
+    spec = target_registry.TargetSpec(
+        family="mixedagent",
+        command="",
+        args_template=(),
+        scope_validator=lambda _s: None,
+        default_system_prompt="You are a support agent.",
+        requires_scope=False,
+        weakness_classes=("W2",),
+        transport="rest",
+        request=request,
+    )
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # A well-behaved JSON agent endpoint parses its own request body; the
+        # malformed bare slot makes that fail, mirroring what a real target
+        # would do with this malformed body.
+        try:
+            json.loads(request.content.decode("utf-8"))
+        except ValueError:
+            return httpx.Response(400, text="malformed JSON body")
+        return httpx.Response(200, json={"reply": "should not get here"})
+
+    adapter = HTTPAgentAdapter(family="mixedagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 400"):
+            asyncio.run(adapter.invoke(_payload("hello")))
+    finally:
+        asyncio.run(adapter.close())
+        target_registry.clear_runtime_targets()
 
 
 def test_escape_for_body_raises_for_bare_non_string_json_position() -> None:

@@ -255,7 +255,7 @@ async def test_open_mcp_session_does_not_inherit_the_full_parent_environment(
         def __init__(self, *_: Any, **__: Any) -> None:
             pass
 
-        async def __aenter__(self) -> "_FakeClientSession":
+        async def __aenter__(self) -> _FakeClientSession:
             return self
 
         async def __aexit__(self, *exc: Any) -> None:
@@ -1108,7 +1108,8 @@ async def test_seed_arm_regex_is_time_bounded() -> None:
         return None
 
     class _Result:
-        content = [SimpleNamespace(text="some result text")]
+        def __init__(self) -> None:
+            self.content = [SimpleNamespace(text="some result text")]
 
     class _Sess:
         async def call_tool(self, name: str, args: dict[str, Any]) -> _Result:
@@ -1118,9 +1119,11 @@ async def test_seed_arm_regex_is_time_bounded() -> None:
     arm = SeedArmSpec(
         tool="remember", args_template={"content": "{payload}"}, id_pattern=r"id:(\d+)"
     )
-    with patch.object(_session_adapter, "_regex_search", _slow_search):
-        with pytest.raises(TimeoutError):
-            await adapter._run_seed_arm(_Sess(), arm, "payload body", [])
+    with (
+        patch.object(_session_adapter, "_regex_search", _slow_search),
+        pytest.raises(TimeoutError),
+    ):
+        await adapter._run_seed_arm(_Sess(), arm, "payload body", [])
 
 
 @pytest.mark.asyncio
@@ -1130,7 +1133,8 @@ async def test_run_seed_arm_id_pattern_still_matches_normally() -> None:
     from mylonite.plugins._mcp.target_registry import SeedArmSpec
 
     class _Result:
-        content = [SimpleNamespace(text="stored as note:77 ok")]
+        def __init__(self) -> None:
+            self.content = [SimpleNamespace(text="stored as note:77 ok")]
 
     class _Sess:
         async def call_tool(self, name: str, args: dict[str, Any]) -> _Result:

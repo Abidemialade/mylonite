@@ -115,6 +115,26 @@ def _escape_for_body(text: str, body: str) -> str:
       need it, at the cost of the bare slot(s) receiving escaped text too —
       preferable to leaving a quoted slot's payload unescaped and corrupting
       the whole JSON body's structure.
+
+      KNOWN TRADEOFF (deliberate, not tightened further): this does NOT raise
+      for the mixed case the way the all-bare case does above, and it does NOT
+      produce a body that's valid JSON at the bare slot's position either — an
+      escaped (quote/backslash-escaped) string substituted into a position
+      that expects a bare JSON value (a number/bool/null, not a quoted
+      string) is itself invalid JSON there. In practice this means a mixed
+      template's request body fails to be valid JSON overall, which the
+      *target* agent's own HTTP layer will reject — surfacing as a non-2xx,
+      which ``HTTPAgentAdapter.invoke`` already treats as a hard
+      misconfiguration error (never a silent/clean scan; see its ``status_code
+      >= 400`` check). So this is NOT a security or honesty issue — an
+      ambiguous mixed template fails LOUD, just one layer further downstream
+      (at the wire) than the all-bare case (which fails immediately, here).
+      Raising here too was considered and rejected: a template's OTHER
+      ``{prompt}`` occurrence being bare is not necessarily a mistake (e.g. a
+      debug/echo field the operator doesn't care about) and this function has
+      no way to distinguish "ambiguous mistake" from "one slot we don't care
+      about protecting" — the quoted slot (the one that matters for injecting
+      a natural-language attack payload) stays correctly escaped either way.
     """
     quoted_flags = _prompt_occurrences_quoted(body)
     if not quoted_flags:
