@@ -639,6 +639,17 @@ class ScanEngine:
             while pending:
                 done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                 stop = False
+                # If MULTIPLE passes resolve to a terminal outcome in the SAME
+                # completed batch (e.g. two concurrent invokes both hit the
+                # same missing seed arm), whichever this loop processes last
+                # simply overwrites `terminal_exc` / the earlier terminal
+                # entry in `results` — there's no explicit ordering among
+                # `done`. That's safe today because a structural-skip outcome
+                # for the same payload/seed is content-equivalent regardless
+                # of which concurrent copy "wins" (same reason, same
+                # verdict_mechanism=None) — but would need revisiting if a
+                # future structural-skip type ever carried per-attempt state
+                # that made one copy meaningfully different from another.
                 for finished in done:
                     exc = finished.exception()
                     if exc is not None:

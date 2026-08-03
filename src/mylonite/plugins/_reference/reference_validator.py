@@ -1004,12 +1004,6 @@ class DifferentialValidator(ValidatorBase):
         )
         return vuln_success, not guard_success
 
-    def _invoke_and_judge(
-        self, variant: Literal["vulnerable", "guarded"], payload: Payload
-    ) -> bool:
-        """Invoke one twin with ``payload`` and judge the response (sync entry point)."""
-        return asyncio.run(self._invoke_and_judge_async(variant, payload))
-
     async def _invoke_and_judge_async(
         self, variant: Literal["vulnerable", "guarded"], payload: Payload
     ) -> bool:
