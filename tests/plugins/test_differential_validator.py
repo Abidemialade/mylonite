@@ -18,7 +18,9 @@ Coverage:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -158,6 +160,25 @@ class _ScriptedCompletion:
         # Everything else (other seeds / drives): neutral refusal — no tool call,
         # so no predicate fires. Keeps other families clean.
         return _text_response("I cannot follow embedded instructions from content.")
+
+
+class _SleepyScriptedCompletion(_ScriptedCompletion):
+    """``_ScriptedCompletion`` with a fixed ``await asyncio.sleep(delay)`` per call.
+
+    Used to prove the metamorphic stage's vulnerable/guarded twin calls
+    (``DifferentialValidator._run_perturbed``) genuinely run CONCURRENTLY —
+    each completion call actually suspends (a real await, unlike the instant
+    stubs elsewhere), so the twins can only overlap wall-clock time if they
+    are driven together, not one after another.
+    """
+
+    def __init__(self, *, delay: float, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._delay = delay
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        await asyncio.sleep(self._delay)
+        return await super().__call__(**kwargs)
 
 
 # --- helpers -----------------------------------------------------------------
@@ -362,6 +383,56 @@ def test_metamorphic_genuinely_drives_perturbed_body_through_twins() -> None:
     metamorphic = _outcome(report, "metamorphic")
     assert metamorphic.metric == 1.0
     assert metamorphic.passed is True
+
+
+def test_run_perturbed_drives_twins_concurrently() -> None:
+    """Perf regression guard: ``_run_perturbed`` must drive the vulnerable and
+    guarded twins CONCURRENTLY (via ``run_twins``), not one after another.
+
+    Uses a completion_fn that genuinely ``await asyncio.sleep(delay)``s on
+    every call, so wall-clock time is a faithful proxy for how many completion
+    round-trips ran in serial vs. in parallel. Measures each twin ALONE (its
+    own sequential completion-call chain) to get a per-twin baseline, then
+    measures the PAIR via ``_run_perturbed``. If the pair were still
+    sequential (the pre-fix bug), pair time would be roughly
+    ``vuln_time + guard_time``; genuinely concurrent, it's roughly
+    ``max(vuln_time, guard_time)`` — asserted well under the sequential sum.
+    """
+    exploit = _build_exploit()
+    delay = 0.05
+    payload = exploit.payload
+
+    vuln_validator = DifferentialValidator(
+        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
+    )
+    start = time.monotonic()
+    asyncio.run(vuln_validator._invoke_and_judge_async("vulnerable", payload))
+    vuln_elapsed = time.monotonic() - start
+
+    guard_validator = DifferentialValidator(
+        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
+    )
+    start = time.monotonic()
+    asyncio.run(guard_validator._invoke_and_judge_async("guarded", payload))
+    guard_elapsed = time.monotonic() - start
+
+    sequential_estimate = vuln_elapsed + guard_elapsed
+
+    pair_validator = DifferentialValidator(
+        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
+    )
+    start = time.monotonic()
+    pair_validator._run_perturbed(exploit, payload.body)
+    pair_elapsed = time.monotonic() - start
+
+    # Generous margin (0.75x) to absorb scheduling noise while still clearly
+    # distinguishing "concurrent" (~1x the slower twin) from "sequential"
+    # (~2x, i.e. the sum) — a regression back to sequential would fail this.
+    assert pair_elapsed < sequential_estimate * 0.75, (
+        f"pair={pair_elapsed:.3f}s not well under sequential estimate "
+        f"={sequential_estimate:.3f}s (vuln={vuln_elapsed:.3f}s, guard={guard_elapsed:.3f}s) "
+        "— twins may be running sequentially again"
+    )
 
 
 def test_metamorphic_includes_literal_protected_evasion_encodings() -> None:

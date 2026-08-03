@@ -23,7 +23,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mylonite._concurrency import gather_bounded
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
@@ -473,31 +472,15 @@ class ScanEngine:
         # The `runs` passes are independent of each other (same payload,
         # re-invoked/re-judged for the flakiness filter), so with runs>1 they
         # are driven concurrently, bounded by the same limit as cross-payload
-        # fan-out. runs=1 (the default, and every demo/replay path) stays a
-        # single bare `await` rather than routing through gather_bounded: this
-        # whole payload-processing coroutine is itself already running inside
-        # an ``asyncio.create_task``-managed Task that the engine's own
-        # abort/cancel path (``run()``'s ``pending.cancel()`` on
-        # provider_unreachable / budget_exceeded / wall-clock-timeout) can
-        # cancel BEFORE that Task ever gets its first execution turn — and a
-        # coroutine handed to ``asyncio.gather`` under THOSE conditions can be
-        # abandoned un-awaited (Task.cancel() before the wrapping Task's first
-        # step throws into it without ever reaching the inner ``await coro``),
-        # which trips ``filterwarnings=error``'s "coroutine was never
-        # awaited". A single bare await has no such window and is exactly the
-        # old sequential form, so runs=1 keeps it. With runs>1, a structural
-        # skip/error is still terminal for the OVERALL verdict (the first such
-        # result in run order wins, matching the old early-return), but —
-        # because all passes are launched up front — a later pass may now run
-        # even though an earlier one turned out to be a terminal skip; that
-        # only spends extra (already-budgeted) calls, it never changes which
-        # result is returned.
+        # fan-out — see ``_run_flakiness_passes`` for why that helper (not a
+        # plain ``gather_bounded`` call) is what actually does the work.
+        # runs=1 (the default, and every demo/replay path) stays a single bare
+        # `await`, identical to the old sequential form.
         if runs == 1:
             pass_results = [await self._one_pass(payload=payload, seed_id=seed_id)]
         else:
-            pass_results = await gather_bounded(
-                [self._one_pass(payload=payload, seed_id=seed_id) for _ in range(runs)],
-                limit=self._config.max_concurrent,
+            pass_results = await self._run_flakiness_passes(
+                payload=payload, seed_id=seed_id, runs=runs
             )
         for result in pass_results:
             if isinstance(result, _PerPayloadOutcome):
@@ -578,6 +561,105 @@ class ScanEngine:
             customiser_fallback=customiser_fallback,
             run_disagreement=run_disagreement,
         )
+
+    async def _run_flakiness_passes(
+        self, *, payload: Payload, seed_id: str, runs: int
+    ) -> list[_PerPayloadOutcome | _JudgedPass]:
+        """Run ``runs`` invoke→judge passes for one payload, concurrently and bounded.
+
+        Not a plain ``gather_bounded`` fan-out: the scan-wide LLM-call budget
+        (``LiteLLMCallCounter``) is a SINGLE counter shared across every payload
+        in the scan, not one per payload. Under the old strictly-sequential
+        loop, a mid-run structural skip/error (pass 2 of 5, say) short-circuited
+        immediately and passes 3-5 never spent budget. A naive concurrent
+        fan-out launches all ``runs`` passes up front regardless — a structural
+        skip (``SeedArmUnavailable``/``AdapterInvocationSkipped``) is a
+        *returned* ``_PerPayloadOutcome``, not a raised exception, so
+        ``asyncio.gather`` has no reason to cancel siblings — spending strictly
+        more of the SHARED budget on passes that are discarded anyway. For a
+        ``runs>1`` scan running close to ``--max-llm-calls``, that could tip a
+        scan that would have completed under the old code into
+        ``aborted=budget_exceeded``.
+
+        So instead: launch all ``runs`` passes as real ``asyncio.Task``s
+        (bounded by a semaphore, same limit as cross-payload fan-out). Each
+        task checks a shared ``terminal_found`` flag *immediately after*
+        acquiring the semaphore and *before* calling ``self._one_pass(...)`` —
+        i.e. before it would spend any budget — and skips the call entirely if
+        the flag is already set. As soon as any pass resolves to a terminal
+        outcome (a structural-skip ``_PerPayloadOutcome``, or the one
+        exception ``_one_pass`` can raise — ``BudgetExceededError``,
+        propagated so ``run()`` can flip ``aborted="budget_exceeded"``) it
+        sets the flag (synchronously, before yielding) and any pass still
+        blocked behind the semaphore observes it and does no work. Passes
+        already mid-flight when the flag flips are left to finish (there is
+        no undoing a call already in progress) but nothing NEW is started —
+        so at most ``max_concurrent`` passes ever reach ``adapter.invoke()``
+        after the terminal is discovered, never scaling up to ``runs``. This
+        matches the old early-return's budget behaviour while still running
+        the common (all-non-terminal) case concurrently. Still-pending tasks
+        are additionally cancelled once a terminal is found, purely so
+        ``_run_payload`` doesn't wait around for passes whose result will be
+        discarded.
+
+        Each pass's ``self._one_pass(...)`` coroutine is created INSIDE its own
+        wrapper task rather than up front in a list comprehension, so a task
+        cancelled before its first execution turn never leaves an orphaned,
+        never-awaited ``_one_pass`` coroutine (the same class of
+        ``filterwarnings=error``-tripping "coroutine was never awaited" bug the
+        runs=1 fast path avoids — see the call site).
+        """
+        limit = max(1, self._config.max_concurrent)
+        sem = asyncio.Semaphore(limit)
+        terminal_found = False
+
+        async def _bounded(idx: int) -> tuple[int, _PerPayloadOutcome | _JudgedPass | None]:
+            nonlocal terminal_found
+            async with sem:
+                if terminal_found:
+                    return idx, None  # a sibling already proved this payload is pointless
+                try:
+                    result = await self._one_pass(payload=payload, seed_id=seed_id)
+                except BaseException:
+                    terminal_found = True  # a raised BudgetExceededError is terminal too
+                    raise
+                if isinstance(result, _PerPayloadOutcome):
+                    terminal_found = True
+                return idx, result
+
+        tasks: list[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = [
+            asyncio.ensure_future(_bounded(i)) for i in range(runs)
+        ]
+        results: list[_PerPayloadOutcome | _JudgedPass | None] = [None] * runs
+        pending: set[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = set(
+            tasks
+        )
+        terminal_exc: BaseException | None = None
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                stop = False
+                for finished in done:
+                    exc = finished.exception()
+                    if exc is not None:
+                        terminal_exc = exc
+                        stop = True
+                        continue
+                    idx, result = finished.result()
+                    if result is not None:
+                        results[idx] = result
+                    if isinstance(result, _PerPayloadOutcome):
+                        stop = True
+                if stop:
+                    break
+        finally:
+            for pending_task in pending:
+                pending_task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        if terminal_exc is not None:
+            raise terminal_exc
+        return [r for r in results if r is not None]
 
     async def _one_pass(
         self, *, payload: Payload, seed_id: str

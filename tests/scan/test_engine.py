@@ -53,6 +53,10 @@ class _AdapterStub:
         self._raise_no_seed_arm = raise_no_seed_arm
         self._raise_describe = raise_describe
         self.invoked: list[Payload] = []
+        #: Every invoke() ATTEMPT, including ones that go on to raise a
+        #: structural skip — unlike ``invoked`` (only successful calls). Lets
+        #: tests assert how much work a runs>1 flakiness filter actually did.
+        self.invoke_call_count = 0
 
     async def describe(self) -> TargetDescriptor:
         if self._raise_describe:
@@ -60,6 +64,7 @@ class _AdapterStub:
         return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
+        self.invoke_call_count += 1
         if self._raise_no_seed_arm:
             raise SeedArmUnavailable(
                 "setup arm 'seed_note' has no implementation for family 'stub'",
@@ -730,6 +735,61 @@ async def test_engine_nrun_does_not_retry_structural_skip() -> None:
     )
     result = await engine.run()
     assert result.report.attempts[0].outcome == "skipped_no_seed_arm"
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_structural_skip_does_not_blow_the_shared_budget() -> None:
+    """runs>1 concurrency must not spend the SCAN-WIDE LLM-call budget on passes
+    made pointless by a structural skip.
+
+    ``LiteLLMCallCounter`` is one counter shared across the whole scan, not one
+    per payload. The old sequential loop stopped at the FIRST skip, so passes
+    after it never ran. A naive concurrent fan-out (plain ``gather_bounded``)
+    would launch all `runs` passes up front regardless — a structural skip is
+    a RETURNED ``_PerPayloadOutcome``, not a raised exception, so a bare
+    gather has no reason to cancel the rest — silently spending more of the
+    shared budget than the old code ever did, which could tip a `runs>1` scan
+    running close to ``--max-llm-calls`` into a spurious ``budget_exceeded``.
+
+    This pins the fix (``ScanEngine._run_flakiness_passes``): once ANY pass
+    resolves to a terminal skip, the passes still blocked behind the
+    concurrency semaphore are cancelled BEFORE they ever call
+    ``adapter.invoke()`` — so invoke() is attempted at most ``max_concurrent``
+    times (the semaphore limit), never scaling up to ``runs``.
+    """
+
+    class _SlowSkippingAdapter(_AdapterStub):
+        """Structural skip with a real await, so the semaphore genuinely blocks
+        the remaining passes instead of everything racing through in one
+        scheduler tick (which would make the invoke-count bound trivially
+        true for the wrong reason)."""
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            self.invoke_call_count += 1
+            await asyncio.sleep(0.01)
+            raise AdapterInvocationSkipped(
+                "planner failure: simulated",
+                attempt_metadata={"variant": "vulnerable", "exception": "RuntimeError"},
+            )
+
+    adapter = _SlowSkippingAdapter(raise_skipped=True)
+    engine = ScanEngine(
+        config=_config(runs=5),  # max_concurrent=2 (see _config's fixed default)
+        adapter=adapter,
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+
+    assert result.report.attempts[0].outcome == "skipped_planner_failure"
+    # Bounded by max_concurrent(2), not runs(5): the remaining in-flight
+    # passes were cancelled before they ever reached adapter.invoke().
+    assert adapter.invoke_call_count <= 2, (
+        "expected the terminal skip to cancel still-pending passes before they "
+        f"called adapter.invoke() (bounded by max_concurrent=2); got "
+        f"{adapter.invoke_call_count} invoke() attempts out of runs=5"
+    )
 
 
 @pytest.mark.asyncio

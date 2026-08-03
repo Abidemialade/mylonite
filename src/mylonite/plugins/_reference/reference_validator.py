@@ -981,7 +981,9 @@ class DifferentialValidator(ValidatorBase):
         ``perturbed_body`` and customisation DISABLED (``needs_customisation`` =
         ``"false"``) so the reworded text reaches the twins verbatim, then for
         each variant invokes the reference adapter (which writes the perturbed
-        body into the poisoned note) and judges the response.
+        body into the poisoned note) and judges the response. The two twins
+        are independent — same rationale as ``_run_iteration``/``run_twins`` —
+        so they are driven CONCURRENTLY inside one ``asyncio.run``.
 
         Returns ``(vuln_fired, guard_resisted)``. A skipped planner failure /
         adapter error is NOT a clean resist — it counts as "not fired" on the
@@ -994,11 +996,21 @@ class DifferentialValidator(ValidatorBase):
             body=perturbed_body,
             metadata={**exploit.payload.metadata, "needs_customisation": "false"},
         )
-        vuln_success = self._invoke_and_judge("vulnerable", payload)
-        guard_success = self._invoke_and_judge("guarded", payload)
+        vuln_success, guard_success = asyncio.run(
+            run_twins(
+                self._invoke_and_judge_async("vulnerable", payload),
+                self._invoke_and_judge_async("guarded", payload),
+            )
+        )
         return vuln_success, not guard_success
 
     def _invoke_and_judge(
+        self, variant: Literal["vulnerable", "guarded"], payload: Payload
+    ) -> bool:
+        """Invoke one twin with ``payload`` and judge the response (sync entry point)."""
+        return asyncio.run(self._invoke_and_judge_async(variant, payload))
+
+    async def _invoke_and_judge_async(
         self, variant: Literal["vulnerable", "guarded"], payload: Payload
     ) -> bool:
         """Invoke one twin with ``payload`` and judge the response.
@@ -1006,28 +1018,26 @@ class DifferentialValidator(ValidatorBase):
         Replicates the engine's invoke→judge for a single payload (no
         customiser, since the perturbed body is used verbatim). Returns whether
         the judge deemed the attack a success. A planner skip / adapter error
-        returns ``False`` (the attack did not land).
+        returns ``False`` (the attack did not land). No internal ``asyncio.run``
+        — callers that want to run this concurrently with its twin
+        (``_run_perturbed``) drive both from a single event loop.
         """
-
-        async def _run() -> bool:
-            adapter = InProcessReferenceAdapter(
-                variant=variant,
-                model=self._planner_model,
-                completion_fn=self._completion_fn,
-                note_id_factory=note_id_counter(),
-            )
-            judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
-            try:
-                response = await adapter.invoke(payload)
-            except AdapterInvocationSkipped:
-                return False
-            except Exception:
-                logger.exception("metamorphic: adapter.invoke raised unexpectedly")
-                return False
-            verdict = await judge.judge(payload, response)
-            return verdict.success
-
-        return asyncio.run(_run())
+        adapter = InProcessReferenceAdapter(
+            variant=variant,
+            model=self._planner_model,
+            completion_fn=self._completion_fn,
+            note_id_factory=note_id_counter(),
+        )
+        judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
+        try:
+            response = await adapter.invoke(payload)
+        except AdapterInvocationSkipped:
+            return False
+        except Exception:
+            logger.exception("metamorphic: adapter.invoke raised unexpectedly")
+            return False
+        verdict = await judge.judge(payload, response)
+        return verdict.success
 
     # -- build stage ----------------------------------------------------------
 
