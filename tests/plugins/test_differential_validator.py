@@ -865,6 +865,46 @@ def test_validate_custom_target_rejects_when_effect_not_confirmed() -> None:
     assert report.kept is False
 
 
+def test_validate_custom_target_rejects_when_effect_probe_errored() -> None:
+    """RB-DCR-0014: a DECLARED effect_probe whose verify call fails on every run
+    ("errored") must FAIL the effect leg — not be silently treated the same as
+    "unprobed" (no effect_probe declared), which auto-passes the leg. Before
+    this fix, `_run_effect_probe`'s exception path returned the same string
+    used for "no probe declared," so a misconfigured verify_tool (e.g. a
+    target.yaml typo) silently reported "no effect_probe declared" and the
+    effect leg passed, potentially keeping a test whose real-world damage was
+    never actually confirmed end-to-end.
+
+    Stubs `_run_custom_iteration` directly (like the RB-DCR-0013 test above)
+    rather than driving the full scan-engine/predicate pipeline through
+    `_FakeCustomAdapter`, because judge.py's own effect_confirmed handling only
+    short-circuits on "true"/"false" — "errored" deliberately falls through to
+    the named predicate, whose finding determination is orthogonal to what
+    this test exercises (the effect-leg branch logic in
+    `_validate_custom_target` itself, given a `_CustomRun` that already carries
+    an "errored" result)."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        return _CustomRun(finding=True, effect_confirmed="errored", response=None)
+
+    validator = DifferentialValidator(
+        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    assert report.kept is False
+    effect = next(o for o in report.outcomes if o.stage == "effect")
+    assert effect.passed is False
+    assert "declared" in effect.detail and "failed" in effect.detail
+    assert "no effect_probe declared" not in effect.detail
+
+
 def test_vuln_threshold_default_is_non_trivial_at_iterations_one() -> None:
     """DCR-0024: the DEFAULT vuln_threshold (no explicit override) used to be
     `iterations - 1`, which is 0 at iterations=1 — making the custom-target

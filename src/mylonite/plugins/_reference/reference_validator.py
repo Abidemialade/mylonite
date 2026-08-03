@@ -235,7 +235,7 @@ class _CustomRun:
     """Per-iteration result of re-driving a CUSTOM target (no twin)."""
 
     finding: bool
-    effect_confirmed: str  # "true" | "false" | "unprobed"
+    effect_confirmed: str  # "true" | "false" | "unprobed" | "errored"
     response: Any
 
 
@@ -522,6 +522,13 @@ class DifferentialValidator(ValidatorBase):
         fired = sum(1 for r in runs if r.finding)
         effect_yes = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
         probed = any(r.effect_confirmed in ("true", "false") for r in runs)
+        # A probe that raised on every run is NOT the same as no probe being
+        # declared: the operator asked for end-to-end confirmation and it never
+        # ran, so the leg must fail loud rather than silently auto-pass like the
+        # genuinely-undeclared case below (RB-DCR-0014 — both used to collapse
+        # into the same "unprobed" string and this branch never distinguished
+        # them).
+        errored = (not probed) and any(r.effect_confirmed == "errored" for r in runs)
 
         stability = ValidationOutcome(
             stage="stability",
@@ -541,6 +548,19 @@ class DifferentialValidator(ValidatorBase):
                     f"end-to-end {effect_yes}/{n} runs (need >= {self._vuln_threshold})"
                 ),
                 metric=(effect_yes / n) if n else 0.0,
+            )
+        elif errored:
+            effect = ValidationOutcome(
+                stage="effect",
+                passed=False,
+                detail=(
+                    "an effect_probe IS declared on the target but its verify call "
+                    "failed on every run (bad verify_tool name, a timeout, or the "
+                    "target crashing) — the effect leg cannot confirm end-to-end "
+                    "damage, so it is FAILED rather than silently treated as "
+                    "undeclared; check the target file's effect_probe.verify_tool"
+                ),
+                metric=0.0,
             )
         else:
             effect = ValidationOutcome(

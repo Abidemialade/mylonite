@@ -642,7 +642,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         payload_body: str,
         probe_calls: list[dict[str, Any]],
     ) -> str:
-        """Confirm the damaging effect materialized. Returns 'true' | 'false' | 'unprobed'.
+        """Confirm the damaging effect materialized.
+
+        Returns 'true' | 'false' | 'unprobed' | 'errored'. 'unprobed' means no
+        effect_probe was declared at all; 'errored' means one WAS declared but
+        the verify call itself failed (bad tool name, timeout, target crash) —
+        these are deliberately DISTINCT states. Collapsing both into 'unprobed'
+        let a misconfigured probe (e.g. a target.yaml typo in verify_tool) look
+        identical to an undeclared one, and DifferentialValidator's effect leg
+        auto-passes on 'unprobed' — so a broken probe silently reported "no
+        effect_probe declared" instead of surfacing the failure (RB-DCR-0014).
 
         The target declares a verify tool + an expected-effect marker. A
         structural ``isError`` or a missing marker means the effect did NOT
@@ -660,11 +669,12 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             )
         except Exception:
             logger.info(
-                "%s: effect probe %r raised — treating as unprobed",
+                "%s: effect probe %r raised — treating as errored (probe was "
+                "declared but the verify call itself failed)",
                 type(self).__name__,
                 probe.verify_tool,
             )
-            return "unprobed"
+            return "errored"
         content = str(getattr(result, "content", "") or "")
         is_error = bool(getattr(result, "isError", False))
         probe_calls.append({"tool": f"effect_probe:{probe.verify_tool}", "is_error": is_error})

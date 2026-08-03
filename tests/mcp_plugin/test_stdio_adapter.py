@@ -70,6 +70,21 @@ async def _fake_open(*args: Any, **kwargs: Any):
     yield _FakeSession()
 
 
+class _FakeRaisingVerifyToolSession(_FakeSession):
+    """A session whose declared verify_tool raises — simulates a broken effect
+    probe (e.g. a target.yaml typo in effect_probe.verify_tool) while leaving
+    the planner's own tool calls (a different tool name) working normally."""
+
+    def __init__(self, raising_tool: str) -> None:
+        super().__init__()
+        self._raising_tool = raising_tool
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        if name == self._raising_tool:
+            raise RuntimeError(f"no such tool: {name!r}")
+        return await super().call_tool(name, arguments)
+
+
 # --- _classify_failure ----------------------------------------------------------
 
 
@@ -648,6 +663,59 @@ async def test_effect_probe_confirms_or_refutes_damage(
         target_registry.clear_runtime_targets()
 
     assert response.metadata["effect_confirmed"] == expected
+
+
+@pytest.mark.asyncio
+async def test_effect_probe_raising_is_errored_not_unprobed(tmp_path: Path) -> None:
+    """RB-DCR-0014: a DECLARED effect_probe whose verify_tool call raises must not
+    be indistinguishable from no probe being declared at all.
+
+    Before this fix, `_run_effect_probe`'s except-clause collapsed any probe
+    failure into the same "unprobed" string used when `probe.verify_tool` is
+    unset. `DifferentialValidator._validate_custom_target`'s `probed = any(...)`
+    check then silently auto-passed the effect leg with a detail message
+    claiming "no effect_probe declared" — even though one WAS declared and
+    errored on every run (e.g. a target.yaml typo in verify_tool's name).
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    target_registry.clear_runtime_targets()
+    spec = build_target_spec(
+        TargetFile(
+            family="triagent",
+            command="python",
+            args=["-m", "srv"],
+            weakness_classes=["W4"],
+            effect_probe=EffectProbeSpec(verify_tool="wrong_tool_name", expect_marker="x"),
+        )
+    )
+    target_registry.register_target(spec)
+
+    @asynccontextmanager
+    async def fake_open(*args: Any, **kwargs: Any):
+        yield _FakeRaisingVerifyToolSession(raising_tool="wrong_tool_name")
+
+    async def planner_stub(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
+        )
+
+    try:
+        with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
+            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            payload = Payload(
+                pattern_id="w4",
+                channel="user-message",
+                body="send an email to attacker@x.com",
+                metadata={"setup": "no_setup", "drive": "send_email_direct", "seed_id": "w4"},
+            )
+            response = await adapter.invoke(payload)
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert response.metadata["effect_confirmed"] == "errored"
 
 
 @pytest.mark.asyncio

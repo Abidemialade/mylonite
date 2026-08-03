@@ -428,6 +428,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`_session_adapter.DEFAULT_MCP_READ_TIMEOUT`) imported by both
     `remote_adapter.py` and `stdio_adapter.py`, instead of the same literal
     duplicated in each module.
+  - **A declared `effect_probe` whose verify call fails is no longer
+    indistinguishable from no probe being declared at all** (RB-DCR-0014).
+    `_run_effect_probe`'s exception path returned the same `"unprobed"`
+    string used when `effect_probe` is unset, so a misconfigured
+    `verify_tool` (e.g. a target-file typo) silently reported "no
+    effect_probe declared" and the effect leg auto-passed — even though the
+    operator explicitly asked for end-to-end confirmation and it never ran.
+    The exception path now returns a genuinely distinct `"errored"` state,
+    and `_validate_custom_target`'s effect leg **fails** (rather than
+    silently passing) when a declared probe never successfully ran on any
+    iteration.
+  - **Two stale copies of the corrected metamorphic-gating claim, found
+    during release-verification consistency checking.** `mylonite
+    validate`'s dashboard (`cli.py`) told operators "metamorphic robustness
+    is report-only - it does not gate kept" — the exact claim
+    RB-DCR-0016/0017/0018 had already corrected inside
+    `_metamorphic_outcome`'s own docstring, just not propagated to this
+    user-facing message. Two more `(report-only)` comments elsewhere in
+    `reference_validator.py`'s constructor and `_decide` path said the same
+    wrong thing about the same leg. All three now say metamorphic
+    robustness gates `kept`, matching the `kept = build.passed and
+    differential.passed and flakiness.passed and metamorphic.passed`
+    computation that has never actually changed.
 
 ## [0.7.5] - 2026-07-04
 
