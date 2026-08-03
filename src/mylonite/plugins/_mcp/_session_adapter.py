@@ -28,6 +28,7 @@ import secrets
 import sys
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -56,6 +57,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_PLANNER_TIMEOUT_S = 60.0
+
+#: Bound on how long a single ``ClientSession`` read (including
+#: ``session.initialize()``) may block waiting on the peer — remote server
+#: (SSE/HTTP) or spawned subprocess (stdio) alike — before raising, so a
+#: non-responding/hung peer cannot hang a scan forever (RB-DCR-0002). Shared
+#: by both transport-specific session openers
+#: (``remote_adapter._open_remote_session`` /
+#: ``stdio_adapter._open_mcp_session``) so the bound and its rationale live
+#: in exactly one place.
+DEFAULT_MCP_READ_TIMEOUT = timedelta(seconds=60.0)
 
 #: Minimum length (chars) for a string call_tool argument to be treated as a
 #: PLANTED PAYLOAD candidate rather than an incidental id/path/title. Every
@@ -607,7 +618,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # Legacy anchor: blind first-integer extraction over the whole result
             # text — a genuine "guess" compared to id_key/id_pattern's precise
             # extraction. Only trust it when it actually found something.
-            extracted = _extract_first_number(result.content) if hasattr(result, "content") else None
+            extracted = (
+                _extract_first_number(result.content) if hasattr(result, "content") else None
+            )
             if extracted is not None:
                 return extracted
         # No declared anchor (id_key/id_pattern) extracted a handle, and id_from
@@ -681,6 +694,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         filesystem (or a large directory) it could stall the event loop for
         every OTHER in-flight invoke() sharing it, not just this one.
         """
+
         def _list() -> set[str]:
             try:
                 return {p.name for p in Path(scope).iterdir()}

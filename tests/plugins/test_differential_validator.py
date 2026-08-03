@@ -550,7 +550,8 @@ def _patch_run_perturbed_by_strategy(
     outcome_for_name: dict[str, str],
 ) -> None:
     """Deterministically stub ``_run_perturbed`` so each named strategy yields a
-    chosen 3-way outcome ("held" / "guard_bypassed" / "attack_malformed"),
+    chosen outcome ("held" / "guard_bypassed" / "attack_malformed" / the
+    "inverted" edge case — vuln never fired but the guarded twin did),
     without driving the full offline LLM-scripted harness. Maps each
     strategy's (deterministic, pure) perturbed body back to its name so the
     fake can be keyed on the body ``_metamorphic_outcome`` actually passes in.
@@ -569,6 +570,10 @@ def _patch_run_perturbed_by_strategy(
             return True, True, False
         if outcome == "guard_bypassed":
             return True, False, True
+        if outcome == "inverted":
+            # vuln_fired=False, guard_resisted=False, guard_fired=True: the
+            # guarded twin alone fired, with no vulnerable-twin corroboration.
+            return False, False, True
         assert outcome == "attack_malformed"
         return False, False, False
 
@@ -636,6 +641,36 @@ def test_metamorphic_detail_distinguishes_guard_bypassed_from_attack_malformed(
     # Neither renders as the old, ambiguous "broke" label.
     assert "broke" not in outcome.detail
     # Both count as NOT held for the robustness fraction (backward compatible).
+    assert outcome.metric == 0.0
+    assert outcome.passed is False
+
+
+def test_metamorphic_inverted_case_guard_fired_without_vuln_corroboration_is_malformed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code-review followup (Important #3): the surprising
+    ``vuln_fired=False, guard_fired=True`` combination — the perturbed attack
+    fired on the GUARDED twin but NOT on the vulnerable one — must land in
+    ``attack_malformed``, not ``guard_bypassed``. The two twins are driven by
+    INDEPENDENT LLM planner runs; a guarded-twin-only firing with no
+    vulnerable-twin corroboration is not trusted as a genuine bypass (it
+    reads as LLM-sampling noise between the twins, not evidence the
+    perturbation defeated the guard). Locks in this classification as
+    intentional rather than an untested fallthrough."""
+    exploit = _build_exploit()
+    names = ["casing"]
+    outcome_for_name = {"casing": "inverted"}
+    _patch_run_perturbed_by_strategy(monkeypatch, exploit, names, outcome_for_name)
+
+    validator = DifferentialValidator(
+        iterations=1,
+        completion_fn=_ScriptedCompletion(),
+        metamorphic_strategies=names,
+        metamorphic_robustness_threshold=0.6,
+    )
+    outcome = validator._metamorphic_outcome(exploit)
+    assert "casing:attack_malformed" in outcome.detail
+    assert "casing:guard_bypassed" not in outcome.detail
     assert outcome.metric == 0.0
     assert outcome.passed is False
 

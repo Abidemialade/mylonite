@@ -336,7 +336,9 @@ async def test_open_mcp_session_passes_read_timeout_to_client_session() -> None:
         "non-responding spawned server cannot hang initialize() forever"
     )
     assert isinstance(read_timeout, _dt.timedelta)
-    assert read_timeout.total_seconds() > 0
+    # Bounded on both ends: > 0 (must actually time out) and a sane upper
+    # bound (catches a future accidental huge-timeout regression).
+    assert 0 < read_timeout.total_seconds() <= 300
 
 
 # --- env-key casing must never produce a duplicate entry ---------------------

@@ -357,7 +357,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (RB-DCR-0001). `_describe_data_sources`/`_describe_notes`
     (`plugins/_mcp/remote_adapter.py`) used `urlsplit(url).netloc`, which
     includes any userinfo component; both now use a new `_host_only` helper
-    keyed on `.hostname` (`+ f":{port}"` when non-default), never userinfo.
+    keyed on `.hostname` (`+ f":{port}"` when the URL has one), never
+    userinfo. `_host_only` also degrades gracefully rather than raising on a
+    malformed/out-of-range port (`.port` is lazily validated and raises
+    `ValueError` for e.g. `:99999` — an operator-supplied target file has no
+    port-range validation ahead of time) and correctly brackets an IPv6 host
+    when a port is present (`[::1]:8080`, not the ambiguous `::1:8080`) —
+    both found in code review of the initial fix.
   - **A non-responding remote or spawned MCP server can no longer hang a scan
     forever** (RB-DCR-0002). Both `plugins/_mcp/remote_adapter.py`'s
     `_open_remote_session` and `plugins/_mcp/stdio_adapter.py`'s
@@ -408,6 +414,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reads `"<name>:guard_bypassed"` / `"<name>:attack_malformed"` /
     `"<name>:held"`; the `robustness`/`held_count`/`total` fraction semantics
     are unchanged (both non-held classifications still count as "not held").
+    The docstring now also spells out the `vuln_fired=False, guard_fired=True`
+    edge case explicitly (the guarded twin alone fired, with no
+    vulnerable-twin corroboration): it is deliberately classified
+    `attack_malformed`, not `guard_bypassed`, since the two twins are driven
+    by independent LLM planner runs and a guarded-twin-only signal is not
+    trusted as a genuine bypass — locked in by a new regression test rather
+    than left as an untested fallthrough.
+  - The `read_timeout_seconds` bound the two session openers pass to
+    `ClientSession` (60s) is now a single shared constant
+    (`_session_adapter.DEFAULT_MCP_READ_TIMEOUT`) imported by both
+    `remote_adapter.py` and `stdio_adapter.py`, instead of the same literal
+    duplicated in each module.
 
 ## [0.7.5] - 2026-07-04
 

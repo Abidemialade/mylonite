@@ -20,7 +20,7 @@ from mcp.types import Tool as MCPTool
 
 from mylonite.plugins._mcp import remote_adapter, target_registry
 from mylonite.plugins._mcp.factory import build_mcp_adapter
-from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter
+from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter, _host_only
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
 from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
 
@@ -99,6 +99,31 @@ async def test_describe_never_leaks_url_embedded_userinfo_credentials() -> None:
     blob = " ".join(descriptor.data_sources) + " " + (descriptor.notes or "")
     assert "target.example" in blob
     assert "sk-live-abc123" not in blob
+
+
+def test_host_only_degrades_gracefully_on_a_malformed_out_of_range_port() -> None:
+    # Code-review followup (Important #1): `urlsplit(url).port` is lazily
+    # validated and raises `ValueError` for an out-of-range/non-numeric port.
+    # A remote target's `url` comes from an operator-supplied target file with
+    # no port-range validation, so a malformed configured URL must not crash
+    # `describe()` — `_host_only` must degrade gracefully (omit the port),
+    # the same way it already handles `hostname=None`.
+    result = _host_only("https://host:99999/sse")
+    assert result == "host"
+
+
+def test_host_only_brackets_ipv6_host_with_a_port() -> None:
+    # Code-review followup (Important #2): the host+port string must stay
+    # unambiguous. Without bracketing, "::1:8080" can't be parsed back into
+    # address vs. port (IPv6 addresses themselves contain ":").
+    result = _host_only("https://[::1]:8080/sse")
+    assert result == "[::1]:8080"
+
+
+def test_host_only_bare_ipv6_with_no_port_is_unbracketed() -> None:
+    # No port -> no ambiguity, so the bare address is fine as-is.
+    result = _host_only("https://[::1]/sse")
+    assert result == "::1"
 
 
 def test_factory_dispatches_on_transport() -> None:
@@ -207,7 +232,10 @@ async def test_open_remote_session_passes_read_timeout_to_client_session() -> No
         "non-responding remote server cannot hang initialize() forever"
     )
     assert isinstance(read_timeout, _dt.timedelta)
-    assert read_timeout.total_seconds() > 0
+    # Bounded on both ends: > 0 (must actually time out) and a sane upper
+    # bound (catches a future accidental huge-timeout regression, e.g. a
+    # typo'd `timedelta(seconds=6000)`).
+    assert 0 < read_timeout.total_seconds() <= 300
 
 
 def test_remote_classify_failure_maps_httpx_errors() -> None:
