@@ -30,9 +30,13 @@ The pipeline (per ``mylonite.contracts.validator``):
 2. **differential** — across ``iterations`` runs of the full attack scan, does
    the exploit's ``pattern_id`` FIRE on the vulnerable twin and RESIST on the
    guarded twin *at all*? (discrimination)
-3. **flakiness** — does it do both *reliably* — vulnerable fires
-   ``>= vuln_threshold`` times and guarded resists ``>= guard_threshold`` times
-   across the runs? (reproducibility)
+3. **flakiness** — does it do both *reliably*? A STATISTICAL rate-gap decision
+   (:meth:`DifferentialValidator._decide`), not a count threshold: the
+   vulnerable-fire-rate minus the guarded-leak-rate must be ``>= min_rate_gap``,
+   with the vulnerable side firing at least ``min_vuln_rate`` of runs and the
+   guard leaking at most ``max_guard_leak``. This keeps genuinely-present-but-
+   probabilistic LLM-mediated exploits (e.g. one that lands 3/5 runs) instead of
+   the older, brittle "vulnerable fires >= N-1/N" count gate. (reproducibility)
 4. **mutation-score** (report-only) — a PER-SEED kill matrix over every
    kitchen-sink seed: of all kitchen-sink seeds, how many did this run "kill"
    (vulnerable FIRED that seed's pattern_id AND guarded RESISTED it)? The
@@ -270,7 +274,6 @@ class DifferentialValidator(ValidatorBase):
         *,
         iterations: int = 5,
         vuln_threshold: int | None = None,
-        guard_threshold: int | None = None,
         min_rate_gap: float = 0.5,
         min_vuln_rate: float = 0.4,
         max_guard_leak: float = 0.0,
@@ -325,11 +328,15 @@ class DifferentialValidator(ValidatorBase):
         self._guarded_is_server_layer = guarded_is_server_layer
         self._control_context = control_context
         self._consensus_judges = max(1, consensus_judges)
-        # Defaults: vulnerable should fire almost-always (N-1), guard must
-        # resist every single run (N) — a guard that leaks even once is not a
-        # guard.
-        self._vuln_threshold = vuln_threshold if vuln_threshold is not None else iterations - 1
-        self._guard_threshold = guard_threshold if guard_threshold is not None else iterations
+        # Default: vulnerable should fire almost-always (N-1) — but at
+        # iterations=1, N-1 is 0, which makes the custom-target stability/effect
+        # legs (`fired >= self._vuln_threshold`) trivially TRUE regardless of
+        # whether the attack ever actually fired (DCR-0024). `max(1, ...)` keeps
+        # the fastest/weakest gate (--iterations 1) genuinely meaningful: it still
+        # requires the attack to have fired at least once.
+        self._vuln_threshold = (
+            vuln_threshold if vuln_threshold is not None else max(1, iterations - 1)
+        )
         # Statistical differential thresholds (reference path). The oracle keeps a
         # test only when the attack SUCCESS RATE differs significantly between the
         # twins: vulnerable-rate minus guarded-leak-rate >= min_rate_gap, with the

@@ -95,14 +95,22 @@ def _raise_if_fixture_problem(
     """Raise :class:`DemoFixtureError` if recorder state shows a fixture problem.
 
     A cache miss OR any recorded error (corrupt fixture sets ``last_error``
-    without bumping ``cache_misses``) means the demo would otherwise show a
-    falsely-clean vulnerable scan.
+    without bumping ``cache_misses``) means the demo would otherwise lie about
+    ONE of the two twins — which one depends on ``variant`` (DCR-0029): a
+    vulnerable-fixture problem would show a falsely-CLEAN vulnerable scan; a
+    guarded-fixture problem would show a falsely-RESISTANT guarded scan
+    (masking a real regression in the guard).
     """
     if cache_misses > 0 or last_error is not None:
         detail = f" ({last_error})" if last_error is not None else ""
+        consequence = (
+            "The vulnerable scan would falsely show clean."
+            if variant == "vulnerable"
+            else "The guarded scan would falsely show resistant, masking a real regression."
+        )
         raise DemoFixtureError(
             f"demo fixtures for the {variant!r} variant are stale or missing"
-            f"{detail}. The vulnerable scan would falsely show clean. {hint}"
+            f"{detail}. {consequence} {hint}"
         ) from last_error
 
 
@@ -195,8 +203,12 @@ async def run_demo(
         )
 
     if live:
-        used_provider = provider or DEMO_PROVIDER
-        used_model = model or DEMO_MODEL
+        # `is None` (not `or`): a caller-supplied but falsy override (e.g. an
+        # empty-string provider/model from a programmatic caller, as opposed to
+        # CLI Optional[str] which never surfaces "") must still win over the
+        # default rather than being silently discarded (DCR-0030).
+        used_provider = provider if provider is not None else DEMO_PROVIDER
+        used_model = model if model is not None else DEMO_MODEL
         # The two variants are independent — separate engines, no completion_fn
         # (real litellm.acompletion), random note IDs — so nothing is shared
         # between them. Drive them concurrently instead of one after another.

@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeVar
 
 import typer
 from rich.console import Console
@@ -76,6 +76,34 @@ EXIT_PROVIDER = 4
 EXIT_NOT_KEPT = 5
 
 _V0_2_ATTACK_FAMILIES = frozenset({"prompt-injection-family", "excessive-agency-family"})
+
+#: The built-in --max-llm-calls default. A Typer option default of ``50`` is
+#: indistinguishable from an explicit ``--max-llm-calls 50`` — comparing the
+#: resolved value against this literal (``if max_llm_calls == 50``) is exactly
+#: the DCR-0004/0012/0015 bug. The option default is ``None`` (see scan()/
+#: gate()); this constant is the actual fallback, applied via
+#: :func:`_resolve_option`, and is also what ``--help`` displays via
+#: ``show_default``.
+_DEFAULT_MAX_LLM_CALLS = 50
+
+_T = TypeVar("_T")
+
+
+def _resolve_option(explicit: _T | None, from_config: _T | None, default: _T) -> _T:
+    """Apply the precedence every command's ``--config`` help text promises:
+    explicit flag > config file > built-in default.
+
+    A ``None`` sentinel default on the Typer option is what makes "omitted"
+    distinguishable from "explicitly set to the default value"; comparing the
+    resolved value against the literal default (``if x == 50``) cannot
+    (DCR-0004, DCR-0012, DCR-0015, DCR-0005) — 50 IS a valid, meaningful thing
+    to explicitly pass.
+    """
+    if explicit is not None:
+        return explicit
+    if from_config is not None:
+        return from_config
+    return default
 
 
 def _maybe_enable_truststore() -> None:
@@ -814,9 +842,13 @@ def scan(
         ),
     ] = None,
     max_llm_calls: Annotated[
-        int,
-        typer.Option("--max-llm-calls", help="Process-wide LLM call cap for this scan."),
-    ] = 50,
+        int | None,
+        typer.Option(
+            "--max-llm-calls",
+            help="Process-wide LLM call cap for this scan.",
+            show_default=str(_DEFAULT_MAX_LLM_CALLS),
+        ),
+    ] = None,
     max_concurrent: Annotated[
         int,
         typer.Option("--max-concurrent", help="Max concurrent in-flight seeds."),
@@ -892,9 +924,9 @@ def scan(
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
-        if max_llm_calls == 50 and rc.max_llm_calls is not None:
-            # 50 is the option default; only the config overrides an untouched flag.
-            max_llm_calls = rc.max_llm_calls
+        max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+    else:
+        max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
@@ -950,6 +982,19 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
+    # 'reference:*' + --target-file is never meaningful — the reference targets
+    # are bundled in-process twins with no target file of their own, and the
+    # branch below would silently let --target-file win the routing while the
+    # printed/report target_id below still says 'reference:...' (the same
+    # divergence #24 fixes in `gate`). Reject it up front with a clear message.
+    if target is not None and target.startswith("reference:") and target_file is not None:
+        echo_err(
+            "scan: 'reference:*' targets are bundled in-process twins and don't take "
+            "--target-file. Pass a custom target via --target-file alone (drop the "
+            "'reference:' target argument), or drop --target-file to scan the "
+            "reference twin.")
+        raise typer.Exit(code=EXIT_CONFIG)
+
     # For a custom target we persist the resolved target YAML next to the scan
     # (below, after artefacts are written) so `generate`/`validate` can re-resolve
     # it without the operator re-passing --target-file at every step.
@@ -986,6 +1031,14 @@ def scan(
             validate_for_scan,
         )
 
+        # The persisted target.yaml must describe the target that ACTUALLY ran.
+        # Copying the source verbatim after M3 auto-wires a seed_arm (or --purpose
+        # overrides the target's declared purpose) would produce a scan dir whose
+        # target.yaml is missing the seed_arm the findings depended on, contradicting
+        # the adjacent "reproducible from the scan dir alone" guarantee
+        # (DCR-0005/0016/0006).
+        tf_mutated = False
+
         # M3: auto-wire the seed_arm from the LIVE tool surface when a W2 target omits
         # it, so a real app needs near-zero config instead of the hard block below.
         # Only when a no-id recall path exists (else the plant wouldn't be delivered —
@@ -1017,6 +1070,7 @@ def scan(
                 echo_err(f"auto-wire: {_note}")
                 if _spec is not None:
                     tf = tf.model_copy(update={"seed_arm": _spec})
+                    tf_mutated = True
                 else:
                     from mylonite.scan.tool_roles import content_processor_tools
 
@@ -1053,15 +1107,17 @@ def scan(
         # target file's declared purpose is used.
         if purpose is not None:
             tf = tf.model_copy(update={"purpose": purpose})
+            tf_mutated = True
         effective_purpose = tf.purpose
 
         # Copy the source YAML verbatim (preserves operator comments/structure)
-        # when given a file; otherwise serialise the inline mcp:custom flags so the
-        # exact target is reproducible from the scan dir alone. A --purpose override
-        # (or an inline target) is serialised so the persisted YAML carries it.
+        # when given a file AND nothing mutated it since; otherwise serialise the
+        # (possibly-mutated) target so the persisted YAML matches the target that
+        # ACTUALLY ran — a --purpose override, an M3 seed_arm auto-wire, or an
+        # inline mcp:custom target must all be reflected here (DCR-0005/0016/0006).
         custom_target_yaml = (
             target_file.read_text(encoding="utf-8")
-            if target_file is not None and purpose is None
+            if target_file is not None and not tf_mutated
             else dump_target_file(tf)
         )
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
@@ -1379,12 +1435,22 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
     raise typer.Exit(code=EXIT_CONFIG)
 
 
-def _map_compliance(exploit: Any) -> Any:
+def _map_compliance(exploit: Any, mapper: Any | None = None) -> Any:
     """Enrich a finding's compliance tags via the reference mapper (derives NIST
-    from the OWASP tags using the bundled taxonomy cross-refs)."""
-    from mylonite.plugins._reference.reference_compliance_mapper import ReferenceComplianceMapper
+    from the OWASP tags using the bundled taxonomy cross-refs).
 
-    return exploit.model_copy(update={"compliance": ReferenceComplianceMapper().map(exploit)})
+    ``mapper``, when supplied, is reused instead of constructing a fresh
+    ``ReferenceComplianceMapper()`` — a caller looping over many findings (e.g.
+    ``report``'s per-exploit-file loop) can build one and pass it in (DCR-0014
+    perf) instead of paying construction + import overhead per finding.
+    """
+    if mapper is None:
+        from mylonite.plugins._reference.reference_compliance_mapper import (
+            ReferenceComplianceMapper,
+        )
+
+        mapper = ReferenceComplianceMapper()
+    return exploit.model_copy(update={"compliance": mapper.map(exploit)})
 
 
 def _emit_generated_test(
@@ -1394,6 +1460,7 @@ def _emit_generated_test(
     target_file: Path | None,
     *,
     json_mod: Any,
+    validated_target_files: set[Path] | None = None,
 ) -> None:
     """Emit one regression test (+ co-located exploit/fixtures/target) for one
     exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
@@ -1401,6 +1468,14 @@ def _emit_generated_test(
     Factored out of :func:`generate` so a multi-finding scan dir can emit one
     test per finding into per-pattern subdirs. The single-exploit output is
     unchanged.
+
+    ``validated_target_files``, when supplied, is a cache of target-file paths
+    already loaded+validated (by this call or an earlier one in the same
+    multi-finding loop) — a multi-finding scan dir re-invokes this once per
+    exploit, all typically against the SAME target file, so re-parsing and
+    re-validating the identical YAML on every finding is pure overhead
+    (DCR-0013/0009 perf). Absent (``None``), every call validates independently
+    — the original, always-correct behaviour.
     """
     from mylonite._redaction import redact_target_yaml
     from mylonite.plugins._reference.reference_pytest_generator import (
@@ -1448,13 +1523,17 @@ def _emit_generated_test(
             target_file = candidate
             echo(f"Using target:  {candidate} (from the scan dir)")
     if target_file is not None:
-        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+        resolved_target_file = target_file.resolve()
+        if validated_target_files is None or resolved_target_file not in validated_target_files:
+            from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
-        try:
-            build_target_spec(load_target_file(target_file))  # validate before copying
-        except Exception as exc:
-            echo_exc(f"invalid --target-file {target_file}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+            try:
+                build_target_spec(load_target_file(target_file))  # validate before copying
+            except Exception as exc:
+                echo_exc(f"invalid --target-file {target_file}", exc)
+                raise typer.Exit(code=EXIT_CONFIG) from exc
+            if validated_target_files is not None:
+                validated_target_files.add(resolved_target_file)
         colocated_target = out_dir / "target.yaml"
         # Never copy a target file verbatim into a directory we tell the operator
         # to commit: request.headers and env may carry live credentials (DCR-0010).
@@ -1594,6 +1673,22 @@ def generate(
         echo(f"Found {len(exploit_paths)} findings - emitting one test each.")
         echo("")
 
+    # Validate an explicit --target-file ONCE, up front (fail fast before emitting
+    # anything), rather than re-loading + re-validating the identical YAML once per
+    # exploit inside the loop below (DCR-0013/0009 perf). The cache also covers the
+    # auto-resolved (scan-dir-co-located) target.yaml case across iterations, since a
+    # multi-finding scan dir's findings share the same co-located target.
+    validated_target_files: set[Path] = set()
+    if target_file is not None:
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        try:
+            build_target_spec(load_target_file(target_file))
+        except Exception as exc:
+            echo_exc(f"invalid --target-file {target_file}", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        validated_target_files.add(target_file.resolve())
+
     for index, exploit_path in enumerate(exploit_paths):
         try:
             exploit = testkit.load_exploit(exploit_path)
@@ -1618,7 +1713,14 @@ def generate(
         # must degrade to a clean error here too, not just at the unit-tested
         # ReferencePytestGenerator.emit() boundary.
         try:
-            _emit_generated_test(exploit, exploit_path, this_out, target_file, json_mod=json)
+            _emit_generated_test(
+                exploit,
+                exploit_path,
+                this_out,
+                target_file,
+                json_mod=json,
+                validated_target_files=validated_target_files,
+            )
         except UnsafeExploitRecord as exc:
             echo_exc(f"could not generate a test for {exploit_path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
@@ -1641,7 +1743,7 @@ def _boundary_control(weakness: str, spec: Any) -> Any:
         read_tool_names=frozenset(cfg.read_tool_names) or None,
         egress_tools=frozenset(cfg.egress_tools) or None,
         url_param=cfg.egress_url_param,
-        fetch_allowlist=tuple(cfg.fetch_allowlist),
+        fetch_allowlist=tuple(cfg.fetch_allowlist) or None,
         consequential_tools=frozenset(cfg.consequential_tools) or None,
     )
 
@@ -1778,6 +1880,25 @@ def _validate_custom(
     _enforce_custom_authorize(
         spec.family, tf.scope, spec.requires_scope, authorize, command="validate"
     )
+
+    # DCR-0008: fail fast on an unreachable provider with a distinct exit 4 —
+    # otherwise the full N-iteration live loop against the REAL target would
+    # just run to a misleading non-discriminating REJECTED. Always AFTER the
+    # authorize check above: authorization gates every live-driving action,
+    # and this preflight (a scan against the bundled reference twin, never the
+    # operator's real target) must not fire before an unauthorized request is
+    # rejected.
+    try:
+        reachable = _provider_preflight(provider, model)
+    except (ModuleNotFoundError, ImportError) as exc:
+        _exit_if_missing_kitchen_sink(exc)
+        raise
+    if not reachable:
+        echo_err(
+            "no provider reachable — set ANTHROPIC_API_KEY, or pass "
+            "--provider/--model for another LiteLLM provider.")
+        raise typer.Exit(code=EXIT_PROVIDER)
+
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
@@ -1811,8 +1932,18 @@ def _validate_custom(
     # (stability + effect + consensus). With --prove-input-control the operator opts
     # into an INPUT data-framing ("spotlighting") differential — raw vs a build that
     # wraps the payload as untrusted data — to measure whether that realistic input
-    # defence is load-bearing for their agent.
-    rest_input_frame = prove_input_control and spec.transport == "rest" and not server_layer
+    # defence is load-bearing for their agent. `--fast` (skip the differential leg)
+    # takes precedence over --prove-input-control: without this guard the plan
+    # printed above ("--fast: skipping the differential leg") would be silently
+    # contradicted by re-enabling it here (DCR-0017).
+    rest_input_frame = (
+        prove_input_control and spec.transport == "rest" and not server_layer and not fast
+    )
+    if fast and prove_input_control and spec.transport == "rest" and not server_layer:
+        # Re-emit the diff note: the printed plan must match what actually runs.
+        echo_err(
+            "validate: --fast overrides --prove-input-control — the differential leg "
+            "(including the input data-framing check) stays skipped.")
     if rest_input_frame:
         run_diff = True
         control_weakness = control_weakness or "W2"
@@ -2192,7 +2323,9 @@ def validate(
                 "For a black-box HTTP (rest) target: run an input data-framing "
                 "('spotlighting') differential — raw vs a build that wraps the payload as "
                 "untrusted data — to measure whether that input defence is load-bearing. "
-                "Opt-in; otherwise a rest target is gated by stability + effect + consensus."
+                "Opt-in; otherwise a rest target is gated by stability + effect + consensus. "
+                "--fast takes precedence: it skips the differential leg outright and "
+                "makes this a no-op."
             ),
         ),
     ] = False,
@@ -2201,9 +2334,14 @@ def validate(
         typer.Option(
             "--fast",
             help=(
-                "Skip the differential leg (the boundary-guarded twin). Faster/cheaper "
-                "(~half the live runs) but a WEAKER guarantee: kept = build ∧ stability ∧ "
-                "effect ∧ consensus, without proving the safeguard carries the security."
+                "For a CUSTOM target: skip the differential leg (the boundary-guarded "
+                "twin). Faster/cheaper (~half the live runs) but a WEAKER guarantee: "
+                "kept = build ∧ stability ∧ effect ∧ consensus, without proving the "
+                "safeguard carries the security. Also overrides --prove-input-control "
+                "(never re-enables the differential it just skipped). For a REFERENCE "
+                "target: the twin-vs-twin differential itself isn't optional, so this "
+                "instead reduces the metamorphic robustness check to a single "
+                "perturbation strategy (still gates kept, just cheaper/less thorough)."
             ),
         ),
     ] = False,
@@ -2299,7 +2437,17 @@ def validate(
         if candidate.is_file():
             target_file = candidate
             echo_err(f"Using target: {candidate} (co-located with the test)")
+
     if is_custom:
+        # DCR-0008: the provider-reachability preflight is done INSIDE
+        # _validate_custom, AFTER its authorization gate — never before it.
+        # Authorization must gate every live-driving action on the operator's
+        # real target (Phase 4's "one authorization gate" invariant); the
+        # preflight itself only calls the LLM provider (via the bundled
+        # reference twin, not the operator's target) so it carries no
+        # authorization concern of its own, but ordering it before the
+        # authorize check would still mean an unauthorized `validate` burns a
+        # live LLM call before being rejected.
         report = _validate_custom(
             generated,
             target_file,
@@ -2330,10 +2478,24 @@ def validate(
                 "--provider/--model for another LiteLLM provider.")
             raise typer.Exit(code=EXIT_PROVIDER)
 
+        # DCR-0007: `fast` was previously accepted by this command but silently
+        # dropped on the reference branch — a reference-target `--fast` was a
+        # complete no-op, contradicting the flag's own "faster/cheaper" promise.
+        # The reference path's twin-vs-twin differential itself isn't optional
+        # (unlike the custom path, there is no non-differential fallback gate),
+        # so `--fast` here instead trims the metamorphic robustness leg — the
+        # other genuinely-optional source of extra live calls (7 perturbation
+        # strategies x 2 twins each, on top of the `iterations` differential
+        # loop) — to a single strategy.
+        if fast:
+            echo_err(
+                "validate: --fast reduces the metamorphic robustness check to a single "
+                "perturbation strategy (faster/cheaper; weaker robustness signal).")
         validator = DifferentialValidator(
             iterations=iterations,
             provider=effective_provider,
             model=effective_model,
+            metamorphic_strategies=["paraphrase"] if fast else None,
             # Record the canonical guarded fixtures into the gen dir's `fixtures/`
             # and run the on-disk committed test offline as a full-pass build —
             # closing the validate→committed-artefact loop.
@@ -2526,9 +2688,17 @@ def report(
         # enrichment.
         tags: set[str] = set()
         target_id = sreport.target_id
+        from mylonite.plugins._reference.reference_compliance_mapper import (
+            ReferenceComplianceMapper,
+        )
+
+        # Built once, reused for every exploit file (DCR-0014 perf) — a scan dir
+        # with many findings would otherwise construct + import a fresh mapper
+        # per finding in this loop.
+        compliance_mapper = ReferenceComplianceMapper()
         for exploit_file in sorted(path.parent.glob("exploit_*.json")):
             try:
-                exploit = _map_compliance(testkit.load_exploit(exploit_file))
+                exploit = _map_compliance(testkit.load_exploit(exploit_file), compliance_mapper)
             except (FileNotFoundError, ValueError, OSError):
                 continue
             dashboard_exploits.append(exploit)
@@ -3047,9 +3217,13 @@ def gate(
         typer.Option("--out", help="Output directory for gate artefacts."),
     ] = Path(".mylonite/gate"),
     max_llm_calls: Annotated[
-        int,
-        typer.Option("--max-llm-calls", help="Process-wide LLM call cap for the scan phase."),
-    ] = 50,
+        int | None,
+        typer.Option(
+            "--max-llm-calls",
+            help="Process-wide LLM call cap for the scan phase.",
+            show_default=str(_DEFAULT_MAX_LLM_CALLS),
+        ),
+    ] = None,
     runs_on: Annotated[
         str,
         typer.Option(
@@ -3170,9 +3344,9 @@ def gate(
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
-        if max_llm_calls == 50 and rc.max_llm_calls is not None:
-            # 50 is the option default; only the config overrides an untouched flag.
-            max_llm_calls = rc.max_llm_calls
+        max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+    else:
+        max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
@@ -3180,8 +3354,23 @@ def gate(
     effective_model = _route_model(provider, base_model)
 
     # --- resolve adapter (mirrors scan command routing) ---
-    is_reference = bool(target and target.startswith("reference:"))
+    # 'reference:*' + --target-file is never meaningful — the reference targets
+    # are bundled in-process twins with no target file of their own. Reject it
+    # up front rather than silently letting one win (#24): a prior version
+    # computed `is_reference` from the target STRING before this branch could
+    # override routing to a custom adapter, so validate_fn below could drive the
+    # wrong oracle (reference twins) against a scan that actually ran a custom
+    # target, or vice versa.
+    if target is not None and target.startswith("reference:") and target_file is not None:
+        echo_err(
+            "gate: 'reference:*' targets are bundled in-process twins and don't take "
+            "--target-file. Pass a custom target via --target-file alone (drop the "
+            "'reference:' target argument), or drop --target-file to gate the "
+            "reference twin.")
+        raise typer.Exit(code=EXIT_CONFIG)
+
     tf = None
+    routed_to: str
 
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
@@ -3205,12 +3394,14 @@ def gate(
                 "Pass a target YAML via --target-file.")
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_custom(tf, authorize, effective_model, command="gate")
+        routed_to = "custom"
     elif target is None:
         echo_err(
             "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
-    elif is_reference:
+    elif target.startswith("reference:"):
         adapter = _build_adapter_for_reference(target, effective_model)
+        routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
             echo_err(
@@ -3218,11 +3409,16 @@ def gate(
                 "See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+        routed_to = "mcp"
     else:
         echo_err(
             f"unknown target shape {target!r}. "
             "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
+
+    # Derived from what actually ran (routed_to), NOT re-parsed from the target
+    # string — see the up-front rejection above for why the two could diverge.
+    is_reference = routed_to == "reference"
 
     # --- closures injected into run_gate ---
 
@@ -3335,6 +3531,7 @@ def gate(
     def validate_fn(generated: Any) -> Any:
         if is_reference:
             validator = DifferentialValidator(
+                iterations=iterations,
                 provider=effective_provider,
                 model=effective_model,
                 record_fixtures_dir=out / "fixtures",
@@ -3552,6 +3749,9 @@ def ablate(
     if not authorize:
         echo_err("--authorize is required to ablate a custom target. See SECURITY.md.")
         raise typer.Exit(code=EXIT_CONFIG)
+    if iterations < 1:
+        echo_err("--iterations must be >= 1.")
+        raise typer.Exit(code=EXIT_CONFIG)
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
@@ -3580,7 +3780,9 @@ def ablate(
     server_layer = bool(spec.control_env)
 
     if controls:
-        chosen = [c.strip().upper() for c in controls.split(",") if c.strip()]
+        # dict.fromkeys dedupes while preserving order — "W2,W3,W2" must not
+        # double-count W2's scans/rows in the ablation matrix (DCR-0015).
+        chosen = list(dict.fromkeys(c.strip().upper() for c in controls.split(",") if c.strip()))
     elif spec.control_config and spec.control_config.declared:
         chosen = list(spec.control_config.declared)
     elif spec.control_config and spec.control_config.synthetic:

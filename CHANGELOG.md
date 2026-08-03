@@ -238,6 +238,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `except Exception: pass`/`continue`, distinguishing it from AgentDojo's
       expected sparse-grid 404 misses (DCR-0001/DCR-0002).
 
+- **Explicit flags now win over `--config` even at the flag's own default
+  value** (DCR-0004, DCR-0005, DCR-0012, DCR-0015). `scan --max-llm-calls 50`
+  and `gate --max-llm-calls 50` were each indistinguishable from an omitted
+  flag (`if max_llm_calls == 50 and rc.max_llm_calls is not None`), so a
+  `mylonite.yaml`'s `max_llm_calls` silently won — contradicting `--config`'s
+  own "an explicit flag always wins" help text. Both `--max-llm-calls` options
+  now default to `None` (still displaying `[default: 50]` in `--help`) and
+  resolve through a shared `_resolve_option(explicit, from_config, default)`
+  helper; a parametrized conformance test guards the same field-level
+  precedence for `provider`/`model`/`max_llm_calls` so the bug class can't
+  silently recur for a different field.
+- **A custom scan's persisted `target.yaml` now matches the target that
+  actually ran** (DCR-0005/DCR-0006/DCR-0016). `scan` copied the source YAML
+  verbatim into the scan dir even when the M3 seed-arm auto-wire or a
+  `--purpose` override had mutated the in-memory target — the co-located
+  `target.yaml` a finding depended on could be missing the seed_arm that made
+  it reproducible. `scan` now tracks whether the target was mutated and
+  serialises the mutated version (still redacted) when it was.
+- **`gate` could drive the wrong differential oracle for a `reference:* +
+  --target-file` combination** (#24). `is_reference` was computed from the
+  target string before the `--target-file` branch could override routing to a
+  custom adapter, so `validate_fn` could pick the reference twins' oracle for
+  a scan that actually ran a custom target. `gate` (and `scan`, which had the
+  same latent ambiguity) now reject `reference:* + --target-file` up front
+  with a clear message, and `is_reference` is derived from the single
+  `routed_to` value the resolution block actually used.
+- Assorted flag-precedence/correctness fixes found independently by three
+  reviewers: `validate --fast` is now honoured for a `reference:*` target too
+  (previously a silent no-op there); `validate --prove-input-control` no
+  longer silently re-enables the differential leg `--fast` just said it was
+  skipping; `validate`'s provider-reachability preflight now also covers the
+  custom-target path (after, never before, its authorization check) instead
+  of only the reference path; `gate`'s reference-branch validator now honours
+  `--iterations` instead of always running 5; `ablate --iterations` rejects
+  `< 1` like `gate` already did; a custom target's unset `control_config.
+  fetch_allowlist` no longer silently replaces the sensible default egress
+  allowlist with an allow-nothing one; `ablate --controls W2,W3,W2` no longer
+  double-counts a repeated control; a multi-finding `generate` no longer
+  re-loads and re-validates the same `--target-file` once per finding;
+  `report`'s per-finding compliance-tag loop no longer reconstructs a mapper
+  per finding; the bundled reference differential validator's default
+  `vuln_threshold` is no longer trivially-satisfied (`0`) at `--iterations 1`;
+  a dead, never-wired `guard_threshold` constructor parameter was removed from
+  `DifferentialValidator`; `mylonite demo`'s fixture-error message now
+  describes the correct consequence for whichever twin's fixtures are stale
+  (previously always claimed "the vulnerable scan would falsely show clean",
+  even for a guarded-fixture problem); and `run_demo`'s live-mode
+  provider/model resolution uses `is None` instead of `or`.
+
 ## [0.7.5] - 2026-07-04
 
 > **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP

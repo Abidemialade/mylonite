@@ -1894,6 +1894,253 @@ def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 # ---------------------------------------------------------------------------
+# Phase 10 — flag precedence: an explicit flag must win over --config, even
+# when the explicit value happens to equal the flag's own Typer default.
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_max_llm_calls_beats_the_config_even_at_the_default_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0004/0012/0015/0005: 50 is the Typer default, so an explicit
+    `--max-llm-calls 50` was indistinguishable from an omitted flag and the
+    config's value (10) silently won — contradicting --config's own help text
+    ("an explicit flag always wins")."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\nmax_llm_calls: 10\n", encoding="utf-8"
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(
+        app, ["scan", "--config", str(cfg), "--max-llm-calls", "50", "--dry-run"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 50
+    target_registry.clear_runtime_targets()
+
+
+def test_config_max_llm_calls_applies_when_the_flag_is_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanity complement: with NO --max-llm-calls flag at all, the config's
+    value must still apply (the sentinel-default change must not break the
+    config-fills-omitted-flags case Step 1 doesn't cover)."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\nmax_llm_calls: 10\n", encoding="utf-8"
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--dry-run"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 10
+    target_registry.clear_runtime_targets()
+
+
+def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SAME DCR-0004/0012 precedence bug was independently duplicated in
+    `gate`'s own --config resolution block (a separate, copy-pasted `if
+    max_llm_calls == 50` check) — fixing `scan` alone would not have caught a
+    regression here, so this is verified at `gate`'s call site too."""
+    from mylonite.scan.engine import ScanEngine
+
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text("max_llm_calls: 10\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    async def _fake_run(self: Any) -> Any:  # no live LLM calls, zero findings
+        return _canned_scan_result("reference:vulnerable", findings=0)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["gate", "reference:vulnerable", "--config", str(cfg), "--max-llm-calls", "50"],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 50
+
+
+@pytest.mark.parametrize(
+    ("field", "flag", "config_key", "explicit_value", "config_value"),
+    [
+        # The historical bug shape (DCR-0004/0012): the explicit value
+        # DELIBERATELY equals the Typer option's own literal default (50),
+        # which `if resolved == 50` cannot distinguish from "omitted".
+        ("max_llm_calls", "--max-llm-calls", "max_llm_calls", 50, 10),
+        ("provider", "--provider", "provider", "openai", "anthropic"),
+        ("model", "--model", "model", "gpt-4o-mini", "claude-haiku-4-5-20251001"),
+    ],
+)
+def test_scan_config_precedence_conformance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    flag: str,
+    config_key: str,
+    explicit_value: Any,
+    config_value: Any,
+) -> None:
+    """Conformance test (Phase 10 Step 3): for every scalar field RunConfig
+    shares with `scan`'s signature, an explicit flag must win over --config —
+    even at the flag's own default value. This makes the DCR-0004/0012/0015
+    bug CLASS untestable-by-omission: it must fail if the `if resolved ==
+    literal_default` anti-pattern is reintroduced for a DIFFERENT field later,
+    not just re-test the one field the dedicated max-llm-calls test covers.
+
+    Each case only sets its OWN field (leaving provider/model at their true
+    defaults) so the asserted :class:`ScanConfig` attribute isn't perturbed by
+    ``--provider``'s LiteLLM routing prefix on ``model``.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\n{config_key}: {config_value}\n",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["config"] = config
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(
+        app, ["scan", "--config", str(cfg), flag, str(explicit_value), "--dry-run"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert getattr(captured["config"], field) == explicit_value
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_config_precedence_conformance_target_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RunConfig's ``target_file`` field: an explicit --target-file must win
+    over --config's target_file. Observed via the routed target's family name
+    surfacing in the dry-run summary — the config's target file (family
+    'configapp') must NOT be what actually ran."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    config_target = tmp_path / "config_target.yaml"
+    config_target.write_text(
+        "family: configapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    flag_target = tmp_path / "flag_target.yaml"
+    flag_target.write_text(
+        "family: flagapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {config_target}\nauthorize: configapp\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--config",
+            str(cfg),
+            "--target-file",
+            str(flag_target),
+            "--authorize",
+            "flagapp",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "flagapp" in result.stdout
+    assert "configapp" not in result.stdout
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_config_precedence_conformance_authorize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RunConfig's ``authorize`` field: an explicit --authorize must win over
+    --config's authorize. The config's authorize deliberately does NOT match
+    the target's family — if it silently won over a correct explicit
+    --authorize, the custom-target ownership check would reject the run."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {target_yaml}\nauthorize: not-myapp\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["scan", "--config", str(cfg), "--authorize", "myapp", "--dry-run"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    target_registry.clear_runtime_targets()
+
+
+# ---------------------------------------------------------------------------
 # PR7 — launch infra: an end-to-end guard that the custom-target path needs
 # --target-file at most ONCE (scan), then auto-resolves it downstream. This is
 # the regression test that keeps the headline custom-target flow honest.
@@ -2291,6 +2538,12 @@ def test_validate_custom_runs_differential_by_default(
     monkeypatch.setattr(
         "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
     )
+    # DCR-0008: _validate_custom now preflights provider reachability (after its
+    # authorize check) before doing anything expensive. This test drives an
+    # intentionally-fake model ("m") and stubs DifferentialValidator to avoid all
+    # OTHER live calls, so the preflight (the one live-call-making piece not
+    # already stubbed) needs stubbing too.
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
     tf = tmp_path / "t.yaml"
     tf.write_text(
         "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"

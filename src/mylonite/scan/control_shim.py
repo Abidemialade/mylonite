@@ -404,13 +404,19 @@ def make_control(
     read_tool_names: frozenset[str] | None = None,
     egress_tools: frozenset[str] | None = None,
     url_param: str | None = None,
-    fetch_allowlist: tuple[str, ...] = DEFAULT_FETCH_ALLOWLIST,
+    fetch_allowlist: tuple[str, ...] | None = None,
     consequential_tools: frozenset[str] | None = None,
 ) -> BoundaryControl:
     """Build the canonical boundary control for a weakness class (W1-W4).
 
     Raises for an unknown class so a caller can never silently get a no-op
     control (which would make a guard look load-bearing when nothing ran).
+
+    ``fetch_allowlist=None`` (the default) falls back to
+    ``DEFAULT_FETCH_ALLOWLIST`` — mirroring ``read_tool_names``/``egress_tools``,
+    an explicitly-empty tuple from a caller (e.g. an unset ``control_config`` hint)
+    must not silently replace the sensible default with an allow-nothing
+    allowlist (DCR-0009).
     """
     if weakness == "W1":
         return ToolDescriptionSanitizer()
@@ -418,7 +424,9 @@ def make_control(
         return UntrustedEnvelopeControl(read_tool_names=read_tool_names)
     if weakness == "W3":
         return EgressAllowlistControl(
-            egress_tools=egress_tools, url_param=url_param, allowlist=fetch_allowlist
+            egress_tools=egress_tools,
+            url_param=url_param,
+            allowlist=fetch_allowlist if fetch_allowlist is not None else DEFAULT_FETCH_ALLOWLIST,
         )
     if weakness == "W4":
         return ConfirmGateControl(consequential_tools=consequential_tools)
