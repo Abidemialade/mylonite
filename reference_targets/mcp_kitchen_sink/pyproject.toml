@@ -42,7 +42,12 @@ Source = "https://github.com/Abidemialade/mylonite/tree/main/reference_targets/m
 Issues = "https://github.com/Abidemialade/mylonite/issues"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.0"]
+# Upper bound mirrors the root package: mcp 2.0 renamed Tool.inputSchema ->
+# input_schema and CallToolResult.isError -> is_error, which this target's
+# server shim depends on. Pinned before the first PyPI release because a
+# published version's metadata is immutable — shipping an unbounded floor
+# would bake the breakage in permanently.
+mcp = ["mcp>=1.0,<2.0"]
 dev = [
     "pytest>=8.2",
 ]
