@@ -87,6 +87,51 @@ _INHERITED_ENV_KEYS: frozenset[str] = frozenset(
 )
 
 
+def _compose_child_env(extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Build the spawned server's environment: the allowlisted parent
+    variables, then the target's declared overlay on top — normalized so
+    there is never more than one entry for the same effective variable name.
+
+    Two case-sensitivity hazards, both around ``os.environ``'s ACTUAL stored
+    key casing being a platform/session quirk (Windows has been observed
+    storing e.g. ``"Path"`` instead of ``"PATH"``):
+
+    1. The allowlist CHECK must be case-insensitive (``k.upper() in
+       _INHERITED_ENV_KEYS``) or a variable stored under an unexpected casing
+       is silently dropped — the safer failure mode for an allowlist is "too
+       narrow", not a platform-dependent flake.
+    2. Every allowlisted entry is then stored under a SINGLE CANONICAL
+       (uppercase) key, and ``extra_env`` overlay keys are merged by first
+       removing any existing entry that matches case-insensitively. Without
+       this, an inherited ``"Path"`` plus a target-declared override
+       ``env: {PATH: ...}`` would both land in the dict as separate keys —
+       the override would not cleanly REPLACE the inherited value, it would
+       silently ADD a same-effective-name key under different casing, with
+       implementation-defined behaviour for which one the OS actually
+       resolves. That would defeat ``TargetSpec.launch_env``'s documented
+       "single precedence point" guarantee.
+    """
+    env: dict[str, str] = {}
+    # Track, per UPPERCASE name, which exact key currently occupies `env` —
+    # lets the extra_env merge below find and remove a case-differing
+    # duplicate before inserting the overlay's own key.
+    canonical_key_for: dict[str, str] = {}
+    for k, v in os.environ.items():
+        upper = k.upper()
+        if upper in _INHERITED_ENV_KEYS:
+            env[upper] = v  # canonical uppercase key — collapses any pre-existing
+            canonical_key_for[upper] = upper  # case ambiguity in os.environ itself
+    if extra_env:
+        for k, v in extra_env.items():
+            upper = k.upper()
+            existing_key = canonical_key_for.get(upper)
+            if existing_key is not None and existing_key != k:
+                del env[existing_key]
+            env[k] = v
+            canonical_key_for[upper] = k
+    return env
+
+
 @asynccontextmanager
 async def _open_mcp_session(
     spec: target_registry.TargetSpec,
@@ -109,20 +154,13 @@ async def _open_mcp_session(
     parent environment. It gets a narrow, named allowlist
     (``_INHERITED_ENV_KEYS`` — PATH and the handful of OS-plumbing variables a
     subprocess launcher needs) merged with ``extra_env`` (the target's
-    declared overlay — see ``TargetSpec.launch_env``'s docstring). This is a
-    deliberate, real behaviour change: a custom MCP server that previously
-    relied on inheriting some OTHER parent-env variable must now declare it
-    explicitly in the target file's ``env:`` block.
+    declared overlay — see ``TargetSpec.launch_env``'s docstring), composed by
+    :func:`_compose_child_env` so a casing mismatch can't produce a duplicate
+    entry. This is a deliberate, real behaviour change: a custom MCP server
+    that previously relied on inheriting some OTHER parent-env variable must
+    now declare it explicitly in the target file's ``env:`` block.
     """
-    # Case-insensitive on the allowlist check: os.environ's ACTUAL stored key
-    # casing is a platform/session quirk (Windows environments have been
-    # observed with e.g. "Path" instead of "PATH"), and a case-sensitive
-    # comparison here would silently drop an allowlisted variable rather than
-    # fail loud — the safer failure mode for an allowlist is "too narrow", not
-    # a platform-dependent flake.
-    env = {k: v for k, v in os.environ.items() if k.upper() in _INHERITED_ENV_KEYS}
-    if extra_env:
-        env.update(extra_env)
+    env = _compose_child_env(extra_env)
     params = StdioServerParameters(
         command=command or spec.command,
         args=args if args is not None else spec.render_args(scope),

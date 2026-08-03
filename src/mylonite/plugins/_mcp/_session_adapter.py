@@ -823,6 +823,13 @@ class _MCPAttackSession:
         argument of the call that looks payload-shaped (see
         ``_MIN_PLANTED_PAYLOAD_CHARS``), which is the payload for every plant
         shape in the catalogue and never an id or a path.
+
+        Bounded by ``self._adapter._bounded`` (#37 consistency) — every other
+        session/subprocess round-trip this phase touched (``_run_setup``'s
+        ``write_file``/``create_issue``, ``_run_seed_arm``'s call, the planner
+        run, the effect probe) is timeout-bounded; this is the one sibling
+        raw-call site on the ``AttackSession`` contract and a stuck subprocess
+        write here is exactly the same DCR-0008 hazard as the others.
         """
         # Raw plant — un-sanitized by design (honesty invariant).
         args = dict(arguments)
@@ -835,7 +842,7 @@ class _MCPAttackSession:
             if len(candidate) >= _MIN_PLANTED_PAYLOAD_CHARS:
                 self._planted_payloads.append(candidate)
         shim = MCPSessionAsServerLike(self._session)
-        result = await shim.call_tool(name, args)
+        result = await self._adapter._bounded(shim.call_tool(name, args))
         return ToolCallOutcome(tool=name, result=result.content, is_error=result.isError)
 
     async def drive_planner(

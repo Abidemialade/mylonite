@@ -278,9 +278,72 @@ async def test_open_mcp_session_does_not_inherit_the_full_parent_environment(
     assert "MYLONITE_TEST_SENTINEL_SECRET" not in captured_env
     # The target's declared overlay still reaches the child.
     assert captured_env.get("DECLARED_VAR") == "1"
-    # An allowlisted, OS-plumbing variable is still inherited (PATH is set in
-    # every real environment this test runs in).
-    assert "PATH" in captured_env or "Path" in captured_env
+    # An allowlisted, OS-plumbing variable is still inherited, canonicalized
+    # to a single uppercase key regardless of os.environ's own casing (see
+    # _compose_child_env / the casing-dedup tests below).
+    assert "PATH" in captured_env
+    assert "Path" not in captured_env
+
+
+# --- env-key casing must never produce a duplicate entry ---------------------
+
+
+def test_compose_child_env_dedupes_a_casing_mismatch_between_inherited_and_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reviewer repro: the parent's inherited PATH lands in the allowlist
+    under the canonical 'PATH' key, but a target file declares its override
+    with a DIFFERENT casing — env: {Path: ...} — exactly what a hand-authored
+    YAML (thinking of the Windows convention) would plausibly write. Before
+    the fix (plain ``env.update(extra_env)``), the composed dict ended up
+    with BOTH 'PATH' and 'Path' as separate keys — the override did not
+    cleanly replace the inherited value, it silently ADDED a same-effective-
+    name key under different casing, with implementation-defined behaviour
+    for which one the OS actually resolves. Exactly one entry must survive,
+    holding the override's value."""
+    monkeypatch.setenv("PATH", "C:\\inherited\\from\\parent")
+
+    env = stdio_adapter._compose_child_env({"Path": "C:\\overridden\\by\\target"})
+
+    path_entries = {k: v for k, v in env.items() if k.upper() == "PATH"}
+    assert len(path_entries) == 1, f"expected exactly one PATH-family entry, got {path_entries}"
+    assert env.get("Path") == "C:\\overridden\\by\\target"
+    assert "PATH" not in env
+
+
+def test_compose_child_env_dedupes_with_no_casing_difference_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The common case (inherited and override both spelled 'PATH') must also
+    yield exactly one entry, holding the override's value."""
+    monkeypatch.setenv("PATH", "C:\\inherited")
+
+    env = stdio_adapter._compose_child_env({"PATH": "C:\\overridden"})
+
+    assert list(k for k in env if k.upper() == "PATH") == ["PATH"]
+    assert env["PATH"] == "C:\\overridden"
+
+
+def test_compose_child_env_allowlist_itself_is_casing_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even with NO extra_env override, an inherited variable stored under an
+    unexpected casing lands under the canonical uppercase key — never both.
+
+    (On this interpreter/platform ``os.environ`` itself may already
+    normalize ``Path`` -> ``PATH`` before ``_compose_child_env`` ever sees
+    it — CPython's Windows ``os.environ`` does this. The assertions hold
+    either way; on a platform/mapping that preserves the raw casing (e.g.
+    POSIX), this is where ``_compose_child_env``'s OWN normalization is the
+    thing doing the work.)"""
+    monkeypatch.setenv("Path", "C:\\only\\the\\parent\\has\\this")
+
+    env = stdio_adapter._compose_child_env(None)
+
+    path_entries = {k: v for k, v in env.items() if k.upper() == "PATH"}
+    assert len(path_entries) == 1, f"expected exactly one PATH-family entry, got {path_entries}"
+    assert env.get("PATH") == "C:\\only\\the\\parent\\has\\this"
+    assert "Path" not in env
 
 
 @pytest.mark.asyncio
@@ -1189,6 +1252,35 @@ async def test_setup_calls_are_timeout_bounded(tmp_path: Path) -> None:
         with pytest.raises(AdapterInvocationSkipped) as excinfo:
             await adapter.invoke(payload)
     assert excinfo.value.attempt_metadata["reason"] == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_attack_session_call_tool_is_timeout_bounded(tmp_path: Path) -> None:
+    """DCR-0008 consistency: _MCPAttackSession.call_tool (the raw
+    attacker-plant call on the AttackSession contract) is the one sibling
+    session round-trip this phase's other timeout-bounding didn't originally
+    cover — a stuck subprocess write here must time out exactly like
+    _run_setup's write_file/create_issue and _run_seed_arm's call do."""
+
+    class _StuckSession(_FakeSession):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+            await asyncio.sleep(10)
+            return await super().call_tool(name, arguments)
+
+    @asynccontextmanager
+    async def fake_open(*args: Any, **kwargs: Any):
+        yield _StuckSession()
+
+    with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
+        adapter = MCPStdioAdapter(
+            family="filesystem", scope=str(tmp_path), planner_timeout_s=0.1
+        )
+        session = await adapter.open_session()
+        try:
+            with pytest.raises(TimeoutError):
+                await session.call_tool("write_file", {"path": "x", "content": "poison"})
+        finally:
+            await session.close()
 
 
 # --- #36 planted-payload tracking (DCR-0006) ---------------------------------

@@ -24,7 +24,7 @@ seed_arm:
 family: my-app                 # short name used in report ids (not a bundled name)
 command: python                # the MCP server launch command
 args: [my_server.py, --port, "0"]
-env: { LOG_LEVEL: warning }    # extra env for the server process
+env: { LOG_LEVEL: warning }    # ADDED to a small allowlist, not merged into your full env — see below
 scope: tenant-a                # optional label; must match --authorize / {scope}
 requires_scope: false          # set true to require a non-empty scope
 
@@ -121,6 +121,20 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 > `sqlite:////c/Users/...` (4 slashes) and `sqlite:///C:/Users/...` (3 slashes) open
 > *different* databases on Windows — a silent way to scan an empty DB and wrongly
 > conclude the agent is clean. Prefer an absolute path and verify it opened.
+
+> **`env` is an overlay, not your full environment.** A stdio target's spawned process
+> does **not** inherit Mylonite's own environment wholesale — Mylonite routinely spawns
+> deliberately-vulnerable and third-party servers, and handing every one of them
+> Mylonite's own provider API keys / `GITHUB_TOKEN` / other credentials would be a real
+> leak. The child gets a small, fixed allowlist of OS-plumbing variables (`PATH`, `HOME`,
+> `USERPROFILE`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `PATHEXT`,
+> `COMSPEC`, `APPDATA`, `LOCALAPPDATA`) plus whatever you declare in `env:` — nothing
+> else. If your server needs some OTHER parent-env variable, declare it explicitly here.
+> The most common case: an `npx`/`uvx`-launched target running behind a corporate
+> TLS-inspecting proxy needs its proxy/CA variables declared explicitly too, e.g.
+> `env: { HTTPS_PROXY: "...", HTTP_PROXY: "...", NO_PROXY: "...", NODE_EXTRA_CA_CERTS:
+> "...", SSL_CERT_FILE: "..." }` — without them the launch can fail with a TLS/registry
+> error that looks unrelated to Mylonite.
 
 ## The boundary controls fail closed
 

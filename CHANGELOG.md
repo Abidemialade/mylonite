@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A spawned MCP server no longer inherits Mylonite's full process
+  environment** (DCR-0012, DCR-0018). `mylonite` routinely spawns
+  deliberately-vulnerable and third-party MCP servers (bundled `npx`/`uvx`
+  targets, and any `--target-file`/`mcp:custom` stdio target); previously the
+  child process got `dict(os.environ)` — Mylonite's own provider API keys,
+  `GITHUB_TOKEN`, and any other credential in the parent's environment,
+  handed unconditionally to every target it scans, including a purposely
+  unguarded twin.
+  - **BEHAVIOUR CHANGE:** the spawned server's environment is now composed
+    from a narrow, named allowlist (`PATH`/`HOME`/`USERPROFILE`/`SYSTEMROOT`/
+    `TEMP`/`TMP`/`TMPDIR`/`LANG`/`LC_ALL`/`PATHEXT`/`COMSPEC`/`APPDATA`/
+    `LOCALAPPDATA` — the OS-plumbing variables a subprocess launcher needs)
+    plus whatever the target file declares in its `env:` block, composed with
+    casing-safe dedup so a target-declared override can never collide with an
+    inherited entry under a different case. A custom target that previously
+    relied on inheriting some OTHER parent-env variable now needs that
+    variable declared explicitly in `env:` — most commonly a proxy/TLS
+    variable (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`/`NODE_EXTRA_CA_CERTS`/
+    `SSL_CERT_FILE`) for an `npx`/`uvx`-launched target running behind a
+    corporate TLS-inspecting proxy — see `docs/target-file.md`'s `env:` field.
 - **Boundary controls fail closed on an unrecognised tool** (DCR-0032, DCR-0033,
   DCR-0034, DCR-0035), closing #8, #9. The four adapter-boundary controls
   (`src/mylonite/scan/control_shim.py`) each answer "does this control apply to
