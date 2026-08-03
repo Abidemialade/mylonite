@@ -184,7 +184,12 @@ def load_cases(
     ``"base"`` or ``"enhanced"`` (matching the source filename's suffix) — it
     only matters for the ``Tool Response Template`` fallback (see
     ``_substitute_tool_response_template``); every real case today carries a
-    precomputed ``Tool Response`` and ignores it.
+    precomputed ``Tool Response`` and ignores it. Passing the wrong
+    ``setting`` for the file being parsed (e.g. the default ``"base"`` against
+    an ``*_enhanced.json`` file) would silently misclassify it whenever the
+    fallback DOES fire — producing a technically-valid but weaker,
+    non-injection-framed substitution instead of raising, so pass the value
+    that matches the actual file.
     """
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):

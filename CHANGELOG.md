@@ -175,6 +175,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     actually names the target (its scope or family), not merely that some
     non-empty value was supplied.
 
+### Fixed
+
+- **Fail loud instead of silently wrong**: six production `assert` statements
+  that silently no-op under `python -O` are now explicit checks that raise a
+  typed error or return a typed result, and five sites that either swallowed
+  an exception into a confident-wrong value or aborted a whole batch on one
+  bad item now fail loud or degrade gracefully instead (closes #21, #22, #29,
+  #39, #40, #41).
+  - `gate/orchestrator.py`'s `run_gate` no longer crashes with a bare
+    `AttributeError` when an injected `generate_fn`/`validate_fn` collaborator
+    returns `None` — new `EXIT_GENERATE_FAILED`/`EXIT_VALIDATE_FAILED` exit
+    codes (`6`/`7`, documented in `docs/cli-reference.md`) surface it as a
+    typed `GateResult` instead. Three more asserts (`cli.py`,
+    `scan/engine.py`, `plugins/_reference/reference_validator.py`) and a sixth
+    found during the sweep (`demo/_replay.py`) became explicit
+    `if ... is None: raise ...` checks on invariants provably true today —
+    never trust that to survive under `-O` or a future refactor.
+  - **`DifferentialValidator`'s metamorphic-robustness check no longer
+    inverts an adapter error on the guarded twin into "the guard resisted"**
+    (DCR-0022). `_invoke_and_judge_async` now returns a tri-state
+    `bool | None` (`None` = the twin was never actually exercised — a planner
+    skip or adapter error), and `_run_perturbed` only records
+    `guard_resisted=True` when the guarded twin was genuinely invoked AND
+    judged not a success, instead of computing it as `not guard_success` (which
+    collapsed "errored" and "invoked, did not fire" to the same value).
+  - A `verdict_reason`/`seed_id` quoting target output shaped like a Rich
+    closing tag (e.g. `[/bold]`) no longer crashes `mylonite scan`/`report`/
+    `validate` with `rich.errors.MarkupError` **after a successful run**
+    (DCR-0004). `scan/artefacts.py`'s `render_summary` and `cli.py`'s
+    `_render_validation_report` now escape Rich markup on every
+    attacker/target-influenced free-text table cell — redaction alone only
+    masks secret-shaped tokens, not markup.
+  - `gate/annotate.py`'s `post_check_run` no longer returns the truthy string
+    `"None"` for a genuinely missing `html_url` (DCR-0020).
+  - Third-party verification harness (`verification/`, excluded from the
+    wheel) hardening:
+    - `layer2_datasets/agentdojo.py`: one malformed AgentDojo run file no
+      longer discards every transcript already parsed from files that sorted
+      before it — `run_to_transcript` runs inside the try, catching
+      `AttributeError`/`TypeError`/`KeyError` too, and skips are counted and
+      logged (DCR-0009) so "0 runs matched" reads differently from "N runs
+      were dropped". `limit=0` is now honoured (DCR-0012).
+    - `layer2_datasets/injecagent.py`: the `Tool Response Template` fallback
+      (exercised only if a future dataset revision omits the usually-present
+      `Tool Response`) now correctly substitutes the attacker instruction —
+      re-derived and verified against a live fetch of all four pinned
+      dh/ds × base/enhanced files (2108 real cases, 0 mismatches): `json.dumps`
+      runs on the template BEFORE substitution (fixes a quote-escaping-order
+      bug that would have double-escaped an instruction containing a literal
+      `"`), and an `enhanced`-split case wraps the instruction in its real
+      injection-strengthening prefix instead of splicing it raw. Raises on an
+      unrecognised (non-string) template shape rather than guessing.
+    - `layer3_production/run.py`: `_load_scan_report` picks the most recent of
+      several `scan_report.json` matches (not whichever `rglob` yields first)
+      and warns when more than one exists (#41); validates the parsed JSON is
+      a mapping and raises there instead of a silent `attempts = []` deep in
+      the scorer that fabricated a clean report (DCR-0014); a schema-legal
+      `null` `verdict_reason` no longer crashes `precision_report` (DCR-0015).
+    - `fetch.py`: a truststore-injection failure or a persistent proxy/TLS
+      error is now logged instead of silently swallowed by a bare
+      `except Exception: pass`/`continue`, distinguishing it from AgentDojo's
+      expected sparse-grid 404 misses (DCR-0001/DCR-0002).
+
 ## [0.7.5] - 2026-07-04
 
 > **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP

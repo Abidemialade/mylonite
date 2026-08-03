@@ -1005,6 +1005,8 @@ class DifferentialValidator(ValidatorBase):
                 self._invoke_and_judge_async("guarded", payload),
             )
         )
+        # `is True`/`is False`, not plain truthiness: `None` (adapter error,
+        # twin never exercised) must fall into neither "fired" nor "resisted".
         vuln_fired = vuln_result is True
         guard_resisted = guard_result is False
         return vuln_fired, guard_resisted

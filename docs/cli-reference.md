@@ -5,7 +5,9 @@ the authoritative, always-current list (the help strings and usage examples live
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
 **Exit codes:** `0` ok/kept · `2` config or usage error (incl. an empty scan) · `3`
-LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept).
+LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept) · `6`
+`gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`:
+the validator returned nothing (internal collaborator failure).
 
 ---
 
