@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.6] - 2026-08-03
 
+### Fixed (CI)
+
+- **`mcp` dependency now pinned to `<2.0`.** The unbounded `mcp>=1.0` floor let
+  a fresh install (CI, or any environment without a pre-existing pin) resolve
+  the just-released `mcp==2.0.0`, a breaking major version this codebase does
+  not support (`Tool.inputSchema` -> `input_schema`, `CallToolResult.isError`
+  -> `is_error`, `mcp.client.streamable_http.streamablehttp_client` ->
+  `streamable_http_client`, and `ClientSession.read_timeout_seconds` changed
+  from `timedelta` to `float`). Every local dev environment for this whole
+  remediation effort had `mcp==1.29.0` pinned as an ad-hoc workaround, so this
+  was invisible locally and only surfaced once the PR reached CI's fresh
+  install — mypy and ~30 tests failed across every Python version and
+  platform. No code change; the dependency constraint was the bug.
+- **`.secrets.baseline` regenerated against the current tree.** The baseline
+  was last refreshed for a Windows path-separator normalization only; several
+  test files edited later in this same effort (`test_redaction.py` most
+  notably, whose imports were reorganized) shifted the line numbers of
+  pre-existing, deliberately-fake test credentials, so `detect-secrets`
+  reported them as new, unbaselined findings. Regenerated and spot-checked
+  every new entry — all are either test fixtures or documentation describing
+  the redaction feature's own pattern-matching (e.g. `scheme://user:pass@host`
+  in `SECURITY.md`), none are real.
+
 ### Security
 
 - **A spawned MCP server no longer inherits Mylonite's full process

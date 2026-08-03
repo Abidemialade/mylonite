@@ -60,7 +60,14 @@ dependencies = [
     # github targets. The mcp_kitchen_sink reference target still uses this
     # as an optional dep since its in-process server doesn't need wire
     # transport.
-    "mcp>=1.0",
+    # Upper bound: mcp 2.0 is a breaking release (Tool.inputSchema ->
+    # input_schema, CallToolResult.isError -> is_error,
+    # mcp.client.streamable_http.streamablehttp_client -> streamable_http_client,
+    # ClientSession's read_timeout_seconds changed from timedelta to float) that
+    # this codebase does not yet support. An unbounded floor let CI silently
+    # resolve 2.0.0 while local dev environments stayed pinned to 1.x, so CI
+    # failed broadly (mypy + ~30 tests) while every local check passed.
+    "mcp>=1.0,<2.0",
     # OS trust-store TLS, BASE dependency: many users sit behind a TLS-inspecting
     # corporate proxy or local AV whose CA lives in the OS store but not in certifi's
     # bundle, so HTTPS to the LLM provider fails with CERTIFICATE_VERIFY_FAILED out of
