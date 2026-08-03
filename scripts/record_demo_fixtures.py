@@ -97,6 +97,22 @@ async def _main() -> None:
     print(f"Recording demo fixtures with {DEMO_PROVIDER}/{DEMO_MODEL}")
     print(f"Fixtures root: {FIXTURES_ROOT.resolve()}")
     counts: dict[str, tuple[int, int]] = {}
+    # Deliberately SEQUENTIAL — not migrated to run_twins (mylonite._concurrency)
+    # despite the two variants otherwise looking like an independent twin pair.
+    # Unlike the offline demo replay/live paths (mylonite.demo.runner.run_demo),
+    # this is a RECORD-mode run: it makes real, non-deterministic LLM calls and
+    # writes the resulting (model, messages) -> response pairs to disk as the
+    # fixtures every future replay depends on. Running both variants
+    # concurrently would fire two live provider call streams at once with
+    # nothing to keep them in lock-step, and this script's whole job is
+    # producing a byte-stable, reviewable artefact — not wall-clock speed (it
+    # is a rare, manual, dev-time tool run once per prompt/schema change, never
+    # on any hot or CI path). Keeping it strictly sequential also keeps the
+    # per-variant console output ("[vulnerable] recorded ... " then
+    # "[guarded] recorded ...") in a predictable order for the human running
+    # it. An intentional, documented exception is the correct call for a
+    # performance finding whose "fix" would trade determinism for a speedup
+    # nobody needs here.
     for variant in _VARIANTS:
         counts[variant] = await _record_variant(variant)
 

@@ -23,6 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mylonite._concurrency import gather_bounded
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
@@ -469,8 +470,36 @@ class ScanEngine:
         fail_passes: list[_JudgedPass] = []
         last_pass: _JudgedPass | None = None
         success_count = 0
-        for _ in range(runs):
-            result = await self._one_pass(payload=payload, seed_id=seed_id)
+        # The `runs` passes are independent of each other (same payload,
+        # re-invoked/re-judged for the flakiness filter), so with runs>1 they
+        # are driven concurrently, bounded by the same limit as cross-payload
+        # fan-out. runs=1 (the default, and every demo/replay path) stays a
+        # single bare `await` rather than routing through gather_bounded: this
+        # whole payload-processing coroutine is itself already running inside
+        # an ``asyncio.create_task``-managed Task that the engine's own
+        # abort/cancel path (``run()``'s ``pending.cancel()`` on
+        # provider_unreachable / budget_exceeded / wall-clock-timeout) can
+        # cancel BEFORE that Task ever gets its first execution turn — and a
+        # coroutine handed to ``asyncio.gather`` under THOSE conditions can be
+        # abandoned un-awaited (Task.cancel() before the wrapping Task's first
+        # step throws into it without ever reaching the inner ``await coro``),
+        # which trips ``filterwarnings=error``'s "coroutine was never
+        # awaited". A single bare await has no such window and is exactly the
+        # old sequential form, so runs=1 keeps it. With runs>1, a structural
+        # skip/error is still terminal for the OVERALL verdict (the first such
+        # result in run order wins, matching the old early-return), but —
+        # because all passes are launched up front — a later pass may now run
+        # even though an earlier one turned out to be a terminal skip; that
+        # only spends extra (already-budgeted) calls, it never changes which
+        # result is returned.
+        if runs == 1:
+            pass_results = [await self._one_pass(payload=payload, seed_id=seed_id)]
+        else:
+            pass_results = await gather_bounded(
+                [self._one_pass(payload=payload, seed_id=seed_id) for _ in range(runs)],
+                limit=self._config.max_concurrent,
+            )
+        for result in pass_results:
             if isinstance(result, _PerPayloadOutcome):
                 return result  # structural skip / error — terminal, do not retry
             last_pass = result

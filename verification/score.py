@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 
+from mylonite._concurrency import gather_bounded
 from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.corpus import CaseResult, ConfusionMatrix, confusion_matrix
 from mylonite.scan.judge import SuccessJudge
@@ -86,5 +87,7 @@ async def score_transcripts(
     exercise the LLM-judge leg (the "with-LLM" column).
     """
     judge = judge or SuccessJudge(model="deterministic-unused", llm_fallback=False)
-    rows = [await score_transcript(t, judge, crosswalk) for t in transcripts]
+    # Each transcript is scored independently (no shared mutable state between
+    # them), so drive them concurrently instead of one after another.
+    rows = await gather_bounded([score_transcript(t, judge, crosswalk) for t in transcripts])
     return rows, confusion_matrix(rows)

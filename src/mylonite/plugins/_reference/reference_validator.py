@@ -69,6 +69,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
+from mylonite._concurrency import gather_bounded, run_twins
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -742,14 +743,15 @@ class DifferentialValidator(ValidatorBase):
         if not runs:
             return 0.0
         judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
-        agree = 0
-        total = 0
-        for r in runs:
-            for _ in range(self._consensus_judges):
-                verdict = asyncio.run(judge.judge(payload, r.response))
-                total += 1
-                if verdict.success:
-                    agree += 1
+        # Every judge call here is independent (same payload/response pair,
+        # judged repeatedly for consensus) — build them all up front and drive
+        # them concurrently, bounded, inside one event loop.
+        judge_coros = [
+            judge.judge(payload, r.response) for r in runs for _ in range(self._consensus_judges)
+        ]
+        verdicts = asyncio.run(gather_bounded(judge_coros))
+        total = len(verdicts)
+        agree = sum(1 for v in verdicts if v.success)
         return (agree / total) if total else 0.0
 
     # -- pure decision helper (unit-tested directly) --------------------------
@@ -802,10 +804,15 @@ class DifferentialValidator(ValidatorBase):
         """Run the full attack scan against BOTH twins once and tally.
 
         Factored out so the metamorphic stage can reuse the exact same
-        per-iteration differential check.
+        per-iteration differential check. The two twins are independent — the
+        differential compares their results, neither feeds the other — so they
+        are driven CONCURRENTLY via ``run_twins`` inside one ``asyncio.run``,
+        each with its own adapter/customiser/judge/note-id-counter (built fresh
+        per call by ``build_scan``), so nothing is shared between them.
         """
-        vuln_result = self._run_scan("vulnerable")
-        guard_result = self._run_scan("guarded")
+        vuln_result, guard_result = asyncio.run(
+            run_twins(self._run_scan_async("vulnerable"), self._run_scan_async("guarded"))
+        )
         return _IterationTally(
             vuln_fired=self._fired(vuln_result, pattern_id),
             guard_resisted=self._resisted(guard_result, pattern_id),
@@ -815,7 +822,15 @@ class DifferentialValidator(ValidatorBase):
         )
 
     def _run_scan(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
-        """Build and run one full attack scan for ``variant``."""
+        """Build and run one full attack scan for ``variant`` (sync entry point)."""
+        return asyncio.run(self._run_scan_async(variant))
+
+    async def _run_scan_async(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
+        """Build and await one full attack scan for ``variant``.
+
+        No internal ``asyncio.run`` — callers that want to run this concurrently
+        with its twin (``_run_iteration``) drive both from a single event loop.
+        """
         engine = build_scan(
             variant,
             completion_fn=self._completion_fn,
@@ -826,7 +841,7 @@ class DifferentialValidator(ValidatorBase):
             customiser_model=self._customiser_model,
             judge_model=self._judge_model,
         )
-        return asyncio.run(engine.run())
+        return await engine.run()
 
     @staticmethod
     def _fired(result: ScanResult, pattern_id: str) -> bool:
