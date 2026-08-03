@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -68,6 +69,12 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
 #: ``LC_ALL`` are the POSIX equivalents. Verified empirically on Windows: a
 #: real ``npx``-launched filesystem server and ``uvx``-launched fetch server
 #: both spawn and respond to ``tools/list`` with only this allowlist.
+#: Bound on how long a single ``ClientSession`` read (including
+#: ``session.initialize()``) may block waiting on the spawned subprocess
+#: before raising, so a hung/non-responding server cannot hang a scan forever
+#: (RB-DCR-0002 — same gap as the remote adapter's ``_open_remote_session``).
+_READ_TIMEOUT = timedelta(seconds=60.0)
+
 _INHERITED_ENV_KEYS: frozenset[str] = frozenset(
     {
         "PATH",
@@ -168,7 +175,7 @@ async def _open_mcp_session(
     )
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
+        ClientSession(read_stream, write_stream, read_timeout_seconds=_READ_TIMEOUT) as session,
     ):
         await session.initialize()
         yield session

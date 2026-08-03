@@ -95,6 +95,23 @@ class VulnerableKitchenSinkServer:
         ]
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            return self._call_tool(name, arguments)
+        except KeyError as exc:
+            # A missing required argument used to raise an unhandled KeyError
+            # straight out of `arguments[...]`
+            # (ground-truth-verification-review RB-DCR-0003). This is orthogonal
+            # to the four catalogued weaknesses above (W1-W4 are about what a
+            # well-formed call does, not about crashing on a malformed one) —
+            # mirrors `server_guarded.py`'s identical fix (DCR-0016 there) so
+            # both twins fail the same, non-crashing way on missing arguments.
+            return ToolResult(
+                name=name,
+                content=f"missing required argument: {exc.args[0]!r}",
+                isError=True,
+            )
+
+    def _call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         if name == "read_note":
             note_id = str(arguments["note_id"])
             body = self.store.read(note_id)

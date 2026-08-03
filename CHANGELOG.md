@@ -349,6 +349,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     resolved by earlier phases in this remediation plan; this entry exists so
     the disposition of each is on the permanent record (the original review
     file itself was never a tracked artifact).
+- Coverage-gap remediation from `docs/reviews/2026-08-03-contracts-taxonomy-review.md`
+  and `docs/reviews/2026-08-03-remote-adapter-reference-validator-vulnerable-target-review.md`
+  (RB-DCR-0001, 0002, 0003, 0006, 0007, 0013, 0016/0017/0018):
+  - **A URL-embedded credential (e.g. `https://sk-live-abc@host/sse`) no
+    longer leaks into the remote MCP adapter's descriptor strings**
+    (RB-DCR-0001). `_describe_data_sources`/`_describe_notes`
+    (`plugins/_mcp/remote_adapter.py`) used `urlsplit(url).netloc`, which
+    includes any userinfo component; both now use a new `_host_only` helper
+    keyed on `.hostname` (`+ f":{port}"` when non-default), never userinfo.
+  - **A non-responding remote or spawned MCP server can no longer hang a scan
+    forever** (RB-DCR-0002). Both `plugins/_mcp/remote_adapter.py`'s
+    `_open_remote_session` and `plugins/_mcp/stdio_adapter.py`'s
+    `_open_mcp_session` now construct `ClientSession` with a bounded
+    `read_timeout_seconds=60s`, so `await session.initialize()` (and every
+    subsequent read) raises instead of blocking indefinitely.
+  - **`VulnerableKitchenSinkServer.call_tool` no longer raises an unhandled
+    `KeyError` on a missing required argument** (RB-DCR-0003,
+    `reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_vulnerable.py`).
+    Mirrors `server_guarded.py`'s existing fix for the identical defect: a
+    missing key now returns `ToolResult(isError=True, ...)` naming the
+    missing argument. Orthogonal to the four catalogued weaknesses (W1-W4),
+    which are untouched.
+  - **The `"unicode"` and `"casing"` metamorphic strategies no longer mangle
+    the exfil email/URL literal the success predicate keys on**
+    (RB-DCR-0006, RB-DCR-0007, `plugins/_reference/reference_validator.py`'s
+    `_deterministic_strategies`). Both were the only two strategies not
+    wrapped in `_protect_exfil` (unlike their siblings `unicode-tag`/
+    `split`), so a perturbation that would genuinely have survived instead
+    corrupted its own destination address and misreported as "broke" — a
+    harness defect, not a real robustness failure.
+  - **A custom-target boundary-guarded-twin `differential` outcome's `metric`
+    now reports the discrimination strength, not the rate-gap**
+    (RB-DCR-0013, `_validate_custom_target`). The merged `stage="differential"`
+    `ValidationOutcome` set `metric=decision.flakiness_metric` — a copy/paste
+    from the sibling `flakiness` outcome; it now correctly sets
+    `metric=decision.differential_metric`, matching the reference-target
+    path's convention that `stage="differential"` -> `differential_metric`
+    and `stage="flakiness"` -> `flakiness_metric` are distinct fields.
+  - **`_metamorphic_outcome`'s docstring now matches what the code does, and
+    the stage's gating status is documented correctly** (RB-DCR-0016/0017/0018,
+    the review's highest-priority, confirmed release-gating finding). The
+    docstring previously claimed `passed` is true "iff ALL perturbations
+    held (the strict reading)" and that the stage is report-only and does
+    NOT feed `kept` — both false: `passed` has always been a THRESHOLD check
+    (`robustness >= self._metamorphic_threshold`, default 0.6), and
+    `_validate_reference`'s `kept` AND-chain has always included
+    `metamorphic.passed`. No behaviour change to `passed`/`kept` — only the
+    documentation was wrong, now corrected, with a new test
+    (`test_metamorphic_passed_is_threshold_based_not_all_or_nothing`) locking
+    in the threshold reading (3-of-4 held at threshold 0.6 -> passed=True).
+    Separately, `_run_perturbed`/`_metamorphic_outcome` now distinguish a
+    genuine guard bypass (the attack fired on BOTH twins) from a malformed/
+    non-firing perturbation (the attack never fired on the vulnerable twin
+    either) — both previously rendered identically as `"<name>:broke"` in
+    `detail`, conflating the single most important signal this stage can
+    produce (a real bypass) with a harmless harness artefact. `detail` now
+    reads `"<name>:guard_bypassed"` / `"<name>:attack_malformed"` /
+    `"<name>:held"`; the `robustness`/`held_count`/`total` fraction semantics
+    are unchanged (both non-held classifications still count as "not held").
 
 ## [0.7.5] - 2026-07-04
 

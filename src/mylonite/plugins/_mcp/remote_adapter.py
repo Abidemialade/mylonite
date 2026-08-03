@@ -24,11 +24,33 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 from urllib.parse import urlsplit
 
 from mcp import ClientSession
 
 from mylonite.plugins._mcp._session_adapter import MCPSessionAdapterBase
+
+#: Bound on how long a single ``ClientSession`` read (including
+#: ``session.initialize()``) may block waiting on the remote server before
+#: raising, so a non-responding remote endpoint cannot hang a scan forever
+#: (RB-DCR-0002).
+_READ_TIMEOUT = timedelta(seconds=60.0)
+
+
+def _host_only(url: str | None) -> str:
+    """The host (+ port, if non-default) of ``url`` — never userinfo/credentials.
+
+    ``urlsplit(url).netloc`` includes any embedded userinfo (e.g.
+    ``https://sk-live-abc@host/sse`` -> netloc ``sk-live-abc@host``), which
+    would surface a URL-embedded credential in a descriptor string
+    (RB-DCR-0001). ``.hostname`` never includes userinfo.
+    """
+    parts = urlsplit(url or "")
+    host = parts.hostname or "(unknown)"
+    if parts.port:
+        return f"{host}:{parts.port}"
+    return host
 
 
 @asynccontextmanager
@@ -60,7 +82,9 @@ async def _open_remote_session(
 
     async with client_cm as streams:
         read_stream, write_stream = streams[0], streams[1]
-        async with ClientSession(read_stream, write_stream) as session:
+        async with ClientSession(
+            read_stream, write_stream, read_timeout_seconds=_READ_TIMEOUT
+        ) as session:
             await session.initialize()
             yield session
 
@@ -83,12 +107,12 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
         return _open_remote_session(self._spec.transport, self._spec.url, self._spec.headers)
 
     def _describe_data_sources(self) -> list[str]:
-        # Host only — never the full URL with query/credentials, never headers.
-        host = urlsplit(self._spec.url or "").netloc or "(unknown)"
+        # Host only — never the full URL with query/credentials/userinfo, never headers.
+        host = _host_only(self._spec.url)
         return [f"MCP {self._spec.transport}: {host}"]
 
     def _describe_notes(self) -> str:
-        host = urlsplit(self._spec.url or "").netloc or "(unknown)"
+        host = _host_only(self._spec.url)
         return (
             f"MCP {self._spec.transport} target — family={self._family!r}, host={host}. "
             "Fresh connection per invocation."
