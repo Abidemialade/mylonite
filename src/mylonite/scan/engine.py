@@ -639,14 +639,21 @@ class ScanEngine:
             while pending:
                 done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
                 stop = False
-                # If MULTIPLE passes resolve to a terminal outcome in the SAME
-                # completed batch (e.g. two concurrent invokes both hit the
-                # same missing seed arm), whichever this loop processes last
-                # simply overwrites `terminal_exc` / the earlier terminal
-                # entry in `results` — there's no explicit ordering among
-                # `done`. That's safe today because a structural-skip outcome
-                # for the same payload/seed is content-equivalent regardless
-                # of which concurrent copy "wins" (same reason, same
+                # If MULTIPLE passes resolve to a terminal `_PerPayloadOutcome`
+                # in the SAME completed batch (e.g. two concurrent invokes
+                # both hit the same missing seed arm), each writes to its OWN
+                # `results[idx]` slot — neither is overwritten, both survive
+                # into the returned list. The actual tie-break happens one
+                # level up, in `_run_payload`'s `for result in pass_results:
+                # ... return result`, which returns the first terminal
+                # outcome in ascending list/idx order — deterministic, not
+                # "whichever finishes first". (`terminal_exc` IS a single
+                # shared variable, so if instead multiple passes raise —
+                # only `BudgetExceededError` can — whichever this loop
+                # processes last does win there.) Either way this is safe
+                # today because a structural-skip outcome for the same
+                # payload/seed is content-equivalent regardless of which
+                # concurrent copy is returned (same reason, same
                 # verdict_mechanism=None) — but would need revisiting if a
                 # future structural-skip type ever carried per-attempt state
                 # that made one copy meaningfully different from another.

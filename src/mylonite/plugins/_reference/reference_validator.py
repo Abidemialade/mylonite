@@ -821,10 +821,6 @@ class DifferentialValidator(ValidatorBase):
             guard_fired=self._fired(guard_result, pattern_id),
         )
 
-    def _run_scan(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
-        """Build and run one full attack scan for ``variant`` (sync entry point)."""
-        return asyncio.run(self._run_scan_async(variant))
-
     async def _run_scan_async(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
         """Build and await one full attack scan for ``variant``.
 
@@ -879,7 +875,8 @@ class DifferentialValidator(ValidatorBase):
         helpers but applied to EVERY kitchen-sink seed, not just the exploit's.
 
         Nearly free — the validator's differential loop runs the FULL attack bank
-        each iteration (``_run_scan`` calls ``build_scan`` with NO
+        each iteration (``_run_iteration`` drives both twins via
+        ``_run_scan_async``, which calls ``build_scan`` with NO
         ``pattern_id_filter``), so every kitchen-sink seed is observable.
 
         ``mutation_score = killed_seeds / total_kitchen_sink_seeds``, bounded
