@@ -13,12 +13,19 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+from pydantic import BaseModel, ValidationError
+
 from mylonite._redaction import (
     REDACTION_PLACEHOLDER,
     SecretRedactingFilter,
     install_log_redaction,
     looks_like_api_key,
     redact,
+    redact_env,
+    redact_exception,
+    redact_target_yaml,
+    redact_value,
 )
 
 # --- Fakes (NOT real credentials) -------------------------------------------
@@ -210,16 +217,6 @@ def test_looks_like_api_key_rejects_obvious_non_keys() -> None:
 
 # --- redact_exception / redact_target_yaml (Phase 1) ------------------------
 
-import pytest
-from pydantic import BaseModel, ValidationError
-
-from mylonite._redaction import (
-    redact_env,
-    redact_exception,
-    redact_target_yaml,
-    redact_value,
-)
-
 
 def test_redact_masks_url_userinfo_password() -> None:
     text = "DATABASE_URL=postgres://user:realpass@prod-db/app"
@@ -252,8 +249,8 @@ def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
     out = redact_target_yaml(src)
     assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in out
     assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out
-    assert "LOG_LEVEL: debug" in out          # non-secret values survive
-    assert "Authorization" in out             # key names survive
+    assert "LOG_LEVEL: debug" in out  # non-secret values survive
+    assert "Authorization" in out  # key names survive
     assert REDACTION_PLACEHOLDER in out
 
 

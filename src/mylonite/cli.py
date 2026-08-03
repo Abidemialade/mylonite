@@ -148,7 +148,8 @@ def _warn_unsupported_python() -> None:
         echo_err(
             "note: Mylonite supports Python 3.11-3.13. litellm has no 3.14 wheels "
             "yet, so live LLM calls may fail to import on this interpreter - use a "
-            "3.11-3.13 virtualenv for scan/validate/demo --live.")
+            "3.11-3.13 virtualenv for scan/validate/demo --live."
+        )
 
 
 def _provider_key_var_names() -> set[str]:
@@ -185,8 +186,7 @@ def _load_env_file(path: Path) -> None:
         if key not in known:
             continue
         if key in os.environ and os.environ[key] != value:
-            echo_err(
-                f"warning: overriding ambient {key} with the value from {path}.")
+            echo_err(f"warning: overriding ambient {key} with the value from {path}.")
         os.environ[key] = value
         loaded.append(key)
     if loaded:
@@ -223,11 +223,11 @@ def _load_api_key_file(path: Path) -> None:
         echo_err(
             "--api-key-file: couldn't infer the provider from the key shape. Use a "
             "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "
-            "or pass --env-file.")
+            "or pass --env-file."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     if var in os.environ and os.environ[var] != key:
-        echo_err(
-            f"warning: overriding ambient {var} with the value from {path}.")
+        echo_err(f"warning: overriding ambient {var} with the value from {path}.")
     os.environ[var] = key
     echo_err(f"loaded {var} from {path}.")
 
@@ -419,7 +419,8 @@ def doctor(
             echo_err(
                 f"warning: {var} is set but doesn't look like an API key "
                 "(too short / contains spaces or path separators). Check it's the "
-                "real key, not a placeholder or file path.")
+                "real key, not a placeholder or file path."
+            )
 
     import litellm
 
@@ -443,7 +444,8 @@ def _validate_model_string(model: str) -> None:
     if not model or not model.strip() or model != model.strip():
         echo_err(
             f"invalid --model {model!r}: must be a non-empty model id with no "
-            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5.")
+            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -476,7 +478,8 @@ def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
         echo_err(
             "the reference app target isn't installed (it's opt-in) — run "
             '`pip install "mylonite[demo]"`, or from a checkout '
-            "`pip install -e ./reference_targets/mcp_kitchen_sink`.")
+            "`pip install -e ./reference_targets/mcp_kitchen_sink`."
+        )
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
@@ -495,7 +498,8 @@ def _build_adapter_for_reference(target: str, model: str) -> Any:
         del InProcessGuardedReferenceAdapter
         return InProcessReferenceAdapter(variant="guarded", model=model)
     echo_err(
-        f"unknown reference variant {variant!r}; expected reference:vulnerable or reference:guarded")
+        f"unknown reference variant {variant!r}; expected reference:vulnerable or reference:guarded"
+    )
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -655,7 +659,8 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     if family not in target_registry.BUNDLED_TARGETS:
         echo_err(
             f"unknown MCP target family {family!r}. "
-            f"Known families: {sorted(target_registry.BUNDLED_TARGETS)}.")
+            f"Known families: {sorted(target_registry.BUNDLED_TARGETS)}."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     spec = target_registry.BUNDLED_TARGETS[family]
     if spec.requires_scope:
@@ -664,13 +669,15 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
                 f"--authorize must equal the scope segment for {family!r} "
                 f"(scope={scope!r}, authorize={authorize!r}). "
                 f"Example: mylonite scan mcp:{family}:{scope or '<scope>'} "
-                f"--authorize {scope or '<scope>'}")
+                f"--authorize {scope or '<scope>'}"
+            )
             raise typer.Exit(code=EXIT_CONFIG)
     elif authorize != family:
         echo_err(
             f"--authorize must equal the family name for stateless target "
             f"{family!r} (got authorize={authorize!r}). "
-            f"Example: mylonite scan mcp:{family} --authorize {family}")
+            f"Example: mylonite scan mcp:{family} --authorize {family}"
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     # Step 3: registry resolution (validates scope shape).
@@ -1006,7 +1013,8 @@ def scan(
             "scan: 'reference:*' targets are bundled in-process twins and don't take "
             "--target-file. Pass a custom target via --target-file alone (drop the "
             "'reference:' target argument), or drop --target-file to scan the "
-            "reference twin.")
+            "reference twin."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     # For a custom target we persist the resolved target YAML next to the scan
@@ -1078,7 +1086,8 @@ def scan(
                 _descriptor = None
                 echo_err(
                     f"auto-wire: could not describe the target to infer a seed_arm "
-                    f"({type(exc).__name__}); falling back to the pre-flight check.")
+                    f"({type(exc).__name__}); falling back to the pre-flight check."
+                )
             if _descriptor is not None:
                 _spec, _note = infer_seed_arm(_descriptor.tools)
                 echo_err(f"auto-wire: {_note}")
@@ -1093,7 +1102,8 @@ def scan(
                         echo_err(
                             "auto-wire: no store->recall pair, but a content-processing "
                             "tool exposes the direct_content channel — W2 is tested via "
-                            "descriptor synthesis (no seed_arm needed).")
+                            "descriptor synthesis (no seed_arm needed)."
+                        )
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
@@ -1137,8 +1147,7 @@ def scan(
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
-        echo_err(
-            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
+        echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
         adapter = _build_adapter_for_reference(target, effective_planner_model)
@@ -1147,7 +1156,8 @@ def scan(
         if not authorize:
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md.")
+                "See SECURITY.md."
+            )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         report_target_id = target
@@ -1155,7 +1165,8 @@ def scan(
         echo_err(
             f"unknown target shape {target!r}. "
             "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', 'mcp:custom', "
-            "or --target-file.")
+            "or --target-file."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     try:
@@ -1171,7 +1182,8 @@ def scan(
     if not attack_modules:
         echo_err(
             "no usable attack modules discovered "
-            "(looking for 'prompt-injection-family' or 'excessive-agency-family')")
+            "(looking for 'prompt-injection-family' or 'excessive-agency-family')"
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
@@ -1247,14 +1259,16 @@ def scan(
         echo_err(
             "error: no seeds were applicable to this target, so nothing was scanned. "
             "If this is a custom MCP app, declare which weakness classes it exposes "
-            "via --target-file (weakness_classes) or --weakness-class.")
+            "via --target-file (weakness_classes) or --weakness-class."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     if result.report.aborted == "describe_failed":
         # The adapter couldn't describe the target (e.g. the MCP server failed to
         # launch). Zero attempts ran — must not exit 0 and read as a clean pass.
         echo_err(
             "error: could not describe the target (adapter.describe() failed); "
-            "nothing was scanned. Check the target command/scope and connectivity.")
+            "nothing was scanned. Check the target command/scope and connectivity."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     if result.report.aborted == "wall_clock_timeout":
         # The scan hit its wall-clock budget before finishing. Coverage is
@@ -1262,7 +1276,8 @@ def scan(
         # rule as no_payloads / describe_failed).
         echo_err(
             "error: scan exceeded its wall-clock budget and stopped early; coverage "
-            "is incomplete. Raise the timeout or narrow the scan, then re-run.")
+            "is incomplete. Raise the timeout or narrow the scan, then re-run."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     raise typer.Exit(code=EXIT_SUCCESS)
 
@@ -1333,7 +1348,8 @@ def demo(
             "warning: --provider/--model are ignored in replay mode — the demo "
             f"replays fixtures recorded against {DEMO_PROVIDER}/{DEMO_MODEL} "
             "(claude-haiku-4-5-20251001). Pass --live to use a different "
-            "provider/model.")
+            "provider/model."
+        )
 
     try:
         result = asyncio.run(run_demo(live=live, provider=provider, model=model))
@@ -1367,12 +1383,14 @@ def demo(
         if variant.report.aborted == "provider_unreachable":
             echo_err(
                 "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider.")
+                "--provider/--model for another LiteLLM provider."
+            )
             raise typer.Exit(code=EXIT_PROVIDER)
         if variant.report.aborted == "budget_exceeded":
             echo_err(
                 "demo budget exceeded before both variants completed "
-                "(max_llm_calls=100 per variant).")
+                "(max_llm_calls=100 per variant)."
+            )
             raise typer.Exit(code=EXIT_BUDGET)
 
     raise typer.Exit(code=EXIT_SUCCESS)
@@ -1418,18 +1436,19 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
                 return found
             echo_err(
                 f"no exploit_*.json found in {scan_path}. "
-                "Run `mylonite scan <target>` first, or pass an exploit_*.json directly.")
+                "Run `mylonite scan <target>` first, or pass an exploit_*.json directly."
+            )
             raise typer.Exit(code=EXIT_CONFIG)
         echo_err(
             f"path not found: {scan_path}. Pass a scan dir or an exploit_*.json, "
-            "or run `mylonite scan <target>` first.")
+            "or run `mylonite scan <target>` first."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     if latest:
         scan_dir = _find_latest_scan_dir(scans_root)
         if scan_dir is None:
-            echo_err(
-                f"no scans found under {scans_root}. Run `mylonite scan <target>` first.")
+            echo_err(f"no scans found under {scans_root}. Run `mylonite scan <target>` first.")
             raise typer.Exit(code=EXIT_CONFIG)
         found = _exploits_in_dir(scan_dir)
         if not found:
@@ -1438,14 +1457,16 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
                 "A no-finding scan is a PASS, not an error: it usually means the target "
                 "is clean or guarded. To generate from an earlier scan that DID find "
                 "something, pass that scan dir explicitly, e.g. "
-                "`mylonite generate .mylonite/scans/<earlier-run>`.")
+                "`mylonite generate .mylonite/scans/<earlier-run>`."
+            )
             raise typer.Exit(code=EXIT_CONFIG)
         return found
 
     echo_err(
         "no input given. Pass a SCAN_PATH (an exploit_*.json or a scan dir), or "
         "--latest to use the newest scan under .mylonite/scans/. Run "
-        "`mylonite scan <target>` first if you have no scans yet.")
+        "`mylonite scan <target>` first if you have no scans yet."
+    )
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -1566,7 +1587,8 @@ def _emit_generated_test(
             f"warning: {exploit.target_id} is a custom target - the emitted test re-drives "
             "your real app and needs a co-located target.yaml. Re-run with "
             "`--target-file <your-target>.yaml`, or copy your scan's target YAML into "
-            f"{out_dir} as target.yaml. Without it the test errors at runtime.")
+            f"{out_dir} as target.yaml. Without it the test errors at runtime."
+        )
 
     echo("")
     if is_custom:
@@ -1599,7 +1621,8 @@ def _tag_control_for_generate(exploit: Any) -> Any:
     if exploit.target_id.startswith("reference:"):
         echo_err(
             f"--prove-control: {exploit.pattern_id} targets a reference twin; emitting "
-            "the standard guard test instead.")
+            "the standard guard test instead."
+        )
         return exploit
     cw = weakness_class_for(exploit)
     try:
@@ -1607,7 +1630,8 @@ def _tag_control_for_generate(exploit: Any) -> Any:
     except ValueError:
         echo_err(
             f"--prove-control: no boundary control for weakness {cw!r} "
-            f"({exploit.pattern_id}); emitting the standard target-resists test instead.")
+            f"({exploit.pattern_id}); emitting the standard target-resists test instead."
+        )
         return exploit
     meta = {**exploit.payload.metadata, "synthetic_control": cw}
     return exploit.model_copy(
@@ -1882,7 +1906,8 @@ def _validate_custom(
     if target_file is None:
         echo_err(
             "validating a custom-target test requires --target-file (the same target "
-            "YAML you scanned); the validator re-drives the real target.")
+            "YAML you scanned); the validator re-drives the real target."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     try:
         tf = load_target_file(target_file)
@@ -1910,7 +1935,8 @@ def _validate_custom(
     if not reachable:
         echo_err(
             "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-            "--provider/--model for another LiteLLM provider.")
+            "--provider/--model for another LiteLLM provider."
+        )
         raise typer.Exit(code=EXIT_PROVIDER)
 
     target_registry.clear_runtime_targets()
@@ -1929,7 +1955,8 @@ def _validate_custom(
         echo_err(
             "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
             "one demo literal, not exfil to ANY attacker address. Drop it (randomization is the "
-            "default for custom targets) to avoid 'teaching to the test'.")
+            "default for custom targets) to avoid 'teaching to the test'."
+        )
 
     # Does the target declare a SERVER-LAYER toggle for this control (control_env)?
     # If so, the differential measures the REAL server guard at parity with `ablate`:
@@ -1957,13 +1984,15 @@ def _validate_custom(
         # Re-emit the diff note: the printed plan must match what actually runs.
         echo_err(
             "validate: --fast overrides --prove-input-control — the differential leg "
-            "(including the input data-framing check) stays skipped.")
+            "(including the input data-framing check) stays skipped."
+        )
     if rest_input_frame:
         run_diff = True
         control_weakness = control_weakness or "W2"
         echo_err(
             "validate: rest input-control differential — raw vs input data-framing "
-            "(spotlighting). `kept` means input framing IS load-bearing for this attack.")
+            "(spotlighting). `kept` means input framing IS load-bearing for this attack."
+        )
     elif spec.transport == "rest" and not server_layer:
         run_diff = False
         echo_err(
@@ -1971,13 +2000,15 @@ def _validate_custom(
             "not apply to a black box, so `kept` is decided by stability + effect + consensus "
             "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
             "for a server-layer differential, or pass --prove-input-control to test input "
-            "data-framing.")
+            "data-framing."
+        )
 
     if spec.vulnerable_launch is not None or server_layer:
         echo_err(
             f"validate: the raw side runs {spec.family!r} with the "
             f"{control_weakness or 'target'} guard DISABLED (deliberately unguarded) — "
-            "ensure you are authorized to run it. Env values are never logged.")
+            "ensure you are authorized to run it. Env values are never logged."
+        )
 
     def _factory() -> Any:
         if server_layer:
@@ -2030,7 +2061,8 @@ def _validate_custom(
         twin_kind = "none (differential not applicable to a black-box target)"
     echo_err(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
-        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind}).")
+        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind})."
+    )
     if run_diff and not server_layer and not rest_input_frame:
         bar = "=" * 74
         echo_err(
@@ -2040,7 +2072,8 @@ def _validate_custom(
             "finding proves a canonical control WOULD be load-bearing for this model --\n"
             "not that your implementation is. For the strong, server-side claim, declare\n"
             "control_env or vulnerable_launch in your target.yaml (see docs/concepts.md).\n"
-            f"{bar}")
+            f"{bar}"
+        )
     validator = DifferentialValidator(
         iterations=iterations,
         provider=provider,
@@ -2071,20 +2104,21 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
     else:
         echo_err(
             f"target not found: {target}. Pass the dir (or test file) emitted by "
-            "`mylonite generate`.")
+            "`mylonite generate`."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     exploit_matches = sorted(gen_dir.glob("exploit_*.json"))
     if not exploit_matches:
         echo_err(
             f"no exploit_*.json found in {gen_dir}. Re-run `mylonite generate` to "
-            "emit a test + its co-located exploit.")
+            "emit a test + its co-located exploit."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     test_matches = sorted(gen_dir.glob("test_security_*.py"))
     if not test_matches:
-        echo_err(
-            f"no test_security_*.py found in {gen_dir}. Re-run `mylonite generate`.")
+        echo_err(f"no test_security_*.py found in {gen_dir}. Re-run `mylonite generate`.")
         raise typer.Exit(code=EXIT_CONFIG)
 
     return test_matches[0], exploit_matches[0]
@@ -2151,11 +2185,12 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     # the per-seed kill matrix were previously buried in report.notes (rendered
     # nowhere). Surface them so a "KEPT" verdict shows WHY it's trustworthy.
     # Metric legend — what the bare decimals in the table's metric column mean.
-    console_print(console,
+    console_print(
+        console,
         "metric legend: "
         + sep.join(
             ["differential=agreement", "flakiness=reproducibility", "metamorphic=robustness (0-1)"]
-        )
+        ),
     )
 
     # The gate itself, with LIVE per-leg marks — this is what makes a verdict
@@ -2174,14 +2209,16 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     repro = getattr(report, "reproducibility", None)
     if repro is not None:
         if repro.guard_resisted is not None:
-            console_print(console,
+            console_print(
+                console,
                 f"reproducibility: vulnerable fired {repro.vuln_fired}/{repro.iterations}, "
-                f"guarded resisted {repro.guard_resisted}/{repro.iterations}"
+                f"guarded resisted {repro.guard_resisted}/{repro.iterations}",
             )
         else:
-            console_print(console,
+            console_print(
+                console,
                 f"reproducibility: reproduced {repro.vuln_fired}/{repro.iterations} "
-                "against the real target (no in-repo guarded twin)"
+                "against the real target (no in-repo guarded twin)",
             )
 
     if report.mutation_score is not None:
@@ -2191,20 +2228,27 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     matrix = getattr(report, "mutation_matrix", None) or []
     if matrix:
         killed = sum(1 for s in matrix if s.killed)
-        console_print(console,
+        console_print(
+            console,
             f"kill matrix ({killed}/{len(matrix)} seeds killed = "
-            "fired-on-vulnerable, resisted-on-guarded):"
+            "fired-on-vulnerable, resisted-on-guarded):",
         )
         for seed in matrix:
             console_print(console, f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
 
-    # Metamorphic is report-only — say so explicitly so a failing metamorphic row
-    # is never read as a gate failure.
+    # Metamorphic robustness gates kept (M2) — say so explicitly so a failing
+    # metamorphic row below IS read as a gate failure, not just a footnote.
     if any(o.stage == "metamorphic" for o in report.outcomes):
-        console_print(console, "note: metamorphic robustness is report-only - it does not gate kept.")
+        console_print(
+            console,
+            "note: metamorphic robustness gates kept - a failing row below means "
+            "the differential did not survive that perturbation.",
+        )
 
     if report.kept:
-        console_print(console, f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]")
+        console_print(
+            console, f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]"
+        )
     else:
         console_print(console, f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
         # The differential remediation must not accuse a real (server-layer) control
@@ -2481,7 +2525,8 @@ def validate(
     else:
         echo_err(
             f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
-            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY).")
+            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY)."
+        )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
         try:
@@ -2492,7 +2537,8 @@ def validate(
         if not reachable:
             echo_err(
                 "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider.")
+                "--provider/--model for another LiteLLM provider."
+            )
             raise typer.Exit(code=EXIT_PROVIDER)
 
         # DCR-0007: `fast` was previously accepted by this command but silently
@@ -2507,7 +2553,8 @@ def validate(
         if fast:
             echo_err(
                 "validate: --fast reduces the metamorphic robustness check to a single "
-                "perturbation strategy (faster/cheaper; weaker robustness signal).")
+                "perturbation strategy (faster/cheaper; weaker robustness signal)."
+            )
         validator = DifferentialValidator(
             iterations=iterations,
             provider=effective_provider,
@@ -2545,7 +2592,8 @@ def validate(
         echo("")
         echo(
             "Next: commit the generated test + fixtures so CI can gate on it "
-            "(see `mylonite gate --help`).")
+            "(see `mylonite gate --help`)."
+        )
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
 
@@ -2578,7 +2626,8 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
             return "scan", target
         echo_err(
             f"don't know how to report on {target.name}. Pass a scan dir, a "
-            "generated/validated dir, or a scan_report.json / validation_report.json.")
+            "generated/validated dir, or a scan_report.json / validation_report.json."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
     if target.is_dir():
         vr = target / "validation_report.json"
@@ -2589,10 +2638,10 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
             return "scan", sr
         echo_err(
             f"no validation_report.json or scan_report.json found in {target}. "
-            "Run `mylonite scan` or `mylonite validate` first.")
+            "Run `mylonite scan` or `mylonite validate` first."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
-    echo_err(
-        f"path not found: {target}. Pass a scan/validated dir or a report JSON.")
+    echo_err(f"path not found: {target}. Pass a scan/validated dir or a report JSON.")
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -2677,10 +2726,13 @@ def report(
                 # for artefacts whose persisted exploit predates enrichment. Captured
                 # for the dashboard renderer.
                 dashboard_exploit = _map_compliance(testkit.load_exploit(exploit_matches[0]))
-                console_print(console, f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}")
-                console_print(console,
+                console_print(
+                    console, f"compliance: {_compliance_tags_line(dashboard_exploit.compliance)}"
+                )
+                console_print(
+                    console,
                     f"target: {dashboard_exploit.target_id}  "
-                    f"pattern: {dashboard_exploit.pattern_id}"
+                    f"pattern: {dashboard_exploit.pattern_id}",
                 )
             except (FileNotFoundError, ValueError):
                 pass
@@ -2978,7 +3030,8 @@ def _scaffold_target_file(
     echo(f"wrote {output} — {len(tool_names)} tools discovered.")
     echo_err(
         "  suggested weakness_classes "
-        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning).")
+        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning)."
+    )
     if roles.seed_arm_tool is not None:
         echo_err(
             f"  seed_arm candidate: {roles.seed_arm_tool}(...{roles.seed_arm_param}='{{payload}}') "
@@ -2990,15 +3043,18 @@ def _scaffold_target_file(
                 "store whose only readback needs that id (the save_note/read_note trap) will never "
                 "deliver the poison. Confirm a list/recall/search-style tool exists, or expect those "
                 "seeds to report NOT TESTED."
-            ))
+            )
+        )
     elif "W2" in suggested_weaknesses:
         echo_err(
             "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
-            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED.")
+            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
+        )
     echo_err(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
-        f"`mylonite scan --target-file {output} --authorize custom`.")
+        f"`mylonite scan --target-file {output} --authorize custom`."
+    )
 
 
 def _render_target_scaffold(
@@ -3383,7 +3439,8 @@ def gate(
             "gate: 'reference:*' targets are bundled in-process twins and don't take "
             "--target-file. Pass a custom target via --target-file alone (drop the "
             "'reference:' target argument), or drop --target-file to gate the "
-            "reference twin.")
+            "reference twin."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     tf = None
@@ -3408,13 +3465,13 @@ def gate(
             echo_err(
                 "gate --target-file <yaml> is the custom-target path; "
                 "inline mcp:custom flags are not wired in `gate`. "
-                "Pass a target YAML via --target-file.")
+                "Pass a target YAML via --target-file."
+            )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_custom(tf, authorize, effective_model, command="gate")
         routed_to = "custom"
     elif target is None:
-        echo_err(
-            "no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
+        echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
         adapter = _build_adapter_for_reference(target, effective_model)
@@ -3423,14 +3480,16 @@ def gate(
         if not authorize:
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md.")
+                "See SECURITY.md."
+            )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_model)
         routed_to = "mcp"
     else:
         echo_err(
             f"unknown target shape {target!r}. "
-            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file.")
+            "Expected 'reference:<variant>', 'mcp:<family>[:<scope>]', or --target-file."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     # Derived from what actually ran (routed_to), NOT re-parsed from the target
@@ -3455,7 +3514,8 @@ def gate(
         if not attack_modules:
             echo_err(
                 "no usable attack modules discovered "
-                "(looking for 'prompt-injection-family' or 'excessive-agency-family')")
+                "(looking for 'prompt-injection-family' or 'excessive-agency-family')"
+            )
             raise typer.Exit(code=EXIT_CONFIG)
 
         config = ScanConfig(
@@ -3491,7 +3551,8 @@ def gate(
                 # the framing-guarded HTTP build for the differential.
                 echo_err(
                     "gate: rest input-control differential — raw vs input data-framing "
-                    "(spotlighting).")
+                    "(spotlighting)."
+                )
                 return [
                     ex.model_copy(
                         update={
@@ -3514,7 +3575,8 @@ def gate(
                 "gate: rest (HTTP-agent) target — the control-efficacy differential does not "
                 "apply to a black box; the emitted test is gated by stability + effect + "
                 "consensus. Declare control_env / vulnerable_launch for a server-layer "
-                "differential, or pass --prove-input-control to test input data-framing.")
+                "differential, or pass --prove-input-control to test input data-framing."
+            )
             return exploits
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
@@ -3561,8 +3623,7 @@ def gate(
             )
         # Custom target: mirror _validate_custom — re-drive the REAL target.
         if tf is None:
-            echo_err(
-                "internal: expected a loaded TargetFile for custom validate_fn")
+            echo_err("internal: expected a loaded TargetFile for custom validate_fn")
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
         from mylonite.plugins._mcp.factory import build_mcp_adapter
@@ -3760,8 +3821,7 @@ def ablate(
     from mylonite.scan.control_shim import make_control
 
     if target_file is None:
-        echo_err(
-            "ablate requires --target-file (the app whose controls you want to score).")
+        echo_err("ablate requires --target-file (the app whose controls you want to score).")
         raise typer.Exit(code=EXIT_CONFIG)
     if not authorize:
         echo_err("--authorize is required to ablate a custom target. See SECURITY.md.")
@@ -3828,7 +3888,8 @@ def ablate(
     if not usable:
         echo_err(
             "no ablatable controls. Pass --controls W2,W3,W4 or declare weakness_classes / "
-            "control_config in the target file.")
+            "control_config in the target file."
+        )
         raise typer.Exit(code=EXIT_CONFIG)
 
     seeds_by_weakness = seeds_for_weaknesses(usable, max_per_weakness=max_seeds)
@@ -3841,7 +3902,8 @@ def ablate(
     layer = "server-layer (env toggles)" if server_layer else "adapter-shim"
     echo_err(
         f"ablate re-drives {spec.family!r} live, toggling {', '.join(usable)} {mode} "
-        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans.")
+        f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans."
+    )
 
     def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
         if server_layer:
@@ -3889,7 +3951,8 @@ def ablate(
         echo_err(
             "hint: every control classified 'no-attack' — the raw side never fired. "
             "Check that control_env actually disables the server's guard for these "
-            "weakness classes, and that the representative seeds reach the surface.")
+            "weakness classes, and that the representative seeds reach the surface."
+        )
 
 
 @taxonomy_app.command("list")

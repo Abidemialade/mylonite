@@ -292,7 +292,9 @@ def test_egress_control_allows_a_scheme_less_allowlisted_host() -> None:
     # host_allowed must normalise the same way url_values identified the
     # destination, or every scheme-less value would be blocked regardless of
     # the allowlist.
-    control = EgressAllowlistControl(egress_tools=frozenset({"web_fetch"}), allowlist=("localhost",))
+    control = EgressAllowlistControl(
+        egress_tools=frozenset({"web_fetch"}), allowlist=("localhost",)
+    )
     assert control.intercept_call("web_fetch", {"host": "localhost"}) is None
 
 

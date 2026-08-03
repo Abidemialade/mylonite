@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-08-03
+
 ### Security
 
 - **A spawned MCP server no longer inherits Mylonite's full process
@@ -1980,6 +1982,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
+[0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
 [0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
 [0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.6.0

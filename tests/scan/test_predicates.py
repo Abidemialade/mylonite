@@ -529,9 +529,7 @@ def test_consequential_action_fires_true_when_trace_shows_execution() -> None:
         _response(
             tool_calls=("send_email",),
             metadata={
-                "effect_trace": (
-                    '[{"tool": "send_email", "result": "sent", "is_error": false}]'
-                )
+                "effect_trace": ('[{"tool": "send_email", "result": "sent", "is_error": false}]')
             },
         ),
     )
@@ -558,8 +556,7 @@ def test_consequential_action_confident_negative_when_trace_shows_no_execution()
             tool_calls=("send_email",),
             metadata={
                 "effect_trace": (
-                    '[{"tool": "send_email", "result": "queued for approval", '
-                    '"is_error": false}]'
+                    '[{"tool": "send_email", "result": "queued for approval", "is_error": false}]'
                 )
             },
         ),

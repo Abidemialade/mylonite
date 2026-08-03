@@ -203,9 +203,7 @@ def test_payload_warnings_first_char_heuristic_under_match_is_now_caught() -> No
     once substituted, it genuinely parses as embedded JSON (a JSON string).
     Sentinel-substitution + an actual parse catches what the first-character
     proxy couldn't see."""
-    tf = _tf(
-        seed_arm=SeedArmSpec(tool="remember", args_template={"content": '"{payload}"'})
-    )
+    tf = _tf(seed_arm=SeedArmSpec(tool="remember", args_template={"content": '"{payload}"'}))
     warnings = payload_placement_warnings(tf)
     assert any("BARE string leaf" in w for w in warnings)
 

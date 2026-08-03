@@ -58,7 +58,7 @@ def test_id_param_does_not_false_positive_on_a_word_containing_id_as_substring()
 
 
 def test_genuine_content_param_does_not_false_positive_on_keyword() -> None:
-    """"keyword" contains the "key" id-hint as a substring but is not an id
+    """ "keyword" contains the "key" id-hint as a substring but is not an id
     param — must still be picked as the content slot."""
     tool = _tool("search", _str("keyword"), [])
     assert _genuine_content_param(tool) == "keyword"

@@ -252,8 +252,7 @@ def redact_exception(exc: BaseException) -> str:
     if callable(errors):
         try:
             lines = [
-                f"{'.'.join(str(p) for p in err.get('loc', ())) or '<root>'}: "
-                f"{err.get('msg', '')}"
+                f"{'.'.join(str(p) for p in err.get('loc', ())) or '<root>'}: {err.get('msg', '')}"
                 for err in errors()
             ]
         except Exception:  # a non-pydantic .errors() — fall through to str()

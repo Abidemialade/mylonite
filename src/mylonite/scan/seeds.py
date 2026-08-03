@@ -609,8 +609,7 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
                 # 'seed_note') depends on kitchen-sink-specific infrastructure this
                 # arbitrary custom target has no equivalent for — restrict THOSE to
                 # a genuine family match (DCR-0031).
-                s.setup == "no_setup"
-                or family in s.applicable_targets
+                s.setup == "no_setup" or family in s.applicable_targets
             )
         ]
         uncovered = sorted(classes - covered - {s.weakness for s in kitchen})

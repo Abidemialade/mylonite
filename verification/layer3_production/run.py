@@ -66,8 +66,7 @@ def _load_scan_report(scan_dir_or_file: Path) -> dict[str, Any]:
         # defensively falls back to `attempts = []` on a bad shape fabricates
         # a clean (0 false positive) report from a malformed file.
         raise ValueError(
-            f"{path}: scan_report.json must be a JSON object (mapping), got "
-            f"{type(data).__name__}"
+            f"{path}: scan_report.json must be a JSON object (mapping), got {type(data).__name__}"
         )
     return data
 

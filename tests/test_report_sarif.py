@@ -133,7 +133,9 @@ def test_to_sarif_redacts_secret_shaped_success_reason() -> None:
     ex = ExploitRecord(
         target_id="mcp:myapp",
         pattern_id=pid,
-        payload=Payload(pattern_id=pid, channel="tool-result", body="x", metadata={"weakness": "W3"}),
+        payload=Payload(
+            pattern_id=pid, channel="tool-result", body="x", metadata={"weakness": "W3"}
+        ),
         response=AdapterResponse(
             payload_pattern_id=pid, raw_response="ok", tool_calls=["fetch"], metadata={}
         ),

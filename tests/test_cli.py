@@ -1588,8 +1588,8 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
         ],
         kept=False,
         mutation_score=0.75,
-        gating_formula="kept = build AND differential AND flakiness",
-        gating_legs=["build", "differential", "flakiness"],
+        gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+        gating_legs=["build", "differential", "flakiness", "metamorphic"],
         reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=2),
         mutation_matrix=[
             SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
@@ -1610,7 +1610,13 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
     assert "kill matrix" in out
     assert "W2:indirect-injection-note-body-direct" in out
     assert "metric legend" in out
-    assert "report-only" in out  # metamorphic does-not-gate note
+    # Metamorphic robustness gates kept (M2) — the note must say so, not the
+    # inverse. A prior version of this message incorrectly claimed metamorphic
+    # was "report-only"; reference_validator.py's own kept computation
+    # (`build.passed and differential.passed and flakiness.passed and
+    # metamorphic.passed`) has always included it.
+    assert "gates kept" in out
+    assert "report-only" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -2153,9 +2159,7 @@ def test_scan_config_precedence_conformance_authorize(
     cfg = tmp_path / "mylonite.yaml"
     cfg.write_text(f"target_file: {target_yaml}\nauthorize: not-myapp\n", encoding="utf-8")
 
-    result = runner.invoke(
-        app, ["scan", "--config", str(cfg), "--authorize", "myapp", "--dry-run"]
-    )
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--authorize", "myapp", "--dry-run"])
     assert result.exit_code == EXIT_SUCCESS, result.output
     target_registry.clear_runtime_targets()
 

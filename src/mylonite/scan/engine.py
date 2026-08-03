@@ -645,9 +645,7 @@ class ScanEngine:
             asyncio.ensure_future(_bounded(i)) for i in range(runs)
         ]
         results: list[_PerPayloadOutcome | _JudgedPass | None] = [None] * runs
-        pending: set[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = set(
-            tasks
-        )
+        pending: set[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = set(tasks)
         terminal_exc: BaseException | None = None
         try:
             while pending:

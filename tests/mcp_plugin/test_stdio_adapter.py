@@ -14,7 +14,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -1170,7 +1170,7 @@ async def test_run_seed_arm_returns_none_and_logs_when_no_id_anchor_declared(
     from mylonite.plugins._mcp.target_registry import SeedArmSpec
 
     class _Result:
-        content = [SimpleNamespace(text="stored ok, no id in this text")]
+        content: ClassVar = [SimpleNamespace(text="stored ok, no id in this text")]
 
     class _Sess:
         async def call_tool(self, name: str, args: dict[str, Any]) -> _Result:
@@ -1191,7 +1191,7 @@ async def test_run_seed_arm_id_from_still_extracts_when_present() -> None:
     from mylonite.plugins._mcp.target_registry import SeedArmSpec
 
     class _Result:
-        content = [SimpleNamespace(text="Created record #42 successfully.")]
+        content: ClassVar = [SimpleNamespace(text="Created record #42 successfully.")]
 
     class _Sess:
         async def call_tool(self, name: str, args: dict[str, Any]) -> _Result:

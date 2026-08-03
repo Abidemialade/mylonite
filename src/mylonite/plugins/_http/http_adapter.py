@@ -153,7 +153,7 @@ def _escape_for_body(text: str, body: str) -> str:
         return text  # not JSON at all — substitute raw
     raise ValueError(
         "request.body's {prompt} placeholder sits in a non-string JSON position "
-        '(not inside quotes) — a natural-language attack payload can\'t be '
+        "(not inside quotes) — a natural-language attack payload can't be "
         'safely substituted there. Wrap it in quotes, e.g. "{prompt}", so it '
         "lands as a JSON string."
     )

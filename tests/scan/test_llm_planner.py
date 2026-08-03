@@ -205,8 +205,6 @@ async def test_planner_passes_an_explicit_timeout_to_every_completion_call() -> 
         seen.append(kwargs)
         return _text_response("done.")
 
-    planner = LLMPlanner(
-        server=server, model="stub", completion_fn=stub, completion_timeout_s=12.5
-    )
+    planner = LLMPlanner(server=server, model="stub", completion_fn=stub, completion_timeout_s=12.5)
     await planner.run("Hi.")
     assert seen[0]["timeout"] == 12.5

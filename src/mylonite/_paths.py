@@ -41,7 +41,9 @@ def resolve_contained(candidate: str | Path, *, base: str | Path, label: str) ->
         # "base" concepts (a target file's own directory, an operator-configured
         # scope root, ...). Each caller appends its own context-appropriate
         # closing clause rather than this function guessing one.
-        msg = f"{label} {str(candidate)!r} resolves to {resolved}, which is outside {base_resolved}."
+        msg = (
+            f"{label} {str(candidate)!r} resolves to {resolved}, which is outside {base_resolved}."
+        )
         raise PathEscapesBase(msg)
     return resolved
 

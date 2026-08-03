@@ -130,7 +130,9 @@ def render_demo(
     if console is None:
         console = Console()
 
-    console_print(console, Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow"))
+    console_print(
+        console, Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow")
+    )
 
     table = Table(
         title="the reference app — vulnerable vs guarded build",
@@ -156,7 +158,9 @@ def render_demo(
 
     n_vuln = vulnerable.report.findings_count
     n_guard = guarded.report.findings_count
-    console_print(console, _HEADLINE_TEMPLATE.format(n_vuln=n_vuln, n_guard=n_guard), highlight=False)
+    console_print(
+        console, _HEADLINE_TEMPLATE.format(n_vuln=n_vuln, n_guard=n_guard), highlight=False
+    )
     if n_guard > 0:
         console_print(console, f"[yellow]{_GUARDED_FINDING_NOTE}[/yellow]", highlight=False)
     console_print(console, _TEASER, highlight=False)

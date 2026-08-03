@@ -360,7 +360,8 @@ class DifferentialValidator(ValidatorBase):
         self._completion_fn = completion_fn
         self._run_build = run_build
         self._record_fixtures_dir = record_fixtures_dir
-        # Metamorphic perturbation strategies (report-only robustness check).
+        # Metamorphic perturbation strategies. Gates ``kept`` (M2) — see the
+        # ``kept =`` computation below and ``_metamorphic_outcome``'s docstring.
         # Default = all built-in deterministic transforms; a caller can restrict
         # to a subset (e.g. for focused tests). Unknown names raise.
         all_strategies = _deterministic_strategies()
@@ -456,8 +457,8 @@ class DifferentialValidator(ValidatorBase):
         #    already run.
         mutation = self._mutation_score(tallies)
 
-        # 4. metamorphic (report-only) — multiple deterministic perturbations,
-        #    each genuinely driven through both twins.
+        # 4. metamorphic — multiple deterministic perturbations, each genuinely
+        #    driven through both twins. GATES kept (M2), unlike mutation-score above.
         metamorphic = self._metamorphic_outcome(test.exploit)
 
         # build stage — collect-only, OR (when recording) record the canonical

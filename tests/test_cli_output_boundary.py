@@ -48,7 +48,9 @@ def test_no_direct_output_calls_outside_the_output_boundary() -> None:
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             for label, pattern, guidance in _CALLS:
                 if pattern.search(line):
-                    offenders.append(f"{path.relative_to(_SRC)}:{lineno} ({label} -> use {guidance})")
+                    offenders.append(
+                        f"{path.relative_to(_SRC)}:{lineno} ({label} -> use {guidance})"
+                    )
     assert not offenders, (
         "these call typer.echo / console.print / print directly, bypassing redaction — "
         "route through mylonite._cli_io instead:\n  " + "\n  ".join(offenders)

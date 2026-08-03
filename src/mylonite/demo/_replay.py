@@ -223,9 +223,7 @@ class LiteLLMRecorder:
             # __post_init__ enforces a real Path in record mode (mkdir/write are
             # Path-only), so this should be unreachable — but never trust that an
             # invariant established elsewhere still holds at a write call site.
-            raise TypeError(
-                f"record mode requires a real pathlib.Path, got {type(path).__name__}"
-            )
+            raise TypeError(f"record mode requires a real pathlib.Path, got {type(path).__name__}")
         if path.is_file():
             existing = path.read_text(encoding="utf-8")
             if existing != serialised:

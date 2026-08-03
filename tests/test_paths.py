@@ -9,9 +9,10 @@ from mylonite._paths import PathEscapesBase, resolve_contained, safe_slug
 
 def test_resolves_relative_path_inside_base(tmp_path: Path) -> None:
     (tmp_path / "prompt.txt").write_text("hi", encoding="utf-8")
-    assert resolve_contained("prompt.txt", base=tmp_path, label="system_prompt_file") == (
-        tmp_path / "prompt.txt"
-    ).resolve()
+    assert (
+        resolve_contained("prompt.txt", base=tmp_path, label="system_prompt_file")
+        == (tmp_path / "prompt.txt").resolve()
+    )
 
 
 def test_rejects_dotdot_escape(tmp_path: Path) -> None:

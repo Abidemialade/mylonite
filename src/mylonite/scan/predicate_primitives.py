@@ -69,7 +69,9 @@ def tool_call_sequence(tool_calls: Sequence[str], first: str, then: str) -> bool
     genuine indirect-injection sequence (DCR-0020).
     """
     earliest_first = next((i for i, name in enumerate(tool_calls) if name == first), None)
-    latest_then = next((i for i in range(len(tool_calls) - 1, -1, -1) if tool_calls[i] == then), None)
+    latest_then = next(
+        (i for i in range(len(tool_calls) - 1, -1, -1) if tool_calls[i] == then), None
+    )
     if earliest_first is None or latest_then is None:
         return False
     return earliest_first < latest_then
