@@ -20,6 +20,7 @@ Prefer an absolute path and verify the target actually opened it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Literal
 
@@ -242,6 +243,30 @@ def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:
     return redact_target_yaml(text)
 
 
+def _payload_placeholder_is_json_embedded(value: str) -> bool:
+    """True if a ``{payload}``-containing string leaf itself looks like it
+    embeds structured JSON around the placeholder (DCR-0021).
+
+    The old check tested only the field value's FIRST character
+    (``stripped[:1] in "{["``) — a heuristic that both under- and
+    over-matches (e.g. a value like ``"[see {payload}]"`` starts with neither
+    ``{`` nor ``[`` after stripping outer text and would be MISSED; a value
+    like ``"{not json, just braces {payload}"`` starts with ``{`` and would
+    be wrongly FLAGGED). Substituting a sentinel for the placeholder and
+    attempting an actual JSON parse is a direct test of "is this string, once
+    the payload lands, JSON" rather than a proxy on its first character.
+    """
+    stripped = value.strip()
+    if stripped == "{payload}":
+        return False  # the whole field IS the bare placeholder — the happy path
+    probe = value.replace("{payload}", "MYLONITE_PAYLOAD_PLACEMENT_SENTINEL")
+    try:
+        json.loads(probe)
+    except (ValueError, TypeError):
+        return False
+    return True
+
+
 def payload_placement_warnings(tf: TargetFile) -> list[str]:
     """Non-fatal warnings about where the ``{payload}`` placeholder is planted (R7).
 
@@ -264,8 +289,7 @@ def payload_placement_warnings(tf: TargetFile) -> list[str]:
         if isinstance(node, str):
             if "{payload}" in node:
                 found[0] = True
-                stripped = node.strip()
-                if stripped != "{payload}" and stripped[:1] in "{[":
+                if _payload_placeholder_is_json_embedded(node):
                     warnings.append(
                         f"seed_arm.args_template{path}: '{{payload}}' looks embedded in a "
                         "JSON/structured string. Mylonite plants a natural-language payload "

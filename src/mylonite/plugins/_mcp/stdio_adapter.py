@@ -50,6 +50,42 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _user_message_for_drive,
 )
 
+#: Parent-environment variables a spawned MCP server may inherit. Everything
+#: else — provider API keys, GITHUB_TOKEN, cloud credentials — is withheld: we
+#: routinely spawn deliberately-vulnerable and third-party servers, and
+#: ``dict(os.environ)`` handed every one of them Mylonite's own secrets
+#: (DCR-0012), with ``launch_env`` leaving the merge policy to an unseen caller
+#: (DCR-0018). A target that needs some OTHER parent-env variable must declare
+#: it explicitly via the target file's ``env:`` block (``TargetSpec.extra_env``
+#: / ``launch_env()``'s overlay) — that is the correct, auditable way to widen
+#: a spawned server's environment, not a broader allowlist here.
+#:
+#: The set below is deliberately platform-neutral (both POSIX and Windows
+#: entries): a bundled npx/uvx-launched target must keep working on either
+#: platform. ``SYSTEMROOT``/``COMSPEC``/``APPDATA``/``LOCALAPPDATA`` are
+#: Windows-specific (npx/node and many native subprocess launchers on Windows
+#: fail to resolve the shell/DLL search path without them); ``HOME``/``LANG``/
+#: ``LC_ALL`` are the POSIX equivalents. Verified empirically on Windows: a
+#: real ``npx``-launched filesystem server and ``uvx``-launched fetch server
+#: both spawn and respond to ``tools/list`` with only this allowlist.
+_INHERITED_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "PATHEXT",
+        "COMSPEC",
+        "APPDATA",
+        "LOCALAPPDATA",
+    }
+)
+
 
 @asynccontextmanager
 async def _open_mcp_session(
@@ -68,8 +104,23 @@ async def _open_mcp_session(
 
     ``command``/``args`` default to the spec's launch; a caller can override them
     to start a target's deliberately-unguarded (``vulnerable_launch``) variant.
+
+    Environment (DCR-0012/DCR-0018): the child does NOT inherit the full
+    parent environment. It gets a narrow, named allowlist
+    (``_INHERITED_ENV_KEYS`` — PATH and the handful of OS-plumbing variables a
+    subprocess launcher needs) merged with ``extra_env`` (the target's
+    declared overlay — see ``TargetSpec.launch_env``'s docstring). This is a
+    deliberate, real behaviour change: a custom MCP server that previously
+    relied on inheriting some OTHER parent-env variable must now declare it
+    explicitly in the target file's ``env:`` block.
     """
-    env = dict(os.environ)
+    # Case-insensitive on the allowlist check: os.environ's ACTUAL stored key
+    # casing is a platform/session quirk (Windows environments have been
+    # observed with e.g. "Path" instead of "PATH"), and a case-sensitive
+    # comparison here would silently drop an allowlisted variable rather than
+    # fail loud — the safer failure mode for an allowlist is "too narrow", not
+    # a platform-dependent flake.
+    env = {k: v for k, v in os.environ.items() if k.upper() in _INHERITED_ENV_KEYS}
     if extra_env:
         env.update(extra_env)
     params = StdioServerParameters(

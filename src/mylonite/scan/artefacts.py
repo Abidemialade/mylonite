@@ -26,6 +26,7 @@ from rich.table import Table
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact
+from mylonite.contracts._types import ExploitRecord
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
@@ -78,14 +79,47 @@ def _sanitise_filename(pattern_id: str) -> str:
 
 
 def _timestamped_subdir(root: Path) -> Path:
-    """Return a never-collide subdir under ``root``."""
+    """Atomically create and return a never-collide subdir under ``root``.
+
+    DCR-0005: the previous ``candidate.exists()`` check then a separate
+    ``mkdir()`` by the caller was a classic check-then-create race — two
+    concurrent scans landing in the same ``output_dir`` within the same
+    second could both pass the ``exists()`` check for the same candidate
+    before either created it, and the second ``mkdir()`` would then raise (or,
+    worse, silently write into the first scan's directory if the caller ever
+    relaxed this to ``exist_ok=True``). ``mkdir(exist_ok=False)`` in a retry
+    loop makes directory creation itself the atomicity boundary — there is no
+    window between "check" and "create" for a second process to land in.
+    """
     base = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    candidate = root / base
     suffix = 0
-    while candidate.exists():
-        suffix += 1
-        candidate = root / f"{base}-{suffix}"
-    return candidate
+    while True:
+        candidate = root / base if suffix == 0 else root / f"{base}-{suffix}"
+        try:
+            candidate.mkdir(parents=True)
+            return candidate
+        except FileExistsError:
+            suffix += 1
+
+
+def _disambiguated_exploit_filenames(exploits: list[ExploitRecord]) -> list[str]:
+    """One ``exploit_<slug>[-N].json`` filename per exploit, never colliding.
+
+    DCR-0006: two exploits can legitimately share a ``pattern_id`` — e.g. a
+    ``runs>1`` flakiness-filter re-attempt, or a seed emitted by more than one
+    attack module — and the OLD naming (``exploit_<pattern_id>.json``) let a
+    later one silently overwrite an earlier one's evidence file on disk,
+    losing that finding's evidence entirely. Each repeat of the same base
+    filename gets a ``-N`` suffix instead.
+    """
+    seen: dict[str, int] = {}
+    filenames: list[str] = []
+    for exploit in exploits:
+        base = f"exploit_{_sanitise_filename(exploit.pattern_id)}"
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        filenames.append(f"{base}.json" if count == 0 else f"{base}-{count + 1}.json")
+    return filenames
 
 
 def write_artefacts(result: ScanResult, output_root: Path) -> Path:
@@ -93,7 +127,6 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     scan_dir = _timestamped_subdir(output_root)
-    scan_dir.mkdir(parents=True)
 
     report_path = scan_dir / "scan_report.json"
     report_path.write_text(
@@ -101,8 +134,8 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
         encoding="utf-8",
     )
 
-    for exploit in result.exploits:
-        filename = f"exploit_{_sanitise_filename(exploit.pattern_id)}.json"
+    filenames = _disambiguated_exploit_filenames(result.exploits)
+    for exploit, filename in zip(result.exploits, filenames, strict=True):
         path = scan_dir / filename
         path.write_text(
             json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",

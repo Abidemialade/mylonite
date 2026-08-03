@@ -35,6 +35,15 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+#: Default per-call bound (seconds) passed to LiteLLM's own ``timeout``
+#: parameter (DCR-0011/DCR-0018). Distinct from — and a backstop under — any
+#: OUTER ``asyncio.wait_for`` a caller wraps around a multi-call sequence (e.g.
+#: the MCP adapter's ``planner_timeout_s`` bounds the whole multi-turn planner
+#: run): a single stuck provider call inside that sequence should not be able
+#: to silently eat the whole budget before the outer bound even gets a chance
+#: to fire on a slow-but-technically-still-progressing series of calls.
+DEFAULT_LLM_CALL_TIMEOUT_S: Final = 60.0
+
 
 def fence(*parts: str) -> str:
     """A per-call delimiter tag for fencing target-controlled text in a prompt.
@@ -429,6 +438,7 @@ def litellm_json_call(
     system: str | None = None,
     completion_fn: Callable[..., Any] | None = None,
     schema_model: type[BaseModel] | None = None,
+    timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Sync wrapper around ``litellm.completion`` that returns parsed JSON.
 
@@ -437,7 +447,10 @@ def litellm_json_call(
     cap is hit before the call is made.
 
     ``completion_fn`` exists for tests — pass a stub instead of patching the
-    module. Defaults to ``litellm.completion``.
+    module. Defaults to ``litellm.completion``. Every call passes an explicit
+    ``timeout`` (DCR-0018) so a single stuck provider call can't block
+    indefinitely; a caller under its own outer timeout can still override
+    ``timeout_s`` tighter.
     """
     _bump(caller)
     fn = completion_fn or litellm.completion
@@ -445,7 +458,7 @@ def litellm_json_call(
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format
@@ -469,15 +482,20 @@ async def litellm_json_call_async(
     system: str | None = None,
     completion_fn: Callable[..., Any] | None = None,
     schema_model: type[BaseModel] | None = None,
+    timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Async sibling of ``litellm_json_call`` using ``litellm.acompletion``."""
+    """Async sibling of ``litellm_json_call`` using ``litellm.acompletion``.
+
+    Passes an explicit ``timeout`` on every call (DCR-0018) — see
+    ``litellm_json_call``'s docstring.
+    """
     _bump(caller)
     fn = completion_fn or litellm.acompletion
     messages: list[dict[str, str]] = []
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format

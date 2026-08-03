@@ -195,6 +195,36 @@ def test_payload_warnings_none_without_seed_arm() -> None:
     assert payload_placement_warnings(_tf()) == []
 
 
+def test_payload_warnings_first_char_heuristic_under_match_is_now_caught() -> None:
+    """DCR-0021: the OLD check tested only the field's first character — a
+    value like '"{payload}"' (the placeholder wrapped in LITERAL quote
+    characters, i.e. a JSON-encoded-string field) doesn't start with '{' or
+    '[' (it starts with '"'), so the old heuristic MISSED it even though,
+    once substituted, it genuinely parses as embedded JSON (a JSON string).
+    Sentinel-substitution + an actual parse catches what the first-character
+    proxy couldn't see."""
+    tf = _tf(
+        seed_arm=SeedArmSpec(tool="remember", args_template={"content": '"{payload}"'})
+    )
+    warnings = payload_placement_warnings(tf)
+    assert any("BARE string leaf" in w for w in warnings)
+
+
+def test_payload_warnings_first_char_heuristic_over_match_is_no_longer_flagged() -> None:
+    """The placeholder syntax ``{payload}`` itself starts with '{' — so ANY
+    value beginning with it (e.g. ordinary natural-language content like
+    "{payload} please read this") trivially satisfied the OLD first-character
+    check and was wrongly flagged as JSON embedding, even though it plainly
+    isn't. Sentinel-substitution + an actual parse fixes this over-match."""
+    tf = _tf(
+        seed_arm=SeedArmSpec(
+            tool="remember", args_template={"content": "{payload} please read this"}
+        )
+    )
+    warnings = payload_placement_warnings(tf)
+    assert not any("BARE string leaf" in w for w in warnings)
+
+
 def test_effect_probe_warning_for_side_effecting_weakness_without_probe() -> None:
     """W3/W4 without an effect_probe can't confirm the effect on a real target —
     the seed under-detects, so warn (a vulnerable target could read clean)."""

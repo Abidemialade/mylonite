@@ -9,6 +9,7 @@ import pytest
 from mylonite.plugins._mcp.target_registry import (
     BUNDLED_TARGETS,
     InvalidTargetScope,
+    SeedArmSpec,
     UnknownTargetFamily,
     _validate_filesystem_scope,
     resolve_target,
@@ -127,3 +128,35 @@ def test_render_args_omits_scope_for_github_uses_env_var_pattern() -> None:
     spec = BUNDLED_TARGETS["github"]
     args = spec.render_args("myhandle/repo")
     assert args == ["-y", "@modelcontextprotocol/server-github"]
+
+
+# --- #32: SeedArmSpec.id_pattern rejects catastrophic nested quantifiers -----
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "(.+)+:",
+        "(a*)*",
+        r"(\d+)+",
+        r"(\w+){2,}",
+    ],
+)
+def test_target_file_rejects_a_catastrophic_id_pattern(pattern: str) -> None:
+    with pytest.raises(ValueError, match="nested quantifier"):
+        SeedArmSpec(tool="t", id_pattern=pattern)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r"id:(\d+)",
+        r"issue #(\d+)",
+        r"(foo|bar)+",  # alternation with an outer quantifier — not a nested quantifier
+        r"note:(\w+)",
+        None,
+    ],
+)
+def test_target_file_accepts_benign_id_patterns(pattern: str | None) -> None:
+    spec = SeedArmSpec(tool="t", id_pattern=pattern)
+    assert spec.id_pattern == pattern

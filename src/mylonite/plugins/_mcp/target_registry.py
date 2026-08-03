@@ -15,14 +15,35 @@ finding **C2**.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from mylonite._paths import PathEscapesBase, resolve_contained
+
+#: A narrow, DELIBERATELY LIMITED heuristic for one specific catastrophic-
+#: backtracking (ReDoS) shape: a quantified group whose body ALREADY contains
+#: another unbounded quantifier — e.g. ``(.+)+``, ``(a*)*``, ``(\d+){2,}``.
+#: This is NOT a general ReDoS static analyzer (that is a much harder,
+#: open-ended problem); it exists to catch exactly the nested-quantifier shape
+#: named in the finding (#32). It will both under- and over-match relative to
+#: a "real" analysis (e.g. it won't catch alternation-based blowups, and it
+#: can't see across a non-capturing group boundary that itself nests further),
+#: so it is deliberately paired with a runtime bound (``asyncio.wait_for``
+#: around the executor-run match in ``_run_seed_arm``) as a backstop for
+#: whatever this misses.
+_NESTED_QUANTIFIER_RE = re.compile(r"\([^()]*[+*][^()]*\)[+*]|\([^()]*[+*][^()]*\)\{\d*,")
+
+
+def _looks_like_nested_quantifier(pattern: str) -> bool:
+    """True if ``pattern``'s source contains a quantified group that itself
+    already contains another quantifier — the specific catastrophic-
+    backtracking shape this validator targets. See ``_NESTED_QUANTIFIER_RE``."""
+    return bool(_NESTED_QUANTIFIER_RE.search(pattern))
 
 
 class SeedArmSpec(BaseModel):
@@ -41,6 +62,26 @@ class SeedArmSpec(BaseModel):
     id_from: str | None = None  # legacy: extract first integer from the tool result
     id_key: str | None = None  # extract the planted handle from this JSON field of the result
     id_pattern: str | None = None  # extract the handle via this regex (first capture group)
+
+    @field_validator("id_pattern")
+    @classmethod
+    def _reject_catastrophic_id_pattern(cls, value: str | None) -> str | None:
+        """Refuse a target-declared ``id_pattern`` with a nested-quantifier
+        shape (``(.+)+``-style) at LOAD time — a target file is attacker/PR
+        editable content, and a target-declared pattern is later matched
+        against target-CONTROLLED result text (``_run_seed_arm``), so this is
+        adversarial input reaching a regex engine (#32). Validation is the
+        primary fix; ``_run_seed_arm``'s ``asyncio.wait_for``-bounded match is
+        the backstop for whatever this narrow heuristic misses."""
+        if value is not None and _looks_like_nested_quantifier(value):
+            raise ValueError(
+                f"id_pattern {value!r} looks like it contains a nested quantifier "
+                "(e.g. '(.+)+' or '(a*)*') — this shape is vulnerable to "
+                "catastrophic backtracking (ReDoS) against adversarial/target-"
+                "controlled content. Rewrite it without a quantified group that "
+                "itself contains another quantifier."
+            )
+        return value
 
 
 class RequestSpec(BaseModel):
@@ -270,7 +311,18 @@ class TargetSpec:
     def launch_env(
         self, *, vulnerable: bool = False, disable_controls: tuple[str, ...] = ()
     ) -> dict[str, str]:
-        """Resolve the environment for one launch — the single precedence point.
+        """Resolve the environment OVERLAY for one launch — the single precedence point.
+
+        IMPORTANT: this is an OVERLAY, never the complete child environment. It
+        returns only the target-declared ``extra_env`` (+ vulnerable/control-env
+        toggles) — it deliberately does NOT include ``os.environ``. The stdio
+        adapter (``stdio_adapter._open_mcp_session``) is the single place that
+        composes the actual child env: a fixed, narrow allowlist of inherited
+        parent-env keys (``_INHERITED_ENV_KEYS``) merged with THIS overlay. A
+        caller of ``launch_env`` must not treat its return value as "the env to
+        hand the subprocess" — doing that once (``dict(os.environ)`` merged with
+        this overlay) handed every spawned server, including deliberately
+        vulnerable/third-party ones, Mylonite's own secrets (DCR-0012/DCR-0018).
 
         Base ``extra_env`` first; then (when ``vulnerable``) the
         ``vulnerable_launch`` env; then each named control's *disable* toggle from

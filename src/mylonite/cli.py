@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, Final, TypeVar
 
 import typer
 from rich.console import Console
@@ -85,6 +85,13 @@ _V0_2_ATTACK_FAMILIES = frozenset({"prompt-injection-family", "excessive-agency-
 #: :func:`_resolve_option`, and is also what ``--help`` displays via
 #: ``show_default``.
 _DEFAULT_MAX_LLM_CALLS = 50
+
+#: Sane non-None default for ``validate --iteration-timeout`` (DCR-0010): a
+#: stuck/slow real custom target must not be able to block a CI job
+#: indefinitely just because the flag was left unset. 120s comfortably covers
+#: a real subprocess spawn + a multi-turn planner run; pass a larger value
+#: explicitly for a target known to need more headroom.
+_DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
 _T = TypeVar("_T")
 
@@ -2302,16 +2309,19 @@ def validate(
         ),
     ] = None,
     iteration_timeout: Annotated[
-        float | None,
+        float,
         typer.Option(
             "--iteration-timeout",
             help=(
                 "Per-scan wall-clock budget (seconds) for a CUSTOM-target run. A "
                 "stuck or slow real target aborts that run cleanly instead of "
-                "hanging open-ended; the loop still completes and reports."
+                "hanging open-ended; the loop still completes and reports. "
+                "Defaults to a sane non-zero bound (DCR-0010) — a CI job must not "
+                "be able to hang indefinitely just because this flag was left "
+                "unset; pass a larger value for a target known to need more time."
             ),
         ),
-    ] = None,
+    ] = _DEFAULT_ITERATION_TIMEOUT_S,
     prove_control: Annotated[
         bool,
         typer.Option(

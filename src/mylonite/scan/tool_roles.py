@@ -59,6 +59,33 @@ _CONTENT_PARAM_HINTS = _words(
 _ID_PARAM_HINTS = _words("id key uuid handle ref index")
 
 
+#: Splits any non-alphanumeric run AND a camelCase boundary into separate
+#: tokens: "note_id" -> {"note", "id"}, "noteId" -> {"note", "id"}. Used by
+#: ``_hints_match`` instead of a plain substring test.
+_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _tokens(name: str) -> set[str]:
+    """Lowercase, camelCase/snake_case-aware tokens of a param/tool name.
+
+    DCR-0015: matching a hint with plain ``h in name.lower()`` substring search
+    false-positives whenever a name merely CONTAINS a short hint as part of a
+    longer word — e.g. the 2-letter ``"id"`` hint matches inside ``"guidance"``
+    or ``"valid"``; ``"key"`` matches inside ``"keyword"``. Splitting the name
+    into whole tokens and requiring an EXACT token match keeps genuine cases
+    (``video_id``, ``noteId``, ``api_key``) matching while rejecting those.
+    """
+    with_boundaries = _CAMEL_BOUNDARY_RE.sub("_", name)
+    return {t for t in _TOKEN_SPLIT_RE.split(with_boundaries.lower()) if t}
+
+
+def _hints_match(name: str, hints: tuple[str, ...]) -> bool:
+    """True if any of ``hints`` is a whole TOKEN of ``name`` (see ``_tokens``)."""
+    tokens = _tokens(name)
+    return any(h in tokens for h in hints)
+
+
 def _schema_props(tool: Any) -> dict[str, Any]:
     schema = getattr(tool, "json_schema", {}) or {}
     props = schema.get("properties", {}) if isinstance(schema, dict) else {}
@@ -81,10 +108,10 @@ def _content_param(tool: Any) -> str | None:
     string_params = [name for name, spec in props.items() if _is_string_param(spec)]
     # Prefer an explicitly content-shaped name, else the first non-id string param.
     for name in string_params:
-        if any(h in name.lower() for h in _CONTENT_PARAM_HINTS):
+        if _hints_match(name, _CONTENT_PARAM_HINTS):
             return name
     for name in string_params:
-        if not any(h in name.lower() for h in _ID_PARAM_HINTS):
+        if not _hints_match(name, _ID_PARAM_HINTS):
             return name
     return string_params[0] if string_params else None
 
@@ -99,11 +126,11 @@ def _genuine_content_param(tool: Any) -> str | None:
     """
     props = _schema_props(tool)
     string_params = [name for name, spec in props.items() if _is_string_param(spec)]
-    # Reject id-shaped params first — a name like ``note_id`` matches the "note"
-    # content hint by substring but is a handle, not a free-text slot.
-    non_id = [name for name in string_params if not any(h in name.lower() for h in _ID_PARAM_HINTS)]
+    # Reject id-shaped params first — a name like "note_id" contains an "id"
+    # TOKEN (a handle, not a free-text slot); see _hints_match/DCR-0015.
+    non_id = [name for name in string_params if not _hints_match(name, _ID_PARAM_HINTS)]
     for name in non_id:
-        if any(h in name.lower() for h in _CONTENT_PARAM_HINTS):
+        if _hints_match(name, _CONTENT_PARAM_HINTS):
             return name
     return non_id[0] if non_id else None
 
@@ -118,7 +145,7 @@ def _id_param(tool: Any) -> str | None:
     """
     props = _schema_props(tool)
     required = set(_schema_required(tool))
-    candidates = [n for n in props if any(h in n.lower() for h in _ID_PARAM_HINTS)]
+    candidates = [n for n in props if _hints_match(n, _ID_PARAM_HINTS)]
     for name in candidates:
         if name in required:
             return name
@@ -128,7 +155,7 @@ def _id_param(tool: Any) -> str | None:
 def _requires_id(tool: Any) -> bool:
     """True if the tool REQUIRES an id-shaped param — so it can't surface content
     without already knowing the handle (the ``save_note``/``read_note`` trap)."""
-    return any(any(h in r.lower() for h in _ID_PARAM_HINTS) for r in _schema_required(tool))
+    return any(_hints_match(r, _ID_PARAM_HINTS) for r in _schema_required(tool))
 
 
 def _classify_tools(tools: list[Any]) -> _ToolRoles:

@@ -810,3 +810,24 @@ async def test_engine_wall_clock_timeout_aborts_with_partial_results() -> None:
     )
     result = await engine.run()
     assert result.report.aborted == "wall_clock_timeout"
+
+
+# --- DCR-0002: max_concurrent must be >= 1 -----------------------------------
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_scan_config_rejects_non_positive_max_concurrent(bad_value: int) -> None:
+    """asyncio.Semaphore(0) would deadlock every attempt forever (not error);
+    asyncio.Semaphore(-1) raises from its OWN constructor with a much less
+    actionable message. Neither is a config a caller could have MEANT —
+    reject both at ScanConfig construction instead."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        ScanConfig(
+            target_id="reference:vulnerable",
+            provider="anthropic",
+            model="stub-model",
+            max_concurrent=bad_value,
+            output_dir=Path(".mylonite/scans"),
+        )

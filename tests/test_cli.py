@@ -2677,6 +2677,15 @@ def test_gate_surfaces_iterations_and_randomize_toggle() -> None:
     assert _command_default("gate", "--randomize-exfil") is None
 
 
+def test_validate_iteration_timeout_has_a_sane_non_none_default() -> None:
+    """DCR-0010: a stuck/slow custom target must not be able to block a CI
+    job indefinitely just because --iteration-timeout was left unset."""
+    from mylonite.cli import _DEFAULT_ITERATION_TIMEOUT_S
+
+    assert _command_default("validate", "--iteration-timeout") == _DEFAULT_ITERATION_TIMEOUT_S
+    assert _DEFAULT_ITERATION_TIMEOUT_S > 0
+
+
 def test_validate_surfaces_randomize_toggle() -> None:
     """validate exposes the --randomize-exfil/--no-randomize-exfil toggle (default-on custom)."""
     opts = _command_option_names("validate")

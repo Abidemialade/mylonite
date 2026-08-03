@@ -67,7 +67,16 @@ class ScanConfig(BaseModel):
         description="Model for the LLM-judge verdict fallback. Defaults to ``model``.",
     )
     max_llm_calls: int = 50
-    max_concurrent: int = 3
+    max_concurrent: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Max in-flight payload attempts. asyncio.Semaphore(0) would deadlock "
+            "every attempt forever rather than error (DCR-0002); a negative value "
+            "raises immediately from asyncio.Semaphore's own constructor. Neither "
+            "is a config a caller could have MEANT, so reject both at construction."
+        ),
+    )
     output_dir: Path = Field(default_factory=lambda: Path(".mylonite/scans"))
     dry_run: bool = False
     customise: bool = Field(
