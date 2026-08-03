@@ -64,6 +64,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   planner treats content as instruction, not data — a delimiter-injection
   bypass of the W2 mitigation itself. A payload with no envelope tag in it
   (every recorded demo fixture) quarantines byte-for-byte as before.
+- **The guarded reference target's own mitigations had confirmed bypasses in
+  three of its four W1-W4 controls — now closed** (DCR-0014, DCR-0016,
+  DCR-0017, DCR-0018, DCR-0019), closing #16, #17, #42, #43. This is a fix to
+  the **reference/demo target** (`reference_targets/mcp_kitchen_sink/`), not
+  to `mylonite`'s own runtime behaviour — but `server_guarded.py` is the
+  differential oracle's PASS-side ground truth, the anchor every scan is
+  proven against, so a bypass here would silently launder through every
+  result built on top of it.
+  - **W2 (DCR-0017):** `server_guarded._quarantine`'s untrusted-content
+    envelope is now neutralised the same way as `quarantine`'s above
+    (DCR-0046) — a literal `<untrusted>`/`</untrusted>` tag in attacker
+    content no longer closes the envelope early and lands the following text
+    where the planner treats it as instruction.
+  - **W4 (DCR-0019):** `confirm_send` now refuses (and clears state) if more
+    than one `send_email` staged since the last confirmation, instead of
+    dispatching the last-staged — possibly attacker-swapped — message under
+    the original approval.
+  - **W1 (DCR-0014, DCR-0018):** `_validate_description` now compiles its
+    ASCII allowlist with `re.ASCII` (`\s` no longer matches NBSP /
+    ideographic space / line separator) and replaces the single literal
+    `"(Note:"` denylist check with positive structural constraints (a length
+    cap plus directive-language patterns — imperative verbs, "ignore prior
+    instructions", "call X immediately"), instead of blocking one known-bad
+    example string.
+  - **Fixed (DCR-0016):** a missing required tool argument (e.g. `read_note`
+    with no `note_id`) raised an unhandled `KeyError` instead of returning a
+    normal `ToolResult(isError=True)`.
+  - New `tests/reference_targets/test_guarded_twin_adversarial.py` red-teams
+    the guarded twin directly and is the regression contract for the four
+    fixes above.
 
 - **Every persist/print/publish path now runs through redaction**, closing
   several independently-discovered credential-leak findings (DCR-0003,

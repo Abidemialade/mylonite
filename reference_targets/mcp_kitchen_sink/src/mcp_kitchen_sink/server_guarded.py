@@ -96,7 +96,7 @@ def _quarantine(content: str) -> str:
 
     The envelope's own bytes are unchanged, so recorded demo fixtures -- whose
     payloads contain no envelope tag -- are byte-identical. A nonce delimiter
-    is the stronger construction and is documented in docs/verification.md as
+    is the stronger construction and is documented in docs/validation.md as
     the next step once fixtures can be re-recorded.
 
     Mirrors ``mylonite.scan._control_primitives.quarantine`` byte-for-byte;

@@ -69,3 +69,14 @@ def test_missing_argument_returns_a_tool_error_not_a_crash() -> None:
     server = GuardedKitchenSinkServer()
     result = server.call_tool("read_note", {})
     assert result.isError
+
+
+def test_w4_confirm_with_nothing_staged_refuses() -> None:
+    """The `_pending_email is None` branch sits right next to the new
+    `_stage_count` logic (DCR-0019 fix) but was untested: confirm_send on a
+    fresh server, with no send_email ever staged, must refuse cleanly rather
+    than dispatch or crash."""
+    server = GuardedKitchenSinkServer()
+    result = server.call_tool("confirm_send", {})
+    assert result.isError
+    assert result.content == "no email staged"
