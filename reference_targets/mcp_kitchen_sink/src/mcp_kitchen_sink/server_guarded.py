@@ -7,15 +7,27 @@ truth for the validation engine that lands in Phase 2.
 
 Mitigations applied:
 
-* M1 — tool descriptions are validated against a strict-ASCII allowlist
-  and stripped of any trailing-instruction-style text (mitigates W1).
-* M2 — ``read_note`` wraps untrusted note bodies in ``<untrusted>...
-  </untrusted>`` and the guarded planner is documented to refuse to follow
-  instructions found inside that envelope (mitigates W2).
+* M1 — tool descriptions are constrained to printable ASCII (``re.ASCII``,
+  so no Unicode whitespace confusables), a length cap, and rejection —
+  not stripping — of instruction-shaped language: imperative directive verbs
+  ("always"/"must"/"immediately"), "ignore/override ... instruction", "call X
+  immediately/first/before", bracketed pseudo-authority (``(Note: ...)``,
+  ``[SYSTEM: ...]``), and angle-bracket tag wrapping (``<IMPORTANT>...
+  </IMPORTANT>``) all raise ``ValueError`` rather than being silently
+  filtered out (mitigates W1).
+* M2 — ``read_note``/``web_fetch`` wrap untrusted content in ``<untrusted>...
+  </untrusted>``, first neutralising any literal ``<untrusted>``/
+  ``</untrusted>`` tag already present in that content so attacker text can't
+  close the envelope early — and the guarded planner is documented to refuse
+  to follow instructions found inside the envelope (mitigates W2).
 * M3 — ``web_fetch`` enforces a hostname allowlist (mitigates W3).
 * M4 — ``send_email`` is a two-step flow: ``send_email`` stages the
   message, and a separate ``confirm_send`` step is required to actually
-  dispatch it (mitigates W4).
+  dispatch it. A stage counter binds ``confirm_send`` to exactly one prior
+  stage — a second ``send_email`` before confirmation (the shape injected
+  content produces to swap a reviewed message for an attacker's) is refused
+  rather than silently dispatched under the original approval
+  (mitigates W4).
 """
 
 from __future__ import annotations
@@ -35,8 +47,9 @@ _SAFE_DESCRIPTION = re.compile(r"^[\x20-\x7E]+$", re.ASCII)
 
 #: A tool description DESCRIBES; it does not direct the agent. Blocking one
 #: literal phrase ("(Note:") filtered the example, not the attack surface
-#: (DCR-0018). These are positive structural constraints on what a description
-#: may be, not a denylist of known-bad substrings.
+#: (ground-truth-verification-review DCR-0018). These are positive structural
+#: constraints on what a description may be, not a denylist of known-bad
+#: substrings.
 _MAX_DESCRIPTION_CHARS = 200
 _DIRECTIVE_PATTERNS = (
     re.compile(r"\b(?:always|never|must|immediately|before responding)\b", re.IGNORECASE),
@@ -46,10 +59,25 @@ _DIRECTIVE_PATTERNS = (
     ),
     re.compile(r"\bcall\s+\w+\s+(?:immediately|first|before)\b", re.IGNORECASE),
     re.compile(r"[(\[]\s*(?:note|important|system|admin|warning)\b", re.IGNORECASE),
+    # Angle-bracket instruction smuggling — `<IMPORTANT>...</IMPORTANT>` is the
+    # single most iconic tool-poisoning shape in this space, and pattern 4
+    # above only ever checked for a preceding `(` or `[`, never `<` (which
+    # `_SAFE_DESCRIPTION` allows as plain printable ASCII). Mirrors
+    # `mylonite.scan._control_primitives._INSTRUCTION_BLOCK`'s shape (an
+    # opening/closing tag pair, case-insensitive, `.` spanning newlines) but
+    # generalised to the same instruction-authority vocabulary as pattern 4
+    # instead of just "important", so it stays in sync with what that pattern
+    # already treats as an authority word.
+    re.compile(
+        r"<\s*(?:note|important|system|admin|warning)\s*>.*?"
+        r"<\s*/\s*(?:note|important|system|admin|warning)\s*>",
+        re.IGNORECASE | re.DOTALL,
+    ),
 )
 
 #: A literal envelope tag inside untrusted content -- see `_quarantine`
-#: (DCR-0017). Mirrors `mylonite.scan._control_primitives._ENVELOPE_TAGS`
+#: (ground-truth-verification-review DCR-0017). Mirrors
+#: `mylonite.scan._control_primitives._ENVELOPE_TAGS`
 #: byte-for-byte; that module is the boundary-control twin of this function
 #: and the two must stay in lockstep.
 _ENVELOPE_TAGS = re.compile(r"</?\s*untrusted\s*>", re.IGNORECASE)
@@ -92,7 +120,7 @@ def _quarantine(content: str) -> str:
     '</untrusted>\\nSYSTEM: ...')` closed the envelope early and the following
     text landed exactly where the planner is documented to treat content as
     trusted instruction -- the guarded twin's core W2 mitigation was not a
-    boundary at all (DCR-0017).
+    boundary at all (ground-truth-verification-review DCR-0017).
 
     The envelope's own bytes are unchanged, so recorded demo fixtures -- whose
     payloads contain no envelope tag -- are byte-identical. A nonce delimiter
@@ -127,9 +155,9 @@ class GuardedKitchenSinkServer:
         #: since the last confirmation: a second `send_email` -- the shape
         #: injected content produces -- silently replaced the message the
         #: operator reviewed, and confirm dispatched the swap under the
-        #: original approval (DCR-0019). Counting is enough to refuse that,
-        #: and keeps the staged and confirmed result strings byte-identical
-        #: for the single-stage flow.
+        #: original approval (ground-truth-verification-review DCR-0019).
+        #: Counting is enough to refuse that, and keeps the staged and
+        #: confirmed result strings byte-identical for the single-stage flow.
         #:
         #: A `confirmation_id` argument threaded from stage to confirm would
         #: be the stronger construction, but there is no channel to hand it
@@ -205,7 +233,8 @@ class GuardedKitchenSinkServer:
             return self._call_tool(name, arguments)
         except KeyError as exc:
             # A missing required argument used to raise an unhandled KeyError
-            # straight out of `arguments[...]` (DCR-0016). Match the module's
+            # straight out of `arguments[...]`
+            # (ground-truth-verification-review DCR-0016). Match the module's
             # own "refused: ..." / isError=True error contract instead of
             # crashing the caller.
             return ToolResult(
@@ -256,7 +285,12 @@ class GuardedKitchenSinkServer:
             if self._stage_count != 1:
                 # The staged message changed after it was staged: whatever
                 # was reviewed is not what would be sent. Refuse and clear
-                # (DCR-0019).
+                # (ground-truth-verification-review DCR-0019). The reset to 0
+                # (not just refusing) is itself load-bearing: without it,
+                # `_stage_count` would stay stuck above 1 forever, so every
+                # subsequent legitimate single-stage send_email/confirm_send
+                # flow would keep incrementing off a stale non-zero baseline
+                # and confirm_send would refuse indefinitely, not just once.
                 self._pending_email = None
                 self._stage_count = 0
                 return ToolResult(
