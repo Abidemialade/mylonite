@@ -2010,10 +2010,17 @@ def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
 @pytest.mark.parametrize(
     ("field", "flag", "config_key", "explicit_value", "config_value"),
     [
-        # The historical bug shape (DCR-0004/0012): the explicit value
-        # DELIBERATELY equals the Typer option's own literal default (50),
-        # which `if resolved == 50` cannot distinguish from "omitted".
+        # DEFAULT-COLLISION coverage (the actual DCR-0004/0012/0015/0005 bug
+        # shape): the explicit value DELIBERATELY equals the `--max-llm-calls`
+        # Typer option's own literal default (50), which `if resolved == 50`
+        # cannot distinguish from "omitted". This is the only row below that
+        # reproduces that specific shape — see the docstring.
         ("max_llm_calls", "--max-llm-calls", "max_llm_calls", 50, 10),
+        # GENERAL precedence coverage only (see docstring): `provider`/`model`
+        # never had the DCR-0004-style bug in the first place, because their
+        # Typer option default is already `None` (`explicit or rc.value`
+        # already distinguishes "omitted" from "explicitly set" for any
+        # realistic string value — there is no default VALUE to collide with).
         ("provider", "--provider", "provider", "openai", "anthropic"),
         ("model", "--model", "model", "gpt-4o-mini", "claude-haiku-4-5-20251001"),
     ],
@@ -2028,11 +2035,24 @@ def test_scan_config_precedence_conformance(
     config_value: Any,
 ) -> None:
     """Conformance test (Phase 10 Step 3): for every scalar field RunConfig
-    shares with `scan`'s signature, an explicit flag must win over --config —
-    even at the flag's own default value. This makes the DCR-0004/0012/0015
-    bug CLASS untestable-by-omission: it must fail if the `if resolved ==
-    literal_default` anti-pattern is reintroduced for a DIFFERENT field later,
-    not just re-test the one field the dedicated max-llm-calls test covers.
+    shares with `scan`'s signature, an explicit flag must win over --config.
+
+    IMPORTANT — what this test does and does not generalize to: only the
+    ``max_llm_calls`` row reproduces the DCR-0004/0012/0015/0005 bug's DEFINING
+    shape (explicit value == the flag's own literal Typer default, which
+    ``if resolved == literal_default`` cannot distinguish from "omitted"). It
+    is the row that would catch a regression if that anti-pattern were
+    reintroduced for ``max_llm_calls`` specifically, and the template for
+    testing any FUTURE field whose Typer option default is a concrete
+    value (not `None`) that could collide with a meaningful explicit setting.
+
+    The ``provider``/``model`` rows exercise the weaker, general property
+    ("an explicit flag beats --config") rather than the default-collision edge
+    case — those fields' Typer defaults are already ``None``, so
+    ``explicit or rc.value`` already distinguishes "omitted" from "explicitly
+    set" for them and they never had this bug class to begin with. They are
+    included for RunConfig field-coverage completeness, not because they are
+    at risk of the same regression `max_llm_calls` was.
 
     Each case only sets its OWN field (leaving provider/model at their true
     defaults) so the asserted :class:`ScanConfig` attribute isn't perturbed by

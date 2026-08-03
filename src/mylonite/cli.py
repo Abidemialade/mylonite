@@ -983,10 +983,17 @@ def scan(
     from mylonite.scan.judge import SuccessJudge
 
     # 'reference:*' + --target-file is never meaningful — the reference targets
-    # are bundled in-process twins with no target file of their own, and the
-    # branch below would silently let --target-file win the routing while the
-    # printed/report target_id below still says 'reference:...' (the same
-    # divergence #24 fixes in `gate`). Reject it up front with a clear message.
+    # are bundled in-process twins with no target file of their own. The custom-
+    # target branch below (`target_file is not None or target == "mcp:custom"`)
+    # is checked BEFORE the reference branch, so passing both would silently
+    # ignore the 'reference:...' positional argument entirely and scan
+    # --target-file instead — surprising for an operator who typed a
+    # 'reference:' target expecting the bundled twin, and who would now hit an
+    # unexpected --authorize requirement. (Unlike `gate`'s #24 fix, `scan` never
+    # computed a separate `is_reference`-style variable read downstream —
+    # `report_target_id` is always set INSIDE the branch that actually ran, so
+    # there is no oracle/routing-divergence bug here, just this silent-argument-
+    # ignoring footgun.) Reject the combination up front with a clear message.
     if target is not None and target.startswith("reference:") and target_file is not None:
         echo_err(
             "scan: 'reference:*' targets are bundled in-process twins and don't take "

@@ -78,6 +78,71 @@ def test_ablate_refuses_authorize_that_does_not_name_the_target(tmp_path: Path) 
     assert "myapp-notes" in out
 
 
+def test_ablate_refuses_iterations_below_one(tmp_path: Path) -> None:
+    """DCR-0014: ablate now rejects --iterations < 1 with the same guard `gate`
+    already had, instead of silently doing zero (or a negative number of) runs
+    per control per side."""
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--iterations",
+            "0",
+        ],
+    )
+    assert result.exit_code != 0
+    out = result.stderr or result.output
+    assert "--iterations" in out
+
+
+def test_ablate_controls_dedupes_repeated_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0015: --controls W2,W2,W4 must not double-count W2's scans/rows in
+    the ablation matrix — `dict.fromkeys` dedupes while preserving order."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import ControlContribution
+
+    captured: dict[str, Any] = {}
+
+    def _fake_run_control_ablation(*, controls: list[str], **kwargs: Any) -> list[Any]:
+        captured["controls"] = list(controls)
+        return [
+            ControlContribution(
+                weakness=c,
+                raw_fired=1,
+                guarded_fired=0,
+                total=1,
+                contribution=1.0,
+                status="load-bearing",
+            )
+            for c in controls
+        ]
+
+    monkeypatch.setattr(ablation_mod, "run_control_ablation", _fake_run_control_ablation)
+
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2,W2,W4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # The deduped, order-preserving list actually driven through the ablation —
+    # a pre-fix run would have passed ["W2", "W2", "W4"] here.
+    assert captured["controls"] == ["W2", "W4"]
+
+
 # --- Theme B: server-layer ablation (control_env toggles) -------------------
 
 _YAML_SERVER_LAYER = """\

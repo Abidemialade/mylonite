@@ -703,6 +703,23 @@ def test_validate_custom_target_rejects_when_effect_not_confirmed() -> None:
     assert report.kept is False
 
 
+def test_vuln_threshold_default_is_non_trivial_at_iterations_one() -> None:
+    """DCR-0024: the DEFAULT vuln_threshold (no explicit override) used to be
+    `iterations - 1`, which is 0 at iterations=1 — making the custom-target
+    stability/effect legs (`fired >= vuln_threshold`) trivially pass even when
+    the attack never fired once. `max(1, iterations - 1)` keeps `--iterations 1`
+    (the fastest, weakest gate) genuinely meaningful: it still requires the
+    attack to have fired at least once. At iterations >= 2 the original N-1
+    formula is unaffected (already non-trivial there)."""
+    assert DifferentialValidator(iterations=1, run_build=False)._vuln_threshold == 1
+    assert DifferentialValidator(iterations=5, run_build=False)._vuln_threshold == 4
+    # An explicit override still always wins over either formula.
+    assert (
+        DifferentialValidator(iterations=1, vuln_threshold=0, run_build=False)._vuln_threshold
+        == 0
+    )
+
+
 def test_validate_custom_target_streams_progress() -> None:
     """progress_cb receives one 'stability run k/N' line per iteration (#8 — no silence)."""
     exploit = _custom_exploit()
