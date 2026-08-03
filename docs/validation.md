@@ -156,3 +156,47 @@ imports the reference adapter. The machinery — differential, flakiness, mutati
 honest-fail gate, control-efficacy check — is the part that generalises to a
 consumer-owned agent (via `--target-file` and the synthetic guarded build); the bundled
 reference app is the ground truth it is proven against.
+
+### What the guarded twin actually guarantees
+
+Because every differential and every control-efficacy check is measured *against* the
+guarded twin (`server_guarded.py`), a bypass in the twin's own mitigations would silently
+launder through every scan built on top of it — a false "resisted." A 2026-08-01 review
+found exactly that: two of the four seeded mitigations had a confirmed bypass, and a
+third had two. All four are now closed:
+
+- **W1 (tool-description injection).** `_validate_description` is a positive allowlist —
+  printable ASCII only (`re.ASCII`, so `\s` can no longer match NBSP / ideographic space /
+  line separator), a length cap, and a small set of *directive-shaped* patterns
+  (imperative verbs, "ignore prior instructions", "call X immediately", bracketed
+  pseudo-authority). It is not a denylist of known-bad literal substrings — the previous
+  version blocked only `"(Note:"` and matched `\s` in Unicode mode, both bypassed.
+  **Known gap:** plain-prose cross-tool steering with no smuggle form (a description that
+  merely *implies* urgency without tripping a directive pattern) is not caught — this
+  matches the boundary control's own documented gap
+  (`mylonite.scan._control_primitives.sanitize_tool_description`).
+- **W2 (untrusted-content envelope).** `_quarantine` strips any literal `<untrusted>` /
+  `</untrusted>` tag from attacker-controlled content *before* wrapping it, so content
+  containing the closing tag can no longer terminate the envelope early and place text
+  where the planner treats it as trusted instruction. Mirrors
+  `mylonite.scan._control_primitives.quarantine` byte-for-byte — same envelope bytes,
+  same neutralisation, applied in two places (the reference twin and the boundary-control
+  shim used against real targets) so they cannot drift apart silently.
+- **W3 (egress allowlist).** Unchanged this phase — no confirmed bypass found.
+- **W4 (send/confirm two-step).** `confirm_send` now requires exactly one `send_email`
+  stage since the last confirmation. A second `send_email` call — the shape injected
+  content produces to swap a reviewed message for an attacker's — bumps a stage counter;
+  `confirm_send` refuses and clears state if more than one stage occurred, instead of
+  dispatching the last-staged message under the original approval.
+
+**Pending:** the envelope's fixed `<untrusted>` / `</untrusted>` delimiter is a known
+gap. The current fix (Step 3) neutralises a *literal* delimiter appearing in attacker
+content, but the delimiter itself is a fixed string an attacker who knows the scheme
+could still target with a fresh variant. A per-session nonce delimiter is the stronger
+construction, and is deliberately **not** implemented yet — it would change the exact
+bytes the demo fixtures were recorded against, and this phase is scoped to fixture-neutral
+fixes only. It is pending a fixture re-record.
+
+`tests/reference_targets/test_guarded_twin_adversarial.py` is the contract for this: it
+red-teams the guarded twin directly (not through a scan), and a change to
+`server_guarded.py` that reopens any of W1/W2/W4 above should fail it.
