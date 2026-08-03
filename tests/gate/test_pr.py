@@ -278,3 +278,49 @@ def test_git_stderr_credentials_are_scrubbed(tmp_path, monkeypatch):
     message = str(excinfo.value)
     assert credential not in message
     assert "github.com" in message  # host stays legible
+
+
+def test_rollback_step_failure_warns_but_does_not_replace_the_original_error(tmp_path, capsys):
+    """A failed rollback (e.g. `git checkout` blocked by a dirty tree) must not be
+    silently swallowed — it must warn, and it must never mask or replace the
+    ORIGINAL GatePrError that triggered the rollback in the first place.
+    """
+    paths = _make_artifacts(tmp_path)
+
+    def run(cmd, **kwargs):
+        class _CP:
+            if cmd[:2] == ["git", "commit"]:
+                returncode = 1
+                stdout = ""
+                stderr = "nothing to commit"
+            elif cmd[:2] == ["git", "checkout"] and cmd[2] == "main":
+                # the rollback's checkout-back step itself fails
+                returncode = 1
+                stdout = ""
+                stderr = "error: Your local changes would be overwritten by checkout"
+            else:
+                returncode = 0
+                stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+                stderr = ""
+
+        return _CP()
+
+    with pytest.raises(GatePrError) as excinfo:
+        open_or_print_pr(
+            paths,
+            branch="mylonite/gate-fail",
+            pr_title="t",
+            pr_body="x",
+            open_pr=False,
+            _run=run,
+        )
+
+    # the ORIGINAL commit failure is still what's raised, not a rollback error
+    assert "commit" in str(excinfo.value)
+    assert "nothing to commit" in str(excinfo.value)
+
+    # ...but the operator sees a warning that the repo may be half-rolled-back
+    err = capsys.readouterr().err
+    assert "rollback" in err.lower()
+    assert "mylonite/gate-fail" in err
+    assert "Your local changes would be overwritten" in err

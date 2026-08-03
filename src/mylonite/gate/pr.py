@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mylonite._cli_io import echo
+from mylonite._cli_io import echo, echo_err
 from mylonite._redaction import redact
 
 Runner = Callable[..., Any]
@@ -72,6 +72,35 @@ def _relative(path: Path, cwd: Path) -> Path:
     return path.relative_to(cwd) if path.is_absolute() else path
 
 
+def _rollback(*, cwd: Path, original_branch: str, branch: str, _run: Runner) -> None:
+    """Best-effort: restore ``original_branch`` and delete the half-created ``branch``.
+
+    Uses raw ``_run`` (not :func:`_git`) so a failure HERE never raises and masks
+    the original ``GatePrError`` that triggered the rollback. But a silently
+    swallowed rollback failure leaves the repo in a half-rolled-back state with
+    zero operator-visible signal — e.g. a dirty tree blocking the ``checkout``
+    back — which can reproduce the exact "branch already exists" retry failure
+    this rollback exists to prevent, with no diagnostic pointing at why. So each
+    step's returncode is checked and a warning (never a raise) is emitted on
+    failure, stderr redacted the same way :func:`_git` already does.
+    """
+    checkout_cp = _run(["git", "checkout", original_branch], cwd=str(cwd))
+    if getattr(checkout_cp, "returncode", 1) != 0:
+        stderr = redact((getattr(checkout_cp, "stderr", "") or "").strip())
+        echo_err(
+            f"warning: rollback failed to check out '{original_branch}' after a gate PR "
+            f"error — the repo may still be on branch '{branch}': {stderr}"
+        )
+
+    delete_cp = _run(["git", "branch", "-D", branch], cwd=str(cwd))
+    if getattr(delete_cp, "returncode", 1) != 0:
+        stderr = redact((getattr(delete_cp, "stderr", "") or "").strip())
+        echo_err(
+            f"warning: rollback failed to delete half-created branch '{branch}' after a "
+            f"gate PR error — retrying may fail with 'branch already exists': {stderr}"
+        )
+
+
 def open_or_print_pr(
     paths: GatePaths,
     *,
@@ -108,10 +137,10 @@ def open_or_print_pr(
     except GatePrError:
         # Best-effort rollback: leave the repo back on the branch it started
         # on and delete the half-created branch so a retry with the same
-        # deterministic branch name doesn't immediately fail (DCR-0017).
-        # Swallow failures here — raising would mask the original error.
-        _run(["git", "checkout", original_branch], cwd=str(cwd))
-        _run(["git", "branch", "-D", branch], cwd=str(cwd))
+        # deterministic branch name doesn't immediately fail (DCR-0017). Never
+        # raises — a rollback-step failure is warned about, not raised, so it
+        # can't mask the original error re-raised below.
+        _rollback(cwd=cwd, original_branch=original_branch, branch=branch, _run=_run)
         raise
 
     if not open_pr or not gh_available(_run=_run):
