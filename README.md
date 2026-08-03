@@ -49,12 +49,8 @@ See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and t
 ## Try it in 60 seconds
 
 *(Once installed.)* `mylonite demo` runs the real scan offline against a deliberately
-vulnerable agent and its guarded version — no API key, deterministic.
-
-![Mylonite demo](docs/assets/quarry-demo.gif)
-
-*The `mylonite demo` playground running against the reference app's vulnerable and guarded
-versions. ([How this GIF is recorded.](docs/assets/recording-script.md))*
+vulnerable agent and its guarded version — no API key, deterministic. Sample output is
+[below](#demo-output).
 
 **Install the CLI and run the demo** — `mylonite` is on PyPI. The base install is just the
 tool that scans your app; the offline demo target is an opt-in extra (a
@@ -93,6 +89,7 @@ mylonite demo
 **No API key needed** — the demo replays recorded model behavior; add `--live` to re-run
 for real.
 
+<a id="demo-output"></a>
 The demo runs the real scan twice — once against the deliberately vulnerable reference
 agent and once against its guarded version — and prints a safety banner, a weakness table,
 and the headline differential (an example run; which patterns land depends on the planner
@@ -151,11 +148,15 @@ differential proof. The core surface:
 - **`mylonite scan <target>`** — the exploit-finding loop against the bundled reference app
   or your own MCP app (`--target-file`). `--scaffold` introspects a server and writes a
   starter `target.yaml`.
+- **`mylonite generate <dir>`** — emits the `pytest` regression test from a confirmed
+  exploit (run for you as a stage of `gate`).
 - **`mylonite validate <dir>`** — proves an emitted test is meaningful via the
   control-efficacy check (the core differentiator); `--fast` skips it for a weaker gate.
 - **`mylonite ablate <target>`** — scores each safeguard as load-bearing vs. security theater.
 - **`mylonite report <dir>`** — a terminal trust panel, **SARIF 2.1.0**, or a JSON bundle,
   all carrying the differential proof and the compliance tags.
+- **`mylonite init`** — guided setup that writes a runnable `target.yaml` for your app
+  (HTTP agent or MCP server).
 - **`mylonite demo` / `doctor` / `taxonomy list`** — offline demo, provider diagnostics,
   and the bundled OWASP/ASI/ATLAS/NIST threat taxonomy.
 
@@ -179,9 +180,11 @@ in the [architecture guide](./docs/architecture.md).
 ## Responsible use
 
 Mylonite reproduces working weaknesses in AI agents. **Use it only against targets you
-control or are contractually authorized to test.** The `scan` command refuses to run against
-real targets without an explicit `--authorize` flag naming the target. The bundled
-vulnerable reference agent runs in-process and binds to nothing.
+control or are contractually authorized to test.** Every command that live-drives a real
+target — `scan`, `gate`, `validate`, and `ablate` — refuses to run without an explicit
+`--authorize` flag naming that target: the value must equal the target's declared `scope`,
+or its family name when no scope is declared. The bundled vulnerable reference agent runs
+in-process and binds to nothing.
 
 Full policy: [SECURITY.md](./SECURITY.md).
 
