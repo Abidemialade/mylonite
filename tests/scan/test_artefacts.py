@@ -161,6 +161,31 @@ def test_render_summary_utf8_keeps_glyphs() -> None:
     assert "✗ FOUND" in summary
 
 
+def test_render_summary_survives_rich_markup_in_a_verdict_reason() -> None:
+    """DCR-0004: a verdict_reason quoting target output like '[/bold]' raised
+    MarkupError and crashed the CLI AFTER a successful scan."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s[/bold]",
+                pattern_id="s",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="the response echoed [/bold] verbatim",
+            )
+        ],
+        findings_count=0,
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert "verbatim" in summary
+
+
 @pytest.mark.parametrize(
     "pattern_id, expected_filename_part",
     [

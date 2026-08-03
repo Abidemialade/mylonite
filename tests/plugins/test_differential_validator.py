@@ -435,6 +435,55 @@ def test_run_perturbed_drives_twins_concurrently() -> None:
     )
 
 
+def test_invoke_and_judge_async_returns_none_on_adapter_error(monkeypatch) -> None:
+    """DCR-0022: an adapter error must be distinguishable from a resisted/failed
+    attack. Before this fix, ``_invoke_and_judge_async`` returned a plain
+    ``bool`` where an adapter crash and a judged non-success both collapsed to
+    ``False`` — indistinguishable from "the twin was invoked and did not fire".
+    """
+    from mylonite.plugins._reference import reference_target_adapter
+
+    async def _boom(self, payload):
+        raise RuntimeError("adapter exploded")
+
+    monkeypatch.setattr(reference_target_adapter.InProcessReferenceAdapter, "invoke", _boom)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+    assert result is None
+
+
+def test_run_perturbed_does_not_invert_a_guarded_adapter_error_into_resisted(monkeypatch) -> None:
+    """DCR-0022: an adapter error on the GUARDED twin must not be silently
+    inverted into ``guard_resisted=True``. Before this fix, ``_invoke_and_judge``
+    (now ``_invoke_and_judge_async``) mapped BOTH "adapter errored" and "judge
+    said no" to ``False``, and ``guard_resisted`` was computed as ``not
+    guard_success`` — so an adapter crash on the guarded twin was reported as
+    proof the guard held, even though the guard was never actually exercised.
+    """
+    from mylonite.plugins._reference import reference_target_adapter
+
+    real_invoke = reference_target_adapter.InProcessReferenceAdapter.invoke
+
+    async def _boom_on_guarded(self, payload):
+        if self._variant == "guarded":
+            raise RuntimeError("adapter exploded")
+        return await real_invoke(self, payload)
+
+    monkeypatch.setattr(
+        reference_target_adapter.InProcessReferenceAdapter, "invoke", _boom_on_guarded
+    )
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    _vuln_fired, guard_resisted = validator._run_perturbed(exploit, exploit.payload.body)
+    assert guard_resisted is False, (
+        "an adapter error on the guarded twin must never be reported as "
+        "guard_resisted=True — that falsely claims the perturbation 'held'"
+    )
+
+
 def test_metamorphic_includes_literal_protected_evasion_encodings() -> None:
     """X1: the real-world evasion encodings (zero-width / split / multilingual) — the
     one useful idea from the retired standalone --obfuscate — are now GATING

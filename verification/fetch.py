@@ -12,10 +12,13 @@ Provenance for every pin lives in ``verification/SOURCE.md``.
 from __future__ import annotations
 
 import hashlib
+import logging
 import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _CACHE_ROOT = Path(__file__).with_name(".cache")
 
@@ -45,7 +48,11 @@ def _enable_truststore() -> None:
 
         truststore.inject_into_ssl()
     except Exception:
-        pass
+        # DCR-0001: best-effort, but never SILENTLY so — a swallowed
+        # ImportError/inject failure here previously surfaced only as a
+        # confusing downstream TLS verification error with no clue that
+        # truststore was the missing piece.
+        logger.debug("truststore injection failed (best-effort, continuing)", exc_info=True)
 
 
 def _sha256(path: Path) -> str:
@@ -126,8 +133,15 @@ def fetch_agentdojo_runs(*, dest_dir: Path | None = None) -> list[Path]:
             try:
                 with urllib.request.urlopen(url) as resp:
                     data = resp.read()
-            except Exception:
-                continue  # sparse grid — missing combos are expected
+            except Exception as exc:
+                # DCR-0002: a missing combo (404) is expected — the run grid is
+                # sparse — so this stays non-fatal, but the exception is still
+                # captured at DEBUG so a persistent proxy/TLS error is
+                # distinguishable from ordinary sparse-grid misses instead of
+                # silently discarded (both used to look identical: 0 runs
+                # fetched, no clue why).
+                logger.debug("fetch_agentdojo_runs: skipping %s (%r)", url, exc)
+                continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             out.append(dest)

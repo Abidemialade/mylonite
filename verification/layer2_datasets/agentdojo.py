@@ -25,10 +25,13 @@ text as the attacker payload. Crosswalk: ``agentdojo: injection -> [W2]``.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from verification.transcript import ToolCall, Transcript
+
+logger = logging.getLogger(__name__)
 
 
 def _tool_calls_from_messages(messages: list[dict[str, Any]]) -> tuple[list[ToolCall], str]:
@@ -87,16 +90,39 @@ def run_to_transcript(run: dict[str, Any]) -> Transcript:
 
 
 def load_run_transcripts(runs_dir: Path, *, limit: int | None = None) -> list[Transcript]:
-    """Parse every ``*.json`` AgentDojo run under ``runs_dir`` into Transcripts."""
+    """Parse every ``*.json`` AgentDojo run under ``runs_dir`` into Transcripts.
+
+    A file that isn't a run at all (missing ``security``/``messages``) is
+    silently filtered — ``rglob`` sweeps the whole tree and unrelated JSON
+    files are expected there. A file that DOES look like a run but fails to
+    parse or convert (corrupt JSON, or a shape ``run_to_transcript`` can't
+    handle) is counted and logged as a skip (DCR-0009) rather than either
+    crashing the whole call — discarding every transcript already
+    accumulated from files that sorted before it (#39) — or going silent, so
+    "0 runs matched" reads differently from "N runs were dropped".
+    """
     files = sorted(p for p in runs_dir.rglob("*.json") if p.is_file())
     out: list[Transcript] = []
+    skipped = 0
     for p in files:
+        if limit is not None and len(out) >= limit:  # DCR-0012: before the append
+            break
         try:
             run = json.loads(p.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
-        if isinstance(run, dict) and "security" in run and "messages" in run:
+        if not (isinstance(run, dict) and "security" in run and "messages" in run):
+            continue
+        try:
             out.append(run_to_transcript(run))
-        if limit is not None and len(out) >= limit:
-            break
+        except (AttributeError, TypeError, KeyError) as exc:
+            skipped += 1
+            logger.warning("load_run_transcripts: skipping malformed run %s: %r", p, exc)
+    if skipped:
+        logger.warning(
+            "load_run_transcripts: %d malformed run(s) skipped under %s (%d transcripts loaded)",
+            skipped,
+            runs_dir,
+            len(out),
+        )
     return out

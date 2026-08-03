@@ -122,6 +122,9 @@ def post_check_run(repo_root: Path, payload: dict[str, Any], *, _run: Runner) ->
         if getattr(cp, "returncode", 1) != 0:
             return None
         stdout = (getattr(cp, "stdout", "") or "").strip()
-        return str(json.loads(stdout).get("html_url")) if stdout else None
+        # DCR-0020: no str() wrapper — a missing html_url must return real
+        # None, not the truthy string "None" (`str(None) == "None"`, which a
+        # caller doing `if url:` would wrongly treat as present).
+        return json.loads(stdout).get("html_url") if stdout else None
     except Exception:  # best-effort: never break the gate PR flow on annotation failure
         return None

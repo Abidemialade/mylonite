@@ -1835,7 +1835,13 @@ def _validate_custom(
 
     def _factory() -> Any:
         if server_layer:
-            assert control_weakness is not None  # narrowed by server_layer  # noqa: S101  # removed in P9
+            if control_weakness is None:
+                raise RuntimeError(
+                    "internal error: server_layer is True but control_weakness is "
+                    "None — server_layer is defined as "
+                    "`control_weakness is not None and control_weakness in "
+                    "spec.control_env`, so this should be unreachable"
+                )
             return build_mcp_adapter(
                 family=spec.family,
                 scope=tf.scope,

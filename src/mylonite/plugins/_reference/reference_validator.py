@@ -982,10 +982,16 @@ class DifferentialValidator(ValidatorBase):
         are independent — same rationale as ``_run_iteration``/``run_twins`` —
         so they are driven CONCURRENTLY inside one ``asyncio.run``.
 
-        Returns ``(vuln_fired, guard_resisted)``. A skipped planner failure /
-        adapter error is NOT a clean resist — it counts as "not fired" on the
-        vulnerable twin and "not resisted" on the guarded twin, consistent with
-        the loop's ``_resisted`` semantics.
+        Returns ``(vuln_fired, guard_resisted)``. ``_invoke_and_judge_async``
+        is tri-state (``bool | None``): ``None`` means the twin was never
+        actually exercised (a skipped planner / adapter error), distinct from
+        ``False`` (invoked, judged, did not fire). ``vuln_fired`` is True only
+        when the vulnerable twin was invoked AND judged a success;
+        ``guard_resisted`` is True only when the guarded twin was invoked AND
+        judged NOT a success. A ``None`` on either side (adapter error) counts
+        as "not fired" / "not resisted" — an adapter error on the guarded twin
+        must never be inverted into "the guard resisted", since the guard was
+        never actually exercised (DCR-0022).
         """
         payload = Payload(
             pattern_id=exploit.pattern_id,
@@ -993,25 +999,29 @@ class DifferentialValidator(ValidatorBase):
             body=perturbed_body,
             metadata={**exploit.payload.metadata, "needs_customisation": "false"},
         )
-        vuln_success, guard_success = asyncio.run(
+        vuln_result, guard_result = asyncio.run(
             run_twins(
                 self._invoke_and_judge_async("vulnerable", payload),
                 self._invoke_and_judge_async("guarded", payload),
             )
         )
-        return vuln_success, not guard_success
+        vuln_fired = vuln_result is True
+        guard_resisted = guard_result is False
+        return vuln_fired, guard_resisted
 
     async def _invoke_and_judge_async(
         self, variant: Literal["vulnerable", "guarded"], payload: Payload
-    ) -> bool:
+    ) -> bool | None:
         """Invoke one twin with ``payload`` and judge the response.
 
         Replicates the engine's invoke→judge for a single payload (no
-        customiser, since the perturbed body is used verbatim). Returns whether
-        the judge deemed the attack a success. A planner skip / adapter error
-        returns ``False`` (the attack did not land). No internal ``asyncio.run``
-        — callers that want to run this concurrently with its twin
-        (``_run_perturbed``) drive both from a single event loop.
+        customiser, since the perturbed body is used verbatim). Returns
+        whether the judge deemed the attack a success — or ``None`` when the
+        twin was never actually exercised (a planner skip / adapter error), so
+        that outcome is never conflated with "invoked and judged not a
+        success" by a caller computing e.g. ``guard_resisted`` (DCR-0022). No
+        internal ``asyncio.run`` — callers that want to run this concurrently
+        with its twin (``_run_perturbed``) drive both from a single event loop.
         """
         adapter = InProcessReferenceAdapter(
             variant=variant,
@@ -1023,10 +1033,10 @@ class DifferentialValidator(ValidatorBase):
         try:
             response = await adapter.invoke(payload)
         except AdapterInvocationSkipped:
-            return False
+            return None
         except Exception:
             logger.exception("metamorphic: adapter.invoke raised unexpectedly")
-            return False
+            return None
         verdict = await judge.judge(payload, response)
         return verdict.success
 
@@ -1110,7 +1120,12 @@ class DifferentialValidator(ValidatorBase):
         co-located exploit are written next to the recorded ``fixtures/`` so the
         emitted test resolves its data, then run offline as a FULL pass.
         """
-        assert self._record_fixtures_dir is not None  # guarded by caller  # noqa: S101  # removed in P9
+        if self._record_fixtures_dir is None:
+            raise RuntimeError(
+                "internal error: _record_and_full_pass called with "
+                "_record_fixtures_dir is None — the only caller (_build_outcome) "
+                "checks this first"
+            )
         fixtures_dir = self._record_fixtures_dir
         exploit = test.exploit
 

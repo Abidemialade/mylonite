@@ -18,6 +18,8 @@ from mylonite.gate.mitigation import build_pr_body
 
 EXIT_SUCCESS = 0
 EXIT_NOT_KEPT = 5
+EXIT_GENERATE_FAILED = 6
+EXIT_VALIDATE_FAILED = 7
 
 
 @dataclass
@@ -45,7 +47,9 @@ def run_gate(
 
     exploit = exploits[0]
     generated = generate_fn(exploit)
-    assert generated is not None  # noqa: S101  # removed in P9
+    if generated is None:
+        echo("Mylonite gate: the test generator returned nothing — cannot gate.")
+        return GateResult(exit_code=EXIT_GENERATE_FAILED, opened_pr=False, kept=None)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     test_path = out_dir / generated.filename
@@ -56,7 +60,9 @@ def run_gate(
     )
 
     report = validate_fn(generated)
-    assert report is not None  # noqa: S101  # removed in P9
+    if report is None:
+        echo("Mylonite gate: the validator returned nothing — cannot gate.")
+        return GateResult(exit_code=EXIT_VALIDATE_FAILED, opened_pr=False, kept=None)
     if not report.kept:
         echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)

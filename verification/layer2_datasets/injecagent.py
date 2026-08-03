@@ -97,6 +97,44 @@ def _coerce_params(raw: Any) -> dict[str, Any]:
     return {}
 
 
+#: Literal placeholder InjecAgent's ``Tool Response Template`` uses to mark
+#: where the attacker instruction is spliced in.
+_TEMPLATE_PLACEHOLDER = "<Attacker Instruction>"
+
+
+def _substitute_tool_response_template(case: dict[str, Any]) -> str:
+    """Reproduce InjecAgent's real ``Tool Response`` shape from its template.
+
+    Every real case in the pinned dataset already carries a precomputed
+    ``Tool Response``; this only runs as a fallback for a case that doesn't
+    (verified against a live fetch of the pinned commit — see
+    ``verification.fetch.INJECAGENT_FILES`` — no such case exists in any of
+    the four ``dh``/``ds`` x ``base``/``enhanced`` files today, but a future
+    revision of the dataset could omit it).
+
+    Verified byte-for-byte against the real, sha256-pinned ``ds`` data:
+    ``Tool Response == json.dumps(Tool Response Template.replace(
+    "<Attacker Instruction>", Attacker Instruction))``. Naively
+    ``json.dumps``-ing the raw template (the prior behaviour) leaves the
+    literal ``<Attacker Instruction>`` placeholder in the poisoned tool
+    response — a dead attack that never reaches the model, which would
+    silently report false robustness (the case looks tested but never
+    actually delivers the injection).
+    """
+    template = case["Tool Response Template"]
+    if not isinstance(template, str):
+        raise ValueError(
+            f"unknown 'Tool Response Template' shape: expected str, got "
+            f"{type(template).__name__} ({template!r}) — the real pinned schema "
+            "carries this as a Python-repr-shaped string; refusing to guess at "
+            "an unverified shape rather than silently substituting into "
+            "something that would never land the attack"
+        )
+    attacker_instruction = str(case.get("Attacker Instruction", ""))
+    substituted = template.replace(_TEMPLATE_PLACEHOLDER, attacker_instruction)
+    return json.dumps(substituted)
+
+
 def load_cases(path: Path, split: str, *, limit: int | None = None) -> list[InjecAgentCase]:
     """Parse an InjecAgent ``test_cases_{split}_*.json`` file into cases.
 
@@ -110,7 +148,7 @@ def load_cases(path: Path, split: str, *, limit: int | None = None) -> list[Inje
     for i, c in enumerate(data):
         response = c.get("Tool Response")
         if not response and c.get("Tool Response Template") is not None:
-            response = json.dumps(c["Tool Response Template"])
+            response = _substitute_tool_response_template(c)
         cases.append(
             InjecAgentCase(
                 case_id=f"injecagent-{split}-{i:04d}",

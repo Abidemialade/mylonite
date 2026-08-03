@@ -20,6 +20,7 @@ from typing import Final
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from mylonite._cli_io import console_print
@@ -128,6 +129,15 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     table, not just here: Rich wraps a cell's text to fit the column width,
     which can split a secret-shaped token across a line break and defeat a
     regex over the final flattened string.
+
+    Every string cell built from attacker/target-influenced free text
+    (``seed_id``, ``verdict_mechanism``, ``verdict_reason``) is also passed
+    through :func:`rich.markup.escape` before ``add_row``. Redaction only
+    masks secret-SHAPED tokens; it does not defend against Rich markup — a
+    ``verdict_reason`` that quotes target output containing a stray
+    ``[/bold]``-shaped substring (a closing tag with no matching open tag)
+    raises ``rich.errors.MarkupError`` when the table is rendered, crashing
+    the CLI after a successful scan (DCR-0004).
     """
     if ascii_safe is None:
         ascii_safe = _stdout_is_ascii_only()
@@ -152,11 +162,15 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         mark = marks.get(attempt.outcome, attempt.outcome)
         table.add_row(
             mark,
-            attempt.seed_id,
-            attempt.verdict_mechanism or "-",
+            # seed_id/verdict_mechanism/verdict_reason are attacker/target-
+            # influenced free text — escape Rich markup so a target response
+            # quoting something shaped like a closing tag (e.g. "[/bold]")
+            # can't raise MarkupError when the table renders (DCR-0004).
+            rich_escape(attempt.seed_id),
+            rich_escape(attempt.verdict_mechanism or "-"),
             # Free text (an LLM judge's rationale can quote target/response
             # content) — redact before Rich's column-width wrapping, not after.
-            redact(attempt.verdict_reason or ""),
+            rich_escape(redact(attempt.verdict_reason or "")),
         )
 
     console_print(console, table)
