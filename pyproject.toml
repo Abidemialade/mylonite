@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mylonite"
-version = "0.7.5"
+version = "0.7.6"
 description = "Open-source AI-layer security testing — probes your AI agent for weaknesses and writes a validated regression test for each one it finds, gating CI."
 readme = "README.md"
 # Upper bound tracks litellm: litellm>=1.83.8 declares Requires-Python
@@ -60,7 +60,14 @@ dependencies = [
     # github targets. The mcp_kitchen_sink reference target still uses this
     # as an optional dep since its in-process server doesn't need wire
     # transport.
-    "mcp>=1.0",
+    # Upper bound: mcp 2.0 is a breaking release (Tool.inputSchema ->
+    # input_schema, CallToolResult.isError -> is_error,
+    # mcp.client.streamable_http.streamablehttp_client -> streamable_http_client,
+    # ClientSession's read_timeout_seconds changed from timedelta to float) that
+    # this codebase does not yet support. An unbounded floor let CI silently
+    # resolve 2.0.0 while local dev environments stayed pinned to 1.x, so CI
+    # failed broadly (mypy + ~30 tests) while every local check passed.
+    "mcp>=1.0,<2.0",
     # OS trust-store TLS, BASE dependency: many users sit behind a TLS-inspecting
     # corporate proxy or local AV whose CA lives in the OS store but not in certifi's
     # bundle, so HTTPS to the LLM provider fails with CERTIFICATE_VERIFY_FAILED out of
@@ -77,7 +84,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.5",
+    "ruff==0.15.16",
     "mypy>=1.10",
     "pytest>=8.2",
     "pytest-cov>=5.0",
@@ -180,8 +187,21 @@ target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "RUF", "SIM", "PTH"]
+select = ["E", "F", "I", "B", "UP", "RUF", "SIM", "PTH", "S"]
 ignore = ["E501"]  # ruff format handles long lines
+
+[tool.ruff.lint.per-file-ignores]
+# Asserts are idiomatic in pytest; subprocess use in dev scripts is deliberate.
+# S108/S105 in tests are false positives on fixture data (a literal "/tmp/..."
+# exploit-payload path, a fake secret used to test the redactor) — not real
+# temp-file or credential handling. "**/tests/**" (not "tests/**") also covers
+# reference_targets/mcp_kitchen_sink/tests/, a separate nested pytest suite.
+"**/tests/**" = ["S101", "S603", "S607", "S108", "S105"]
+"scripts/**" = ["S101", "S603", "S607"]
+# S110/S112 here are the documented "best-effort, absence is non-fatal" /
+# "sparse grid, missing combos expected" fallbacks already explained inline —
+# not silent-and-unexplained swallowing.
+"verification/**" = ["S101", "S603", "S607", "S310", "S110", "S112"]
 
 [tool.ruff.format]
 quote-style = "double"

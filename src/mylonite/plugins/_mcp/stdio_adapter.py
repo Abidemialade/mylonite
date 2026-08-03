@@ -34,6 +34,7 @@ from mylonite.plugins._mcp import target_registry
 # tests that `patch.object(stdio_adapter, ...)` find the symbols here.
 from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _URL_OR_EMAIL,
+    DEFAULT_MCP_READ_TIMEOUT,
     DEFAULT_MODEL,
     DEFAULT_PLANNER_TIMEOUT_S,
     MCPSessionAdapterBase,
@@ -49,6 +50,87 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _truncate_result,
     _user_message_for_drive,
 )
+
+#: Parent-environment variables a spawned MCP server may inherit. Everything
+#: else — provider API keys, GITHUB_TOKEN, cloud credentials — is withheld: we
+#: routinely spawn deliberately-vulnerable and third-party servers, and
+#: ``dict(os.environ)`` handed every one of them Mylonite's own secrets
+#: (DCR-0012), with ``launch_env`` leaving the merge policy to an unseen caller
+#: (DCR-0018). A target that needs some OTHER parent-env variable must declare
+#: it explicitly via the target file's ``env:`` block (``TargetSpec.extra_env``
+#: / ``launch_env()``'s overlay) — that is the correct, auditable way to widen
+#: a spawned server's environment, not a broader allowlist here.
+#:
+#: The set below is deliberately platform-neutral (both POSIX and Windows
+#: entries): a bundled npx/uvx-launched target must keep working on either
+#: platform. ``SYSTEMROOT``/``COMSPEC``/``APPDATA``/``LOCALAPPDATA`` are
+#: Windows-specific (npx/node and many native subprocess launchers on Windows
+#: fail to resolve the shell/DLL search path without them); ``HOME``/``LANG``/
+#: ``LC_ALL`` are the POSIX equivalents. Verified empirically on Windows: a
+#: real ``npx``-launched filesystem server and ``uvx``-launched fetch server
+#: both spawn and respond to ``tools/list`` with only this allowlist.
+_INHERITED_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+        "PATHEXT",
+        "COMSPEC",
+        "APPDATA",
+        "LOCALAPPDATA",
+    }
+)
+
+
+def _compose_child_env(extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Build the spawned server's environment: the allowlisted parent
+    variables, then the target's declared overlay on top — normalized so
+    there is never more than one entry for the same effective variable name.
+
+    Two case-sensitivity hazards, both around ``os.environ``'s ACTUAL stored
+    key casing being a platform/session quirk (Windows has been observed
+    storing e.g. ``"Path"`` instead of ``"PATH"``):
+
+    1. The allowlist CHECK must be case-insensitive (``k.upper() in
+       _INHERITED_ENV_KEYS``) or a variable stored under an unexpected casing
+       is silently dropped — the safer failure mode for an allowlist is "too
+       narrow", not a platform-dependent flake.
+    2. Every allowlisted entry is then stored under a SINGLE CANONICAL
+       (uppercase) key, and ``extra_env`` overlay keys are merged by first
+       removing any existing entry that matches case-insensitively. Without
+       this, an inherited ``"Path"`` plus a target-declared override
+       ``env: {PATH: ...}`` would both land in the dict as separate keys —
+       the override would not cleanly REPLACE the inherited value, it would
+       silently ADD a same-effective-name key under different casing, with
+       implementation-defined behaviour for which one the OS actually
+       resolves. That would defeat ``TargetSpec.launch_env``'s documented
+       "single precedence point" guarantee.
+    """
+    env: dict[str, str] = {}
+    # Track, per UPPERCASE name, which exact key currently occupies `env` —
+    # lets the extra_env merge below find and remove a case-differing
+    # duplicate before inserting the overlay's own key.
+    canonical_key_for: dict[str, str] = {}
+    for k, v in os.environ.items():
+        upper = k.upper()
+        if upper in _INHERITED_ENV_KEYS:
+            env[upper] = v  # canonical uppercase key — collapses any pre-existing
+            canonical_key_for[upper] = upper  # case ambiguity in os.environ itself
+    if extra_env:
+        for k, v in extra_env.items():
+            upper = k.upper()
+            existing_key = canonical_key_for.get(upper)
+            if existing_key is not None and existing_key != k:
+                del env[existing_key]
+            env[k] = v
+            canonical_key_for[upper] = k
+    return env
 
 
 @asynccontextmanager
@@ -68,10 +150,18 @@ async def _open_mcp_session(
 
     ``command``/``args`` default to the spec's launch; a caller can override them
     to start a target's deliberately-unguarded (``vulnerable_launch``) variant.
+
+    Environment (DCR-0012/DCR-0018): the child does NOT inherit the full
+    parent environment. It gets a narrow, named allowlist
+    (``_INHERITED_ENV_KEYS`` — PATH and the handful of OS-plumbing variables a
+    subprocess launcher needs) merged with ``extra_env`` (the target's
+    declared overlay — see ``TargetSpec.launch_env``'s docstring), composed by
+    :func:`_compose_child_env` so a casing mismatch can't produce a duplicate
+    entry. This is a deliberate, real behaviour change: a custom MCP server
+    that previously relied on inheriting some OTHER parent-env variable must
+    now declare it explicitly in the target file's ``env:`` block.
     """
-    env = dict(os.environ)
-    if extra_env:
-        env.update(extra_env)
+    env = _compose_child_env(extra_env)
     params = StdioServerParameters(
         command=command or spec.command,
         args=args if args is not None else spec.render_args(scope),
@@ -79,7 +169,9 @@ async def _open_mcp_session(
     )
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream) as session,
+        ClientSession(
+            read_stream, write_stream, read_timeout_seconds=DEFAULT_MCP_READ_TIMEOUT
+        ) as session,
     ):
         await session.initialize()
         yield session

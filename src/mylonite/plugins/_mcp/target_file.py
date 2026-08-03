@@ -20,12 +20,14 @@ Prefer an absolute path and verify the target actually opened it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from mylonite._paths import PathEscapesBase, resolve_contained
 from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
@@ -64,6 +66,10 @@ class TargetFile(BaseModel):
     requires_scope: bool = False
     system_prompt: str | None = None
     system_prompt_file: Path | None = None
+    #: Directory the YAML was loaded from. Set by ``load_target_file``; the base
+    #: every path field in this document is resolved against. ``None`` for an
+    #: in-memory TargetFile assembled from CLI flags, where the CWD is the base.
+    source_dir: Path | None = None
     # One-line description of what the app is for (e.g. "an email-triage assistant
     # that reads inbox messages and can send replies"). Optional; when set it is
     # threaded into the payload customiser so probes are tailored to the app's
@@ -118,14 +124,45 @@ class TargetFile(BaseModel):
                 f"got unknown key(s): {bad}"
             )
             raise ValueError(msg)
+        if self.scope and self.scope.strip() and not self.requires_scope:
+            # A declared scope IS a resource that must be authorized. Normalising
+            # here keeps any other consumer of this model honest (DCR-0008) — the
+            # --authorize gate derives its required value from `scope` regardless
+            # (see mylonite._authz), but this closes the gap for any future
+            # consumer of `requires_scope` that still trusts the flag.
+            self.requires_scope = True
         return self
 
 
-def _resolved_prompt(tf: TargetFile) -> str:
+def resolved_system_prompt_path(tf: TargetFile) -> Path | None:
+    """The contained, resolved ``system_prompt_file`` path, or ``None``.
+
+    The single place ``system_prompt_file`` becomes a real path. Two separate
+    code paths previously called ``Path(tf.system_prompt_file).read_text()``
+    with no containment check — one to build the live agent's system prompt
+    (DCR-0020) and one to publish it into a GitHub check-run annotation
+    (DCR-0012/DCR-0013) — turning a PR-editable field into arbitrary-file
+    disclosure. Both now go through here.
+    """
+    if tf.system_prompt_file is None:
+        return None
+    base = tf.source_dir or Path.cwd()
+    try:
+        return resolve_contained(tf.system_prompt_file, base=base, label="system_prompt_file")
+    except PathEscapesBase as exc:
+        raise PathEscapesBase(
+            f"{exc} Paths declared in a target file must stay inside the directory "
+            "that file lives in."
+        ) from exc
+
+
+def resolved_system_prompt(tf: TargetFile) -> str:
+    """The system prompt text: inline, from a contained file, or the default."""
     if tf.system_prompt is not None:
         return tf.system_prompt
-    if tf.system_prompt_file is not None:
-        return Path(tf.system_prompt_file).read_text(encoding="utf-8")
+    path = resolved_system_prompt_path(tf)
+    if path is not None:
+        return path.read_text(encoding="utf-8")
     return _DEFAULT_CUSTOM_PROMPT
 
 
@@ -149,7 +186,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         command=tf.command,
         args_template=tuple(tf.args),
         scope_validator=_validate_scope,
-        default_system_prompt=_resolved_prompt(tf),
+        default_system_prompt=resolved_system_prompt(tf),
         requires_scope=requires_scope,
         args_with_scope=False,
         primary_tools=tuple(tf.primary_tools),
@@ -169,14 +206,21 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
 
 def load_target_file(path: Path) -> TargetFile:
     """Parse a YAML target file into a validated ``TargetFile``."""
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    path = Path(path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         msg = f"target file {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)
+    # `source_dir` is derived bookkeeping — the containment base every path field
+    # in this document resolves against — never something the document itself
+    # should get to set. Always overwrite whatever the YAML says (even if it
+    # declares its own `source_dir`), so a PR-editable target.yaml can't hand
+    # itself a wider containment base and defeat resolve_contained.
+    data["source_dir"] = str(path.parent.resolve())
     return TargetFile.model_validate(data)
 
 
-def dump_target_file(tf: TargetFile) -> str:
+def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:
     """Serialise a ``TargetFile`` back to YAML.
 
     Used to persist an *inline* ``mcp:custom`` target (assembled from CLI flags,
@@ -184,9 +228,43 @@ def dump_target_file(tf: TargetFile) -> str:
     ``generate`` and ``validate`` can re-resolve the exact same target without the
     operator re-passing every flag. ``exclude_defaults`` keeps the file minimal and
     re-loadable: it round-trips back through ``load_target_file`` to an equal model.
+
+    ``redact_secrets`` defaults on: ``headers`` and credential-shaped ``env``
+    values are masked (DCR-0019), matching every other persisted target.yaml.
+    Pass ``False`` only for an in-memory round-trip that never touches disk or a
+    console — masking there would corrupt the reload.
     """
-    data = tf.model_dump(mode="json", exclude_defaults=True)
-    return yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+    data = tf.model_dump(mode="json", exclude_defaults=True, exclude={"source_dir"})
+    text = yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+    if not redact_secrets:
+        return text
+    from mylonite._redaction import redact_target_yaml
+
+    return redact_target_yaml(text)
+
+
+def _payload_placeholder_is_json_embedded(value: str) -> bool:
+    """True if a ``{payload}``-containing string leaf itself looks like it
+    embeds structured JSON around the placeholder (DCR-0021).
+
+    The old check tested only the field value's FIRST character
+    (``stripped[:1] in "{["``) — a heuristic that both under- and
+    over-matches (e.g. a value like ``"[see {payload}]"`` starts with neither
+    ``{`` nor ``[`` after stripping outer text and would be MISSED; a value
+    like ``"{not json, just braces {payload}"`` starts with ``{`` and would
+    be wrongly FLAGGED). Substituting a sentinel for the placeholder and
+    attempting an actual JSON parse is a direct test of "is this string, once
+    the payload lands, JSON" rather than a proxy on its first character.
+    """
+    stripped = value.strip()
+    if stripped == "{payload}":
+        return False  # the whole field IS the bare placeholder — the happy path
+    probe = value.replace("{payload}", "MYLONITE_PAYLOAD_PLACEMENT_SENTINEL")
+    try:
+        json.loads(probe)
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def payload_placement_warnings(tf: TargetFile) -> list[str]:
@@ -211,8 +289,7 @@ def payload_placement_warnings(tf: TargetFile) -> list[str]:
         if isinstance(node, str):
             if "{payload}" in node:
                 found[0] = True
-                stripped = node.strip()
-                if stripped != "{payload}" and stripped[:1] in "{[":
+                if _payload_placeholder_is_json_embedded(node):
                     warnings.append(
                         f"seed_arm.args_template{path}: '{{payload}}' looks embedded in a "
                         "JSON/structured string. Mylonite plants a natural-language payload "

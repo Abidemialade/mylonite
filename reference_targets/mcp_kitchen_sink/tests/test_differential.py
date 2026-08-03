@@ -85,3 +85,27 @@ def test_guarded_tool_descriptions_pass_allowlist() -> None:
     for tool in tools:
         assert "(Note:" not in tool.description
         assert "(note:" not in tool.description
+
+
+def test_vulnerable_call_tool_missing_required_argument_returns_error_result() -> None:
+    """RB-DCR-0003: a missing required argument used to raise an unhandled
+    KeyError straight out of ``arguments[...]`` — orthogonal to the four
+    catalogued weaknesses (W1-W4), which are about what a well-formed call
+    does, not about crashing on a malformed one. ``server_guarded.py`` already
+    fixed this identical defect (DCR-0016 there); the vulnerable twin must
+    behave the same way: return ``ToolResult(isError=True)``, never raise."""
+    server = VulnerableKitchenSinkServer(store=NoteStore())
+    result = server.call_tool("read_note", {})  # missing required "note_id"
+    assert result.isError is True
+    assert "note_id" in result.content
+
+    result = server.call_tool("write_note", {"note_id": "n1"})  # missing "body"
+    assert result.isError is True
+    assert "body" in result.content
+
+    result = server.call_tool("web_fetch", {})  # missing "url"
+    assert result.isError is True
+    assert "url" in result.content
+
+    result = server.call_tool("send_email", {"to": "x@example.com"})  # missing subject/body
+    assert result.isError is True

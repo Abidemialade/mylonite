@@ -84,3 +84,28 @@ def test_bundle_empty() -> None:
     from mylonite.report.bundle import to_bundle
 
     assert to_bundle([])["findings"] == []
+
+
+def test_bundle_redacts_secret_shaped_success_reason() -> None:
+    """Mirrors the sarif.py DCR-0021 fix: this bundle is written to disk
+    unconditionally (report --json / gate), and a real exfil finding's
+    success_reason can narrate the exfiltrated value itself."""
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+    from mylonite.report.bundle import to_bundle
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    pid = "finding-w3"
+    ex = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id=pid,
+        payload=Payload(
+            pattern_id=pid, channel="tool-result", body="x", metadata={"weakness": "W3"}
+        ),
+        response=AdapterResponse(
+            payload_pattern_id=pid, raw_response="ok", tool_calls=["fetch"], metadata={}
+        ),
+        success_reason=f"exfiltrated {secret} to the attacker endpoint",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    f = to_bundle([(ex, None)])["findings"][0]
+    assert secret not in f["success_reason"]

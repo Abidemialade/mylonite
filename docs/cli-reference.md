@@ -5,7 +5,9 @@ the authoritative, always-current list (the help strings and usage examples live
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
 **Exit codes:** `0` ok/kept · `2` config or usage error (incl. an empty scan) · `3`
-LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept).
+LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept) · `6`
+`gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`:
+the validator returned nothing (internal collaborator failure).
 
 ---
 
@@ -74,7 +76,10 @@ holds the model constant and toggles only the safeguard; against the bundled ref
 it runs the two-build differential. A test is **kept** only when it discriminates reliably.
 
 Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
-`--model`; `--target-file PATH` (re-drive your REAL app instead of the reference build); `--fast`
+`--model`; `--target-file PATH` (re-drive your REAL app instead of the reference build);
+`--authorize` (**required** when `--target-file` names a custom target — must equal the
+target's declared `scope`, or its family name if no scope is declared; see
+[target-file.md](target-file.md)); `--fast`
 (skip the differential leg — faster, weaker); `--randomize-exfil/--no-randomize-exfil`
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
@@ -82,7 +87,7 @@ reference/replay path); `--iteration-timeout S`. `--prove-control` is a back-com
 (the differential is now default).
 
 ```bash
-mylonite validate .mylonite/generated/my-finding --target-file app.yaml
+mylonite validate .mylonite/generated/my-finding --target-file app.yaml --authorize my-app
 ```
 
 ## `gate` — scan → generate → validate → PR (the full pipeline)

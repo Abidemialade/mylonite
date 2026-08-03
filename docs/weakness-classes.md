@@ -156,3 +156,52 @@ regression test** is decided by Layer 2 — the [validation oracle](validation.m
 > The bundled families ([filesystem / fetch / github](test-your-app.md#bundled-targets))
 > carry their own W1–W4 attack patterns (e.g. `github-indirect-injection-poisoned-issue-then-act`)
 > so the same four classes apply to real MCP servers, not just the reference agent.
+
+### The predicate evidence contract
+
+Every function in `predicates.py` returns `Verdict | None`, and each one is held to
+the same rule: **a predicate returns `None` unless it can see the specific signal it
+needs — never a confident verdict built on a weaker proxy.** Two failure modes this
+rules out, both closed in the same pass (they pull in opposite directions, and both
+are correctness bugs in the oracle):
+
+- **Fabricated positives from structure alone.** Tool *order* is necessary but not
+  sufficient evidence of indirect injection. `read_note` followed by `send_email` is
+  the same tool sequence whether the model was hijacked by planted content or the
+  user just asked "read my note, then email it to bob@company.com." A predicate that
+  fires on order alone can't tell these apart, so predicates that key on a
+  read-then-act pattern (e.g. `read_note_returned_poisoned_content_acted_on`) also
+  require **attacker-shape evidence** — the follow-on call must have actually reached
+  *this payload's* exfil destination (`email_present` / `host_present`), not merely
+  run after the read.
+- **Manufactured negatives from missing evidence.** An adapter that doesn't populate a
+  given metadata key (e.g. a real MCP target has no `effect_trace`, only the
+  in-process reference adapter does) is not evidence the underlying action *didn't*
+  happen — it's evidence the predicate can't see. Treating "key absent" the same as
+  "key present but empty" collapses two different facts into one confident (and
+  sometimes wrong) verdict. Predicates that depend on adapter-populated evidence check
+  for the key's *presence* before reasoning about its *content*
+  (`consequential_action_executed`, `send_email_without_confirmation`), and return
+  `None` — deferring to the LLM judge or the effect probe — when the evidence simply
+  isn't there.
+
+This is convention 5 in [`conventions.md`](conventions.md): *"Absent evidence is
+inconclusive. A predicate that cannot see the signal it needs should return `None`,
+never a confident verdict."*
+
+### The customiser marker guarantee
+
+The per-seed LLM customiser (`customiser.py`) rewrites a seed's body for the target's
+actual tool names and phrasing before it's sent — but every predicate detects success
+by matching *literals* the customiser doesn't otherwise know it must preserve (the
+exfil email/host, e.g. `attacker@example.com`). An unconstrained rewrite can
+paraphrase that literal away, producing a payload a genuinely vulnerable target would
+still act on, that the predicate can no longer detect — a silent false negative on a
+real vulnerability, not a customiser bug you'd notice by reading the output.
+
+`seeds.required_markers()` declares which literals a seed's predicate matches on; the
+customiser checks the rewritten body against that list and **reverts to the raw seed
+body** if any marker was dropped, tagging the payload `metadata["customiser"] =
+"fallback"` (surfaced in the scan summary's customiser-fallback count). The rewrite is
+still used whenever it keeps every required marker — this only guards the case where
+customisation would otherwise silently defeat detection.

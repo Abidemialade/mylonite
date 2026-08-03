@@ -40,3 +40,19 @@ repos:
           - rich>=13.7
           - types-PyYAML
           - types-jsonschema
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        # -ll matches the CI `security` job's threshold (medium+ severity): the
+        # 10 Low-severity findings currently in src/ are the same asserts/
+        # subprocess calls already noqa'd for ruff S101/S603, tracked for P9/P12.
+        # Gating pre-commit on Low would block every commit until those land.
+        # pass_filenames: false — bandit already recurses -r src itself; without
+        # this, pre-commit appends the changed filenames after -r src and bandit
+        # scans them twice (verified: 12 findings instead of 10 with a filename
+        # tacked on), producing confusing duplicate output on every commit.
+        args: ["-c", "pyproject.toml", "-ll", "-r", "src"]
+        pass_filenames: false
+        additional_dependencies: ["bandit[toml]"]

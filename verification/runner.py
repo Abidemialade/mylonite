@@ -24,6 +24,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from mylonite._concurrency import gather_bounded
 from mylonite.scan.judge import SuccessJudge
 from verification import fetch
 from verification.crosswalk import load_crosswalk
@@ -79,11 +80,23 @@ def _cmd_record(args: argparse.Namespace) -> int:
         print(f"record: {data_path} missing - run `fetch` first", file=sys.stderr)
         return 2
     fetch._enable_truststore()
-    cases = injecagent.load_cases(data_path, args.split, limit=args.limit)
-    transcripts = [
-        injecagent.record_case(c, model=args.model, elicit_positives=args.elicit_positives)
-        for c in cases
-    ]
+    cases = injecagent.load_cases(data_path, args.split, limit=args.limit, setting=args.setting)
+    # Each case is an independent, blocking litellm.completion call
+    # (injecagent.record_case is sync). Farm them out to threads and await
+    # them concurrently (bounded) instead of recording one case at a time.
+    transcripts = asyncio.run(
+        gather_bounded(
+            [
+                asyncio.to_thread(
+                    injecagent.record_case,
+                    c,
+                    model=args.model,
+                    elicit_positives=args.elicit_positives,
+                )
+                for c in cases
+            ]
+        )
+    )
     suffix = "_elicit" if args.elicit_positives else ""
     out = (
         Path(args.out)

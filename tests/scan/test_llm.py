@@ -307,6 +307,65 @@ def test_success_resets_consecutive_failures() -> None:
     assert counter.consecutive_failures == 0
 
 
+def test_litellm_json_call_passes_an_explicit_timeout() -> None:
+    """DCR-0018: every completion call carries an explicit timeout — a stuck
+    provider call must not be able to hang indefinitely with no bound at all."""
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    litellm_json_call(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller="test",
+        completion_fn=stub,
+        timeout_s=5.0,
+    )
+    assert seen[0]["timeout"] == 5.0
+
+
+def test_litellm_json_call_defaults_a_timeout_when_not_specified() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    litellm_json_call(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller="test",
+        completion_fn=stub,
+    )
+    assert isinstance(seen[0]["timeout"], float) and seen[0]["timeout"] > 0
+
+
+@pytest.mark.asyncio
+async def test_litellm_json_call_async_passes_an_explicit_timeout() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    await litellm_json_call_async(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller="test",
+        completion_fn=stub,
+        timeout_s=7.0,
+    )
+    assert seen[0]["timeout"] == 7.0
+
+
 @pytest.mark.asyncio
 async def test_async_helper_works_same_way() -> None:
     counter = LiteLLMCallCounter(cap=3)

@@ -20,6 +20,7 @@ ad-hoc tests — but no budget enforcement happens.
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import json
 import logging
 import re
@@ -33,6 +34,46 @@ from json_repair import repair_json
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+#: Default per-call bound (seconds) passed to LiteLLM's own ``timeout``
+#: parameter (DCR-0011/DCR-0018). Distinct from — and a backstop under — any
+#: OUTER ``asyncio.wait_for`` a caller wraps around a multi-call sequence (e.g.
+#: the MCP adapter's ``planner_timeout_s`` bounds the whole multi-turn planner
+#: run): a single stuck provider call inside that sequence should not be able
+#: to silently eat the whole budget before the outer bound even gets a chance
+#: to fire on a slow-but-technically-still-progressing series of calls.
+DEFAULT_LLM_CALL_TIMEOUT_S: Final = 60.0
+
+
+def fence(*parts: str) -> str:
+    """A per-call delimiter tag for fencing target-controlled text in a prompt.
+
+    Shared by the customiser (``customiser._build_prompt``) and the judge
+    (``judge._build_judge_prompt``) — both build evaluator prompts that embed
+    target-controlled text (tool descriptions, system prompt, the target's
+    final response). Mylonite tests OTHER systems for exactly this class of
+    weakness (prompt injection via unfenced/predictably-labelled untrusted
+    text), so its own evaluator prompts should not be trivially splice-able by
+    a target that embeds "ignore the above" style content. A per-call tag
+    (rather than a fixed literal like ``TARGET TOOLS:``) is harder for a
+    generic, pre-written injection payload to guess and close.
+
+    Deliberately DETERMINISTIC (a hash of the call's own inputs), not
+    ``secrets``/``random``/a timestamp: this is a pure function of stable
+    identifiers (seed id, target id, ...), so the SAME seed run against the
+    SAME target builds the byte-identical prompt on a re-run — useful for
+    caching/debugging with zero security downside, since the fence's job is
+    defeating a generic, non-targeted splicing attempt, not withstanding an
+    adversary who already has source access to compute it. This also keeps
+    the customiser's/judge's ``(model, messages)`` pair reproducible. (Neither
+    is currently part of the recorded `mylonite demo` fixture path at all —
+    the demo runs with ``llm_assist=False``, which disables the customiser's
+    LLM call and the judge's LLM fallback entirely, see
+    ``wiring.build_scan`` — but staying deterministic costs nothing and
+    avoids relying on that fact.)
+    """
+    digest = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    return f"MYLONITE-FENCE-{digest}"
 
 
 class BudgetExceededError(RuntimeError):
@@ -361,13 +402,13 @@ def _supported_response_mode(model: str) -> str | None:
         if litellm.supports_response_schema(model=model):
             return "json_schema"
     except Exception:
-        pass
+        logger.info("%s: supports_response_schema introspection failed; degrading", model)
     try:
         params = litellm.get_supported_openai_params(model=model) or []
         if "response_format" in params:
             return "json_object"
     except Exception:
-        pass
+        logger.info("%s: get_supported_openai_params introspection failed; degrading", model)
     return None
 
 
@@ -397,6 +438,7 @@ def litellm_json_call(
     system: str | None = None,
     completion_fn: Callable[..., Any] | None = None,
     schema_model: type[BaseModel] | None = None,
+    timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Sync wrapper around ``litellm.completion`` that returns parsed JSON.
 
@@ -405,7 +447,10 @@ def litellm_json_call(
     cap is hit before the call is made.
 
     ``completion_fn`` exists for tests — pass a stub instead of patching the
-    module. Defaults to ``litellm.completion``.
+    module. Defaults to ``litellm.completion``. Every call passes an explicit
+    ``timeout`` (DCR-0018) so a single stuck provider call can't block
+    indefinitely; a caller under its own outer timeout can still override
+    ``timeout_s`` tighter.
     """
     _bump(caller)
     fn = completion_fn or litellm.completion
@@ -413,7 +458,7 @@ def litellm_json_call(
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format
@@ -437,15 +482,20 @@ async def litellm_json_call_async(
     system: str | None = None,
     completion_fn: Callable[..., Any] | None = None,
     schema_model: type[BaseModel] | None = None,
+    timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Async sibling of ``litellm_json_call`` using ``litellm.acompletion``."""
+    """Async sibling of ``litellm_json_call`` using ``litellm.acompletion``.
+
+    Passes an explicit ``timeout`` on every call (DCR-0018) — see
+    ``litellm_json_call``'s docstring.
+    """
     _bump(caller)
     fn = completion_fn or litellm.acompletion
     messages: list[dict[str, str]] = []
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages}
+    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format

@@ -105,6 +105,58 @@ def test_write_artefacts_never_overwrites_existing_dir(tmp_path: Path) -> None:
     assert first.exists() and second.exists()
 
 
+def test_write_artefacts_disambiguates_two_exploits_sharing_a_pattern_id(
+    tmp_path: Path,
+) -> None:
+    """DCR-0006: two exploits can legitimately share a pattern_id (e.g. a
+    runs>1 re-attempt) — the old exploit_<pattern_id>.json naming let the
+    second silently overwrite the first's evidence file on disk."""
+    same_id = "dup-pattern"
+    exploits = [_exploit(same_id), _exploit(same_id)]
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id=same_id,
+                pattern_id=same_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="caught",
+            )
+        ],
+        findings_count=2,
+        mylonite_version="0.2.0",
+    )
+    scan_dir = write_artefacts(ScanResult(report=report, exploits=exploits), tmp_path)
+    exploit_files = sorted(p.name for p in scan_dir.glob("exploit_*.json"))
+    assert len(exploit_files) == 2, exploit_files
+    assert len({f for f in exploit_files}) == 2  # genuinely distinct filenames
+    # Both files are readable and non-empty (neither overwrote the other with
+    # blank/partial content mid-write).
+    for name in exploit_files:
+        payload = json.loads((scan_dir / name).read_text())
+        assert payload["pattern_id"] == same_id
+
+
+def test_timestamped_subdir_retries_past_an_existing_collision(tmp_path: Path) -> None:
+    """The exist_ok=False retry loop actually retries on a real collision,
+    not just a hypothetical one — pre-create the exact timestamp dir a write
+    would pick and confirm it lands on the -1 suffix instead of raising."""
+    from datetime import UTC, datetime
+
+    from mylonite.scan.artefacts import _timestamped_subdir
+
+    base = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    (tmp_path / base).mkdir(parents=True)
+    scan_dir = _timestamped_subdir(tmp_path)
+    assert scan_dir == tmp_path / f"{base}-1"
+    assert scan_dir.exists()
+
+
 # --- render_summary --------------------------------------------------------
 
 
@@ -159,6 +211,31 @@ def test_render_summary_ascii_safe_is_pure_ascii() -> None:
 def test_render_summary_utf8_keeps_glyphs() -> None:
     summary = render_summary(_result(findings=1), ascii_safe=False)
     assert "✗ FOUND" in summary
+
+
+def test_render_summary_survives_rich_markup_in_a_verdict_reason() -> None:
+    """DCR-0004: a verdict_reason quoting target output like '[/bold]' raised
+    MarkupError and crashed the CLI AFTER a successful scan."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s[/bold]",
+                pattern_id="s",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="the response echoed [/bold] verbatim",
+            )
+        ],
+        findings_count=0,
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert "verbatim" in summary
 
 
 @pytest.mark.parametrize(

@@ -37,25 +37,52 @@ capability against systems the user does not own.
 The project enforces the following non-negotiables:
 
 1. **Targets-you-control by default.** The CLI refuses to run against a target
-   the user has not explicitly authorized. Authorization is opt-in per scan
+   the user has not explicitly authorized. Authorization is opt-in per run
    via a required `--authorize` flag plus a target identifier (hostname,
    service URL, or local-path) the user is asserting they own or are
    contractually authorized to test.
 
-   For **bundled MCP stdio targets** added in v0.2.2 (`mcp:filesystem:<sandbox>`,
-   `mcp:fetch`, `mcp:github:<owner/repo>`), `--authorize` is scope-matched:
-   - Scope-bearing families (`filesystem`, `github`) require
-     `--authorize == <scope>` exactly. Mismatched values exit 2 with both
-     the supplied authorize and the target's scope shown for diagnosis.
-   - Stateless families (`fetch`) require `--authorize == <family>` (the
-     literal `fetch`), making the user-intent assertion explicit even when
-     no scope segment is supplied.
+   **One rule, applied by every command that live-drives a real target** —
+   `scan`, `gate`, `validate`, and `ablate`. The required value is derived
+   from the target's own data, never from a self-asserted flag:
+   - A target that declares a **scope** (`mcp:filesystem:<sandbox>`,
+     `mcp:github:<owner/repo>`, or a custom target file with `scope:` set)
+     requires `--authorize == <scope>` exactly. For a custom target, this
+     applies regardless of whatever the target file's own `requires_scope`
+     field says — a target that names a scope IS asserting that scope is the
+     sensitive resource, and cannot downgrade the check by also setting
+     `requires_scope: false`.
+   - A **stateless** target (`mcp:fetch`, or a custom target/target file
+     with no `scope`) requires `--authorize == <family>` — for inline
+     `mcp:custom`, the family is the literal `custom`.
 
-   **Custom targets** (`--target-file target.yaml` or `mcp:custom --command …`)
-   follow the same rule keyed on the target file's `requires_scope`: with a
-   `scope` declared, `--authorize == <scope>`; otherwise `--authorize == <family>`
-   (for inline `mcp:custom`, the family is the literal `custom`). A custom target
-   can never register over a bundled family name.
+   Mismatched or missing values exit 2 (config error) naming what
+   `--authorize` needed to equal. `mylonite validate` and `mylonite ablate`
+   re-drive the real target — including sending live attack payloads (e.g.
+   exfil) — exactly like `scan`/`gate`, so they are gated identically; this
+   was not always true (`validate` previously ran a custom target with no
+   authorization check at all, and `ablate` previously accepted any non-empty
+   value). A custom target can never register over a bundled family name.
+
+   That's one RULE, but two separate implementations, by design:
+   - **Custom targets** (`--target-file` / `mcp:custom`) — the document being
+     authorized (a target YAML, or CLI flags assembled into one) is
+     user-editable, which is exactly what let a target declare a sensitive
+     `scope` while also setting `requires_scope: false` to downgrade its own
+     gate (DCR-0008). `src/mylonite/_authz.py`
+     (`required_authorization` / `check_authorization`) is the single
+     implementation of the rule for this path, shared by `scan`, `gate`,
+     `validate`, and `ablate` — there is exactly one place that decides what
+     `--authorize` must equal for a custom target.
+   - **Bundled targets** (`mcp:filesystem`, `mcp:fetch`, `mcp:github`) — driven
+     only by `scan`/`gate`, via a separate inline check in
+     `_build_adapter_for_mcp` (`cli.py`) against `target_registry.BUNDLED_TARGETS`,
+     a hardcoded dict defined in source, not a user-editable document. The
+     DCR-0008 vulnerability class — a target smuggling a downgrade instruction
+     into the very document being authorized — does not apply to data the
+     operator cannot edit, so this path is intentionally left as its own
+     (smaller, equally-enforced) implementation of the same rule rather than
+     folded into `_authz.py`.
 
    **TLS / corporate proxies:** behind a TLS-inspecting proxy, provider calls
    can fail `CERTIFICATE_VERIFY_FAILED`. Install `pip install "mylonite[enterprise]"`
@@ -75,13 +102,14 @@ The project enforces the following non-negotiables:
 3. **No payload-logging of live secrets.** Mylonite does not log raw model
    payloads or responses. As defense-in-depth, when `redact_secrets` is on (the
    default) the `mylonite` logger tree masks secret-shaped tokens (provider key
-   prefixes, AWS access-key ids, bearer tokens, PEM private-key blocks, and
-   `key=value` credential assignments) out of every log record, and the
-   rendered CLI scan/report strings are redacted before they are echoed.
-   Redaction is intentionally NOT applied to persisted replay fixtures,
-   `exploit_*.json` / `scan_report.json` artefacts, or generated test source —
-   those are deterministic and contain no raw provider secrets by construction,
-   and masking them would corrupt loadable/replayable data.
+   prefixes, AWS access-key ids, bearer tokens, PEM private-key blocks,
+   `scheme://user:pass@host` URL credentials, and `key=value` credential
+   assignments) out of every log record, and every human-facing CLI string is
+   redacted before it is printed (see "What Mylonite does with your
+   credentials" below). Redaction is intentionally NOT applied to persisted
+   replay fixtures or generated test source — those are deterministic and
+   contain no raw provider secrets by construction, and masking them would
+   corrupt loadable/replayable data.
 4. **No evasion features.** The project does not accept contributions that add
    detection-evasion, anti-forensics, or rate-limit-bypass capabilities. Any
    such PR will be closed.
@@ -94,6 +122,75 @@ These rules apply to all official extensions and to anything shipped through
 the community attack-pattern registry. Third-party plugins are out of our
 direct control, but the registry's contribution guidelines forbid patterns
 whose only use is offensive.
+
+## What Mylonite does with your credentials
+
+A `target.yaml` (or `mcp:custom` `--env`) can legitimately carry a live
+credential — a bearer token in `headers` / `request.headers`, a secret in
+`env` (a DB password, a provider API key for the app under test), or one
+embedded in a `--target-file` argument the probed planner echoes back. Every
+place that value could otherwise leave the machine unmasked is routed through
+`mylonite._redaction`:
+
+- **Console / CI output.** `src/` never calls `typer.echo`, `console.print`,
+  or bare `print` directly — every human-facing string leaves through
+  `mylonite._cli_io` (`echo` / `echo_err` / `echo_exc` / `console_print`),
+  which redact secret-shaped tokens first. This is enforced by a test
+  (`tests/test_cli_output_boundary.py`), not just convention. A Rich `Table`'s
+  free-text cells (e.g. a validation leg's `detail`, a scan attempt's
+  `verdict_reason`) are redacted at the point they're inserted, before Rich's
+  column-width wrapping can split a secret-shaped token across a line break.
+- **A pydantic validation error.** A malformed `--target-file` or `--env`
+  raises a `ValidationError` whose default `str()` embeds the offending raw
+  field value (`input_value`). `echo_exc` renders it via `redact_exception`,
+  which drops `input_value` and prints only the field path + message.
+- **Any `target.yaml` Mylonite writes or copies.** The scan-dir copy
+  (`mylonite scan`), the co-located copy (`mylonite generate`), the gate PR
+  copy (`mylonite gate`), and the `scan --scaffold` / `mylonite init` starter
+  all go through the same `redact_env` / `redact_target_yaml` masking: every
+  `headers` / `request.headers` value is masked unconditionally, and every
+  credential-shaped `env` value — by key name (`password`, `api_key`,
+  `token`, ...) OR value shape — is masked, leaving key names and structure
+  intact so the file still documents the target and still loads. The same
+  masking is `dump_target_file`'s default for an inline `mcp:custom` target.
+- **The SARIF upload and the JSON finding bundle.** Both are written to disk
+  unconditionally (`mylonite gate`, `mylonite report --json`) and the SARIF
+  one is uploaded to GitHub code scanning — a persistent, often
+  broadly-visible surface. A real exfiltration finding's narration
+  (`success_reason`) is redacted before it rides into either artefact.
+- **The retained attack-evidence trace.** A probed tool's schema can
+  legitimately accept a credential-bearing parameter, and a planner steered by
+  injected content may pass a real one. Recorded tool-call arguments
+  (`mcp_trace_planner`, persisted into `exploit_*.json` / `scan_report.json`)
+  mask a credential-shaped argument *value* — by key name OR shape — but not
+  every value and not the keys, so the oracle predicates that inspect those
+  same values (e.g. did `fetch` target the attacker host, did `write_file`
+  carry the attacker marker) keep working; a URL or prose body never matches
+  the credential rules and passes through unchanged.
+
+The one place a credential is used unmasked is the live subprocess/HTTP call
+to the target itself — that is the whole point of testing it. Redaction never
+runs on demo replay fixtures or the emitted test source, because those are
+deterministic and must round-trip byte-for-byte; masking them would corrupt
+the generate → validate → replay pipeline (see the module docstring in
+`src/mylonite/_redaction.py`).
+
+## What a `target.yaml` you received from someone else can and cannot do
+
+`target.yaml` is a shareable, PR-editable document: a teammate mails you one, or a
+pull request edits the one already in your repo. Every path-shaped field in it
+(`system_prompt_file`, the `mcp:filesystem` sandbox scope) is containment-checked, not
+just shape-checked (`is_absolute()` is not a security check) — it cannot read a file
+outside the target YAML's own directory, and it cannot point the filesystem sandbox at
+your whole disk, your home directory, or a nonexistent path. It CAN still launch an
+arbitrary `command`/`args` as a subprocess and carry credentials for that launch (that
+is the point of a custom target) — those are gated by `--authorize` and masked
+wherever Mylonite persists or prints them, per "What Mylonite does with your
+credentials" above, but the operator is still trusting the launch command itself, the
+same way they'd trust any script a PR asks them to run.
+
+See `docs/target-file.md#path-containment` for the full field-level detail, including
+`MYLONITE_FS_SCOPE_ROOT`.
 
 ## Scope
 

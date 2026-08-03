@@ -67,7 +67,16 @@ class ScanConfig(BaseModel):
         description="Model for the LLM-judge verdict fallback. Defaults to ``model``.",
     )
     max_llm_calls: int = 50
-    max_concurrent: int = 3
+    max_concurrent: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "Max in-flight payload attempts. asyncio.Semaphore(0) would deadlock "
+            "every attempt forever rather than error (DCR-0002); a negative value "
+            "raises immediately from asyncio.Semaphore's own constructor. Neither "
+            "is a config a caller could have MEANT, so reject both at construction."
+        ),
+    )
     output_dir: Path = Field(default_factory=lambda: Path(".mylonite/scans"))
     dry_run: bool = False
     customise: bool = Field(
@@ -469,8 +478,20 @@ class ScanEngine:
         fail_passes: list[_JudgedPass] = []
         last_pass: _JudgedPass | None = None
         success_count = 0
-        for _ in range(runs):
-            result = await self._one_pass(payload=payload, seed_id=seed_id)
+        # The `runs` passes are independent of each other (same payload,
+        # re-invoked/re-judged for the flakiness filter), so with runs>1 they
+        # are driven concurrently, bounded by the same limit as cross-payload
+        # fan-out — see ``_run_flakiness_passes`` for why that helper (not a
+        # plain ``gather_bounded`` call) is what actually does the work.
+        # runs=1 (the default, and every demo/replay path) stays a single bare
+        # `await`, identical to the old sequential form.
+        if runs == 1:
+            pass_results = [await self._one_pass(payload=payload, seed_id=seed_id)]
+        else:
+            pass_results = await self._run_flakiness_passes(
+                payload=payload, seed_id=seed_id, runs=runs
+            )
+        for result in pass_results:
             if isinstance(result, _PerPayloadOutcome):
                 return result  # structural skip / error — terminal, do not retry
             last_pass = result
@@ -480,7 +501,12 @@ class ScanEngine:
             else:
                 fail_passes.append(result)
 
-        assert last_pass is not None  # runs >= 1 and every skip returned above
+        if last_pass is None:
+            raise RuntimeError(
+                "internal error: last_pass is None after the pass loop — runs >= 1 "
+                "and every structural skip returns above, so at least one pass "
+                "should have been recorded"
+            )
         is_finding = success_count * 2 > runs  # strict majority (runs=1 → 1 pass)
         # Surface observed flakiness: the runs both fired and didn't.
         run_disagreement = (success_count, runs) if runs > 1 and 0 < success_count < runs else None
@@ -549,6 +575,121 @@ class ScanEngine:
             customiser_fallback=customiser_fallback,
             run_disagreement=run_disagreement,
         )
+
+    async def _run_flakiness_passes(
+        self, *, payload: Payload, seed_id: str, runs: int
+    ) -> list[_PerPayloadOutcome | _JudgedPass]:
+        """Run ``runs`` invoke→judge passes for one payload, concurrently and bounded.
+
+        Not a plain ``gather_bounded`` fan-out: the scan-wide LLM-call budget
+        (``LiteLLMCallCounter``) is a SINGLE counter shared across every payload
+        in the scan, not one per payload. Under the old strictly-sequential
+        loop, a mid-run structural skip/error (pass 2 of 5, say) short-circuited
+        immediately and passes 3-5 never spent budget. A naive concurrent
+        fan-out launches all ``runs`` passes up front regardless — a structural
+        skip (``SeedArmUnavailable``/``AdapterInvocationSkipped``) is a
+        *returned* ``_PerPayloadOutcome``, not a raised exception, so
+        ``asyncio.gather`` has no reason to cancel siblings — spending strictly
+        more of the SHARED budget on passes that are discarded anyway. For a
+        ``runs>1`` scan running close to ``--max-llm-calls``, that could tip a
+        scan that would have completed under the old code into
+        ``aborted=budget_exceeded``.
+
+        So instead: launch all ``runs`` passes as real ``asyncio.Task``s
+        (bounded by a semaphore, same limit as cross-payload fan-out). Each
+        task checks a shared ``terminal_found`` flag *immediately after*
+        acquiring the semaphore and *before* calling ``self._one_pass(...)`` —
+        i.e. before it would spend any budget — and skips the call entirely if
+        the flag is already set. As soon as any pass resolves to a terminal
+        outcome (a structural-skip ``_PerPayloadOutcome``, or the one
+        exception ``_one_pass`` can raise — ``BudgetExceededError``,
+        propagated so ``run()`` can flip ``aborted="budget_exceeded"``) it
+        sets the flag (synchronously, before yielding) and any pass still
+        blocked behind the semaphore observes it and does no work. Passes
+        already mid-flight when the flag flips are left to finish (there is
+        no undoing a call already in progress) but nothing NEW is started —
+        so at most ``max_concurrent`` passes ever reach ``adapter.invoke()``
+        after the terminal is discovered, never scaling up to ``runs``. This
+        matches the old early-return's budget behaviour while still running
+        the common (all-non-terminal) case concurrently. Still-pending tasks
+        are additionally cancelled once a terminal is found, purely so
+        ``_run_payload`` doesn't wait around for passes whose result will be
+        discarded.
+
+        Each pass's ``self._one_pass(...)`` coroutine is created INSIDE its own
+        wrapper task rather than up front in a list comprehension, so a task
+        cancelled before its first execution turn never leaves an orphaned,
+        never-awaited ``_one_pass`` coroutine (the same class of
+        ``filterwarnings=error``-tripping "coroutine was never awaited" bug the
+        runs=1 fast path avoids — see the call site).
+        """
+        limit = max(1, self._config.max_concurrent)
+        sem = asyncio.Semaphore(limit)
+        terminal_found = False
+
+        async def _bounded(idx: int) -> tuple[int, _PerPayloadOutcome | _JudgedPass | None]:
+            nonlocal terminal_found
+            async with sem:
+                if terminal_found:
+                    return idx, None  # a sibling already proved this payload is pointless
+                try:
+                    result = await self._one_pass(payload=payload, seed_id=seed_id)
+                except BaseException:
+                    terminal_found = True  # a raised BudgetExceededError is terminal too
+                    raise
+                if isinstance(result, _PerPayloadOutcome):
+                    terminal_found = True
+                return idx, result
+
+        tasks: list[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = [
+            asyncio.ensure_future(_bounded(i)) for i in range(runs)
+        ]
+        results: list[_PerPayloadOutcome | _JudgedPass | None] = [None] * runs
+        pending: set[asyncio.Task[tuple[int, _PerPayloadOutcome | _JudgedPass | None]]] = set(tasks)
+        terminal_exc: BaseException | None = None
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                stop = False
+                # If MULTIPLE passes resolve to a terminal `_PerPayloadOutcome`
+                # in the SAME completed batch (e.g. two concurrent invokes
+                # both hit the same missing seed arm), each writes to its OWN
+                # `results[idx]` slot — neither is overwritten, both survive
+                # into the returned list. The actual tie-break happens one
+                # level up, in `_run_payload`'s `for result in pass_results:
+                # ... return result`, which returns the first terminal
+                # outcome in ascending list/idx order — deterministic, not
+                # "whichever finishes first". (`terminal_exc` IS a single
+                # shared variable, so if instead multiple passes raise —
+                # only `BudgetExceededError` can — whichever this loop
+                # processes last does win there.) Either way this is safe
+                # today because a structural-skip outcome for the same
+                # payload/seed is content-equivalent regardless of which
+                # concurrent copy is returned (same reason, same
+                # verdict_mechanism=None) — but would need revisiting if a
+                # future structural-skip type ever carried per-attempt state
+                # that made one copy meaningfully different from another.
+                for finished in done:
+                    exc = finished.exception()
+                    if exc is not None:
+                        terminal_exc = exc
+                        stop = True
+                        continue
+                    idx, result = finished.result()
+                    if result is not None:
+                        results[idx] = result
+                    if isinstance(result, _PerPayloadOutcome):
+                        stop = True
+                if stop:
+                    break
+        finally:
+            for pending_task in pending:
+                pending_task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        if terminal_exc is not None:
+            raise terminal_exc
+        return [r for r in results if r is not None]
 
     async def _one_pass(
         self, *, payload: Payload, seed_id: str

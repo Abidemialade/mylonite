@@ -219,7 +219,11 @@ class LiteLLMRecorder:
 
         real = await litellm.acompletion(model=model, messages=list(messages), **kwargs)
         serialised = json.dumps(_dictify_response(real), indent=2, sort_keys=True) + "\n"
-        assert isinstance(path, Path)  # __post_init__ enforces Path in record mode
+        if not isinstance(path, Path):
+            # __post_init__ enforces a real Path in record mode (mkdir/write are
+            # Path-only), so this should be unreachable — but never trust that an
+            # invariant established elsewhere still holds at a write call site.
+            raise TypeError(f"record mode requires a real pathlib.Path, got {type(path).__name__}")
         if path.is_file():
             existing = path.read_text(encoding="utf-8")
             if existing != serialised:

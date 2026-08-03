@@ -190,3 +190,21 @@ async def test_planner_passes_tool_choice_auto_only_with_tools() -> None:
     # The kitchen-sink server exposes tools → tool_choice forwarded.
     assert seen[0].get("tool_choice") == "auto"
     assert "tools" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_planner_passes_an_explicit_timeout_to_every_completion_call() -> None:
+    """DCR-0011/DCR-0018: every completion call carries an explicit timeout —
+    distinct from (and a backstop under) the OUTER asyncio.wait_for an adapter
+    wraps around the whole multi-iteration run — so one stuck provider call
+    inside a longer tool-use loop can't silently eat the whole budget."""
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _text_response("done.")
+
+    planner = LLMPlanner(server=server, model="stub", completion_fn=stub, completion_timeout_s=12.5)
+    await planner.run("Hi.")
+    assert seen[0]["timeout"] == 12.5

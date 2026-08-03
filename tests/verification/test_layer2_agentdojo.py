@@ -81,6 +81,43 @@ def test_load_run_transcripts(tmp_path: Path) -> None:
     assert {t.benchmark_success for t in ts} == {True, False}
 
 
+def test_load_run_transcripts_skips_one_malformed_run_but_keeps_the_rest(
+    tmp_path: Path, caplog
+) -> None:
+    """#39: a malformed run must skip, not discard every transcript already
+    accumulated (``run_to_transcript`` used to be called OUTSIDE the try, so
+    an AttributeError there crashed the whole ``load_run_transcripts`` call —
+    losing every transcript parsed from the files that sorted before it).
+    """
+    good_run = _run(security=False, attacker_tool_called=True)
+    malformed = _run(security=False, attacker_tool_called=True)
+    malformed["injections"] = "not-a-dict"  # .values() -> AttributeError
+
+    (tmp_path / "a_good.json").write_text(json.dumps(good_run), encoding="utf-8")
+    (tmp_path / "b_malformed.json").write_text(json.dumps(malformed), encoding="utf-8")
+    (tmp_path / "c_good.json").write_text(json.dumps(good_run), encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="verification.layer2_datasets.agentdojo"):
+        ts = agentdojo.load_run_transcripts(tmp_path)
+
+    # DCR-0009: both good runs survive the one malformed run in between.
+    assert len(ts) == 2
+    # DCR-0009: the drop is logged so "0 runs matched" reads differently from
+    # "N runs were dropped".
+    assert any("malformed" in r.message.lower() for r in caplog.records)
+
+
+def test_load_run_transcripts_limit_zero_is_honoured(tmp_path: Path) -> None:
+    """DCR-0012: the limit cap must be checked BEFORE the append, so
+    ``limit=0`` returns zero transcripts instead of one.
+    """
+    (tmp_path / "a.json").write_text(
+        json.dumps(_run(security=False, attacker_tool_called=True)), encoding="utf-8"
+    )
+    ts = agentdojo.load_run_transcripts(tmp_path, limit=0)
+    assert ts == []
+
+
 def test_fetch_manifest_pinned() -> None:
     from verification import fetch
 

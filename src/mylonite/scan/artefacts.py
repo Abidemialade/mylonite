@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import io
 import json
-import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,8 +20,13 @@ from typing import Final
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape as rich_escape
 from rich.table import Table
 
+from mylonite._cli_io import console_print
+from mylonite._paths import safe_slug
+from mylonite._redaction import redact
+from mylonite.contracts._types import ExploitRecord
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
@@ -71,18 +75,51 @@ def _stdout_is_ascii_only() -> bool:
 
 def _sanitise_filename(pattern_id: str) -> str:
     """Make ``pattern_id`` safe for filesystem use."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", pattern_id).strip("-_.") or "unknown"
+    return safe_slug(pattern_id)
 
 
 def _timestamped_subdir(root: Path) -> Path:
-    """Return a never-collide subdir under ``root``."""
+    """Atomically create and return a never-collide subdir under ``root``.
+
+    DCR-0005: the previous ``candidate.exists()`` check then a separate
+    ``mkdir()`` by the caller was a classic check-then-create race — two
+    concurrent scans landing in the same ``output_dir`` within the same
+    second could both pass the ``exists()`` check for the same candidate
+    before either created it, and the second ``mkdir()`` would then raise (or,
+    worse, silently write into the first scan's directory if the caller ever
+    relaxed this to ``exist_ok=True``). ``mkdir(exist_ok=False)`` in a retry
+    loop makes directory creation itself the atomicity boundary — there is no
+    window between "check" and "create" for a second process to land in.
+    """
     base = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    candidate = root / base
     suffix = 0
-    while candidate.exists():
-        suffix += 1
-        candidate = root / f"{base}-{suffix}"
-    return candidate
+    while True:
+        candidate = root / base if suffix == 0 else root / f"{base}-{suffix}"
+        try:
+            candidate.mkdir(parents=True)
+            return candidate
+        except FileExistsError:
+            suffix += 1
+
+
+def _disambiguated_exploit_filenames(exploits: list[ExploitRecord]) -> list[str]:
+    """One ``exploit_<slug>[-N].json`` filename per exploit, never colliding.
+
+    DCR-0006: two exploits can legitimately share a ``pattern_id`` — e.g. a
+    ``runs>1`` flakiness-filter re-attempt, or a seed emitted by more than one
+    attack module — and the OLD naming (``exploit_<pattern_id>.json``) let a
+    later one silently overwrite an earlier one's evidence file on disk,
+    losing that finding's evidence entirely. Each repeat of the same base
+    filename gets a ``-N`` suffix instead.
+    """
+    seen: dict[str, int] = {}
+    filenames: list[str] = []
+    for exploit in exploits:
+        base = f"exploit_{_sanitise_filename(exploit.pattern_id)}"
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        filenames.append(f"{base}.json" if count == 0 else f"{base}-{count + 1}.json")
+    return filenames
 
 
 def write_artefacts(result: ScanResult, output_root: Path) -> Path:
@@ -90,7 +127,6 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     scan_dir = _timestamped_subdir(output_root)
-    scan_dir.mkdir(parents=True)
 
     report_path = scan_dir / "scan_report.json"
     report_path.write_text(
@@ -98,8 +134,8 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
         encoding="utf-8",
     )
 
-    for exploit in result.exploits:
-        filename = f"exploit_{_sanitise_filename(exploit.pattern_id)}.json"
+    filenames = _disambiguated_exploit_filenames(result.exploits)
+    for exploit, filename in zip(result.exploits, filenames, strict=True):
         path = scan_dir / filename
         path.write_text(
             json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
@@ -110,12 +146,31 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
 
 
 def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str:
-    """Build a Rich-rendered summary table and return it as plain text.
+    """Build a Rich-rendered summary table and return it as REDACTED plain text.
 
     ``ascii_safe`` forces ASCII-only output (marks, box, separators) so the
     string is safe to print to a non-UTF-8 console; ``None`` auto-detects from
     ``sys.stdout``. A completed scan must never crash on output (Issue #9) — the
     CLI already forces UTF-8, but driver/embedded callers may not.
+
+    The returned string is passed through :func:`mylonite._redaction.redact`
+    before it comes back, so every current AND future caller is safe by
+    construction — one review found a caller (``mylonite report``) that
+    rendered this exact string to a real console with no redaction, even
+    though ``mylonite scan`` redacted it. Free-text cell values
+    (``attempt.verdict_reason``) are ALSO redacted before they reach the
+    table, not just here: Rich wraps a cell's text to fit the column width,
+    which can split a secret-shaped token across a line break and defeat a
+    regex over the final flattened string.
+
+    Every string cell built from attacker/target-influenced free text
+    (``seed_id``, ``verdict_mechanism``, ``verdict_reason``) is also passed
+    through :func:`rich.markup.escape` before ``add_row``. Redaction only
+    masks secret-SHAPED tokens; it does not defend against Rich markup — a
+    ``verdict_reason`` that quotes target output containing a stray
+    ``[/bold]``-shaped substring (a closing tag with no matching open tag)
+    raises ``rich.errors.MarkupError`` when the table is rendered, crashing
+    the CLI after a successful scan (DCR-0004).
     """
     if ascii_safe is None:
         ascii_safe = _stdout_is_ascii_only()
@@ -140,18 +195,24 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         mark = marks.get(attempt.outcome, attempt.outcome)
         table.add_row(
             mark,
-            attempt.seed_id,
-            attempt.verdict_mechanism or "-",
-            attempt.verdict_reason or "",
+            # seed_id/verdict_mechanism/verdict_reason are attacker/target-
+            # influenced free text — escape Rich markup so a target response
+            # quoting something shaped like a closing tag (e.g. "[/bold]")
+            # can't raise MarkupError when the table renders (DCR-0004).
+            rich_escape(attempt.seed_id),
+            rich_escape(attempt.verdict_mechanism or "-"),
+            # Free text (an LLM judge's rationale can quote target/response
+            # content) — redact before Rich's column-width wrapping, not after.
+            rich_escape(redact(attempt.verdict_reason or "")),
         )
 
-    console.print(table)
+    console_print(console, table)
     counts = (
         f"{len(report.attempts)} attempts{sep}{report.findings_count} findings{sep}"
         f"provider={report.provider}{sep}model={report.model}{sep}"
         f"{report.elapsed_seconds:.1f}s"
     )
-    console.print(counts)
+    console_print(console, counts)
     if report.inconclusive_attempts:
         judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
         denom = judged or report.inconclusive_attempts
@@ -162,21 +223,23 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         # A scan where every judged attempt fell back found nothing because it
         # could not judge; it must not read as clean.
         style = "bold red" if report.inconclusive_attempts >= denom else "yellow"
-        console.print(f"[{style}]{line}[/{style}]")
+        console_print(console, f"[{style}]{line}[/{style}]")
     # R7: a customiser fallback means a seed body was NOT refined for this target
     # (raw seed used) — surface it so a low-quality plant isn't invisible.
     customiser_fallbacks = report.fallback_breakdown.get("customiser_fallback", 0)
     if customiser_fallbacks:
-        console.print(
+        console_print(
+            console,
             f"[yellow]customiser: {customiser_fallbacks} payload(s) used the raw seed "
             "body (LLM customisation fell back) - the plant may be less target-tuned"
-            "[/yellow]"
+            "[/yellow]",
         )
     nrun_disagreements = report.fallback_breakdown.get("nrun_disagreement", 0)
     if nrun_disagreements:
-        console.print(
+        console_print(
+            console,
             f"[yellow]flakiness: {nrun_disagreements} payload(s) disagreed across runs "
-            "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]"
+            "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]",
         )
     # Correctness safeguard (PR3): an attempt that was NOT TESTED (poison never
     # delivered / no seed_arm to plant) proved nothing — it must not let a
@@ -184,14 +247,15 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     # can never be mistaken for safety.
     not_tested = sum(1 for a in report.attempts if a.outcome in NOT_TESTED_OUTCOMES)
     if not_tested:
-        console.print(
+        console_print(
+            console,
             f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
             "(planted payload undelivered, no seed_arm, or no plant/sink/recall "
             "surface) - those seeds proved NOTHING. This is not a clean result for "
             "them; declare a seed_arm (and for the tool-chaining / memory modes, "
             "ensure the target exposes a plant + sink/recall surface), then "
-            "re-scan.[/bold red]"
+            "re-scan.[/bold red]",
         )
     if report.aborted:
-        console.print(f"[red]aborted: {report.aborted}[/red]")
-    return buffer.getvalue()
+        console_print(console, f"[red]aborted: {report.aborted}[/red]")
+    return redact(buffer.getvalue())

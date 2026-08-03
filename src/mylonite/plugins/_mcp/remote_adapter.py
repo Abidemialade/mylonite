@@ -28,7 +28,47 @@ from urllib.parse import urlsplit
 
 from mcp import ClientSession
 
-from mylonite.plugins._mcp._session_adapter import MCPSessionAdapterBase
+from mylonite.plugins._mcp._session_adapter import (
+    DEFAULT_MCP_READ_TIMEOUT,
+    MCPSessionAdapterBase,
+)
+
+
+def _host_only(url: str | None) -> str:
+    """The host (+ port, when present in the URL) of ``url`` — never
+    userinfo/credentials.
+
+    ``urlsplit(url).netloc`` includes any embedded userinfo (e.g.
+    ``https://sk-live-abc@host/sse`` -> netloc ``sk-live-abc@host``), which
+    would surface a URL-embedded credential in a descriptor string
+    (RB-DCR-0001). ``.hostname`` never includes userinfo.
+
+    Two edge cases the naive ``f"{hostname}:{port}"`` composition gets wrong:
+
+    * ``.port`` is LAZILY VALIDATED — accessing it raises ``ValueError`` for
+      an out-of-range (e.g. ``:99999``) or non-numeric port. A remote
+      target's ``url`` is operator-supplied (a target file) with no
+      port-range validation ahead of time, so a malformed configured URL
+      must not crash ``describe()`` — the port is simply omitted, same as
+      the existing ``hostname is None`` -> ``"(unknown)"`` degradation.
+    * An IPv6 ``.hostname`` (e.g. ``::1``) already contains ``:``, so
+      appending ``:{port}`` unbracketed produces an ambiguous, unparseable
+      string (``::1:8080`` — address vs. port boundary is lost). Reconstruct
+      as ``[::1]:8080`` when a port is present; a bare IPv6 host with no
+      port is unambiguous as-is.
+    """
+    parts = urlsplit(url or "")
+    host = parts.hostname or "(unknown)"
+    try:
+        port = parts.port
+    except ValueError:
+        # Malformed/out-of-range port — degrade gracefully rather than raise.
+        port = None
+    if port:
+        if ":" in host:  # IPv6 — bracket so the port boundary stays unambiguous.
+            return f"[{host}]:{port}"
+        return f"{host}:{port}"
+    return host
 
 
 @asynccontextmanager
@@ -60,7 +100,9 @@ async def _open_remote_session(
 
     async with client_cm as streams:
         read_stream, write_stream = streams[0], streams[1]
-        async with ClientSession(read_stream, write_stream) as session:
+        async with ClientSession(
+            read_stream, write_stream, read_timeout_seconds=DEFAULT_MCP_READ_TIMEOUT
+        ) as session:
             await session.initialize()
             yield session
 
@@ -83,12 +125,12 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
         return _open_remote_session(self._spec.transport, self._spec.url, self._spec.headers)
 
     def _describe_data_sources(self) -> list[str]:
-        # Host only — never the full URL with query/credentials, never headers.
-        host = urlsplit(self._spec.url or "").netloc or "(unknown)"
+        # Host only — never the full URL with query/credentials/userinfo, never headers.
+        host = _host_only(self._spec.url)
         return [f"MCP {self._spec.transport}: {host}"]
 
     def _describe_notes(self) -> str:
-        host = urlsplit(self._spec.url or "").netloc or "(unknown)"
+        host = _host_only(self._spec.url)
         return (
             f"MCP {self._spec.transport} target — family={self._family!r}, host={host}. "
             "Fresh connection per invocation."

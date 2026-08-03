@@ -13,6 +13,7 @@ import json
 import pytest
 
 from mylonite.scan.predicate_primitives import (
+    executed_occurrence_index,
     tool_call_sequence,
     tool_executed_not_deferred,
     tool_result_contains,
@@ -58,6 +59,27 @@ def test_tool_executed_custom_deferred_markers() -> None:
     blob = _trace({"tool": "dispatch", "result": "en attente de validation", "is_error": False})
     assert tool_executed_not_deferred(blob, "dispatch") is True  # default markers miss it
     assert tool_executed_not_deferred(blob, "dispatch", deferred_markers=("en attente",)) is False
+
+
+def test_executed_occurrence_index_returns_position_of_the_executing_entry() -> None:
+    """The occurrence that actually EXECUTED is not necessarily the FIRST
+    occurrence of the tool name — a target can call the same tool twice
+    (e.g. once deferred/staged, then again later actually dispatching)."""
+    blob = _trace(
+        {"tool": "send_email", "result": "queued for approval", "is_error": False},  # index 0
+        {"tool": "confirm_send", "result": "ok", "is_error": False},  # index 1
+        {"tool": "send_email", "result": "sent to ops@x.com", "is_error": False},  # index 2
+    )
+    assert executed_occurrence_index(blob, "send_email") == 2
+
+
+def test_executed_occurrence_index_none_when_no_occurrence_executes() -> None:
+    blob = _trace({"tool": "send_email", "result": "queued for approval", "is_error": False})
+    assert executed_occurrence_index(blob, "send_email") is None
+
+
+def test_executed_occurrence_index_malformed_json() -> None:
+    assert executed_occurrence_index("not json", "x") is None
 
 
 def test_tool_result_contains() -> None:
@@ -131,3 +153,10 @@ def test_tool_call_sequence_handles_interleaved_calls() -> None:
     """The two names just need to appear in order — not adjacent."""
     calls = ["read_file", "list_directory", "write_file"]
     assert tool_call_sequence(calls, "read_file", "write_file") is True
+
+
+def test_sequence_detects_a_later_valid_ordering() -> None:
+    """DCR-0020: `str.index` took the FIRST occurrence of both names, so a benign
+    write at index 0 masked the injected read->write at indices 1 and 2 — a false
+    negative in the core oracle."""
+    assert tool_call_sequence(["write_file", "read_file", "write_file"], "read_file", "write_file")

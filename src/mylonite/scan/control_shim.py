@@ -31,6 +31,7 @@ Implements the W1-W4 boundary controls (e.g. the W2 untrusted-data envelope).
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from mylonite.scan._control_primitives import (
@@ -39,6 +40,9 @@ from mylonite.scan._control_primitives import (
     sanitize_tool_description,
 )
 from mylonite.scan.llm_types import ToolDescription, ToolResult
+from mylonite.scan.tool_classifier import classify, looks_like_destination, url_values
+
+logger = logging.getLogger(__name__)
 
 #: Default egress allowlist mirroring the guarded reference twin (W3).
 DEFAULT_FETCH_ALLOWLIST: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
@@ -77,6 +81,40 @@ class BoundaryControl:
         """Rewrite a tool result before the planner sees it (W2)."""
         return result
 
+    def _warn_fail_closed_once(self, name: str, reason: str, snippet: str) -> None:
+        """Log, once per (control instance, tool name), that ``name`` was
+        GUARDED (refused, deferred, or wrapped) by fail-closed classification
+        rather than a declared ``control_config`` entry (the escape hatch for
+        DCR-0034/0035).
+
+        Never fires for ``reason == "declared"`` — the operator already told us
+        about that tool, so there is nothing to surface. State is per-instance
+        (``make_control`` builds a fresh control per invoke, per its module
+        docstring), so a warning that was suppressed in one scan run re-fires in
+        the next; it is not process-global.
+        """
+        if reason == "declared":
+            return
+        warned: set[str] | None = getattr(self, "_fail_closed_warned", None)
+        if warned is None:
+            warned = set()
+            self._fail_closed_warned = warned
+        if name in warned:
+            return
+        warned.add(name)
+        # "fail-closed default" IS the basis, so stating it once is enough; any
+        # other reason (e.g. "a destination-shaped argument", "name hint") is
+        # additional information worth keeping alongside it.
+        basis = reason if reason == "fail-closed default" else f"fail-closed default: {reason}"
+        logger.warning(
+            "%s: %r was guarded by %s, not a declared control_config entry. To "
+            "classify it precisely, add this to your target file:\n%s",
+            self.weakness,
+            name,
+            basis,
+            snippet,
+        )
+
 
 # Tool-name hints for "retrieval/read" tools whose results carry untrusted
 # content back to the planner (the W2 indirect-injection surface). Substring,
@@ -109,22 +147,40 @@ class UntrustedEnvelopeControl(BoundaryControl):
     weakness = "W2"
 
     def __init__(self, read_tool_names: frozenset[str] | None = None) -> None:
-        # Optional explicit allowlist of tool names to wrap; when None, fall back
-        # to the name-hint heuristic so a zero-config custom target still works.
+        # Optional explicit allowlist of tool names to wrap; when None, EVERY
+        # tool's non-error result is wrapped by fail-closed default (see
+        # `_classify` / DCR-0035) — a zero-config custom target still works,
+        # and an unhinted retrieval tool is no longer silently unwrapped.
+        # Declare `read_tool_names` (or `control_config.read_tool_names` in a
+        # target file) to narrow this to just the actual retrieval surface.
         self._read_tool_names = read_tool_names
 
-    def _is_read_tool(self, name: str) -> bool:
-        if self._read_tool_names is not None:
-            return name in self._read_tool_names
-        lowered = name.lower()
-        return any(hint in lowered for hint in _READ_HINTS)
+    def _classify(self, name: str) -> tuple[bool, str]:
+        # Declared list -> name hint -> fail-closed default (DCR-0035). There is
+        # no structural-evidence tier here (unlike W3's URL check): whether a
+        # RESULT is untrusted data isn't decidable from the CALL arguments, only
+        # from the tool's role, so name classification is all there is short of
+        # an explicit declaration.
+        return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
+
+    def _config_snippet(self, name: str) -> str:
+        return f"control_config:\n  read_tool_names: [{name}]"
 
     def transform_result(self, name: str, result: ToolResult) -> ToolResult:
         # Never wrap a guarded refusal (isError) — that would mangle the
         # structural signal the judge relies on. Only wrap content the planner
         # reads back as data.
-        if result.isError or not self._is_read_tool(name):
+        if result.isError:
             return result
+        applies, reason = self._classify(name)
+        if not applies:
+            return result
+        # DCR-0035's escape hatch: an operator whose custom target now has
+        # EVERY non-error result wrapped (no `read_tool_names` declared) gets a
+        # once-per-tool warning with the exact snippet to narrow it. No-ops
+        # when `reason == "declared"` — nothing to surface if the operator
+        # already told us this is a read tool.
+        self._warn_fail_closed_once(name, reason, self._config_snippet(name))
         return ToolResult(
             name=result.name,
             content=quarantine(result.content),
@@ -133,9 +189,10 @@ class UntrustedEnvelopeControl(BoundaryControl):
 
 
 # Heuristic name hints (substring, case-insensitive). Explicit tool lists from a
-# ControlConfig override these; the hints are the zero-config fallback.
+# ControlConfig are authoritative over these; an unhinted name still falls
+# through to the fail-closed default (see `tool_classifier.classify`) rather
+# than passing through unguarded.
 _EGRESS_HINTS: tuple[str, ...] = ("fetch", "http", "download", "curl", "request", "egress", "web")
-_URL_PARAM_HINTS: tuple[str, ...] = ("url", "uri", "href", "endpoint", "link", "address")
 _CONSEQUENTIAL_HINTS: tuple[str, ...] = (
     "send",
     "email",
@@ -169,17 +226,18 @@ class ToolDescriptionSanitizer(BoundaryControl):
         return ToolDescription(name=tool.name, description=cleaned, input_schema=tool.input_schema)
 
 
-def _looks_like_url(value: object) -> bool:
-    return isinstance(value, str) and "://" in value
-
-
 class EgressAllowlistControl(BoundaryControl):
     """W3 — refuse egress-tool calls to hosts outside an allowlist.
 
-    Intercepts calls to egress-shaped tools and, when a URL argument points off
-    the allowlist, returns an ``isError`` refusal WITHOUT calling the inner tool
-    (mirrors the guarded reference twin's web_fetch allowlist). Egress tools and
-    the URL arg come from the ControlConfig when declared, else a name heuristic.
+    Intercepts calls to egress-shaped tools and, when a destination argument
+    points off the allowlist, returns an ``isError`` refusal WITHOUT calling the
+    inner tool (mirrors the guarded reference twin's web_fetch allowlist).
+
+    Classification is declared list -> structural evidence (a destination-shaped
+    argument, regardless of name) -> name hint -> fail-closed default (DCR-0032/
+    0033): an egress-classified call with NO identifiable destination is now
+    REFUSED, not passed through — the old behaviour meant the allowlist never
+    ran on the real destination.
     """
 
     weakness = "W3"
@@ -195,33 +253,64 @@ class EgressAllowlistControl(BoundaryControl):
         self._url_param = url_param
         self._allowlist = allowlist
 
-    def _is_egress(self, name: str) -> bool:
-        if self._egress_tools is not None:
-            return name in self._egress_tools
-        lowered = name.lower()
-        return any(hint in lowered for hint in _EGRESS_HINTS)
+    def _destinations_in(self, arguments: dict[str, Any]) -> list[str]:
+        """Destination-shaped argument values, scheme-less included (DCR-0032).
 
-    def _url_in(self, arguments: dict[str, Any]) -> str | None:
+        When ``url_param`` is declared, only that argument is checked — the
+        operator's precise answer to "which argument is the destination?".
+        Otherwise every argument is walked, including nested lists/dicts
+        (:func:`mylonite.scan.tool_classifier.url_values`).
+        """
         if self._url_param is not None:
             val = arguments.get(self._url_param)
-            return val if isinstance(val, str) else None
-        for key, val in arguments.items():
-            if any(hint in key.lower() for hint in _URL_PARAM_HINTS) and isinstance(val, str):
-                return val
-        for val in arguments.values():
-            if _looks_like_url(val):
-                return str(val)
-        return None
+            return [val] if isinstance(val, str) and looks_like_destination(val) else []
+        return url_values(arguments)
+
+    def _classify(self, name: str, arguments: dict[str, Any]) -> tuple[bool, str, list[str]]:
+        # Computed once here (not again in `intercept_call`): `_classify` is the
+        # single source of both the applies/reason decision and the destination
+        # list `intercept_call` needs next, since the structural-evidence tier
+        # already has to compute it to decide.
+        destinations = self._destinations_in(arguments)
+        if self._egress_tools is not None:
+            return name in self._egress_tools, "declared", destinations
+        if destinations:
+            return True, "a destination-shaped argument", destinations
+        applies, reason = classify(name, declared=None, hints=_EGRESS_HINTS)
+        return applies, reason, destinations
+
+    def _config_snippet(self, name: str) -> str:
+        return (
+            "control_config:\n"
+            f"  egress_tools: [{name}]\n"
+            "  egress_url_param: <the-argument-name-holding-the-destination>"
+        )
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
-        if not self._is_egress(name):
+        applies, reason, destinations = self._classify(name, arguments)
+        if not applies:
             return None
-        url = self._url_in(arguments)
-        if url is None or host_allowed(url, self._allowlist):
+        if not destinations:
+            # An egress-classified tool whose destination we cannot identify is
+            # REFUSED, not passed through. Failing open here meant the
+            # allowlist never evaluated the real destination (DCR-0032).
+            self._warn_fail_closed_once(name, reason, self._config_snippet(name))
+            return ToolResult(
+                name=name,
+                content=(
+                    f"refused: {name!r} is treated as an egress tool but no destination "
+                    "argument could be identified. Declare control_config.egress_url_param "
+                    "in your target file to make this precise."
+                ),
+                isError=True,
+            )
+        blocked = [d for d in destinations if not host_allowed(d, self._allowlist)]
+        if not blocked:
             return None
+        self._warn_fail_closed_once(name, reason, self._config_snippet(name))
         return ToolResult(
             name=name,
-            content=f"refused: host for {url!r} not in egress allowlist",
+            content=f"refused: host(s) for {blocked!r} not in egress allowlist",
             isError=True,
         )
 
@@ -234,6 +323,12 @@ class ConfirmGateControl(BoundaryControl):
     unconfirmed consequential action never takes effect (the guarded twin's
     two-step send/confirm, modelled as a confirm-gate).
 
+    Classification is declared list -> name hint -> fail-closed default
+    (DCR-0034); there is no structural-evidence tier here — unlike W3's URL
+    check, "is this action consequential?" has no shape in the call arguments,
+    only in what the tool DOES, so name classification is all there is short of
+    an explicit declaration.
+
     Fidelity note: this BLOCKS the action rather than allowing it after a real
     confirmation step. For the differential — "did the unconfirmed action take
     effect?" — blocking is the correct signal; it is a low-fidelity stand-in for
@@ -245,15 +340,18 @@ class ConfirmGateControl(BoundaryControl):
     def __init__(self, *, consequential_tools: frozenset[str] | None = None) -> None:
         self._consequential_tools = consequential_tools
 
-    def _is_consequential(self, name: str) -> bool:
-        if self._consequential_tools is not None:
-            return name in self._consequential_tools
-        lowered = name.lower()
-        return any(hint in lowered for hint in _CONSEQUENTIAL_HINTS)
+    def _classify(self, name: str) -> tuple[bool, str]:
+        return classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
-        if not self._is_consequential(name):
+        applies, reason = self._classify(name)
+        if not applies:
             return None
+        self._warn_fail_closed_once(
+            name,
+            reason,
+            f"control_config:\n  consequential_tools: [{name}]",
+        )
         return ToolResult(
             name=name,
             content=(
@@ -306,13 +404,19 @@ def make_control(
     read_tool_names: frozenset[str] | None = None,
     egress_tools: frozenset[str] | None = None,
     url_param: str | None = None,
-    fetch_allowlist: tuple[str, ...] = DEFAULT_FETCH_ALLOWLIST,
+    fetch_allowlist: tuple[str, ...] | None = None,
     consequential_tools: frozenset[str] | None = None,
 ) -> BoundaryControl:
     """Build the canonical boundary control for a weakness class (W1-W4).
 
     Raises for an unknown class so a caller can never silently get a no-op
     control (which would make a guard look load-bearing when nothing ran).
+
+    ``fetch_allowlist=None`` (the default) falls back to
+    ``DEFAULT_FETCH_ALLOWLIST`` — mirroring ``read_tool_names``/``egress_tools``,
+    an explicitly-empty tuple from a caller (e.g. an unset ``control_config`` hint)
+    must not silently replace the sensible default with an allow-nothing
+    allowlist (DCR-0009).
     """
     if weakness == "W1":
         return ToolDescriptionSanitizer()
@@ -320,7 +424,9 @@ def make_control(
         return UntrustedEnvelopeControl(read_tool_names=read_tool_names)
     if weakness == "W3":
         return EgressAllowlistControl(
-            egress_tools=egress_tools, url_param=url_param, allowlist=fetch_allowlist
+            egress_tools=egress_tools,
+            url_param=url_param,
+            allowlist=fetch_allowlist if fetch_allowlist is not None else DEFAULT_FETCH_ALLOWLIST,
         )
     if weakness == "W4":
         return ConfirmGateControl(consequential_tools=consequential_tools)

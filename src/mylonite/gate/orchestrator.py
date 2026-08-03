@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mylonite._cli_io import echo
 from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.gate.mitigation import build_pr_body
 
 EXIT_SUCCESS = 0
 EXIT_NOT_KEPT = 5
+EXIT_GENERATE_FAILED = 6
+EXIT_VALIDATE_FAILED = 7
 
 
 @dataclass
@@ -39,12 +42,14 @@ def run_gate(
 ) -> GateResult:
     exploits = scan_fn()
     if not exploits:
-        print("Mylonite gate: no exploit found — nothing to gate.")
+        echo("Mylonite gate: no exploit found — nothing to gate.")
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
 
     exploit = exploits[0]
     generated = generate_fn(exploit)
-    assert generated is not None
+    if generated is None:
+        echo("Mylonite gate: the test generator returned nothing — cannot gate.")
+        return GateResult(exit_code=EXIT_GENERATE_FAILED, opened_pr=False, kept=None)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     test_path = out_dir / generated.filename
@@ -55,9 +60,11 @@ def run_gate(
     )
 
     report = validate_fn(generated)
-    assert report is not None
+    if report is None:
+        echo("Mylonite gate: the validator returned nothing — cannot gate.")
+        return GateResult(exit_code=EXIT_VALIDATE_FAILED, opened_pr=False, kept=None)
     if not report.kept:
-        print("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
+        echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)
 
     body = build_pr_body(exploit, report, llm_enrich=llm_enrich)

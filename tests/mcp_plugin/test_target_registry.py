@@ -9,7 +9,9 @@ import pytest
 from mylonite.plugins._mcp.target_registry import (
     BUNDLED_TARGETS,
     InvalidTargetScope,
+    SeedArmSpec,
     UnknownTargetFamily,
+    _validate_filesystem_scope,
     resolve_target,
 )
 
@@ -34,6 +36,41 @@ def test_resolve_filesystem_rejects_empty_scope() -> None:
 def test_resolve_filesystem_rejects_relative_path() -> None:
     with pytest.raises(InvalidTargetScope, match="absolute path"):
         resolve_target("filesystem", "relative/path")
+
+
+@pytest.mark.parametrize("scope", ["/", "C:\\", "/tmp/sandbox/../../etc"])
+def test_validate_filesystem_scope_rejects_root_and_traversal(scope: str) -> None:
+    """DCR-0017: absolute-shape was the only check, so `/` collapsed the sandbox
+    to the whole disk and the target's read_file/write_file reached anything."""
+    with pytest.raises(InvalidTargetScope):
+        _validate_filesystem_scope(scope)
+
+
+def test_validate_filesystem_scope_rejects_nonexistent_directory(tmp_path: Path) -> None:
+    """A syntactically-valid absolute path that isn't a real directory is a
+    misconfiguration, not a scan target — the old validator never checked this."""
+    missing = tmp_path / "does_not_exist"
+    with pytest.raises(InvalidTargetScope, match="does not exist"):
+        _validate_filesystem_scope(str(missing))
+
+
+def test_validate_filesystem_scope_honours_scope_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MYLONITE_FS_SCOPE_ROOT is an opt-in hard ceiling: a scope inside it passes
+    validation, and one outside it is rejected even though it is otherwise a
+    perfectly valid, existing sandbox directory."""
+    root = tmp_path / "root"
+    inside = root / "inside"
+    inside.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setenv("MYLONITE_FS_SCOPE_ROOT", str(root))
+
+    _validate_filesystem_scope(str(inside))  # inside the root — does not raise
+
+    with pytest.raises(InvalidTargetScope, match="MYLONITE_FS_SCOPE_ROOT"):
+        _validate_filesystem_scope(str(outside))
 
 
 def test_resolve_fetch_accepts_none_scope() -> None:
@@ -91,3 +128,35 @@ def test_render_args_omits_scope_for_github_uses_env_var_pattern() -> None:
     spec = BUNDLED_TARGETS["github"]
     args = spec.render_args("myhandle/repo")
     assert args == ["-y", "@modelcontextprotocol/server-github"]
+
+
+# --- #32: SeedArmSpec.id_pattern rejects catastrophic nested quantifiers -----
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "(.+)+:",
+        "(a*)*",
+        r"(\d+)+",
+        r"(\w+){2,}",
+    ],
+)
+def test_target_file_rejects_a_catastrophic_id_pattern(pattern: str) -> None:
+    with pytest.raises(ValueError, match="nested quantifier"):
+        SeedArmSpec(tool="t", id_pattern=pattern)
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        r"id:(\d+)",
+        r"issue #(\d+)",
+        r"(foo|bar)+",  # alternation with an outer quantifier — not a nested quantifier
+        r"note:(\w+)",
+        None,
+    ],
+)
+def test_target_file_accepts_benign_id_patterns(pattern: str | None) -> None:
+    spec = SeedArmSpec(tool="t", id_pattern=pattern)
+    assert spec.id_pattern == pattern

@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from mylonite._concurrency import gather_bounded
+
 #: One representative kitchen-sink seed per weakness class. Reused on a custom
 #: target via ``pattern_id_filter`` (the same mechanism the custom differential
 #: uses). Direct (no_setup) seeds for W3/W4 need no seed_arm; W2 needs one.
@@ -131,6 +133,56 @@ class ControlContribution:
         )
 
 
+def _run_pair(
+    scan_fires: Callable[[tuple[str, ...], str], bool],
+    applied_a: tuple[str, ...],
+    applied_b: tuple[str, ...],
+    seed: str,
+) -> tuple[bool, bool]:
+    """Run two independent ``scan_fires`` calls concurrently; return their results.
+
+    ``scan_fires`` is a plain blocking callable (the engine-backed
+    implementation wraps its own ``asyncio.run`` per call, and the offline
+    unit tests inject a bare sync function) — kept that way so this stays a
+    drop-in replacement for the sequential form. Each call is farmed out to a
+    thread via ``asyncio.to_thread`` and awaited concurrently, bounded, inside
+    one throwaway event loop.
+    """
+
+    async def _both() -> list[bool]:
+        coros = [
+            asyncio.to_thread(scan_fires, applied_a, seed),
+            asyncio.to_thread(scan_fires, applied_b, seed),
+        ]
+        return await gather_bounded(coros, limit=2)
+
+    a, b = asyncio.run(_both())
+    return a, b
+
+
+def _run_triple(
+    scan_fires: Callable[[tuple[str, ...], str], bool],
+    applied_a: tuple[str, ...],
+    applied_b: tuple[str, ...],
+    applied_c: tuple[str, ...],
+    seed: str,
+) -> tuple[bool, bool, bool]:
+    """Three-way sibling of :func:`_run_pair` for redundancy mode (raw/full/minus-c)."""
+
+    async def _all_three() -> list[bool]:
+        return await gather_bounded(
+            [
+                asyncio.to_thread(scan_fires, applied_a, seed),
+                asyncio.to_thread(scan_fires, applied_b, seed),
+                asyncio.to_thread(scan_fires, applied_c, seed),
+            ],
+            limit=3,
+        )
+
+    a, b, c = asyncio.run(_all_three())
+    return a, b, c
+
+
 def run_control_ablation(
     *,
     controls: list[str],
@@ -162,9 +214,16 @@ def run_control_ablation(
                 for i in range(iterations):
                     if progress is not None:
                         progress(f"ablation {control}: seed {seed} run {i + 1}/{iterations}")
-                    if scan_fires((), seed):
+                    # raw (no controls) vs guarded (only `control`) are
+                    # independent scans of the same seed — each `scan_fires`
+                    # call is a blocking, self-contained scan (the engine-
+                    # backed implementation wraps its own `asyncio.run`), so
+                    # they are farmed out to threads and driven concurrently
+                    # instead of one after another.
+                    raw_result, guard_result = _run_pair(scan_fires, (), (control,), seed)
+                    if raw_result:
                         raw_fired += 1
-                    if scan_fires((control,), seed):
+                    if guard_result:
                         guarded_fired += 1
             results.append(
                 ControlContribution.compute(
@@ -182,11 +241,16 @@ def run_control_ablation(
                     progress(
                         f"ablation {control} (all-minus-c): seed {seed} run {i + 1}/{iterations}"
                     )
-                if scan_fires((), seed):
+                # raw / full / minus-c are three independent scans of the same
+                # seed — run them concurrently (bounded), same rationale as above.
+                raw_result, full_result, minus_result = _run_triple(
+                    scan_fires, (), full, minus_c, seed
+                )
+                if raw_result:
                     raw_fired += 1
-                if scan_fires(full, seed):
+                if full_result:
                     full_fired += 1
-                if scan_fires(minus_c, seed):
+                if minus_result:
                     minus_fired += 1
         results.append(
             ControlContribution.compute_redundancy(

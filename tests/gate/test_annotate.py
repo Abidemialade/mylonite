@@ -90,6 +90,25 @@ def test_post_check_run_calls_gh_api_and_is_best_effort(tmp_path):
     assert post_check_run(tmp_path, payload, _run=fail_run) is None  # swallowed, never raises
 
 
+def test_post_check_run_returns_real_none_when_html_url_missing(tmp_path):
+    """DCR-0020: `str(json.loads(stdout).get("html_url"))` turned a genuinely
+    missing ``html_url`` into the truthy STRING ``"None"``, not real ``None`` —
+    a caller doing `if url:` would then treat a missing URL as present.
+    """
+
+    def ok_run_no_url(cmd, **kw):
+        return type("CP", (), {"returncode": 0, "stdout": '{"id": 1}', "stderr": ""})()
+
+    payload = check_run_payload(
+        head_sha="s",
+        annotations=[Annotation(path="p", start_line=1, message="m")],
+        title="T",
+        summary="S",
+    )
+    url = post_check_run(tmp_path, payload, _run=ok_run_no_url)
+    assert url is None
+
+
 def test_post_check_run_noop_without_annotations(tmp_path):
     called = {"n": 0}
 

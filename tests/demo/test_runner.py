@@ -207,6 +207,60 @@ async def test_last_error_raises_demo_error() -> None:
     assert "corrupt fixture" in str(excinfo.value)
 
 
+def test_fixture_problem_message_names_the_right_consequence_per_variant() -> None:
+    """DCR-0029: the fixture-error message's consequence clause must match WHICH
+    twin's fixtures are stale — it previously always claimed "the vulnerable
+    scan would falsely show clean", even for a guarded-fixture problem, whose
+    actual risk is masking a real regression in the guard (a falsely-resistant
+    guarded scan), not a falsely-clean vulnerable one."""
+    with pytest.raises(DemoFixtureError) as vuln_exc:
+        runner_mod._raise_if_fixture_problem(
+            cache_misses=1, last_error=None, hint="re-record", variant="vulnerable"
+        )
+    assert "vulnerable scan would falsely show clean" in str(vuln_exc.value)
+    assert "guard" not in str(vuln_exc.value).lower()
+
+    with pytest.raises(DemoFixtureError) as guard_exc:
+        runner_mod._raise_if_fixture_problem(
+            cache_misses=1, last_error=None, hint="re-record", variant="guarded"
+        )
+    assert "guarded scan would falsely show resistant" in str(guard_exc.value)
+    assert "masking a real regression" in str(guard_exc.value)
+    assert "vulnerable scan would falsely show clean" not in str(guard_exc.value)
+
+
+async def test_live_falsy_but_explicit_provider_override_is_not_discarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0030: `provider or DEMO_PROVIDER` would silently discard a
+    falsy-but-explicit override (e.g. an empty-string provider/model from a
+    programmatic caller — CLI Optional[str] flags never surface "", but
+    run_demo() is a public function other callers can invoke directly).
+    `is None` is the correct check: only an OMITTED (None) override falls back
+    to the recorded default."""
+    captured: list[dict[str, Any]] = []
+    real_build = runner_mod._build_scan
+    fake = _FakeRecorder()
+
+    def spy_build_live(variant: str, **kwargs: Any) -> Any:
+        captured.append({"variant": variant, **kwargs})
+        kwargs = dict(kwargs)
+        kwargs["completion_fn"] = fake
+        return real_build(variant, **kwargs)
+
+    monkeypatch.setattr(runner_mod, "_build_scan", spy_build_live)
+
+    result = await run_demo(live=True, provider="", model="")
+
+    live_kwargs = [c for c in captured if c["variant"] in ("vulnerable", "guarded")]
+    assert len(live_kwargs) == 2
+    for kw in live_kwargs:
+        assert kw["provider"] == ""  # NOT overwritten with DEMO_PROVIDER
+        assert kw["model"] == ""  # NOT overwritten with DEMO_MODEL
+    assert result.provider == ""
+    assert result.model == ""
+
+
 def _adapter_note_ids(result: DemoResult) -> list[str]:
     """Collect the ``note_id`` echoed in each exploit's adapter response."""
     ids: list[str] = []

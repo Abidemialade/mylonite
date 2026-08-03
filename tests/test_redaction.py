@@ -13,12 +13,19 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+from pydantic import BaseModel, ValidationError
+
 from mylonite._redaction import (
     REDACTION_PLACEHOLDER,
     SecretRedactingFilter,
     install_log_redaction,
     looks_like_api_key,
     redact,
+    redact_env,
+    redact_exception,
+    redact_target_yaml,
+    redact_value,
 )
 
 # --- Fakes (NOT real credentials) -------------------------------------------
@@ -206,3 +213,114 @@ def test_looks_like_api_key_rejects_obvious_non_keys() -> None:
     assert not looks_like_api_key(r"C:\creds\key")
     assert not looks_like_api_key("too short with spaces")
     assert not looks_like_api_key("")
+
+
+# --- redact_exception / redact_target_yaml (Phase 1) ------------------------
+
+
+def test_redact_masks_url_userinfo_password() -> None:
+    text = "DATABASE_URL=postgres://user:realpass@prod-db/app"
+    out = redact(text)
+    assert "realpass" not in out
+    assert "prod-db" in out  # host survives; only the credential is masked
+
+
+def test_redact_exception_drops_pydantic_input_value() -> None:
+    class M(BaseModel):
+        headers: dict[str, str]
+
+    with pytest.raises(ValidationError) as excinfo:
+        M(headers="Bearer sk-live-abcdefghijklmnopqrstuvwxyz")  # type: ignore[arg-type]
+    rendered = redact_exception(excinfo.value)
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in rendered
+    assert "headers" in rendered  # the field path still helps the operator
+
+
+def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
+    src = (
+        "family: app\n"
+        "command: python\n"
+        "headers:\n"
+        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"
+        "env:\n"
+        "  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz1234\n"
+        "  LOG_LEVEL: debug\n"
+    )
+    out = redact_target_yaml(src)
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in out
+    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out
+    assert "LOG_LEVEL: debug" in out  # non-secret values survive
+    assert "Authorization" in out  # key names survive
+    assert REDACTION_PLACEHOLDER in out
+
+
+def test_redact_target_yaml_output_still_loads() -> None:
+    import yaml
+
+    out = redact_target_yaml("family: app\ncommand: python\nenv:\n  A: b\n")
+    assert isinstance(yaml.safe_load(out), dict)
+
+
+# --- redact_value: key-name masking (spec-compliance follow-up) -------------
+
+
+def test_redact_value_masks_by_key_name_even_when_shape_is_plain() -> None:
+    """A credential-named argument must be masked even when its VALUE has no
+    provider-key shape (no sk-/AKIA/Bearer prefix, no embedded key=value, no URL
+    userinfo) — key name alone is enough signal. Reproduces the reviewer's
+    finding: redact_value only checked value shape, never the key."""
+    out = redact_value(
+        {
+            "password": "correcthorsebatterystaple",
+            "api_key": "sekritvalue1234567890",
+            "url": "https://attacker.example.com/x",
+        }
+    )
+    assert out["password"] == REDACTION_PLACEHOLDER
+    assert out["api_key"] == REDACTION_PLACEHOLDER
+    # A non-credential-named key is untouched when its value isn't secret-shaped —
+    # this is oracle-load-bearing (fetch/filesystem/github predicates read it).
+    assert out["url"] == "https://attacker.example.com/x"
+
+
+def test_redact_value_still_masks_by_shape_under_a_plain_key() -> None:
+    """The shape-based fallback must still fire for a non-credential-named key —
+    this is the regression guard for the key-name fix above."""
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    out = redact_value({"note": f"contains {secret}"})
+    assert secret not in out["note"]
+    assert REDACTION_PLACEHOLDER in out["note"]
+
+
+# --- redact_env: direct unit coverage (spec-compliance follow-up) -----------
+
+
+def test_redact_env_masks_by_key_name() -> None:
+    """The key-match branch: a plain passphrase under a credential-named key is
+    masked even though it has no provider-key shape."""
+    out = redact_env({"PASSWORD": "correcthorsebatterystaple", "LOG_LEVEL": "debug"})
+    assert out["PASSWORD"] == REDACTION_PLACEHOLDER
+    assert out["LOG_LEVEL"] == "debug"
+
+
+def test_redact_env_masks_by_value_shape_under_a_plain_key() -> None:
+    """The shape-fallback branch: a non-credential-named key is still masked
+    when its value independently looks like a provider key (looks_like_api_key)
+    or matches redact()'s shape patterns."""
+    out = redact_env(
+        {
+            # "OPAQUE_ID" doesn't match _KV_KEYS — this exercises the shape
+            # fallback, not the key-name branch. No known provider prefix, but
+            # long/opaque/no-spaces-or-slashes — looks_like_api_key's permissive
+            # branch.
+            "OPAQUE_ID": "x" * 40,
+            "DB_URL": "postgres://user:realpass@prod-db/app",
+            "PORT": "8080",
+        }
+    )
+    assert out["OPAQUE_ID"] == REDACTION_PLACEHOLDER
+    # Unlike redact()'s partial in-place masking, an env value flagged secret-
+    # shaped is replaced WHOLESALE (the key name is what survives, not a
+    # partially-masked value) — matches redact_target_yaml's documented contract.
+    assert out["DB_URL"] == REDACTION_PLACEHOLDER
+    assert out["PORT"] == "8080"  # a plain non-secret value is untouched

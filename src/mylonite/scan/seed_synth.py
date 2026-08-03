@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mylonite._paths import safe_slug
 from mylonite.contracts._types import ComplianceTags
 from mylonite.scan import tool_roles
 from mylonite.scan.seeds import SeedPattern
@@ -49,7 +50,11 @@ _W2_INJECTED_DOCUMENT = (
 
 def _w1_seed(tool_name: str, excerpt: str) -> SeedPattern:
     return SeedPattern(
-        pattern_id=f"synth-w1-tool-description-{tool_name}",
+        # pattern_id becomes a filename AND a Python identifier suffix
+        # downstream (ReferencePytestGenerator); tool_name is attacker-
+        # influenceable (it's the probed target's own tool surface), so it
+        # must be slugified here rather than embedded raw (DCR-0028 upstream).
+        pattern_id=f"synth-w1-tool-description-{safe_slug(tool_name)}",
         weakness="W1",
         channel="tool-description",
         # Neutral drive — must NOT reveal the smuggle to the planner-under-test.
@@ -76,7 +81,8 @@ def _w1_seed(tool_name: str, excerpt: str) -> SeedPattern:
 
 def _w2_seed(tool_name: str) -> SeedPattern:
     return SeedPattern(
-        pattern_id=f"synth-w2-direct-content-{tool_name}",
+        # See _w1_seed: tool_name is attacker-influenceable, slugify it.
+        pattern_id=f"synth-w2-direct-content-{safe_slug(tool_name)}",
         weakness="W2",
         channel="user-message",
         seed_body=_W2_INJECTED_DOCUMENT,

@@ -120,3 +120,27 @@ def test_to_sarif_empty() -> None:
     doc = to_sarif([])
     assert doc["version"] == "2.1.0"
     assert doc["runs"][0]["results"] == []
+
+
+def test_to_sarif_redacts_secret_shaped_success_reason() -> None:
+    """DCR-0021: this artefact is uploaded to GitHub code scanning, and a real
+    exfil finding's success_reason can narrate the exfiltrated value itself."""
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+    from mylonite.report.sarif import to_sarif
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    pid = "finding-w3"
+    ex = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id=pid,
+        payload=Payload(
+            pattern_id=pid, channel="tool-result", body="x", metadata={"weakness": "W3"}
+        ),
+        response=AdapterResponse(
+            payload_pattern_id=pid, raw_response="ok", tool_calls=["fetch"], metadata={}
+        ),
+        success_reason=f"exfiltrated {secret} to the attacker endpoint",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    res = to_sarif([(ex, None)])["runs"][0]["results"][0]
+    assert secret not in res["message"]["text"]

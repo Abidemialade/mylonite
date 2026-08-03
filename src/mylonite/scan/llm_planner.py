@@ -25,7 +25,7 @@ from typing import Any, Protocol
 
 import litellm
 
-from mylonite.scan._llm import _try_repair
+from mylonite.scan._llm import DEFAULT_LLM_CALL_TIMEOUT_S, _try_repair
 from mylonite.scan.llm_types import (
     PlannerStep,
     PlannerTrace,
@@ -98,12 +98,20 @@ class LLMPlanner:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         iteration_cap: int = DEFAULT_ITERATION_CAP,
         completion_fn: Callable[..., Any] | None = None,
+        completion_timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
     ) -> None:
         self._server = server
         self._model = model
         self._system_prompt = system_prompt
         self._iteration_cap = iteration_cap
         self._completion_fn = completion_fn
+        # DCR-0011: an explicit per-call bound passed to LiteLLM's own
+        # ``timeout`` on every completion — distinct from (and a backstop
+        # under) any OUTER ``asyncio.wait_for`` an adapter wraps around the
+        # whole multi-iteration ``run()`` (e.g. the MCP adapter's
+        # ``planner_timeout_s``), so a single stuck provider call inside a
+        # longer tool-use loop can't silently eat the budget.
+        self._completion_timeout_s = completion_timeout_s
 
     async def run(self, user_message: str) -> PlannerTrace:
         """Drive the planner with ``user_message`` and return its trace."""
@@ -120,7 +128,11 @@ class LLMPlanner:
             # Pass tools + an explicit tool_choice ONLY when tools exist; some
             # providers error on tool_choice with no tools, and some need the
             # explicit "auto" to actually consider the tools (cross-LLM).
-            call_kwargs: dict[str, Any] = {"model": self._model, "messages": messages}
+            call_kwargs: dict[str, Any] = {
+                "model": self._model,
+                "messages": messages,
+                "timeout": self._completion_timeout_s,
+            }
             if tools_schema:
                 call_kwargs["tools"] = tools_schema
                 call_kwargs["tool_choice"] = "auto"

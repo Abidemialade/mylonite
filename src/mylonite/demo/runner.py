@@ -32,6 +32,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from mylonite._concurrency import run_twins
 from mylonite.demo._replay import (
     DEMO_RERECORD_HINT,
     FixtureError,
@@ -94,14 +95,22 @@ def _raise_if_fixture_problem(
     """Raise :class:`DemoFixtureError` if recorder state shows a fixture problem.
 
     A cache miss OR any recorded error (corrupt fixture sets ``last_error``
-    without bumping ``cache_misses``) means the demo would otherwise show a
-    falsely-clean vulnerable scan.
+    without bumping ``cache_misses``) means the demo would otherwise lie about
+    ONE of the two twins — which one depends on ``variant`` (DCR-0029): a
+    vulnerable-fixture problem would show a falsely-CLEAN vulnerable scan; a
+    guarded-fixture problem would show a falsely-RESISTANT guarded scan
+    (masking a real regression in the guard).
     """
     if cache_misses > 0 or last_error is not None:
         detail = f" ({last_error})" if last_error is not None else ""
+        consequence = (
+            "The vulnerable scan would falsely show clean."
+            if variant == "vulnerable"
+            else "The guarded scan would falsely show resistant, masking a real regression."
+        )
         raise DemoFixtureError(
             f"demo fixtures for the {variant!r} variant are stale or missing"
-            f"{detail}. The vulnerable scan would falsely show clean. {hint}"
+            f"{detail}. {consequence} {hint}"
         ) from last_error
 
 
@@ -194,19 +203,33 @@ async def run_demo(
         )
 
     if live:
-        used_provider = provider or DEMO_PROVIDER
-        used_model = model or DEMO_MODEL
-        results: dict[str, ScanResult] = {}
-        for variant in _VARIANTS:
-            engine = _build_scan(
-                variant,
-                completion_fn=None,
-                note_id_factory=None,
-                provider=used_provider,
-                model=used_model,
-                llm_assist=False,
-            )
-            results[variant] = await engine.run()
+        # `is None` (not `or`): a caller-supplied but falsy override (e.g. an
+        # empty-string provider/model from a programmatic caller, as opposed to
+        # CLI Optional[str] which never surfaces "") must still win over the
+        # default rather than being silently discarded (DCR-0030).
+        used_provider = provider if provider is not None else DEMO_PROVIDER
+        used_model = model if model is not None else DEMO_MODEL
+        # The two variants are independent — separate engines, no completion_fn
+        # (real litellm.acompletion), random note IDs — so nothing is shared
+        # between them. Drive them concurrently instead of one after another.
+        vuln_engine = _build_scan(
+            "vulnerable",
+            completion_fn=None,
+            note_id_factory=None,
+            provider=used_provider,
+            model=used_model,
+            llm_assist=False,
+        )
+        guard_engine = _build_scan(
+            "guarded",
+            completion_fn=None,
+            note_id_factory=None,
+            provider=used_provider,
+            model=used_model,
+            llm_assist=False,
+        )
+        vuln_result, guard_result = await run_twins(vuln_engine.run(), guard_engine.run())
+        results: dict[str, ScanResult] = {"vulnerable": vuln_result, "guarded": guard_result}
         elapsed = time.monotonic() - start
         return DemoResult(
             vulnerable=results["vulnerable"],
@@ -217,21 +240,40 @@ async def run_demo(
             elapsed_s=elapsed,
         )
 
-    # Replay path — provider/model forced to the recorded pair.
-    results = {}
+    # Replay path — provider/model forced to the recorded pair. Each variant
+    # gets its OWN LiteLLMRecorder (a distinct fixtures/<variant>/ directory)
+    # and its own deterministic note-id counter (mylonite.scan.wiring.
+    # note_id_counter() constructs a fresh count(1) closure per call — see its
+    # docstring), so no state is shared between the two variants and they are
+    # safe to run concurrently. A stale/missing fixture never raises out of
+    # engine.run() itself — the engine's completion_fn fallback chain swallows
+    # it (module docstring) — so, exactly as the sequential form did, each
+    # recorder's cumulative state is inspected only AFTER its own run
+    # completes; the only change under concurrency is that both runs now
+    # finish before either check happens, not one check per completed run.
     fixture_root = packaged_fixture_dir()
-    for variant in _VARIANTS:
-        recorder = LiteLLMRecorder(fixture_root / variant, mode="replay")
-        engine = _build_scan(
-            variant,
-            completion_fn=recorder,
-            note_id_factory=_note_id_counter(),
-            provider=DEMO_PROVIDER,
-            model=DEMO_MODEL,
-            llm_assist=False,
-        )
-        results[variant] = await engine.run()
-        _check_replay_recorder(recorder, variant)
+    vuln_recorder = LiteLLMRecorder(fixture_root / "vulnerable", mode="replay")
+    guard_recorder = LiteLLMRecorder(fixture_root / "guarded", mode="replay")
+    vuln_engine = _build_scan(
+        "vulnerable",
+        completion_fn=vuln_recorder,
+        note_id_factory=_note_id_counter(),
+        provider=DEMO_PROVIDER,
+        model=DEMO_MODEL,
+        llm_assist=False,
+    )
+    guard_engine = _build_scan(
+        "guarded",
+        completion_fn=guard_recorder,
+        note_id_factory=_note_id_counter(),
+        provider=DEMO_PROVIDER,
+        model=DEMO_MODEL,
+        llm_assist=False,
+    )
+    vuln_result, guard_result = await run_twins(vuln_engine.run(), guard_engine.run())
+    _check_replay_recorder(vuln_recorder, "vulnerable")
+    _check_replay_recorder(guard_recorder, "guarded")
+    results = {"vulnerable": vuln_result, "guarded": guard_result}
     elapsed = time.monotonic() - start
     return DemoResult(
         vulnerable=results["vulnerable"],
@@ -250,6 +292,22 @@ async def _run_injected(recorder: Any) -> dict[str, ScanResult]:
     deterministic per-variant note IDs (mirrors the replay path), and runs the
     fixture-state check against the injected object when it exposes recorder
     state so tests can simulate a cache miss.
+
+    Deliberately kept SEQUENTIAL (unlike the live/replay paths above), unlike
+    those two paths' per-variant ``LiteLLMRecorder``, here BOTH variants share
+    the single ``recorder`` object the caller injected — that is the whole
+    point of the seam (one fake/double drives both). ``LiteLLMRecorder`` itself
+    documents that it is "not thread-safe... under concurrent calls use the
+    counters as the aggregate signal" (see its docstring), and a stateful test
+    double such as the routing fake in ``tests/demo/test_runner.py`` keys its
+    internal step-tracking on the literal message text — since each variant's
+    note-id counter independently restarts at ``n_demo_0001``, the two
+    variants' early messages can be byte-identical, so concurrent calls into
+    the SAME shared double would race on that state. Running both variants
+    concurrently against one shared, stateful object is unsafe in general, so
+    this loop stays sequential — the same trade-off
+    ``scripts/record_demo_fixtures.py`` documents for its own per-variant
+    recorder reset.
     """
     results: dict[str, ScanResult] = {}
     for variant in _VARIANTS:

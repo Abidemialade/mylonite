@@ -129,7 +129,10 @@ def run_test_file(
     }
 
     try:
-        completed = subprocess.run(
+        # cmd is a fixed argv list (sys.executable -m pytest <path> <flags>);
+        # shell=False and no string is shell-interpolated, so this is safe by
+        # construction — not deferred to a later phase.
+        completed = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             text=True,

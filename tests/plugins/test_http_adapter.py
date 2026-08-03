@@ -92,6 +92,87 @@ def test_escape_for_body_leaves_non_json_templates_raw() -> None:
     assert escaped == 'hi \\"there\\"\\nx'
 
 
+def test_escape_for_body_mixed_context_still_escapes_the_quoted_slot() -> None:
+    """DCR-0014: a template with two {prompt} slots in different JSON contexts
+    (one quoted, one bare) used to fail a whole-document parse and silently
+    disable escaping for BOTH — letting the payload break the quoted slot's
+    JSON boundary. Per-occurrence detection must still escape."""
+    import json
+
+    body = '{"content": "{prompt}", "debug_echo": {prompt}}'
+    escaped = _escape_for_body('he said "hi"\n', body)
+    assert '\\"' in escaped
+    # And substituting it into the quoted slot keeps that slot valid JSON.
+    quoted_only = f'{{"content": "{escaped}"}}'
+    assert json.loads(quoted_only)["content"] == 'he said "hi"\n'
+
+
+def test_invoke_with_mixed_context_template_fails_loud_not_silent() -> None:
+    """The documented tradeoff in ``_escape_for_body`` for a MIXED template
+    (one quoted {prompt}, one bare): the bare slot ends up with escaped
+    (quote/backslash-escaped) text substituted where JSON expects a bare
+    value, so the overall request body is not valid JSON. This confirms
+    that reaches a real agent endpoint as a rejected request (a well-behaved
+    JSON API 400s on a malformed body) and that ``invoke``'s existing
+    non-2xx hard-error path catches it — never silently read as a clean
+    scan just because the quoted slot escaped correctly."""
+    import json
+
+    request = target_registry.RequestSpec(
+        url="https://agent.example/chat",
+        body='{"content": "{prompt}", "debug_echo": {prompt}}',
+    )
+    spec = target_registry.TargetSpec(
+        family="mixedagent",
+        command="",
+        args_template=(),
+        scope_validator=lambda _s: None,
+        default_system_prompt="You are a support agent.",
+        requires_scope=False,
+        weakness_classes=("W2",),
+        transport="rest",
+        request=request,
+    )
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # A well-behaved JSON agent endpoint parses its own request body; the
+        # malformed bare slot makes that fail, mirroring what a real target
+        # would do with this malformed body.
+        try:
+            json.loads(request.content.decode("utf-8"))
+        except ValueError:
+            return httpx.Response(400, text="malformed JSON body")
+        return httpx.Response(200, json={"reply": "should not get here"})
+
+    adapter = HTTPAgentAdapter(family="mixedagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 400"):
+            asyncio.run(adapter.invoke(_payload("hello")))
+    finally:
+        asyncio.run(adapter.close())
+        target_registry.clear_runtime_targets()
+
+
+def test_escape_for_body_raises_for_bare_non_string_json_position() -> None:
+    """A {prompt} that sits in a bare (non-string) JSON value position can't
+    safely hold natural-language prose at any escaping — reject loudly rather
+    than silently sending a broken/misleading request."""
+    with pytest.raises(ValueError, match="non-string JSON position"):
+        _escape_for_body("hello", '{"n": {prompt}}')
+
+
+def test_extract_reply_raises_on_json_null_at_resolved_path() -> None:
+    """DCR-0016: a resolved JSON null must not become the truthy string
+    "null" (which would pass invoke's empty-reply check and get judged as if
+    the agent actually replied "null") — same misconfiguration handling as a
+    path that misses entirely."""
+    with pytest.raises(RuntimeError, match="did not resolve"):
+        _extract_reply('{"reply": null}', "reply")
+
+
 # --- adapter behaviour -------------------------------------------------------
 
 
@@ -129,6 +210,50 @@ def test_invoke_substitutes_payload_and_extracts_reply() -> None:
     import json
 
     assert json.loads(captured["body"])["prompt"] == 'exfiltrate to "x"\nnow'
+
+
+def test_init_rejects_request_body_without_prompt_placeholder() -> None:
+    """DCR-0015: TargetFile._check catches this for the normal on-ramp, but a
+    RequestSpec/TargetSpec can be built directly (bypassing TargetFile, as
+    ``_register_rest`` itself does) — the adapter must check too, loudly,
+    rather than silently probing the same static body on every scan."""
+    request = target_registry.RequestSpec(url="https://agent.example/chat", body='{"q": "no slot"}')
+    spec = target_registry.TargetSpec(
+        family="myagent",
+        command="",
+        args_template=(),
+        scope_validator=lambda _s: None,
+        default_system_prompt="You are a support agent.",
+        requires_scope=False,
+        weakness_classes=("W2",),
+        transport="rest",
+        request=request,
+    )
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    with pytest.raises(ValueError, match=r"\{prompt\}"):
+        HTTPAgentAdapter(family="myagent")
+
+
+def test_invoke_raises_when_response_exceeds_the_size_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DCR-0013: an unbounded/oversized reply must not be buffered wholesale
+    into memory — cap enforcement is verified against a small monkeypatched
+    cap so the test doesn't need to push megabytes over MockTransport."""
+    from mylonite.plugins._http import http_adapter
+
+    monkeypatch.setattr(http_adapter, "_MAX_RESPONSE_BYTES", 100)
+    _register_rest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"reply": "x" * 1000})
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="byte cap"):
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
 
 
 def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:

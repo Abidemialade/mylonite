@@ -5,6 +5,476 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.6] - 2026-08-03
+
+### Fixed (CI)
+
+- **`mcp` dependency now pinned to `<2.0`.** The unbounded `mcp>=1.0` floor let
+  a fresh install (CI, or any environment without a pre-existing pin) resolve
+  the just-released `mcp==2.0.0`, a breaking major version this codebase does
+  not support (`Tool.inputSchema` -> `input_schema`, `CallToolResult.isError`
+  -> `is_error`, `mcp.client.streamable_http.streamablehttp_client` ->
+  `streamable_http_client`, and `ClientSession.read_timeout_seconds` changed
+  from `timedelta` to `float`). Every local dev environment for this whole
+  remediation effort had `mcp==1.29.0` pinned as an ad-hoc workaround, so this
+  was invisible locally and only surfaced once the PR reached CI's fresh
+  install — mypy and ~30 tests failed across every Python version and
+  platform. No code change; the dependency constraint was the bug.
+- **`.secrets.baseline` regenerated against the current tree.** The baseline
+  was last refreshed for a Windows path-separator normalization only; several
+  test files edited later in this same effort (`test_redaction.py` most
+  notably, whose imports were reorganized) shifted the line numbers of
+  pre-existing, deliberately-fake test credentials, so `detect-secrets`
+  reported them as new, unbaselined findings. Regenerated and spot-checked
+  every new entry — all are either test fixtures or documentation describing
+  the redaction feature's own pattern-matching (e.g. `scheme://user:pass@host`
+  in `SECURITY.md`), none are real.
+
+### Security
+
+- **A spawned MCP server no longer inherits Mylonite's full process
+  environment** (DCR-0012, DCR-0018). `mylonite` routinely spawns
+  deliberately-vulnerable and third-party MCP servers (bundled `npx`/`uvx`
+  targets, and any `--target-file`/`mcp:custom` stdio target); previously the
+  child process got `dict(os.environ)` — Mylonite's own provider API keys,
+  `GITHUB_TOKEN`, and any other credential in the parent's environment,
+  handed unconditionally to every target it scans, including a purposely
+  unguarded twin.
+  - **BEHAVIOUR CHANGE:** the spawned server's environment is now composed
+    from a narrow, named allowlist (`PATH`/`HOME`/`USERPROFILE`/`SYSTEMROOT`/
+    `TEMP`/`TMP`/`TMPDIR`/`LANG`/`LC_ALL`/`PATHEXT`/`COMSPEC`/`APPDATA`/
+    `LOCALAPPDATA` — the OS-plumbing variables a subprocess launcher needs)
+    plus whatever the target file declares in its `env:` block, composed with
+    casing-safe dedup so a target-declared override can never collide with an
+    inherited entry under a different case. A custom target that previously
+    relied on inheriting some OTHER parent-env variable now needs that
+    variable declared explicitly in `env:` — most commonly a proxy/TLS
+    variable (`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`/`NODE_EXTRA_CA_CERTS`/
+    `SSL_CERT_FILE`) for an `npx`/`uvx`-launched target running behind a
+    corporate TLS-inspecting proxy — see `docs/target-file.md`'s `env:` field.
+- **Boundary controls fail closed on an unrecognised tool** (DCR-0032, DCR-0033,
+  DCR-0034, DCR-0035), closing #8, #9. The four adapter-boundary controls
+  (`src/mylonite/scan/control_shim.py`) each answer "does this control apply to
+  this tool?" from a declared `control_config` list, then a name heuristic, and
+  previously defaulted to **pass-through** for anything neither matched — a
+  control that fails open on ambiguity, in the module that implements the exact
+  mitigations the differential oracle relies on to prove a fix works. New
+  `src/mylonite/scan/tool_classifier.py` centralizes the classification
+  contract (declared list -> structural evidence -> name hint -> fail-closed
+  default) shared by all four controls.
+  - **BEHAVIOUR CHANGE:** an egress (W3) or consequential (W4) tool call that
+    isn't declared and doesn't match a name hint is now **refused** —
+    `refused: ... no destination argument could be identified` /
+    `deferred: ... requires explicit confirmation` — instead of silently
+    reaching the inner tool unguarded. The W2 untrusted-data envelope now wraps
+    every non-error tool result by the same default. The first time this fires
+    for a given tool name in a run — a refusal (W3/W4) or a wrap (W2) driven by
+    a name hint or the fail-closed default, never a declared `control_config`
+    entry — logs a warning (once per name) with the exact `control_config`
+    snippet to declare it precisely; see "The boundary controls fail closed" in
+    `docs/target-file.md`.
+  - New `control_config.read_tool_names` (`ControlConfig`, `tuple[str, ...]`,
+    default `()`) lets an operator declare W2's read-tool surface from
+    `target.yaml` — the same declared-list precision W3 (`egress_tools`) and W4
+    (`consequential_tools`) already had, wired through `cli.py`'s
+    `_boundary_control` the same way.
+  - **Fixed:** the W3 egress allowlist's destination extractor (`_url_in`)
+    required a literal `"://"` on a single string argument, so a scheme-less
+    call like `web_fetch(host="attacker.example")` or a list-valued
+    `targets=[...]` argument reached the inner tool with the allowlist never
+    evaluated (DCR-0032). The new `tool_classifier.url_values` walks nested
+    lists/dicts and recognises a bare hostname or IP literal.
+  - **Fixed:** `EgressAllowlistControl`/`ConfirmGateControl` classified a tool
+    as egress/consequential from a small hardcoded name-substring list only;
+    an egress tool named e.g. `visit_page` (DCR-0033) or a consequential tool
+    with no matching verb (DCR-0034) matched nothing and passed through
+    unguarded regardless of what its arguments actually did.
+  - `host_allowed` now accepts a scheme-less host the same way
+    `looks_like_destination` identifies one — `urlparse` only populates
+    `.hostname` from a network-location component, so a bare allowlisted host
+    (e.g. `localhost`) previously read as host `""` and was never matched.
+- **Sanitiser strips non-ASCII before the blocklist regexes run, not after**
+  (DCR-0045). `sanitize_tool_description`'s instruction-smuggling patterns are
+  ASCII; running them before the strip let a keyword split by a zero-width
+  space or unicode tag character (e.g. `<IMP​ORTANT>`) evade every one of
+  them, and the invisible character then survived to reconstitute a live
+  smuggle marker downstream. The strip now runs first.
+- **`quarantine`'s untrusted-data envelope neutralises a literal
+  `<untrusted>`/`</untrusted>` tag in the wrapped content before wrapping**
+  (DCR-0046, the mylonite-side twin of the reference guard's `_quarantine`
+  fix). Without this, attacker-controlled content containing `</untrusted>`
+  closed the envelope early, and the text after it landed exactly where the
+  planner treats content as instruction, not data — a delimiter-injection
+  bypass of the W2 mitigation itself. A payload with no envelope tag in it
+  (every recorded demo fixture) quarantines byte-for-byte as before.
+- **The guarded reference target's own mitigations had confirmed bypasses in
+  three of its four W1-W4 controls — now closed** (all from the
+  ground-truth-verification-review: DCR-0014, DCR-0016, DCR-0017, DCR-0018,
+  DCR-0019), closing #16, #17, #42, #43. This is a fix to
+  the **reference/demo target** (`reference_targets/mcp_kitchen_sink/`), not
+  to `mylonite`'s own runtime behaviour — but `server_guarded.py` is the
+  differential oracle's PASS-side ground truth, the anchor every scan is
+  proven against, so a bypass here would silently launder through every
+  result built on top of it.
+  - **W2 (ground-truth-verification-review DCR-0017):**
+    `server_guarded._quarantine`'s untrusted-content envelope is now
+    neutralised the same way as `quarantine`'s above (DCR-0046) — a literal
+    `<untrusted>`/`</untrusted>` tag in attacker content no longer closes the
+    envelope early and lands the following text where the planner treats it
+    as instruction.
+  - **W4 (ground-truth-verification-review DCR-0019):** `confirm_send` now
+    refuses (and clears state) if more than one `send_email` staged since the
+    last confirmation, instead of dispatching the last-staged — possibly
+    attacker-swapped — message under the original approval.
+  - **W1 (DCR-0014, DCR-0018):** `_validate_description` now compiles its
+    ASCII allowlist with `re.ASCII` (`\s` no longer matches NBSP /
+    ideographic space / line separator) and replaces the single literal
+    `"(Note:"` denylist check with positive structural constraints (a length
+    cap plus directive-language patterns — imperative verbs, "ignore prior
+    instructions", "call X immediately", and angle-bracket tag wrapping like
+    `<IMPORTANT>...</IMPORTANT>`), instead of blocking one known-bad example
+    string.
+  - **Fixed (ground-truth-verification-review DCR-0016):** a missing
+    required tool argument (e.g. `read_note` with no `note_id`) raised an
+    unhandled `KeyError` instead of returning a normal
+    `ToolResult(isError=True)`.
+  - New `tests/reference_targets/test_guarded_twin_adversarial.py` red-teams
+    the guarded twin directly and is the regression contract for the fixes
+    above.
+
+- **Every persist/print/publish path now runs through redaction**, closing
+  several independently-discovered credential-leak findings (DCR-0003,
+  DCR-0006, DCR-0007, DCR-0010, DCR-0011, DCR-0016, DCR-0019, DCR-0021).
+  `install_log_redaction` only ever filtered `logging` records; every
+  `typer.echo` call bypassed it, and three review passes independently
+  rediscovered the same gap. `src/` no longer calls `typer.echo` directly —
+  every human-facing string leaves through a new console boundary
+  (`mylonite._cli_io.echo` / `echo_err` / `echo_exc`), enforced by
+  `tests/test_cli_output_boundary.py`. Specifically:
+  - A pydantic `ValidationError` from a malformed `--target-file`/`--env` no
+    longer echoes its raw `input_value` (e.g. an `Authorization` header or a
+    DB password) — `redact_exception` renders field path + message only.
+  - `mylonite scan`'s scan-dir copy, `mylonite generate`'s co-located copy,
+    and `mylonite gate`'s PR copy of a custom `target.yaml` are no longer
+    verbatim: `redact_target_yaml` masks every `headers` /
+    `request.headers` value and every credential-shaped `env` value before
+    the file is written, so a live bearer token or DB password never lands
+    in a directory the operator is told to commit. `dump_target_file` masks
+    by default for the same reason (`redact_secrets=False` opts out for the
+    in-memory-only round-trip).
+  - The `scan --scaffold` "relative SQLite path" warning (#18) no longer
+    prints the env value, only the key name.
+  - The SARIF artefact uploaded to GitHub code scanning redacts a finding's
+    narration before it is rendered into the `message`.
+  - The retained attack-evidence trace (`mcp_trace_planner`, persisted into
+    `exploit_*.json` / `scan_report.json`) masks credential-shaped tool-call
+    argument *values* while leaving non-secret values (URLs, prose bodies)
+    intact — the fetch/filesystem/github oracle predicates read those exact
+    values to detect exfiltration, so blanket-dropping them would have
+    silently disabled detection.
+  - `redact()` now also masks `scheme://user:pass@host` URL credentials.
+  - `redact_value`/`redact_env` mask a credential-shaped value by KEY NAME
+    (`password`, `api_key`, `token`, ...) as well as by shape — a plain
+    passphrase with no provider-key prefix under a credential-named key
+    previously sailed through unmasked.
+  - `scan --scaffold` / `mylonite init --transport mcp` no longer writes a
+    `--env` value verbatim into the starter `target.yaml` it generates — a
+    fourth, earlier-in-the-lifecycle origination path for the same leak class
+    as the scan/generate/gate copy sites.
+  - The output boundary now also covers `console.print` and bare `print` —
+    not just `typer.echo`. `mylonite report` rendered a scan/validation
+    summary via a bare `console.print(...)` with no redaction, even though
+    `mylonite scan` redacted the exact same string.
+  - The JSON finding bundle (`report --json`) now redacts a finding's
+    narration the same way the SARIF artefact does.
+
+  See "What Mylonite does with your credentials" in `SECURITY.md`.
+
+- **One `--authorize` rule for every command that live-drives a real target**
+  (DCR-0008, DCR-0009), replacing three independent, drifted implementations
+  of it. New `src/mylonite/_authz.py` (`required_authorization` /
+  `check_authorization`) derives the required `--authorize` value from the
+  target's own data — its declared `scope`, else its `family` name — and is
+  now the single implementation of that rule for CUSTOM targets
+  (`--target-file` / `mcp:custom`), shared by `scan`, `gate`, `validate`, and
+  `ablate`. Bundled `mcp:` targets (`mcp:filesystem`/`mcp:fetch`/`mcp:github`)
+  keep their own separate enforcement against the hardcoded
+  `target_registry.BUNDLED_TARGETS` registry — same rule, different
+  implementation, unaffected by this change (see `SECURITY.md`).
+  - **Fixed:** a custom target file could declare a sensitive `scope` (e.g.
+    `scope: /home/alice/private`) while also setting `requires_scope: false`,
+    downgrading the check to the guessable literal family name instead of the
+    scope (DCR-0008). The gate no longer trusts that self-asserted flag — a
+    declared scope is now always the required value, and `TargetFile`
+    normalises `requires_scope` to `true` whenever a `scope` is set, as
+    defense in depth for any other consumer of the field.
+  - **BEHAVIOUR CHANGE:** `mylonite validate` against a custom target
+    (`--target-file`) now requires `--authorize` and refuses (exit 2) without
+    it. Previously `validate` live-drove the real target — including sending
+    live attack payloads such as exfil probes — with **no authorization check
+    at all** (DCR-0009). Reference targets (`reference:vulnerable` /
+    `reference:guarded`) are unaffected; they never required `--authorize`.
+  - **BEHAVIOUR CHANGE:** `mylonite ablate` now validates that `--authorize`
+    actually names the target (its scope or family), not merely that some
+    non-empty value was supplied.
+
+### Fixed
+
+- **Fail loud instead of silently wrong**: six production `assert` statements
+  that silently no-op under `python -O` are now explicit checks that raise a
+  typed error or return a typed result, and five sites that either swallowed
+  an exception into a confident-wrong value or aborted a whole batch on one
+  bad item now fail loud or degrade gracefully instead (closes #21, #22, #29,
+  #39, #40, #41).
+  - `gate/orchestrator.py`'s `run_gate` no longer crashes with a bare
+    `AttributeError` when an injected `generate_fn`/`validate_fn` collaborator
+    returns `None` — new `EXIT_GENERATE_FAILED`/`EXIT_VALIDATE_FAILED` exit
+    codes (`6`/`7`, documented in `docs/cli-reference.md`) surface it as a
+    typed `GateResult` instead. Three more asserts (`cli.py`,
+    `scan/engine.py`, `plugins/_reference/reference_validator.py`) and a sixth
+    found during the sweep (`demo/_replay.py`) became explicit
+    `if ... is None: raise ...` checks on invariants provably true today —
+    never trust that to survive under `-O` or a future refactor.
+  - **`DifferentialValidator`'s metamorphic-robustness check no longer
+    inverts an adapter error on the guarded twin into "the guard resisted"**
+    (DCR-0022). `_invoke_and_judge_async` now returns a tri-state
+    `bool | None` (`None` = the twin was never actually exercised — a planner
+    skip or adapter error), and `_run_perturbed` only records
+    `guard_resisted=True` when the guarded twin was genuinely invoked AND
+    judged not a success, instead of computing it as `not guard_success` (which
+    collapsed "errored" and "invoked, did not fire" to the same value).
+  - A `verdict_reason`/`seed_id` quoting target output shaped like a Rich
+    closing tag (e.g. `[/bold]`) no longer crashes `mylonite scan`/`report`/
+    `validate` with `rich.errors.MarkupError` **after a successful run**
+    (DCR-0004). `scan/artefacts.py`'s `render_summary` and `cli.py`'s
+    `_render_validation_report` now escape Rich markup on every
+    attacker/target-influenced free-text table cell — redaction alone only
+    masks secret-shaped tokens, not markup.
+  - `gate/annotate.py`'s `post_check_run` no longer returns the truthy string
+    `"None"` for a genuinely missing `html_url` (DCR-0020).
+  - Third-party verification harness (`verification/`, excluded from the
+    wheel) hardening:
+    - `layer2_datasets/agentdojo.py`: one malformed AgentDojo run file no
+      longer discards every transcript already parsed from files that sorted
+      before it — `run_to_transcript` runs inside the try, catching
+      `AttributeError`/`TypeError`/`KeyError` too, and skips are counted and
+      logged (DCR-0009) so "0 runs matched" reads differently from "N runs
+      were dropped". `limit=0` is now honoured (DCR-0012).
+    - `layer2_datasets/injecagent.py`: the `Tool Response Template` fallback
+      (exercised only if a future dataset revision omits the usually-present
+      `Tool Response`) now correctly substitutes the attacker instruction —
+      re-derived and verified against a live fetch of all four pinned
+      dh/ds × base/enhanced files (2108 real cases, 0 mismatches): `json.dumps`
+      runs on the template BEFORE substitution (fixes a quote-escaping-order
+      bug that would have double-escaped an instruction containing a literal
+      `"`), and an `enhanced`-split case wraps the instruction in its real
+      injection-strengthening prefix instead of splicing it raw. Raises on an
+      unrecognised (non-string) template shape rather than guessing.
+    - `layer3_production/run.py`: `_load_scan_report` picks the most recent of
+      several `scan_report.json` matches (not whichever `rglob` yields first)
+      and warns when more than one exists (#41); validates the parsed JSON is
+      a mapping and raises there instead of a silent `attempts = []` deep in
+      the scorer that fabricated a clean report (DCR-0014); a schema-legal
+      `null` `verdict_reason` no longer crashes `precision_report` (DCR-0015).
+    - `fetch.py`: a truststore-injection failure or a persistent proxy/TLS
+      error is now logged instead of silently swallowed by a bare
+      `except Exception: pass`/`continue`, distinguishing it from AgentDojo's
+      expected sparse-grid 404 misses (DCR-0001/DCR-0002).
+
+- **Explicit flags now win over `--config` even at the flag's own default
+  value** (DCR-0004, DCR-0005, DCR-0012, DCR-0015). `scan --max-llm-calls 50`
+  and `gate --max-llm-calls 50` were each indistinguishable from an omitted
+  flag (`if max_llm_calls == 50 and rc.max_llm_calls is not None`), so a
+  `mylonite.yaml`'s `max_llm_calls` silently won — contradicting `--config`'s
+  own "an explicit flag always wins" help text. Both `--max-llm-calls` options
+  now default to `None` (still displaying `[default: 50]` in `--help`) and
+  resolve through a shared `_resolve_option(explicit, from_config, default)`
+  helper; a parametrized conformance test guards the same field-level
+  precedence for `provider`/`model`/`max_llm_calls` so the bug class can't
+  silently recur for a different field.
+- **A custom scan's persisted `target.yaml` now matches the target that
+  actually ran** (DCR-0005/DCR-0006/DCR-0016). `scan` copied the source YAML
+  verbatim into the scan dir even when the M3 seed-arm auto-wire or a
+  `--purpose` override had mutated the in-memory target — the co-located
+  `target.yaml` a finding depended on could be missing the seed_arm that made
+  it reproducible. `scan` now tracks whether the target was mutated and
+  serialises the mutated version (still redacted) when it was.
+- **`gate` could drive the wrong differential oracle for a `reference:* +
+  --target-file` combination** (#24). `is_reference` was computed from the
+  target string before the `--target-file` branch could override routing to a
+  custom adapter, so `validate_fn` could pick the reference twins' oracle for
+  a scan that actually ran a custom target. `gate` (and `scan`, which had the
+  same latent ambiguity) now reject `reference:* + --target-file` up front
+  with a clear message, and `is_reference` is derived from the single
+  `routed_to` value the resolution block actually used.
+- Assorted flag-precedence/correctness fixes found independently by three
+  reviewers: `validate --fast` is now honoured for a `reference:*` target too
+  (previously a silent no-op there); `validate --prove-input-control` no
+  longer silently re-enables the differential leg `--fast` just said it was
+  skipping; `validate`'s provider-reachability preflight now also covers the
+  custom-target path (after, never before, its authorization check) instead
+  of only the reference path; `gate`'s reference-branch validator now honours
+  `--iterations` instead of always running 5; `ablate --iterations` rejects
+  `< 1` like `gate` already did; a custom target's unset `control_config.
+  fetch_allowlist` no longer silently replaces the sensible default egress
+  allowlist with an allow-nothing one; `ablate --controls W2,W3,W2` no longer
+  double-counts a repeated control; a multi-finding `generate` no longer
+  re-loads and re-validates the same `--target-file` once per finding;
+  `report`'s per-finding compliance-tag loop no longer reconstructs a mapper
+  per finding; the bundled reference differential validator's default
+  `vuln_threshold` is no longer trivially-satisfied (`0`) at `--iterations 1`;
+  a dead, never-wired `guard_threshold` constructor parameter was removed from
+  `DifferentialValidator`; `mylonite demo`'s fixture-error message now
+  describes the correct consequence for whichever twin's fixtures are stale
+  (previously always claimed "the vulnerable scan would falsely show clean",
+  even for a guarded-fixture problem); and `run_demo`'s live-mode
+  provider/model resolution uses `is None` instead of `or`.
+- **Resolved the 7 quarantined scan-engine-review findings.** An earlier
+  review pass flagged 7 findings as "quarantined" (unverified) because a
+  tooling bug anchored each one's "evidence" to the linter's generic rule
+  text instead of the actual source line, so the specific line-number claim
+  couldn't be mechanically re-verified even though the underlying category of
+  concern was real. Each was independently re-checked against current source:
+  - `cli.py` assert in production code — **already fixed**, by the "fail loud"
+    pass above: the site now raises a typed `RuntimeError` on the
+    `control_weakness is None` invariant instead of asserting it.
+  - `plugins/_reference/reference_validator.py` assert in production code —
+    **already fixed**, same pass: `_record_and_full_pass` now raises a typed
+    `RuntimeError` if called with `_record_fixtures_dir is None` instead of
+    asserting it.
+  - `scan/engine.py` assert in production code — **already fixed**, same
+    pass: the per-payload pass loop now raises a typed `RuntimeError` if
+    `last_pass` is unexpectedly `None` after the loop instead of asserting it.
+  - `scan/_llm.py`, two sites: exception silently swallowed without logging —
+    **already fixed**: no `except` clause in the file is a bare `pass`
+    (confirmed by walking the file's AST for `except` bodies — none found).
+    Several narrow structural catches (`_extract_text`, `_tool_call_arguments`,
+    `_try_repair`) return a fallback value directly without logging in that
+    clause, but every such return propagates into `_parse_or_fallback`, which
+    logs a `"...using fallback"` message before its own fallback path returns —
+    so nothing is silently lost, though not every catch site logs itself.
+  - `scan/pytest_runner.py` subprocess call, potential command-injection
+    risk — **confirmed false positive**: `run_test_file`'s `cmd` is a fixed
+    argv list (`sys.executable -m pytest <path> <flags>`) built from literal
+    strings and `str(Path)` values, passed to `subprocess.run(..., shell=False)`
+    with no shell string interpolation anywhere in the call — safe by
+    construction, as the existing `# noqa: S603` comment at the call site
+    documents.
+  - `scan/tool_roles.py` `_content_param`/id-hint substring matching —
+    **already fixed** (DCR-0015): hint matching now goes through
+    `_tokens`/`_hints_match`, which split a param name on non-alphanumeric
+    runs and camelCase boundaries and require an exact token match, so a name
+    like `video_url` (tokens `{video, url}`) no longer false-positively
+    matches the `id` hint the way a plain substring test would. Covered by
+    dedicated tests in `tests/scan/test_tool_roles.py` (the `guidance`/
+    `keyword`/`valid` substring-trap cases).
+  - No production code changes were needed for this pass — all 7 were already
+    resolved by earlier phases in this remediation plan; this entry exists so
+    the disposition of each is on the permanent record (the original review
+    file itself was never a tracked artifact).
+- Coverage-gap remediation from `docs/reviews/2026-08-03-contracts-taxonomy-review.md`
+  and `docs/reviews/2026-08-03-remote-adapter-reference-validator-vulnerable-target-review.md`
+  (RB-DCR-0001, 0002, 0003, 0006, 0007, 0013, 0016/0017/0018):
+  - **A URL-embedded credential (e.g. `https://sk-live-abc@host/sse`) no
+    longer leaks into the remote MCP adapter's descriptor strings**
+    (RB-DCR-0001). `_describe_data_sources`/`_describe_notes`
+    (`plugins/_mcp/remote_adapter.py`) used `urlsplit(url).netloc`, which
+    includes any userinfo component; both now use a new `_host_only` helper
+    keyed on `.hostname` (`+ f":{port}"` when the URL has one), never
+    userinfo. `_host_only` also degrades gracefully rather than raising on a
+    malformed/out-of-range port (`.port` is lazily validated and raises
+    `ValueError` for e.g. `:99999` — an operator-supplied target file has no
+    port-range validation ahead of time) and correctly brackets an IPv6 host
+    when a port is present (`[::1]:8080`, not the ambiguous `::1:8080`) —
+    both found in code review of the initial fix.
+  - **A non-responding remote or spawned MCP server can no longer hang a scan
+    forever** (RB-DCR-0002). Both `plugins/_mcp/remote_adapter.py`'s
+    `_open_remote_session` and `plugins/_mcp/stdio_adapter.py`'s
+    `_open_mcp_session` now construct `ClientSession` with a bounded
+    `read_timeout_seconds=60s`, so `await session.initialize()` (and every
+    subsequent read) raises instead of blocking indefinitely.
+  - **`VulnerableKitchenSinkServer.call_tool` no longer raises an unhandled
+    `KeyError` on a missing required argument** (RB-DCR-0003,
+    `reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_vulnerable.py`).
+    Mirrors `server_guarded.py`'s existing fix for the identical defect: a
+    missing key now returns `ToolResult(isError=True, ...)` naming the
+    missing argument. Orthogonal to the four catalogued weaknesses (W1-W4),
+    which are untouched.
+  - **The `"unicode"` and `"casing"` metamorphic strategies no longer mangle
+    the exfil email/URL literal the success predicate keys on**
+    (RB-DCR-0006, RB-DCR-0007, `plugins/_reference/reference_validator.py`'s
+    `_deterministic_strategies`). Both were the only two strategies not
+    wrapped in `_protect_exfil` (unlike their siblings `unicode-tag`/
+    `split`), so a perturbation that would genuinely have survived instead
+    corrupted its own destination address and misreported as "broke" — a
+    harness defect, not a real robustness failure.
+  - **A custom-target boundary-guarded-twin `differential` outcome's `metric`
+    now reports the discrimination strength, not the rate-gap**
+    (RB-DCR-0013, `_validate_custom_target`). The merged `stage="differential"`
+    `ValidationOutcome` set `metric=decision.flakiness_metric` — a copy/paste
+    from the sibling `flakiness` outcome; it now correctly sets
+    `metric=decision.differential_metric`, matching the reference-target
+    path's convention that `stage="differential"` -> `differential_metric`
+    and `stage="flakiness"` -> `flakiness_metric` are distinct fields.
+  - **`_metamorphic_outcome`'s docstring now matches what the code does, and
+    the stage's gating status is documented correctly** (RB-DCR-0016/0017/0018,
+    the review's highest-priority, confirmed release-gating finding). The
+    docstring previously claimed `passed` is true "iff ALL perturbations
+    held (the strict reading)" and that the stage is report-only and does
+    NOT feed `kept` — both false: `passed` has always been a THRESHOLD check
+    (`robustness >= self._metamorphic_threshold`, default 0.6), and
+    `_validate_reference`'s `kept` AND-chain has always included
+    `metamorphic.passed`. No behaviour change to `passed`/`kept` — only the
+    documentation was wrong, now corrected, with a new test
+    (`test_metamorphic_passed_is_threshold_based_not_all_or_nothing`) locking
+    in the threshold reading (3-of-4 held at threshold 0.6 -> passed=True).
+    Separately, `_run_perturbed`/`_metamorphic_outcome` now distinguish a
+    genuine guard bypass (the attack fired on BOTH twins) from a malformed/
+    non-firing perturbation (the attack never fired on the vulnerable twin
+    either) — both previously rendered identically as `"<name>:broke"` in
+    `detail`, conflating the single most important signal this stage can
+    produce (a real bypass) with a harmless harness artefact. `detail` now
+    reads `"<name>:guard_bypassed"` / `"<name>:attack_malformed"` /
+    `"<name>:held"`; the `robustness`/`held_count`/`total` fraction semantics
+    are unchanged (both non-held classifications still count as "not held").
+    The docstring now also spells out the `vuln_fired=False, guard_fired=True`
+    edge case explicitly (the guarded twin alone fired, with no
+    vulnerable-twin corroboration): it is deliberately classified
+    `attack_malformed`, not `guard_bypassed`, since the two twins are driven
+    by independent LLM planner runs and a guarded-twin-only signal is not
+    trusted as a genuine bypass — locked in by a new regression test rather
+    than left as an untested fallthrough.
+  - The `read_timeout_seconds` bound the two session openers pass to
+    `ClientSession` (60s) is now a single shared constant
+    (`_session_adapter.DEFAULT_MCP_READ_TIMEOUT`) imported by both
+    `remote_adapter.py` and `stdio_adapter.py`, instead of the same literal
+    duplicated in each module.
+  - **A declared `effect_probe` whose verify call fails is no longer
+    indistinguishable from no probe being declared at all** (RB-DCR-0014).
+    `_run_effect_probe`'s exception path returned the same `"unprobed"`
+    string used when `effect_probe` is unset, so a misconfigured
+    `verify_tool` (e.g. a target-file typo) silently reported "no
+    effect_probe declared" and the effect leg auto-passed — even though the
+    operator explicitly asked for end-to-end confirmation and it never ran.
+    The exception path now returns a genuinely distinct `"errored"` state,
+    and `_validate_custom_target`'s effect leg **fails** (rather than
+    silently passing) when a declared probe never successfully ran on any
+    iteration.
+  - **Two stale copies of the corrected metamorphic-gating claim, found
+    during release-verification consistency checking.** `mylonite
+    validate`'s dashboard (`cli.py`) told operators "metamorphic robustness
+    is report-only - it does not gate kept" — the exact claim
+    RB-DCR-0016/0017/0018 had already corrected inside
+    `_metamorphic_outcome`'s own docstring, just not propagated to this
+    user-facing message. Two more `(report-only)` comments elsewhere in
+    `reference_validator.py`'s constructor and `_decide` path said the same
+    wrong thing about the same leg. All three now say metamorphic
+    robustness gates `kept`, matching the `kept = build.passed and
+    differential.passed and flakiness.passed and metamorphic.passed`
+    computation that has never actually changed.
+
 ## [0.7.5] - 2026-07-04
 
 > **Adoption + professionalization.** Point Mylonite at a plain HTTP agent with no MCP
@@ -1558,6 +2028,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
+[0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
 [0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
 [0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.6.0

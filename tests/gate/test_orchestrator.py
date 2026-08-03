@@ -90,6 +90,47 @@ def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
     assert result.opened_pr is False
 
 
+def test_run_gate_returns_a_typed_result_when_generate_returns_none(tmp_path):
+    """DCR-0002: `assert generated is not None` is stripped under python -O, so
+    the next line raised a bare AttributeError instead of an exit code."""
+    from mylonite.gate.orchestrator import EXIT_GENERATE_FAILED
+
+    ex = _exploit()
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: [ex],
+        generate_fn=lambda e: None,
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+    assert result.exit_code == EXIT_GENERATE_FAILED
+    assert result.opened_pr is False
+    assert result.kept is None
+
+
+def test_run_gate_returns_a_typed_result_when_validate_returns_none(tmp_path):
+    """The other of the two orchestrator.py asserts: a validator that returns
+    None (e.g. an offline collaborator wired wrong) must not crash with a bare
+    AttributeError on ``report.kept`` — it must exit with a typed code."""
+    from mylonite.gate.orchestrator import EXIT_VALIDATE_FAILED
+
+    ex = _exploit()
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: [ex],
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="t.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+    assert result.exit_code == EXIT_VALIDATE_FAILED
+    assert result.opened_pr is False
+    assert result.kept is None
+
+
 def test_run_gate_opened_pr_flows_from_prresult(tmp_path):
     from mylonite.gate.pr import PrResult
 

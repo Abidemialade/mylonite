@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mylonite._redaction import redact
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
 from mylonite.report.severity import severity_for
@@ -49,7 +50,10 @@ def _finding(exploit: Any, report: Any | None) -> dict[str, Any]:
         "severity": severity_for(weakness, effect),
         # static / obfuscated / ... (attack tier or shape metadata, generic)
         "attack_shape": str(md.get("attack_shape") or md.get("attack_tier") or "static"),
-        "success_reason": str(exploit.success_reason),
+        # Mirrors the sarif.py fix (DCR-0021): a real exfil finding's narration can
+        # carry the exfiltrated value itself, and this bundle is written to disk
+        # unconditionally (no console-boundary redaction applies to a file write).
+        "success_reason": redact(str(exploit.success_reason)),
         "compliance": {
             "owasp_llm": list(exploit.compliance.owasp_llm),
             "owasp_asi": list(exploit.compliance.owasp_asi),

@@ -319,6 +319,40 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
     assert "relative SQLite path" in (result.stderr or result.output)
 
 
+def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0006 (spec-compliance follow-up): `scan --scaffold` must not write a
+    credential-shaped --env value verbatim into the scaffold target.yaml — this
+    is a fourth, earlier-in-the-lifecycle origination path for the same leak the
+    scan/generate/gate target.yaml copies were already fixed for. The scaffold
+    output must still round-trip through load_target_file."""
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    secret = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--env",
+            f"GITHUB_TOKEN={secret}",
+            "--scaffold",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = out.read_text(encoding="utf-8")
+    assert secret not in text
+    assert "GITHUB_TOKEN" in text  # the key name still documents the target
+
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    tf = load_target_file(out)
+    assert tf.env["GITHUB_TOKEN"] != secret
+
+
 def test_env_file_loads_only_known_provider_vars(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -915,6 +949,45 @@ def test_generate_no_input_exit_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "mylonite scan" in out or "--latest" in out
 
 
+def test_generate_unsafe_pattern_id_exits_cleanly(tmp_path: Path) -> None:
+    """A hand-edited (or stale, pre-validation) exploit_*.json with an unsafe
+    pattern_id must degrade to a clean EXIT_CONFIG error, not a raw traceback.
+
+    exploit_*.json is a user-editable artefact under .mylonite/scans/, not
+    just scanner output, so ReferencePytestGenerator.emit()'s
+    UnsafeExploitRecord must be caught at this CLI boundary too — it was
+    previously only unit-tested at the generator level.
+    """
+    import json
+
+    from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    pid = "foo\"); exec(\"import os; os.system('echo pwned')"
+    exploit = ExploitRecord(
+        target_id="reference:vulnerable",
+        pattern_id=pid,
+        payload=Payload(pattern_id=pid, channel="tool-result", body="x"),
+        response=AdapterResponse(payload_pattern_id=pid, raw_response="ok"),
+        success_reason="r",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    exploit_json = tmp_path / "scan" / "exploit_hostile.json"
+    exploit_json.parent.mkdir(parents=True, exist_ok=True)
+    exploit_json.write_text(
+        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit_json), "--out", str(out_dir)])
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "Traceback" not in out
+    assert "pattern_id" in out
+    assert not list(out_dir.glob("test_security_*.py"))
+
+
 def _write_custom_exploit_json(path: Path) -> Any:
     """A custom-target ExploitRecord (target_id != reference:*) for generate tests."""
     import json
@@ -935,7 +1008,17 @@ _MINIMAL_TARGET_YAML = (
 
 
 def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
-    """generate --target-file co-locates the YAML verbatim as target.yaml + prereq block."""
+    """generate --target-file co-locates the YAML as a (redaction-safe) target.yaml
+    + prereq block.
+
+    DCR-0010: the colocated copy is no longer byte-verbatim (it round-trips through
+    ``redact_target_yaml`` so a live credential never lands in a directory the
+    operator is told to commit) — but it must still describe the SAME target.
+    """
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
     exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
     _write_custom_exploit_json(exploit_json)
     target_yaml = tmp_path / "open.yaml"
@@ -949,8 +1032,12 @@ def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_SUCCESS, result.output
     colocated = out_dir / "target.yaml"
     assert colocated.is_file()
-    # Verbatim copy (comments preserved).
-    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != _MINIMAL_TARGET_YAML
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(_MINIMAL_TARGET_YAML)
+    )
     # Prereq block (N5) for the live custom test.
     out = result.output
     assert "MYLONITE_LIVE_TARGET=1 pytest" in out
@@ -1177,7 +1264,13 @@ def test_validate_uses_on_disk_source_and_records(
 
 
 def test_dump_target_file_roundtrips() -> None:
-    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal."""
+    """An inline mcp:custom TargetFile serialises to YAML that re-loads equal.
+
+    Uses ``redact_secrets=False`` — this exercises the in-memory round-trip
+    contract, distinct from the (default-on) persisted-copy path, which
+    deliberately masks credential-shaped values and so does NOT round-trip
+    (see ``test_dump_target_file_default_redacts_secrets`` below).
+    """
     import yaml
 
     from mylonite.plugins._mcp.target_file import (
@@ -1193,11 +1286,31 @@ def test_dump_target_file_roundtrips() -> None:
         weakness_classes=["W2", "W4"],
         primary_tools=["send_email"],
     )
-    text = dump_target_file(tf)
+    text = dump_target_file(tf, redact_secrets=False)
     # Re-loadable and equal (round-trip through the same validator the CLI uses).
     assert yaml.safe_load(text)  # valid YAML mapping
     reloaded = TargetFile.model_validate(yaml.safe_load(text))
     assert reloaded == tf
+
+
+def test_dump_target_file_default_redacts_secrets() -> None:
+    """DCR-0019: dump_target_file defaults to masking credential-shaped values."""
+    from mylonite._redaction import REDACTION_PLACEHOLDER
+    from mylonite.plugins._mcp.target_file import TargetFile, dump_target_file
+
+    tf = TargetFile(
+        family="myapp",
+        command="python",
+        env={"GITHUB_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyz1234", "LOG_LEVEL": "debug"},
+        headers={"Authorization": "Bearer sk-live-abcdefghijklmnopqrstuvwxyz"},
+        transport="sse",
+        url="https://example.invalid/mcp",
+    )
+    text = dump_target_file(tf)
+    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in text
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in text
+    assert "LOG_LEVEL: debug" in text
+    assert REDACTION_PLACEHOLDER in text
 
 
 def _canned_scan_result(target_id: str, *, findings: int) -> Any:
@@ -1233,9 +1346,13 @@ def _canned_scan_result(target_id: str, *, findings: int) -> Any:
 def test_scan_custom_persists_target_yaml_and_next_hint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A custom scan co-locates the resolved target YAML in the scan dir (verbatim)
-    and prints a `Next: mylonite generate` hint when it found something."""
+    """A custom scan co-locates the resolved target YAML in the scan dir
+    (redaction-safe, DCR-0006) and prints a `Next: mylonite generate` hint when
+    it found something."""
+    import yaml
+
     from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile
     from mylonite.scan.engine import ScanEngine
 
     target_registry.clear_runtime_targets()
@@ -1271,14 +1388,104 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
     assert len(scan_dirs) == 1, scan_dirs
     colocated = scan_dirs[0] / "target.yaml"
     assert colocated.is_file()
-    # Verbatim copy (operator comments/structure preserved).
-    assert colocated.read_text(encoding="utf-8") == source
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != source
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(source)
+    )
     assert "Next: mylonite generate" in result.output
     target_registry.clear_runtime_targets()
 
 
+def test_scan_persisted_target_yaml_has_no_secret_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0006: `scan` must not write a credential-shaped --env value verbatim
+    into the persisted scan-dir target.yaml."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    scan_root = tmp_path / "scans"
+
+    async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
+        return _canned_scan_result("mcp:myapp", findings=1)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "mcp:custom",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--env",
+            "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz1234",
+            "--weakness-class",
+            "W2",
+            "--authorize",
+            "custom",
+            "--output-dir",
+            str(scan_root),
+            "--allow-no-seed-arm",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    scan_dirs = [p for p in scan_root.iterdir() if p.is_dir()]
+    assert len(scan_dirs) == 1, scan_dirs
+    persisted = (scan_dirs[0] / "target.yaml").read_text(encoding="utf-8")
+    assert "ghp_" not in persisted
+    target_registry.clear_runtime_targets()
+
+
+def test_generate_colocated_target_yaml_has_no_auth_header(tmp_path: Path) -> None:
+    """DCR-0010: `generate` must not copy a live Authorization header verbatim
+    into a directory the operator is told to commit."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    target_yaml = tmp_path / "open.yaml"
+    source = (
+        "family: myapp\n"
+        "transport: sse\n"
+        "url: https://example.invalid/mcp\n"
+        "headers:\n"
+        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"
+        "weakness_classes: [W2]\n"
+    )
+    target_yaml.write_text(source, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(
+        app,
+        ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    colocated = (out_dir / "target.yaml").read_text(encoding="utf-8")
+    assert "sk-live-" not in colocated
+    assert "Authorization" in colocated  # key name still documents the target
+    # The masked copy still describes the same shape of target (minus the secret).
+    reloaded = TargetFile.model_validate(yaml.safe_load(colocated))
+    assert reloaded.transport == "sse"
+    assert reloaded.url == "https://example.invalid/mcp"
+
+
 def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
     """generate without --target-file picks up target.yaml from the scan dir."""
+    import yaml
+
+    from mylonite.plugins._mcp.target_file import TargetFile
+
     scan_dir = tmp_path / "scans" / "s"
     _write_custom_exploit_json(scan_dir / "exploit_pid.json")
     # `scan` would have written this next to the exploit.
@@ -1290,7 +1497,12 @@ def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> 
     # Auto-resolved: co-located into the generated dir, no "re-run with --target-file" warning.
     colocated = out_dir / "target.yaml"
     assert colocated.is_file()
-    assert colocated.read_text(encoding="utf-8") == _MINIMAL_TARGET_YAML
+    # Not byte-verbatim (masked/re-serialised) but semantically the same target.
+    colocated_text = colocated.read_text(encoding="utf-8")
+    assert colocated_text != _MINIMAL_TARGET_YAML
+    assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
+        yaml.safe_load(_MINIMAL_TARGET_YAML)
+    )
     assert "Using target:" in result.output
     out = result.stderr or result.output
     assert "Re-run with" not in out
@@ -1330,6 +1542,25 @@ def test_validate_custom_auto_resolves_colocated_target_yaml(
     assert (out_dir / "validation_report.json").is_file()
 
 
+def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> None:
+    """DCR-0009: `validate` live-drove a real third-party target — sending exfil
+    payloads — with no authorization gate at all. Same fixture shape as
+    ``test_validate_custom_auto_resolves_colocated_target_yaml`` above, but
+    driving the REAL ``_validate_custom`` (no monkeypatch) and omitting
+    --authorize, so the new gate must refuse before anything is driven."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    (out_dir / "target.yaml").write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize" in (result.stderr or result.output)
+
+
 # ---------------------------------------------------------------------------
 # PR2 — verification legibility: the differential-oracle evidence renders in the
 # console report (gating formula with live marks, fires/resists, kill matrix).
@@ -1357,8 +1588,8 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
         ],
         kept=False,
         mutation_score=0.75,
-        gating_formula="kept = build AND differential AND flakiness",
-        gating_legs=["build", "differential", "flakiness"],
+        gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+        gating_legs=["build", "differential", "flakiness", "metamorphic"],
         reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=2),
         mutation_matrix=[
             SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
@@ -1379,7 +1610,13 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
     assert "kill matrix" in out
     assert "W2:indirect-injection-note-body-direct" in out
     assert "metric legend" in out
-    assert "report-only" in out  # metamorphic does-not-gate note
+    # Metamorphic robustness gates kept (M2) — the note must say so, not the
+    # inverse. A prior version of this message incorrectly claimed metamorphic
+    # was "report-only"; reference_validator.py's own kept computation
+    # (`build.passed and differential.passed and flakiness.passed and
+    # metamorphic.passed`) has always included it.
+    assert "gates kept" in out
+    assert "report-only" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -1523,6 +1760,110 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
+def test_report_scan_console_output_redacts_secret_shaped_verdict_reason(tmp_path: Path) -> None:
+    """Spec-compliance follow-up (Important #1): `mylonite report` used to render
+    `render_summary()`'s output via a bare `console.print(...)` with NO redaction,
+    even though `mylonite scan` redacted the exact same string. This is the
+    concrete repro: a scan_report.json whose verdict_reason carries a secret-
+    shaped token must not leak it through `mylonite report`'s console output."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason=f"the target echoed {secret} back to the user",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    (scan_dir / "scan_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert secret not in result.output
+
+
+def test_report_validation_console_output_redacts_secret_shaped_detail(tmp_path: Path) -> None:
+    """The validation-report leg of the same gap: `_render_validation_report`'s
+    per-leg table embeds ValidationOutcome.detail (free text)."""
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    secret = "sk-live" + "abcdefghijklmnopqrstuvwxyz"
+    gen = tmp_path / "gen"
+    gen.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(
+                stage="build", passed=False, detail=f"collect failed: {secret}", metric=None
+            ),
+        ],
+        kept=False,
+    )
+    (gen / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert secret not in result.output
+
+
+def test_report_validation_console_output_survives_rich_markup_in_detail(
+    tmp_path: Path,
+) -> None:
+    """DCR-0004, extended to the CLI validation table (`_render_validation_report`):
+    a ``ValidationOutcome.detail`` quoting target/exception output shaped like a
+    Rich closing tag (e.g. "[/bold]") must not crash `mylonite report` with
+    ``rich.errors.MarkupError`` — the same failure class `scan/artefacts.py`'s
+    `render_summary` was fixed for. ``detail`` is free text from the validation
+    pipeline (including third-party ``ValidatorBase`` plugins, per the versioned
+    extension contract), so it is attacker/target-influenced, unlike ``stage``
+    (a contract ``Literal``).
+    """
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    gen = tmp_path / "gen"
+    gen.mkdir(parents=True, exist_ok=True)
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(
+                stage="build",
+                passed=False,
+                detail="collect failed: the response echoed [/bold] verbatim",
+                metric=None,
+            ),
+        ],
+        kept=False,
+    )
+    (gen / "validation_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(gen)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "verbatim" in result.output
+
+
 def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -1555,6 +1896,271 @@ def test_scan_config_fills_omitted_flags(tmp_path: Path, monkeypatch: pytest.Mon
     result = runner.invoke(app, ["scan", "--config", str(cfg), "--dry-run"])
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert "dry-run" in result.stdout or "attempts" in result.stdout
+    target_registry.clear_runtime_targets()
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 — flag precedence: an explicit flag must win over --config, even
+# when the explicit value happens to equal the flag's own Typer default.
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_max_llm_calls_beats_the_config_even_at_the_default_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0004/0012/0015/0005: 50 is the Typer default, so an explicit
+    `--max-llm-calls 50` was indistinguishable from an omitted flag and the
+    config's value (10) silently won — contradicting --config's own help text
+    ("an explicit flag always wins")."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\nmax_llm_calls: 10\n", encoding="utf-8"
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(
+        app, ["scan", "--config", str(cfg), "--max-llm-calls", "50", "--dry-run"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 50
+    target_registry.clear_runtime_targets()
+
+
+def test_config_max_llm_calls_applies_when_the_flag_is_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanity complement: with NO --max-llm-calls flag at all, the config's
+    value must still apply (the sentinel-default change must not break the
+    config-fills-omitted-flags case Step 1 doesn't cover)."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\nmax_llm_calls: 10\n", encoding="utf-8"
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--dry-run"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 10
+    target_registry.clear_runtime_targets()
+
+
+def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SAME DCR-0004/0012 precedence bug was independently duplicated in
+    `gate`'s own --config resolution block (a separate, copy-pasted `if
+    max_llm_calls == 50` check) — fixing `scan` alone would not have caught a
+    regression here, so this is verified at `gate`'s call site too."""
+    from mylonite.scan.engine import ScanEngine
+
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text("max_llm_calls: 10\n", encoding="utf-8")
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["max_llm_calls"] = config.max_llm_calls
+        real_init(self, config=config, **kwargs)
+
+    async def _fake_run(self: Any) -> Any:  # no live LLM calls, zero findings
+        return _canned_scan_result("reference:vulnerable", findings=0)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["gate", "reference:vulnerable", "--config", str(cfg), "--max-llm-calls", "50"],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured["max_llm_calls"] == 50
+
+
+@pytest.mark.parametrize(
+    ("field", "flag", "config_key", "explicit_value", "config_value"),
+    [
+        # DEFAULT-COLLISION coverage (the actual DCR-0004/0012/0015/0005 bug
+        # shape): the explicit value DELIBERATELY equals the `--max-llm-calls`
+        # Typer option's own literal default (50), which `if resolved == 50`
+        # cannot distinguish from "omitted". This is the only row below that
+        # reproduces that specific shape — see the docstring.
+        ("max_llm_calls", "--max-llm-calls", "max_llm_calls", 50, 10),
+        # GENERAL precedence coverage only (see docstring): `provider`/`model`
+        # never had the DCR-0004-style bug in the first place, because their
+        # Typer option default is already `None` (`explicit or rc.value`
+        # already distinguishes "omitted" from "explicitly set" for any
+        # realistic string value — there is no default VALUE to collide with).
+        ("provider", "--provider", "provider", "openai", "anthropic"),
+        ("model", "--model", "model", "gpt-4o-mini", "claude-haiku-4-5-20251001"),
+    ],
+)
+def test_scan_config_precedence_conformance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    flag: str,
+    config_key: str,
+    explicit_value: Any,
+    config_value: Any,
+) -> None:
+    """Conformance test (Phase 10 Step 3): for every scalar field RunConfig
+    shares with `scan`'s signature, an explicit flag must win over --config.
+
+    IMPORTANT — what this test does and does not generalize to: only the
+    ``max_llm_calls`` row reproduces the DCR-0004/0012/0015/0005 bug's DEFINING
+    shape (explicit value == the flag's own literal Typer default, which
+    ``if resolved == literal_default`` cannot distinguish from "omitted"). It
+    is the row that would catch a regression if that anti-pattern were
+    reintroduced for ``max_llm_calls`` specifically, and the template for
+    testing any FUTURE field whose Typer option default is a concrete
+    value (not `None`) that could collide with a meaningful explicit setting.
+
+    The ``provider``/``model`` rows exercise the weaker, general property
+    ("an explicit flag beats --config") rather than the default-collision edge
+    case — those fields' Typer defaults are already ``None``, so
+    ``explicit or rc.value`` already distinguishes "omitted" from "explicitly
+    set" for them and they never had this bug class to begin with. They are
+    included for RunConfig field-coverage completeness, not because they are
+    at risk of the same regression `max_llm_calls` was.
+
+    Each case only sets its OWN field (leaving provider/model at their true
+    defaults) so the asserted :class:`ScanConfig` attribute isn't perturbed by
+    ``--provider``'s LiteLLM routing prefix on ``model``.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        f"target_file: {target_yaml}\nauthorize: myapp\n{config_key}: {config_value}\n",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, Any] = {}
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured["config"] = config
+        real_init(self, config=config, **kwargs)
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+
+    result = runner.invoke(
+        app, ["scan", "--config", str(cfg), flag, str(explicit_value), "--dry-run"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert getattr(captured["config"], field) == explicit_value
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_config_precedence_conformance_target_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RunConfig's ``target_file`` field: an explicit --target-file must win
+    over --config's target_file. Observed via the routed target's family name
+    surfacing in the dry-run summary — the config's target file (family
+    'configapp') must NOT be what actually ran."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    config_target = tmp_path / "config_target.yaml"
+    config_target.write_text(
+        "family: configapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    flag_target = tmp_path / "flag_target.yaml"
+    flag_target.write_text(
+        "family: flagapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {config_target}\nauthorize: configapp\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--config",
+            str(cfg),
+            "--target-file",
+            str(flag_target),
+            "--authorize",
+            "flagapp",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "flagapp" in result.stdout
+    assert "configapp" not in result.stdout
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_config_precedence_conformance_authorize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RunConfig's ``authorize`` field: an explicit --authorize must win over
+    --config's authorize. The config's authorize deliberately does NOT match
+    the target's family — if it silently won over a correct explicit
+    --authorize, the custom-target ownership check would reject the run."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {target_yaml}\nauthorize: not-myapp\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["scan", "--config", str(cfg), "--authorize", "myapp", "--dry-run"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
     target_registry.clear_runtime_targets()
 
 
@@ -1770,7 +2376,7 @@ def test_generate_prove_control_emits_assert_control_holds(tmp_path: Path) -> No
     assert test_files, list(out.iterdir())
     src = test_files[0].read_text(encoding="utf-8")
     assert "assert_control_holds" in src
-    assert 'control="W2"' in src
+    assert "control='W2'" in src  # rendered via repr(), not a bare f-string
 
 
 def test_generate_prove_control_passes_through_reference_target(tmp_path: Path) -> None:
@@ -1956,6 +2562,12 @@ def test_validate_custom_runs_differential_by_default(
     monkeypatch.setattr(
         "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
     )
+    # DCR-0008: _validate_custom now preflights provider reachability (after its
+    # authorize check) before doing anything expensive. This test drives an
+    # intentionally-fake model ("m") and stubs DifferentialValidator to avoid all
+    # OTHER live calls, so the preflight (the one live-call-making piece not
+    # already stubbed) needs stubbing too.
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
     tf = tmp_path / "t.yaml"
     tf.write_text(
         "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
@@ -1965,11 +2577,11 @@ def test_validate_custom_runs_differential_by_default(
     gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
     target_registry.clear_runtime_targets()
     try:
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False)
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False, authorize="myapp")
         assert captured["guarded_adapter_factory"] is not None  # differential ON by default
         assert captured["control_weakness"] == "W2"
         captured.clear()
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True)
+        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True, authorize="myapp")
         assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
     finally:
         target_registry.clear_runtime_targets()
@@ -2067,6 +2679,15 @@ def test_gate_surfaces_iterations_and_randomize_toggle() -> None:
     assert _command_default("gate", "--iterations") == 3
     # None default = "decide from the target" (on for custom, off for reference/replay).
     assert _command_default("gate", "--randomize-exfil") is None
+
+
+def test_validate_iteration_timeout_has_a_sane_non_none_default() -> None:
+    """DCR-0010: a stuck/slow custom target must not be able to block a CI
+    job indefinitely just because --iteration-timeout was left unset."""
+    from mylonite.cli import _DEFAULT_ITERATION_TIMEOUT_S
+
+    assert _command_default("validate", "--iteration-timeout") == _DEFAULT_ITERATION_TIMEOUT_S
+    assert _DEFAULT_ITERATION_TIMEOUT_S > 0
 
 
 def test_validate_surfaces_randomize_toggle() -> None:

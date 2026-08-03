@@ -14,12 +14,36 @@ finding **C2**.
 
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from mylonite._paths import PathEscapesBase, resolve_contained
+
+#: A narrow, DELIBERATELY LIMITED heuristic for one specific catastrophic-
+#: backtracking (ReDoS) shape: a quantified group whose body ALREADY contains
+#: another unbounded quantifier — e.g. ``(.+)+``, ``(a*)*``, ``(\d+){2,}``.
+#: This is NOT a general ReDoS static analyzer (that is a much harder,
+#: open-ended problem); it exists to catch exactly the nested-quantifier shape
+#: named in the finding (#32). It will both under- and over-match relative to
+#: a "real" analysis (e.g. it won't catch alternation-based blowups, and it
+#: can't see across a non-capturing group boundary that itself nests further),
+#: so it is deliberately paired with a runtime bound (``asyncio.wait_for``
+#: around the executor-run match in ``_run_seed_arm``) as a backstop for
+#: whatever this misses.
+_NESTED_QUANTIFIER_RE = re.compile(r"\([^()]*[+*][^()]*\)[+*]|\([^()]*[+*][^()]*\)\{\d*,")
+
+
+def _looks_like_nested_quantifier(pattern: str) -> bool:
+    """True if ``pattern``'s source contains a quantified group that itself
+    already contains another quantifier — the specific catastrophic-
+    backtracking shape this validator targets. See ``_NESTED_QUANTIFIER_RE``."""
+    return bool(_NESTED_QUANTIFIER_RE.search(pattern))
 
 
 class SeedArmSpec(BaseModel):
@@ -38,6 +62,26 @@ class SeedArmSpec(BaseModel):
     id_from: str | None = None  # legacy: extract first integer from the tool result
     id_key: str | None = None  # extract the planted handle from this JSON field of the result
     id_pattern: str | None = None  # extract the handle via this regex (first capture group)
+
+    @field_validator("id_pattern")
+    @classmethod
+    def _reject_catastrophic_id_pattern(cls, value: str | None) -> str | None:
+        """Refuse a target-declared ``id_pattern`` with a nested-quantifier
+        shape (``(.+)+``-style) at LOAD time — a target file is attacker/PR
+        editable content, and a target-declared pattern is later matched
+        against target-CONTROLLED result text (``_run_seed_arm``), so this is
+        adversarial input reaching a regex engine (#32). Validation is the
+        primary fix; ``_run_seed_arm``'s ``asyncio.wait_for``-bounded match is
+        the backstop for whatever this narrow heuristic misses."""
+        if value is not None and _looks_like_nested_quantifier(value):
+            raise ValueError(
+                f"id_pattern {value!r} looks like it contains a nested quantifier "
+                "(e.g. '(.+)+' or '(a*)*') — this shape is vulnerable to "
+                "catastrophic backtracking (ReDoS) against adversarial/target-"
+                "controlled content. Rewrite it without a quantified group that "
+                "itself contains another quantifier."
+            )
+        return value
 
 
 class RequestSpec(BaseModel):
@@ -87,11 +131,14 @@ class EffectProbeSpec(BaseModel):
 class ControlConfig(BaseModel):
     """Operator hints for the boundary controls (``--prove-control`` / ablation).
 
-    All optional: when omitted the controls fall back to name heuristics.
-    Declaring the egress / consequential tools (and which arg holds the URL) makes
-    the W3/W4 controls precise on an arbitrary custom tool surface. ``declared``
-    lists controls the app ALREADY implements (the higher-fidelity ablation path);
-    ``synthetic`` lists controls Mylonite should test at the boundary.
+    All optional: when omitted, the controls fall back to name heuristics and
+    then a fail-closed default (an unrecognised tool is guarded, not passed
+    through — see "The boundary controls fail closed" in ``target-file.md``).
+    Declaring the egress / consequential / read tools (and which arg holds the
+    URL) makes the W3/W4/W2 controls precise on an arbitrary custom tool
+    surface. ``declared`` lists controls the app ALREADY implements (the
+    higher-fidelity ablation path); ``synthetic`` lists controls Mylonite
+    should test at the boundary.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -100,6 +147,7 @@ class ControlConfig(BaseModel):
     egress_url_param: str | None = None
     fetch_allowlist: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
     consequential_tools: tuple[str, ...] = ()
+    read_tool_names: tuple[str, ...] = ()  # W2: narrows which results get quarantined
     declared: tuple[str, ...] = ()  # controls the app already has (for ablation)
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
 
@@ -155,13 +203,48 @@ class InvalidTargetScope(ValueError):
 
 
 def _validate_filesystem_scope(scope: str | None) -> None:
+    """Refuse a scope that is not a real, contained sandbox directory.
+
+    ``render_args`` appends this string verbatim to
+    ``@modelcontextprotocol/server-filesystem``'s argv, so it IS the launched
+    server's sandbox root. Checking only that it parses as an absolute path let
+    ``/``, ``C:\\`` and ``..``-escaping paths through, collapsing the sandbox to
+    the whole disk (DCR-0017).
+    """
     if not scope:
         raise InvalidTargetScope(
             "filesystem requires a sandbox path scope, e.g. mcp:filesystem:/tmp/sandbox"
         )
     p = Path(scope)
+    if ".." in p.parts:
+        raise InvalidTargetScope(f"filesystem scope must not contain '..'; got {scope!r}")
     if not p.is_absolute():
         raise InvalidTargetScope(f"filesystem scope must be an absolute path; got {scope!r}")
+    resolved = p.resolve()
+    if resolved.parent == resolved:
+        raise InvalidTargetScope(
+            f"filesystem scope {scope!r} is a filesystem root — that gives the target "
+            "server the whole disk. Point it at a dedicated sandbox directory."
+        )
+    if resolved == Path.home().resolve():
+        raise InvalidTargetScope(
+            f"filesystem scope {scope!r} is your home directory. Use a dedicated "
+            "sandbox directory instead."
+        )
+    root = os.environ.get("MYLONITE_FS_SCOPE_ROOT")
+    if root:
+        try:
+            resolve_contained(resolved, base=root, label="filesystem scope")
+        except PathEscapesBase as exc:
+            raise InvalidTargetScope(
+                f"{exc} MYLONITE_FS_SCOPE_ROOT={root!r} restricts every filesystem-scope "
+                "target to that directory (or a subdirectory of it); point the scope "
+                "inside it, or unset MYLONITE_FS_SCOPE_ROOT to lift the restriction."
+            ) from exc
+    if not resolved.is_dir():
+        raise InvalidTargetScope(
+            f"filesystem scope {resolved} does not exist or is not a directory"
+        )
 
 
 def _validate_fetch_scope(scope: str | None) -> None:
@@ -228,7 +311,18 @@ class TargetSpec:
     def launch_env(
         self, *, vulnerable: bool = False, disable_controls: tuple[str, ...] = ()
     ) -> dict[str, str]:
-        """Resolve the environment for one launch — the single precedence point.
+        """Resolve the environment OVERLAY for one launch — the single precedence point.
+
+        IMPORTANT: this is an OVERLAY, never the complete child environment. It
+        returns only the target-declared ``extra_env`` (+ vulnerable/control-env
+        toggles) — it deliberately does NOT include ``os.environ``. The stdio
+        adapter (``stdio_adapter._open_mcp_session``) is the single place that
+        composes the actual child env: a fixed, narrow allowlist of inherited
+        parent-env keys (``_INHERITED_ENV_KEYS``) merged with THIS overlay. A
+        caller of ``launch_env`` must not treat its return value as "the env to
+        hand the subprocess" — doing that once (``dict(os.environ)`` merged with
+        this overlay) handed every spawned server, including deliberately
+        vulnerable/third-party ones, Mylonite's own secrets (DCR-0012/DCR-0018).
 
         Base ``extra_env`` first; then (when ``vulnerable``) the
         ``vulnerable_launch`` env; then each named control's *disable* toggle from
