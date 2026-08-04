@@ -67,7 +67,7 @@ dependencies = [
     # this codebase does not yet support. An unbounded floor let CI silently
     # resolve 2.0.0 while local dev environments stayed pinned to 1.x, so CI
     # failed broadly (mypy + ~30 tests) while every local check passed.
-    "mcp>=1.0,<2.0",
+    "mcp>=1.0,<3.0",
     # OS trust-store TLS, BASE dependency: many users sit behind a TLS-inspecting
     # corporate proxy or local AV whose CA lives in the OS store but not in certifi's
     # bundle, so HTTPS to the LLM provider fails with CERTIFICATE_VERIFY_FAILED out of
