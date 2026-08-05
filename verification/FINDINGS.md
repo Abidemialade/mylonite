@@ -12,7 +12,7 @@ everywhere we threw it — but the *same model* was caught immediately where the
 **app's own design** was the flaw. Mylonite's demonstrable value is **app-flaw
 detection + regression gating + honesty**, not out-fooling frontier alignment.
 
-## The keystone: same model, app design decides (Layer "real catch")
+## The core result: same model, app design decides (Layer "real catch")
 
 Same Claude Haiku 4.5, two targets:
 

@@ -10,7 +10,7 @@ Mylonite to fix). The headline is the false-positive rate over the probes that
 actually ran.
 
 Clean baselines, easiest first:
-* ``reference:guarded`` — the defended kitchen-sink twin. Every W1-W4 attack
+* ``reference:guarded`` — the guarded kitchen-sink build. Every W1-W4 attack
   should be blocked, so a correct scanner reports 0 findings. No external
   dependency; the obvious first precision baseline.
 * a real, well-built third-party MCP server in a sandbox (see ``candidates.md``)

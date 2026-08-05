@@ -7,7 +7,7 @@ vulnerable. Any finding here is a false positive — a Mylonite bug to fix.
 
 | Target | Why it's a clean baseline | How to run |
 | --- | --- | --- |
-| `reference:guarded` | the defended kitchen-sink twin — every W1–W4 attack is blocked by design | `mylonite scan reference:guarded --output-dir verification/reports/layer3/guarded` then `layer3 score` |
+| `reference:guarded` | the guarded kitchen-sink build — every W1–W4 attack is blocked by design | `mylonite scan reference:guarded --output-dir verification/reports/layer3/guarded` then `layer3 score` |
 | Bundled `mcp:filesystem` on an empty sandbox | a real MCP server with no attacker-controlled content planted | needs `npx`; scope to a throwaway dir |
 
 ## Production-grade candidates (future)
@@ -16,7 +16,7 @@ Well-built, non-deliberately-vulnerable MCP servers to scan for false positives.
 All must be **trusted** (reputable author, clear license) and run in a sandbox:
 
 - **`server-fetch` *with* a host allowlist** (the defended counterpart to the W3
-  external differential — see `verification/KEYSTONE.md`). Once upstream issue #2317
+  external differential — see `verification/EXTERNAL_DIFFERENTIAL.md`). Once upstream issue #2317
   lands, or with a wrapper that blocks internal IPs, this server should yield **0
   findings** — the first external 0-FP precision number (closes the C2/B4 gap). A
   finding here is a Mylonite FP to fix.
