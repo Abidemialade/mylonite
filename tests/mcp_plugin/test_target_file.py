@@ -27,7 +27,7 @@ def _clean_runtime() -> None:
 
 
 def _tf(**over: object) -> TargetFile:
-    base: dict[str, object] = {"family": "triagent", "command": "python", "args": ["-m", "srv"]}
+    base: dict[str, object] = {"family": "acme", "command": "python", "args": ["-m", "srv"]}
     base.update(over)
     return TargetFile(**base)  # type: ignore[arg-type]
 
@@ -114,7 +114,7 @@ def test_build_target_spec_shape() -> None:
         seed_arm=SeedArmSpec(tool="remember", args_template={"content": "{payload}"}),
     )
     spec = build_target_spec(tf)
-    assert spec.family == "triagent"
+    assert spec.family == "acme"
     assert spec.command == "python"
     assert spec.args_template == ("-m", "srv")
     assert spec.args_with_scope is False
@@ -134,8 +134,8 @@ def test_build_target_spec_scope_validator_enforces_requires_scope() -> None:
 def test_register_and_resolve_round_trip() -> None:
     spec = build_target_spec(_tf())
     target_registry.register_target(spec)
-    assert target_registry.resolve_target("triagent", None) is spec
-    assert "triagent" in target_registry.known_families()
+    assert target_registry.resolve_target("acme", None) is spec
+    assert "acme" in target_registry.known_families()
 
 
 def test_register_cannot_shadow_bundled_family() -> None:
@@ -150,7 +150,7 @@ def test_register_cannot_shadow_bundled_family() -> None:
 def test_load_target_file_from_yaml(tmp_path: Path) -> None:
     p = tmp_path / "t.yaml"
     p.write_text(
-        "family: triagent\n"
+        "family: acme\n"
         "command: python\n"
         "args: [-m, srv]\n"
         "weakness_classes: [W2, W4]\n"
@@ -160,7 +160,7 @@ def test_load_target_file_from_yaml(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     tf = load_target_file(p)
-    assert tf.family == "triagent"
+    assert tf.family == "acme"
     assert tf.weakness_classes == ["W2", "W4"]
     assert tf.seed_arm is not None and tf.seed_arm.tool == "remember"
 

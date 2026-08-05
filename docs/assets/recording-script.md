@@ -1,9 +1,13 @@
 # Recording the reference app demo GIF
 
-This page is the controller script for producing `docs/assets/quarry-demo.gif`
-— the GIF embedded at the top of the README. **The actual recording is a
-human / controller step done post-merge**; this doc just pins down exactly
-what gets recorded so the result is reproducible.
+This page is the controller script for producing `docs/assets/quarry-demo.gif`.
+**The actual recording is a human / controller step done post-merge**; this doc
+just pins down exactly what gets recorded so the result is reproducible.
+
+> **Status:** the GIF has not been recorded yet, so the README does **not**
+> currently embed it — it links to the text demo output instead. Adding the
+> embed is part of the post-recording step below; until then there is no
+> broken image reference to leave lying around.
 
 - **Output path:** `docs/assets/quarry-demo.gif`
 - **Target length:** ≤ 60 seconds.
@@ -53,10 +57,10 @@ Budget against the ≤ 60s target:
 | -------- | ------------------------------------------------------------------- |
 | 0–2s     | Blank prompt; type `mylonite demo` and hit enter.                   |
 | 2–6s     | **Safety banner** appears: in-process, loopback-only, no network.   |
-| 6–18s    | Scan #1 runs against the **vulnerable** reference app — W1–W4 land. |
+| 6–18s    | Scan #1 runs against the **vulnerable** reference app — W1/W2 land. |
 | 18–30s   | Scan #2 runs against the **guarded** build — all clean.             |
 | 30–40s   | The **W1–W4 weakness table** with OWASP / ASI / ATLAS taxonomy IDs. |
-| 40–48s   | The headline: **`4 exploits on vulnerable, 0 on guarded`**.         |
+| 40–48s   | The headline: **`2 exploits on vulnerable, 0 on guarded`**.         |
 | 48–55s   | The `mode: replay (offline)` line; hold a beat on the final frame.  |
 
 Trim dead air so the whole thing stays under a minute, then loop cleanly back
@@ -64,6 +68,16 @@ to the blank prompt.
 
 ## Post-recording
 
-Export to `docs/assets/quarry-demo.gif`, keep the file small enough to embed
-comfortably in the README (optimize/downscale if needed), and confirm the
-README embed (`![Mylonite demo](docs/assets/quarry-demo.gif)`) renders.
+Export to `docs/assets/quarry-demo.gif` and keep the file small enough to embed
+comfortably in the README (optimize/downscale if needed). Then **add** the embed
+to the README's "Try it in 60 seconds" section — it is deliberately absent until
+the GIF exists:
+
+```markdown
+![Mylonite demo](docs/assets/quarry-demo.gif)
+
+*The `mylonite demo` playground running against the reference app's vulnerable
+and guarded versions. ([How this GIF is recorded.](docs/assets/recording-script.md))*
+```
+
+Commit the GIF and the embed together, and confirm it renders on GitHub.

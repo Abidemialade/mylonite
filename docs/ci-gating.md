@@ -4,7 +4,10 @@
 validate it against the differential oracle, and (opt-in) open a PR that gates
 CI on it.
 
-## The 60-second end-to-end flow (local)
+## The end-to-end flow (local)
+
+Against your own app this drives a real agent and makes real model calls, so budget
+minutes and API spend rather than seconds.
 
 ```bash
 # against the bundled reference agent
@@ -57,6 +60,33 @@ scaffolded workflows:
     authorize: your-scope
     open-pr: "true"
 ```
+
+## Other CI systems (Jenkins, GitLab, …)
+
+The committed gate is a plain `pytest` file with no GitHub dependency, so it should run
+anywhere that meets the preconditions below. **GitHub Actions is the only configuration we
+test**, so treat other systems as supported-but-unverified.
+
+```bash
+MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate
+```
+
+**The environment variable is required.** Without it the live test is skipped and `pytest`
+exits **0** — your pipeline goes green having tested nothing. `mylonite generate` prints
+this exact command for that reason. You also need:
+
+- `mylonite` and `pytest` installed
+- the scan artefacts (`exploit_<pattern_id>.json`, `target.yaml`) co-located with the test
+- a provider key
+- network egress to both the model provider and your MCP server
+
+Only the bundled reference/replay test runs offline unconditionally; a gate against your
+own app always re-drives the real target.
+
+What does *not* port: opening the gating PR, inline check-run annotations, and Security-tab
+SARIF upload all use the `gh` CLI and GitHub APIs. On other CI, run the test as the gate and
+surface results through your own reporting — `mylonite report --sarif` still emits standard
+SARIF 2.1.0 if your platform ingests it.
 
 ### Provider keys
 

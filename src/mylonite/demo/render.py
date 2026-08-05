@@ -48,9 +48,9 @@ _TEASER: Final[str] = (
     "vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable"
 )
 _NEXT_STEP: Final[str] = (
-    "Try it on YOUR app next: mylonite scan --command 'python server.py' --scaffold "
-    "app.yaml, then mylonite scan --target-file app.yaml --authorize my-app "
-    "(needs an LLM API key) — details: docs/test-your-app.md"
+    "Try it on YOUR app next: mylonite scan --command python --arg server.py --scaffold "
+    "app.yaml (free, no API key), then mylonite scan --target-file app.yaml "
+    "--authorize my-app (needs an LLM API key) — details: docs/test-your-app.md"
 )
 
 _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]

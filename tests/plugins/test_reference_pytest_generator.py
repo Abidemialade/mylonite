@@ -261,12 +261,12 @@ def test_emit_matches_golden_snapshot() -> None:
 
 def test_custom_target_emits_real_target_assertion() -> None:
     """A custom target_id emits a test that re-drives the REAL target, not the twin."""
-    custom = _EXPLOIT.model_copy(update={"target_id": "mcp:triagent"})
+    custom = _EXPLOIT.model_copy(update={"target_id": "mcp:acme"})
     source = ReferencePytestGenerator().emit(custom).source
     assert "assert_target_resists" in source
     assert "assert_guard_holds" not in source
     assert "MYLONITE_LIVE_TARGET" in source  # live-gated, honest about offline
-    assert "mcp:triagent" in source
+    assert "mcp:acme" in source
 
 
 def test_reference_target_still_emits_guard_holds() -> None:

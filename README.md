@@ -10,10 +10,13 @@
 [![CI](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml/badge.svg)](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-Point Mylonite at any MCP app, whatever model or framework is behind it. It attacks the
-AI/agentic layer — the system prompt, tool/function schemas, RAG pipeline, and agent
-memory — finds app-specific weaknesses, and for each one emits a **validated,
-CI-gating `pytest` regression test**.
+**Built for teams shipping MCP or agentic apps who need CI-enforced regression coverage on
+the AI layer.**
+
+Point Mylonite at any MCP (Model Context Protocol) app, whatever model or framework is
+behind it. It attacks the AI/agentic layer — the system prompt, tool/function schemas, RAG
+pipeline, and agent memory — finds app-specific weaknesses, and for each one emits a
+**validated, CI-gating `pytest` regression test**.
 
 The core differentiator is the **control-efficacy check**. It holds the model constant and
 toggles only the safeguard, keeping a finding only when the attack *fires* on your app and
@@ -25,6 +28,13 @@ Mylonite against external ground truth it did not author.
 
 Mylonite deliberately does *not* test the surrounding traditional code; that work belongs to
 SAST/DAST tools.
+
+**Where this sits.** Static scanners read your tool descriptions and flag the ones that look
+dangerous; you are left to judge which flags matter. Model-eval harnesses swap models and
+score which one behaves best. Mylonite does neither. It runs the attack against your app,
+then holds the model constant and toggles only your safeguard — so the finding you get back
+is evidence about *your control*, not about how a description reads or how a model scored
+today.
 
 **Example: same model, two versions of one app.** Run the *same* model against the two
 versions of the bundled reference app. Against the deliberately-vulnerable version Mylonite
@@ -49,12 +59,8 @@ See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and t
 ## Try it in 60 seconds
 
 *(Once installed.)* `mylonite demo` runs the real scan offline against a deliberately
-vulnerable agent and its guarded version — no API key, deterministic.
-
-![Mylonite demo](docs/assets/quarry-demo.gif)
-
-*The `mylonite demo` playground running against the reference app's vulnerable and guarded
-versions. ([How this GIF is recorded.](docs/assets/recording-script.md))*
+vulnerable agent and its guarded version — no API key, deterministic. Sample output is
+[below](#demo-output).
 
 **Install the CLI and run the demo** — `mylonite` is on PyPI. The base install is just the
 tool that scans your app; the offline demo target is an opt-in extra (a
@@ -93,6 +99,7 @@ mylonite demo
 **No API key needed** — the demo replays recorded model behavior; add `--live` to re-run
 for real.
 
+<a id="demo-output"></a>
 The demo runs the real scan twice — once against the deliberately vulnerable reference
 agent and once against its guarded version — and prints a safety banner, a weakness table,
 and the headline differential (an example run; which patterns land depends on the planner
@@ -116,14 +123,24 @@ model resists some patterns outright, which is why the exact count varies by mod
 reference app runs entirely in-process and never binds to a network. Full walkthrough:
 [docs/quarry.md](./docs/quarry.md).
 
-Once you've seen it, point `scan` at your own MCP app:
+Once you've seen it, point `scan` at your own MCP app. **The first step is free** — it needs
+no API key and makes no model call:
 
 ```bash
-mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml   # write a target.yaml
-mylonite scan --target-file app.yaml --authorize my-app                     # then scan it
+mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml   # free, no API key
 ```
 
-*(scanning needs an LLM API key; scaffolding does not)*
+That connects to your server, lists the tools it exposes, tells you which weakness classes
+apply to that surface, flags the consequential-action tools worth guarding, and writes a
+starter `app.yaml`. Treat it as a scope check, not a verdict: it reads your tool *surface*,
+not your tool descriptions, and everything it suggests is a hint for you to confirm.
+
+Proving which weaknesses actually land — and which of your controls stops them — is the
+scan itself, and that needs a key:
+
+```bash
+mylonite scan --target-file app.yaml --authorize my-app                    # needs an LLM API key
+```
 
 ## From scan to a gating PR
 
@@ -151,11 +168,15 @@ differential proof. The core surface:
 - **`mylonite scan <target>`** — the exploit-finding loop against the bundled reference app
   or your own MCP app (`--target-file`). `--scaffold` introspects a server and writes a
   starter `target.yaml`.
+- **`mylonite generate <dir>`** — emits the `pytest` regression test from a confirmed
+  exploit (run for you as a stage of `gate`).
 - **`mylonite validate <dir>`** — proves an emitted test is meaningful via the
   control-efficacy check (the core differentiator); `--fast` skips it for a weaker gate.
 - **`mylonite ablate <target>`** — scores each safeguard as load-bearing vs. security theater.
 - **`mylonite report <dir>`** — a terminal trust panel, **SARIF 2.1.0**, or a JSON bundle,
   all carrying the differential proof and the compliance tags.
+- **`mylonite init`** — guided setup that writes a runnable `target.yaml` for your app
+  (HTTP agent or MCP server).
 - **`mylonite demo` / `doctor` / `taxonomy list`** — offline demo, provider diagnostics,
   and the bundled OWASP/ASI/ATLAS/NIST threat taxonomy.
 
@@ -179,9 +200,11 @@ in the [architecture guide](./docs/architecture.md).
 ## Responsible use
 
 Mylonite reproduces working weaknesses in AI agents. **Use it only against targets you
-control or are contractually authorized to test.** The `scan` command refuses to run against
-real targets without an explicit `--authorize` flag naming the target. The bundled
-vulnerable reference agent runs in-process and binds to nothing.
+control or are contractually authorized to test.** Every command that live-drives a real
+target — `scan`, `gate`, `validate`, and `ablate` — refuses to run without an explicit
+`--authorize` flag naming that target: the value must equal the target's declared `scope`,
+or its family name when no scope is declared. The bundled vulnerable reference agent runs
+in-process and binds to nothing.
 
 Full policy: [SECURITY.md](./SECURITY.md).
 
