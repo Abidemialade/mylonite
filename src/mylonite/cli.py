@@ -55,7 +55,8 @@ app = typer.Typer(
         "Examples:\n\n"
         "`mylonite demo` -- try it on the bundled vulnerable agent (no setup).\n\n"
         "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
-        "`mylonite scan --command 'python server.py' --scaffold app.yaml` -- scaffold a target.yaml.\n\n"
+        "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- "
+        "scaffold a target.yaml.\n\n"
         "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
         "Docs: https://abidemialade.github.io/mylonite/ -- "
         "run 'mylonite COMMAND --help' for any command."
@@ -704,8 +705,8 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
         "Examples:\n\n"
         "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
         "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
-        "`mylonite scan --command 'python server.py' --scaffold app.yaml` -- introspect a\n"
-        "server and write a starter target.yaml (no LLM call, no attack).\n\n"
+        "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- introspect\n"
+        "a server and write a starter target.yaml (no LLM call, no attack).\n\n"
         "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
     )
 )
