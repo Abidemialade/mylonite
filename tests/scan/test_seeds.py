@@ -168,7 +168,7 @@ def test_seeds_for_descriptor_weakness_classes_reports_not_tested_when_uncoverab
     for — that used to silently fail instead of honestly reporting NOT TESTED.
     A seed_note-setup W2 seed plants into infrastructure this target lacks, so
     it is honestly excluded (unlike a no_setup seed — see the sibling test)."""
-    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2"]))
+    got = seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W2"]))
     assert got == []
 
 
@@ -177,7 +177,7 @@ def test_seeds_for_descriptor_no_setup_kitchen_seed_still_reaches_any_target() -
     user message — so it is NOT restricted to a family match: it can always
     run on an arbitrary custom target that opted into the weakness class,
     worst case the target simply has no matching tool to call."""
-    got = seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W4"]))
+    got = seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W4"]))
     assert any(s.pattern_id == "excessive-agency-send-email-direct-unconfirmed" for s in got)
     # The OTHER (seed_note-setup) W4 kitchen seed is still excluded.
     assert not any(s.pattern_id == "excessive-agency-send-email-via-note-injection" for s in got)
@@ -189,7 +189,7 @@ def test_seeds_for_descriptor_weakness_classes_logs_uncovered_classes(
     import logging
 
     with caplog.at_level(logging.INFO, logger="mylonite.scan.seeds"):
-        seeds_for_descriptor(_descriptor("mcp:triagent", weakness_classes=["W2"]))
+        seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W2"]))
     assert "W2" in caplog.text
     assert "NOT TESTED" in caplog.text
 

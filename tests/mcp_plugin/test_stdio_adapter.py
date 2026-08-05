@@ -626,7 +626,7 @@ async def test_effect_probe_confirms_or_refutes_damage(
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W4"],
@@ -651,7 +651,7 @@ async def test_effect_probe_confirms_or_refutes_damage(
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             payload = Payload(
                 pattern_id="w4",
                 channel="user-message",
@@ -684,7 +684,7 @@ async def test_effect_probe_raising_is_errored_not_unprobed(tmp_path: Path) -> N
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W4"],
@@ -704,7 +704,7 @@ async def test_effect_probe_raising_is_errored_not_unprobed(tmp_path: Path) -> N
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             payload = Payload(
                 pattern_id="w4",
                 channel="user-message",
@@ -733,7 +733,7 @@ async def test_effect_probe_deferred_marker_overrides_expect_marker(tmp_path: Pa
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W4"],
@@ -767,7 +767,7 @@ async def test_effect_probe_deferred_marker_overrides_expect_marker(tmp_path: Pa
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             payload = Payload(
                 pattern_id="w4",
                 channel="user-message",
@@ -811,7 +811,7 @@ async def test_payload_delivery_is_verified(
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -846,7 +846,7 @@ async def test_payload_delivery_is_verified(
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             payload = Payload(
                 pattern_id="w2",
                 channel="tool-result",
@@ -870,7 +870,7 @@ async def test_seed_arm_plants_poisoned_content_via_declared_tool(tmp_path: Path
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -896,7 +896,7 @@ async def test_seed_arm_plants_poisoned_content_via_declared_tool(tmp_path: Path
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             payload = Payload(
                 pattern_id="w2",
                 channel="tool-result",
@@ -1015,7 +1015,7 @@ async def test_controls_guard_planner_view_but_not_the_plant(tmp_path: Path) -> 
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -1056,7 +1056,7 @@ async def test_controls_guard_planner_view_but_not_the_plant(tmp_path: Path) -> 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
             adapter = MCPStdioAdapter(
-                family="triagent",
+                family="acme",
                 scope=None,
                 completion_fn=planner_stub,
                 controls=[UntrustedEnvelopeControl()],
@@ -1169,7 +1169,7 @@ async def test_open_session_drive_planner_stamps_effect_and_delivery(tmp_path: P
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent",
+            family="acme",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -1211,7 +1211,7 @@ async def test_open_session_drive_planner_stamps_effect_and_delivery(tmp_path: P
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(family="triagent", scope=None, completion_fn=planner_stub)
+            adapter = MCPStdioAdapter(family="acme", scope=None, completion_fn=planner_stub)
             session = await adapter.open_session()
             try:
                 await session.call_tool("remember", {"content": poison})
@@ -1426,7 +1426,7 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent-probe",
+            family="acme-probe",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -1472,7 +1472,7 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
             adapter = MCPStdioAdapter(
-                family="triagent-probe", scope=None, completion_fn=planner_stub
+                family="acme-probe", scope=None, completion_fn=planner_stub
             )
             session = await adapter.open_session()
             try:
@@ -1507,7 +1507,7 @@ async def test_open_session_call_tool_honours_explicit_payload_body(tmp_path: Pa
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent-explicit",
+            family="acme-explicit",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -1553,7 +1553,7 @@ async def test_open_session_call_tool_honours_explicit_payload_body(tmp_path: Pa
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
             adapter = MCPStdioAdapter(
-                family="triagent-explicit", scope=None, completion_fn=planner_stub
+                family="acme-explicit", scope=None, completion_fn=planner_stub
             )
             session = await adapter.open_session()
             try:
@@ -1588,7 +1588,7 @@ async def test_open_session_drive_planner_builds_the_haystack_once_per_call(
     target_registry.clear_runtime_targets()
     spec = build_target_spec(
         TargetFile(
-            family="triagent-haystack",
+            family="acme-haystack",
             command="python",
             args=["-m", "srv"],
             weakness_classes=["W2"],
@@ -1634,7 +1634,7 @@ async def test_open_session_drive_planner_builds_the_haystack_once_per_call(
             patch.object(_session_adapter, "_delivery_haystack", _counting_haystack),
         ):
             adapter = MCPStdioAdapter(
-                family="triagent-haystack", scope=None, completion_fn=planner_stub
+                family="acme-haystack", scope=None, completion_fn=planner_stub
             )
             session = await adapter.open_session()
             try:
