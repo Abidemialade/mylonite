@@ -12,6 +12,19 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # mcp 2.0 is a breaking rewrite: Tool.inputSchema -> input_schema,
+      # CallToolResult.isError -> is_error, streamablehttp_client ->
+      # streamable_http_client, and ClientSession(read_timeout_seconds=) moved
+      # from timedelta to float. It also swaps httpx for httpx2. Adopting it is
+      # blocked on the published mcp-kitchen-sink==0.1.0, which pins mcp<2.0 in
+      # immutable PyPI metadata — widening only the root package would make
+      # `pip install "mylonite[demo]"` unresolvable. See #68 (closed).
+      # Re-evaluate as a deliberate port: fix the call sites, republish the
+      # reference target, then move both pins together. Minor/patch updates
+      # within mcp 1.x are unaffected by this rule.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
