@@ -1,13 +1,14 @@
-# Keystone: land ONE real external differential (handoff)
+# Land ONE real external differential (handoff)
 
-> **The goal.** The moat's strongest proof is a single committed regression test built
-> from a **non-self-seeded** target — a real open-source MCP server Mylonite did *not*
-> author — that **fires on the unguarded app, is resisted once the control is applied,
-> holds across the 5-run flakiness gate, and emits a validated test**. The in-repo
-> reference twins already prove this; this is about proving it in the wild.
+> **The goal.** The strongest proof of the control-efficacy check is a single committed
+> regression test built from a **non-self-seeded** target — a real open-source MCP server
+> Mylonite did *not* author — that **fires on the unguarded app, is resisted once the
+> control is applied, holds across the 5-run flakiness gate, and emits a validated test**.
+> The in-repo vulnerable and guarded builds already prove this; this is about proving it in
+> the wild.
 
 > **The chosen approach:** use
-> the **control-efficacy oracle**, which holds the model constant and varies only the
+> the **control-efficacy check**, which holds the model constant and varies only the
 > safeguard — so we prove the *control* is load-bearing **without needing to out-fool a
 > frontier model**. This is why robust-model resistance (DVMCP recall 0/8) is not a
 > blocker: an app-design flaw (an unconfirmed `send_email`, an un-allowlisted egress) is
@@ -23,8 +24,8 @@
 ### Primary — W4 unconfirmed consequential action: `mcp-server-email`
 
 `Shy2593666979/mcp-server-email` (**MIT**, Python, stdio). Exposes `send_email` with **no
-confirmation/approval step** — the *same flaw class* as our reference keystone, on code we
-didn't write. Maximal credibility.
+confirmation/approval step** — the *same flaw class* as the in-repo reference app's W4, on
+code we didn't write. Maximal credibility.
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-..."
@@ -42,7 +43,7 @@ mylonite scan --command "python" --arg "-m" --arg "mcp_email_server" --scaffold 
 mylonite validate --target-file email.yaml --authorize mcp-email --iterations 5
 mylonite ablate   --target-file email.yaml --authorize mcp-email --controls W4
 
-# 3. if KEPT, the emitted test is the keystone artifact. Commit it.
+# 3. if KEPT, the emitted test is the external-differential artifact. Commit it.
 ```
 
 > **SAFETY — mandatory.** `send_email` really sends. Point it at a **sandboxed SMTP sink**
@@ -50,7 +51,7 @@ mylonite ablate   --target-file email.yaml --authorize mcp-email --controls W4
 > responsible-use default; the `--authorize` flag asserts you own the target.
 
 Success = a **KEPT** differential: the raw server dispatches the send with no approval; the
-control-shim guarded twin stages/blocks it; the gap holds 5/5; a validated regression test
+control-shim guarded build stages/blocks it; the gap holds 5/5; a validated regression test
 is emitted. Because W4 is about the *app's dispatch behavior*, not the model falling for an
 injection, this fires regardless of planner-model robustness.
 
@@ -63,7 +64,7 @@ the *official* reference server (recognizable to the exact wedge).
 ```powershell
 mylonite scan --command "uvx" --arg "mcp-server-fetch" --scaffold fetch.yaml
 # edit fetch.yaml: weakness_classes [W3], egress tool = fetch, effect_probe = an internal
-# URL the guarded (host-allowlist) twin must refuse. Then:
+# URL the guarded (host-allowlist) build must refuse. Then:
 mylonite validate --target-file fetch.yaml --authorize mcp-fetch --iterations 5
 ```
 
@@ -89,7 +90,7 @@ crutch below. Prefer the real OSS servers above.
 - DVMCP ships **no LICENSE file**, so the fetch is opt-in (`--include-unlicensed`); it is
   cloned at a pinned commit and never vendored.
 
-## Path A — control-efficacy oracle on a DVMCP app-flaw challenge (preferred)
+## Path A — the control-efficacy check on a DVMCP app-flaw challenge (preferred)
 
 This holds the model constant and varies only the safeguard (the control-shim differential),
 so it doesn't depend on a weaker model — *provided* the challenge's harmful action lands
@@ -113,11 +114,11 @@ python -m verification.runner layer1 emit-targets
 mylonite validate --target-file verification/.cache/dvmcp/targets/c3.yaml `
     --authorize dvmcp-c3 --iterations 5
 
-# 5. if it KEPT, the emitted test under .mylonite/ IS the keystone artifact. Commit it.
+# 5. if it KEPT, the emitted test under .mylonite/ IS the artifact. Commit it.
 ```
 
 Success = `validate` reports **KEPT**: the attack fired on the raw target and was resisted
-with the control across 5/5 runs. That committed test is the external keystone.
+with the control across 5/5 runs. That committed test is the external differential.
 
 ## Path B — manufacture a positive with a weaker planner, then prove the guard closes it
 
@@ -130,8 +131,8 @@ model.
 # Point the PLANNER (agent-under-test) at a weaker model; keep judge/customiser strong.
 mylonite scan --target-file verification/.cache/dvmcp/targets/c6.yaml `
     --authorize dvmcp-c6 --planner-model <weaker-or-older-model>
-mylonite generate --latest --out .mylonite/generated/keystone
-mylonite validate .mylonite/generated/keystone `
+mylonite generate --latest --out .mylonite/generated/external
+mylonite validate .mylonite/generated/external `
     --target-file verification/.cache/dvmcp/targets/c6.yaml --iterations 5
 ```
 
@@ -144,8 +145,8 @@ genuinely weaker model.
 
 Update [`FINDINGS.md`](FINDINGS.md) (the "Layer 1 — DVMCP recall" section) with the
 challenge, the model, and the differential result, and commit the emitted test. That single
-external differential converts the keystone from "proven on our own twins" to "proven on a
-target we didn't author" — the strongest version of the moat claim.
+external differential moves the proof from "shown on our own vulnerable and guarded builds"
+to "shown on a target we didn't author" — the strongest form of the control-efficacy claim.
 
 ## Caveats
 

@@ -2,7 +2,7 @@
 
 A tiered system for checking Mylonite's claims against ground truth Mylonite did
 NOT author. Unlike ``mylonite.corpus`` (which scores the in-repo kitchen-sink
-twins — ground truth we wrote), this harness scores Mylonite against external,
+builds — ground truth we wrote), this harness scores Mylonite against external,
 independently-published sources:
 
 - **Layer 1** — runnable vulnerable targets (DVAA, ...): point Mylonite's full

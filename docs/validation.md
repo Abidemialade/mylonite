@@ -113,8 +113,8 @@ the core differentiator. On a target you don't have two builds of, the sharper q
 is not "is there a weakness?" — it's *"which safeguard is actually carrying the security,
 and does it hold?"* For a real (`--target-file`) target it runs **by default** —
 `validate` and `gate` synthesize the guarded build at the adapter boundary and prove the
-control automatically. (`--prove-control` is kept as a back-compat no-op; pass `--fast`
-to *skip* the differential for a faster, weaker gate.)
+control automatically. (Pass `--fast` to *skip* the differential for a faster, weaker
+gate.)
 
 The move is to **hold the model constant and vary only the safeguard**. Mylonite
 synthesizes a *guarded build* of any real target by applying a canonical control

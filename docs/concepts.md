@@ -66,9 +66,9 @@ build* of any real target by applying a canonical control (W1–W4) at the adapt
 boundary, then keeps a finding only when the attack fires on the raw target and is
 resisted with the control applied — proving the *control*, not the model's current
 behaviour, carries the security. For a real (`--target-file`) target this differential
-runs **by default** in `validate`/`gate` (`--prove-control` is a back-compat no-op,
-`--fast` skips it); `mylonite ablate` scores the whole control set as load-bearing /
-theater / redundant. The plant and effect probe always bypass the boundary shim, so
+runs **by default** in `validate`/`gate` (`--fast` skips it); `mylonite ablate` scores
+the whole control set as load-bearing / theater / redundant. The plant and effect probe
+always bypass the boundary shim, so
 the control is measured against an undiluted attack. Full treatment in
 [the validation engine](validation.md#the-control-efficacy-check).
 

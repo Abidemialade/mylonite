@@ -1883,7 +1883,6 @@ def _validate_custom(
     provider: str,
     model: str,
     iteration_timeout_s: float | None = None,
-    prove_control: bool = False,
     randomize_exfil: bool = False,
     fast: bool = False,
     prove_input_control: bool = False,
@@ -1947,9 +1946,7 @@ def _validate_custom(
     # model held constant) gates `kept` BY DEFAULT — proving the *safeguard*, not the
     # model, carries the security. `--fast` opts out (it doubles the live runs per
     # finding); a weakness with no inferable control falls back loudly to the
-    # stability/effect/consensus gate. `--prove-control` is now the default behaviour
-    # and kept only for back-compat.
-    del prove_control
+    # stability/effect/consensus gate.
     run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
     echo_err(f"validate: {diff_note}")
     if not randomize_exfil:
@@ -2367,16 +2364,6 @@ def validate(
             ),
         ),
     ] = _DEFAULT_ITERATION_TIMEOUT_S,
-    prove_control: Annotated[
-        bool,
-        typer.Option(
-            "--prove-control",
-            help=(
-                "Deprecated/back-compat: the differential leg now runs BY DEFAULT for a "
-                "real target, so this flag is a no-op. Pass --fast to skip the differential."
-            ),
-        ),
-    ] = False,
     prove_input_control: Annotated[
         bool,
         typer.Option(
@@ -2517,7 +2504,6 @@ def validate(
             effective_provider,
             effective_model,
             iteration_timeout_s=iteration_timeout,
-            prove_control=prove_control,
             randomize_exfil=randomize_exfil,
             fast=fast,
             prove_input_control=prove_input_control,
@@ -3317,16 +3303,6 @@ def gate(
         typer.Option(
             "--llm-enrich",
             help="Append a labelled, unverified LLM fix suggestion to the PR body.",
-        ),
-    ] = False,
-    prove_control: Annotated[
-        bool,
-        typer.Option(
-            "--prove-control",
-            help=(
-                "Deprecated/back-compat: for a custom target the differential now runs BY "
-                "DEFAULT (the emitted test is the control-verified one). Pass --fast to skip it."
-            ),
         ),
     ] = False,
     fast: Annotated[

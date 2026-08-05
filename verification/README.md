@@ -1,8 +1,8 @@
 # Mylonite verification harness
 
 Independent verification of Mylonite's claims against ground truth Mylonite did
-**not** author. Where `mylonite.corpus` scores the in-repo kitchen-sink twins
-(ground truth we wrote — useful, but circular), this harness scores Mylonite
+**not** author. Where `mylonite.corpus` scores the in-repo kitchen-sink
+builds (ground truth we wrote — useful, but circular), this harness scores Mylonite
 against external, independently-published sources.
 
 Lives outside `src/mylonite` and is excluded from the wheel; it consumes the
@@ -13,8 +13,9 @@ digests (`SOURCE.md`), never vendored.
 > evidence-backed scorecard (real catch, recall, judge agreement, precision) and
 > the honest gaps. Headline: *model robustness ≠ app security.*
 >
-> **To land the strongest moat proof** — one external (non-self-seeded) differential —
-> follow the maintainer-run recipe in [`KEYSTONE.md`](KEYSTONE.md).
+> **To land the strongest available proof** — one external (non-self-seeded) differential —
+> follow the maintainer-run recipe in
+> [`EXTERNAL_DIFFERENTIAL.md`](EXTERNAL_DIFFERENTIAL.md).
 
 ## Layers
 

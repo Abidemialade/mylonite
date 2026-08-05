@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`validate --prove-control` and `gate --prove-control` removed.** Both were
+  documented back-compat no-ops: the control-efficacy differential has run BY
+  DEFAULT for a real target since M1, and neither command read the flag's value
+  anymore. Pass `--fast` to skip the differential leg instead.
+  `generate --prove-control` is **unaffected** — it still selects the
+  control-efficacy test template. If you pass either removed flag, the CLI now
+  exits 2 with "No such option"; drop it from your invocation.
+
+### Changed
+
+- **`verification/KEYSTONE.md` is renamed `verification/EXTERNAL_DIFFERENTIAL.md.`**
+  "Keystone" said nothing about the document's contents; it describes the
+  external control-efficacy differential (the maintainer-run recipe that scores
+  Mylonite against a third-party target it did not author). Referring documents
+  updated. This file is not published to the docs site, so no URL breaks.
+
 ## [0.7.6] - 2026-08-03
 
 ### Fixed (CI)
