@@ -8,32 +8,70 @@
 > base `pip install mylonite` is unaffected and **never** pulls this deliberately-
 > vulnerable agent — that invariant is preserved.
 
-## Status (verified this pass)
+## Status (re-verified 2026-08-03)
 
 - Builds cleanly: `python -m build reference_targets/mcp_kitchen_sink` → sdist + wheel.
 - `twine check` **PASSED** on both artifacts (metadata is PyPI-valid).
 - Version `0.1.0`, Apache-2.0, `requires-python >=3.11`.
-- It depends on `mylonite` (already on PyPI at 0.7.3), and `mylonite[demo]` depends back
-  on it. This circular *extra* is fine for pip: each resolves independently. Publish order
-  does not matter.
+- The `mcp` extra is pinned `>=1.0,<2.0`, matching the root package. **This pin had to
+  land before the first release**: `mcp` 2.0 renamed `Tool.inputSchema` → `input_schema`
+  and `CallToolResult.isError` → `is_error`, which this target's server shim uses, and a
+  published version's metadata is immutable — an unbounded floor would have baked the
+  breakage in permanently.
+- It depends on `mylonite` (on PyPI, latest published 0.7.5), and `mylonite[demo]` depends
+  back on it. This circular *extra* is fine for pip: each resolves independently. Publish
+  order does not matter.
+- **The release automation is already wired**: `.github/workflows/release-kitchen-sink.yml`
+  builds from this directory and publishes TestPyPI → PyPI via Trusted Publishing on a
+  `ks-v*` tag. Only the one-time PyPI-side setup below is outstanding.
 
-## Step 1 — build the artifacts
+## Step 1 — one-time PyPI setup (maintainer, browser — REQUIRED FIRST)
+
+The workflow exists but cannot publish until the projects exist and trust this repo. Do
+this on **both** [pypi.org](https://pypi.org/manage/account/publishing/) and
+[test.pypi.org](https://test.pypi.org/manage/account/publishing/):
+
+1. Go to *Your projects → Publishing → Add a new pending publisher*.
+2. Fill in exactly:
+   - **PyPI project name:** `mcp-kitchen-sink`
+   - **Owner:** `Abidemialade`
+   - **Repository name:** `mylonite`
+   - **Workflow name:** `release-kitchen-sink.yml`  ← note: *not* `release.yml`
+   - **Environment name:** `pypi` on PyPI, `testpypi` on TestPyPI
+3. Save. (A *pending* publisher is correct here — the project doesn't exist yet; PyPI
+   creates it on the first successful upload.)
+
+The workflow filename is what distinguishes this from the `mylonite` publisher, so the
+two projects can safely share the `pypi`/`testpypi` environment names.
+
+## Step 2 — release it
+
+```bash
+git tag ks-v0.1.0
+git push origin ks-v0.1.0
+```
+
+That triggers `release-kitchen-sink.yml`: build → `twine check` → TestPyPI → PyPI. Watch
+it with `gh run watch`. Nothing else is needed — no local credentials, no manual upload.
+
+<details>
+<summary>Fallback — one-off manual upload (only if Trusted Publishing can't be set up)</summary>
+
+Requires a PyPI API token. Prefer Step 2; this path leaves no audit trail in Actions.
 
 ```powershell
 python -m build reference_targets/mcp_kitchen_sink --outdir dist_ks
-python -m twine check dist_ks/*       # expect: PASSED, PASSED
+python -m twine check dist_ks/*        # expect: PASSED, PASSED
+
+# TestPyPI first (recommended dry run):
+python -m twine upload --repository testpypi dist_ks/*
+python -m pip install --index-url https://test.pypi.org/simple/ `
+    --extra-index-url https://pypi.org/simple/ mcp-kitchen-sink   # resolves mylonite from real PyPI
+
+# then the real index:
+python -m twine upload dist_ks/*
 ```
-
-## Step 2 — publish (maintainer credentials required — pick ONE)
-
-**Option A — Trusted Publisher (OIDC), the same path `mylonite` uses.**
-1. On PyPI (and TestPyPI), create the project `mcp-kitchen-sink` and add a Trusted
-   Publisher pointing at this repo + the publish workflow + a `pypi` environment, exactly
-   as was done for `mylonite` (that OIDC exchange is already known-good — it published
-   `mylonite` 0.7.3).
-2. Add a tag-triggered job (mirror `.github/workflows/release.yml`) that builds from
-   `reference_targets/mcp_kitchen_sink/` and `pypa/gh-action-pypi-publish`. A separate tag
-   prefix (e.g. `ks-v0.1.0`) keeps it independent of `mylonite` releases.
+</details>
 
 **Option B — one-off manual upload (fastest, a PyPI API token).**
 ```powershell
@@ -55,9 +93,14 @@ pip install "mylonite[demo]"          # must now resolve mcp-kitchen-sink from P
 mylonite demo                          # 2 exploits on vulnerable, 0 on guarded — no clone
 ```
 
-When that runs green from a clean install, bump the README/CHANGELOG note that currently
-says the `[demo]` extra is "inert until published" to "available" and drop the
-clone-first fallback as the primary path.
+**No doc edits should be needed afterwards.** The README, `docs/quickstart.md` and
+`docs/quarry.md` already document `pip install "mylonite[demo]"` as the primary path —
+publishing is what makes those instructions true, rather than the docs being rewritten to
+match a missing package. If Step 3 does *not* come up green, that is the signal to fix the
+package or the docs, not to paper over it.
+
+The only place still describing the extra as unresolvable is the explanatory comment above
+`demo = [...]` in the root `pyproject.toml`; delete that caveat once Step 3 passes.
 
 ## Caveats specific to this machine
 
