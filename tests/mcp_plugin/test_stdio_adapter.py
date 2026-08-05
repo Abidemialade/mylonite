@@ -1471,9 +1471,7 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
-            adapter = MCPStdioAdapter(
-                family="acme-probe", scope=None, completion_fn=planner_stub
-            )
+            adapter = MCPStdioAdapter(family="acme-probe", scope=None, completion_fn=planner_stub)
             session = await adapter.open_session()
             try:
                 # Plant the real payload, THEN issue an incidental short-string call
