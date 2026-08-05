@@ -131,11 +131,11 @@ def test_planner_summarised_inconclusive_when_summary_solicited_by_drive() -> No
 
 
 def test_planner_summarised_inconclusive_when_system_prompt_mandates_summary() -> None:
-    """Baseline-aware (the Triagent false positive): when the target's own system
-    prompt mandates summaries (``baseline_solicits_summary``), a summary is baseline
-    behaviour — the marker can't be attributed to the smuggle. Defer to the oracle
-    (return None) instead of asserting a confirmed scan finding. The reference target
-    is unaffected: its summary lives in a tool description, not the system prompt."""
+    """Baseline-aware: when the target's own system prompt mandates summaries
+    (``baseline_solicits_summary``), a summary is baseline behaviour — the marker
+    can't be attributed to the smuggle. Defer to the oracle (return None) instead
+    of asserting a confirmed scan finding. The reference target is unaffected: its
+    summary lives in a tool description, not the system prompt."""
     fn = lookup_predicate("planner_summarised_against_user_intent")
     v = fn(
         _payload(metadata={"drive": "read_note_direct", "baseline_solicits_summary": "1"}),

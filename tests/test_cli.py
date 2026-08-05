@@ -448,7 +448,7 @@ def test_scan_mcp_github_rejects_missing_slash() -> None:
 
 def test_scan_custom_target_requires_authorize(tmp_path: Path) -> None:
     p = tmp_path / "t.yaml"
-    p.write_text("family: triagent\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+    p.write_text("family: acme\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
     result = runner.invoke(app, ["scan", "--target-file", str(p)])
     assert result.exit_code == EXIT_CONFIG
     assert "authorize" in (result.stderr or result.output).lower()
@@ -499,12 +499,12 @@ def test_scan_custom_target_file_dry_run_enumerates_seeds(
     _patch_fake_mcp_session(monkeypatch)
     p = tmp_path / "t.yaml"
     p.write_text(
-        "family: triagent\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2, W4]\n",
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2, W4]\n",
         encoding="utf-8",
     )
     result = runner.invoke(
         app,
-        ["scan", "--target-file", str(p), "--authorize", "triagent", "--dry-run"],
+        ["scan", "--target-file", str(p), "--authorize", "acme", "--dry-run"],
     )
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert "dry-run" in result.stdout or "attempts" in result.stdout
@@ -520,8 +520,8 @@ def test_scan_custom_target_without_weakness_classes_is_loud(
     target_registry.clear_runtime_targets()
     _patch_fake_mcp_session(monkeypatch)
     p = tmp_path / "t.yaml"
-    p.write_text("family: triagent\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
-    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "triagent"])
+    p.write_text("family: acme\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "acme"])
     assert result.exit_code == EXIT_CONFIG
     assert "no seeds" in (result.stderr or result.output).lower()
     target_registry.clear_runtime_targets()
