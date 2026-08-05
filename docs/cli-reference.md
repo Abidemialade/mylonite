@@ -83,8 +83,7 @@ target's declared `scope`, or its family name if no scope is declared; see
 (skip the differential leg — faster, weaker); `--randomize-exfil/--no-randomize-exfil`
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
-reference/replay path); `--iteration-timeout S`. `--prove-control` is a back-compat no-op
-(the differential is now default).
+reference/replay path); `--iteration-timeout S`.
 
 ```bash
 mylonite validate .mylonite/generated/my-finding --target-file app.yaml --authorize my-app

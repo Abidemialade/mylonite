@@ -219,6 +219,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **BEHAVIOUR CHANGE:** `mylonite ablate` now validates that `--authorize`
     actually names the target (its scope or family), not merely that some
     non-empty value was supplied.
+- **`docs/quarry.md` is renamed `docs/reference-app.md`**, completing the 0.7.5 rename of
+  "the Quarry" to "the reference app" down to the URL. **This breaks the published
+  `/quarry/` link** — anything pointing at
+  `https://abidemialade.github.io/mylonite/quarry/` needs updating to `/reference-app/`.
+  No redirect is configured. The planned demo asset is renamed to
+  `docs/assets/reference-app-demo.gif` for the same reason.
+- **`validate --prove-control` and `gate --prove-control` removed.** Both were
+  documented back-compat no-ops since the differential leg started running by
+  default — nothing in either command read the flag's value anymore. Pass
+  `--fast` to skip the differential leg instead. `generate --prove-control` is
+  unaffected (it still tags the emitted test as control-verified).
 
 ### Fixed
 
