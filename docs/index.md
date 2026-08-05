@@ -17,7 +17,7 @@ The phased build plan lives in
 
 !!! success "Status: the full pipeline works"
     `scan` → `generate` → `validate` → `gate` runs end to end against the bundled reference
-    app and your own MCP app (`--target-file`). Findings are proven by the
+    app and your own MCP (Model Context Protocol) app (`--target-file`). Findings are proven by the
     [control-efficacy check](validation.md) (the two-build differential on the reference
     app), emitted as committed pytest regression tests, and surfaced as a gating PR,
     [SARIF](reading-results.md), or a JSON bundle. Every claim is checked by an
