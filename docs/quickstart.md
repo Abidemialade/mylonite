@@ -63,7 +63,8 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
   API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
   provider via `--provider`/`--model` plus that provider's own key env var.
   Targets: `reference:vulnerable` / `reference:guarded`
-  (the in-process reference app builds), and the bundled MCP stdio families
+  (the in-process reference app builds), and the bundled MCP (Model Context
+  Protocol) stdio families
   `mcp:filesystem:<sandbox>`, `mcp:fetch`, `mcp:github:<owner/repo>` — these
   require `--authorize` (see the
   [responsible-use policy](security.md)) plus the family's runtime: `uv` for

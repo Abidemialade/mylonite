@@ -10,10 +10,13 @@
 [![CI](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml/badge.svg)](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-Point Mylonite at any MCP app, whatever model or framework is behind it. It attacks the
-AI/agentic layer — the system prompt, tool/function schemas, RAG pipeline, and agent
-memory — finds app-specific weaknesses, and for each one emits a **validated,
-CI-gating `pytest` regression test**.
+**Built for teams shipping MCP or agentic apps who need CI-enforced regression coverage on
+the AI layer.**
+
+Point Mylonite at any MCP (Model Context Protocol) app, whatever model or framework is
+behind it. It attacks the AI/agentic layer — the system prompt, tool/function schemas, RAG
+pipeline, and agent memory — finds app-specific weaknesses, and for each one emits a
+**validated, CI-gating `pytest` regression test**.
 
 The core differentiator is the **control-efficacy check**. It holds the model constant and
 toggles only the safeguard, keeping a finding only when the attack *fires* on your app and
@@ -25,6 +28,13 @@ Mylonite against external ground truth it did not author.
 
 Mylonite deliberately does *not* test the surrounding traditional code; that work belongs to
 SAST/DAST tools.
+
+**Where this sits.** Static scanners read your tool descriptions and flag the ones that look
+dangerous; you are left to judge which flags matter. Model-eval harnesses swap models and
+score which one behaves best. Mylonite does neither. It runs the attack against your app,
+then holds the model constant and toggles only your safeguard — so the finding you get back
+is evidence about *your control*, not about how a description reads or how a model scored
+today.
 
 **Example: same model, two versions of one app.** Run the *same* model against the two
 versions of the bundled reference app. Against the deliberately-vulnerable version Mylonite
@@ -113,14 +123,24 @@ model resists some patterns outright, which is why the exact count varies by mod
 reference app runs entirely in-process and never binds to a network. Full walkthrough:
 [docs/quarry.md](./docs/quarry.md).
 
-Once you've seen it, point `scan` at your own MCP app:
+Once you've seen it, point `scan` at your own MCP app. **The first step is free** — it needs
+no API key and makes no model call:
 
 ```bash
-mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml   # write a target.yaml
-mylonite scan --target-file app.yaml --authorize my-app                     # then scan it
+mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml   # free, no API key
 ```
 
-*(scanning needs an LLM API key; scaffolding does not)*
+That connects to your server, lists the tools it exposes, tells you which weakness classes
+apply to that surface, flags the consequential-action tools worth guarding, and writes a
+starter `app.yaml`. Treat it as a scope check, not a verdict: it reads your tool *surface*,
+not your tool descriptions, and everything it suggests is a hint for you to confirm.
+
+Proving which weaknesses actually land — and which of your controls stops them — is the
+scan itself, and that needs a key:
+
+```bash
+mylonite scan --target-file app.yaml --authorize my-app                    # needs an LLM API key
+```
 
 ## From scan to a gating PR
 
