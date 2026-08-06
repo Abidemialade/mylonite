@@ -357,6 +357,37 @@ def test_factory_routes_rest_transport_to_http_adapter() -> None:
     assert isinstance(adapter, HTTPAgentAdapter)
 
 
+# --- explicit __init__ signature (no `**_ignored` catch-all) ----------------
+
+
+def test_unknown_kwarg_raises_type_error_instead_of_silently_swallowing() -> None:
+    """The old ``**_ignored: Any`` catch-all silently dropped ANY keyword,
+    including a typo'd or wrong-named argument a caller actually meant to be
+    observed (e.g. an offline differential's ``completion_fn`` under some other
+    name). The explicit signature must let Python's normal keyword handling
+    raise ``TypeError`` on a name it doesn't recognise."""
+    with pytest.raises(TypeError):
+        HTTPAgentAdapter(family="myagent", not_a_real_kwarg="boom")  # type: ignore[call-arg]
+
+
+def test_mcp_only_kwargs_are_still_accepted_and_ignored() -> None:
+    """The MCP-only kwargs the shared factory passes for every transport
+    (model/completion_fn/controls/launch overrides) must still be accepted —
+    just explicitly named now, rather than via a catch-all — so the SAME
+    factory call shape keeps working for a `rest` target."""
+    _register_rest()
+    adapter = HTTPAgentAdapter(
+        family="myagent",
+        model="m",
+        completion_fn=lambda **_kw: None,
+        controls=[],
+        launch_env={"X": "1"},
+        launch_command="cmd",
+        launch_args=["--flag"],
+    )
+    assert isinstance(adapter, HTTPAgentAdapter)
+
+
 # --- target-file validation --------------------------------------------------
 
 

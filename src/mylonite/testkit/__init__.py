@@ -285,15 +285,27 @@ def _run_target_scan(
     provider: str,
     controls: list[Any] | None,
     completion_fn: Callable[..., Any] | None,
+    disable_controls: tuple[str, ...] = (),
 ) -> ScanResult:
     """Re-drive the declared target once, scoped to one seed.
 
     ``controls`` (when non-empty) wraps the adapter boundary to synthesize a
     guarded twin of the real target — the model is held constant, only the
-    control differs. Shared by :func:`assert_target_resists` (raw, no controls)
-    and :func:`assert_control_holds` (raw + boundary-guarded).
+    control differs. ``disable_controls`` (when non-empty) instead toggles OFF
+    the named SERVER-LAYER guard(s) via the target's declared ``control_env``,
+    so the re-drive exercises the target's own real guard rather than only the
+    low-fidelity adapter-boundary shim. Shared by :func:`assert_target_resists`
+    (raw, no controls, no disables) and :func:`assert_control_holds` (raw +
+    boundary-guarded, or raw-with-server-guard-disabled + real-guard-on).
+
+    Builds its adapter through :func:`~mylonite.plugins._mcp.factory.build_adapter_for_spec`
+    — the shared transport-dispatching chokepoint — rather than constructing an
+    MCP adapter class directly. That is what lets ``disable_controls`` actually
+    take effect (the launch triple is threaded, not skipped), and what makes
+    this correct for a non-stdio custom target (``transport: sse/http/rest``),
+    which a hardcoded ``MCPStdioAdapter`` would silently mis-drive.
     """
-    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
     from mylonite.plugins.registry import discover
     from mylonite.scan.customiser import PayloadCustomiser
     from mylonite.scan.engine import ScanConfig, ScanEngine
@@ -304,12 +316,15 @@ def _run_target_scan(
         for m in discover("mylonite.attack_modules")
         if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
     ]
-    adapter = MCPStdioAdapter(
-        family=spec.family,
+    adapter = build_adapter_for_spec(
+        spec,
         scope=scope,
         model=model,
         completion_fn=completion_fn,
-        controls=controls,
+        intent=LaunchIntent(
+            boundary_controls=tuple(controls or ()),
+            disable_controls=disable_controls,
+        ),
     )
     config = ScanConfig(
         target_id=f"mcp:{spec.family}",
@@ -540,6 +555,17 @@ def assert_control_holds(
         The guarded run was inconclusive (only skip/error outcomes).
     ValueError:
         ``control`` names a weakness class with no implemented boundary control.
+
+    Notes
+    -----
+    When the target declares a SERVER-LAYER toggle for ``control`` (its target
+    file's ``control_env``), the raw leg re-drives with that REAL guard turned
+    OFF (via ``disable_controls``) rather than relying only on the adapter-
+    boundary shim — mirroring the CLI's ``validate``/``ablate`` server-layer
+    differential — and the guarded leg is simply the plain default launch (the
+    real guard is ON by default, so no shim is layered on top of it). A target
+    with no ``control_env`` entry for ``control`` is unaffected: both legs
+    behave exactly as before (boundary shim only).
     """
     from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
@@ -558,8 +584,11 @@ def assert_control_holds(
         )
     tf = load_target_file(target_path)
     spec = build_target_spec(tf)
+    server_layer = control in spec.control_env
     # Resolve the boundary control up front so a bad control name fails clearly
-    # (ValueError) before we spawn any subprocess.
+    # (ValueError) before we spawn any subprocess. Still resolved even on the
+    # server_layer path — it validates ``control`` names a real weakness class,
+    # and stays available in case a future caller wants to combine both legs.
     boundary_control = make_control(control)
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
@@ -572,6 +601,7 @@ def assert_control_holds(
             provider=provider,
             controls=None,
             completion_fn=_completion_fn,
+            disable_controls=(control,) if server_layer else (),
         )
         guarded = _run_target_scan(
             spec=spec,
@@ -579,7 +609,7 @@ def assert_control_holds(
             pattern_id=exploit.pattern_id,
             model=model,
             provider=provider,
-            controls=[boundary_control],
+            controls=None if server_layer else [boundary_control],
             completion_fn=_completion_fn,
         )
     finally:

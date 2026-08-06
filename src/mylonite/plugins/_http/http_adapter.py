@@ -20,6 +20,7 @@ probe a black box can't provide.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -237,7 +238,23 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         family: str,
         scope: str | None = None,
         input_frame: bool = False,
-        **_ignored: Any,
+        # Everything below is an MCP-only kwarg (see MCPSessionAdapterBase):
+        # accepted-and-IGNORED so ``build_mcp_adapter``/``build_adapter_for_spec``
+        # can pass the same call shape to any transport without special-casing
+        # ``rest``. Named explicitly — rather than a ``**_ignored: Any`` catch-all
+        # — so a genuinely unrecognised keyword (a typo, or a future param this
+        # adapter really does need to observe, e.g. a caller meaning to pass
+        # ``completion_fn`` under some other name) raises ``TypeError`` instead of
+        # being silently swallowed. A caller that intends an offline/fixture-
+        # replayed differential and misspells a kwarg here now fails loudly
+        # instead of the "offline" run silently doing something else.
+        model: str | None = None,
+        completion_fn: Callable[..., Any] | None = None,
+        planner_timeout_s: float | None = None,
+        controls: list[Any] | None = None,
+        launch_env: dict[str, str] | None = None,
+        launch_command: str | None = None,
+        launch_args: list[str] | None = None,
     ) -> None:
         spec = target_registry.resolve_target(family, scope)
         if spec.request is None:
