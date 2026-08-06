@@ -2765,6 +2765,18 @@ def report(
     sreport: Any = None
     dashboard_exploit: Any = None
     dashboard_exploits: list[Any] = []
+    # A1: the exit code for a `kind == "scan"` artefact. Defaults to success;
+    # overwritten below from `ScanOutcome.from_report(sreport)` once loaded --
+    # the same single "did this scan actually work" authority `scan`/`gate`
+    # already go through (mylonite.scan.coverage). Before this, `report`
+    # rendered "aborted: <reason>" in its own output text and then STILL fell
+    # through to `raise typer.Exit(code=EXIT_SUCCESS)` unconditionally --
+    # exactly the silent fail-open this release exists to close. A validation
+    # artefact has no comparable "did this actually run" signal to re-derive
+    # (any persisted validation_report.json already reflects a completed run;
+    # `kept=False` is a genuine verdict, not an infra abort), so it keeps
+    # EXIT_SUCCESS unconditionally.
+    exit_code = EXIT_SUCCESS
 
     if kind == "validation":
         from mylonite import testkit
@@ -2807,6 +2819,11 @@ def report(
         except Exception as exc:
             echo_exc(f"could not load {path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        from mylonite.scan.coverage import ScanOutcome
+
+        exit_code = ScanOutcome.from_report(sreport).exit_code
+
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console_print(console, render_summary(result), markup=False)
@@ -2859,7 +2876,7 @@ def report(
                 _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
             )
             echo(f"Wrote JSON finding bundle: {json_bundle}")
-    raise typer.Exit(code=EXIT_SUCCESS)
+    raise typer.Exit(code=exit_code)
 
 
 def _suggest_weakness_classes(tools: list[Any]) -> list[str]:

@@ -1956,6 +1956,67 @@ def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     assert "scan_report.json" in out or "validation_report.json" in out
 
 
+def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
+    """A1 (release/0.7.7-honest-results): a scan_report.json whose scan was
+    formally aborted (e.g. `aborted="provider_unreachable"`, the shape a bare
+    `mylonite scan` with no ANTHROPIC_API_KEY produces) must make `mylonite
+    report` exit non-zero too -- rendering "aborted: provider_unreachable" in
+    the panel while still exiting 0 is exactly the silent-fail-open bug this
+    release exists to close. The plan's own acceptance test says this in so
+    many words: `mylonite report "$TMP/aborted-scan"  # MUST exit non-zero`.
+    Expected code comes from `ScanOutcome.from_report`'s
+    `_EXIT_CODE_BY_ABORT` mapping (mylonite.scan.coverage): PROVIDER_UNREACHABLE
+    -> EXIT_PROVIDER (4), matching `scan`'s own exit code for the identical
+    abort reason.
+    """
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    scan_dir = tmp_path / "aborted-scan"
+    scan_dir.mkdir()
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism="predicate",
+                verdict_reason=None,
+                error_detail="provider unreachable",
+            )
+        ],
+        findings_count=0,
+        aborted="provider_unreachable",
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    (scan_dir / "scan_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    assert result.exit_code != EXIT_SUCCESS
+    assert "aborted" in result.output.lower()
+
+
+def test_report_clean_scan_still_exits_success(tmp_path: Path) -> None:
+    """Regression guard for the A1 fix above: a genuine, non-aborted scan
+    (the common case) must keep exiting 0 through `mylonite report`."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=0)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+
 # ---------------------------------------------------------------------------
 # PR6 — declarative run-config.
 # ---------------------------------------------------------------------------
