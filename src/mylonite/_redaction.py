@@ -308,9 +308,39 @@ def target_yaml_env_ref_name(*path: str) -> str:
     return f"MYLONITE_TARGET_{segments}"
 
 
-def _env_ref_placeholder(*path: str) -> str:
-    """The literal ``${VAR}`` text a masked field is replaced with."""
-    return "${" + target_yaml_env_ref_name(*path) + "}"
+def _dedupe_ref_names(path_prefix: tuple[str, ...], keys: list[str]) -> dict[str, str]:
+    """Assign each of ``keys`` a DISTINCT derived env-var name under
+    ``path_prefix``, even when two different keys normalise to the same
+    :func:`target_yaml_env_ref_name` (e.g. ``X-Api-Key`` and ``X_Api_Key`` both
+    become ``..._X_API_KEY`` after the ``[^A-Za-z0-9_]`` → ``_`` + upper-case
+    transform).
+
+    ``target_yaml_env_ref_name`` alone is collision-resistant ACROSS sections
+    (``env`` vs ``headers`` vs ``request.headers``) by construction, but two
+    keys within the SAME section can still normalise to the same string. Two
+    fields silently sharing one env var would defeat the entire point of this
+    scheme (T9: genuinely re-runnable, not just safely masked) — there would be
+    no way to set both back to their own distinct original value.
+
+    Deterministic (keys are processed in the given order — dict iteration
+    order, i.e. insertion order): the first key to claim a base name keeps it
+    unsuffixed; every subsequent key whose base name is already taken gets the
+    lowest-numbered ``_N`` (``N`` >= 2) suffix not already assigned to another
+    key in this same call, so a suffix can itself never collide with a
+    naturally-derived or previously-disambiguated name.
+    """
+    assigned: set[str] = set()
+    result: dict[str, str] = {}
+    for key in keys:
+        base = target_yaml_env_ref_name(*path_prefix, key)
+        name = base
+        suffix = 2
+        while name in assigned:
+            name = f"{base}_{suffix}"
+            suffix += 1
+        assigned.add(name)
+        result[key] = name
+    return result
 
 
 def _is_secret_env(key: str, value: object) -> bool:
@@ -339,13 +369,13 @@ def redact_env(env: dict[str, str]) -> dict[str, str]:
     ``GITHUB_TOKEN``) that reaches a target.yaml written to disk. Key names and
     non-secret values survive so the file still documents the target. Unlike an
     opaque placeholder, the ``${VAR}`` reference (derived from the key via
-    :func:`target_yaml_env_ref_name`) is genuinely re-runnable: set the named
+    :func:`target_yaml_env_ref_name`, disambiguated against sibling keys by
+    :func:`_dedupe_ref_names`) is genuinely re-runnable: set the named
     environment variable to the real value and ``load_target_file`` restores it.
     """
-    return {
-        k: (_env_ref_placeholder("env", k) if _is_secret_env(k, v) else v)
-        for k, v in env.items()
-    }
+    secret_keys = [k for k, v in env.items() if _is_secret_env(k, v)]
+    ref_names = _dedupe_ref_names(("env",), secret_keys)
+    return {k: (f"${{{ref_names[k]}}}" if k in ref_names else v) for k, v in env.items()}
 
 
 def redact_target_yaml(text: str) -> str:
@@ -357,13 +387,17 @@ def redact_target_yaml(text: str) -> str:
     password into git history (DCR-0006/0010/0016). This replaces every ``headers``
     value unconditionally (both the sse/http transport's top-level ``headers`` and
     the rest transport's ``request.headers``) and every credential-shaped ``env``
-    value with a ``${VAR}`` reference (:func:`target_yaml_env_ref_name`), leaving
-    key names and structure intact so the copy still documents the target. Unlike
-    a bare placeholder, this is genuinely OPERATIONAL, not just structurally
-    parseable: the copy still round-trips through ``load_target_file`` to a
-    RUNNABLE target once the operator sets the named environment variable(s) to
-    the real values — ``load_target_file`` expands ``${VAR}`` references and
-    fails loudly (never with an empty/broken credential) if one is unset.
+    value with a ``${VAR}`` reference (:func:`target_yaml_env_ref_name`,
+    disambiguated within each section by :func:`_dedupe_ref_names` so two keys
+    that normalise to the same name — e.g. ``X-Api-Key`` and ``X_Api_Key`` — get
+    DISTINCT ``${VAR}`` names, never one shared between two different secrets),
+    leaving key names and structure intact so the copy still documents the
+    target. Unlike a bare placeholder, this is genuinely OPERATIONAL, not just
+    structurally parseable: the copy still round-trips through
+    ``load_target_file`` to a RUNNABLE target once the operator sets the named
+    environment variable(s) to the real values — ``load_target_file`` expands
+    ``${VAR}`` references and fails loudly (never with an empty/broken
+    credential) if one is unset.
 
     A document that does not parse as a YAML mapping falls back to
     :func:`redact` over the raw text — a malformed file is never persisted
@@ -381,16 +415,16 @@ def redact_target_yaml(text: str) -> str:
     for section in _ALWAYS_MASK_SECTIONS:
         block = data.get(section)
         if isinstance(block, dict):
-            data[section] = {k: _env_ref_placeholder(section, k) for k in block}
+            ref_names = _dedupe_ref_names((section,), list(block.keys()))
+            data[section] = {k: f"${{{ref_names[k]}}}" for k in block}
 
     for parent_key, child_key in _ALWAYS_MASK_NESTED_SECTIONS:
         parent = data.get(parent_key)
         if isinstance(parent, dict):
             block = parent.get(child_key)
             if isinstance(block, dict):
-                parent[child_key] = {
-                    k: _env_ref_placeholder(parent_key, child_key, k) for k in block
-                }
+                ref_names = _dedupe_ref_names((parent_key, child_key), list(block.keys()))
+                parent[child_key] = {k: f"${{{ref_names[k]}}}" for k in block}
 
     env = data.get("env")
     if isinstance(env, dict):

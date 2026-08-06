@@ -412,6 +412,55 @@ def test_headers_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert rest_tf.request.headers["Authorization"] == rest_secret
 
 
+def test_colliding_header_keys_get_distinct_var_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Adversarial-review follow-up: two DIFFERENT header keys that normalise to
+    the SAME derived name (``X-Api-Key`` and ``X_Api_Key`` both become
+    ``..._X_API_KEY`` after the ``[^A-Za-z0-9_]`` -> ``_`` + upper-case
+    transform) must NOT collide on one shared ${VAR} — each secret is safely
+    masked either way (no leak), but silently sharing one env var makes it
+    impossible to restore both to their own distinct original value, which
+    defeats T9's whole point (genuinely re-runnable, not just safely masked)."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    secret_1 = "firstSECRETvalueAAAAAAAAAAAA"
+    secret_2 = "secondSECRETvalueBBBBBBBBBBB"
+    src = (
+        "family: app\n"
+        "command: python\n"
+        "headers:\n"
+        f"  X-Api-Key: {secret_1}\n"
+        f"  X_Api_Key: {secret_2}\n"
+    )
+    out = redact_target_yaml(src)
+
+    # Neither secret survives, and the two ${VAR} names are DISTINCT.
+    assert secret_1 not in out
+    assert secret_2 not in out
+    base_name = target_yaml_env_ref_name("headers", "X-Api-Key")
+    assert base_name == target_yaml_env_ref_name("headers", "X_Api_Key")  # the collision itself
+    import yaml as _yaml
+
+    parsed = _yaml.safe_load(out)  # comment lines (the banner) are plain YAML comments
+    ref_1 = parsed["headers"]["X-Api-Key"]
+    ref_2 = parsed["headers"]["X_Api_Key"]
+    assert ref_1 != ref_2  # distinct ${VAR} names despite the normalised-name collision
+    assert ref_1 == f"${{{base_name}}}"  # first occurrence keeps the unsuffixed base name
+
+    var_1 = ref_1[2:-1]  # strip ${ }
+    var_2 = ref_2[2:-1]
+
+    # Both round-trip to their OWN distinct original value.
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(out, encoding="utf-8")
+    monkeypatch.setenv(var_1, secret_1)
+    monkeypatch.setenv(var_2, secret_2)
+    tf = load_target_file(target_yaml)
+    assert tf.headers["X-Api-Key"] == secret_1
+    assert tf.headers["X_Api_Key"] == secret_2
+
+
 def test_unset_referenced_var_raises_loud_error(tmp_path: Path) -> None:
     """A ${VAR} reference to an environment variable that is NOT set must fail
     loudly and actionably at load time — never silently substitute an empty
