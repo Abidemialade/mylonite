@@ -131,6 +131,13 @@ class TargetFile(BaseModel):
                 f"got unknown key(s): {bad}"
             )
             raise ValueError(msg)
+        bad_weakness = sorted(set(self.weakness_classes) - _WEAKNESS_CLASSES)
+        if bad_weakness:
+            msg = (
+                f"weakness_classes entries must be weakness classes {sorted(_WEAKNESS_CLASSES)}; "
+                f"got unknown value(s): {bad_weakness}"
+            )
+            raise ValueError(msg)
         if self.scope and self.scope.strip() and not self.requires_scope:
             # A declared scope IS a resource that must be authorized. Normalising
             # here keeps any other consumer of this model honest (DCR-0008) — the
