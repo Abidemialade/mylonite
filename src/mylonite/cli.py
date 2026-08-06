@@ -2822,7 +2822,21 @@ def report(
 
         from mylonite.scan.coverage import ScanOutcome
 
-        exit_code = ScanOutcome.from_report(sreport).exit_code
+        # Code-quality review of the A1 fix (43dc63b): `ScanReport.aborted` has
+        # no enum constraint at the pydantic layer, so a legacy-version or
+        # hand-edited/corrupted scan_report.json can load fine here yet carry
+        # an `aborted` value outside the current AbortReason enum --
+        # `ScanOutcome.from_report` raises ValueError for exactly that case.
+        # Left uncaught, that surfaces as a bare traceback (exit 1, empty
+        # output) -- strictly worse than the silent-exit-0 bug this branch
+        # exists to fix. Degrade the same way the sibling try/except a few
+        # lines above (unparseable report) already does: a clear message, no
+        # traceback, EXIT_CONFIG.
+        try:
+            exit_code = ScanOutcome.from_report(sreport).exit_code
+        except ValueError as exc:
+            echo_exc(f"could not classify {path}", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.

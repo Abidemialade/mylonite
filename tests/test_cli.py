@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from importlib.abc import MetaPathFinder
@@ -1984,7 +1985,7 @@ def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
                 seed_id="s1",
                 pattern_id="s1",
                 outcome="error",
-                verdict_mechanism="predicate",
+                verdict_mechanism=None,
                 verdict_reason=None,
                 error_detail="provider unreachable",
             )
@@ -2002,6 +2003,49 @@ def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_PROVIDER, result.output
     assert result.exit_code != EXIT_SUCCESS
     assert "aborted" in result.output.lower()
+
+
+def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Path) -> None:
+    """Code-quality review of 43dc63b (Critical): `ScanOutcome.from_report`
+    raises `ValueError` for any `ScanReport.aborted` value outside the current
+    `AbortReason` enum -- `ScanReport.aborted` is a plain `str | None` at the
+    pydantic layer with no enum constraint, so an older-mylonite-version or
+    hand-edited/corrupted `scan_report.json` loads fine but then blew up
+    `report`'s new `ScanOutcome.from_report(sreport)` call as an UNCAUGHT
+    exception (bare traceback, exit 1, empty output) -- strictly worse than
+    the silent-exit-0 bug 43dc63b fixed. `report` must instead degrade
+    gracefully: a clear message, no traceback, and a distinguishing exit code
+    (EXIT_CONFIG, matching the sibling try/except a few lines above that
+    already handles "this artefact doesn't parse")."""
+    scan_dir = tmp_path / "legacy-abort"
+    scan_dir.mkdir()
+    # Hand-write raw JSON (not via ScanReport(...)) since the model itself
+    # would happily accept this -- `aborted` has no enum constraint at the
+    # pydantic layer, which is exactly the point being tested.
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps(
+            {
+                "target_id": "mcp:myapp",
+                "attack_modules": ["mylonite.prompt-injection"],
+                "provider": "anthropic",
+                "model": "synthetic-model",
+                "elapsed_seconds": 0.1,
+                "attempts": [],
+                "findings_count": 0,
+                "aborted": "some_future_reason",
+                "single_run": True,
+                "mylonite_version": "0.0.0-test",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert result.exit_code not in (EXIT_SUCCESS, 1)
+    err = result.stderr or result.output
+    assert "some_future_reason" in err or "AbortReason" in err
 
 
 def test_report_clean_scan_still_exits_success(tmp_path: Path) -> None:
