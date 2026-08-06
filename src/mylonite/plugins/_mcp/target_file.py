@@ -30,6 +30,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from mylonite._paths import PathEscapesBase, resolve_contained
+from mylonite._redaction import (
+    CREDENTIAL_ENV_FIELD,
+    CREDENTIAL_NESTED_SECTIONS,
+    CREDENTIAL_TOP_LEVEL_SECTIONS,
+)
 from mylonite.plugins._mcp.target_registry import (
     ControlConfig,
     EffectProbeSpec,
@@ -213,44 +218,80 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
 _VAR_REF_PATTERN: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
+def _expand_dict_block(
+    block: dict[str, Any], path: str, missing: list[tuple[str, str]]
+) -> dict[str, Any]:
+    """Expand every ``${VAR}`` reference in the STRING values of one flat dict
+    (a ``headers`` / ``request.headers`` / ``env`` block), appending any
+    unresolved reference to ``missing`` as ``(field_path, var_name)``."""
+
+    def _sub(match: re.Match[str]) -> str:
+        name = match.group(1)
+        value = os.environ.get(name)
+        if value is None:
+            missing.append((path, name))
+            return match.group(0)
+        return value
+
+    return {
+        k: (_VAR_REF_PATTERN.sub(_sub, v) if isinstance(v, str) else v) for k, v in block.items()
+    }
+
+
 def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
-    """Expand every ``${VAR}`` reference in ``data``'s string values from
-    ``os.environ``, recursively.
+    """Expand ``${VAR}`` references from ``os.environ`` — ONLY within the
+    credential-bearing fields ``redact_target_yaml`` actually masks: the
+    top-level ``headers`` dict, the rest transport's nested ``request.headers``
+    dict, and the top-level ``env`` dict (:data:`CREDENTIAL_TOP_LEVEL_SECTIONS`
+    / :data:`CREDENTIAL_NESTED_SECTIONS` / :data:`CREDENTIAL_ENV_FIELD` in
+    ``mylonite._redaction`` — the single shared source of truth for both the
+    masking side and this expanding side).
 
     This is what makes a masked ``target.yaml`` (from ``redact_target_yaml``)
     genuinely re-runnable instead of just structurally parseable, and what makes
     ``docs/http-agent.md``'s long-documented ``Authorization: Bearer ${MY_TOKEN}``
-    example actually work: it runs unconditionally on every loaded target file,
-    not only ones that came from the redaction path, so an operator's own
-    hand-written ``${VAR}`` reference is honoured too.
+    example actually work — it runs unconditionally on every loaded target
+    file's credential fields, not only ones that came from the redaction path,
+    so an operator's own hand-written ``${VAR}`` reference there is honoured too.
 
-    A referenced variable that is NOT set in the process environment is a hard
-    error (collected across the whole document and reported together): this
-    must never silently substitute an empty string, ``None``, or leave the
-    literal unexpanded ``${VAR}`` text in place and let a broken credential
-    reach the target launch.
+    Deliberately scoped, NOT a whole-document scan: an AI-security tool's
+    operators routinely write literal ``${IDENTIFIER}``-shaped text as
+    SSTI/template-injection test payloads in fields like ``system_prompt``,
+    ``purpose``, ``args``, or ``request.body`` — those are the tool's actual
+    attack-payload surface — and a CI gate runner has real secrets
+    (``ANTHROPIC_API_KEY``, ``GH_TOKEN``, ...) set in its environment
+    (``SECURITY.md``). Expanding ``${VAR}`` outside the credential fields would
+    either silently substitute a live secret into an unrelated string headed
+    for the target under test, or raise a confusing "undefined variable" error
+    on a field that was never meant as an env reference at all. Every other
+    field is returned completely untouched (same object, not even copied).
+
+    A referenced variable that IS in a credential field but NOT set in the
+    process environment is a hard error (collected across the whole document
+    and reported together): this must never silently substitute an empty
+    string, ``None``, or leave the literal unexpanded ``${VAR}`` text in place
+    and let a broken credential reach the target launch.
     """
     missing: list[tuple[str, str]] = []
 
-    def _expand(node: Any, path: str) -> Any:
-        if isinstance(node, str):
+    for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
+        block = data.get(section)
+        if isinstance(block, dict):
+            data[section] = _expand_dict_block(block, section, missing)
 
-            def _sub(match: re.Match[str]) -> str:
-                name = match.group(1)
-                value = os.environ.get(name)
-                if value is None:
-                    missing.append((path, name))
-                    return match.group(0)
-                return value
+    for parent_key, child_key in CREDENTIAL_NESTED_SECTIONS:
+        parent = data.get(parent_key)
+        if isinstance(parent, dict):
+            block = parent.get(child_key)
+            if isinstance(block, dict):
+                parent[child_key] = _expand_dict_block(
+                    block, f"{parent_key}.{child_key}", missing
+                )
 
-            return _VAR_REF_PATTERN.sub(_sub, node)
-        if isinstance(node, dict):
-            return {k: _expand(v, f"{path}.{k}" if path else str(k)) for k, v in node.items()}
-        if isinstance(node, list):
-            return [_expand(v, f"{path}[{i}]") for i, v in enumerate(node)]
-        return node
+    env = data.get(CREDENTIAL_ENV_FIELD)
+    if isinstance(env, dict):
+        data[CREDENTIAL_ENV_FIELD] = _expand_dict_block(env, CREDENTIAL_ENV_FIELD, missing)
 
-    expanded = _expand(data, "")
     if missing:
         var_names = ", ".join(sorted({name for _, name in missing}))
         detail = "; ".join(f"{p} -> ${{{n}}}" for p, n in missing)
@@ -261,17 +302,20 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
             "an empty or missing credential."
         )
         raise ValueError(msg)
-    return expanded  # type: ignore[no-any-return]
+    return data
 
 
 def load_target_file(path: Path) -> TargetFile:
     """Parse a YAML target file into a validated ``TargetFile``.
 
-    Every string value is scanned for a ``${VAR}`` reference (see
-    :func:`_expand_env_refs`) and expanded from ``os.environ`` before
-    validation — this is what lets a ``redact_target_yaml``-masked copy (or an
-    operator's own hand-written ``${VAR}`` reference, per ``docs/http-agent.md``)
-    load as a genuinely runnable target once the named variable(s) are set.
+    Every string value in a credential-bearing field (``headers``,
+    ``request.headers``, ``env`` — see :func:`_expand_env_refs`) is scanned for
+    a ``${VAR}`` reference and expanded from ``os.environ`` before validation —
+    this is what lets a ``redact_target_yaml``-masked copy (or an operator's own
+    hand-written ``${VAR}`` reference, per ``docs/http-agent.md``) load as a
+    genuinely runnable target once the named variable(s) are set. Every other
+    field (``system_prompt``, ``purpose``, ``args``, ``url``, ``request.body``,
+    ...) is loaded completely unchanged — never scanned for ``${VAR}`` text.
     """
     path = Path(path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))

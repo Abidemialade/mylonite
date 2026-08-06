@@ -476,6 +476,58 @@ def test_unset_referenced_var_raises_loud_error(tmp_path: Path) -> None:
         load_target_file(target_yaml)
 
 
+def test_var_ref_expansion_scoped_to_credential_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CRITICAL — post-hoc review finding: ${VAR} expansion must be scoped to
+    ONLY the fields redact_target_yaml actually masks (headers, request.headers,
+    env) — never the whole document. An AI-security tool's operators routinely
+    write literal ${IDENTIFIER}-shaped text as SSTI/template-injection test
+    payloads in system_prompt/purpose/args/request.body; those must survive
+    completely unexpanded — even when the referenced var IS set in the
+    environment, so this can't be caught by "unset var fails loudly" alone; the
+    var must never even be looked up outside the credential fields."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    # Set BOTH vars so a leak (if the bug were still present) would be silent —
+    # no missing-var error to mask the regression.
+    monkeypatch.setenv("SIDECHANNEL", "sidechannel-real-value")
+    monkeypatch.setenv("TEMPLATE_PROBE_VAR", "should-never-be-substituted")
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: app\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "purpose: an app that echoes ${SIDECHANNEL} back\n"
+        "system_prompt: |\n"
+        "  Render this template: ${TEMPLATE_PROBE_VAR}/secret and report what happens.\n"
+        "args: ['--flag', '${TEMPLATE_PROBE_VAR}']\n"
+        "env:\n"
+        "  API_TOKEN: ${SIDECHANNEL}\n"
+        "request:\n"
+        "  url: https://agent.example/chat\n"
+        "  headers:\n"
+        "    Authorization: Bearer ${SIDECHANNEL}\n"
+        '  body: \'{"prompt": "{prompt} SSTI test: ${TEMPLATE_PROBE_VAR}"}\'\n',
+        encoding="utf-8",
+    )
+    tf = load_target_file(target_yaml)
+
+    # Out of scope — literal ${VAR} text preserved verbatim, no substitution.
+    assert tf.purpose == "an app that echoes ${SIDECHANNEL} back"
+    assert tf.system_prompt is not None
+    assert "${TEMPLATE_PROBE_VAR}" in tf.system_prompt
+    assert tf.args == ["--flag", "${TEMPLATE_PROBE_VAR}"]
+    assert tf.request is not None
+    assert "${TEMPLATE_PROBE_VAR}" in tf.request.body
+    assert "should-never-be-substituted" not in tf.request.body
+
+    # In scope — the actual T9 feature still works.
+    assert tf.env["API_TOKEN"] == "sidechannel-real-value"
+    assert tf.request.headers["Authorization"] == "Bearer sidechannel-real-value"
+
+
 def test_http_agent_bearer_token_example_works(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

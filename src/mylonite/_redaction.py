@@ -28,6 +28,9 @@ from typing import Final
 REDACTION_PLACEHOLDER: Final = "***REDACTED***"
 
 __all__ = [
+    "CREDENTIAL_ENV_FIELD",
+    "CREDENTIAL_NESTED_SECTIONS",
+    "CREDENTIAL_TOP_LEVEL_SECTIONS",
     "REDACTION_PLACEHOLDER",
     "SecretRedactingFilter",
     "install_log_redaction",
@@ -270,8 +273,24 @@ def redact_exception(exc: BaseException) -> str:
 #: field; ``request.headers`` is the rest transport's own nested equivalent
 #: (``RequestSpec.headers`` — "may carry auth ... and are NEVER logged") and is
 #: just as live a leak if left unmasked when a rest target.yaml is copied/persisted.
-_ALWAYS_MASK_SECTIONS: Final[tuple[str, ...]] = ("headers",)
-_ALWAYS_MASK_NESTED_SECTIONS: Final[tuple[tuple[str, str], ...]] = (("request", "headers"),)
+#:
+#: PUBLIC and shared with ``plugins._mcp.target_file``'s loader: these three
+#: names (plus :data:`CREDENTIAL_ENV_FIELD` for ``env``) are the ONLY target.yaml
+#: locations ``redact_target_yaml`` replaces with a ``${VAR}`` reference, and —
+#: critically — the ONLY locations ``load_target_file`` expands a ``${VAR}``
+#: reference in. Keeping this list as the single shared source of truth for
+#: both halves of the T9 contract (mask here / expand there) is what stops a
+#: future change silently widening the loader's blast radius to the rest of
+#: the document (system_prompt, purpose, args, url, request.body, ...) — an
+#: AI-security tool's operators routinely write literal ``${IDENTIFIER}``-shaped
+#: text as SSTI/template-injection test payloads in exactly those fields, and a
+#: CI gate runner has real secrets (``ANTHROPIC_API_KEY``, ``GH_TOKEN``, ...) in
+#: its environment (see ``SECURITY.md``), so expanding ``${VAR}`` outside the
+#: credential-bearing fields would silently substitute a live secret into (or
+#: raise a confusing error on) a field that was never meant as an env reference.
+CREDENTIAL_TOP_LEVEL_SECTIONS: Final[tuple[str, ...]] = ("headers",)
+CREDENTIAL_NESTED_SECTIONS: Final[tuple[tuple[str, str], ...]] = (("request", "headers"),)
+CREDENTIAL_ENV_FIELD: Final[str] = "env"
 
 _REDACTION_BANNER: Final = (
     "# Written by mylonite. Credential-shaped values are replaced with ${VAR}\n"
@@ -374,7 +393,7 @@ def redact_env(env: dict[str, str]) -> dict[str, str]:
     environment variable to the real value and ``load_target_file`` restores it.
     """
     secret_keys = [k for k, v in env.items() if _is_secret_env(k, v)]
-    ref_names = _dedupe_ref_names(("env",), secret_keys)
+    ref_names = _dedupe_ref_names((CREDENTIAL_ENV_FIELD,), secret_keys)
     return {k: (f"${{{ref_names[k]}}}" if k in ref_names else v) for k, v in env.items()}
 
 
@@ -412,13 +431,13 @@ def redact_target_yaml(text: str) -> str:
     if not isinstance(data, dict):
         return redact(text)
 
-    for section in _ALWAYS_MASK_SECTIONS:
+    for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
         block = data.get(section)
         if isinstance(block, dict):
             ref_names = _dedupe_ref_names((section,), list(block.keys()))
             data[section] = {k: f"${{{ref_names[k]}}}" for k in block}
 
-    for parent_key, child_key in _ALWAYS_MASK_NESTED_SECTIONS:
+    for parent_key, child_key in CREDENTIAL_NESTED_SECTIONS:
         parent = data.get(parent_key)
         if isinstance(parent, dict):
             block = parent.get(child_key)
@@ -426,8 +445,8 @@ def redact_target_yaml(text: str) -> str:
                 ref_names = _dedupe_ref_names((parent_key, child_key), list(block.keys()))
                 parent[child_key] = {k: f"${{{ref_names[k]}}}" for k in block}
 
-    env = data.get("env")
+    env = data.get(CREDENTIAL_ENV_FIELD)
     if isinstance(env, dict):
-        data["env"] = redact_env(env)
+        data[CREDENTIAL_ENV_FIELD] = redact_env(env)
 
     return _REDACTION_BANNER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)

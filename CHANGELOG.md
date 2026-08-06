@@ -25,6 +25,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Mylonite against a third-party target it did not author). Referring documents
   updated. This file is not published to the docs site, so no URL breaks.
 
+### Security
+
+> **NEEDS MAINTAINER SIGN-OFF before merge/release (secret-handling code, per
+> `GOVERNANCE.md`).** The two entries below change how a persisted
+> `target.yaml` copy handles credential-shaped values.
+
+- **A masked `target.yaml` copy is now `${VAR}`-indirected instead of
+  opaque-placeholder-masked, so it stays genuinely runnable.** Previously,
+  `redact_target_yaml` (used by `scan`, `generate`, `gate`, `scan --scaffold`,
+  and `mylonite init` whenever a `target.yaml` is written or copied) replaced a
+  credential-shaped `headers` / `request.headers` / `env` value with the bare
+  `***REDACTED***` placeholder — safe (no leak) but the copy could no longer
+  actually launch the target, since the real credential was gone with no way to
+  recover it. It now replaces the value with a `${VAR}` reference deterministically
+  derived from the field's key (e.g. `env.API_TOKEN` -> `${MYLONITE_TARGET_ENV_API_TOKEN}`;
+  see `mylonite._redaction.target_yaml_env_ref_name`), disambiguated within a
+  file so two different keys can never collide on one shared name. `docs/http-agent.md`'s
+  long-documented `Authorization: Bearer ${MY_TOKEN}` example now works as written.
+- **`load_target_file` now expands `${VAR}` references — and fails loudly if
+  one is unset.** Every loaded target file's `headers` / `request.headers` /
+  `env` values are scanned for a `${VAR}` reference and substituted from the
+  process environment (this is what makes the point above actually work, and
+  also what makes an operator's own hand-written `${VAR}` reference work). A
+  reference to a variable that is NOT set is a hard, actionable `ValueError`
+  naming the missing variable — never a silent empty-string substitution.
+  Expansion is deliberately scoped to ONLY those three credential-bearing
+  fields, never `system_prompt` / `purpose` / `args` / `url` / `request.body` /
+  the rest of the document — those are exactly where an operator legitimately
+  writes literal `${IDENTIFIER}`-shaped SSTI/template-injection test payloads,
+  and a CI gate runner has real secrets (`ANTHROPIC_API_KEY`, `GH_TOKEN`, ...)
+  set in its own environment.
+- **`SECURITY.md` corrected: a credential embedded in `command`/`args` is NOT
+  masked.** The doc previously implied `args`-embedded credentials were masked
+  like `headers`/`env`; they are not (pre-existing, not introduced by the two
+  changes above) — put a credential in `env` or `headers` instead.
+
 ## [0.7.6] - 2026-08-03
 
 ### Fixed (CI)
