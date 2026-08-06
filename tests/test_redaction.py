@@ -100,6 +100,19 @@ def test_redact_keeps_key_name_in_kv() -> None:
     assert out == f"api_key={REDACTION_PLACEHOLDER}"
 
 
+def test_redact_masks_quoted_dict_repr_kv() -> None:
+    """DCR-0014: a credential reaching redact() embedded in a Python dict repr
+    (e.g. str(exc) embedding {'GH_TOKEN': 'ghp_...'}, or logging a headers
+    dict) must still be masked even though the closing quote breaks the
+    key-sep-value adjacency the plain KV pattern requires."""
+    token = "ghp_1234567890abcdEFGHijklMNOP"
+    out = redact("{'GH_TOKEN': '" + token + "'}")
+    assert token not in out
+
+    out2 = redact('{"GH_TOKEN": "' + token + '"}')
+    assert token not in out2
+
+
 # --- Preservation: these must NEVER be masked -------------------------------
 def test_redact_preserves_example_emails_and_attack_strings() -> None:
     survivors = [
@@ -147,6 +160,29 @@ def test_filter_redacts_log_record() -> None:
     rendered = record.getMessage()
     assert FAKE_ANTHROPIC not in rendered
     assert REDACTION_PLACEHOLDER in rendered
+
+
+def test_filter_clears_args_when_getmessage_raises() -> None:
+    """DCR-0008: a malformed %-format record (wrong arg type/count) makes
+    ``record.getMessage()`` raise inside ``filter()``. The except branch must
+    never leave the raw ``record.args`` intact for stdlib's ``handleError`` to
+    print verbatim to stderr — it must clear (or redact) them."""
+    flt = SecretRedactingFilter()
+    record = logging.LogRecord(
+        name="mylonite.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="%d",
+        args=("not-a-number",),
+        exc_info=None,
+    )
+    # getMessage() would raise TypeError: %d format requires a number.
+    with pytest.raises(TypeError):
+        record.getMessage()
+
+    assert flt.filter(record) is True  # never crash/drop the record
+    assert record.args == ()  # the raw arg must not survive for handleError to print
 
 
 def test_filter_never_drops_record() -> None:
@@ -261,6 +297,31 @@ def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
     assert "${" + target_yaml_env_ref_name("env", "GITHUB_TOKEN") + "}" in out
 
 
+def test_redact_target_yaml_masks_numeric_secret_env_value() -> None:
+    """DCR-0009: an unquoted numeric/boolean env value (YAML parses it as a
+    Python int/bool, not a str) under a secret-looking key name must still be
+    masked — the isinstance(value, str) shape check must not short-circuit
+    before _key_looks_secret(key) is evaluated."""
+    src = "family: app\ncommand: python\nenv:\n  API_TOKEN: 8675309123456\n"
+    out = redact_target_yaml(src)
+    assert "8675309123456" not in out
+
+
+def test_redact_target_yaml_masks_url_embedded_credential() -> None:
+    """DCR-0015: redact_target_yaml only walked the named headers/request.headers/
+    env sections. A credential embedded in a URL elsewhere in the document
+    (exactly the shape _URL_CRED_PATTERN exists to catch) must still be masked
+    before the document is persisted/published."""
+    src = (
+        "family: app\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        'url: "postgres://svc_user:S3cretPassw0rd123@internal-db:5432/app"\n'
+    )
+    out = redact_target_yaml(src)
+    assert "S3cretPassw0rd123" not in out
+
+
 def test_redact_target_yaml_output_still_loads() -> None:
     import yaml
 
@@ -288,6 +349,15 @@ def test_redact_value_masks_by_key_name_even_when_shape_is_plain() -> None:
     # A non-credential-named key is untouched when its value isn't secret-shaped —
     # this is oracle-load-bearing (fetch/filesystem/github predicates read it).
     assert out["url"] == "https://attacker.example.com/x"
+
+
+def test_redact_value_masks_list_items_under_a_secret_named_key() -> None:
+    """DCR-0010: the unconditional key-name mask must apply to EVERY string leaf
+    under a secret-named key, not just a direct string value. A list (or dict)
+    value under "password" is still a password, regardless of container shape."""
+    out = redact_value({"password": ["hunter2", "s3cr3t-plain"]})
+    assert "hunter2" not in out["password"]
+    assert "s3cr3t-plain" not in out["password"]
 
 
 def test_redact_value_still_masks_by_shape_under_a_plain_key() -> None:

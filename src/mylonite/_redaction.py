@@ -70,9 +70,13 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 
 # key=value / key: value credential assignments. The key name is preserved; only
 # the value is masked. Case-insensitive on the key; the separator may be ``=`` or
-# ``:`` with optional surrounding whitespace.
+# ``:`` with optional surrounding whitespace. An optional quote character is
+# allowed between the key and the separator, and between the separator and the
+# value, so a quoted dict-repr rendering (e.g. "'GH_TOKEN': 'ghp_...'" from
+# str(exc) embedding a headers/env dict) still matches (DCR-0014) even though
+# the closing/opening quotes would otherwise break key-sep-value adjacency.
 _KV_PATTERN: Final = re.compile(
-    rf"(?P<key>{_KV_KEYS})(?P<sep>\s*[:=]\s*)(?P<val>{_KV_VALUE})",
+    rf"(?P<key>{_KV_KEYS})['\"]?(?P<sep>\s*[:=]\s*)['\"]?(?P<val>{_KV_VALUE})",
     re.IGNORECASE,
 )
 
@@ -187,17 +191,34 @@ def redact_value(value: object) -> object:
         return redact(value)
     if isinstance(value, dict):
         return {
-            k: (
-                REDACTION_PLACEHOLDER
-                if isinstance(v, str) and _key_looks_secret(str(k))
-                else redact_value(v)
-            )
+            k: (_mask_all_strings(v) if _key_looks_secret(str(k)) else redact_value(v))
             for k, v in value.items()
         }
     if isinstance(value, list):
         return [redact_value(v) for v in value]
     if isinstance(value, tuple):
         return tuple(redact_value(v) for v in value)
+    return value
+
+
+def _mask_all_strings(value: object) -> object:
+    """Replace every string leaf in ``value`` with the placeholder unconditionally.
+
+    Used by :func:`redact_value` when a key name alone already signals a
+    credential (``_key_looks_secret``): the mask must apply no matter how the
+    value is shaped — a direct string, or a list/dict/tuple of strings
+    (DCR-0010: a list of passwords under a ``password`` key is still a list of
+    passwords). Non-string leaves (ints, bools, ``None``) are left alone —
+    there is nothing to mask.
+    """
+    if isinstance(value, str):
+        return REDACTION_PLACEHOLDER
+    if isinstance(value, dict):
+        return {k: _mask_all_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask_all_strings(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_mask_all_strings(v) for v in value)
     return value
 
 
@@ -214,6 +235,13 @@ class SecretRedactingFilter(logging.Filter):
         try:
             message = record.getMessage()
         except Exception:  # never let message formatting kill a log line
+            # getMessage() itself raised (e.g. a malformed %-format call whose
+            # arg is secret-shaped) — record.msg/args were never rendered or
+            # redacted. Clearing record.args here is load-bearing: left as-is,
+            # stdlib logging.Handler.handleError() prints
+            # 'Message: %r\nArguments: %s\n' % (record.msg, record.args)
+            # straight to stderr, leaking the raw arg verbatim (DCR-0008).
+            record.args = ()
             return True
         record.msg = redact(message)
         record.args = ()
@@ -370,11 +398,18 @@ def _is_secret_env(key: str, value: object) -> bool:
     static, operator-supplied config (never something an oracle predicate
     needs to string-match against), so the broader "looks like an opaque key"
     heuristic has no false-positive cost.
+
+    The key-name check runs BEFORE the ``isinstance(value, str)`` shape check
+    (DCR-0009): a YAML-typed non-string value (e.g. an unquoted numeric/
+    boolean literal like ``API_TOKEN: 8675309123456``, which ``yaml.safe_load``
+    parses as a Python ``int``) must still be masked when its KEY name alone
+    signals a credential — otherwise the raw value is written unmasked into
+    the persisted ``target.yaml`` copy.
     """
-    if not isinstance(value, str):
-        return False
     if _key_looks_secret(key):
         return True
+    if not isinstance(value, str):
+        return False
     return looks_like_api_key(value) or redact(value) != value
 
 
@@ -421,6 +456,16 @@ def redact_target_yaml(text: str) -> str:
     A document that does not parse as a YAML mapping falls back to
     :func:`redact` over the raw text — a malformed file is never persisted
     verbatim.
+
+    Beyond the three named sections, every OTHER string leaf in the document
+    (``url``, ``args``, ``command``, ``request.url``, ...) is still swept with
+    shape-based :func:`redact` (DCR-0015) — so a credential embedded in, say,
+    a DB connection URL (``postgres://user:pass@host/db``) is still caught by
+    ``_URL_CRED_PATTERN`` even though ``url`` isn't a named credential
+    section. This sweep is shape-based ONLY (never the key-name-unconditional
+    rule) and explicitly skips the fields already replaced with a ``${VAR}``
+    reference above — running the key-name rule over them would clobber a
+    correct ``${VAR}`` reference with a bare, non-runnable placeholder.
     """
     import yaml
 
@@ -437,7 +482,9 @@ def redact_target_yaml(text: str) -> str:
             ref_names = _dedupe_ref_names((section,), list(block.keys()))
             data[section] = {k: f"${{{ref_names[k]}}}" for k in block}
 
+    nested_skip: dict[str, set[str]] = {}
     for parent_key, child_key in CREDENTIAL_NESTED_SECTIONS:
+        nested_skip.setdefault(parent_key, set()).add(child_key)
         parent = data.get(parent_key)
         if isinstance(parent, dict):
             block = parent.get(child_key)
@@ -449,4 +496,37 @@ def redact_target_yaml(text: str) -> str:
     if isinstance(env, dict):
         data[CREDENTIAL_ENV_FIELD] = redact_env(env)
 
+    already_masked = set(CREDENTIAL_TOP_LEVEL_SECTIONS) | {CREDENTIAL_ENV_FIELD}
+    for key, val in list(data.items()):
+        if key in already_masked:
+            continue
+        if key in nested_skip and isinstance(val, dict):
+            data[key] = {
+                k: (v if k in nested_skip[key] else _redact_remaining(v))
+                for k, v in val.items()
+            }
+            continue
+        data[key] = _redact_remaining(val)
+
     return _REDACTION_BANNER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+
+
+def _redact_remaining(value: object) -> object:
+    """Shape-based sweep (DCR-0015) over every string leaf NOT already handled
+    by :func:`redact_target_yaml`'s named-section ``${VAR}`` indirection.
+
+    Deliberately shape-based only (:func:`redact`, never the key-name-
+    unconditional rule from :func:`redact_value`/:func:`_mask_all_strings`) —
+    fields swept here were never part of the credential contract, so there is
+    no key name to trust as unconditional signal, only a shape to catch
+    defense-in-depth (e.g. a URL with an embedded ``user:pass@`` credential).
+    """
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redact_remaining(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_remaining(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_remaining(v) for v in value)
+    return value
