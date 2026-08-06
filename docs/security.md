@@ -16,7 +16,18 @@ non-negotiables:
 
 1. **Targets-you-control by default.** The CLI refuses to run against an
    unauthorized target. Authorization is opt-in per scan via an explicit
-   `--authorize` flag.
+   `--authorize` flag, and `--authorize` must **equal** the value the target
+   itself requires — never an arbitrary non-empty string. One rule, applied
+   by every command that live-drives a real target (`scan`, `gate`,
+   `validate`, `ablate`): a target that declares a **scope**
+   (`mcp:filesystem:<sandbox>`, `mcp:github:<owner/repo>`, or a custom
+   [target file](target-file.md) with `scope:` set) requires
+   `--authorize == <scope>` exactly; a **stateless** target (`mcp:fetch`, or a
+   custom target with no scope) requires `--authorize == <family>` — for
+   inline `mcp:custom` with no `--scope`, the family is the literal `custom`.
+   The required value is derived from the target's own data, never from a
+   self-asserted flag like `requires_scope`. See the full rule in
+   [`SECURITY.md`](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md).
 2. **No bundled targeting of public services.**
 3. **Secret-redaction in logs.** Anything that looks like a secret is
    redacted before any log line, report, or generated test is written.

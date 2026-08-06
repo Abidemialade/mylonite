@@ -52,7 +52,7 @@ with `--target-file`.
 
 ```bash
 mylonite scan --command python --arg my_server.py --scaffold app.yaml   # generate the target file
-mylonite scan --target-file app.yaml --authorize me                     # then scan it
+mylonite scan --target-file app.yaml --authorize custom                 # then scan it
 ```
 
 ## `generate` — emit the regression test
@@ -103,7 +103,7 @@ suggestion); `--fast`; `--randomize-exfil/--no-randomize-exfil` (defaults ON for
 custom target).
 
 ```bash
-mylonite gate --target-file app.yaml --authorize me --open-pr
+mylonite gate --target-file app.yaml --authorize my-app --open-pr
 ```
 
 ## `report` — render findings
@@ -111,12 +111,12 @@ mylonite gate --target-file app.yaml --authorize me --open-pr
 Render a saved scan or validation as a terminal trust panel, offline. See [Reading the
 results](reading-results.md).
 
-Options: `target` (a scan/validated dir or `*_report.json`); `--sarif PATH` (SARIF 2.1.0
+Options: `target` (a scan/generated dir or `*_report.json`); `--sarif PATH` (SARIF 2.1.0
 for GitHub code scanning); `--json PATH` (machine-readable finding bundle). Both carry
 the differential proof and the OWASP/ASI/ATLAS/NIST tags.
 
 ```bash
-mylonite report .mylonite/validated/my-finding --sarif out.sarif --json finding.json
+mylonite report .mylonite/generated/my-finding --sarif out.sarif --json finding.json
 ```
 
 ## `ablate` — score the safeguards
@@ -129,7 +129,7 @@ Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
 `--max-seeds N`; `--provider`, `--model`.
 
 ```bash
-mylonite ablate --target-file app.yaml --authorize me --controls W2,W4 --redundancy
+mylonite ablate --target-file app.yaml --authorize my-app --controls W2,W4 --redundancy
 ```
 
 > **Scaffolding moved.** The old `mylonite init-target` command is now `mylonite scan

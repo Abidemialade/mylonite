@@ -49,7 +49,7 @@ app = typer.Typer(
     help=(
         "Mylonite -- AI-layer security testing.\n\n"
         "Finds app-specific weaknesses in your AI agent's attack surface (system prompt, "
-        "tool/function schemas, MCP tools, RAG, memory), proves each one with a differential "
+        "tool/function schemas, MCP tools), proves each one with a differential "
         "oracle, and writes the pytest regression test that gates CI."
     ),
     epilog=(
@@ -58,7 +58,7 @@ app = typer.Typer(
         "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
         "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- "
         "scaffold a target.yaml.\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize custom --open-pr` -- scan to a gating PR.\n\n"
         "Docs: https://abidemialade.github.io/mylonite/ -- "
         "run 'mylonite COMMAND --help' for any command."
     ),
@@ -743,7 +743,7 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     epilog=(
         "Examples:\n\n"
         "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
-        "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
+        "`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app.\n\n"
         "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- introspect\n"
         "a server and write a starter target.yaml (no LLM call, no attack).\n\n"
         "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
@@ -3291,8 +3291,8 @@ def _post_gate_annotations(
     epilog=(
         "Examples:\n\n"
         "`mylonite gate reference:vulnerable` -- the full pipeline on the demo target.\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me` -- gate YOUR app (writes test + workflows).\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- also open the gating PR via gh."
+        "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes test + workflows).\n\n"
+        "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh."
     )
 )
 def gate(

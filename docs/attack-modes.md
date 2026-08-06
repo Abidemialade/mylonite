@@ -9,9 +9,11 @@ Mylonite runs a single-shot attack engine that exercises the four
 ## Single-shot (the engine)
 
 For each applicable attack pattern, the engine customises a payload, invokes the target once,
-and judges the result. With `--runs > 1` it applies a **scan-time flakiness filter**:
-a payload only counts as a finding if it fires in a strict majority of runs, rejecting
-a one-in-N fluke.
+and judges the result. The engine itself supports a **scan-time flakiness filter**
+(`ScanEngineConfig.runs`): with `runs > 1` a payload only counts as a finding if it fires in
+a strict majority of runs, rejecting a one-in-N fluke — but the `scan` CLI does not currently
+expose this as a flag, so it always runs with `runs=1`. The flakiness filter you *will* hit
+from the CLI is `validate`'s 5-iteration default (see [The validation engine](validation.md)).
 
 This is the fast, deterministic baseline and what `gate` uses by default. It's all you
 need when the target follows injected instructions readily. Source:
@@ -35,7 +37,7 @@ the test realistic:
 - `--judge-model` — the verdict (only when the deterministic predicate is inconclusive).
 
 ```bash
-mylonite scan --target-file app.yaml --authorize me \
+mylonite scan --target-file app.yaml --authorize my-app \
   --planner-model claude-haiku-4-5 --customiser-model claude-sonnet-4-6
 ```
 
