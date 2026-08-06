@@ -3571,8 +3571,16 @@ def gate(
         # disagree with scan_fn's tag or with `validate`'s own plan for the same
         # spec+weakness (the bug this closes: the raw side here used to be a plain
         # adapter that never honoured control_env at all).
+        #
+        # `fast` (gate()'s own flag) is threaded through explicitly here too —
+        # defense-in-depth. Today control_weakness is already None whenever
+        # `fast` is set (scan_fn's own early-return under --fast never tags an
+        # exploit), so plan_twins would short-circuit on `weakness is None`
+        # regardless of what `fast` says — but hardcoding `fast=False` here
+        # relied entirely on that separate, implicit cross-closure guarantee
+        # holding forever. Passing the real value removes that coupling.
         control_weakness = generated.exploit.payload.metadata.get("synthetic_control") or None
-        plan = plan_twins(spec, weakness=control_weakness, fast=False)
+        plan = plan_twins(spec, weakness=control_weakness, fast=fast)
 
         def _factory() -> Any:
             return build_adapter_for_spec(

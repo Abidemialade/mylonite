@@ -560,7 +560,13 @@ def assert_control_holds(
     TestkitFixtureError:
         The guarded run was inconclusive (only skip/error outcomes).
     ValueError:
-        ``control`` names a weakness class with no implemented boundary control.
+        ``control`` names a weakness class with no implemented boundary control,
+        or ``plan_twins`` found no differential to build at all for this
+        target+control combination (e.g. a real W1-W4 class on a ``transport:
+        rest`` target with no ``control_env`` toggle for it and no input-frame
+        request — a boundary-control differential does not apply to a black
+        box). Raised BEFORE any scan runs, never discovered by running an
+        identical raw/guarded pair and misreading the result as a regression.
 
     Notes
     -----
@@ -608,6 +614,23 @@ def assert_control_holds(
     if control != INPUT_FRAME_CONTROL:
         make_control(control)
     plan = plan_twins(spec, weakness=control, fast=False)
+    # plan_twins' "no differential" outcome (control_weakness is None) is a SOFT
+    # degrade for gate/validate's auto-detected weakness class (fall back to a
+    # non-differential gate) — but here `control` is explicit and hand-picked, so
+    # "no differential buildable" must be a hard, fail-fast error, not a silent
+    # raw==guarded run. Without this check, an identical raw/guarded pair (e.g. a
+    # real W1-W4 class on a rest target with no control_env toggle for it) would
+    # re-fire the confirmed exploit on the "guarded" leg and raise a misleading
+    # AssertionError("guard did not hold") even though no guard was ever applied.
+    if plan.control_weakness is None:
+        raise ValueError(
+            f"control {control!r} has no differential to build on target "
+            f"{spec.family!r} (transport={spec.transport!r}): "
+            f"{plan.banner or 'plan_twins found nothing to differentiate.'} "
+            "Use assert_target_resists for a non-differential regression check "
+            "instead, or declare control_env / pass control='input-frame' so a "
+            "real twin exists to test."
+        )
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     try:

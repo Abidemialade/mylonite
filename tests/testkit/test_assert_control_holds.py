@@ -162,3 +162,35 @@ def test_input_frame_control_on_rest_target_does_not_raise(
     assert testkit.assert_control_holds(_exploit(), target_file=p, control="input-frame") is None
     # Raw (plain call, input_frame=False) fires; guarded (input_frame=True) resists.
     assert seen_input_frame == [False, True]
+
+
+def test_real_weakness_class_on_rest_target_raises_instead_of_spurious_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A REAL, implemented W1-W4 class (not the input-frame sentinel) on a rest
+    target with no ``control_env`` toggle for it has no buildable differential:
+    ``plan_twins`` returns ``raw == guarded`` (identical LaunchIntent) and
+    ``control_weakness=None``. Before this fix, ``assert_control_holds`` ignored
+    ``plan.control_weakness`` and unconditionally ran + asserted BOTH legs — so
+    a confirmed-firing exploit fired again on the identical "guarded" leg and
+    the gate raised ``AssertionError: guard did not hold`` even though no guard
+    was ever applied (a spuriously-failing committed test, contradicting this
+    module's own honesty principle). It must now raise a clear, actionable
+    error BEFORE any scan runs at all.
+    """
+    p = tmp_path / "target.yaml"
+    p.write_text(_REST_TARGET_YAML, encoding="utf-8")
+
+    calls: list[Any] = []
+
+    def fake_run(*, controls: Any, **kwargs: Any) -> Any:
+        # Would always "fire" if ever reached -- proves the pre-fix failure
+        # mode (raw fires, identical "guarded" fires too) if the guard below
+        # doesn't short-circuit first.
+        calls.append(kwargs)
+        return _fired()
+
+    monkeypatch.setattr(testkit, "_run_target_scan", fake_run)
+    with pytest.raises(ValueError, match="no differential"):
+        testkit.assert_control_holds(_exploit(), target_file=p, control="W2")
+    assert not calls, "must fail BEFORE spawning any scan, not after an identical-twin run"

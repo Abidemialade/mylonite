@@ -2892,6 +2892,73 @@ def test_gate_and_validate_produce_identical_twin_plans(
         target_registry.clear_runtime_targets()
 
 
+def test_gate_fast_passes_fast_to_plan_twins_in_validate_fn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate --fast must pass fast=True through to validate_fn's own plan_twins
+    call too (defense-in-depth) -- not rely SOLELY on scan_fn's early-return
+    under --fast (which never tags an exploit, so control_weakness stays None)
+    to keep validate_fn's twin non-differential. Before this fix, validate_fn
+    hardcoded fast=False in its plan_twins call, which happened to be safe only
+    because of that separate, implicit cross-closure guarantee. Confirmed by
+    capturing plan_twins' actual `fast` kwarg on a real `gate --fast` run
+    against a custom target: scan_fn never even imports plan_twins under
+    --fast (it returns before that import), so the single captured call is
+    validate_fn's own."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp import twins as twins_module
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-fast"})
+    canned = _canned_finding_result("mcp:myapp-fast", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_differential_validator(
+        monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+    )
+    _stub_open_pr(monkeypatch)
+
+    real_plan_twins = twins_module.plan_twins
+    calls: list[dict[str, Any]] = []
+
+    def spying_plan_twins(spec: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real_plan_twins(spec, **kwargs)
+
+    monkeypatch.setattr(twins_module, "plan_twins", spying_plan_twins)
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp-fast\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-fast",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+                "--fast",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert calls == [{"weakness": None, "fast": True}]
+    finally:
+        target_registry.clear_runtime_targets()
+
+
 def test_report_sarif_emits_valid_document(tmp_path: Path) -> None:
     """report --sarif writes a SARIF 2.1.0 doc (GitHub code scanning) from findings."""
     import json as _json
