@@ -15,8 +15,14 @@ from mylonite.contracts._types import (
     Payload,
     TargetDescriptor,
 )
-from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, active_counter
+from mylonite.scan._llm import (
+    BudgetExceededError,
+    LiteLLMCallCounter,
+    NonRecoverableProviderError,
+    active_counter,
+)
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable, Verdict
+from mylonite.scan.diagnostics import Diagnosis
 from mylonite.scan.engine import ScanConfig, ScanEngine
 from mylonite.scan.seeds import SEED_CATALOGUE
 
@@ -596,6 +602,54 @@ async def test_engine_budget_aborts_on_exhaustion() -> None:
     )
     result = await engine.run()
     assert result.report.aborted == "budget_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_customiser_non_recoverable_error_degrades_to_error_outcome_not_crash() -> None:
+    """T4 follow-up (reviewer-flagged gap): a NonRecoverableProviderError (auth/
+    tls/context_window — see ``_llm.py``) raised by the customiser must NOT escape
+    ``_run_payload``/``run()`` as an unhandled exception.
+
+    Before this fix, an exception here skipped `run()`'s `asyncio.as_completed`
+    loop entirely (it only catches `TimeoutError`/`BudgetExceededError`), which
+    in turn skipped the post-loop `asyncio.gather(*tasks, return_exceptions=True)`
+    drain that reaps cancelled/in-flight MCP `stdio_client` subprocess tasks
+    (worst on Windows — see `run()`'s own comment), AND skipped the CLI's
+    redaction step on the exception's way out to stderr. Mirrors the judge
+    call's pre-existing `except Exception: outcome="error"` handling in
+    `_one_pass` — the customiser call site now gets the same treatment.
+
+    Proving `engine.run()` returns a normal `ScanResult` (rather than the
+    exception propagating out of this call) is sufficient to prove the drain
+    runs: the post-loop `gather` sits unconditionally between the
+    `as_completed` loop and `_finalize()` on every normal-return path.
+    """
+
+    class _BoomCustomiser:
+        async def customise(self, seed: Any, target: Any) -> Payload:
+            del seed, target
+            raise NonRecoverableProviderError(
+                Diagnosis(category="auth", detail="boom: bad key", remedy="fix your key"),
+                caller="customiser",
+            )
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_BoomCustomiser(),  # type: ignore[arg-type]
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()  # must not raise
+    assert result.report.aborted is None
+    assert len(result.report.attempts) == 1
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "error"
+    assert attempt.error_detail == "NonRecoverableProviderError"
+    assert attempt.verdict_reason is not None
+    assert "auth" in attempt.verdict_reason
+    assert result.report.findings_count == 0
 
 
 @pytest.mark.asyncio
