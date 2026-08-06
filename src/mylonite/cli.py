@@ -38,6 +38,7 @@ from rich.table import Table
 
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
+from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
 
@@ -95,6 +96,35 @@ _DEFAULT_MAX_LLM_CALLS = 50
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
 _T = TypeVar("_T")
+
+
+class _CliState:
+    """Carried on ``ctx.obj``: the artefact :class:`Layout` resolved once by the
+    root callback (``--output-dir``/``--out``/config ``root:`` unavailable yet at
+    that point — just the ``MYLONITE_ROOT`` env var and the built-in default).
+
+    A command with its own ``--config``/explicit-flag knowledge re-resolves via
+    :func:`_layout_for` instead of reading ``layout`` directly whenever it has a
+    more specific ``config_root`` to apply — see ``scan``/``gate``.
+    """
+
+    def __init__(self, layout: Layout) -> None:
+        self.layout = layout
+
+
+def _layout_for(ctx: typer.Context, *, config_root: Path | None = None) -> Layout:
+    """The effective :class:`Layout` for a command: ``config_root`` (when given)
+    re-resolves against the env/default fallback; otherwise reuse the Layout the
+    root callback already resolved on ``ctx.obj`` (``isinstance`` guards a ``ctx``
+    whose ``obj`` was never populated, e.g. a command invoked directly in a test
+    without going through the Typer app).
+    """
+    if config_root is not None:
+        return resolve_layout(config_root=config_root)
+    state = ctx.obj
+    if isinstance(state, _CliState):
+        return state.layout
+    return resolve_layout()
 
 
 def _resolve_option(explicit: _T | None, from_config: _T | None, default: _T) -> _T:
@@ -235,6 +265,7 @@ def _load_api_key_file(path: Path) -> None:
 
 @app.callback()
 def _root(
+    ctx: typer.Context,
     api_key_file: Annotated[
         Path | None,
         typer.Option(
@@ -255,6 +286,13 @@ def _root(
     The ``mylonite`` logger tree gets a secret-redacting filter so secret-shaped
     tokens never reach a log line (the ``LoggingConfig.redact_secrets`` default is
     True). The install is idempotent — safe to run on every invocation.
+
+    Also resolves the artefact :class:`~mylonite.layout.Layout` ONCE here (from
+    ``MYLONITE_ROOT`` and the built-in default — a per-command ``--config``'s
+    ``root:`` field and an explicit ``--output-dir``/``--out`` flag aren't in
+    scope yet at this point) and carries it on ``ctx.obj`` so every command
+    reads it from there (via ``_layout_for``) instead of each re-resolving —
+    and, critically, instead of any command hardcoding ``.mylonite/...`` itself.
     """
     from mylonite._redaction import install_log_redaction
 
@@ -262,6 +300,7 @@ def _root(
     _maybe_enable_truststore()
     install_log_redaction(enabled=True)
     _warn_unsupported_python()
+    ctx.obj = _CliState(layout=resolve_layout())
     if env_file is not None:
         _load_env_file(env_file)
     if api_key_file is not None:
@@ -711,6 +750,7 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     )
 )
 def scan(
+    ctx: typer.Context,
     target: Annotated[
         str | None,
         typer.Argument(
@@ -869,9 +909,16 @@ def scan(
         typer.Option("--max-concurrent", help="Max concurrent in-flight seeds."),
     ] = 3,
     output_dir: Annotated[
-        Path,
-        typer.Option("--output-dir", help="Root directory for scan artefacts."),
-    ] = Path(".mylonite/scans"),
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Root directory for scan artefacts (default: the resolved layout's "
+                "scans dir, normally .mylonite/scans — see mylonite.yaml `root:` / "
+                "MYLONITE_ROOT)."
+            ),
+        ),
+    ] = None,
     run_config_path: Annotated[
         Path | None,
         typer.Option(
@@ -927,6 +974,7 @@ def scan(
     """
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
+    config_root: Path | None = None
     if run_config_path is not None:
         from mylonite.config import load_run_config
 
@@ -940,8 +988,16 @@ def scan(
         provider = provider or rc.provider
         model = model or rc.model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+        config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+
+    # The resolved artefact Layout: an explicit --output-dir always wins outright
+    # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
+    # default decide where scan artefacts land — and, by construction, where
+    # `generate --latest` later looks for them (both read mylonite.layout.Layout).
+    layout = _layout_for(ctx, config_root=config_root)
+    effective_output_dir = output_dir if output_dir is not None else layout.scans
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
@@ -1199,7 +1255,7 @@ def scan(
         judge_model=effective_judge_model if judge_model else None,
         max_llm_calls=max_llm_calls,
         max_concurrent=max_concurrent,
-        output_dir=output_dir,
+        output_dir=effective_output_dir,
         dry_run=dry_run,
     )
 
@@ -1227,7 +1283,7 @@ def scan(
 
         # Persist artefacts UN-redacted (they are loadable/replayable data); only
         # the console-rendered summary string is redacted before display.
-        scan_dir = write_artefacts(result, output_dir)
+        scan_dir = write_artefacts(result, effective_output_dir)
         # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
         # it from the scan dir — the custom-target journey needs the path ONCE.
         # Never persist it verbatim: request.headers and env may carry live
@@ -1629,6 +1685,7 @@ def _tag_control_for_generate(exploit: Any) -> Any:
 
 @app.command()
 def generate(
+    ctx: typer.Context,
     scan_path: Annotated[
         Path | None,
         typer.Argument(
@@ -1640,8 +1697,19 @@ def generate(
     ] = None,
     latest: Annotated[
         bool,
-        typer.Option("--latest", help="Use the newest scan under .mylonite/scans/."),
+        typer.Option("--latest", help="Use the newest scan under the resolved scans dir."),
     ] = False,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "The scans root --latest searches (default: the resolved layout's "
+                "scans dir, normally .mylonite/scans). Pass the SAME value you gave "
+                "`scan --output-dir` to find a scan written to a custom location."
+            ),
+        ),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option(
@@ -1691,7 +1759,17 @@ def generate(
         UnsafeExploitRecord,
     )
 
-    scans_root = Path(".mylonite/scans")
+    # No --config on `generate` (kept minimal): absent an explicit --output-dir,
+    # the resolved Layout is MYLONITE_ROOT / the built-in default, via the root
+    # callback (ctx.obj) — the SAME resolution `scan`'s own default --output-dir
+    # uses, so a scan written under a root moved by mylonite.yaml/MYLONITE_ROOT is
+    # found here too. An explicit --output-dir (mirroring `scan --output-dir`,
+    # highest priority) points --latest at that exact scans root directly,
+    # closing the "generate --latest hardcodes .mylonite/scans" bug outright: a
+    # scan written to a one-off custom dir via `scan --output-dir X` is found by
+    # `generate --latest --output-dir X`.
+    layout = _layout_for(ctx)
+    scans_root = output_dir if output_dir is not None else layout.scans
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
     multi = len(exploit_paths) > 1
 
@@ -1730,7 +1808,7 @@ def generate(
         if out is not None:
             this_out = out / _slugify_pattern(exploit.pattern_id) if multi else out
         else:
-            this_out = Path(".mylonite/generated") / _slugify_pattern(exploit.pattern_id)
+            this_out = layout.generated_for(_slugify_pattern(exploit.pattern_id))
 
         if multi and index > 0:
             echo("")
@@ -3139,11 +3217,23 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 
 
 def _post_gate_annotations(
-    repo_root: Path, exploit: Any, report: Any, target_file: Path | None, pr_mod: Any
+    repo_root: Path,
+    exploit: Any,
+    report: Any,
+    target_file: Path | None,
+    pr_mod: Any,
+    *,
+    gate_dir: Path,
 ) -> None:
     """Best-effort GitHub check-run annotation for a finding that maps to a committed
     prompt line (R4). Untestable live glue (needs a real PR + ``checks:write``); the
-    payload assembly and localization it calls are unit-tested. Never raises."""
+    payload assembly and localization it calls are unit-tested. Never raises.
+
+    ``gate_dir`` is the resolved ``gate --out`` directory — threaded through to
+    :func:`mylonite.gate.annotate.post_check_run` so its scratch file lands
+    alongside the rest of this run's gate artefacts rather than always under
+    the hardcoded default.
+    """
     try:
         from mylonite.gate.annotate import (
             annotations_from_findings,
@@ -3185,7 +3275,7 @@ def _post_gate_annotations(
             title="Mylonite AI-layer findings",
             summary=f"{len(anns)} finding(s) localized to a source line.",
         )
-        post_check_run(repo_root, payload, _run=pr_mod._default_run)
+        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=pr_mod._default_run)
     except Exception:  # live glue must never break the gate
         return
 
@@ -3199,6 +3289,7 @@ def _post_gate_annotations(
     )
 )
 def gate(
+    ctx: typer.Context,
     target: Annotated[
         str | None,
         typer.Argument(
@@ -3260,9 +3351,16 @@ def gate(
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
     ] = None,
     out: Annotated[
-        Path,
-        typer.Option("--out", help="Output directory for gate artefacts."),
-    ] = Path(".mylonite/gate"),
+        Path | None,
+        typer.Option(
+            "--out",
+            help=(
+                "Output directory for gate artefacts (default: the resolved layout's "
+                "gate dir, normally .mylonite/gate — see mylonite.yaml `root:` / "
+                "MYLONITE_ROOT)."
+            ),
+        ),
+    ] = None,
     max_llm_calls: Annotated[
         int | None,
         typer.Option(
@@ -3382,8 +3480,17 @@ def gate(
         provider = provider or rc.provider
         model = model or rc.model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+        config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+        config_root = None
+
+    # The resolved artefact Layout, mirroring `scan`: an explicit --out always
+    # wins outright; absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the
+    # built-in default decide where gate artefacts (test, exploit, check-run
+    # scratch file) land instead of the historical hardcoded `.mylonite/gate`.
+    layout = _layout_for(ctx, config_root=config_root)
+    out = out if out is not None else layout.gate
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
@@ -3658,7 +3765,9 @@ def gate(
         from mylonite.gate.workflows import write_workflows
 
         repo_root = Path.cwd()
-        wf_files = write_workflows(repo_root, runs_on=runs_on) if workflows else []
+        wf_files = (
+            write_workflows(repo_root, runs_on=runs_on, gate_dir=out_dir) if workflows else []
+        )
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
             # credential from request.headers/env into that history (DCR-0019).
@@ -3678,7 +3787,9 @@ def gate(
         # remote MCP description/handler/return path) have no source line and ride in
         # the PR body + SARIF instead. Live-only glue; never fails the gate.
         if open_pr and getattr(pr, "opened", False):
-            _post_gate_annotations(repo_root, exploit, report, target_file, pr_mod)
+            _post_gate_annotations(
+                repo_root, exploit, report, target_file, pr_mod, gate_dir=out_dir
+            )
         return pr
 
     result = run_gate(
@@ -3721,8 +3832,7 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
         if r.status == "inconclusive":
             contribution_cell = "n/a"
             fired_cell = (
-                f"{r.raw_fired}/{r.guarded_fired} of {r.total} "
-                f"({r.inconclusive} inconclusive)"
+                f"{r.raw_fired}/{r.guarded_fired} of {r.total} ({r.inconclusive} inconclusive)"
             )
         else:
             contribution_cell = f"{r.contribution:+.0%}"

@@ -1,5 +1,5 @@
 # Mylonite per-PR gate — the CHEAP, blocking check.
-# Runs the committed .mylonite/gate/ regression test on every PR. For a custom
+# Runs the committed __GATE_DIR__/ regression test on every PR. For a custom
 # target it BOUNDED-re-drives your MCP server (deterministic effect-probe, small
 # model, 1 iteration) — a few cents/PR. A regression fails this check.
 #
@@ -29,4 +29,4 @@ jobs:
       - name: Install mylonite + pytest
         run: pip install "mylonite" pytest
       - name: Run the committed gate test
-        run: pytest .mylonite/gate -q
+        run: pytest __GATE_DIR__ -q

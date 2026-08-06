@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from mylonite.gate.localize import localize
+from mylonite.layout import DEFAULT_LAYOUT
 
 #: GitHub's per-request annotation cap (the rest stay in the PR body).
 _MAX_ANNOTATIONS = 50
@@ -94,16 +95,27 @@ def check_run_payload(
     }
 
 
-def post_check_run(repo_root: Path, payload: dict[str, Any], *, _run: Runner) -> str | None:
+def post_check_run(
+    repo_root: Path,
+    payload: dict[str, Any],
+    *,
+    gate_dir: Path = DEFAULT_LAYOUT.gate,
+    _run: Runner,
+) -> str | None:
     """Create the check run via ``gh api`` (live-only). Returns its URL, or ``None``.
 
     No-op when the payload carries no annotations. Best-effort: any ``gh`` failure
     (e.g. a token without ``checks:write``) is swallowed — the loci already ride in
     the PR body and SARIF, so the gate must not fail on a missing annotation scope.
+
+    ``gate_dir`` is the resolved gate output directory (``gate --out``, defaulting
+    to :data:`mylonite.layout.DEFAULT_LAYOUT`'s gate dir) — the scratch file rides
+    alongside the rest of that run's gate artefacts rather than always under the
+    hardcoded default, so a custom ``--out`` is honoured here too.
     """
     if not payload.get("output", {}).get("annotations"):
         return None
-    body_file = repo_root / ".mylonite" / "gate" / "check_run.json"
+    body_file = repo_root / gate_dir / "check_run.json"
     try:
         body_file.parent.mkdir(parents=True, exist_ok=True)
         body_file.write_text(json.dumps(payload), encoding="utf-8")
