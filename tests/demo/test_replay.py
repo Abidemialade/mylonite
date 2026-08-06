@@ -32,7 +32,10 @@ from mylonite.demo._replay import (
     FixtureConflictError,
     LiteLLMRecorder,
     MissingFixtureError,
+    _resolve_key_version,
     _stable_key,
+    _stable_key_v1,
+    _stable_key_v2,
     packaged_fixture_dir,
 )
 
@@ -158,7 +161,11 @@ async def test_record_mode_forwards_tools_kwarg(
     assert captured["tools"] == tools
     assert captured["model"] == "claude-x"
     assert response.choices[0].message.content == "ok"
-    key = _stable_key("claude-x", _MSGS)
+    # A fresh fixtures_dir (no `_meta.json`) defaults to v2 in record mode
+    # (T8), so `tools=` is folded into the on-disk key — this is the actual
+    # fix: recording under v1 here would silently drop the tool schema from
+    # cache identity.
+    key = _stable_key_v2("claude-x", _MSGS, tools=tools)
     written = json.loads((tmp_path / f"{key}.json").read_text(encoding="utf-8"))
     assert written["choices"][0]["message"]["content"] == "ok"
 
@@ -251,3 +258,195 @@ def test_packaged_fixture_dir_points_at_demo_package() -> None:
     assert Path(str(root)).resolve().parent == demo_pkg_dir
     # Per-variant namespaces must be joinable underneath the root.
     assert (root / "vulnerable").name == "vulnerable"
+
+
+# --- (T8) v2 cache key: extra call-shape kwargs must change the key ------------
+#
+# The bug: the shipped key function hashes ONLY (model, messages), so two
+# calls that differ solely in `tools`/`response_format`/`api_base` collide on
+# the same fixture file — replay silently returns whichever response was
+# recorded first, which may not be shaped for the call actually being made.
+# `_stable_key_v2` is the fix; `_stable_key_v1` (== the original `_stable_key`)
+# is kept byte-for-byte so the already-shipped v1 fixture directories
+# (`src/mylonite/demo/fixtures/*`) keep replaying under the old algorithm.
+
+
+def test_tool_schema_change_produces_distinct_key() -> None:
+    tools_a = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
+    tools_b = [{"type": "function", "function": {"name": "send_email", "parameters": {}}}]
+    key_a = _stable_key_v2("claude-x", _MSGS, tools=tools_a)
+    key_b = _stable_key_v2("claude-x", _MSGS, tools=tools_b)
+    assert key_a != key_b
+    # Proves the bug is real: the OLD (v1) algorithm ignores `tools` entirely,
+    # so these same two calls collide under it.
+    assert _stable_key_v1("claude-x", _MSGS) == _stable_key_v1("claude-x", _MSGS)
+
+
+def test_response_format_change_produces_distinct_key() -> None:
+    key_a = _stable_key_v2("claude-x", _MSGS, response_format={"type": "json_object"})
+    key_b = _stable_key_v2("claude-x", _MSGS, response_format={"type": "text"})
+    assert key_a != key_b
+
+
+def test_api_base_in_key() -> None:
+    key_a = _stable_key_v2("claude-x", _MSGS, api_base="https://a.example.com")
+    key_b = _stable_key_v2("claude-x", _MSGS, api_base="https://b.example.com")
+    assert key_a != key_b
+
+
+def test_api_key_excluded_from_key() -> None:
+    key_a = _stable_key_v2("claude-x", _MSGS, api_key="sk-aaaaaaaa")
+    key_b = _stable_key_v2("claude-x", _MSGS, api_key="sk-bbbbbbbb")
+    assert key_a == key_b
+    # Rotating a key (or never setting one) must never itself cause a miss.
+    assert key_a == _stable_key_v2("claude-x", _MSGS)
+
+
+def test_v2_key_unaffected_by_dict_key_ordering() -> None:
+    tools_ordered_a = [{"type": "function", "function": {"name": "x", "parameters": {"a": 1, "b": 2}}}]
+    tools_ordered_b = [{"function": {"parameters": {"b": 2, "a": 1}, "name": "x"}, "type": "function"}]
+    assert _stable_key_v2("claude-x", _MSGS, tools=tools_ordered_a) == _stable_key_v2(
+        "claude-x", _MSGS, tools=tools_ordered_b
+    )
+
+
+# --- (T8) fixture-format-version detection -------------------------------------
+
+
+def test_format_version_defaults_to_v1_on_replay_with_no_sidecar(tmp_path: Path) -> None:
+    assert _resolve_key_version(tmp_path, "replay") == 1
+
+
+def test_format_version_defaults_to_v2_on_record_with_no_sidecar(tmp_path: Path) -> None:
+    assert _resolve_key_version(tmp_path, "record") == 2
+
+
+def test_format_version_honours_explicit_sidecar_in_either_mode(tmp_path: Path) -> None:
+    (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 1}), encoding="utf-8")
+    assert _resolve_key_version(tmp_path, "replay") == 1
+    assert _resolve_key_version(tmp_path, "record") == 1
+
+    (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 2}), encoding="utf-8")
+    assert _resolve_key_version(tmp_path, "replay") == 2
+    assert _resolve_key_version(tmp_path, "record") == 2
+
+
+def test_real_shipped_demo_fixtures_are_detected_as_v1() -> None:
+    """The committed demo fixtures ship with no `_meta.json` — must resolve v1."""
+    root = packaged_fixture_dir()
+    assert _resolve_key_version(root / "vulnerable", "replay") == 1
+    assert _resolve_key_version(root / "guarded", "replay") == 1
+
+
+# --- (T8) the critical non-regression: shipped v1 fixtures still replay --------
+
+
+async def test_v1_fixtures_still_replay() -> None:
+    """The real, already-shipped ``mylonite demo`` fixtures must keep working.
+
+    The critical non-regression proof: drive the ACTUAL demo wiring
+    (``mylonite.demo.runner.run_demo``) against the real packaged
+    ``vulnerable``/``guarded`` fixtures — which ship with no ``_meta.json``
+    sidecar — end to end. Every real call the demo's ``LLMPlanner`` makes
+    includes ``tools=``/``tool_choice=``; if v1 dispatch (or the key-version
+    detection defaulting) were broken, this would raise
+    ``DemoFixtureError``/``MissingFixtureError`` instead of completing with
+    the expected differential.
+    """
+    from mylonite.demo.runner import run_demo
+
+    result = await run_demo(live=False)
+    assert result.vulnerable.report.aborted is None
+    assert result.guarded.report.aborted is None
+    assert result.vulnerable.report.findings_count >= 1
+    assert result.guarded.report.findings_count == 0
+
+
+# --- (T8) usage / finish_reason round-trip through record + replay -------------
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="truncated...", tool_calls=None),
+                    finish_reason="length",
+                )
+            ],
+            usage=None,
+        )
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    await recorder(model="claude-x", messages=_MSGS)
+
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await replay(model="claude-x", messages=_MSGS)
+    assert response.choices[0].finish_reason == "length"
+
+
+@pytest.mark.asyncio
+async def test_usage_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="ok", tool_calls=None),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=12, completion_tokens=34, total_tokens=46),
+        )
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    await recorder(model="claude-x", messages=_MSGS)
+
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await replay(model="claude-x", messages=_MSGS)
+    assert response.usage is not None
+    assert response.usage.prompt_tokens == 12
+    assert response.usage.completion_tokens == 34
+    assert response.usage.total_tokens == 46
+
+
+@pytest.mark.asyncio
+async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The actual regression scenario: a call WITH tools, recorded + replayed v2."""
+    tools = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="", tool_calls=None), finish_reason="stop"
+                )
+            ],
+            usage=None,
+        )
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    # Explicit v2 sidecar written up front, mirroring how a caller that wants
+    # v2 dispatch on a fresh directory would stamp it (reference_validator.py /
+    # record_reference_example.py stamp it right after recording).
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({"format_version": 2, "model": "claude-x"}), encoding="utf-8"
+    )
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    await recorder(model="claude-x", messages=_MSGS, tools=tools)
+
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await replay(model="claude-x", messages=_MSGS, tools=tools)
+    assert response.choices[0].message.content == ""
+    assert replay.cache_hits == 1
+    assert replay.cache_misses == 0

@@ -12,9 +12,27 @@ and replay makes every fixture miss on lookup and the demo silently lies.
 For each reference variant (``vulnerable``, ``guarded``) it builds a
 record-mode :class:`~mylonite.demo._replay.LiteLLMRecorder` over
 ``src/mylonite/demo/fixtures/<variant>/`` and runs the real scan once, writing one
-JSON fixture per unique ``(model, messages)`` pair. The same deterministic
+JSON fixture per unique ``(model, messages, ...)`` pair. The same deterministic
 per-variant note-id factory the replay path uses is reset per variant, so the
 recorded note IDs (``n_demo_0001`` …) match replay exactly.
+
+Cache-key format (T8)
+----------------------
+The CURRENTLY COMMITTED fixtures under ``src/mylonite/demo/fixtures/{vulnerable,
+guarded}/`` predate the ``_meta.json`` sidecar entirely and were recorded with
+the v1 key (``(model, messages)`` only) — :mod:`mylonite.demo._replay` keeps
+replaying them correctly (v1 is the documented default for a sidecar-less
+directory in replay mode). A FRESH re-record (an EMPTY ``variant_dir``, as
+happens the first time this script targets a variant) defaults to the v2 key
+(folds in ``tools``/``tool_choice``/``response_format``/``api_base``) and this
+script then stamps ``_meta.json`` with ``format_version: 2`` afterwards, so a
+later replay of the freshly-recorded directory resolves the SAME v2 key rather
+than silently falling back to v1 (which would ignore ``tools=`` and miss every
+lookup). Re-recording an EXISTING v1 directory in place is NOT supported by
+this script as written — delete the stale ``*.json`` fixtures (but not this
+script's newly-written ``_meta.json``, which won't exist yet either) before
+re-running, so the directory starts genuinely empty and the whole variant is
+recorded under one consistent key version.
 
 When to (re-)record
 -------------------
@@ -44,6 +62,7 @@ committing them.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from mylonite.demo._replay import LiteLLMRecorder
@@ -53,6 +72,10 @@ from mylonite.demo.runner import (
     _build_scan,
     _note_id_counter,
 )
+
+#: The v2 cache-key format this script always records freshly-empty variant
+#: directories with (see the module docstring's "Cache-key format" section).
+_FIXTURE_FORMAT_VERSION = 2
 
 try:
     from mylonite.demo.runner import _VARIANTS
@@ -84,7 +107,20 @@ async def _record_variant(variant: str) -> tuple[int, int]:
         llm_assist=False,
     )
     result = await engine.run()
-    fixture_count = len(list(variant_dir.glob("*.json")))
+    # Stamp the _meta.json sidecar so a LATER replay of this directory resolves
+    # the same v2 key the recorder just used (a sidecar-less directory defaults
+    # to v1 on replay — see the module docstring's "Cache-key format" section).
+    meta_path = variant_dir / "_meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {"format_version": _FIXTURE_FORMAT_VERSION, "model": DEMO_MODEL, "variant": variant},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fixture_count = len(list(variant_dir.glob("*.json"))) - 1  # exclude _meta.json
     findings_count = result.report.findings_count
     print(
         f"[{variant}] recorded {fixture_count} fixture(s) -> "

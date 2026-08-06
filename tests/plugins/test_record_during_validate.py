@@ -6,10 +6,12 @@ Every test here is OFFLINE — NO live LLM call happens:
   sibling ``test_differential_validator`` uses (the in-process servers produce
   the differential).
 * The RECORD leg (``LiteLLMRecorder._record``) imports ``litellm`` lazily and
-  calls ``litellm.acompletion``. We monkeypatch ``sys.modules["litellm"]`` with a
-  fake whose ``acompletion`` is a coroutine routing through the SAME scripted
-  completion logic, so the recorder serialises those scripted responses into real
-  fixture JSON — no network, no key.
+  calls ``litellm.acompletion``. We monkeypatch ONLY ``litellm.acompletion`` on
+  the REAL, installed ``litellm`` module (not a wholesale ``sys.modules["litellm"]``
+  swap — see :func:`_install_fake_acompletion`'s docstring for why that matters)
+  to a coroutine routing through the SAME scripted completion logic, so the
+  recorder serialises those scripted responses into real fixture JSON — no
+  network, no key.
 
 The crux test proves the full record→replay round-trip works offline: validate
 records the canonical guarded fixtures, writes the on-disk test + exploit next to
@@ -20,11 +22,11 @@ the recorded fixtures).
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import litellm
 import pytest
 
 # Reuse the scripted-completion machinery + exploit/test builders from the
@@ -51,19 +53,34 @@ def _fixture_jsons(fixtures_dir: Path) -> list[Path]:
     return [p for p in sorted(fixtures_dir.glob("*.json")) if p.name != "_meta.json"]
 
 
-class _FakeLiteLLM:
-    """Stand-in for the ``litellm`` module the recorder imports lazily.
+def _install_fake_acompletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Monkeypatch ONLY ``litellm.acompletion`` on the real, installed module.
 
-    ``acompletion`` is an async method routing through a fresh
-    :class:`_ScriptedCompletion`, so the recorder records the SAME deterministic
-    guarded responses the differential loop sees — entirely offline.
+    An earlier version of this fixture replaced the WHOLE ``sys.modules["litellm"]``
+    entry with a bespoke stand-in object. That broke under T8: ``litellm``'s own
+    ``supports_response_schema``/``get_supported_openai_params`` (which
+    ``mylonite.scan._llm.build_response_format`` calls to decide whether/how to
+    set ``response_format`` — now part of the v2 fixture cache key) turn out to
+    do internal work that ALSO re-resolves ``litellm`` via ``sys.modules`` — so
+    swapping the module out from under them silently changed their answer
+    (``supports_response_schema(model="claude-haiku-4-5-20251001")`` flips from
+    ``True`` to ``False`` the moment ``sys.modules["litellm"]`` points at
+    anything else, even though the function is still the REAL one). That made
+    the RECORD-time ``response_format`` decision (``None``, degraded) diverge
+    from the REPLAY-time one (a real subprocess with the genuine, never-mocked
+    ``litellm``, producing the schema class) — a pure test-fidelity bug, not a
+    problem with keying on ``response_format``. Patching only ``acompletion``
+    on the real module leaves every other ``litellm`` introspection call
+    completely genuine (and therefore identical between record and replay),
+    exactly matching what a live-key recording session already does.
     """
 
-    def __init__(self) -> None:
-        self._script = _ScriptedCompletion()
+    script = _ScriptedCompletion()
 
-    async def acompletion(self, *, model: str, messages: Any, **kwargs: Any) -> SimpleNamespace:
-        return await self._script(model=model, messages=messages, **kwargs)
+    async def fake_acompletion(*, model: str, messages: Any, **kwargs: Any) -> SimpleNamespace:
+        return await script(model=model, messages=messages, **kwargs)
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +158,9 @@ def test_record_then_full_pass_offline(tmp_path: Path, monkeypatch: pytest.Monke
     gen_dir = tmp_path / "gen"
     fixtures_dir = gen_dir / "fixtures"
 
-    # Fake the lazily-imported litellm module at the recorder seam.
-    monkeypatch.setitem(sys.modules, "litellm", _FakeLiteLLM())
+    # Fake ONLY litellm.acompletion at the recorder seam (see
+    # _install_fake_acompletion's docstring for why NOT the whole module).
+    _install_fake_acompletion(monkeypatch)
 
     validator = DifferentialValidator(
         iterations=2,
