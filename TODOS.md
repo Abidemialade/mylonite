@@ -5,6 +5,48 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## 0.7.7 deep-code-review non-blocking findings (docs/reviews/2026-08-06-0.7.7-honest-results-review.md)
+
+The two high-severity blockers (DCR-0005, DCR-0009) were fixed before merge. These are
+the remaining medium/low findings from the same review, intentionally left for a
+follow-up rather than expanding the 0.7.7 diff further. None are fail-opens; all are
+either correctness gaps in already-correct-in-spirit code, or non-blocking performance.
+
+- **`--target-file` silently overrides a non-`reference:`/non-`mcp:custom` positional
+  `TARGET`, in both `scan()` and `gate()`** (DCR-0001, DCR-0003 — `cli.py:1081`,
+  `:3530`), and **`gate()`'s custom-target `target_id` drops the scope and diverges
+  from `scan()`'s formula** (DCR-0004 — `cli.py:3604`). Same root cause: both commands
+  independently re-derive "did the operator mean `--target-file` or the positional
+  argument" instead of sharing one resolution function — the exact fail-open class this
+  release exists to close, just found too late in review to fold into this diff without
+  re-triggering full verification. *Trigger:* next patch release; candidate for a small
+  `_resolve_target_and_file()` helper shared by both commands.
+- **`_first_balanced_object` can silently pick an earlier draft JSON object over the
+  model's real final answer** in prose-only response mode (DCR-0006 — `scan/_llm.py:231`).
+  Only reachable when `build_response_format` degrades to prose (a model with no native
+  JSON mode). *Trigger:* next patch release.
+- **`DifferentialValidator`'s independent live re-drive loops run sequentially instead
+  of concurrently**, across four call sites (DCR-0016 through DCR-0019 —
+  `reference_validator.py:422,527,620,1061`) plus one quarantined-but-likely-real sibling
+  in `ablation.py:285` (`run_control_ablation`, evidence didn't verbatim-match at review
+  time — needs a human re-check, not dismissed). At default `--iterations 5`, a
+  `validate` run against a guarded custom target costs roughly 17x a single scan's
+  wall-clock instead of something closer to `max_concurrent`-bounded. *Trigger:*
+  performance follow-up, not correctness-blocking; consolidate into one
+  concurrency-bounded runner rather than four point fixes.
+- **Metamorphic mislabeling**: a `vuln_fired=True` + guarded-adapter-error combination is
+  classified `attack_malformed`, contradicting the branch's own comment (DCR-0011 —
+  `reference_validator.py:1070`). **Guard-resisted count treats adapter errors/timeouts
+  as genuine resistance** on the custom-target differential leg (DCR-0012 — `:677`).
+  Both narrow the meaning of a `validate` verdict in an edge case; low-frequency but
+  worth fixing before either metric is used unattended in CI. *Trigger:* next patch
+  release, alongside DCR-0006.
+- **Plugin entry-point discovery re-runs with no caching** on every custom-target
+  validate iteration (DCR-0020 — `reference_validator.py:739`) and every ablate
+  `scan_target_fires` call (quarantined finding, `ablation.py:476`, since demoted to
+  false-positive on adjudication — amortised against minutes of LLM latency, not worth
+  fixing on its own).
+
 ## Phase 4 launch infrastructure (pre-launch readiness landed; these remain — human-gated)
 
 The pre-Phase-4 readiness work (flow, verification legibility, correctness
