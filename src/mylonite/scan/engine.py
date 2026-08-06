@@ -27,6 +27,7 @@ from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
@@ -216,7 +217,7 @@ class ScanEngine:
                 raise
             except Exception:
                 logger.exception("ScanEngine: adapter.describe() raised")
-                aborted = "describe_failed"
+                aborted = AbortReason.DESCRIBE_FAILED.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -272,7 +273,7 @@ class ScanEngine:
                         family,
                         known,
                     )
-                    aborted = "no_payloads"
+                    aborted = AbortReason.NO_PAYLOADS.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -290,12 +291,12 @@ class ScanEngine:
                     else:
                         outcome = await coro
                 except TimeoutError:
-                    aborted = "wall_clock_timeout"
+                    aborted = AbortReason.WALL_CLOCK_TIMEOUT.value
                     for pending in tasks:
                         pending.cancel()
                     break
                 except BudgetExceededError:
-                    aborted = "budget_exceeded"
+                    aborted = AbortReason.BUDGET_EXCEEDED.value
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -317,7 +318,7 @@ class ScanEngine:
                         fallback_breakdown.get("nrun_disagreement", 0) + 1
                     )
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
-                    aborted = "provider_unreachable"
+                    aborted = AbortReason.PROVIDER_UNREACHABLE.value
                     for pending in tasks:
                         pending.cancel()
                     break
