@@ -76,6 +76,13 @@ dependencies = [
     # a no-op in CI (the OS store already trusts standard CAs). Not "enterprise" — it's
     # the common case; the [enterprise] extra is kept as a back-compat alias.
     "truststore>=0.9",
+    # `validate`/`gate` shell out to `sys.executable -m pytest` (see
+    # scan/pytest_runner.py) to genuinely run each emitted regression test —
+    # a real, production-path dependency, not just a dev/CI tool. Previously
+    # only in the `dev` extra, so a plain `pip install mylonite` user hitting
+    # `mylonite validate`/`gate` got PYTEST_UNAVAILABLE (T5) unless they also
+    # happened to have pytest installed some other way.
+    "pytest>=8.2",
     # Security floors for litellm's transitive deps (pinned to patched
     # releases; we don't import these directly):
     "aiohttp>=3.14.0",  # CVE-2026-34993, CVE-2026-47265
@@ -86,7 +93,8 @@ dependencies = [
 dev = [
     "ruff==0.16.1",
     "mypy>=1.10",
-    "pytest>=8.2",
+    # pytest itself is now a BASE dependency (see above) — kept out of this
+    # list to avoid a duplicate/drift-prone pin.
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
     "pre-commit>=3.7",

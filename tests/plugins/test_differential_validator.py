@@ -1253,3 +1253,58 @@ def test_custom_no_guarded_factory_omits_differential_leg() -> None:
     assert "differential" not in report.gating_legs
     assert all(o.stage != "differential" for o in report.outcomes)
     assert report.kept is True
+
+
+# --- T5: the custom-target build leg must be REAL, not a hardcoded True ------
+
+
+def test_custom_build_leg_actually_runs_pytest() -> None:
+    """T5 regression (Bug 2): the custom-target build leg used to hardcode
+    ``passed=True`` UNCONDITIONALLY for every custom target, citing a
+    ``testkit.assert_attack_reproduces`` function that does not exist anywhere
+    in the codebase (see ``test_no_reference_to_assert_attack_reproduces``
+    below). Feed a SYNTACTICALLY BROKEN emitted test through the custom-target
+    path (``run_build`` defaults to True) and assert the build leg now
+    genuinely FAILS — proving pytest was actually invoked against the
+    (corrupted) source, not faked."""
+    exploit = _custom_exploit()
+    good = ReferencePytestGenerator().emit(exploit)
+    broken = good.model_copy(update={"source": "def test_x(:\n    pass\n"})
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion
+    )
+    report = validator.validate(broken, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    build = _outcome(report, "build")
+    assert build.passed is False
+    assert report.kept is False
+
+
+def test_custom_build_leg_passes_for_well_formed_test() -> None:
+    """Sanity companion to the regression above: a well-formed emitted
+    custom-target test's build leg genuinely collects under pytest (the
+    ``skipif(MYLONITE_LIVE_TARGET != "1")`` guard means it collects-and-skips,
+    not a real live run) — not merely hardcoded True regardless of content."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    build = _outcome(report, "build")
+    assert build.passed is True
+
+
+def test_no_reference_to_assert_attack_reproduces() -> None:
+    """Grep-guard: ``testkit.assert_attack_reproduces`` was cited in a comment
+    on the hardcoded-True custom-target build leg but never existed as a
+    function anywhere in ``mylonite.testkit`` (or elsewhere in ``src/``) — a
+    lie in a comment describing dead code. Prevents it from silently coming
+    back once the real build leg (this file's other T5 tests) is in place."""
+    from pathlib import Path
+
+    text = Path("src/mylonite/plugins/_reference/reference_validator.py").read_text(
+        encoding="utf-8"
+    )
+    assert "assert_attack_reproduces" not in text

@@ -24,8 +24,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install mylonite
-        run: pip install "mylonite"
+      - name: Install mylonite + pytest
+        run: pip install "mylonite" pytest
       - name: Discover -> generate -> validate -> open gating PR
         run: >
           mylonite gate --target-file .mylonite/gate/target.yaml

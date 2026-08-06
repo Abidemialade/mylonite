@@ -27,6 +27,11 @@ The pipeline (per ``mylonite.contracts.validator``):
      fixtures), not merely on collection. This closes the
      ``validate``→committed-artefact loop: the command leaves behind a
      ready-to-commit, replayable test + fixtures and proves it passes offline.
+
+   A CUSTOM target (``_validate_custom_target``) has no in-repo guarded twin to
+   record fixtures against, so its build leg is always collect-only — but it is
+   the SAME real ``run_test_file``-backed check as above (T5), not a
+   hardcoded pass: a syntactically broken emitted test genuinely fails it.
 2. **differential** — across ``iterations`` runs of the full attack scan, does
    the exploit's ``pattern_id`` FIRE on the vulnerable twin and RESIST on the
    guarded twin *at all*? (discrimination)
@@ -584,14 +589,18 @@ class DifferentialValidator(ValidatorBase):
             ),
             metric=agree,
         )
-        build = ValidationOutcome(
-            stage="build",
-            passed=True,
-            detail=(
-                "custom-target regression test emitted; it re-drives the real "
-                "target via testkit.assert_attack_reproduces"
-            ),
-            metric=None,
+        # T5: the build leg used to hardcode `passed=True` unconditionally here,
+        # citing a testkit re-drive helper that never existed anywhere in this
+        # codebase — dead code that could never catch a malformed emitted test.
+        # Consolidated onto the SAME real pytest-invoking leg the reference
+        # path uses (`_collect_only_outcome`): it writes the emitted source to
+        # a temp file and genuinely runs it under pytest. A custom-target test
+        # carries a `skipif(MYLONITE_LIVE_TARGET != "1")` guard (see
+        # `reference_pytest_generator.py`), so this collects-and-skips rather
+        # than launching the real target — still a genuine proof the file is
+        # syntactically valid and collectible, which the hardcoded True never was.
+        build = (
+            self._build_skip_outcome() if not self._run_build else self._collect_only_outcome(test)
         )
         outcomes = [build, stability, effect, consensus]
         legs = ["build", "stability", "effect", "consensus"]
@@ -1204,11 +1213,7 @@ class DifferentialValidator(ValidatorBase):
           the differential/flakiness failure).
         """
         if not self._run_build:
-            return ValidationOutcome(
-                stage="build",
-                passed=True,
-                detail="build stage skipped (run_build=False)",
-            )
+            return self._build_skip_outcome()
 
         if self._record_fixtures_dir is not None:
             canonical = self._canonical_run_index(tallies)
@@ -1224,6 +1229,18 @@ class DifferentialValidator(ValidatorBase):
             )
 
         return self._collect_only_outcome(test)
+
+    @staticmethod
+    def _build_skip_outcome() -> ValidationOutcome:
+        """The ``build`` outcome when ``run_build=False`` — shared by both the
+        reference-target (:meth:`_build_outcome`) and custom-target
+        (:meth:`_validate_custom_target`) paths so a skip reads identically
+        either way."""
+        return ValidationOutcome(
+            stage="build",
+            passed=True,
+            detail="build stage skipped (run_build=False)",
+        )
 
     @staticmethod
     def _canonical_run_index(tallies: list[_IterationTally]) -> int | None:
