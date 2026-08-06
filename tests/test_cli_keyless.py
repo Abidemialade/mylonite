@@ -33,6 +33,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mylonite.cli import (
+    EXIT_CONFIG,
     EXIT_PROVIDER,
     EXIT_SUCCESS,
     app,
@@ -202,47 +203,45 @@ def test_validate_reference_no_key_exits_provider(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ablate -- DOCUMENTED GAP, not a positive control
+# ablate -- EXIT_CONFIG (2): total-failure regression guard
 # ---------------------------------------------------------------------------
 
 
-def test_ablate_no_key_exits_zero_documented_gap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`ablate` currently has NO exit-code contract for total provider failure
-    -- unlike scan/gate/validate/demo, it exits 0 even when every control came
-    back "inconclusive" because no LLM call could authenticate.
+def test_ablate_no_key_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`ablate` must not exit 0 on total provider failure.
 
-    This is a REAL, CONFIRMED FINDING from writing this task, not a test bug:
+    THIS WAS A CONFIRMED FAIL-OPEN BUG (0.7.7 remediation, direct follow-up to
+    T6): unlike scan/gate/validate/demo, `ablate` had no exit-code contract for
+    "every control came back inconclusive because no LLM call could
+    authenticate" -- it printed an "inconclusive ... check
+    connectivity/credentials" hint and still exited 0, indistinguishable from a
+    genuine (if uninteresting) clean run. This test used to be named
+    `test_ablate_no_key_exits_zero_documented_gap` and asserted exactly that
+    gap (exit 0) as a pinned "known-bad, not an endorsement" regression guard.
+    It's flipped here to prove the fix and now guards the FIXED contract.
 
-    * `scan_target_fires` (mylonite/scan/ablation.py) derives its return value
-      purely from `ScanOutcome.from_report(...).trustworthy_clean` -- FIRED,
-      RESISTED, or INCONCLUSIVE. There is no fourth outcome that distinguishes
-      "the scan didn't run because of a provider auth failure" from any other
-      reason a scan might not reach a trustworthy result, and `ScanEngine.run()`
-      deliberately never raises for this (it degrades every internal failure to
-      an aborted/errored `ScanReport`, by design -- see the "ScanEngine:
-      customiser raised unexpectedly" degrade path).
-    * The `ablate` CLI command (mylonite/cli.py) never inspects
-      `ScanOutcome.exit_code` or an all-inconclusive result to override its exit
-      code, unlike `scan`/`gate` (which explicitly derive their exit code from
-      `ScanOutcome`) and `validate`/`demo` (which explicitly check
-      `_provider_preflight` / `aborted == "provider_unreachable"`). Ablate's
-      command body ends with only informational `echo_err` hints; Typer/Click's
-      implicit return is exit 0.
+    The fix: `scan_target_fires` (mylonite/scan/ablation.py) now accepts an
+    `on_outcome` sink invoked with the full `ScanOutcome` (not just the
+    collapsed `FireOutcome`) whenever a scoped scan doesn't fire. The `ablate`
+    CLI command wires that sink to collect every underlying `ScanOutcome`, and
+    once `run_control_ablation` returns, if EVERY control's status is
+    "inconclusive" (a total failure -- nothing could be determined for ANY
+    control, not just some), it raises `typer.Exit` with the most severe
+    `ScanOutcome.exit_code` observed across the underlying scans -- the same
+    authority `scan`/`gate` already use (mylonite.scan.coverage.ScanOutcome).
 
-    Verified directly (not just by reading the code): with the real engine,
-    real PayloadCustomiser, real SuccessJudge and a REAL (unmocked) LiteLLM
-    call attempt against a cleared environment, `ablate` prints an
-    "inconclusive ... check connectivity/credentials" table row and hint, and
-    still exits 0.
-
-    This test pins that CURRENT behaviour so it's visible or intentional if it
-    ever changes -- it is NOT an endorsement. Per the T6 brief this task is
-    test-only (no src/ edits); this is flagged prominently to the maintainer
-    as a candidate follow-up (e.g. "ablate should exit EXIT_PROVIDER when every
-    control comes back inconclusive due to a provider failure, mirroring
-    scan/gate").
+    The exact code here is EXIT_CONFIG (2), not EXIT_PROVIDER (4): each
+    `scan_target_fires` call is a SINGLE-seed scoped scan (`pattern_id_filter`
+    pins it to exactly one attempt), so it never accumulates the 3 consecutive
+    LLM-call failures `ScanEngine.run()` requires to set the formal
+    `aborted="provider_unreachable"` abort (see `engine.py`'s
+    `provider_failure_threshold`, default 3). Instead it lands in the exact
+    same "untrustworthy without a formal abort" bucket `ScanOutcome` already
+    uses for `scan`/`gate` when a report is too small to trip that threshold
+    (see `coverage.py`'s `_EXIT_INCOMPLETE_NO_ABORT` / its own comment: "a
+    common cause is missing or invalid provider credentials") -- EXIT_CONFIG.
+    This was verified empirically (not assumed) by driving `scan_target_fires`
+    directly against this exact fixture before writing this assertion.
 
     The only thing monkeypatched here is the MCP STDIO TRANSPORT (spawning a
     real OS subprocess) -- not the scan engine, not the customiser, not the
@@ -321,12 +320,15 @@ def test_ablate_no_key_exits_zero_documented_gap(
     elapsed = time.monotonic() - t0
 
     assert elapsed < _MAX_SECONDS, f"ablate took {elapsed:.1f}s -- expected a fast local failure"
-    # Documents the CURRENT gap: no EXIT_PROVIDER wiring, so this is 0, not 4.
-    assert result.exit_code == EXIT_SUCCESS, (
-        "ablate's exit code changed -- if it now correctly non-zero-exits on "
-        "total provider failure, update this test (and its docstring) to match "
-        f"the new, better contract instead of xfailing it. Got {result.exit_code}.\n"
+    assert result.exit_code != EXIT_SUCCESS, (
+        f"ablate must not exit 0 on total provider failure. Got {result.exit_code}.\n"
         f"Output:\n{result.output}"
+    )
+    assert result.exit_code == EXIT_CONFIG, (
+        f"expected EXIT_CONFIG (2) -- see this test's docstring for why total "
+        f"failure here lands in the same bucket scan/gate use for a report too "
+        f"small to trip the formal provider_unreachable abort, rather than "
+        f"EXIT_PROVIDER (4). Got {result.exit_code}.\nOutput:\n{result.output}"
     )
     assert "inconclusive" in result.output.lower()
 

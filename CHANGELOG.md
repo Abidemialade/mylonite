@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ablate` no longer exits 0 on total provider failure.** Direct follow-up
+  to T6's keyless-execution test matrix, which confirmed `ablate` was the one
+  scan-driving command without an exit-code contract for "the provider was
+  never actually reachable" — unlike `scan`/`gate`/`validate`, which all
+  correctly exit non-zero. `scan_target_fires` (`mylonite/scan/ablation.py`)
+  discarded the underlying `ScanOutcome` (abort reason, exit code) behind
+  every `FireOutcome.INCONCLUSIVE` verdict; `ablate`'s command body had no
+  code path that ever called `raise typer.Exit` on a non-zero code, so a run
+  where every control came back "inconclusive" (e.g. no provider API key set)
+  still printed its inconclusive-caveat table and hint and exited 0 —
+  indistinguishable from a genuine, if uninteresting, clean run.
+  - **BEHAVIOUR CHANGE:** if every control ablate was asked to score comes
+    back `"inconclusive"` (a **total** failure — nothing could be determined
+    for ANY control), `ablate` now exits non-zero instead of 0. A **mixed**
+    result (some controls resolved, some crashed) is deliberately left at
+    exit 0 — a partial result is still real, actionable signal for the
+    controls that did resolve, and is already flagged per-row in the table
+    and via the existing "one or more controls came back inconclusive" hint;
+    this fix does not touch that rendering. A CI script that checks `$?` from
+    `ablate` and previously tolerated exit 0 on a total-failure run needs
+    updating.
+  - `scan_target_fires` gained an optional `on_outcome` callback, invoked
+    with the full `ScanOutcome` (not just the collapsed `FireOutcome`)
+    whenever a scoped scan doesn't fire; `ablate` wires it to recover that
+    detail and picks the most severe `exit_code` observed across the
+    underlying scans — the same authority `scan`/`gate` already derive their
+    own exit codes from (`mylonite.scan.coverage.ScanOutcome`), rather than a
+    hardcoded value. In practice this is usually `EXIT_CONFIG` (2), not
+    `EXIT_PROVIDER` (4): each scoped scan is single-seed, so it never
+    accumulates the 3 consecutive LLM-call failures `ScanEngine.run()`
+    requires to set a formal `aborted="provider_unreachable"` — it lands in
+    the same "untrustworthy without a formal abort" bucket `ScanOutcome`
+    already uses for `scan`/`gate` when a report is too small to trip that
+    threshold. New `mylonite.scan.ablation.all_inconclusive` is the pure
+    predicate the CLI checks to distinguish "total" from "mixed".
+
 ### Removed
 
 - **`validate --prove-control` and `gate --prove-control` removed.** Both were

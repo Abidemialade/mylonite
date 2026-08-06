@@ -90,7 +90,15 @@ def test_ablate_renders_inconclusive_without_crashing(
             "W2",
         ],
     )
-    assert result.exit_code == 0, result.output
+    # 0.7.7 fix: the single requested control (W2) is wholly inconclusive here
+    # (its only guarded leg crashes) -- a TOTAL failure, which must not exit 0
+    # (see tests/test_cli_keyless.py::test_ablate_no_key_exits_nonzero for the
+    # full keyless regression guard). `fake_scan` replaces `scan_target_fires`
+    # entirely, so it never feeds the real ScanOutcome detail through the
+    # on_outcome sink the CLI wires up in production -- the CLI has no
+    # exit_code detail to work with here and falls back to EXIT_PROVIDER (4),
+    # its documented conservative default for that case.
+    assert result.exit_code == 4, result.output
     combined = result.output + (result.stderr or "")
     assert "inconclusive" in combined
     assert "load-bearing: W2" not in combined  # the summary list, not the caveat prose

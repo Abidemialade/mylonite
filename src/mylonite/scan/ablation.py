@@ -357,6 +357,27 @@ def run_control_ablation(
     return results
 
 
+def all_inconclusive(results: list[ControlContribution]) -> bool:
+    """True iff EVERY control's status is ``"inconclusive"`` — a total failure.
+
+    Distinguishes "ablate could not determine ANY control's status" (the CLI
+    layer's cue to exit non-zero — the bug this function exists to close: a
+    total provider outage previously still exited 0) from a genuinely mixed
+    result where SOME controls were determined and only others crashed. The
+    latter is not a failure of the ablate run itself — it's real, actionable
+    signal for the controls that did resolve — so it deliberately does not
+    trip this predicate; see the ``ablate`` CLI command in ``cli.py`` for how
+    the two cases are handled differently.
+
+    ``results`` is what :func:`run_control_ablation` returns — one
+    :class:`ControlContribution` per requested control, always non-empty by
+    the time the CLI calls this (it exits earlier if there are no ablatable
+    controls). An empty list is treated as NOT a total failure (nothing to
+    report having failed).
+    """
+    return bool(results) and all(r.status == "inconclusive" for r in results)
+
+
 def scan_target_fires(
     adapter: Any,
     pattern_id: str,
@@ -367,6 +388,7 @@ def scan_target_fires(
     judge_model: str,
     completion_fn: Callable[..., Any] | None = None,
     randomize_exfil: bool = False,
+    on_outcome: Callable[[ScanOutcome], None] | None = None,
 ) -> FireOutcome:
     """Run one scoped scan against ``adapter`` and classify the outcome.
 
@@ -384,6 +406,19 @@ def scan_target_fires(
     it's :attr:`FireOutcome.INCONCLUSIVE` rather than being forced into
     "resisted" — the whole point of this type: a crash must never be
     indistinguishable from a control that actually held.
+
+    ``on_outcome``, if given, is called with the full :class:`ScanOutcome` —
+    not just the collapsed :class:`FireOutcome` — whenever one is computed
+    (i.e. whenever ``result.exploits`` is empty; a genuine finding short-
+    circuits before a ``ScanOutcome`` is even built, since it's evidence
+    regardless of coverage). This is how the ``ablate`` CLI command recovers
+    the discarded ``abort``/``exit_code`` detail behind an INCONCLUSIVE
+    verdict, so it can pick an honest, non-zero exit code on total failure
+    (mirroring how ``scan``/``gate`` derive their own exit codes from
+    ``ScanOutcome``) without ``run_control_ablation`` or ``FireOutcome``
+    itself needing to carry that detail — this stays a pure sink, invoked
+    directly, so it's safe to call from the worker thread each scoped scan
+    runs on (see ``_run_pair``/``_run_triple``).
     """
     from mylonite.plugins.registry import discover
     from mylonite.scan.customiser import PayloadCustomiser
@@ -415,6 +450,9 @@ def scan_target_fires(
     result = asyncio.run(engine.run())
     if result.exploits:
         return FireOutcome.FIRED
-    if ScanOutcome.from_report(result.report).trustworthy_clean:
+    outcome = ScanOutcome.from_report(result.report)
+    if on_outcome is not None:
+        on_outcome(outcome)
+    if outcome.trustworthy_clean:
         return FireOutcome.RESISTED
     return FireOutcome.INCONCLUSIVE
