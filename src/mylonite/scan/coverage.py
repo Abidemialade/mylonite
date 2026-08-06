@@ -6,17 +6,21 @@ Root cause (A1 in the 0.7.7 remediation plan): ``ScanReport.aborted`` (in
 (``cli.py``'s ``scan``/``gate``/``ablate`` commands, ``artefacts.py``'s
 ``render_summary``, and others) each re-derive "did this scan actually work"
 from a different lossy projection of those two fields — most visibly,
-``artefacts.NOT_TESTED_OUTCOMES`` is an ALLOWLIST covering only 2 of the 9
-``ScanAttemptOutcome`` values, so an ``outcome="error"`` attempt (an
-exception during invocation/judging — not in the allowlist) silently renders
-as "tested and clean" rather than "not exercised". A scan where every
-attempt errored can render "N attempts * 0 findings" and exit 0 — a
-false-clean.
+``artefacts.NOT_TESTED_OUTCOMES`` used to be a hand-maintained ALLOWLIST
+covering only 2 of the 9 ``ScanAttemptOutcome`` values, so an
+``outcome="error"`` attempt (an exception during invocation/judging — not in
+the allowlist) silently rendered as "tested and clean" rather than "not
+exercised". A scan where every attempt errored could render "N attempts * 0
+findings" and exit 0 — a false-clean. ``artefacts.NOT_TESTED_OUTCOMES`` is
+now derived from :data:`ATTEMPT_CLASS` below instead of maintaining its own
+parallel list.
 
 This module fixes that by being the ONE place that turns a ``ScanReport``
 into a verdict: :func:`ScanOutcome.from_report`. Every command that needs to
 know "did this scan actually work" should go through it (wiring existing
-call sites is later work — this task only introduces the type).
+call sites into ``ScanOutcome`` itself — e.g. ``gate``/``ablate``/``report``/
+``demo`` — is later work; this task's own CLI-facing fix is limited to
+``artefacts.NOT_TESTED_OUTCOMES``, described above).
 
 Pure data/logic — no CLI concerns. Must not import ``typer`` or
 ``mylonite.cli``.
@@ -210,8 +214,28 @@ class ScanOutcome:
 
     @classmethod
     def from_report(cls, report: ScanReport) -> ScanOutcome:
-        """The ONE place that turns a ``ScanReport`` into a verdict."""
-        abort = AbortReason(report.aborted) if report.aborted else None
+        """The ONE place that turns a ``ScanReport`` into a verdict.
+
+        Raises :class:`ValueError` with an actionable message if
+        ``report.aborted`` is set to something other than one of the 5 known
+        :class:`AbortReason` values — e.g. a hand-edited replay fixture, a
+        legacy artefact from a version that used a different string, or a
+        future typo. A bare ``ValueError: 'x' is not a valid AbortReason``
+        would be undiagnosable once ``ScanReport``s are routinely loaded back
+        off disk; naming the field and the known-good values here is not.
+        """
+        if report.aborted:
+            try:
+                abort: AbortReason | None = AbortReason(report.aborted)
+            except ValueError as exc:
+                known = sorted(r.value for r in AbortReason)
+                raise ValueError(
+                    f"ScanReport.aborted={report.aborted!r} is not a recognised "
+                    f"AbortReason (known values: {known}). This report may be from "
+                    "an incompatible mylonite version, or hand-edited/corrupted."
+                ) from exc
+        else:
+            abort = None
 
         exercised = 0
         not_tested = 0

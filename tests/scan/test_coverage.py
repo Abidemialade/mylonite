@@ -202,3 +202,18 @@ class TestCoverageComputation:
     def test_default_fallbacks_field_is_zero(self) -> None:
         outcome = ScanOutcome.from_report(_report())
         assert outcome.fallbacks == 0
+
+
+class TestUnknownAbortReason:
+    def test_unrecognised_aborted_value_raises_actionable_error(self) -> None:
+        # A hand-edited replay fixture, a legacy artefact from an incompatible
+        # version, or a future typo could set `aborted` to something outside
+        # the 5 known AbortReason values. The bare `ValueError` StrEnum raises
+        # by default ("'x' is not a valid AbortReason") is undiagnosable once
+        # ScanReports are routinely loaded back off disk — this must name the
+        # offending value and the known-good ones instead.
+        report = _report(aborted="some_future_reason_nobody_declared")
+        with pytest.raises(ValueError, match="some_future_reason_nobody_declared") as excinfo:
+            ScanOutcome.from_report(report)
+        assert "AbortReason" in str(excinfo.value)
+        assert "budget_exceeded" in str(excinfo.value)
