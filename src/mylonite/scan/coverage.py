@@ -177,6 +177,38 @@ _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
     ),
 }
 
+# --- Untrustworthy-without-a-formal-abort ---------------------------------------
+#
+# `PROVIDER_UNREACHABLE` (the `aborted` field) only fires once the engine sees
+# `consecutive_failures >= DEFAULT_PROVIDER_FAILURE_THRESHOLD` (3, in
+# scan/engine.py). A target with fewer than 3 applicable attempts (a narrow
+# --weakness-class filter, or just few seeds) can run start-to-finish with
+# every single attempt erroring — e.g. missing/invalid provider credentials —
+# without ever tripping that threshold. `report.aborted` then stays `None`,
+# `findings_count` is 0, and nothing was genuinely exercised: exactly the
+# shape a real clean pass has, EXCEPT `trustworthy_clean` is correctly False.
+# Without this, `exit_code` fell through to the `abort is None` branch below
+# and silently returned `_EXIT_SUCCESS` — indistinguishable from a real clean
+# pass to every consumer (this is the exact fail-open bug `gate` hit).
+#
+# The rule: whenever nothing trustworthy came out of the scan (coverage never
+# reached EXERCISED) AND nothing was found, `exit_code` must not be 0 — no
+# matter whether a formal `AbortReason` was ever recorded. A genuine finding
+# (`findings_count > 0`) is excluded: that's still real evidence worth an
+# EXIT_SUCCESS at this layer, mirroring `scan`'s own convention (only
+# `aborted` drives a non-zero exit there; finding something is not, by
+# itself, treated as failure — see cli.py's `scan` command and
+# `test_findings_still_exit_success_at_this_layer`).
+_EXIT_INCOMPLETE_NO_ABORT: Final = _EXIT_CONFIG
+
+_INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE: Final = (
+    "error: coverage was incomplete or absent and nothing was found, but the scan "
+    "was never formally aborted (e.g. too few applicable attempts to trip the "
+    "provider-failure-threshold abort). This is NOT a clean result — check each "
+    "attempt's verdict_reason/error_detail (a common cause is missing or invalid "
+    "provider credentials), then re-run."
+)
+
 
 @dataclass(frozen=True)
 class ScanOutcome:
@@ -260,6 +292,13 @@ class ScanOutcome:
         if abort is not None:
             exit_code = _EXIT_CODE_BY_ABORT[abort]
             operator_message = _OPERATOR_MESSAGE_BY_ABORT[abort]
+        elif coverage is not Coverage.EXERCISED and report.findings_count == 0:
+            # No formal AbortReason was recorded, yet coverage never reached
+            # EXERCISED (PARTIAL or NOT_EXERCISED) and nothing was found. Must
+            # not be indistinguishable from a genuine clean pass — see the
+            # "Untrustworthy-without-a-formal-abort" note above.
+            exit_code = _EXIT_INCOMPLETE_NO_ABORT
+            operator_message = _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE
         else:
             exit_code = _EXIT_SUCCESS
             operator_message = None

@@ -56,6 +56,44 @@ def _aborted_provider_unreachable_outcome() -> ScanOutcome:
     )
 
 
+def _all_errored_no_formal_abort_outcome() -> ScanOutcome:
+    """Built via the REAL ScanOutcome.from_report, not hand-rolled: the
+    reviewer-confirmed variant of the fail-open bug where every attempt
+    errored (e.g. missing/invalid provider credentials) but the engine never
+    tripped the consecutive-failures threshold that sets `aborted` — a target
+    with fewer than DEFAULT_PROVIDER_FAILURE_THRESHOLD (3) applicable attempts
+    can hit this. `aborted` stays None, so this exercises coverage.py's fix
+    (not the abort-mapping path already covered above)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    report = ScanReport(
+        target_id="t",
+        provider="p",
+        model="m",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason=None,
+            ),
+            ScanAttempt(
+                seed_id="s2",
+                pattern_id="s2",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason=None,
+            ),
+        ],
+        findings_count=0,
+        aborted=None,
+        mylonite_version="0.0.0",
+    )
+    return ScanOutcome.from_report(report)
+
+
 def _exploit():
     return ExploitRecord(
         target_id="mcp:custom",
@@ -169,6 +207,35 @@ def test_gate_exits_nonzero_when_scan_aborted(tmp_path):
     assert generate_called["called"] is False
     assert validate_called["called"] is False
     assert pr_called["called"] is False
+
+
+def test_gate_exits_nonzero_when_every_attempt_errored_without_formal_abort(tmp_path):
+    """End-to-end proof (via run_gate, not just coverage.py in isolation) that
+    the reviewer-confirmed second fail-open shape is now closed: every attempt
+    errored, findings_count is 0, but the engine never tripped the
+    consecutive-failures threshold that sets ScanReport.aborted — so
+    ScanOutcome.abort is None. Before the coverage.py fix, ScanOutcome.exit_code
+    fell through to EXIT_SUCCESS here (abort is None) even though
+    trustworthy_clean was correctly False, so run_gate would print its
+    untrustworthy-scan message and STILL exit 0."""
+    generate_called = {"called": False}
+    outcome = _all_errored_no_formal_abort_outcome()
+    assert outcome.abort is None  # confirms this is the no-formal-abort shape
+    assert outcome.trustworthy_clean is False
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=outcome, exploits=[]),
+        generate_fn=lambda e: generate_called.__setitem__("called", True),
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+    assert result.exit_code == outcome.exit_code
+    assert result.exit_code != 0
+    assert result.opened_pr is False
+    assert result.kept is None
+    assert generate_called["called"] is False
 
 
 def test_run_gate_returns_a_typed_result_when_generate_returns_none(tmp_path):

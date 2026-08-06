@@ -97,6 +97,65 @@ class TestFromReportExitCodes:
         assert outcome.exit_code == EXIT_SUCCESS
         assert outcome.findings == 1
 
+    def test_all_errored_no_formal_abort_exits_nonzero(self) -> None:
+        # The gate-review regression: PROVIDER_UNREACHABLE only fires once the
+        # engine sees consecutive_failures >= DEFAULT_PROVIDER_FAILURE_THRESHOLD
+        # (3, in scan/engine.py). A target with fewer than 3 applicable attempts
+        # (a narrow --weakness-class filter, or just few seeds) can run with
+        # every attempt erroring (e.g. missing/invalid provider credentials)
+        # without ever tripping that threshold — `aborted` stays None. Before
+        # this fix, exit_code fell through to the `abort is None` branch and
+        # returned EXIT_SUCCESS despite `trustworthy_clean` correctly being
+        # False — silently indistinguishable from a genuine clean pass to any
+        # exit_code-driven consumer (this is what made `gate` exit 0 here).
+        report = _report(
+            attempts=[_attempt("error"), _attempt("error", seed_id="s2")],
+            findings_count=0,
+            aborted=None,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.trustworthy_clean is False
+        assert outcome.abort is None
+        assert outcome.exit_code != EXIT_SUCCESS
+        assert outcome.exit_code == EXIT_CONFIG
+        assert outcome.operator_message is not None
+        assert "never formally aborted" in outcome.operator_message
+
+    def test_partial_not_tested_without_abort_and_no_findings_exits_nonzero(self) -> None:
+        # Same failure shape as above but PARTIAL rather than fully
+        # NOT_EXERCISED: some attempts genuinely ran clean, others were
+        # structurally skipped, no formal abort, and nothing was found. Still
+        # not a trustworthy clean pass, so still must not be EXIT_SUCCESS.
+        report = _report(
+            attempts=[
+                _attempt("no_finding"),
+                _attempt("skipped_no_seed_arm", seed_id="s2"),
+            ],
+            findings_count=0,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.coverage is Coverage.PARTIAL
+        assert outcome.trustworthy_clean is False
+        assert outcome.exit_code != EXIT_SUCCESS
+        assert outcome.exit_code == EXIT_CONFIG
+
+    def test_partial_coverage_with_a_real_finding_still_exits_success(self) -> None:
+        # The exclusion that keeps the fix from over-firing: a real finding
+        # (findings_count > 0) is still worth EXIT_SUCCESS at this layer even
+        # under incomplete coverage — mirrors `scan`'s own convention (only
+        # `aborted` drives non-zero; finding something is not itself failure).
+        report = _report(
+            attempts=[
+                _attempt("finding"),
+                _attempt("skipped_no_seed_arm", seed_id="s2"),
+            ],
+            findings_count=1,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.coverage is Coverage.PARTIAL
+        assert outcome.trustworthy_clean is False
+        assert outcome.exit_code == EXIT_SUCCESS
+
 
 class TestOperatorMessage:
     def test_no_payloads_message_matches_cli_wording(self) -> None:
@@ -115,8 +174,25 @@ class TestOperatorMessage:
         assert "wall-clock budget" in outcome.operator_message
 
     def test_clean_report_has_no_operator_message(self) -> None:
-        outcome = ScanOutcome.from_report(_report())
+        # A genuinely clean report needs at least one exercised attempt (a
+        # bare `_report()` with zero attempts at all is itself an untested,
+        # not-trustworthy-clean report post-fix — see
+        # test_all_errored_no_formal_abort_exits_nonzero and
+        # TestCoverageComputation for that shape).
+        report = _report(attempts=[_attempt("no_finding")], findings_count=0)
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.trustworthy_clean is True
         assert outcome.operator_message is None
+
+    def test_all_errored_no_formal_abort_has_a_diagnostic_message(self) -> None:
+        report = _report(
+            attempts=[_attempt("error"), _attempt("error", seed_id="s2")],
+            findings_count=0,
+            aborted=None,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.operator_message is not None
+        assert "verdict_reason" in outcome.operator_message
 
 
 class TestTrustworthyClean:
