@@ -148,11 +148,19 @@ place that value could otherwise leave the machine unmasked is routed through
   (`mylonite scan`), the co-located copy (`mylonite generate`), the gate PR
   copy (`mylonite gate`), and the `scan --scaffold` / `mylonite init` starter
   all go through the same `redact_env` / `redact_target_yaml` masking: every
-  `headers` / `request.headers` value is masked unconditionally, and every
+  `headers` / `request.headers` value is replaced unconditionally, and every
   credential-shaped `env` value — by key name (`password`, `api_key`,
-  `token`, ...) OR value shape — is masked, leaving key names and structure
-  intact so the file still documents the target and still loads. The same
-  masking is `dump_target_file`'s default for an inline `mcp:custom` target.
+  `token`, ...) OR value shape — is replaced, with a `${VAR}` reference
+  (`mylonite._redaction.target_yaml_env_ref_name`) deterministically derived
+  from the field's key, leaving key names and structure intact so the file
+  still documents the target. This is genuinely operational, not just
+  structurally parseable: `load_target_file` expands `${VAR}` references from
+  the process environment on every load (also honouring an operator's own
+  hand-written `${VAR}` reference, e.g. `docs/http-agent.md`'s
+  `Authorization: Bearer ${MY_TOKEN}`), and raises a loud, actionable error
+  naming the missing variable if it is unset — never a silent empty-string
+  substitution. The same masking is `dump_target_file`'s default for an
+  inline `mcp:custom` target.
 - **The SARIF upload and the JSON finding bundle.** Both are written to disk
   unconditionally (`mylonite gate`, `mylonite report --json`) and the SARIF
   one is uploaded to GitHub code scanning — a persistent, often

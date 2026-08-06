@@ -322,11 +322,17 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
 def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DCR-0006 (spec-compliance follow-up): `scan --scaffold` must not write a
-    credential-shaped --env value verbatim into the scaffold target.yaml — this
-    is a fourth, earlier-in-the-lifecycle origination path for the same leak the
-    scan/generate/gate target.yaml copies were already fixed for. The scaffold
-    output must still round-trip through load_target_file."""
+    """DCR-0006 (spec-compliance follow-up); T9 (${VAR} indirection): `scan
+    --scaffold` must not write a credential-shaped --env value verbatim into
+    the scaffold target.yaml — this is a fourth, earlier-in-the-lifecycle
+    origination path for the same leak the scan/generate/gate target.yaml
+    copies were already fixed for. Since T9, the masked value is a derived
+    ``${VAR}`` reference (not a bare, non-runnable placeholder), so the
+    scaffold output round-trips through load_target_file to a RUNNABLE target
+    once the named env var is set — and fails loudly if it is not."""
+    from mylonite._redaction import target_yaml_env_ref_name
+    from mylonite.plugins._mcp.target_file import load_target_file
+
     _patch_fake_adapter(monkeypatch)
     out = tmp_path / "target.yaml"
     secret = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234"
@@ -346,11 +352,19 @@ def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
     text = out.read_text(encoding="utf-8")
     assert secret not in text
     assert "GITHUB_TOKEN" in text  # the key name still documents the target
+    var_name = target_yaml_env_ref_name("env", "GITHUB_TOKEN")
+    assert f"${{{var_name}}}" in text
 
-    from mylonite.plugins._mcp.target_file import load_target_file
+    # Unset: loading fails loudly rather than silently proceeding without a
+    # real credential.
+    monkeypatch.delenv(var_name, raising=False)
+    with pytest.raises(ValueError, match=var_name):
+        load_target_file(out)
 
+    # Set: the scaffold is genuinely re-runnable, restoring the original secret.
+    monkeypatch.setenv(var_name, secret)
     tf = load_target_file(out)
-    assert tf.env["GITHUB_TOKEN"] != secret
+    assert tf.env["GITHUB_TOKEN"] == secret
 
 
 def test_env_file_loads_only_known_provider_vars(
@@ -1360,8 +1374,10 @@ def test_dump_target_file_roundtrips() -> None:
 
 
 def test_dump_target_file_default_redacts_secrets() -> None:
-    """DCR-0019: dump_target_file defaults to masking credential-shaped values."""
-    from mylonite._redaction import REDACTION_PLACEHOLDER
+    """DCR-0019/T9: dump_target_file defaults to replacing credential-shaped
+    values with a derived ``${VAR}`` reference (not the bare, non-runnable
+    placeholder) so the masked copy stays genuinely re-runnable."""
+    from mylonite._redaction import target_yaml_env_ref_name
     from mylonite.plugins._mcp.target_file import TargetFile, dump_target_file
 
     tf = TargetFile(
@@ -1376,7 +1392,8 @@ def test_dump_target_file_default_redacts_secrets() -> None:
     assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in text
     assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in text
     assert "LOG_LEVEL: debug" in text
-    assert REDACTION_PLACEHOLDER in text
+    assert "${" + target_yaml_env_ref_name("env", "GITHUB_TOKEN") + "}" in text
+    assert "${" + target_yaml_env_ref_name("headers", "Authorization") + "}" in text
 
 
 def _canned_scan_result(target_id: str, *, findings: int) -> Any:

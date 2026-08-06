@@ -37,6 +37,7 @@ __all__ = [
     "redact_exception",
     "redact_target_yaml",
     "redact_value",
+    "target_yaml_env_ref_name",
 ]
 
 # Value shape shared by the key=value rule: long-ish credential-looking runs.
@@ -273,9 +274,43 @@ _ALWAYS_MASK_SECTIONS: Final[tuple[str, ...]] = ("headers",)
 _ALWAYS_MASK_NESTED_SECTIONS: Final[tuple[tuple[str, str], ...]] = (("request", "headers"),)
 
 _REDACTION_BANNER: Final = (
-    "# Written by mylonite. Credential-shaped values are masked with\n"
-    f"# {REDACTION_PLACEHOLDER} — restore them from your secret store before use.\n"
+    "# Written by mylonite. Credential-shaped values are replaced with ${VAR}\n"
+    "# references (see mylonite._redaction.target_yaml_env_ref_name) — set the\n"
+    "# corresponding environment variable(s) (named below) to the real values\n"
+    "# before running this target file; an unset one fails loudly at load time\n"
+    "# instead of silently running with an empty/broken credential.\n"
 )
+
+#: Characters a derived env-var-name SEGMENT may keep as-is; everything else
+#: (spaces, hyphens in a header like ``X-Api-Key``, ...) becomes ``_``.
+_ENV_REF_INVALID_CHARS: Final = re.compile(r"[^A-Za-z0-9_]")
+
+
+def target_yaml_env_ref_name(*path: str) -> str:
+    """Derive the ``MYLONITE_TARGET_``-prefixed env-var name a masked
+    ``target.yaml`` field is replaced with.
+
+    Deterministic and collision-resistant by construction: ``path`` is the
+    field's full location in the document (e.g. ``("env", "API_TOKEN")`` for a
+    top-level ``env`` entry, ``("headers", "Authorization")`` for the sse/http
+    transport's top-level ``headers``, or ``("request", "headers",
+    "Authorization")`` for the rest transport's nested ``request.headers``).
+    Every segment is upper-cased, any character outside ``[A-Za-z0-9_]`` becomes
+    ``_``, and the segments are joined with ``_`` under one shared
+    ``MYLONITE_TARGET_`` prefix — so an ``env`` entry can never collide with a
+    same-named ``headers`` entry (they land under different segment prefixes:
+    ``MYLONITE_TARGET_ENV_...`` vs ``MYLONITE_TARGET_HEADERS_...``), and a
+    top-level ``headers`` entry can never collide with a ``request.headers``
+    one (``MYLONITE_TARGET_HEADERS_...`` vs
+    ``MYLONITE_TARGET_REQUEST_HEADERS_...``).
+    """
+    segments = "_".join(_ENV_REF_INVALID_CHARS.sub("_", part).upper() for part in path)
+    return f"MYLONITE_TARGET_{segments}"
+
+
+def _env_ref_placeholder(*path: str) -> str:
+    """The literal ``${VAR}`` text a masked field is replaced with."""
+    return "${" + target_yaml_env_ref_name(*path) + "}"
 
 
 def _is_secret_env(key: str, value: object) -> bool:
@@ -295,16 +330,22 @@ def _is_secret_env(key: str, value: object) -> bool:
 
 
 def redact_env(env: dict[str, str]) -> dict[str, str]:
-    """Mask every credential-shaped ``env`` entry, by key name OR value shape.
+    """Replace every credential-shaped ``env`` entry with a ``${VAR}`` reference.
 
     Shared by :func:`redact_target_yaml` (persisted/copied target.yaml files) and
     the ``scan --scaffold`` / ``mylonite init --transport mcp`` starter renderer
     (``cli.py``'s ``_render_target_scaffold``) — a FOURTH origination path for the
     same DCR-0006/0010/0016/0019 leak class: a `--env` value (e.g. a live
     ``GITHUB_TOKEN``) that reaches a target.yaml written to disk. Key names and
-    non-secret values survive so the file still documents the target.
+    non-secret values survive so the file still documents the target. Unlike an
+    opaque placeholder, the ``${VAR}`` reference (derived from the key via
+    :func:`target_yaml_env_ref_name`) is genuinely re-runnable: set the named
+    environment variable to the real value and ``load_target_file`` restores it.
     """
-    return {k: (REDACTION_PLACEHOLDER if _is_secret_env(k, v) else v) for k, v in env.items()}
+    return {
+        k: (_env_ref_placeholder("env", k) if _is_secret_env(k, v) else v)
+        for k, v in env.items()
+    }
 
 
 def redact_target_yaml(text: str) -> str:
@@ -313,11 +354,16 @@ def redact_target_yaml(text: str) -> str:
     Mylonite's own documented workflow tells the operator to commit the scan and
     generated-test directories and to push the gate artefacts as a PR. Copying a
     target file byte-for-byte into any of those puts a live bearer token or DB
-    password into git history (DCR-0006/0010/0016). This masks every ``headers``
+    password into git history (DCR-0006/0010/0016). This replaces every ``headers``
     value unconditionally (both the sse/http transport's top-level ``headers`` and
     the rest transport's ``request.headers``) and every credential-shaped ``env``
-    value, leaving key names and structure intact so the copy still documents the
-    target and still round-trips through ``load_target_file``.
+    value with a ``${VAR}`` reference (:func:`target_yaml_env_ref_name`), leaving
+    key names and structure intact so the copy still documents the target. Unlike
+    a bare placeholder, this is genuinely OPERATIONAL, not just structurally
+    parseable: the copy still round-trips through ``load_target_file`` to a
+    RUNNABLE target once the operator sets the named environment variable(s) to
+    the real values — ``load_target_file`` expands ``${VAR}`` references and
+    fails loudly (never with an empty/broken credential) if one is unset.
 
     A document that does not parse as a YAML mapping falls back to
     :func:`redact` over the raw text — a malformed file is never persisted
@@ -335,14 +381,16 @@ def redact_target_yaml(text: str) -> str:
     for section in _ALWAYS_MASK_SECTIONS:
         block = data.get(section)
         if isinstance(block, dict):
-            data[section] = dict.fromkeys(block, REDACTION_PLACEHOLDER)
+            data[section] = {k: _env_ref_placeholder(section, k) for k in block}
 
     for parent_key, child_key in _ALWAYS_MASK_NESTED_SECTIONS:
         parent = data.get(parent_key)
         if isinstance(parent, dict):
             block = parent.get(child_key)
             if isinstance(block, dict):
-                parent[child_key] = dict.fromkeys(block, REDACTION_PLACEHOLDER)
+                parent[child_key] = {
+                    k: _env_ref_placeholder(parent_key, child_key, k) for k in block
+                }
 
     env = data.get("env")
     if isinstance(env, dict):

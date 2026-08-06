@@ -21,8 +21,10 @@ Prefer an absolute path and verify the target actually opened it.
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -204,13 +206,79 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
     )
 
 
+#: ``${VAR_NAME}`` — the indirection syntax ``redact_target_yaml`` writes and
+#: ``docs/http-agent.md`` documents an operator can hand-write directly (e.g.
+#: ``Authorization: Bearer ${MY_TOKEN}``). Matches a shell-style variable name
+#: embedded anywhere inside a larger string, not just a whole-value reference.
+_VAR_REF_PATTERN: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
+    """Expand every ``${VAR}`` reference in ``data``'s string values from
+    ``os.environ``, recursively.
+
+    This is what makes a masked ``target.yaml`` (from ``redact_target_yaml``)
+    genuinely re-runnable instead of just structurally parseable, and what makes
+    ``docs/http-agent.md``'s long-documented ``Authorization: Bearer ${MY_TOKEN}``
+    example actually work: it runs unconditionally on every loaded target file,
+    not only ones that came from the redaction path, so an operator's own
+    hand-written ``${VAR}`` reference is honoured too.
+
+    A referenced variable that is NOT set in the process environment is a hard
+    error (collected across the whole document and reported together): this
+    must never silently substitute an empty string, ``None``, or leave the
+    literal unexpanded ``${VAR}`` text in place and let a broken credential
+    reach the target launch.
+    """
+    missing: list[tuple[str, str]] = []
+
+    def _expand(node: Any, path: str) -> Any:
+        if isinstance(node, str):
+
+            def _sub(match: re.Match[str]) -> str:
+                name = match.group(1)
+                value = os.environ.get(name)
+                if value is None:
+                    missing.append((path, name))
+                    return match.group(0)
+                return value
+
+            return _VAR_REF_PATTERN.sub(_sub, node)
+        if isinstance(node, dict):
+            return {k: _expand(v, f"{path}.{k}" if path else str(k)) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_expand(v, f"{path}[{i}]") for i, v in enumerate(node)]
+        return node
+
+    expanded = _expand(data, "")
+    if missing:
+        var_names = ", ".join(sorted({name for _, name in missing}))
+        detail = "; ".join(f"{p} -> ${{{n}}}" for p, n in missing)
+        msg = (
+            "target file references undefined environment variable(s): "
+            f"{var_names} (fields: {detail}). Set them in the environment before "
+            "loading this target file — mylonite will not silently proceed with "
+            "an empty or missing credential."
+        )
+        raise ValueError(msg)
+    return expanded  # type: ignore[no-any-return]
+
+
 def load_target_file(path: Path) -> TargetFile:
-    """Parse a YAML target file into a validated ``TargetFile``."""
+    """Parse a YAML target file into a validated ``TargetFile``.
+
+    Every string value is scanned for a ``${VAR}`` reference (see
+    :func:`_expand_env_refs`) and expanded from ``os.environ`` before
+    validation — this is what lets a ``redact_target_yaml``-masked copy (or an
+    operator's own hand-written ``${VAR}`` reference, per ``docs/http-agent.md``)
+    load as a genuinely runnable target once the named variable(s) are set.
+    """
     path = Path(path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         msg = f"target file {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)
+    data = _expand_env_refs(data)
     # `source_dir` is derived bookkeeping — the containment base every path field
     # in this document resolves against — never something the document itself
     # should get to set. Always overwrite whatever the YAML says (even if it
@@ -230,9 +298,10 @@ def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:
     re-loadable: it round-trips back through ``load_target_file`` to an equal model.
 
     ``redact_secrets`` defaults on: ``headers`` and credential-shaped ``env``
-    values are masked (DCR-0019), matching every other persisted target.yaml.
-    Pass ``False`` only for an in-memory round-trip that never touches disk or a
-    console — masking there would corrupt the reload.
+    values are replaced with a ``${VAR}`` reference (DCR-0019/T9), matching every
+    other persisted target.yaml — set the named environment variable(s) to reload
+    a runnable target. Pass ``False`` only for an in-memory round-trip that never
+    touches disk or a console — masking there would corrupt the reload.
     """
     data = tf.model_dump(mode="json", exclude_defaults=True, exclude={"source_dir"})
     text = yaml.safe_dump(data, sort_keys=True, default_flow_style=False)

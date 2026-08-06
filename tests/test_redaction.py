@@ -12,6 +12,7 @@ These are offline and deterministic. They prove that:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -26,6 +27,7 @@ from mylonite._redaction import (
     redact_exception,
     redact_target_yaml,
     redact_value,
+    target_yaml_env_ref_name,
 )
 
 # --- Fakes (NOT real credentials) -------------------------------------------
@@ -237,6 +239,9 @@ def test_redact_exception_drops_pydantic_input_value() -> None:
 
 
 def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
+    """T9: masking now replaces a secret VALUE with a derived ``${VAR}``
+    reference (not the bare, non-runnable ``REDACTION_PLACEHOLDER``) — the copy
+    stays genuinely re-runnable once the named env var is set."""
     src = (
         "family: app\n"
         "command: python\n"
@@ -251,7 +256,9 @@ def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
     assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out
     assert "LOG_LEVEL: debug" in out  # non-secret values survive
     assert "Authorization" in out  # key names survive
-    assert REDACTION_PLACEHOLDER in out
+    assert REDACTION_PLACEHOLDER not in out  # no longer the opaque, non-runnable placeholder
+    assert "${" + target_yaml_env_ref_name("headers", "Authorization") + "}" in out
+    assert "${" + target_yaml_env_ref_name("env", "GITHUB_TOKEN") + "}" in out
 
 
 def test_redact_target_yaml_output_still_loads() -> None:
@@ -297,16 +304,18 @@ def test_redact_value_still_masks_by_shape_under_a_plain_key() -> None:
 
 def test_redact_env_masks_by_key_name() -> None:
     """The key-match branch: a plain passphrase under a credential-named key is
-    masked even though it has no provider-key shape."""
+    replaced (even though it has no provider-key shape) with a ``${VAR}``
+    reference derived from the key — not the bare, non-runnable placeholder
+    (T9: the masked copy must stay genuinely re-runnable)."""
     out = redact_env({"PASSWORD": "correcthorsebatterystaple", "LOG_LEVEL": "debug"})
-    assert out["PASSWORD"] == REDACTION_PLACEHOLDER
+    assert out["PASSWORD"] == "${" + target_yaml_env_ref_name("env", "PASSWORD") + "}"
     assert out["LOG_LEVEL"] == "debug"
 
 
 def test_redact_env_masks_by_value_shape_under_a_plain_key() -> None:
-    """The shape-fallback branch: a non-credential-named key is still masked
-    when its value independently looks like a provider key (looks_like_api_key)
-    or matches redact()'s shape patterns."""
+    """The shape-fallback branch: a non-credential-named key is still replaced
+    with a ``${VAR}`` reference when its value independently looks like a
+    provider key (looks_like_api_key) or matches redact()'s shape patterns."""
     out = redact_env(
         {
             # "OPAQUE_ID" doesn't match _KV_KEYS — this exercises the shape
@@ -318,9 +327,183 @@ def test_redact_env_masks_by_value_shape_under_a_plain_key() -> None:
             "PORT": "8080",
         }
     )
-    assert out["OPAQUE_ID"] == REDACTION_PLACEHOLDER
+    assert out["OPAQUE_ID"] == "${" + target_yaml_env_ref_name("env", "OPAQUE_ID") + "}"
     # Unlike redact()'s partial in-place masking, an env value flagged secret-
-    # shaped is replaced WHOLESALE (the key name is what survives, not a
-    # partially-masked value) — matches redact_target_yaml's documented contract.
-    assert out["DB_URL"] == REDACTION_PLACEHOLDER
+    # shaped is replaced WHOLESALE with a ${VAR} reference (the key name is what
+    # survives, not a partially-masked value) — matches redact_target_yaml's
+    # documented contract.
+    assert out["DB_URL"] == "${" + target_yaml_env_ref_name("env", "DB_URL") + "}"
     assert out["PORT"] == "8080"  # a plain non-secret value is untouched
+
+
+# --- T9: ${VAR} indirection — masked copies must be genuinely RUNNABLE ------
+
+
+def test_env_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The core T9 round-trip: an env secret survives redaction as NOTHING (not
+    even a fragment of the original value), the redacted file carries a
+    ${VAR} reference instead, and — with the corresponding env var set —
+    loading the redacted copy restores the ORIGINAL real value, i.e. the
+    copy is genuinely runnable, not just structurally parseable."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    secret = "sk-abc123-realvalue"
+    src = f"family: app\ncommand: python\nenv:\n  API_TOKEN: {secret}\n"
+    out = redact_target_yaml(src)
+
+    assert secret not in out
+    var_name = target_yaml_env_ref_name("env", "API_TOKEN")
+    assert f"${{{var_name}}}" in out
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(out, encoding="utf-8")
+    monkeypatch.setenv(var_name, secret)
+    tf = load_target_file(target_yaml)
+    assert tf.env["API_TOKEN"] == secret
+
+
+def test_headers_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Same round-trip for a top-level ``headers`` value (sse/http transport)
+    and for the rest transport's nested ``request.headers``."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    secret = "Bearer sk-live-abcdefghijklmnopqrstuvwxyz"
+    src = (
+        "family: app\n"
+        "command: python\n"
+        "headers:\n"
+        f"  Authorization: {secret}\n"
+    )
+    out = redact_target_yaml(src)
+    assert secret not in out
+    headers_var = target_yaml_env_ref_name("headers", "Authorization")
+    assert f"${{{headers_var}}}" in out
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(out, encoding="utf-8")
+    monkeypatch.setenv(headers_var, secret)
+    tf = load_target_file(target_yaml)
+    assert tf.headers["Authorization"] == secret
+
+    # request.headers (rest transport) — a distinct nested field path, so a
+    # distinct derived var name (collision-resistant against the top-level one).
+    rest_secret = "Bearer sk-live-zyxwvutsrqponmlkjihgfedcba"
+    rest_src = (
+        "family: app2\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "request:\n"
+        "  url: https://agent.example/chat\n"
+        "  headers:\n"
+        f"    Authorization: {rest_secret}\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n'
+    )
+    rest_out = redact_target_yaml(rest_src)
+    assert rest_secret not in rest_out
+    request_headers_var = target_yaml_env_ref_name("request", "headers", "Authorization")
+    assert request_headers_var != headers_var  # no collision with the top-level header
+    assert f"${{{request_headers_var}}}" in rest_out
+
+    rest_target_yaml = tmp_path / "rest_target.yaml"
+    rest_target_yaml.write_text(rest_out, encoding="utf-8")
+    monkeypatch.setenv(request_headers_var, rest_secret)
+    rest_tf = load_target_file(rest_target_yaml)
+    assert rest_tf.request is not None
+    assert rest_tf.request.headers["Authorization"] == rest_secret
+
+
+def test_unset_referenced_var_raises_loud_error(tmp_path: Path) -> None:
+    """A ${VAR} reference to an environment variable that is NOT set must fail
+    loudly and actionably at load time — never silently substitute an empty
+    string, ``None``, or proceed with the literal unexpanded text."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: app\ncommand: python\nenv:\n  API_TOKEN: ${MYLONITE_TEST_DEFINITELY_UNSET_VAR}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="MYLONITE_TEST_DEFINITELY_UNSET_VAR"):
+        load_target_file(target_yaml)
+
+
+def test_http_agent_bearer_token_example_works(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """docs/http-agent.md's exact documented example — an operator hand-writing
+    ``Authorization: Bearer ${MY_TOKEN}`` (a ${VAR} embedded inside a larger
+    string, not a whole-value reference) — must actually work as written."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    monkeypatch.setenv("MY_TOKEN", "the-real-token-value")
+    target_yaml = tmp_path / "my-http-agent.yaml"
+    target_yaml.write_text(
+        "family: my-http-agent\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "request:\n"
+        "  url: https://my-agent.internal/v1/chat\n"
+        "  method: POST\n"
+        "  headers:\n"
+        "    Authorization: Bearer ${MY_TOKEN}\n"
+        '  body: \'{"messages": [{"role": "user", "content": "{prompt}"}]}\'\n'
+        "  response_path: choices.0.message.content\n",
+        encoding="utf-8",
+    )
+    tf = load_target_file(target_yaml)
+    assert tf.request is not None
+    assert tf.request.headers["Authorization"] == "Bearer the-real-token-value"
+
+
+def test_no_raw_secret_survives_redaction() -> None:
+    """Broader security-property non-regression guard: MULTIPLE different
+    secret-shaped values across env AND headers AND request.headers must ALL
+    be gone from the redacted output — not one substring surviving anywhere."""
+    secrets = [
+        "sk-live-firstSECRETvalueHERE12345",
+        "ghp_secondSECRETtoken67890abcdef",
+        "Bearer thirdSECREToauthBEARERtoken999",
+        "Bearer fourthSECRETrestHeaderTOKEN000",
+    ]
+    src = (
+        "family: app\n"
+        "command: python\n"
+        "headers:\n"
+        f"  Authorization: {secrets[2]}\n"
+        "env:\n"
+        f"  API_TOKEN: {secrets[0]}\n"
+        f"  GITHUB_TOKEN: {secrets[1]}\n"
+    )
+    out = redact_target_yaml(src)
+    for secret in secrets[:3]:
+        assert secret not in out, secret
+
+    rest_src = (
+        "family: app2\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "request:\n"
+        "  url: https://agent.example/chat\n"
+        "  headers:\n"
+        f"    Authorization: {secrets[3]}\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n'
+    )
+    rest_out = redact_target_yaml(rest_src)
+    assert secrets[3] not in rest_out
+
+
+def test_target_file_without_var_refs_loads_unchanged(tmp_path: Path) -> None:
+    """A target file with no ${VAR} references anywhere must load exactly as
+    before — no behaviour change for the common (no-indirection) case."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: app\ncommand: python\nargs: [-m, srv]\nenv:\n  LOG_LEVEL: debug\n",
+        encoding="utf-8",
+    )
+    tf = load_target_file(target_yaml)
+    assert tf.family == "app"
+    assert tf.command == "python"
+    assert tf.args == ["-m", "srv"]
+    assert tf.env == {"LOG_LEVEL": "debug"}
