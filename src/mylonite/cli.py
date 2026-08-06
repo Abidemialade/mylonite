@@ -1593,6 +1593,39 @@ def _emit_generated_test(
     # (the test would fail at runtime without it). Reference tests replay the
     # bundled twin and need no target file.
     is_custom = not exploit.target_id.startswith("reference:")
+
+    # T12 back-fill source: `scan` writes scan_report.json into the SCAN dir
+    # (exploit_path.parent), but `generate` writes the emitted test into a
+    # DIFFERENT directory (layout.generated_for(slug), e.g.
+    # `.mylonite/generated/<slug>/`) — so an exploit with no embedded
+    # `mylonite.exec.*` execution-context metadata (e.g. one scanned before
+    # this release) would otherwise have no sibling scan_report.json for
+    # testkit._resolve_exec_context to back-fill from once co-located here.
+    # Only the two fields the back-fill actually reads are copied — NOT a
+    # verbatim copy — because unlike target.yaml (redacted before copying,
+    # see below) a raw ScanReport's `attempts` can carry unredacted
+    # target/judge free text, and this directory is one the operator commits.
+    if is_custom:
+        source_report = exploit_path.parent / "scan_report.json"
+        if source_report.is_file():
+            try:
+                report_data = json_mod.loads(source_report.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report_data = None
+            if isinstance(report_data, dict):
+                trimmed = {
+                    key: report_data[key]
+                    for key in ("model", "provider")
+                    if isinstance(report_data.get(key), str)
+                }
+                if trimmed:
+                    colocated_report = out_dir / "scan_report.json"
+                    colocated_report.write_text(
+                        json_mod.dumps(trimmed, indent=2, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    echo(f"Wrote report:  {colocated_report} (model/provider back-fill only)")
+
     # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
     # the operator needn't re-pass --target-file at every step. An explicit
     # --target-file always wins.
