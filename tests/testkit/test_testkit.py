@@ -454,7 +454,13 @@ def test_resolve_exec_context_backfills_from_sibling_scan_report(tmp_path: Path)
 def test_resolve_exec_context_raises_when_sibling_report_is_incomplete(tmp_path: Path) -> None:
     """The back-fill path's own failure mode: a sibling scan_report.json exists
     but is missing the field(s) actually needed -> still the loud error, not a
-    partially-resolved (model, None) pair silently passed on."""
+    partially-resolved (model, None) pair silently passed on.
+
+    Code review caught the message unconditionally claiming "no sibling ...
+    was found" even when the file is sitting right there but incomplete --
+    an operator chasing a phantom missing file. So this also pins that the
+    message names the file as EXISTING (but incomplete), not absent.
+    """
     target_file = tmp_path / "target.yaml"
     target_file.write_text("family: myapp\n", encoding="utf-8")
     (tmp_path / "scan_report.json").write_text(
@@ -462,7 +468,42 @@ def test_resolve_exec_context_raises_when_sibling_report_is_incomplete(tmp_path:
         encoding="utf-8",
     )
     exploit = _exploit()
-    with pytest.raises(testkit.TestkitConfigError, match="provider"):
+    with pytest.raises(testkit.TestkitConfigError, match="provider") as excinfo:
         testkit._resolve_exec_context(
             exploit, model=None, provider=None, target_file=target_file
         )
+    msg = str(excinfo.value)
+    assert "exists" in msg
+    assert "doesn't specify model/provider" in msg
+    assert "no sibling scan_report.json was found" not in msg
+
+
+def test_resolve_exec_context_message_when_sibling_genuinely_absent(tmp_path: Path) -> None:
+    """No sibling scan_report.json at all -> the message says "not found",
+    the only case where that wording is actually true."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text("family: myapp\n", encoding="utf-8")
+    exploit = _exploit()
+    with pytest.raises(testkit.TestkitConfigError) as excinfo:
+        testkit._resolve_exec_context(
+            exploit, model=None, provider=None, target_file=target_file
+        )
+    msg = str(excinfo.value)
+    assert "no sibling scan_report.json was found" in msg
+    assert "exists" not in msg
+
+
+def test_resolve_exec_context_message_when_sibling_unparseable(tmp_path: Path) -> None:
+    """A sibling scan_report.json exists but isn't valid JSON -> the message
+    must say so, not claim the file wasn't found (it's sitting right there)."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text("family: myapp\n", encoding="utf-8")
+    (tmp_path / "scan_report.json").write_text("not valid json {{{", encoding="utf-8")
+    exploit = _exploit()
+    with pytest.raises(testkit.TestkitConfigError) as excinfo:
+        testkit._resolve_exec_context(
+            exploit, model=None, provider=None, target_file=target_file
+        )
+    msg = str(excinfo.value)
+    assert "isn't valid JSON" in msg
+    assert "no sibling scan_report.json was found" not in msg

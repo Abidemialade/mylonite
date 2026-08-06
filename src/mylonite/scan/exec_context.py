@@ -79,9 +79,11 @@ class ExecContext:
 
     ``provider``/``model`` are the primary pair (what an emitted test re-drives
     with by default). ``planner_model``/``customiser_model``/``judge_model``
-    record the role-separated overrides :class:`~mylonite.scan.engine.ScanConfig`
-    supports (see its ``resolved_planner_model`` etc.) when they differ from
-    ``model`` -- informational provenance, not currently read by any resolver.
+    record the role-separated models :class:`~mylonite.scan.engine.ScanConfig`
+    supports (its ``resolved_planner_model`` etc., which fall back to ``model``
+    when a role has no override, so the writer always populates all three --
+    they are never conditionally omitted for equalling ``model``) --
+    informational provenance, not currently read by any resolver.
     """
 
     provider: str

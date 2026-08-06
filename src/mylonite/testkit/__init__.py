@@ -325,18 +325,38 @@ def _resolve_exec_context(
     resolved_provider = provider or (ctx.provider if ctx is not None else None)
 
     sibling_report = Path(target_file).parent / "scan_report.json"
+    # Distinguishes WHY the sibling back-fill didn't supply the missing
+    # field(s) -- "not found" is only ever true when the file genuinely
+    # doesn't exist. Code review caught the original version claiming "not
+    # found" even when the file was sitting right there but unparseable or
+    # missing the fields -- an operator chasing a phantom missing file is
+    # exactly the misleading failure a "loud, actionable" error must not be.
+    sibling_detail = f"no sibling scan_report.json was found at {sibling_report}"
     if (resolved_model is None or resolved_provider is None) and sibling_report.is_file():
         try:
             report_data: Any = json.loads(sibling_report.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            report_data = None
-        if isinstance(report_data, dict):
-            raw_model = report_data.get("model")
-            raw_provider = report_data.get("provider")
-            if resolved_model is None and isinstance(raw_model, str):
-                resolved_model = raw_model
-            if resolved_provider is None and isinstance(raw_provider, str):
-                resolved_provider = raw_provider
+            sibling_detail = (
+                f"a sibling scan_report.json exists at {sibling_report} but isn't valid JSON"
+            )
+        else:
+            if not isinstance(report_data, dict):
+                sibling_detail = (
+                    f"a sibling scan_report.json exists at {sibling_report} but isn't "
+                    "a JSON object"
+                )
+            else:
+                raw_model = report_data.get("model")
+                raw_provider = report_data.get("provider")
+                if resolved_model is None and isinstance(raw_model, str):
+                    resolved_model = raw_model
+                if resolved_provider is None and isinstance(raw_provider, str):
+                    resolved_provider = raw_provider
+                if resolved_model is None or resolved_provider is None:
+                    sibling_detail = (
+                        f"a sibling scan_report.json exists at {sibling_report} but "
+                        "doesn't specify model/provider"
+                    )
 
     if resolved_model is None or resolved_provider is None:
         missing = [
@@ -347,10 +367,10 @@ def _resolve_exec_context(
         raise TestkitConfigError(
             f"cannot resolve {' and '.join(missing)} to re-drive exploit "
             f"{exploit.pattern_id!r}: no explicit model=/provider= kwarg was passed, the "
-            "exploit carries no 'mylonite.exec.*' execution-context metadata, and no "
-            f"sibling scan_report.json was found at {sibling_report}. Pass model=/provider= "
-            "explicitly, or re-run `mylonite scan` + `mylonite generate` against a current "
-            "scan so the exploit carries its execution context."
+            f"exploit carries no 'mylonite.exec.*' execution-context metadata, and "
+            f"{sibling_detail}. Pass model=/provider= explicitly, or re-run `mylonite scan` "
+            "+ `mylonite generate` against a current scan so the exploit carries its "
+            "execution context."
         )
     return resolved_model, resolved_provider
 

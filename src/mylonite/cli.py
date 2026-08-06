@@ -1532,6 +1532,74 @@ def _map_compliance(exploit: Any, mapper: Any | None = None) -> Any:
     return exploit.model_copy(update={"compliance": mapper.map(exploit)})
 
 
+def _backfill_scan_report(
+    source_report: Path,
+    out_dir: Path,
+    *,
+    json_mod: Any,
+    trimmed_cache: dict[Path, dict[str, str] | None] | None = None,
+) -> None:
+    """T12 back-fill: co-locate a TRIMMED ``scan_report.json`` next to a
+    ``generate``-emitted custom-target test.
+
+    ``scan`` writes ``scan_report.json`` into the SCAN dir (``exploit_path.parent``
+    in :func:`_emit_generated_test`), but ``generate`` writes its output into a
+    DIFFERENT directory (``layout.generated_for(slug)``, e.g.
+    ``.mylonite/generated/<slug>/``). Without this, an exploit with no embedded
+    ``mylonite.exec.*`` execution-context metadata (e.g. one scanned before this
+    release) has no sibling report for ``testkit._resolve_exec_context`` to
+    back-fill from once co-located there — the back-fill safety net is dead in
+    practice against the real CLI-produced layout.
+
+    Writes ONLY ``{"model": ..., "provider": ...}`` — never a verbatim copy.
+    Unlike ``target.yaml`` (redacted before copying, see the caller), a raw
+    ``ScanReport``'s ``attempts`` can carry unredacted target/judge free text,
+    and ``out_dir`` is a directory this project tells the operator to commit.
+    A no-op (nothing written, no error) when ``source_report`` is absent,
+    unparseable, or doesn't carry both fields — this is a best-effort back-fill,
+    not a hard requirement (``testkit`` raises its own loud error at test-run
+    time if nothing ever supplied a usable model/provider).
+
+    ``trimmed_cache``, when supplied, memoises the trimmed result per resolved
+    ``source_report`` path — a multi-finding scan dir invokes this once per
+    exploit, all against the SAME scan dir's ``scan_report.json``, so re-reading
+    and re-parsing the identical file on every finding is pure overhead
+    (mirrors ``validated_target_files`` below). Absent (``None``), every call
+    re-reads independently.
+    """
+    resolved_source = source_report.resolve()
+    if trimmed_cache is not None and resolved_source in trimmed_cache:
+        trimmed = trimmed_cache[resolved_source]
+    else:
+        trimmed = None
+        if source_report.is_file():
+            try:
+                report_data = json_mod.loads(source_report.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                report_data = None
+            if isinstance(report_data, dict):
+                candidate = {
+                    key: report_data[key]
+                    for key in ("model", "provider")
+                    if isinstance(report_data.get(key), str)
+                }
+                # Only useful to testkit's back-fill if BOTH fields are present —
+                # a partial trim (e.g. model only) would silently mask that the
+                # source report itself was incomplete.
+                trimmed = candidate if {"model", "provider"} <= candidate.keys() else None
+        if trimmed_cache is not None:
+            trimmed_cache[resolved_source] = trimmed
+
+    if trimmed is None:
+        return
+
+    colocated_report = out_dir / "scan_report.json"
+    colocated_report.write_text(
+        json_mod.dumps(trimmed, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    echo(f"Wrote report:  {colocated_report} (model/provider back-fill only)")
+
+
 def _emit_generated_test(
     exploit: Any,
     exploit_path: Path,
@@ -1540,6 +1608,7 @@ def _emit_generated_test(
     *,
     json_mod: Any,
     validated_target_files: set[Path] | None = None,
+    scan_report_cache: dict[Path, dict[str, str] | None] | None = None,
 ) -> None:
     """Emit one regression test (+ co-located exploit/fixtures/target) for one
     exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
@@ -1555,6 +1624,9 @@ def _emit_generated_test(
     re-validating the identical YAML on every finding is pure overhead
     (DCR-0013/0009 perf). Absent (``None``), every call validates independently
     — the original, always-correct behaviour.
+
+    ``scan_report_cache`` is the same style of cache for
+    :func:`_backfill_scan_report`'s trimmed ``scan_report.json`` read.
     """
     from mylonite._redaction import redact_target_yaml
     from mylonite.plugins._reference.reference_pytest_generator import (
@@ -1594,37 +1666,17 @@ def _emit_generated_test(
     # bundled twin and need no target file.
     is_custom = not exploit.target_id.startswith("reference:")
 
-    # T12 back-fill source: `scan` writes scan_report.json into the SCAN dir
-    # (exploit_path.parent), but `generate` writes the emitted test into a
-    # DIFFERENT directory (layout.generated_for(slug), e.g.
-    # `.mylonite/generated/<slug>/`) — so an exploit with no embedded
-    # `mylonite.exec.*` execution-context metadata (e.g. one scanned before
-    # this release) would otherwise have no sibling scan_report.json for
-    # testkit._resolve_exec_context to back-fill from once co-located here.
-    # Only the two fields the back-fill actually reads are copied — NOT a
-    # verbatim copy — because unlike target.yaml (redacted before copying,
-    # see below) a raw ScanReport's `attempts` can carry unredacted
-    # target/judge free text, and this directory is one the operator commits.
+    # T12 back-fill (see _backfill_scan_report's docstring): only applies to
+    # custom targets — a reference-target test replays the bundled twin via
+    # assert_guard_holds, which takes no model/provider kwargs and has no use
+    # for a co-located scan_report.json at all.
     if is_custom:
-        source_report = exploit_path.parent / "scan_report.json"
-        if source_report.is_file():
-            try:
-                report_data = json_mod.loads(source_report.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                report_data = None
-            if isinstance(report_data, dict):
-                trimmed = {
-                    key: report_data[key]
-                    for key in ("model", "provider")
-                    if isinstance(report_data.get(key), str)
-                }
-                if trimmed:
-                    colocated_report = out_dir / "scan_report.json"
-                    colocated_report.write_text(
-                        json_mod.dumps(trimmed, indent=2, sort_keys=True) + "\n",
-                        encoding="utf-8",
-                    )
-                    echo(f"Wrote report:  {colocated_report} (model/provider back-fill only)")
+        _backfill_scan_report(
+            exploit_path.parent / "scan_report.json",
+            out_dir,
+            json_mod=json_mod,
+            trimmed_cache=scan_report_cache,
+        )
 
     # Auto-resolve the target YAML co-located with the scan (written by `scan`) so
     # the operator needn't re-pass --target-file at every step. An explicit
@@ -1823,6 +1875,9 @@ def generate(
     # auto-resolved (scan-dir-co-located) target.yaml case across iterations, since a
     # multi-finding scan dir's findings share the same co-located target.
     validated_target_files: set[Path] = set()
+    # Mirrors validated_target_files: a multi-finding scan dir shares one
+    # scan_report.json across every finding's _backfill_scan_report call.
+    scan_report_cache: dict[Path, dict[str, str] | None] = {}
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
@@ -1864,6 +1919,7 @@ def generate(
                 target_file,
                 json_mod=json,
                 validated_target_files=validated_target_files,
+                scan_report_cache=scan_report_cache,
             )
         except UnsafeExploitRecord as exc:
             echo_exc(f"could not generate a test for {exploit_path}", exc)

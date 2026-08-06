@@ -2438,6 +2438,141 @@ def test_custom_target_flow_needs_target_file_at_most_once(
 # with the single, pure plan_twins(), shared by validate/gate/ablate/testkit.)
 
 
+# --- T12 review follow-up: cli.py's _backfill_scan_report block --------------
+# Direct coverage of the ~20-line back-fill copy block generate's
+# _emit_generated_test runs for every custom-target finding (the actual fix
+# for "the sibling scan_report.json back-fill is dead in practice against the
+# real CLI layout" — see tests/testkit/test_bounded_redrive.py for the
+# end-to-end proof via a real scan+generate round trip). These are narrower,
+# faster unit-style tests pinning the block's own behaviour in isolation:
+# what it writes, what it trims, and when it no-ops.
+
+
+def _write_custom_exploit_and_target(scan_dir: Path) -> Path:
+    """A minimal custom-target exploit + target.yaml co-located in ``scan_dir``,
+    mirroring what `mylonite scan` actually writes. Returns the exploit path."""
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    ep = scan_dir / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    (scan_dir / "target.yaml").write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    return ep
+
+
+def test_generate_backfills_trimmed_scan_report_only(tmp_path: Path) -> None:
+    """A sibling scan_report.json co-located with the exploit gets copied into
+    the generated dir TRIMMED to exactly {model, provider} -- never a verbatim
+    copy. A verbatim copy would leak whatever's in `attempts` (target/judge
+    free text, potentially secret-shaped) into a directory this project tells
+    the operator to commit.
+    """
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps(
+            {
+                "target_id": "mcp:myapp",
+                "attack_modules": ["mylonite.prompt-injection"],
+                "provider": "anthropic",
+                "model": "claude-t12-cli-unit",
+                "elapsed_seconds": 1.2,
+                "attempts": [
+                    {
+                        "seed_id": "x",
+                        "pattern_id": "x",
+                        "outcome": "finding",
+                        "verdict_mechanism": "predicate",
+                        # A decoy secret-shaped value the trim must drop.
+                        "verdict_reason": "sk-live-should-never-be-copied",
+                        "error_detail": None,
+                    }
+                ],
+                "findings_count": 1,
+                "mylonite_version": "0.0.0-test",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    copied_path = out / "scan_report.json"
+    assert copied_path.is_file()
+    raw_text = copied_path.read_text(encoding="utf-8")
+    data = json.loads(raw_text)
+    assert data == {"model": "claude-t12-cli-unit", "provider": "anthropic"}
+    assert "attempts" not in data
+    assert "target_id" not in data
+    assert "sk-live-should-never-be-copied" not in raw_text
+
+
+def test_generate_skips_scan_report_backfill_when_source_absent(tmp_path: Path) -> None:
+    """No sibling scan_report.json next to the exploit -> generate writes
+    nothing (a no-op, not an error) -- the back-fill is best-effort."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    # Deliberately no scan_report.json written.
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
+def test_generate_skips_scan_report_backfill_when_source_malformed(tmp_path: Path) -> None:
+    """A sibling scan_report.json that isn't valid JSON -> skipped silently,
+    not a generate failure (testkit raises its own loud error at test-run time
+    if nothing else ever supplies a usable model/provider)."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text("not valid json {{{", encoding="utf-8")
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
+def test_generate_skips_scan_report_backfill_when_source_incomplete(tmp_path: Path) -> None:
+    """A sibling scan_report.json missing model OR provider -> skipped, not a
+    partial {model} or {provider}-only file silently written."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps({"model": "claude-t12-cli-unit"}), encoding="utf-8"  # no "provider"
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
+def test_generate_skips_scan_report_backfill_for_reference_target(tmp_path: Path) -> None:
+    """A reference-target finding replays the bundled twin via
+    assert_guard_holds (no model/provider kwargs at all) -- the back-fill must
+    not run (and must not write a stray scan_report.json) for it."""
+    exploit = _sample_exploit()  # target_id="reference:vulnerable"
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    (tmp_path / "scan_report.json").write_text(
+        json.dumps({"model": "claude-t12-cli-unit", "provider": "anthropic"}), encoding="utf-8"
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
 # --- Theme C: generate --prove-control emits assert_control_holds ------------
 
 
