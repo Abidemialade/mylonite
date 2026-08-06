@@ -15,6 +15,7 @@ from typing import Any
 from mylonite._cli_io import echo
 from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.gate.mitigation import build_pr_body
+from mylonite.scan.coverage import ScanOutcome
 
 EXIT_SUCCESS = 0
 EXIT_NOT_KEPT = 5
@@ -30,18 +31,50 @@ class GateResult:
     kept: bool | None = None
 
 
+@dataclass(frozen=True)
+class ScanOutcomeBundle:
+    """What ``scan_fn`` hands ``run_gate``: the typed verdict AND the exploits.
+
+    Replaces a bare ``list[ExploitRecord]`` seam (the A-series false-clean bug:
+    a scan that never actually ran — e.g. ``provider_unreachable`` — and a
+    scan that ran cleanly both produced an empty list, and ``run_gate``
+    couldn't tell them apart). Carrying ``outcome`` alongside the exploits
+    makes that distinction structurally reachable at the call site.
+    """
+
+    outcome: ScanOutcome
+    exploits: list[ExploitRecord]
+
+
 def run_gate(
     *,
     out_dir: Path,
-    scan_fn: Callable[[], list[ExploitRecord]],
+    scan_fn: Callable[[], ScanOutcomeBundle],
     generate_fn: Callable[[ExploitRecord], GeneratedTest | None],
     validate_fn: Callable[[GeneratedTest], ValidationReport | None],
     open_pr_fn: Callable[..., Any],
     open_pr: bool,
     llm_enrich: bool = False,
 ) -> GateResult:
-    exploits = scan_fn()
+    bundle = scan_fn()
+    exploits = bundle.exploits
     if not exploits:
+        # An empty exploits list is ambiguous on its own: it means either "the
+        # scan genuinely ran and found nothing" or "the scan never meaningfully
+        # ran" (aborted, e.g. provider_unreachable, or every attempt errored
+        # out without an explicit abort). ``trustworthy_clean`` is what
+        # disambiguates the two — a real finding (exploits non-empty) is
+        # trusted regardless of overall coverage, matching pre-existing
+        # behaviour where a partial/aborted scan that still found something
+        # before stopping is gated on that finding.
+        if not bundle.outcome.trustworthy_clean:
+            message = bundle.outcome.operator_message or (
+                "Mylonite gate: the scan did not complete a trustworthy run "
+                f"(coverage={bundle.outcome.coverage.name}, abort={bundle.outcome.abort}) — "
+                "cannot gate."
+            )
+            echo(message)
+            return GateResult(exit_code=bundle.outcome.exit_code, opened_pr=False, kept=None)
         echo("Mylonite gate: no exploit found — nothing to gate.")
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
 

@@ -3361,8 +3361,8 @@ def gate(
     if iterations < 1:
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
+    from mylonite.gate import ScanOutcomeBundle, run_gate
     from mylonite.gate import pr as pr_mod
-    from mylonite.gate import run_gate
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
         UnsafeExploitRecord,
@@ -3475,8 +3475,9 @@ def gate(
 
     # --- closures injected into run_gate ---
 
-    def scan_fn() -> list[Any]:
+    def scan_fn() -> ScanOutcomeBundle:
         from mylonite.plugins.registry import discover
+        from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.customiser import PayloadCustomiser
         from mylonite.scan.engine import ScanConfig, ScanEngine
         from mylonite.scan.judge import SuccessJudge
@@ -3511,6 +3512,10 @@ def gate(
             judge=SuccessJudge(model=effective_model),
         )
         result = asyncio.run(engine.run())
+        # The typed verdict for "did this scan actually run" (A1 fix) — carried
+        # alongside the exploits so run_gate can tell a genuine clean scan apart
+        # from one that never meaningfully ran (e.g. provider_unreachable).
+        outcome = ScanOutcome.from_report(result.report)
         # Enrich compliance (derive NIST) once so both the emitted test and the PR
         # carry it.
         exploits = [_map_compliance(ex) for ex in result.exploits]
@@ -3520,7 +3525,7 @@ def gate(
         # in-repo differential and are not tagged here. This tagging is the default
         # behaviour; the old --prove-control opt-in flag was removed in 0.7.7.
         if fast or is_reference:
-            return exploits
+            return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
         if tf is not None and tf.transport == "rest":
             if prove_input_control:
                 # Opt-in: measure whether input data-framing (spotlighting) is
@@ -3530,21 +3535,24 @@ def gate(
                     "gate: rest input-control differential — raw vs input data-framing "
                     "(spotlighting)."
                 )
-                return [
-                    ex.model_copy(
-                        update={
-                            "payload": ex.payload.model_copy(
-                                update={
-                                    "metadata": {
-                                        **ex.payload.metadata,
-                                        "synthetic_control": "input-frame",
+                return ScanOutcomeBundle(
+                    outcome=outcome,
+                    exploits=[
+                        ex.model_copy(
+                            update={
+                                "payload": ex.payload.model_copy(
+                                    update={
+                                        "metadata": {
+                                            **ex.payload.metadata,
+                                            "synthetic_control": "input-frame",
+                                        }
                                     }
-                                }
-                            )
-                        }
-                    )
-                    for ex in exploits
-                ]
+                                )
+                            }
+                        )
+                        for ex in exploits
+                    ],
+                )
             # A black-box HTTP agent has no adapter-boundary control to apply, so a
             # boundary-guarded twin would equal the raw target and wrongly REJECT a
             # real finding. Don't tag; the gate is decided by stability/effect/consensus.
@@ -3554,7 +3562,7 @@ def gate(
                 "consensus. Declare control_env / vulnerable_launch for a server-layer "
                 "differential, or pass --prove-input-control to test input data-framing."
             )
-            return exploits
+            return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
 
@@ -3570,7 +3578,7 @@ def gate(
             tagged.append(
                 ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
             )
-        return tagged
+        return ScanOutcomeBundle(outcome=outcome, exploits=tagged)
 
     def generate_fn(exploit: Any) -> Any:
         # run_gate() is Typer-agnostic by design (its docstring: "Collaborators

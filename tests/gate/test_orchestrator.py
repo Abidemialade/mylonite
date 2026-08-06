@@ -7,7 +7,53 @@ from mylonite.contracts._types import (
     ValidationOutcome,
     ValidationReport,
 )
-from mylonite.gate.orchestrator import GateResult, run_gate
+from mylonite.gate.orchestrator import GateResult, ScanOutcomeBundle, run_gate
+from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
+
+
+def _trustworthy_clean_outcome() -> ScanOutcome:
+    """A genuine, meaningful clean scan: ran to completion, nothing found."""
+    return ScanOutcome(
+        coverage=Coverage.EXERCISED,
+        abort=None,
+        exercised=3,
+        not_tested=0,
+        findings=0,
+        fallbacks=0,
+        exit_code=0,
+        operator_message=None,
+    )
+
+
+def _found_outcome(findings: int = 1) -> ScanOutcome:
+    """A scan that ran and found something — not "clean" by definition, but a
+    trusted result (exploits are real evidence regardless of overall coverage)."""
+    return ScanOutcome(
+        coverage=Coverage.EXERCISED,
+        abort=None,
+        exercised=3,
+        not_tested=0,
+        findings=findings,
+        fallbacks=0,
+        exit_code=0,
+        operator_message=None,
+    )
+
+
+def _aborted_provider_unreachable_outcome() -> ScanOutcome:
+    """The scan never meaningfully ran: provider was unreachable. This is the
+    fail-open bug's exact shape — empty exploits, but NOT a trustworthy clean
+    result — exit_code must be 4 (mirrors cli.py's EXIT_PROVIDER), not 0."""
+    return ScanOutcome(
+        coverage=Coverage.NOT_EXERCISED,
+        abort=AbortReason.PROVIDER_UNREACHABLE,
+        exercised=0,
+        not_tested=0,
+        findings=0,
+        fallbacks=0,
+        exit_code=4,
+        operator_message=None,
+    )
 
 
 def _exploit():
@@ -42,7 +88,7 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     pr_calls = {}
 
     def fake_scan():
-        return [ex]
+        return ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex])
 
     def fake_generate(exploit):
         return GeneratedTest(
@@ -80,7 +126,7 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
 def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",
-        scan_fn=lambda: [],
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_trustworthy_clean_outcome(), exploits=[]),
         generate_fn=lambda e: None,
         validate_fn=lambda t: None,
         open_pr_fn=lambda **k: None,
@@ -88,6 +134,41 @@ def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
     )
     assert result.exit_code == 0
     assert result.opened_pr is False
+    assert result.kept is None
+
+
+def test_gate_exits_nonzero_when_scan_aborted(tmp_path):
+    """The fail-open regression test (T2): when the scan never meaningfully
+    ran — e.g. provider_unreachable, exactly what happens with no API key set
+    — an empty exploits list must NOT be treated as a genuine clean pass.
+    Before this fix, ``run_gate`` took a bare ``list[ExploitRecord]`` and
+    could not tell "aborted" apart from "ran clean"; both produced [] and
+    exited 0. This must now exit non-zero, matching ``ScanOutcome.exit_code``
+    (4 == EXIT_PROVIDER, mirroring `scan reference:vulnerable`'s own exit code
+    under the same condition)."""
+    generate_called = {"called": False}
+    validate_called = {"called": False}
+    pr_called = {"called": False}
+    outcome = _aborted_provider_unreachable_outcome()
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=outcome, exploits=[]),
+        generate_fn=lambda e: generate_called.__setitem__("called", True),
+        validate_fn=lambda t: validate_called.__setitem__("called", True),
+        open_pr_fn=lambda **k: pr_called.__setitem__("called", True),
+        open_pr=False,
+    )
+    assert result.exit_code == outcome.exit_code
+    assert result.exit_code == 4
+    assert result.exit_code != 0
+    assert result.opened_pr is False
+    assert result.kept is None
+    # The generate/validate/PR legs must never run for an untrustworthy scan —
+    # there is nothing real to gate on.
+    assert generate_called["called"] is False
+    assert validate_called["called"] is False
+    assert pr_called["called"] is False
 
 
 def test_run_gate_returns_a_typed_result_when_generate_returns_none(tmp_path):
@@ -98,7 +179,7 @@ def test_run_gate_returns_a_typed_result_when_generate_returns_none(tmp_path):
     ex = _exploit()
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",
-        scan_fn=lambda: [ex],
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
         generate_fn=lambda e: None,
         validate_fn=lambda t: None,
         open_pr_fn=lambda **k: None,
@@ -118,7 +199,7 @@ def test_run_gate_returns_a_typed_result_when_validate_returns_none(tmp_path):
     ex = _exploit()
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",
-        scan_fn=lambda: [ex],
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
@@ -147,7 +228,7 @@ def test_run_gate_opened_pr_flows_from_prresult(tmp_path):
 
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",
-        scan_fn=lambda: [ex],
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
@@ -165,7 +246,7 @@ def test_run_gate_rejected_test_exits_5_no_pr(tmp_path):
     called = {"pr": False}
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",
-        scan_fn=lambda: [ex],
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
