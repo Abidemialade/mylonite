@@ -17,9 +17,13 @@ an AST guard, not a convention). Every other module gets a :class:`Layout`
 (typically via ``ctx.obj`` in ``cli.py``) and reads its properties instead of
 constructing ``.mylonite/...`` paths itself.
 
-Resolution order (see :func:`resolve_layout`): an explicit ``--output-dir``/
-``--out`` CLI flag wins, then a ``mylonite.yaml`` ``root:`` field, then the
-``MYLONITE_ROOT`` environment variable, then the built-in default ``.mylonite``.
+Full resolution order, top to bottom: an explicit per-command flag
+(``scan --output-dir``, ``gate --out``, ``generate --scans-dir``/``--out``)
+wins outright; then a ``mylonite.yaml`` ``root:`` field; then the
+``MYLONITE_ROOT`` environment variable; then the built-in default
+``.mylonite``. Only the BOTTOM three tiers are ``resolve_layout``'s job — see
+its docstring for why the top tier can't be, structurally, without
+reintroducing double-nested paths.
 """
 
 from __future__ import annotations
@@ -77,22 +81,27 @@ DEFAULT_LAYOUT = Layout()
 
 def resolve_layout(
     *,
-    explicit_root: Path | None = None,
     config_root: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> Layout:
-    """Resolve the effective :class:`Layout` from the documented precedence.
-
-    Order: ``explicit_root`` (an ``--output-dir``/``--out`` flag value) wins,
-    then ``config_root`` (``mylonite.yaml``'s ``root:`` field), then the
+    """Resolve the effective :class:`Layout` from the BOTTOM three precedence
+    tiers: ``config_root`` (``mylonite.yaml``'s ``root:`` field) wins, then the
     ``MYLONITE_ROOT`` env var, then the built-in ``.mylonite`` default.
 
     ``env`` defaults to ``os.environ`` — overridable so callers (and tests)
     can resolve against an arbitrary mapping instead of the real process
     environment.
+
+    There is deliberately no ``explicit_root`` parameter here for the TOP tier
+    (an explicit ``--output-dir``/``--out``/``--scans-dir`` flag). Each of
+    those flags names a LEAF directory directly (e.g. ``scan --output-dir``
+    IS the scans dir, not a root to nest ``scans/`` under) — routing it
+    through this function would set :attr:`Layout.root` instead and
+    double-nest the result (``custom/scans/scans``). Every call site instead
+    applies its own flag with a direct ``explicit if explicit is not None else
+    layout.<leaf>`` check; ``resolve_layout`` only ever supplies the fallback
+    ``Layout`` for when that flag is absent.
     """
-    if explicit_root is not None:
-        return Layout(root=explicit_root)
     if config_root is not None:
         return Layout(root=config_root)
     environ = env if env is not None else os.environ

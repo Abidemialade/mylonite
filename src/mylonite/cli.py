@@ -1699,14 +1699,16 @@ def generate(
         bool,
         typer.Option("--latest", help="Use the newest scan under the resolved scans dir."),
     ] = False,
-    output_dir: Annotated[
+    scans_dir: Annotated[
         Path | None,
         typer.Option(
-            "--output-dir",
+            "--scans-dir",
             help=(
-                "The scans root --latest searches (default: the resolved layout's "
-                "scans dir, normally .mylonite/scans). Pass the SAME value you gave "
-                "`scan --output-dir` to find a scan written to a custom location."
+                "The directory `scan --output-dir` wrote to, when using --latest "
+                "(default: the resolved layout's scans dir, normally .mylonite/scans). "
+                "An INPUT — where --latest searches for a scan to read, not where "
+                "this command writes; for the emitted test's output dir see --out. "
+                "Ignored if you pass SCAN_PATH explicitly instead of --latest."
             ),
         ),
     ] = None,
@@ -1759,17 +1761,22 @@ def generate(
         UnsafeExploitRecord,
     )
 
-    # No --config on `generate` (kept minimal): absent an explicit --output-dir,
+    # No --config on `generate` (kept minimal): absent an explicit --scans-dir,
     # the resolved Layout is MYLONITE_ROOT / the built-in default, via the root
     # callback (ctx.obj) — the SAME resolution `scan`'s own default --output-dir
     # uses, so a scan written under a root moved by mylonite.yaml/MYLONITE_ROOT is
-    # found here too. An explicit --output-dir (mirroring `scan --output-dir`,
-    # highest priority) points --latest at that exact scans root directly,
-    # closing the "generate --latest hardcodes .mylonite/scans" bug outright: a
-    # scan written to a one-off custom dir via `scan --output-dir X` is found by
-    # `generate --latest --output-dir X`.
+    # found here too. An explicit --scans-dir (highest priority; an INPUT read by
+    # --latest, deliberately NOT named --output-dir like scan's own flag — that
+    # name would mislead as "where generate writes", which is --out's job) points
+    # --latest at that exact scans root directly, closing the "generate --latest
+    # hardcodes .mylonite/scans" bug outright: a scan written to a one-off custom
+    # dir via `scan --output-dir X` is found by `generate --latest --scans-dir X`.
+    # Silently unused when SCAN_PATH is passed explicitly instead of --latest —
+    # consistent with how --latest itself is already ignored in that case (see
+    # _resolve_exploit_paths: an explicit scan_path short-circuits before either
+    # is consulted).
     layout = _layout_for(ctx)
-    scans_root = output_dir if output_dir is not None else layout.scans
+    scans_root = scans_dir if scans_dir is not None else layout.scans
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
     multi = len(exploit_paths) > 1
 
