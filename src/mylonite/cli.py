@@ -3720,12 +3720,20 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
     load_bearing = [r.weakness for r in results if r.load_bearing]
     redundant = [r.weakness for r in results if r.status == "redundant"]
     theater = [r.weakness for r in results if r.status == "theater"]
+    inconclusive = [r.weakness for r in results if r.status == "inconclusive"]
     if load_bearing:
         console_print(console, f"load-bearing: {', '.join(load_bearing)}")
     if redundant:
         console_print(console, f"redundant (another control covers it): {', '.join(redundant)}")
     if theater:
         console_print(console, f"security theater (no marginal contribution): {', '.join(theater)}")
+    if inconclusive:
+        console_print(
+            console,
+            f"inconclusive (scan didn't produce a trustworthy result on at least one "
+            f"side -- NOT the same as resisted, re-run before trusting this control): "
+            f"{', '.join(inconclusive)}",
+        )
 
 
 @app.command()
@@ -3786,6 +3794,7 @@ def ablate(
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
     from mylonite.scan.ablation import (
         REP_SEED_BY_WEAKNESS,
+        FireOutcome,
         run_control_ablation,
         scan_target_fires,
         seeds_for_weaknesses,
@@ -3877,7 +3886,7 @@ def ablate(
         f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans."
     )
 
-    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
         if server_layer:
             # ``applied`` = controls currently ON. The raw side (applied=()) turns
             # them all OFF; the "only C" side leaves only C on. Translate to the
@@ -3924,6 +3933,14 @@ def ablate(
             "hint: every control classified 'no-attack' — the raw side never fired. "
             "Check that control_env actually disables the server's guard for these "
             "weakness classes, and that the representative seeds reach the surface."
+        )
+    if any(r.status == "inconclusive" for r in results):
+        echo_err(
+            "hint: one or more controls came back 'inconclusive' — the scan didn't run "
+            "to completion on at least one side (provider outage, adapter crash, or "
+            "no applicable attempts). This is NOT the same as the control resisting the "
+            "attack; it must not be read as load-bearing/theater/redundant. Check "
+            "connectivity/credentials and re-run."
         )
 
 

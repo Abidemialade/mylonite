@@ -32,12 +32,14 @@ def test_ablate_renders_load_bearing_and_theater(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
 
-    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> bool:
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
         applied = {c.weakness for c in adapter._controls}
         if pattern_id.startswith("indirect"):  # W2 seed -> load-bearing
-            return len(applied) == 0  # fires raw, resisted when a control is applied
-        return True  # W4 seed -> fires regardless -> theater
+            # fires raw, resisted when a control is applied
+            return FireOutcome.FIRED if len(applied) == 0 else FireOutcome.RESISTED
+        return FireOutcome.FIRED  # W4 seed -> fires regardless -> theater
 
     monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
     result = _runner.invoke(
@@ -57,6 +59,42 @@ def test_ablate_renders_load_bearing_and_theater(
     assert "W2" in out and "W4" in out
     assert "load-bearing" in out
     assert "theater" in out
+
+
+def test_ablate_renders_inconclusive_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T3 regression at the CLI layer: a crashed guarded-side scan (simulated
+    here as scan_target_fires returning INCONCLUSIVE) must render as
+    'inconclusive' in the table -- never as 'load-bearing', and never crash
+    the render."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        applied = {c.weakness for c in adapter._controls}
+        if len(applied) == 0:
+            return FireOutcome.FIRED  # raw side fires normally
+        return FireOutcome.INCONCLUSIVE  # guarded side "crashes"
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    combined = result.output + (result.stderr or "")
+    assert "inconclusive" in combined
+    assert "load-bearing: W2" not in combined  # the summary list, not the caveat prose
+    assert combined.count("inconclusive") >= 2  # the table row + the post-render hint
 
 
 def test_ablate_requires_authorize(tmp_path: Path) -> None:
@@ -171,8 +209,9 @@ def test_ablate_server_layer_toggles_via_control_env(
     shim could not strip the server-layer guard.
     """
     import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
 
-    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> bool:
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
         # Server-layer mode uses no adapter-shim controls; the differential is
         # produced entirely by the launch env that disables server guards.
         assert adapter._controls == []
@@ -180,8 +219,9 @@ def test_ablate_server_layer_toggles_via_control_env(
         w2_disabled = env.get("DISABLE_MARKING") == "1"
         w4_disabled = env.get("AUTONOMY") == "full"
         if pattern_id.startswith("indirect"):  # W2 representative seed
-            return w2_disabled  # fires only when the W2 server guard is off
-        return w4_disabled  # W4 representative seed
+            # fires only when the W2 server guard is off
+            return FireOutcome.FIRED if w2_disabled else FireOutcome.RESISTED
+        return FireOutcome.FIRED if w4_disabled else FireOutcome.RESISTED  # W4 rep seed
 
     monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
     p = tmp_path / "server.yaml"
