@@ -122,11 +122,19 @@ async def _record_guarded_fixtures(example_dir: Path, pattern_id: str) -> int:
         model=EXAMPLE_MODEL,
     )
     await engine.run()
+    # `format_version` is testkit's own field (per-exploit fixture-isolation
+    # SCOPE); `cache_key_version` is the UNRELATED _replay.LiteLLMRecorder
+    # cache-key algorithm field — read off `recorder.key_version` (not a
+    # locally hardcoded literal) so the sidecar can never drift from what the
+    # recorder actually used to key the files just written above. The two
+    # fields share this one sidecar file but are independent axes; see
+    # mylonite.demo._replay.CACHE_KEY_VERSION_FIELD's docstring.
     meta_path = fixtures_dir / "_meta.json"
     meta_path.write_text(
         json.dumps(
             {
                 "format_version": FIXTURE_FORMAT_VERSION,
+                "cache_key_version": recorder.key_version,
                 "model": EXAMPLE_MODEL,
                 "pattern_id": pattern_id,
             },

@@ -19,8 +19,12 @@ infers the likely weakness classes and the plant/retrieve tools, and writes a co
 `target.yaml` starter (no `--authorize` needed — nothing is attacked):
 
 ```bash
-mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml
+mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml --scope my-app
 ```
+
+`--scope` is optional here (it labels the target and becomes the value `--authorize` must
+match below — see [the `target.yaml` reference](target-file.md)); omit it and the
+scaffolded `target.yaml` falls back to `family: custom`, so `--authorize custom` instead.
 
 It suggests `weakness_classes` (W1/W2 baseline; W3 if it sees an egress tool; W4 if it
 sees a consequential tool), pre-fills a `seed_arm` (how to plant poisoned content) and
@@ -47,7 +51,7 @@ seed_arm:                    # how to plant untrusted content (required for W2)
 ## 2. Scan it
 
 ```bash
-mylonite scan --target-file app.yaml --authorize me
+mylonite scan --target-file app.yaml --authorize my-app
 ```
 
 This runs the [single-shot engine](attack-modes.md). Findings land under
@@ -61,8 +65,8 @@ This runs the [single-shot engine](attack-modes.md). Findings land under
 and only a **kept** test makes it through:
 
 ```bash
-mylonite gate --target-file app.yaml --authorize me            # writes test + CI workflows
-mylonite gate --target-file app.yaml --authorize me --open-pr  # also opens the PR via gh
+mylonite gate --target-file app.yaml --authorize my-app            # writes test + CI workflows
+mylonite gate --target-file app.yaml --authorize my-app --open-pr  # also opens the PR via gh
 ```
 
 Because you have no in-repo guarded build, the validator synthesizes one at the adapter
@@ -73,7 +77,7 @@ and proves the finding *differentially* by default — the emitted test gates on
 
 ## 4. Keep it honest over time
 
-- **`mylonite ablate --target-file app.yaml --authorize me`** — score each safeguard:
+- **`mylonite ablate --target-file app.yaml --authorize my-app`** — score each safeguard:
   load-bearing, security theater, or (with `--redundancy`) redundant.
 
 ## Bundled targets
@@ -88,7 +92,7 @@ trying Mylonite against real servers:
 | `mcp:github:<owner/repo>` | a repo | W1, W2, W4 (issues/comments) |
 
 ```bash
-mylonite scan mcp:filesystem:/tmp/sandbox --authorize me
+mylonite scan mcp:filesystem:/tmp/sandbox --authorize /tmp/sandbox
 ```
 
 > These bundled families are **attack-only** today (they scan but don't yet route

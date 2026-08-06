@@ -32,12 +32,14 @@ def test_ablate_renders_load_bearing_and_theater(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
 
-    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> bool:
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
         applied = {c.weakness for c in adapter._controls}
         if pattern_id.startswith("indirect"):  # W2 seed -> load-bearing
-            return len(applied) == 0  # fires raw, resisted when a control is applied
-        return True  # W4 seed -> fires regardless -> theater
+            # fires raw, resisted when a control is applied
+            return FireOutcome.FIRED if len(applied) == 0 else FireOutcome.RESISTED
+        return FireOutcome.FIRED  # W4 seed -> fires regardless -> theater
 
     monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
     result = _runner.invoke(
@@ -57,6 +59,131 @@ def test_ablate_renders_load_bearing_and_theater(
     assert "W2" in out and "W4" in out
     assert "load-bearing" in out
     assert "theater" in out
+
+
+def test_ablate_renders_inconclusive_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T3 regression at the CLI layer: a crashed guarded-side scan (simulated
+    here as scan_target_fires returning INCONCLUSIVE) must render as
+    'inconclusive' in the table -- never as 'load-bearing', and never crash
+    the render."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        applied = {c.weakness for c in adapter._controls}
+        if len(applied) == 0:
+            return FireOutcome.FIRED  # raw side fires normally
+        return FireOutcome.INCONCLUSIVE  # guarded side "crashes"
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2",
+        ],
+    )
+    # 0.7.7 fix: the single requested control (W2) is wholly inconclusive here
+    # (its only guarded leg crashes) -- a TOTAL failure, which must not exit 0
+    # (see tests/test_cli_keyless.py::test_ablate_no_key_exits_nonzero for the
+    # full keyless regression guard). `fake_scan` replaces `scan_target_fires`
+    # entirely, so it never feeds the real ScanOutcome detail through the
+    # on_outcome sink the CLI wires up in production -- the CLI has no
+    # exit_code detail to work with here and falls back to EXIT_PROVIDER (4),
+    # its documented conservative default for that case.
+    assert result.exit_code == 4, result.output
+    combined = result.output + (result.stderr or "")
+    assert "inconclusive" in combined
+    assert "load-bearing: W2" not in combined  # the summary list, not the caveat prose
+    # The row's numbers must not be independently readable as a genuine
+    # load-bearing signal: no bare percentage (contribution is neutralised to
+    # "n/a"), and the inconclusive count is surfaced in the fired-count cell
+    # rather than silently dropped (code review: "2/0 of 2" + "+100%" reads
+    # exactly like a real load-bearing result even though status says
+    # inconclusive).
+    assert "n/a" in combined
+    assert "+100%" not in combined
+    assert "inconclusive)" in combined  # the "(N inconclusive)" fired-count suffix
+
+
+def test_ablate_mixed_result_still_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.7.7 fix, code-review follow-up: a MIXED result -- one control
+    resolved (load-bearing), a DIFFERENT control wholly inconclusive -- must
+    NOT be treated as a total failure. Only exiting non-zero when EVERY
+    control is inconclusive is the whole point of `all_inconclusive` (see its
+    direct unit tests in test_ablation.py); this proves that contract through
+    the real `ablate` command end-to-end, not just at the pure-predicate
+    level."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        applied = {c.weakness for c in adapter._controls}
+        if pattern_id.startswith("indirect"):  # W2 seed -> resolves cleanly: load-bearing
+            return FireOutcome.FIRED if len(applied) == 0 else FireOutcome.RESISTED
+        return FireOutcome.INCONCLUSIVE  # W4 seed -> crashes on both sides
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2,W4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    combined = result.output + (result.stderr or "")
+    assert "load-bearing: W2" in combined  # W2 resolved and is reported as such
+    assert "inconclusive" in combined  # W4's row/hint still surfaces -- not silently dropped
+
+
+def test_render_ablation_matrix_neutralises_inconclusive_row() -> None:
+    """Unit-level reproduction of the code-review finding: a row whose
+    `status` is "inconclusive" must not ALSO carry a bare contribution
+    percentage or a fired-count string that reads like a genuine
+    load-bearing/theater result. Uses the exact shape the reviewer
+    reproduced -- raw_fired=2, guarded_fired=0, total=2, contribution=+1.0
+    -- to pin that "n/a" and the inconclusive-count suffix replace the
+    misleading "+100%" / "2/0 of 2" output."""
+    import io
+
+    from rich.console import Console
+
+    from mylonite.cli import _render_ablation_matrix
+    from mylonite.scan.ablation import ControlContribution
+
+    misleading_row = ControlContribution(
+        weakness="W2",
+        raw_fired=2,
+        guarded_fired=0,
+        total=2,
+        contribution=1.0,
+        status="inconclusive",
+        inconclusive=2,
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, width=200, force_terminal=False)
+    _render_ablation_matrix([misleading_row], console=console)
+    out = buf.getvalue()
+
+    assert "inconclusive" in out
+    assert "n/a" in out
+    assert "+100%" not in out  # the exact misleading percentage from review
+    assert "2/0 of 2 (2 inconclusive)" in out
 
 
 def test_ablate_requires_authorize(tmp_path: Path) -> None:
@@ -171,8 +298,9 @@ def test_ablate_server_layer_toggles_via_control_env(
     shim could not strip the server-layer guard.
     """
     import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
 
-    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> bool:
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
         # Server-layer mode uses no adapter-shim controls; the differential is
         # produced entirely by the launch env that disables server guards.
         assert adapter._controls == []
@@ -180,8 +308,9 @@ def test_ablate_server_layer_toggles_via_control_env(
         w2_disabled = env.get("DISABLE_MARKING") == "1"
         w4_disabled = env.get("AUTONOMY") == "full"
         if pattern_id.startswith("indirect"):  # W2 representative seed
-            return w2_disabled  # fires only when the W2 server guard is off
-        return w4_disabled  # W4 representative seed
+            # fires only when the W2 server guard is off
+            return FireOutcome.FIRED if w2_disabled else FireOutcome.RESISTED
+        return FireOutcome.FIRED if w4_disabled else FireOutcome.RESISTED  # W4 rep seed
 
     monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
     p = tmp_path / "server.yaml"

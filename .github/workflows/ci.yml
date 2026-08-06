@@ -48,6 +48,27 @@ jobs:
       - name: Mypy
         run: mypy src
 
+  docs-consistency:
+    # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs,
+    # demo/render.py's printed next-step text) against the real Typer app. Runs in
+    # main CI (not docs.yml, which only triggers on docs/** changes) specifically
+    # because a cli.py-only change -- a renamed/removed flag, a dropped command --
+    # never touches docs/ and would otherwise never trip a docs check at all.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: Embedded CLI examples parse against the real app
+        run: pytest tests/test_docs_consistency.py -q
+
   test:
     runs-on: ubuntu-latest
     strategy:

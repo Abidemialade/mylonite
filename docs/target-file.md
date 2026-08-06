@@ -27,6 +27,10 @@ args: [my_server.py, --port, "0"]
 env: { LOG_LEVEL: warning }    # ADDED to a small allowlist, not merged into your full env — see below
 scope: tenant-a                # optional label; must match --authorize / {scope}
 requires_scope: false          # set true to require a non-empty scope
+# --authorize must EQUAL this target's required value: the declared `scope`
+# exactly (e.g. `--authorize tenant-a` above) if one is set, else `family`
+# (e.g. `--authorize my-app`) if it isn't. This is derived from the target's
+# own data, never from `requires_scope` — see `mylonite._authz`, SECURITY.md.
 
 # --- the AI layer ----------------------------------------------------------
 system_prompt: |               # the target's system prompt (inline)...
@@ -58,7 +62,7 @@ control_config:
   consequential_tools: [send_email]    # W4: high-impact actions to gate
   read_tool_names: [read_note]         # W2: tools whose results get quarantined
   declared: [W2]                       # controls you've already implemented server-side
-  synthetic: true                      # let Mylonite synthesize the missing guarded build
+  synthetic: [W3, W4]                  # controls NOT already declared — Mylonite synthesizes/tests these
 
 # --- optional: a genuinely unguarded build + per-control server-layer toggles
 vulnerable_launch:                     # how to launch a DELIBERATELY-unguarded variant

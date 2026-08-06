@@ -27,6 +27,7 @@ from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
@@ -216,7 +217,7 @@ class ScanEngine:
                 raise
             except Exception:
                 logger.exception("ScanEngine: adapter.describe() raised")
-                aborted = "describe_failed"
+                aborted = AbortReason.DESCRIBE_FAILED.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -272,7 +273,7 @@ class ScanEngine:
                         family,
                         known,
                     )
-                    aborted = "no_payloads"
+                    aborted = AbortReason.NO_PAYLOADS.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -290,12 +291,12 @@ class ScanEngine:
                     else:
                         outcome = await coro
                 except TimeoutError:
-                    aborted = "wall_clock_timeout"
+                    aborted = AbortReason.WALL_CLOCK_TIMEOUT.value
                     for pending in tasks:
                         pending.cancel()
                     break
                 except BudgetExceededError:
-                    aborted = "budget_exceeded"
+                    aborted = AbortReason.BUDGET_EXCEEDED.value
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -317,7 +318,7 @@ class ScanEngine:
                         fallback_breakdown.get("nrun_disagreement", 0) + 1
                     )
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
-                    aborted = "provider_unreachable"
+                    aborted = AbortReason.PROVIDER_UNREACHABLE.value
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -457,7 +458,37 @@ class ScanEngine:
 
         customiser_fallback = False
         if seed is not None and self._config.customise and needs_customisation:
-            payload = await self._customiser.customise(seed, descriptor)
+            # Mirrors the judge call's handling below (see `_one_pass`): a
+            # BudgetExceededError must keep propagating so `run()` can flip
+            # `aborted="budget_exceeded"`, but any OTHER exception here — most
+            # notably a `NonRecoverableProviderError` re-raised by `_llm.py`
+            # (T4) for an auth/tls/context_window-classified failure — must
+            # degrade to a per-attempt `outcome="error"` rather than escape
+            # `_run_payload` uncaught. An uncaught exception here would skip
+            # `run()`'s `asyncio.as_completed` loop entirely (it only catches
+            # `TimeoutError`/`BudgetExceededError`), which in turn skips the
+            # post-loop `asyncio.gather(*tasks, return_exceptions=True)` drain
+            # that reaps cancelled/in-flight MCP subprocess tasks (worst on
+            # Windows), AND skips the CLI's redaction step on the way out —
+            # an unhandled provider exception's raw text (`Diagnosis.detail`)
+            # could otherwise reach stderr/CI logs unredacted.
+            try:
+                payload = await self._customiser.customise(seed, descriptor)
+            except BudgetExceededError:
+                raise
+            except Exception as exc:
+                logger.exception("ScanEngine: customiser raised unexpectedly")
+                return _PerPayloadOutcome(
+                    attempt=ScanAttempt(
+                        seed_id=seed_id,
+                        pattern_id=payload.pattern_id,
+                        outcome="error",
+                        verdict_mechanism=None,
+                        verdict_reason=str(exc),
+                        error_detail=type(exc).__name__,
+                    ),
+                    exploit=None,
+                )
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
         # Generalization probe (opt-in): randomize the exfil destination AFTER

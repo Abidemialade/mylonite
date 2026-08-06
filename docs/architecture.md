@@ -29,9 +29,10 @@ target ──> scan (Layer 1) ──> generate ──> validate (Layer 2) ──
 - **`seeds.py`** / **`predicates.py`** — the bundled attack seeds (W1–W4) and the
   deterministic success predicates.
 - **`judge.py`** — the Layer-1 success ladder (predicate → LLM judge → effect probe).
-- **`attack_loop.py`** — `discover_attack_plan` / `AttackPlan`: auto-find the
-  plant/retrieve tools from a target's tool surface so indirect injection works with
-  near-zero configuration.
+- **`seed_synth.py`** — descriptor-driven seed synthesis: builds attack seeds for the
+  channels a target's *introspected tool surface* actually supports (a direct-content
+  tool, a poisoned tool description, …), so a target that doesn't match the bundled
+  kitchen-sink's plant/recall shape still gets a runnable probe instead of a skip.
 - **`control_shim.py`** — the `BoundaryControl` subclasses (W1–W4) and `ControlServerShim`
   that synthesize a *boundary*-guarded build of any target (a server-layer control needs
   `control_env`); the [control-efficacy check](validation.md#the-control-efficacy-check).

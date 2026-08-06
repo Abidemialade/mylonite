@@ -1,6 +1,6 @@
 # Mylonite discovery — the EXPENSIVE, non-blocking job.
 # Runs nightly (and on demand): full scan -> generate -> validate, and on a NEW
-# kept exploit opens a gating PR that adds/updates the .mylonite/gate/ test plus
+# kept exploit opens a gating PR that adds/updates the __GATE_DIR__/ test plus
 # a suggested-fix description. Never blocks merges.
 #
 # Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open
@@ -24,9 +24,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install mylonite
-        run: pip install "mylonite"
+      - name: Install mylonite + pytest
+        run: pip install "mylonite" pytest
       - name: Discover -> generate -> validate -> open gating PR
         run: >
-          mylonite gate --target-file .mylonite/gate/target.yaml
+          mylonite gate --target-file __GATE_DIR__/target.yaml
           --authorize "${{ vars.MYLONITE_AUTHORIZE }}" --open-pr

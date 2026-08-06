@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ablate` no longer exits 0 on total provider failure.** Direct follow-up
+  to T6's keyless-execution test matrix, which confirmed `ablate` was the one
+  scan-driving command without an exit-code contract for "the provider was
+  never actually reachable" — unlike `scan`/`gate`/`validate`, which all
+  correctly exit non-zero. `scan_target_fires` (`mylonite/scan/ablation.py`)
+  discarded the underlying `ScanOutcome` (abort reason, exit code) behind
+  every `FireOutcome.INCONCLUSIVE` verdict; `ablate`'s command body had no
+  code path that ever called `raise typer.Exit` on a non-zero code, so a run
+  where every control came back "inconclusive" (e.g. no provider API key set)
+  still printed its inconclusive-caveat table and hint and exited 0 —
+  indistinguishable from a genuine, if uninteresting, clean run.
+  - **BEHAVIOUR CHANGE:** if every control ablate was asked to score comes
+    back `"inconclusive"` (a **total** failure — nothing could be determined
+    for ANY control), `ablate` now exits non-zero instead of 0. A **mixed**
+    result (some controls resolved, some crashed) is deliberately left at
+    exit 0 — a partial result is still real, actionable signal for the
+    controls that did resolve, and is already flagged per-row in the table
+    and via the existing "one or more controls came back inconclusive" hint;
+    this fix does not touch that rendering. A CI script that checks `$?` from
+    `ablate` and previously tolerated exit 0 on a total-failure run needs
+    updating.
+  - `scan_target_fires` gained an optional `on_outcome` callback, invoked
+    with the full `ScanOutcome` (not just the collapsed `FireOutcome`)
+    whenever a scoped scan doesn't fire; `ablate` wires it to recover that
+    detail and picks the most severe `exit_code` observed across the
+    underlying scans — the same authority `scan`/`gate` already derive their
+    own exit codes from (`mylonite.scan.coverage.ScanOutcome`), rather than a
+    hardcoded value. In practice this is usually `EXIT_CONFIG` (2), not
+    `EXIT_PROVIDER` (4): each scoped scan is single-seed, so it never
+    accumulates the 3 consecutive LLM-call failures `ScanEngine.run()`
+    requires to set a formal `aborted="provider_unreachable"` — it lands in
+    the same "untrustworthy without a formal abort" bucket `ScanOutcome`
+    already uses for `scan`/`gate` when a report is too small to trip that
+    threshold. New `mylonite.scan.ablation.all_inconclusive` is the pure
+    predicate the CLI checks to distinguish "total" from "mixed".
+
 ### Removed
 
 - **`validate --prove-control` and `gate --prove-control` removed.** Both were
@@ -24,6 +62,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   external control-efficacy differential (the maintainer-run recipe that scores
   Mylonite against a third-party target it did not author). Referring documents
   updated. This file is not published to the docs site, so no URL breaks.
+
+### Security
+
+> **NEEDS MAINTAINER SIGN-OFF before merge/release (secret-handling code, per
+> `GOVERNANCE.md`).** The two entries below change how a persisted
+> `target.yaml` copy handles credential-shaped values.
+
+- **A masked `target.yaml` copy is now `${VAR}`-indirected instead of
+  opaque-placeholder-masked, so it stays genuinely runnable.** Previously,
+  `redact_target_yaml` (used by `scan`, `generate`, `gate`, `scan --scaffold`,
+  and `mylonite init` whenever a `target.yaml` is written or copied) replaced a
+  credential-shaped `headers` / `request.headers` / `env` value with the bare
+  `***REDACTED***` placeholder — safe (no leak) but the copy could no longer
+  actually launch the target, since the real credential was gone with no way to
+  recover it. It now replaces the value with a `${VAR}` reference deterministically
+  derived from the field's key (e.g. `env.API_TOKEN` -> `${MYLONITE_TARGET_ENV_API_TOKEN}`;
+  see `mylonite._redaction.target_yaml_env_ref_name`), disambiguated within a
+  file so two different keys can never collide on one shared name. `docs/http-agent.md`'s
+  long-documented `Authorization: Bearer ${MY_TOKEN}` example now works as written.
+- **`load_target_file` now expands `${VAR}` references — and fails loudly if
+  one is unset.** Every loaded target file's `headers` / `request.headers` /
+  `env` values are scanned for a `${VAR}` reference and substituted from the
+  process environment (this is what makes the point above actually work, and
+  also what makes an operator's own hand-written `${VAR}` reference work). A
+  reference to a variable that is NOT set is a hard, actionable `ValueError`
+  naming the missing variable — never a silent empty-string substitution.
+  Expansion is deliberately scoped to ONLY those three credential-bearing
+  fields, never `system_prompt` / `purpose` / `args` / `url` / `request.body` /
+  the rest of the document — those are exactly where an operator legitimately
+  writes literal `${IDENTIFIER}`-shaped SSTI/template-injection test payloads,
+  and a CI gate runner has real secrets (`ANTHROPIC_API_KEY`, `GH_TOKEN`, ...)
+  set in its own environment.
+- **`SECURITY.md` corrected: a credential embedded in `command`/`args` is NOT
+  masked.** The doc previously implied `args`-embedded credentials were masked
+  like `headers`/`env`; they are not (pre-existing, not introduced by the two
+  changes above) — put a credential in `env` or `headers` instead.
 
 ## [0.7.6] - 2026-08-03
 

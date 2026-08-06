@@ -154,6 +154,7 @@ class RunConfig(BaseModel):
         provider: anthropic
         model: claude-sonnet-4-6
         max_llm_calls: 50
+        root: .mylonite-custom
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -168,6 +169,15 @@ class RunConfig(BaseModel):
     model: str | None = Field(default=None, description="Model identifier passed to LiteLLM.")
     max_llm_calls: int | None = Field(
         default=None, ge=1, description="Process-wide LLM call cap (budget) for a scan."
+    )
+    root: Path | None = Field(
+        default=None,
+        description=(
+            "Override the artefact root (replaces the built-in default root every "
+            "command's scans/generated/gate artefacts nest under). An explicit "
+            "--output-dir/--out flag still wins; this in turn wins over the "
+            "MYLONITE_ROOT env var. See mylonite.layout.Layout."
+        ),
     )
 
 

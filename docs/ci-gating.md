@@ -15,7 +15,7 @@ mylonite gate reference:vulnerable
 
 # against your own MCP app
 mylonite scan --command "python" --arg "-m" --arg "your.server" --scaffold target.yaml
-mylonite gate --target-file target.yaml --authorize your-scope --open-pr
+mylonite gate --target-file target.yaml --authorize custom --open-pr
 ```
 
 Without `--open-pr`, `gate` writes `.mylonite/gate/` (the test, the exploit,
@@ -47,19 +47,54 @@ scaffolded workflows:
 
 - **`mylonite-gate.yml`** runs on every PR. It re-drives your agent (bounded:
   deterministic effect-probe, small model, 1 iteration) and fails the check on
-  a regression. Cheap — a few cents per PR.
+  a regression. Cheap — a few cents per PR. It sets `MYLONITE_LIVE_TARGET=1`
+  for you (see [The validation engine](validation.md)) — without that
+  variable the committed test for a custom target is *skipped*, not run, and
+  `pytest` still exits `0`.
 - **`mylonite-discovery.yml`** runs nightly or on demand. It does the expensive
-  full discovery and opens a fresh gating PR when it finds a new exploit.
+  full discovery and opens a fresh gating PR when it finds a new exploit. It
+  also needs a repository **variable** — `vars.MYLONITE_AUTHORIZE` — set to
+  the same value your own `--authorize` would need (the target's declared
+  `scope`, or its `family` if no scope is declared; see
+  [target.yaml](target-file.md)); the workflow passes it straight through to
+  `mylonite gate --authorize`.
+
+### Prerequisites `gate --open-pr` assumes
+
+`mylonite gate --open-pr` shells out to `git`/`gh` directly (no GitHub API
+client), so it inherits a few real preconditions the scaffolded workflows
+satisfy automatically but a local or non-GitHub run must provide itself:
+
+- **A git repository, and `gate` run from its root.** `gate` resolves the repo
+  root as the current working directory (`Path.cwd()`) — it does not search
+  upward for a `.git` — so `cd` into the repo root before running it.
+- **A `main` branch as the PR base.** The branch/commit/PR flow targets `main`
+  by default; if your default branch is named differently, open the PR
+  yourself with the printed `git push` + `gh pr create --base <branch>`
+  command instead of `--open-pr`.
+- **`.mylonite/gate/` (or your configured `--out`) must actually be
+  committed.** `gate` writes the test, the exploit, and your `target.yaml`
+  there, then commits and pushes them as part of the PR — but if *your* repo's
+  own `.gitignore` has a blanket `.mylonite/` rule (a natural pattern to add,
+  and what Mylonite's own repo uses for its dev artefacts), that commit is a
+  silent no-op: the PR opens with no test in it, and the per-PR gate workflow
+  then has nothing to run. Make sure your `.gitignore` does **not** ignore the
+  gate output directory.
 
 ### The reusable Action
 
 ```yaml
-- uses: Abidemialade/mylonite/gate-action@v1
+- uses: Abidemialade/mylonite/gate-action@main
   with:
     target-file: .mylonite/gate/target.yaml
-    authorize: your-scope
+    authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
     open-pr: "true"
 ```
+
+**Not yet pinned to a stable release.** `gate-action` (`gate-action/action.yml`
+in this repo) has no tagged release yet — `@main` tracks the tip of the
+default branch. For a reproducible pin, reference a specific commit SHA
+instead of `@main` until a versioned tag exists.
 
 ## Other CI systems (Jenkins, GitLab, …)
 
@@ -102,7 +137,7 @@ Emit SARIF from a scan or validation and upload it so AI-layer findings land in 
 GitHub **Security tab** alongside every other code-scanning result:
 
 ```yaml
-- run: mylonite report .mylonite/validated --sarif mylonite.sarif
+- run: mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with: { sarif_file: mylonite.sarif }
 ```

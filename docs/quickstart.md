@@ -115,9 +115,13 @@ mylonite validate .mylonite\generated\indirect-injection-note-body-direct
   when the test is kept and `5` when it is cleanly rejected.
 
 `generate` is the only offline command here; `scan` and `validate` both make
-live LLM calls. The committed regression test that `generate` emits, however,
-replays **offline** at the CI gate (no API key needed there) — see
-[The validation engine](validation.md).
+live LLM calls. Whether the committed regression test that `generate` emits
+replays offline at the CI gate depends on the target: for the bundled
+`reference:*` builds it replays **offline** (no API key needed there); for a
+real, custom target (`--target-file`) there is no recorded twin to replay, so
+the emitted test re-drives your actual app **live**, gated behind
+`MYLONITE_LIVE_TARGET=1` (the CI workflow sets it for you) — see
+[The validation engine](validation.md) and [CI gating](ci-gating.md).
 
 ## Gate it (CI) and read the results
 
@@ -125,9 +129,9 @@ Turn a finding into a committed regression test and a gating PR with one command
 render it in whatever format your pipeline consumes:
 
 ```bash
-mylonite gate --target-file app.yaml --authorize me --open-pr   # against YOUR app
-mylonite report .mylonite/validated/<dir> --sarif out.sarif     # GitHub code scanning
-mylonite report .mylonite/validated/<dir> --json finding.json   # dashboards / SIEM / bots
+mylonite gate --target-file app.yaml --authorize my-app --open-pr   # against YOUR app
+mylonite report .mylonite/generated/<dir> --sarif out.sarif     # GitHub code scanning
+mylonite report .mylonite/generated/<dir> --json finding.json   # dashboards / SIEM / bots
 ```
 
 ## Where to go next

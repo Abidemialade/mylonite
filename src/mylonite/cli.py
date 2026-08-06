@@ -38,6 +38,7 @@ from rich.table import Table
 
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
+from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
 
@@ -48,7 +49,7 @@ app = typer.Typer(
     help=(
         "Mylonite -- AI-layer security testing.\n\n"
         "Finds app-specific weaknesses in your AI agent's attack surface (system prompt, "
-        "tool/function schemas, MCP tools, RAG, memory), proves each one with a differential "
+        "tool/function schemas, MCP tools), proves each one with a differential "
         "oracle, and writes the pytest regression test that gates CI."
     ),
     epilog=(
@@ -57,7 +58,7 @@ app = typer.Typer(
         "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
         "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- "
         "scaffold a target.yaml.\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- scan to a gating PR.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize custom --open-pr` -- scan to a gating PR.\n\n"
         "Docs: https://abidemialade.github.io/mylonite/ -- "
         "run 'mylonite COMMAND --help' for any command."
     ),
@@ -95,6 +96,35 @@ _DEFAULT_MAX_LLM_CALLS = 50
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
 _T = TypeVar("_T")
+
+
+class _CliState:
+    """Carried on ``ctx.obj``: the artefact :class:`Layout` resolved once by the
+    root callback (``--output-dir``/``--out``/config ``root:`` unavailable yet at
+    that point — just the ``MYLONITE_ROOT`` env var and the built-in default).
+
+    A command with its own ``--config``/explicit-flag knowledge re-resolves via
+    :func:`_layout_for` instead of reading ``layout`` directly whenever it has a
+    more specific ``config_root`` to apply — see ``scan``/``gate``.
+    """
+
+    def __init__(self, layout: Layout) -> None:
+        self.layout = layout
+
+
+def _layout_for(ctx: typer.Context, *, config_root: Path | None = None) -> Layout:
+    """The effective :class:`Layout` for a command: ``config_root`` (when given)
+    re-resolves against the env/default fallback; otherwise reuse the Layout the
+    root callback already resolved on ``ctx.obj`` (``isinstance`` guards a ``ctx``
+    whose ``obj`` was never populated, e.g. a command invoked directly in a test
+    without going through the Typer app).
+    """
+    if config_root is not None:
+        return resolve_layout(config_root=config_root)
+    state = ctx.obj
+    if isinstance(state, _CliState):
+        return state.layout
+    return resolve_layout()
 
 
 def _resolve_option(explicit: _T | None, from_config: _T | None, default: _T) -> _T:
@@ -235,6 +265,7 @@ def _load_api_key_file(path: Path) -> None:
 
 @app.callback()
 def _root(
+    ctx: typer.Context,
     api_key_file: Annotated[
         Path | None,
         typer.Option(
@@ -255,6 +286,13 @@ def _root(
     The ``mylonite`` logger tree gets a secret-redacting filter so secret-shaped
     tokens never reach a log line (the ``LoggingConfig.redact_secrets`` default is
     True). The install is idempotent — safe to run on every invocation.
+
+    Also resolves the artefact :class:`~mylonite.layout.Layout` ONCE here (from
+    ``MYLONITE_ROOT`` and the built-in default — a per-command ``--config``'s
+    ``root:`` field and an explicit ``--output-dir``/``--out`` flag aren't in
+    scope yet at this point) and carries it on ``ctx.obj`` so every command
+    reads it from there (via ``_layout_for``) instead of each re-resolving —
+    and, critically, instead of any command hardcoding ``.mylonite/...`` itself.
     """
     from mylonite._redaction import install_log_redaction
 
@@ -262,6 +300,7 @@ def _root(
     _maybe_enable_truststore()
     install_log_redaction(enabled=True)
     _warn_unsupported_python()
+    ctx.obj = _CliState(layout=resolve_layout())
     if env_file is not None:
         _load_env_file(env_file)
     if api_key_file is not None:
@@ -704,13 +743,14 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     epilog=(
         "Examples:\n\n"
         "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
-        "`mylonite scan --target-file app.yaml --authorize me` -- attack YOUR MCP app.\n\n"
+        "`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app.\n\n"
         "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- introspect\n"
         "a server and write a starter target.yaml (no LLM call, no attack).\n\n"
         "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
     )
 )
 def scan(
+    ctx: typer.Context,
     target: Annotated[
         str | None,
         typer.Argument(
@@ -869,9 +909,16 @@ def scan(
         typer.Option("--max-concurrent", help="Max concurrent in-flight seeds."),
     ] = 3,
     output_dir: Annotated[
-        Path,
-        typer.Option("--output-dir", help="Root directory for scan artefacts."),
-    ] = Path(".mylonite/scans"),
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Root directory for scan artefacts (default: the resolved layout's "
+                "scans dir, normally .mylonite/scans — see mylonite.yaml `root:` / "
+                "MYLONITE_ROOT)."
+            ),
+        ),
+    ] = None,
     run_config_path: Annotated[
         Path | None,
         typer.Option(
@@ -927,6 +974,7 @@ def scan(
     """
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
+    config_root: Path | None = None
     if run_config_path is not None:
         from mylonite.config import load_run_config
 
@@ -940,8 +988,16 @@ def scan(
         provider = provider or rc.provider
         model = model or rc.model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+        config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+
+    # The resolved artefact Layout: an explicit --output-dir always wins outright
+    # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
+    # default decide where scan artefacts land — and, by construction, where
+    # `generate --latest` later looks for them (both read mylonite.layout.Layout).
+    layout = _layout_for(ctx, config_root=config_root)
+    effective_output_dir = output_dir if output_dir is not None else layout.scans
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
@@ -1199,7 +1255,7 @@ def scan(
         judge_model=effective_judge_model if judge_model else None,
         max_llm_calls=max_llm_calls,
         max_concurrent=max_concurrent,
-        output_dir=output_dir,
+        output_dir=effective_output_dir,
         dry_run=dry_run,
     )
 
@@ -1227,7 +1283,7 @@ def scan(
 
         # Persist artefacts UN-redacted (they are loadable/replayable data); only
         # the console-rendered summary string is redacted before display.
-        scan_dir = write_artefacts(result, output_dir)
+        scan_dir = write_artefacts(result, effective_output_dir)
         # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
         # it from the scan dir — the custom-target journey needs the path ONCE.
         # Never persist it verbatim: request.headers and env may carry live
@@ -1249,38 +1305,25 @@ def scan(
 
         echo(redact(render_summary(result)))
 
-    # C4 / G5: map aborted reason to distinct exit code.
-    if result.report.aborted == "budget_exceeded":
-        raise typer.Exit(code=EXIT_BUDGET)
-    if result.report.aborted == "provider_unreachable":
-        raise typer.Exit(code=EXIT_PROVIDER)
-    if result.report.aborted == "no_payloads":
-        # Issue #3: nothing ran — a misconfigured/unknown target must not look
-        # like a clean pass. Point the user at the on-ramp for custom targets.
-        echo_err(
-            "error: no seeds were applicable to this target, so nothing was scanned. "
-            "If this is a custom MCP app, declare which weakness classes it exposes "
-            "via --target-file (weakness_classes) or --weakness-class."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    if result.report.aborted == "describe_failed":
-        # The adapter couldn't describe the target (e.g. the MCP server failed to
-        # launch). Zero attempts ran — must not exit 0 and read as a clean pass.
-        echo_err(
-            "error: could not describe the target (adapter.describe() failed); "
-            "nothing was scanned. Check the target command/scope and connectivity."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    if result.report.aborted == "wall_clock_timeout":
-        # The scan hit its wall-clock budget before finishing. Coverage is
-        # incomplete, so it must not exit 0 and read as a clean pass (same honesty
-        # rule as no_payloads / describe_failed).
-        echo_err(
-            "error: scan exceeded its wall-clock budget and stopped early; coverage "
-            "is incomplete. Raise the timeout or narrow the scan, then re-run."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    raise typer.Exit(code=EXIT_SUCCESS)
+    # C4 / G5 / A1: the exit code is derived from ScanOutcome — the single
+    # "did this scan actually work" authority (mylonite.scan.coverage) — rather
+    # than hand-matching `result.report.aborted` here. That hand-matching used
+    # to fall through to EXIT_SUCCESS for any report that wasn't formally
+    # `aborted`, which missed the case where every attempt errored (e.g.
+    # missing/invalid provider credentials) without ever tripping the
+    # consecutive-failures threshold that sets `aborted="provider_unreachable"`
+    # (too few applicable attempts to reach it) — `scan` would print a summary
+    # and exit 0, indistinguishable from a genuine clean pass. ScanOutcome
+    # closes that gap (it was already closed for `gate` — see coverage.py).
+    # For the 5 previously-handled abort reasons this is behaviour-identical:
+    # ScanOutcome's exit-code mapping and operator_message text were extracted
+    # verbatim from this exact block.
+    from mylonite.scan.coverage import ScanOutcome
+
+    outcome = ScanOutcome.from_report(result.report)
+    if outcome.operator_message:
+        echo_err(outcome.operator_message)
+    raise typer.Exit(code=outcome.exit_code)
 
 
 @app.command()
@@ -1642,6 +1685,7 @@ def _tag_control_for_generate(exploit: Any) -> Any:
 
 @app.command()
 def generate(
+    ctx: typer.Context,
     scan_path: Annotated[
         Path | None,
         typer.Argument(
@@ -1653,8 +1697,21 @@ def generate(
     ] = None,
     latest: Annotated[
         bool,
-        typer.Option("--latest", help="Use the newest scan under .mylonite/scans/."),
+        typer.Option("--latest", help="Use the newest scan under the resolved scans dir."),
     ] = False,
+    scans_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--scans-dir",
+            help=(
+                "The directory `scan --output-dir` wrote to, when using --latest "
+                "(default: the resolved layout's scans dir, normally .mylonite/scans). "
+                "An INPUT — where --latest searches for a scan to read, not where "
+                "this command writes; for the emitted test's output dir see --out. "
+                "Ignored if you pass SCAN_PATH explicitly instead of --latest."
+            ),
+        ),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option(
@@ -1704,7 +1761,22 @@ def generate(
         UnsafeExploitRecord,
     )
 
-    scans_root = Path(".mylonite/scans")
+    # No --config on `generate` (kept minimal): absent an explicit --scans-dir,
+    # the resolved Layout is MYLONITE_ROOT / the built-in default, via the root
+    # callback (ctx.obj) — the SAME resolution `scan`'s own default --output-dir
+    # uses, so a scan written under a root moved by mylonite.yaml/MYLONITE_ROOT is
+    # found here too. An explicit --scans-dir (highest priority; an INPUT read by
+    # --latest, deliberately NOT named --output-dir like scan's own flag — that
+    # name would mislead as "where generate writes", which is --out's job) points
+    # --latest at that exact scans root directly, closing the "generate --latest
+    # hardcodes .mylonite/scans" bug outright: a scan written to a one-off custom
+    # dir via `scan --output-dir X` is found by `generate --latest --scans-dir X`.
+    # Silently unused when SCAN_PATH is passed explicitly instead of --latest —
+    # consistent with how --latest itself is already ignored in that case (see
+    # _resolve_exploit_paths: an explicit scan_path short-circuits before either
+    # is consulted).
+    layout = _layout_for(ctx)
+    scans_root = scans_dir if scans_dir is not None else layout.scans
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
     multi = len(exploit_paths) > 1
 
@@ -1743,7 +1815,7 @@ def generate(
         if out is not None:
             this_out = out / _slugify_pattern(exploit.pattern_id) if multi else out
         else:
-            this_out = Path(".mylonite/generated") / _slugify_pattern(exploit.pattern_id)
+            this_out = layout.generated_for(_slugify_pattern(exploit.pattern_id))
 
         if multi and index > 0:
             echo("")
@@ -2693,6 +2765,18 @@ def report(
     sreport: Any = None
     dashboard_exploit: Any = None
     dashboard_exploits: list[Any] = []
+    # A1: the exit code for a `kind == "scan"` artefact. Defaults to success;
+    # overwritten below from `ScanOutcome.from_report(sreport)` once loaded --
+    # the same single "did this scan actually work" authority `scan`/`gate`
+    # already go through (mylonite.scan.coverage). Before this, `report`
+    # rendered "aborted: <reason>" in its own output text and then STILL fell
+    # through to `raise typer.Exit(code=EXIT_SUCCESS)` unconditionally --
+    # exactly the silent fail-open this release exists to close. A validation
+    # artefact has no comparable "did this actually run" signal to re-derive
+    # (any persisted validation_report.json already reflects a completed run;
+    # `kept=False` is a genuine verdict, not an infra abort), so it keeps
+    # EXIT_SUCCESS unconditionally.
+    exit_code = EXIT_SUCCESS
 
     if kind == "validation":
         from mylonite import testkit
@@ -2735,6 +2819,25 @@ def report(
         except Exception as exc:
             echo_exc(f"could not load {path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
+
+        from mylonite.scan.coverage import ScanOutcome
+
+        # Code-quality review of the A1 fix (43dc63b): `ScanReport.aborted` has
+        # no enum constraint at the pydantic layer, so a legacy-version or
+        # hand-edited/corrupted scan_report.json can load fine here yet carry
+        # an `aborted` value outside the current AbortReason enum --
+        # `ScanOutcome.from_report` raises ValueError for exactly that case.
+        # Left uncaught, that surfaces as a bare traceback (exit 1, empty
+        # output) -- strictly worse than the silent-exit-0 bug this branch
+        # exists to fix. Degrade the same way the sibling try/except a few
+        # lines above (unparseable report) already does: a clear message, no
+        # traceback, EXIT_CONFIG.
+        try:
+            exit_code = ScanOutcome.from_report(sreport).exit_code
+        except ValueError as exc:
+            echo_exc(f"could not classify {path}", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+
         result = ScanResult(report=sreport, exploits=[])
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console_print(console, render_summary(result), markup=False)
@@ -2787,7 +2890,7 @@ def report(
                 _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
             )
             echo(f"Wrote JSON finding bundle: {json_bundle}")
-    raise typer.Exit(code=EXIT_SUCCESS)
+    raise typer.Exit(code=exit_code)
 
 
 def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
@@ -3037,10 +3140,13 @@ def _scaffold_target_file(
             "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
             "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
         )
+    from mylonite._authz import required_authorization
+
     echo_err(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
-        f"`mylonite scan --target-file {output} --authorize custom`."
+        f"`mylonite scan --target-file {output} "
+        f"--authorize {required_authorization(family=spec.family, scope=tf.scope)}`."
     )
 
 
@@ -3152,11 +3258,23 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 
 
 def _post_gate_annotations(
-    repo_root: Path, exploit: Any, report: Any, target_file: Path | None, pr_mod: Any
+    repo_root: Path,
+    exploit: Any,
+    report: Any,
+    target_file: Path | None,
+    pr_mod: Any,
+    *,
+    gate_dir: Path,
 ) -> None:
     """Best-effort GitHub check-run annotation for a finding that maps to a committed
     prompt line (R4). Untestable live glue (needs a real PR + ``checks:write``); the
-    payload assembly and localization it calls are unit-tested. Never raises."""
+    payload assembly and localization it calls are unit-tested. Never raises.
+
+    ``gate_dir`` is the resolved ``gate --out`` directory — threaded through to
+    :func:`mylonite.gate.annotate.post_check_run` so its scratch file lands
+    alongside the rest of this run's gate artefacts rather than always under
+    the hardcoded default.
+    """
     try:
         from mylonite.gate.annotate import (
             annotations_from_findings,
@@ -3198,7 +3316,7 @@ def _post_gate_annotations(
             title="Mylonite AI-layer findings",
             summary=f"{len(anns)} finding(s) localized to a source line.",
         )
-        post_check_run(repo_root, payload, _run=pr_mod._default_run)
+        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=pr_mod._default_run)
     except Exception:  # live glue must never break the gate
         return
 
@@ -3207,11 +3325,12 @@ def _post_gate_annotations(
     epilog=(
         "Examples:\n\n"
         "`mylonite gate reference:vulnerable` -- the full pipeline on the demo target.\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me` -- gate YOUR app (writes test + workflows).\n\n"
-        "`mylonite gate --target-file app.yaml --authorize me --open-pr` -- also open the gating PR via gh."
+        "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes test + workflows).\n\n"
+        "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh."
     )
 )
 def gate(
+    ctx: typer.Context,
     target: Annotated[
         str | None,
         typer.Argument(
@@ -3273,9 +3392,16 @@ def gate(
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
     ] = None,
     out: Annotated[
-        Path,
-        typer.Option("--out", help="Output directory for gate artefacts."),
-    ] = Path(".mylonite/gate"),
+        Path | None,
+        typer.Option(
+            "--out",
+            help=(
+                "Output directory for gate artefacts (default: the resolved layout's "
+                "gate dir, normally .mylonite/gate — see mylonite.yaml `root:` / "
+                "MYLONITE_ROOT)."
+            ),
+        ),
+    ] = None,
     max_llm_calls: Annotated[
         int | None,
         typer.Option(
@@ -3361,8 +3487,8 @@ def gate(
     if iterations < 1:
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
+    from mylonite.gate import ScanOutcomeBundle, run_gate
     from mylonite.gate import pr as pr_mod
-    from mylonite.gate import run_gate
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
         UnsafeExploitRecord,
@@ -3395,8 +3521,17 @@ def gate(
         provider = provider or rc.provider
         model = model or rc.model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
+        config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+        config_root = None
+
+    # The resolved artefact Layout, mirroring `scan`: an explicit --out always
+    # wins outright; absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the
+    # built-in default decide where gate artefacts (test, exploit, check-run
+    # scratch file) land instead of the historical hardcoded `.mylonite/gate`.
+    layout = _layout_for(ctx, config_root=config_root)
+    out = out if out is not None else layout.gate
 
     effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
@@ -3475,8 +3610,9 @@ def gate(
 
     # --- closures injected into run_gate ---
 
-    def scan_fn() -> list[Any]:
+    def scan_fn() -> ScanOutcomeBundle:
         from mylonite.plugins.registry import discover
+        from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.customiser import PayloadCustomiser
         from mylonite.scan.engine import ScanConfig, ScanEngine
         from mylonite.scan.judge import SuccessJudge
@@ -3511,6 +3647,10 @@ def gate(
             judge=SuccessJudge(model=effective_model),
         )
         result = asyncio.run(engine.run())
+        # The typed verdict for "did this scan actually run" (A1 fix) — carried
+        # alongside the exploits so run_gate can tell a genuine clean scan apart
+        # from one that never meaningfully ran (e.g. provider_unreachable).
+        outcome = ScanOutcome.from_report(result.report)
         # Enrich compliance (derive NIST) once so both the emitted test and the PR
         # carry it.
         exploits = [_map_compliance(ex) for ex in result.exploits]
@@ -3520,7 +3660,7 @@ def gate(
         # in-repo differential and are not tagged here. This tagging is the default
         # behaviour; the old --prove-control opt-in flag was removed in 0.7.7.
         if fast or is_reference:
-            return exploits
+            return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
         if tf is not None and tf.transport == "rest":
             if prove_input_control:
                 # Opt-in: measure whether input data-framing (spotlighting) is
@@ -3530,21 +3670,24 @@ def gate(
                     "gate: rest input-control differential — raw vs input data-framing "
                     "(spotlighting)."
                 )
-                return [
-                    ex.model_copy(
-                        update={
-                            "payload": ex.payload.model_copy(
-                                update={
-                                    "metadata": {
-                                        **ex.payload.metadata,
-                                        "synthetic_control": "input-frame",
+                return ScanOutcomeBundle(
+                    outcome=outcome,
+                    exploits=[
+                        ex.model_copy(
+                            update={
+                                "payload": ex.payload.model_copy(
+                                    update={
+                                        "metadata": {
+                                            **ex.payload.metadata,
+                                            "synthetic_control": "input-frame",
+                                        }
                                     }
-                                }
-                            )
-                        }
-                    )
-                    for ex in exploits
-                ]
+                                )
+                            }
+                        )
+                        for ex in exploits
+                    ],
+                )
             # A black-box HTTP agent has no adapter-boundary control to apply, so a
             # boundary-guarded twin would equal the raw target and wrongly REJECT a
             # real finding. Don't tag; the gate is decided by stability/effect/consensus.
@@ -3554,7 +3697,7 @@ def gate(
                 "consensus. Declare control_env / vulnerable_launch for a server-layer "
                 "differential, or pass --prove-input-control to test input data-framing."
             )
-            return exploits
+            return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
         from mylonite.gate.mitigation import weakness_class_for
         from mylonite.scan.control_shim import make_control
 
@@ -3570,7 +3713,7 @@ def gate(
             tagged.append(
                 ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
             )
-        return tagged
+        return ScanOutcomeBundle(outcome=outcome, exploits=tagged)
 
     def generate_fn(exploit: Any) -> Any:
         # run_gate() is Typer-agnostic by design (its docstring: "Collaborators
@@ -3663,7 +3806,9 @@ def gate(
         from mylonite.gate.workflows import write_workflows
 
         repo_root = Path.cwd()
-        wf_files = write_workflows(repo_root, runs_on=runs_on) if workflows else []
+        wf_files = (
+            write_workflows(repo_root, runs_on=runs_on, gate_dir=out_dir) if workflows else []
+        )
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
             # credential from request.headers/env into that history (DCR-0019).
@@ -3683,7 +3828,9 @@ def gate(
         # remote MCP description/handler/return path) have no source line and ride in
         # the PR body + SARIF instead. Live-only glue; never fails the gate.
         if open_pr and getattr(pr, "opened", False):
-            _post_gate_annotations(repo_root, exploit, report, target_file, pr_mod)
+            _post_gate_annotations(
+                repo_root, exploit, report, target_file, pr_mod, gate_dir=out_dir
+            )
         return pr
 
     result = run_gate(
@@ -3715,22 +3862,41 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
     table.add_column("contribution", no_wrap=True)
     table.add_column("raw/guarded fired", no_wrap=True)
     for r in results:
-        table.add_row(
-            r.weakness,
-            r.status,
-            f"{r.contribution:+.0%}",
-            f"{r.raw_fired}/{r.guarded_fired} of {r.total}",
-        )
+        # An inconclusive row's raw/guarded fired counts and contribution
+        # percentage are computed purely from the FIRED/RESISTED legs and
+        # exclude the crashed leg(s) entirely — left alone, they can still
+        # read as a genuine load-bearing/theater signal (e.g. "2/0 of 2",
+        # "+100%") to anyone skimming the table or copying a row out of
+        # context, even though `status` correctly says "inconclusive". Never
+        # render a bare percentage or count for this row; always surface the
+        # inconclusive count instead.
+        if r.status == "inconclusive":
+            contribution_cell = "n/a"
+            fired_cell = (
+                f"{r.raw_fired}/{r.guarded_fired} of {r.total} ({r.inconclusive} inconclusive)"
+            )
+        else:
+            contribution_cell = f"{r.contribution:+.0%}"
+            fired_cell = f"{r.raw_fired}/{r.guarded_fired} of {r.total}"
+        table.add_row(r.weakness, r.status, contribution_cell, fired_cell)
     console_print(console, table)
     load_bearing = [r.weakness for r in results if r.load_bearing]
     redundant = [r.weakness for r in results if r.status == "redundant"]
     theater = [r.weakness for r in results if r.status == "theater"]
+    inconclusive = [r.weakness for r in results if r.status == "inconclusive"]
     if load_bearing:
         console_print(console, f"load-bearing: {', '.join(load_bearing)}")
     if redundant:
         console_print(console, f"redundant (another control covers it): {', '.join(redundant)}")
     if theater:
         console_print(console, f"security theater (no marginal contribution): {', '.join(theater)}")
+    if inconclusive:
+        console_print(
+            console,
+            f"inconclusive (scan didn't produce a trustworthy result on at least one "
+            f"side -- NOT the same as resisted, re-run before trusting this control): "
+            f"{', '.join(inconclusive)}",
+        )
 
 
 @app.command()
@@ -3791,11 +3957,15 @@ def ablate(
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
     from mylonite.scan.ablation import (
         REP_SEED_BY_WEAKNESS,
+        FireOutcome,
+        all_inconclusive,
         run_control_ablation,
         scan_target_fires,
         seeds_for_weaknesses,
+        total_failure_exit_code,
     )
     from mylonite.scan.control_shim import make_control
+    from mylonite.scan.coverage import ScanOutcome
 
     if target_file is None:
         echo_err("ablate requires --target-file (the app whose controls you want to score).")
@@ -3882,7 +4052,18 @@ def ablate(
         f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans."
     )
 
-    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> bool:
+    # Populated by scan_target_fires's on_outcome sink below with the full
+    # ScanOutcome (abort reason + exit_code) behind every non-FIRED scoped
+    # scan -- discarded by the bare FireOutcome return value otherwise. Used
+    # after run_control_ablation returns to pick an honest, non-zero exit
+    # code if EVERY control comes back inconclusive (see the
+    # all_inconclusive(results) check below). Appended from worker threads
+    # (each scoped scan runs via asyncio.to_thread -- see _run_pair/
+    # _run_triple); list.append is safe under the GIL and no ordering
+    # invariant is needed across entries.
+    observed_outcomes: list[ScanOutcome] = []
+
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
         if server_layer:
             # ``applied`` = controls currently ON. The raw side (applied=()) turns
             # them all OFF; the "only C" side leaves only C on. Translate to the
@@ -3908,6 +4089,7 @@ def ablate(
             model=effective_model,
             customiser_model=effective_model,
             judge_model=effective_model,
+            on_outcome=observed_outcomes.append,
         )
 
     try:
@@ -3930,6 +4112,35 @@ def ablate(
             "Check that control_env actually disables the server's guard for these "
             "weakness classes, and that the representative seeds reach the surface."
         )
+    if any(r.status == "inconclusive" for r in results):
+        echo_err(
+            "hint: one or more controls came back 'inconclusive' — the scan didn't run "
+            "to completion on at least one side (provider outage, adapter crash, or "
+            "no applicable attempts). This is NOT the same as the control resisting the "
+            "attack; it must not be read as load-bearing/theater/redundant. Check "
+            "connectivity/credentials and re-run."
+        )
+    if all_inconclusive(results):
+        # Total failure: NOTHING could be determined for ANY control (the
+        # confirmed T6 keyless bug -- previously fell through to an implicit
+        # exit 0, indistinguishable from a genuine "every control resisted"
+        # run). A MIXED result -- some controls determined, some inconclusive
+        # -- is deliberately NOT treated the same way: ablate is inherently
+        # multi-control, so a partial result is still real, actionable signal
+        # for the controls that did resolve (already flagged per-row above,
+        # via the table's status column and the "hint" line) rather than a
+        # failure of the run itself.
+        #
+        # Exit-code derivation itself lives in ablation.py's
+        # total_failure_exit_code (pure, directly unit-tested there) --
+        # matching the gate/ScanOutcomeBundle precedent of keeping that
+        # decision out of the Typer command body.
+        echo_err(
+            "error: every control came back inconclusive — ablate could not determine "
+            "ANY control's status (total failure, not a null result). Check provider "
+            "credentials/connectivity, then re-run."
+        )
+        raise typer.Exit(code=total_failure_exit_code(observed_outcomes))
 
 
 @taxonomy_app.command("list")

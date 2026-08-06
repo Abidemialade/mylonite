@@ -119,3 +119,42 @@ def test_post_check_run_noop_without_annotations(tmp_path):
     payload = check_run_payload(head_sha="s", annotations=[], title="T", summary="S")
     assert post_check_run(tmp_path, payload, _run=run) is None
     assert called["n"] == 0  # nothing to annotate -> no API call
+
+
+def test_post_check_run_defaults_scratch_file_under_dot_mylonite_gate(tmp_path):
+    """Backward-compat: omitting gate_dir keeps the historical location."""
+
+    def ok_run(cmd, **kw):
+        return type("CP", (), {"returncode": 0, "stdout": '{"html_url": "u"}', "stderr": ""})()
+
+    payload = check_run_payload(
+        head_sha="s",
+        annotations=[Annotation(path="p", start_line=1, message="m")],
+        title="T",
+        summary="S",
+    )
+    post_check_run(tmp_path, payload, _run=ok_run)
+    assert (tmp_path / ".mylonite" / "gate" / "check_run.json").is_file()
+    assert not (tmp_path / "custom").exists()
+
+
+def test_post_check_run_honours_configured_gate_dir(tmp_path):
+    """T7 regression for known bug #2: ``annotate.py`` hardcoded
+    ``.mylonite/gate/check_run.json`` even though ``gate``'s ``out_dir`` was
+    available at the call site — a ``gate --out custom/`` run's scratch file
+    must land under the CONFIGURED dir, not always under the default.
+    """
+    from pathlib import Path
+
+    def ok_run(cmd, **kw):
+        return type("CP", (), {"returncode": 0, "stdout": '{"html_url": "u"}', "stderr": ""})()
+
+    payload = check_run_payload(
+        head_sha="s",
+        annotations=[Annotation(path="p", start_line=1, message="m")],
+        title="T",
+        summary="S",
+    )
+    post_check_run(tmp_path, payload, gate_dir=Path("custom") / "gate", _run=ok_run)
+    assert (tmp_path / "custom" / "gate" / "check_run.json").is_file()
+    assert not (tmp_path / ".mylonite").exists()

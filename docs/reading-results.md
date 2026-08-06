@@ -6,7 +6,8 @@ panel to GitHub code scanning to a machine-readable bundle — all from the same
 underlying data, all offline (no LLM, no network).
 
 The one command for all of it is `mylonite report`, pointed at a scan dir, a
-generated/validated dir, or a `*_report.json`.
+`generate`-emitted dir (before or after `validate` — both write into the same
+dir), or a `*_report.json`.
 
 ```bash
 mylonite report .mylonite/scans/<dir>                 # terminal trust panel
@@ -50,7 +51,7 @@ each result carries:
   prompt-file line when the AI layer is a committed file.
 
 ```bash
-mylonite report .mylonite/validated/<dir> --sarif mylonite.sarif
+mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
 # then upload via github/codeql-action/upload-sarif in CI
 ```
 

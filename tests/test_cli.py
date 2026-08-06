@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from importlib.abc import MetaPathFinder
@@ -322,11 +323,17 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
 def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DCR-0006 (spec-compliance follow-up): `scan --scaffold` must not write a
-    credential-shaped --env value verbatim into the scaffold target.yaml — this
-    is a fourth, earlier-in-the-lifecycle origination path for the same leak the
-    scan/generate/gate target.yaml copies were already fixed for. The scaffold
-    output must still round-trip through load_target_file."""
+    """DCR-0006 (spec-compliance follow-up); T9 (${VAR} indirection): `scan
+    --scaffold` must not write a credential-shaped --env value verbatim into
+    the scaffold target.yaml — this is a fourth, earlier-in-the-lifecycle
+    origination path for the same leak the scan/generate/gate target.yaml
+    copies were already fixed for. Since T9, the masked value is a derived
+    ``${VAR}`` reference (not a bare, non-runnable placeholder), so the
+    scaffold output round-trips through load_target_file to a RUNNABLE target
+    once the named env var is set — and fails loudly if it is not."""
+    from mylonite._redaction import target_yaml_env_ref_name
+    from mylonite.plugins._mcp.target_file import load_target_file
+
     _patch_fake_adapter(monkeypatch)
     out = tmp_path / "target.yaml"
     secret = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234"
@@ -346,11 +353,19 @@ def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
     text = out.read_text(encoding="utf-8")
     assert secret not in text
     assert "GITHUB_TOKEN" in text  # the key name still documents the target
+    var_name = target_yaml_env_ref_name("env", "GITHUB_TOKEN")
+    assert f"${{{var_name}}}" in text
 
-    from mylonite.plugins._mcp.target_file import load_target_file
+    # Unset: loading fails loudly rather than silently proceeding without a
+    # real credential.
+    monkeypatch.delenv(var_name, raising=False)
+    with pytest.raises(ValueError, match=var_name):
+        load_target_file(out)
 
+    # Set: the scaffold is genuinely re-runnable, restoring the original secret.
+    monkeypatch.setenv(var_name, secret)
     tf = load_target_file(out)
-    assert tf.env["GITHUB_TOKEN"] != secret
+    assert tf.env["GITHUB_TOKEN"] == secret
 
 
 def test_env_file_loads_only_known_provider_vars(
@@ -705,12 +720,78 @@ def test_scan_exit_4_on_provider_failure(
             "200",
         ],
     )
-    # Either exit code 4 (provider_unreachable) or the adapter skip path produced
-    # every attempt as skipped_planner_failure (still fine — no findings, no abort).
-    # The engine aborts on 3 consecutive provider failures via consecutive_failures.
-    # In practice the wrapped completion in the adapter increments
-    # consecutive_failures on the counter; after 3, ScanEngine sets aborted.
-    assert result.exit_code in (EXIT_PROVIDER, EXIT_SUCCESS)
+    # Either exit code 4 (provider_unreachable, the common case: 3 consecutive
+    # provider failures trip ScanEngine's threshold and it sets `aborted`), or
+    # — if there were too few applicable attempts to ever reach that threshold
+    # — every attempt comes back skipped_planner_failure/error with `aborted`
+    # left None. That second shape is NOT "fine": it's the exact fail-open
+    # gap ScanOutcome closes (scan/coverage.py) — `scan` must still refuse to
+    # exit 0 for it. EXIT_SUCCESS is deliberately NOT in this set any more.
+    assert result.exit_code in (EXIT_PROVIDER, EXIT_CONFIG)
+
+
+def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live sibling of gate's fail-open fix, for plain `mylonite scan`
+    itself: `scan`'s exit code is now derived from ScanOutcome.from_report
+    (mylonite.scan.coverage) rather than hand-matching `report.aborted`
+    against the 5 known strings. Before this fix, a report where every
+    attempt errored but the engine never tripped the consecutive-failures
+    threshold (too few applicable attempts) had `aborted=None`, and the old
+    hand-matching fell through to EXIT_SUCCESS — `scan` printed a summary and
+    exited 0, indistinguishable from a genuine clean pass to any CI step
+    checking $?. Deterministic (no live LLM calls, no threshold-timing
+    flakiness): the engine run itself is monkeypatched to return a canned,
+    already-errored ScanResult, mirroring the gate regression test
+    (test_gate_exits_nonzero_when_every_attempt_errored_without_formal_abort
+    in tests/gate/test_orchestrator.py)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanEngine, ScanResult
+
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason="litellm.AuthenticationError: Missing Anthropic API Key",
+                error_detail=None,
+            ),
+            ScanAttempt(
+                seed_id="s2",
+                pattern_id="s2",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason="litellm.AuthenticationError: Missing Anthropic API Key",
+                error_detail=None,
+            ),
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--output-dir", str(tmp_path)],
+    )
+    assert result.exit_code != EXIT_SUCCESS, result.output
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "never formally aborted" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1294,8 +1375,10 @@ def test_dump_target_file_roundtrips() -> None:
 
 
 def test_dump_target_file_default_redacts_secrets() -> None:
-    """DCR-0019: dump_target_file defaults to masking credential-shaped values."""
-    from mylonite._redaction import REDACTION_PLACEHOLDER
+    """DCR-0019/T9: dump_target_file defaults to replacing credential-shaped
+    values with a derived ``${VAR}`` reference (not the bare, non-runnable
+    placeholder) so the masked copy stays genuinely re-runnable."""
+    from mylonite._redaction import target_yaml_env_ref_name
     from mylonite.plugins._mcp.target_file import TargetFile, dump_target_file
 
     tf = TargetFile(
@@ -1310,7 +1393,8 @@ def test_dump_target_file_default_redacts_secrets() -> None:
     assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in text
     assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in text
     assert "LOG_LEVEL: debug" in text
-    assert REDACTION_PLACEHOLDER in text
+    assert "${" + target_yaml_env_ref_name("env", "GITHUB_TOKEN") + "}" in text
+    assert "${" + target_yaml_env_ref_name("headers", "Authorization") + "}" in text
 
 
 def _canned_scan_result(target_id: str, *, findings: int) -> Any:
@@ -1871,6 +1955,110 @@ def test_report_missing_artefact_exit_2(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CONFIG
     out = result.stderr or result.output
     assert "scan_report.json" in out or "validation_report.json" in out
+
+
+def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
+    """A1 (release/0.7.7-honest-results): a scan_report.json whose scan was
+    formally aborted (e.g. `aborted="provider_unreachable"`, the shape a bare
+    `mylonite scan` with no ANTHROPIC_API_KEY produces) must make `mylonite
+    report` exit non-zero too -- rendering "aborted: provider_unreachable" in
+    the panel while still exiting 0 is exactly the silent-fail-open bug this
+    release exists to close. The plan's own acceptance test says this in so
+    many words: `mylonite report "$TMP/aborted-scan"  # MUST exit non-zero`.
+    Expected code comes from `ScanOutcome.from_report`'s
+    `_EXIT_CODE_BY_ABORT` mapping (mylonite.scan.coverage): PROVIDER_UNREACHABLE
+    -> EXIT_PROVIDER (4), matching `scan`'s own exit code for the identical
+    abort reason.
+    """
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    scan_dir = tmp_path / "aborted-scan"
+    scan_dir.mkdir()
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason=None,
+                error_detail="provider unreachable",
+            )
+        ],
+        findings_count=0,
+        aborted="provider_unreachable",
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    (scan_dir / "scan_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    assert result.exit_code != EXIT_SUCCESS
+    assert "aborted" in result.output.lower()
+
+
+def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Path) -> None:
+    """Code-quality review of 43dc63b (Critical): `ScanOutcome.from_report`
+    raises `ValueError` for any `ScanReport.aborted` value outside the current
+    `AbortReason` enum -- `ScanReport.aborted` is a plain `str | None` at the
+    pydantic layer with no enum constraint, so an older-mylonite-version or
+    hand-edited/corrupted `scan_report.json` loads fine but then blew up
+    `report`'s new `ScanOutcome.from_report(sreport)` call as an UNCAUGHT
+    exception (bare traceback, exit 1, empty output) -- strictly worse than
+    the silent-exit-0 bug 43dc63b fixed. `report` must instead degrade
+    gracefully: a clear message, no traceback, and a distinguishing exit code
+    (EXIT_CONFIG, matching the sibling try/except a few lines above that
+    already handles "this artefact doesn't parse")."""
+    scan_dir = tmp_path / "legacy-abort"
+    scan_dir.mkdir()
+    # Hand-write raw JSON (not via ScanReport(...)) since the model itself
+    # would happily accept this -- `aborted` has no enum constraint at the
+    # pydantic layer, which is exactly the point being tested.
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps(
+            {
+                "target_id": "mcp:myapp",
+                "attack_modules": ["mylonite.prompt-injection"],
+                "provider": "anthropic",
+                "model": "synthetic-model",
+                "elapsed_seconds": 0.1,
+                "attempts": [],
+                "findings_count": 0,
+                "aborted": "some_future_reason",
+                "single_run": True,
+                "mylonite_version": "0.0.0-test",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert result.exit_code not in (EXIT_SUCCESS, 1)
+    err = result.stderr or result.output
+    assert "some_future_reason" in err or "AbortReason" in err
+
+
+def test_report_clean_scan_still_exits_success(tmp_path: Path) -> None:
+    """Regression guard for the A1 fix above: a genuine, non-aborted scan
+    (the common case) must keep exiting 0 through `mylonite report`."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    result_obj = _canned_scan_result("mcp:myapp", findings=0)
+    (scan_dir / "scan_report.json").write_text(
+        result_obj.report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
 
 
 # ---------------------------------------------------------------------------

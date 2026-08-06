@@ -148,11 +148,30 @@ place that value could otherwise leave the machine unmasked is routed through
   (`mylonite scan`), the co-located copy (`mylonite generate`), the gate PR
   copy (`mylonite gate`), and the `scan --scaffold` / `mylonite init` starter
   all go through the same `redact_env` / `redact_target_yaml` masking: every
-  `headers` / `request.headers` value is masked unconditionally, and every
+  `headers` / `request.headers` value is replaced unconditionally, and every
   credential-shaped `env` value — by key name (`password`, `api_key`,
-  `token`, ...) OR value shape — is masked, leaving key names and structure
-  intact so the file still documents the target and still loads. The same
-  masking is `dump_target_file`'s default for an inline `mcp:custom` target.
+  `token`, ...) OR value shape — is replaced, with a `${VAR}` reference
+  (`mylonite._redaction.target_yaml_env_ref_name`) deterministically derived
+  from the field's key, leaving key names and structure intact so the file
+  still documents the target. This is genuinely operational, not just
+  structurally parseable: `load_target_file` expands `${VAR}` references from
+  the process environment on every load (also honouring an operator's own
+  hand-written `${VAR}` reference, e.g. `docs/http-agent.md`'s
+  `Authorization: Bearer ${MY_TOKEN}`), and raises a loud, actionable error
+  naming the missing variable if it is unset — never a silent empty-string
+  substitution. The same masking is `dump_target_file`'s default for an
+  inline `mcp:custom` target. `${VAR}` expansion is deliberately scoped to
+  ONLY these three credential-bearing locations (`headers`, `request.headers`,
+  `env`) — never the rest of the document (`system_prompt`, `purpose`, `args`,
+  `url`, `request.body`, ...). Those are exactly the fields an operator
+  legitimately uses for SSTI/template-injection attack payloads containing
+  literal `${IDENTIFIER}`-shaped text, and a CI gate runner has real secrets
+  (`ANTHROPIC_API_KEY`, `GH_TOKEN`, ...) set in its own environment — scanning
+  the whole document for `${VAR}` would risk silently substituting a live
+  secret into an unrelated string headed for the target under test.
+  **`command`/`args` are NOT masked or `${VAR}`-indirected** — see the next
+  section; put a credential in `env` or `headers` instead, never bake it into
+  `args`.
 - **The SARIF upload and the JSON finding bundle.** Both are written to disk
   unconditionally (`mylonite gate`, `mylonite report --json`) and the SARIF
   one is uploaded to GitHub code scanning — a persistent, often
@@ -183,11 +202,20 @@ pull request edits the one already in your repo. Every path-shaped field in it
 just shape-checked (`is_absolute()` is not a security check) — it cannot read a file
 outside the target YAML's own directory, and it cannot point the filesystem sandbox at
 your whole disk, your home directory, or a nonexistent path. It CAN still launch an
-arbitrary `command`/`args` as a subprocess and carry credentials for that launch (that
-is the point of a custom target) — those are gated by `--authorize` and masked
-wherever Mylonite persists or prints them, per "What Mylonite does with your
-credentials" above, but the operator is still trusting the launch command itself, the
-same way they'd trust any script a PR asks them to run.
+arbitrary `command`/`args` as a subprocess (that is the point of a custom target) —
+gated by `--authorize`, but the operator is still trusting the launch command itself,
+the same way they'd trust any script a PR asks them to run.
+
+**A credential embedded directly in `command`/`args` (e.g.
+`args: [--api-key, sk-live-...]`) is NOT masked.** Unlike `headers` /
+`request.headers` / `env` — which are always replaced with a `${VAR}` reference
+wherever Mylonite persists or prints a target.yaml, per "What Mylonite does with
+your credentials" above — `args` is an unstructured string list with no key name
+to mask by, so a value embedded there survives byte-for-byte into every copy
+Mylonite writes (scan dir, `generate`'s co-located copy, the `gate` PR). If a
+target's launch needs a credential, pass it via `env` (most subprocess CLIs
+also accept the value from an environment variable) or, for an MCP server
+reachable at a URL, `headers` — never as a literal `args` entry.
 
 See `docs/target-file.md#path-containment` for the full field-level detail, including
 `MYLONITE_FS_SCOPE_ROOT`.

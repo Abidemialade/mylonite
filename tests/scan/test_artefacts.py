@@ -213,6 +213,49 @@ def test_render_summary_utf8_keeps_glyphs() -> None:
     assert "✗ FOUND" in summary
 
 
+def test_render_summary_all_errored_attempts_are_not_a_silent_clean() -> None:
+    """The literal false-clean bug T1 exists to fix: NOT_TESTED_OUTCOMES used
+    to be a hand-maintained allowlist that omitted "error", so a scan where
+    every attempt raised an exception rendered "2 attempts * 0 findings" with
+    no coverage warning — indistinguishable from a genuine clean pass. Now
+    that NOT_TESTED_OUTCOMES is derived from coverage.ATTEMPT_CLASS (which
+    classifies "error" as NOT_TESTED), the same report must surface the
+    loud coverage warning instead of reading as clean."""
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason=None,
+                error_detail="RuntimeError: adapter.invoke raised unexpectedly",
+            ),
+            ScanAttempt(
+                seed_id="s2",
+                pattern_id="s2",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason=None,
+                error_detail="RuntimeError: judge raised unexpectedly",
+            ),
+        ],
+        findings_count=0,
+        aborted=None,
+        mylonite_version="0.0.0-test",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    # The old bug: only "2 attempts * 0 findings" with no coverage line.
+    assert "coverage:" in summary
+    assert "2 attempt(s) were NOT TESTED" in summary
+    assert "✓ clean" not in summary
+
+
 def test_render_summary_survives_rich_markup_in_a_verdict_reason() -> None:
     """DCR-0004: a verdict_reason quoting target output like '[/bold]' raised
     MarkupError and crashed the CLI AFTER a successful scan."""

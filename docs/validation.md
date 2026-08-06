@@ -2,10 +2,11 @@
 
 The attack library finds weaknesses. The **validation engine** is what makes
 Mylonite's output trustworthy — it proves a generated security test *means*
-what it claims, then ships that proof as a fast, offline CI gate. This is the
-core of the tool: the novel piece is not the exploits, it's the machinery that
-separates a real, reproducible weakness from a plausible-looking but vacuous
-assertion.
+what it claims, then ships that proof as a fast CI gate (offline for the
+bundled reference targets; a live, gated re-drive for your own app — see
+below). This is the core of the tool: the novel piece is not the exploits,
+it's the machinery that separates a real, reproducible weakness from a
+plausible-looking but vacuous assertion.
 
 ## Two tiers: live discovery, offline gate
 
@@ -20,18 +21,28 @@ exercised live. This is the expensive, stochastic tier. You run it
 periodically: when you build a new agent capability, change a system prompt,
 add a tool, or on a schedule — not on every commit.
 
-**Tier 2 — the committed regression test (OFFLINE, per-PR).**
-`mylonite generate` emits a pytest file that, at the CI gate, replays a
-*recorded* reproduction of the attack against the guarded build. No API key. No
-network. No LLM call. It is a normal, fast, deterministic pytest. That is what
-runs on every pull request: if a future change re-opens the weakness, the
-recorded attack now succeeds against the guard and the test fails.
+**Tier 2 — the committed regression test.** `mylonite generate` emits a pytest
+file, but what it replays at the CI gate depends on the target:
 
-The recorded fixtures (the `(model, messages)` → response pairs the replay
-looks up) and an `exploit_*.json` are produced once, during the live tier, and
-committed alongside the test. After that the gate is offline forever — until
-something that changes the recorded pairs (a planner / judge / customiser
-prompt, a tool schema, or the model) forces a re-record.
+- **Bundled reference targets** (`reference:vulnerable` / `reference:guarded`)
+  — **OFFLINE, per-PR.** The test replays a *recorded* reproduction of the
+  attack against the guarded twin via `testkit.assert_guard_holds`. No API
+  key. No network. No LLM call. It is a normal, fast, deterministic pytest.
+  The recorded fixtures (the `(model, messages)` → response pairs the replay
+  looks up) and an `exploit_*.json` are produced once, during the live tier,
+  and committed alongside the test. After that the gate is offline forever —
+  until something that changes the recorded pairs (a planner / judge /
+  customiser prompt, a tool schema, or the model) forces a re-record.
+- **A real, custom target** (`--target-file`) — **LIVE, always.** There is no
+  recorded twin to replay: the emitted test re-launches your actual MCP
+  server and calls the real provider (`testkit.assert_target_resists` /
+  `assert_control_holds`), so it needs `ANTHROPIC_API_KEY` (or your
+  configured provider) and network egress. This live re-drive is gated behind
+  the `MYLONITE_LIVE_TARGET=1` environment variable — without it the test is
+  **skipped**, not run, and a plain `pytest` still exits `0`. `mylonite
+  generate` prints the exact `MYLONITE_LIVE_TARGET=1 pytest …` command; the
+  scaffolded `mylonite-gate.yml` workflow sets the variable for you. See
+  [CI gating](ci-gating.md) for the operational details.
 
 ## "Isn't this a tautology?"
 

@@ -14,8 +14,8 @@
 the AI layer.**
 
 Point Mylonite at any MCP (Model Context Protocol) app, whatever model or framework is
-behind it. It attacks the AI/agentic layer — the system prompt, tool/function schemas, RAG
-pipeline, and agent memory — finds app-specific weaknesses, and for each one emits a
+behind it. It attacks the AI/agentic layer — the system prompt and tool/function schemas —
+finds app-specific weaknesses, and for each one emits a
 **validated, CI-gating `pytest` regression test**.
 
 The core differentiator is the **control-efficacy check**. It holds the model constant and
@@ -127,7 +127,7 @@ Once you've seen it, point `scan` at your own MCP app. **The first step is free*
 no API key and makes no model call:
 
 ```bash
-mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml   # free, no API key
+mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml --scope my-app   # free, no API key
 ```
 
 That connects to your server, lists the tools it exposes, tells you which weakness classes
@@ -149,7 +149,7 @@ validate it against the control-efficacy check, and (opt-in) open a PR that gate
 
 ```bash
 mylonite gate reference:vulnerable          # find -> test -> validate -> print the PR command
-mylonite gate --target-file app.yaml --authorize your-scope --open-pr   # ...and open it
+mylonite gate --target-file app.yaml --authorize my-app --open-pr   # ...and open it
 ```
 
 `gate` writes a validated regression test under `.mylonite/gate/` plus two CI workflows (a

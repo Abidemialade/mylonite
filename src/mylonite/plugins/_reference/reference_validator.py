@@ -27,6 +27,11 @@ The pipeline (per ``mylonite.contracts.validator``):
      fixtures), not merely on collection. This closes the
      ``validate``→committed-artefact loop: the command leaves behind a
      ready-to-commit, replayable test + fixtures and proves it passes offline.
+
+   A CUSTOM target (``_validate_custom_target``) has no in-repo guarded twin to
+   record fixtures against, so its build leg is always collect-only — but it is
+   the SAME real ``run_test_file``-backed check as above (T5), not a
+   hardcoded pass: a syntactically broken emitted test genuinely fails it.
 2. **differential** — across ``iterations`` runs of the full attack scan, does
    the exploit's ``pattern_id`` FIRE on the vulnerable twin and RESIST on the
    guarded twin *at all*? (discrimination)
@@ -68,7 +73,7 @@ import json
 import logging
 import re
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -86,7 +91,8 @@ from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.demo._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan._types import AdapterInvocationSkipped
+from mylonite.scan._llm import BudgetExceededError
+from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
@@ -583,14 +589,18 @@ class DifferentialValidator(ValidatorBase):
             ),
             metric=agree,
         )
-        build = ValidationOutcome(
-            stage="build",
-            passed=True,
-            detail=(
-                "custom-target regression test emitted; it re-drives the real "
-                "target via testkit.assert_attack_reproduces"
-            ),
-            metric=None,
+        # T5: the build leg used to hardcode `passed=True` unconditionally here,
+        # citing a testkit re-drive helper that never existed anywhere in this
+        # codebase — dead code that could never catch a malformed emitted test.
+        # Consolidated onto the SAME real pytest-invoking leg the reference
+        # path uses (`_collect_only_outcome`): it writes the emitted source to
+        # a temp file and genuinely runs it under pytest. A custom-target test
+        # carries a `skipif(MYLONITE_LIVE_TARGET != "1")` guard (see
+        # `reference_pytest_generator.py`), so this collects-and-skips rather
+        # than launching the real target — still a genuine proof the file is
+        # syntactically valid and collectible, which the hardcoded True never was.
+        build = (
+            self._build_skip_outcome() if not self._run_build else self._collect_only_outcome(test)
         )
         outcomes = [build, stability, effect, consensus]
         legs = ["build", "stability", "effect", "consensus"]
@@ -761,6 +771,30 @@ class DifferentialValidator(ValidatorBase):
             )
         return _CustomRun(finding=False, effect_confirmed="unprobed", response=None)
 
+    @staticmethod
+    async def _judge_or_none(coro: Coroutine[Any, Any, Verdict]) -> Verdict | None:
+        """Await one consensus judge call; ``None`` on a non-budget failure.
+
+        T4 follow-up (reviewer-flagged): ``judge.judge()`` here was completely
+        unguarded, so a ``NonRecoverableProviderError`` (auth/tls/context_window
+        — see ``scan/_llm.py``) would escape ``gather_bounded``'s bare
+        ``asyncio.gather`` (no ``return_exceptions=True``) and propagate all the
+        way to the ``gate``/``validate`` CLI as a raw traceback. ``BudgetExceededError``
+        still propagates unchanged — a real budget exhaustion should still abort
+        the run, same as everywhere else in the codebase. Any other exception
+        degrades to ``None``, filtered out of both the numerator and denominator
+        by the caller — NOT counted as "judge disagreed" — so an infra failure
+        can never be misread as "the judges reviewed this and rejected it" (the
+        same DCR-0022-style non-inversion the adapter-error path already applies).
+        """
+        try:
+            return await coro
+        except BudgetExceededError:
+            raise
+        except Exception:
+            logger.exception("multi-judge consensus: judge.judge raised unexpectedly")
+            return None
+
     def _multi_judge_consensus(self, firing_runs: list[_CustomRun], payload: Any) -> float:
         """Fraction of independent judge calls (across firing runs) that agree it's real.
 
@@ -768,6 +802,12 @@ class DifferentialValidator(ValidatorBase):
         gap for custom targets. When an effect probe drove the verdict the judge is
         deterministic (agreement ~1.0); otherwise repeated LLM judging surfaces
         flaky/over-eager verdicts.
+
+        A judge call that raises (see ``_judge_or_none``) contributes to NEITHER
+        ``agree`` nor ``total`` — it never happened, as far as the consensus
+        metric is concerned. If EVERY judge call fails this returns 0.0 (not an
+        exception, not a fabricated 1.0) — a broken judge model must fail the
+        consensus gate closed, never pass it by default.
         """
         from mylonite.scan.judge import SuccessJudge
 
@@ -779,9 +819,12 @@ class DifferentialValidator(ValidatorBase):
         # judged repeatedly for consensus) — build them all up front and drive
         # them concurrently, bounded, inside one event loop.
         judge_coros = [
-            judge.judge(payload, r.response) for r in runs for _ in range(self._consensus_judges)
+            self._judge_or_none(judge.judge(payload, r.response))
+            for r in runs
+            for _ in range(self._consensus_judges)
         ]
-        verdicts = asyncio.run(gather_bounded(judge_coros))
+        raw_verdicts = asyncio.run(gather_bounded(judge_coros))
+        verdicts = [v for v in raw_verdicts if v is not None]
         total = len(verdicts)
         agree = sum(1 for v in verdicts if v.success)
         return (agree / total) if total else 0.0
@@ -1132,7 +1175,21 @@ class DifferentialValidator(ValidatorBase):
         except Exception:
             logger.exception("metamorphic: adapter.invoke raised unexpectedly")
             return None
-        verdict = await judge.judge(payload, response)
+        try:
+            verdict = await judge.judge(payload, response)
+        except BudgetExceededError:
+            raise
+        except Exception:
+            # Same shape as the adapter.invoke() failure above (T4 follow-up —
+            # reviewer-flagged: this call was completely unguarded, including
+            # against `NonRecoverableProviderError`, which `run_twins`/
+            # `asyncio.gather` — no `return_exceptions=True` — would otherwise
+            # let escape all the way to the `gate` CLI as a raw traceback).
+            # `None` means "never judged" here too: this variant contributes
+            # neither a fired nor a resisted result (DCR-0022) — a judge
+            # infra failure must not be misread as "the guard resisted".
+            logger.exception("metamorphic: judge.judge raised unexpectedly")
+            return None
         return verdict.success
 
     # -- build stage ----------------------------------------------------------
@@ -1156,11 +1213,7 @@ class DifferentialValidator(ValidatorBase):
           the differential/flakiness failure).
         """
         if not self._run_build:
-            return ValidationOutcome(
-                stage="build",
-                passed=True,
-                detail="build stage skipped (run_build=False)",
-            )
+            return self._build_skip_outcome()
 
         if self._record_fixtures_dir is not None:
             canonical = self._canonical_run_index(tallies)
@@ -1176,6 +1229,18 @@ class DifferentialValidator(ValidatorBase):
             )
 
         return self._collect_only_outcome(test)
+
+    @staticmethod
+    def _build_skip_outcome() -> ValidationOutcome:
+        """The ``build`` outcome when ``run_build=False`` — shared by both the
+        reference-target (:meth:`_build_outcome`) and custom-target
+        (:meth:`_validate_custom_target`) paths so a skip reads identically
+        either way."""
+        return ValidationOutcome(
+            stage="build",
+            passed=True,
+            detail="build stage skipped (run_build=False)",
+        )
 
     @staticmethod
     def _canonical_run_index(tallies: list[_IterationTally]) -> int | None:
@@ -1236,12 +1301,20 @@ class DifferentialValidator(ValidatorBase):
         )
         asyncio.run(engine.run())
 
-        # 2. Stamp the _meta.json sidecar the offline gate reads.
+        # 2. Stamp the _meta.json sidecar the offline gate reads. `format_version`
+        #    is testkit's own field (per-exploit fixture-isolation SCOPE);
+        #    `cache_key_version` is the UNRELATED _replay.LiteLLMRecorder cache-key
+        #    algorithm field — read straight off `recorder.key_version` (not a
+        #    locally hardcoded literal) so the sidecar can never drift from what
+        #    the recorder actually used to key the files just written above. The
+        #    two fields share this one sidecar file but are independent axes; see
+        #    mylonite.demo._replay.CACHE_KEY_VERSION_FIELD's docstring.
         meta_path = fixtures_dir / "_meta.json"
         meta_path.write_text(
             json.dumps(
                 {
                     "format_version": FIXTURE_FORMAT_VERSION,
+                    "cache_key_version": recorder.key_version,
                     "model": self._model,
                     "pattern_id": exploit.pattern_id,
                 },

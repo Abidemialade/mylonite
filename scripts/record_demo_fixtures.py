@@ -12,9 +12,36 @@ and replay makes every fixture miss on lookup and the demo silently lies.
 For each reference variant (``vulnerable``, ``guarded``) it builds a
 record-mode :class:`~mylonite.demo._replay.LiteLLMRecorder` over
 ``src/mylonite/demo/fixtures/<variant>/`` and runs the real scan once, writing one
-JSON fixture per unique ``(model, messages)`` pair. The same deterministic
+JSON fixture per unique ``(model, messages, ...)`` pair. The same deterministic
 per-variant note-id factory the replay path uses is reset per variant, so the
 recorded note IDs (``n_demo_0001`` …) match replay exactly.
+
+Cache-key format (T8)
+----------------------
+The CURRENTLY COMMITTED fixtures under ``src/mylonite/demo/fixtures/{vulnerable,
+guarded}/`` predate the ``_meta.json`` sidecar entirely and were recorded with
+the v1 key (``(model, messages)`` only) — :mod:`mylonite.demo._replay` keeps
+replaying them correctly (v1 is the documented default for a sidecar-less
+directory in replay mode). A FRESH re-record (an EMPTY ``variant_dir``, as
+happens the first time this script targets a variant) defaults to
+``mylonite.demo._replay.CACHE_KEY_VERSION`` (currently v2 — folds in
+``tools``/``tool_choice``/``response_format``/``api_base``), and this script
+stamps ``_meta.json`` with the matching ``cache_key_version`` field BEFORE
+recording begins (not after — see :func:`_stamp_meta`'s docstring for why),
+so a later replay of the freshly-recorded directory resolves the SAME key
+rather than silently falling back to v1 (which would ignore ``tools=`` and
+miss every lookup).
+
+Re-recording an EXISTING directory in place is guarded by
+:func:`_check_dir_safe_to_record`: if ``variant_dir`` already holds fixture
+files but either has no ``_meta.json`` at all (almost certainly legacy v1
+fixtures — this is exactly the shape of the currently-committed directories)
+or a sidecar declaring a DIFFERENT ``cache_key_version`` than this run would
+use, the script REFUSES rather than silently writing a mixed-key-version
+directory or (if interrupted before a sidecar existed) leaving one with no
+sidecar at all — either of which a later replay could silently mis-key.
+Delete the stale ``*.json`` fixtures (and ``_meta.json``, if present) under
+``variant_dir`` first, so it starts genuinely empty, then re-run.
 
 When to (re-)record
 -------------------
@@ -44,9 +71,15 @@ committing them.
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
-from mylonite.demo._replay import LiteLLMRecorder
+from mylonite.demo._replay import (
+    CACHE_KEY_VERSION,
+    CACHE_KEY_VERSION_FIELD,
+    LiteLLMRecorder,
+    _read_meta_cache_key_version,
+)
 from mylonite.demo.runner import (
     DEMO_MODEL,
     DEMO_PROVIDER,
@@ -65,10 +98,99 @@ except ImportError:  # pragma: no cover - _VARIANTS is exported today
 FIXTURES_ROOT = Path("src/mylonite/demo/fixtures")
 
 
+def _existing_fixture_count(variant_dir: Path) -> int:
+    """Fixture ``*.json`` files already in ``variant_dir``, excluding ``_meta.json``."""
+    if not variant_dir.exists():
+        return 0
+    return len([p for p in variant_dir.glob("*.json") if p.name != "_meta.json"])
+
+
+def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
+    """Refuse to record into a directory that could end up mixed-key-version.
+
+    Reproduced directly by code review: this script used to stamp
+    ``_meta.json`` only AFTER ``engine.run()`` completed, and never checked
+    whether ``variant_dir`` already held pre-existing sidecar-less v1
+    fixtures (exactly the shape of the currently-committed
+    ``src/mylonite/demo/fixtures/{vulnerable,guarded}/``). Recording a
+    ``tools=``-bearing call into such a directory would leave the OLD v1
+    file untouched AND write a NEW, differently-keyed v2 file alongside it —
+    a genuinely mixed directory — and if the run were interrupted before the
+    post-run stamp, the directory would have a v1/v2 mix with NO sidecar at
+    all: the next replay would default to v1 and could silently return a
+    stale, wrong response for a tool-bearing call, with no error.
+
+    An EMPTY (or not-yet-existing) ``variant_dir`` is always safe. A
+    NON-EMPTY one is safe only if its ``_meta.json`` already declares the
+    SAME ``cache_key_version`` this run would use (an intentional
+    incremental re-record) — anything else refuses with ``SystemExit`` and
+    tells the operator to clear the directory first, rather than risk ever
+    silently producing (or leaving, if interrupted) an ambiguous mix.
+    """
+    existing = _existing_fixture_count(variant_dir)
+    if existing == 0:
+        return
+    declared = _read_meta_cache_key_version(variant_dir)
+    if declared == expected_version:
+        return
+    if declared is None:
+        raise SystemExit(
+            f"refusing to record into {variant_dir}: it already has {existing} fixture "
+            "file(s) but no _meta.json sidecar declaring a cache_key_version. These are "
+            "almost certainly LEGACY v1 fixtures (recorded before the v2 cache key "
+            "existed) — recording new v2-keyed fixtures alongside them would leave a "
+            "mixed, confusing directory, and if this script is interrupted before it "
+            "can stamp _meta.json, a later replay would default to v1 and could "
+            "SILENTLY return a stale, wrong response for a tools-bearing call. Delete "
+            f"the stale *.json files under {variant_dir} first (or move them aside), "
+            "then re-run."
+        )
+    raise SystemExit(
+        f"refusing to record into {variant_dir}: its _meta.json declares "
+        f"cache_key_version={declared}, but this run would record with "
+        f"cache_key_version={expected_version}. Recording into it now would produce a "
+        "directory keyed inconsistently. Delete the stale *.json fixtures (and "
+        f"_meta.json) under {variant_dir} first, then re-run."
+    )
+
+
+def _stamp_meta(variant_dir: Path, variant: str) -> None:
+    """Write the ``_meta.json`` sidecar BEFORE recording begins.
+
+    Stamped up front (not after ``engine.run()``, as an earlier version of
+    this script did) so the directory is self-consistent even if the run is
+    interrupted midway: any fixture files present after an interruption were
+    ALL written by a recorder that had already resolved
+    :data:`CACHE_KEY_VERSION` (from this very sidecar), so a later replay
+    reads the same sidecar and uses the same key — never silently falls back
+    to v1. Combined with :func:`_check_dir_safe_to_record`'s upfront refusal,
+    a target directory is either genuinely empty (safe to stamp+record into)
+    or already agrees with this sidecar (a deliberate incremental re-record).
+    """
+    variant_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = variant_dir / "_meta.json"
+    meta_path.write_text(
+        json.dumps(
+            {CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION, "model": DEMO_MODEL, "variant": variant},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 async def _record_variant(variant: str) -> tuple[int, int]:
     """Record one variant's fixtures; return (fixture_count, findings_count)."""
     variant_dir = FIXTURES_ROOT / variant
+    _check_dir_safe_to_record(variant_dir, CACHE_KEY_VERSION)
+    _stamp_meta(variant_dir, variant)
     recorder = LiteLLMRecorder(variant_dir, mode="record")
+    assert recorder.key_version == CACHE_KEY_VERSION, (
+        f"internal error: _stamp_meta declared cache_key_version={CACHE_KEY_VERSION} for "
+        f"{variant_dir} but the recorder resolved {recorder.key_version} — "
+        "_check_dir_safe_to_record should have refused this directory"
+    )
     engine = _build_scan(
         variant,
         completion_fn=recorder,
@@ -84,7 +206,7 @@ async def _record_variant(variant: str) -> tuple[int, int]:
         llm_assist=False,
     )
     result = await engine.run()
-    fixture_count = len(list(variant_dir.glob("*.json")))
+    fixture_count = len(list(variant_dir.glob("*.json"))) - 1  # exclude _meta.json
     findings_count = result.report.findings_count
     print(
         f"[{variant}] recorded {fixture_count} fixture(s) -> "

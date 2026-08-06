@@ -27,14 +27,25 @@ from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact
 from mylonite.contracts._types import ExploitRecord
+from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
 # skip (the seed didn't apply) and CRUCIALLY distinct from a proven `no_finding`.
 # A scan with these but zero findings is NOT a clean result: those seeds tested
 # nothing. They get a loud mark and a summary warning so the gap is never silent.
+#
+# Derived from coverage.ATTEMPT_CLASS (the total, exhaustiveness-guarded
+# classification of every ScanAttemptOutcome) instead of being maintained as a
+# second, independent allowlist. Before this, a hand-maintained subset here
+# (originally just {"skipped_no_seed_arm", "skipped_payload_not_delivered"})
+# omitted "error" and the other structural skips — so a scan where every
+# attempt raised an exception rendered "N attempts * 0 findings" with no
+# warning, the exact false-clean this module exists to prevent. Deliberately
+# excludes AttemptClass.INTENTIONALLY_SKIPPED (currently just
+# "skipped_dry_run"): that's an operator choice, not a coverage gap.
 NOT_TESTED_OUTCOMES: Final[frozenset[str]] = frozenset(
-    {"skipped_no_seed_arm", "skipped_payload_not_delivered"}
+    outcome for outcome, cls in ATTEMPT_CLASS.items() if cls is AttemptClass.NOT_TESTED
 )
 
 OUTCOME_MARKS: Final[dict[str, str]] = {
@@ -250,10 +261,13 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         console_print(
             console,
             f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
-            "(planted payload undelivered, no seed_arm, or no plant/sink/recall "
-            "surface) - those seeds proved NOTHING. This is not a clean result for "
-            "them; declare a seed_arm (and for the tool-chaining / memory modes, "
-            "ensure the target exposes a plant + sink/recall surface), then "
+            "(planted payload undelivered, no seed_arm, no plant/sink/recall "
+            "surface, malformed seed metadata, an unresolvable seed, a planner "
+            "failure, or an unexpected error during invocation/judging) - those "
+            "seeds proved NOTHING. This is not a clean result for them; declare a "
+            "seed_arm (and for the tool-chaining / memory modes, ensure the target "
+            "exposes a plant + sink/recall surface), check each attempt's "
+            "verdict_reason/error_detail for the specific cause, then "
             "re-scan.[/bold red]",
         )
     if report.aborted:

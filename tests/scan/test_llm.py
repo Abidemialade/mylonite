@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import litellm
 import pytest
 
 from mylonite.scan._llm import (
@@ -16,6 +17,7 @@ from mylonite.scan._llm import (
     FALLBACK_UNPARSEABLE,
     BudgetExceededError,
     LiteLLMCallCounter,
+    NonRecoverableProviderError,
     _extract_json_object,
     active_counter,
     litellm_json_call,
@@ -27,6 +29,21 @@ from mylonite.scan._llm import (
 def _stub_response(text: str) -> SimpleNamespace:
     """Construct a minimal LiteLLM-shaped completion response."""
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+
+def _provider_exc(name: str) -> BaseException:
+    """A real LiteLLM typed exception instance (e.g. ``AuthenticationError``).
+
+    Mirrors ``test_llm_crossmodel.py``'s ``_make`` helper — constructing the
+    real typed class (rather than a plain ``RuntimeError`` with a matching
+    message) is what proves ``classify_provider_error``'s typed-exception-first
+    path, not just its substring fallback.
+    """
+    cls = getattr(litellm, name)
+    try:
+        return cls(message="boom", llm_provider="openai", model="gpt-4o")
+    except TypeError:
+        return cls("boom")
 
 
 def _tool_call_response(arguments: str, content: str = "") -> SimpleNamespace:
@@ -224,6 +241,137 @@ def test_completion_exception_returns_fallback_and_marks_failure() -> None:
     assert "provider down" in (detail or "")
     assert result == {"body": "fb"}
     assert counter.consecutive_failures == 1
+
+
+# --- T4: non-recoverable provider failures re-raise, transient ones still fall back ---
+#
+# auth/tls/context_window will never succeed on retry (a misconfigured API key
+# doesn't fix itself between calls), so these must propagate as a loud,
+# classifiable error instead of quietly degrading to an "inconclusive" verdict
+# (the exact failure mode a security tool must not have). rate_limit/network/
+# unknown are genuinely transient and must keep the pre-existing fallback
+# behaviour unchanged — see ``test_rate_limit_error_still_falls_back_unchanged``.
+
+
+def test_auth_error_reraises_not_fallback() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    def stub(**_: Any) -> SimpleNamespace:
+        raise _provider_exc("AuthenticationError")
+
+    with counter.active(), pytest.raises(NonRecoverableProviderError) as excinfo:
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert excinfo.value.diagnosis.category == "auth"
+    # The counter still records the failed attempt — a re-raise doesn't lose
+    # the consecutive-failure signal the engine's provider-unreachable abort
+    # relies on.
+    assert counter.consecutive_failures == 1
+
+
+def test_tls_error_reraises_not_fallback() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        # Real shape LiteLLM wraps a corporate-proxy TLS failure in — an
+        # APIConnectionError-flavoured message, not a typed TLS exception (see
+        # diagnostics.classify_provider_error's "TLS FIRST" substring check).
+        raise RuntimeError(
+            "AnthropicException - APIConnectionError - [SSL: CERTIFICATE_VERIFY_FAILED] "
+            "unable to get local issuer certificate"
+        )
+
+    with pytest.raises(NonRecoverableProviderError) as excinfo:
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert excinfo.value.diagnosis.category == "tls"
+
+
+def test_context_window_error_reraises_not_fallback() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        raise _provider_exc("ContextWindowExceededError")
+
+    with pytest.raises(NonRecoverableProviderError) as excinfo:
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert excinfo.value.diagnosis.category == "context_window"
+
+
+def test_rate_limit_error_still_falls_back_unchanged() -> None:
+    """Regression guard: a genuinely transient category must NOT be re-raised."""
+    counter = LiteLLMCallCounter(cap=5)
+
+    def stub(**_: Any) -> SimpleNamespace:
+        raise _provider_exc("RateLimitError")
+
+    with counter.active():
+        result = litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    cause, _ = pop_fallback_cause(result)
+    assert cause == FALLBACK_CALL_RAISED
+    assert result == {"body": "fb"}
+    assert counter.consecutive_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_async_auth_error_reraises_not_fallback() -> None:
+    """The async sibling classifies+re-raises the same way as the sync entry point."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise _provider_exc("AuthenticationError")
+
+    with pytest.raises(NonRecoverableProviderError) as excinfo:
+        await litellm_json_call_async(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert excinfo.value.diagnosis.category == "auth"
+
+
+@pytest.mark.asyncio
+async def test_async_network_error_still_falls_back_unchanged() -> None:
+    """Regression guard for the async entry point's transient path."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise _provider_exc("APIConnectionError")
+
+    result = await litellm_json_call_async(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller="test",
+        completion_fn=stub,
+    )
+    cause, _ = pop_fallback_cause(result)
+    assert cause == FALLBACK_CALL_RAISED
+    assert result == {"body": "fb"}
 
 
 @pytest.mark.parametrize(

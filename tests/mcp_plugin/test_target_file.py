@@ -300,6 +300,22 @@ def test_target_file_rejects_bad_control_env_key() -> None:
         _tf(control_env={"W9": {"X": "1"}})
 
 
+def test_target_file_rejects_miscased_weakness_class() -> None:
+    """DCR-0005: a lowercase/miscased weakness class (e.g. 'w2' instead of 'W2')
+    must be rejected at load time, not silently pass validation and then fail to
+    match `_INDIRECT_ONLY_WEAKNESS_CLASSES` in a case-sensitive set intersection —
+    which would let a seed-less W2 target skip the hard pre-flight block and read
+    as clean."""
+    with pytest.raises(ValueError, match="weakness_classes"):
+        _tf(weakness_classes=["w2"])
+
+
+@pytest.mark.parametrize("cls", ["W1", "W2", "W3", "W4"])
+def test_target_file_accepts_valid_weakness_classes(cls: str) -> None:
+    tf = _tf(weakness_classes=[cls])
+    assert tf.weakness_classes == [cls]
+
+
 def test_target_file_server_layer_fields_round_trip(tmp_path: Path) -> None:
     from mylonite.plugins._mcp.target_file import dump_target_file
 

@@ -48,22 +48,30 @@ so a dev install already has it:
 pip install -e ".[enterprise]"   # end users / non-dev installs
 ```
 
-## 4. Force UTF-8 output (`PYTHONUTF8=1`)
+## 4. UTF-8 output — handled automatically, with a fallback
 
-The Windows console defaults to the legacy `cp1252` code page, which crashes on
-the non-ASCII glyphs Mylonite prints (✓, │, …). Force UTF-8 for the session:
+The Windows console defaults to the legacy `cp1252` code page, which used to crash on
+the non-ASCII glyphs Mylonite prints (✓, │, …). The `mylonite` CLI now forces UTF-8 on
+its own stdout/stderr before any output (`errors="replace"`, so it degrades rather than
+crashes even if a stream still can't encode something) — verified locally against a
+`chcp 1252` console with `PYTHONUTF8` unset: `mylonite demo` renders cleanly. You should
+not need to set anything for `mylonite` commands themselves.
+
+`pytest` run directly (not through the `mylonite` CLI) does **not** get this automatic
+reconfiguration, since it never goes through `cli.py`'s startup path. If you see mangled
+output or a `UnicodeEncodeError` from a plain `pytest` run, force UTF-8 for the session as
+a fallback:
 
 ```powershell
 $env:PYTHONUTF8 = "1"
 ```
 
-Add it to your profile (or set it as a user environment variable) to make it
-permanent. CI runs on Linux and never catches this, so it only shows up locally.
+Add it to your profile (or set it as a user environment variable) to make it permanent.
+CI runs on Linux and never catches encoding issues like this, so they only show up locally.
 
 ## 5. Verify
 
 ```powershell
-$env:PYTHONUTF8 = "1"
 mylonite version
 pytest -q
 ```
