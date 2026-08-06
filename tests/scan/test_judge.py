@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from mylonite.contracts._types import AdapterResponse, Payload
+from mylonite.scan._llm import NonRecoverableProviderError
 from mylonite.scan.judge import SuccessJudge, _build_judge_prompt
 
 
@@ -183,10 +184,21 @@ async def test_llm_invalid_json_falls_back_to_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_llm_call_raised_reports_call_failure() -> None:
-    """Issue #7: a raised provider call must read as a call failure, not a parse failure."""
+    """Issue #7: a raised provider call must read as a call failure, not a parse failure.
+
+    Uses a call failure that classifies as a genuinely TRANSIENT category
+    (unknown — no provider/auth/tls/rate-limit/network shape to the message),
+    so the graceful "call_raised" fallback verdict is still the right, expected
+    outcome. See ``test_tls_call_raised_now_reraises_loudly`` below for the
+    non-recoverable (TLS) counterpart, which used to hit this exact test with
+    the SAME graceful-fallback expectation — that's the behaviour T4 (root-
+    cause remediation) deliberately changed: a TLS/auth/context-window failure
+    will never succeed on retry, so it must surface loudly instead of quietly
+    degrading to "inconclusive".
+    """
 
     async def stub(**_: Any) -> SimpleNamespace:
-        raise RuntimeError("SSL: CERTIFICATE_VERIFY_FAILED")
+        raise RuntimeError("provider hiccup, try again")
 
     judge = SuccessJudge(model="stub", completion_fn=stub)
     v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
@@ -194,7 +206,33 @@ async def test_llm_call_raised_reports_call_failure() -> None:
     assert v.mechanism == "llm"
     assert v.fallback_cause == "call_raised"
     assert "LLM call raised" in v.reason
-    assert "CERTIFICATE_VERIFY_FAILED" in v.reason
+    assert "provider hiccup" in v.reason
+
+
+@pytest.mark.asyncio
+async def test_tls_call_raised_now_reraises_loudly() -> None:
+    """T4 (root-cause remediation): a TLS-shaped call failure must not degrade quietly.
+
+    Was ``test_llm_call_raised_reports_call_failure`` pre-T4: it asserted this
+    EXACT TLS-shaped exception ("SSL: CERTIFICATE_VERIFY_FAILED") produced a
+    graceful ``Verdict(success=False, fallback_cause="call_raised")`` — i.e. a
+    misconfigured/corporate-proxy TLS failure looked identical to "the target
+    genuinely resisted the attack". That is the false-inconclusive failure
+    mode T4 closes: TLS (like auth/context_window) will NEVER succeed on
+    retry, so ``litellm_json_call_async`` now re-raises
+    ``NonRecoverableProviderError`` instead of returning a fallback verdict,
+    and ``SuccessJudge.judge`` does not catch it — it propagates to the
+    caller (``ScanEngine``) so the failure is loud and actionable rather than
+    read as a clean/inconclusive result.
+    """
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError("SSL: CERTIFICATE_VERIFY_FAILED")
+
+    judge = SuccessJudge(model="stub", completion_fn=stub)
+    with pytest.raises(NonRecoverableProviderError) as excinfo:
+        await judge.judge(_payload(), _response(tool_calls=("read_note",)))
+    assert excinfo.value.diagnosis.category == "tls"
 
 
 @pytest.mark.asyncio

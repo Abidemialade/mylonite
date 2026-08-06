@@ -225,8 +225,16 @@ class ScanOutcome:
     exercised: int
     not_tested: int
     findings: int
-    #: Populated by a later task (T4's fallback-classification work); a scan
-    #: built here always reports 0 until that wiring lands.
+    #: Total fallback events across every cause in ``report.fallback_breakdown``
+    #: (e.g. ``judge_call_raised``, ``judge_unparseable_output``,
+    #: ``customiser_fallback``) — every judge/customiser LLM call that degraded
+    #: to a fallback verdict rather than a genuine parse, summed. T4 (root-cause
+    #: remediation) is what makes this field meaningful: before T4, EVERY LLM-call
+    #: exception (including non-recoverable ones — auth/tls/context_window) fed
+    #: this same breakdown, so a wrong API key and a one-off network blip were
+    #: indistinguishable here. T4 re-raises the non-recoverable categories
+    #: instead (see ``scan/_llm.py``), so what lands in ``fallback_breakdown`` —
+    #: and therefore this count — is now only genuinely transient degradations.
     fallbacks: int
     exit_code: int
     operator_message: str | None
@@ -329,7 +337,7 @@ class ScanOutcome:
             exercised=exercised,
             not_tested=not_tested,
             findings=report.findings_count,
-            fallbacks=0,
+            fallbacks=sum(report.fallback_breakdown.values()),
             exit_code=exit_code,
             operator_message=operator_message,
         )

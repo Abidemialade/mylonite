@@ -10,6 +10,15 @@ Closes the two issues the eng review surfaced:
 * **C1 — DRY.** Customiser and Judge both did "LiteLLM call → expect JSON →
   ``try/except`` parse → fallback." Folded here into one helper with a sync
   and an async entry point.
+* **T4 — don't swallow non-recoverable provider failures.** A raised
+  completion-call exception is classified via
+  ``diagnostics.classify_provider_error`` before falling back. auth/tls/
+  context_window will never succeed on retry, so those re-raise as
+  :class:`NonRecoverableProviderError` instead of quietly degrading to an
+  "inconclusive" ``FALLBACK_CALL_RAISED`` verdict — a misconfigured provider
+  should be a loud, actionable failure, not a silent one. Every other
+  category (rate_limit, network, unknown) keeps the pre-existing
+  swallow-into-fallback behaviour.
 
 The counter is a context manager so callers can nest scopes (the
 ``ScanEngine`` wraps the whole run; individual calls increment via
@@ -32,6 +41,9 @@ from typing import Any, Final
 import litellm
 from json_repair import repair_json
 from pydantic import BaseModel
+
+from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
+from mylonite.scan.providers import provider_from_model
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +90,39 @@ def fence(*parts: str) -> str:
 
 class BudgetExceededError(RuntimeError):
     """Raised when an LLM call would push the active counter over its cap."""
+
+
+#: Diagnosis categories (see ``diagnostics.classify_provider_error``) that will
+#: NEVER succeed on retry — a misconfigured API key, a TLS/cert failure, or a
+#: prompt that exceeds the model's context window are all deterministic, not
+#: transient. Swallowing these into ``FALLBACK_CALL_RAISED`` (the same bucket
+#: as a one-off network blip) turns a loud, actionable misconfiguration into a
+#: quiet "inconclusive" — the worst possible failure mode for a security tool.
+#: Every OTHER category (rate_limit, network, unknown) keeps the existing
+#: swallow-into-fallback behaviour unchanged: those genuinely can clear up on
+#: their own or on a later run.
+_NON_RECOVERABLE_CATEGORIES: Final = frozenset({"auth", "tls", "context_window"})
+
+
+class NonRecoverableProviderError(RuntimeError):
+    """A provider-call failure that will never succeed on retry — re-raised, not swallowed.
+
+    Raised by ``litellm_json_call``/``litellm_json_call_async`` instead of
+    returning ``fallback`` when :func:`classify_provider_error` puts the
+    causing exception in :data:`_NON_RECOVERABLE_CATEGORIES`. Carries the
+    :class:`~mylonite.scan.diagnostics.Diagnosis` so a caller (or an
+    uncaught-exception handler further up) can report the category/remedy
+    instead of a bare traceback. Chained via ``raise ... from exc`` so the
+    original provider exception is still visible in the traceback.
+    """
+
+    def __init__(self, diagnosis: Diagnosis, *, caller: str) -> None:
+        self.diagnosis = diagnosis
+        self.caller = caller
+        super().__init__(
+            f"{caller}: non-recoverable provider error [{diagnosis.category}]: "
+            f"{diagnosis.detail} — {diagnosis.remedy}"
+        )
 
 
 @dataclass
@@ -323,6 +368,33 @@ def _exc_detail(exc: BaseException, limit: int = 200) -> str:
     return f"{type(exc).__name__}: {exc}"[:limit]
 
 
+def _classify_or_swallow(
+    exc: Exception, *, model: str, caller: str, fallback: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Classify a raised completion-call exception; re-raise if non-recoverable.
+
+    auth/tls/context_window (see ``_NON_RECOVERABLE_CATEGORIES``) will never
+    succeed on retry, so this raises :class:`NonRecoverableProviderError`
+    instead of returning a fallback. Every other category (rate_limit,
+    network, unknown) preserves the pre-existing swallow-into-fallback
+    behaviour exactly — same fallback value, same log line, same
+    ``FALLBACK_CALL_RAISED`` cause.
+    """
+    diagnosis = classify_provider_error(exc, provider=provider_from_model(model))
+    if diagnosis.category in _NON_RECOVERABLE_CATEGORIES:
+        logger.error(
+            "%s: LiteLLM completion raised a non-recoverable [%s] error: %s",
+            caller,
+            diagnosis.category,
+            diagnosis.detail,
+        )
+        _mark_failure()
+        raise NonRecoverableProviderError(diagnosis, caller=caller) from exc
+    logger.exception("%s: LiteLLM completion raised", caller)
+    _mark_failure()
+    return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
+
+
 def _with_cause(fallback: Mapping[str, Any], cause: str, detail: str) -> dict[str, Any]:
     """Return a copy of ``fallback`` stamped with the fallback-cause sentinels."""
     out = dict(fallback)
@@ -442,9 +514,13 @@ def litellm_json_call(
 ) -> dict[str, Any]:
     """Sync wrapper around ``litellm.completion`` that returns parsed JSON.
 
-    On any exception from LiteLLM or any parse failure, returns ``fallback``.
-    Increments the active call counter; raises ``BudgetExceededError`` if the
-    cap is hit before the call is made.
+    On a parse failure, or a call exception classified as a transient
+    provider issue (rate_limit/network/unknown), returns ``fallback``. A call
+    exception classified as auth/tls/context_window (see
+    ``diagnostics.classify_provider_error`` — none of these will ever succeed
+    on retry) raises :class:`NonRecoverableProviderError` instead. Increments
+    the active call counter; raises ``BudgetExceededError`` if the cap is hit
+    before the call is made.
 
     ``completion_fn`` exists for tests — pass a stub instead of patching the
     module. Defaults to ``litellm.completion``. Every call passes an explicit
@@ -465,9 +541,7 @@ def litellm_json_call(
     try:
         response = fn(**call_kwargs)
     except Exception as exc:
-        logger.exception("%s: LiteLLM completion raised", caller)
-        _mark_failure()
-        return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
+        return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
     return _parse_or_fallback(response, expected_keys, fallback, caller)
 
@@ -502,8 +576,6 @@ async def litellm_json_call_async(
     try:
         response = await fn(**call_kwargs)
     except Exception as exc:
-        logger.exception("%s: LiteLLM acompletion raised", caller)
-        _mark_failure()
-        return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
+        return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
     return _parse_or_fallback(response, expected_keys, fallback, caller)

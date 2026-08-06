@@ -41,6 +41,7 @@ def _report(
     attempts: list[ScanAttempt] | None = None,
     findings_count: int = 0,
     aborted: str | None = None,
+    fallback_breakdown: dict[str, int] | None = None,
 ) -> ScanReport:
     return ScanReport(
         target_id="t",
@@ -50,6 +51,7 @@ def _report(
         attempts=attempts or [],
         findings_count=findings_count,
         aborted=aborted,
+        fallback_breakdown=fallback_breakdown or {},
         mylonite_version="0.0.0",
     )
 
@@ -299,6 +301,20 @@ class TestCoverageComputation:
     def test_default_fallbacks_field_is_zero(self) -> None:
         outcome = ScanOutcome.from_report(_report())
         assert outcome.fallbacks == 0
+
+    def test_fallbacks_sums_the_report_breakdown(self) -> None:
+        # T4: `fallbacks` is derived from `report.fallback_breakdown` (populated
+        # by the engine from judge/customiser fallback events) rather than the
+        # hardcoded 0 placeholder T1 shipped with — the sum across every cause.
+        report = _report(
+            fallback_breakdown={
+                "judge_call_raised": 2,
+                "judge_unparseable_output": 1,
+                "customiser_fallback": 3,
+            }
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.fallbacks == 6
 
 
 class TestUnknownAbortReason:
