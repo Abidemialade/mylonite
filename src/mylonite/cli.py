@@ -3109,10 +3109,13 @@ def _scaffold_target_file(
             "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
             "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
         )
+    from mylonite._authz import required_authorization
+
     echo_err(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
-        f"`mylonite scan --target-file {output} --authorize custom`."
+        f"`mylonite scan --target-file {output} "
+        f"--authorize {required_authorization(family=spec.family, scope=tf.scope)}`."
     )
 
 

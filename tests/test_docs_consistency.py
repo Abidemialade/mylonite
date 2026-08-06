@@ -190,6 +190,51 @@ def test_demo_render_examples_were_actually_collected() -> None:
     )
 
 
+def test_demo_render_next_step_scaffold_then_scan_chain_actually_authorizes() -> None:
+    """`_assert_example_parses` above only proves the two `_NEXT_STEP` commands
+    PARSE individually -- it can't see that they are a two-step CHAIN (scaffold
+    app.yaml, then scan that same app.yaml) where step 2's `--authorize` must
+    match whatever `family`/`scope` step 1's `--scaffold` actually produced.
+    That is exactly how this string went stale: it read `--scaffold app.yaml
+    ... --authorize my-app` with no `--scope` on the scaffold step, so the
+    scaffolded target got `family: custom` while the second command demanded
+    `--authorize my-app` -- `mylonite scan --command python --arg server.py
+    --scaffold app.yaml` (as it read before this fix) then `mylonite scan
+    --target-file app.yaml --authorize my-app` raised `AuthorizationRefused`
+    for real, verified live.
+
+    This test extracts BOTH commands from the live `_NEXT_STEP` string, reads
+    `--scope` off the scaffold command (mirroring exactly what
+    `_scaffold_target_file`/`_target_file_from_flags` does: family is always
+    the literal `"custom"` for the plain MCP scaffold path; scope is whatever
+    `--scope` was passed, or `None`), and `--authorize` off the scan command,
+    then proves the pairing via the same `check_authorization` the CLI itself
+    calls -- so a future edit to `_NEXT_STEP` that reintroduces a mismatch
+    fails here, not just in a live user's terminal.
+    """
+    from mylonite.demo import render as demo_render
+
+    examples = [m.group(0) for m in _PROSE_MYLONITE_RE.finditer(demo_render._NEXT_STEP)]
+    assert len(examples) == 2, (
+        f"expected exactly 2 `mylonite ...` commands in _NEXT_STEP (scaffold, then scan), "
+        f"found {len(examples)}: {examples} -- update this test if _NEXT_STEP's shape changed"
+    )
+    scaffold_cmd, scan_cmd = examples
+    assert "--scaffold" in scaffold_cmd, f"expected the first command to scaffold: {scaffold_cmd!r}"
+    assert "--authorize" in scan_cmd, f"expected the second command to authorize: {scan_cmd!r}"
+
+    scope_match = re.search(r"--scope\s+(\S+)", scaffold_cmd)
+    scope = scope_match.group(1) if scope_match else None
+    authorize_match = re.search(r"--authorize\s+(\S+)", scan_cmd)
+    assert authorize_match, f"no --authorize value found in {scan_cmd!r}"
+    authorize = authorize_match.group(1)
+
+    # `_scaffold_target_file` -> `_target_file_from_flags` always sets
+    # family="custom" for the plain (non --rest-url) MCP scaffold path;
+    # `--scope`, if given, becomes the target's scope.
+    check_authorization(family="custom", scope=scope, authorize=authorize, command="scan")
+
+
 # --------------------------------------------------------------------------
 # Narrower regression guards for specific stale references T17 fixed. Each
 # pins ONE concrete fact against live source (never a copy of the doc text),

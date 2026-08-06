@@ -49,7 +49,7 @@ _TEASER: Final[str] = (
 )
 _NEXT_STEP: Final[str] = (
     "Try it on YOUR app next: mylonite scan --command python --arg server.py --scaffold "
-    "app.yaml (free, no API key), then mylonite scan --target-file app.yaml "
+    "app.yaml --scope my-app (free, no API key), then mylonite scan --target-file app.yaml "
     "--authorize my-app (needs an LLM API key) — details: docs/test-your-app.md"
 )
 
