@@ -1839,115 +1839,6 @@ def generate(
     raise typer.Exit(code=EXIT_SUCCESS)
 
 
-def _boundary_control(weakness: str, spec: Any) -> Any:
-    """Build a boundary control for ``weakness``, applying the target's ControlConfig
-    hints (declared egress / consequential / read tools, URL param, allowlist) when
-    present; falls back to the control's name heuristics, then a fail-closed default,
-    otherwise."""
-    from mylonite.scan.control_shim import make_control
-
-    cfg = getattr(spec, "control_config", None)
-    if cfg is None:
-        return make_control(weakness)
-    return make_control(
-        weakness,
-        read_tool_names=frozenset(cfg.read_tool_names) or None,
-        egress_tools=frozenset(cfg.egress_tools) or None,
-        url_param=cfg.egress_url_param,
-        fetch_allowlist=tuple(cfg.fetch_allowlist) or None,
-        consequential_tools=frozenset(cfg.consequential_tools) or None,
-    )
-
-
-def _guarded_factory(spec: Any, scope: str | None, model: str, weakness: str) -> Any:
-    """Build the GUARDED side of a custom-target differential for ``weakness``.
-
-    Parity with ``ablate``'s server-layer mode: when the target declares a
-    server-layer toggle for this weakness (``control_env``), the guarded twin is
-    the REAL default launch (the server's own guard ON), so the differential
-    measures the actual server-layer control. Otherwise it falls back to the
-    adapter-boundary shim — a low-fidelity stand-in that cannot see server-side
-    guards (the verdict is reframed honestly in that case; see
-    ``DifferentialValidator(guarded_is_server_layer=...)``).
-    """
-    from mylonite.plugins._mcp.factory import build_mcp_adapter
-
-    if weakness in getattr(spec, "control_env", {}):
-        # Real server, guard ON (default launch) — no boundary shim, no env toggle.
-        return build_mcp_adapter(family=spec.family, scope=scope, model=model)
-    return build_mcp_adapter(
-        family=spec.family,
-        scope=scope,
-        model=model,
-        controls=[_boundary_control(weakness, spec)],
-    )
-
-
-def _vulnerable_adapter(spec: Any, scope: str | None, model: str) -> Any:
-    """Adapter for the RAW/vulnerable side of a differential.
-
-    Honors a target's ``vulnerable_launch`` (its declared, deliberately-unguarded
-    variant) so the raw side of a SERVER-LAYER-controlled target is genuinely
-    unguarded — otherwise the "raw" side would launch the guarded server and the
-    differential would never fire. When ``vulnerable_launch`` is undeclared this is
-    byte-for-byte the default adapter (today's behaviour). SECURITY: launching the
-    unguarded variant is announced loudly by the caller; env values are never logged.
-    """
-    from mylonite.plugins._mcp.factory import build_mcp_adapter
-
-    if getattr(spec, "vulnerable_launch", None) is None:
-        return build_mcp_adapter(family=spec.family, scope=scope, model=model)
-    return build_mcp_adapter(
-        family=spec.family,
-        scope=scope,
-        model=model,
-        launch_env=spec.launch_env(vulnerable=True),
-        launch_command=spec.launch_command(vulnerable=True),
-        launch_args=spec.launch_args(scope, vulnerable=True),
-    )
-
-
-def _differential_plan(exploit: Any, *, fast: bool) -> tuple[bool, str | None, str]:
-    """Decide whether the differential leg gates a real-target finding (M1).
-
-    The differential — re-driving a boundary-guarded twin to prove the *safeguard*,
-    not the model, carries the security — is the core differentiator. It now runs BY DEFAULT for a
-    custom/real target whenever a boundary control can be built for the finding's
-    weakness; ``--fast`` opts out (it doubles the live runs per finding). When no
-    control is inferable we run WITHOUT it, loudly (never a silently weaker gate).
-
-    Returns ``(run, control_weakness, note)`` — pure (``make_control`` is
-    deterministic), so it is unit-tested without a live target.
-    """
-    if fast:
-        return (
-            False,
-            None,
-            "--fast: skipping the differential leg "
-            "(weaker guarantee: kept = build ∧ stability ∧ effect ∧ consensus).",
-        )
-    from mylonite.gate.mitigation import weakness_class_for
-    from mylonite.scan.control_shim import make_control
-
-    cw = weakness_class_for(exploit)
-    try:
-        make_control(cw)
-    except ValueError:
-        return (
-            False,
-            None,
-            f"no boundary control implemented for weakness {cw!r} — running WITHOUT the "
-            "differential leg (weaker guarantee: kept = build ∧ stability ∧ effect ∧ "
-            "consensus). Add a control for this weakness, or pass --fast to silence.",
-        )
-    return (
-        True,
-        cw,
-        f"differential ON (default): proving control {cw} is load-bearing — "
-        "the differential gates `kept` (the safeguard, not the model, carries the security).",
-    )
-
-
 def _validate_custom(
     generated: Any,
     target_file: Path | None,
@@ -1967,9 +1858,11 @@ def _validate_custom(
     rule as ``scan``/``gate`` (:func:`_enforce_custom_authorize`), not zero
     checks.
     """
+    from mylonite.gate.mitigation import weakness_class_for
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.factory import build_mcp_adapter
+    from mylonite.plugins._mcp.factory import build_adapter_for_spec
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._mcp.twins import plan_twins
     from mylonite.plugins._reference.reference_validator import (
         DifferentialValidator,
         ReferenceVulnerableOracle,
@@ -2019,8 +1912,18 @@ def _validate_custom(
     # model, carries the security. `--fast` opts out (it doubles the live runs per
     # finding); a weakness with no inferable control falls back loudly to the
     # stability/effect/consensus gate.
-    run_diff, control_weakness, diff_note = _differential_plan(generated.exploit, fast=fast)
-    echo_err(f"validate: {diff_note}")
+    #
+    # plan_twins is the ONE place that decides raw-vs-guarded (server-layer
+    # control_env / vulnerable_launch / rest input-framing / boundary shim /
+    # no differential) — `gate` and `testkit.assert_control_holds` call the exact
+    # same function with the exact same inputs, so this decision cannot drift
+    # between them (the bug this closes: `gate` used to hold a parallel, drifted
+    # copy of this logic that ignored control_env entirely).
+    cw = weakness_class_for(generated.exploit)
+    plan = plan_twins(spec, weakness=cw, fast=fast, prove_input_control=prove_input_control)
+    if plan.banner:
+        for line in plan.banner.split("\n"):
+            echo_err(f"validate: {line}")
     if not randomize_exfil:
         echo_err(
             "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
@@ -2028,104 +1931,22 @@ def _validate_custom(
             "default for custom targets) to avoid 'teaching to the test'."
         )
 
-    # Does the target declare a SERVER-LAYER toggle for this control (control_env)?
-    # If so, the differential measures the REAL server guard at parity with `ablate`:
-    # the raw side env-disables THIS control (other guards stay ON), the guarded side
-    # is the real default launch. Otherwise both sides use the adapter-boundary shim —
-    # a low-fidelity stand-in that cannot see server-side guards, so the verdict is
-    # reframed honestly (DifferentialValidator(guarded_is_server_layer=...)).
-    server_layer = control_weakness is not None and control_weakness in spec.control_env
-
-    # A black-box HTTP agent (transport: rest) has no adapter-boundary control we can
-    # apply — HTTPAgentAdapter has no tool surface for the W1/W2 envelope, so a
-    # boundary-guarded twin would be BYTE-IDENTICAL to the raw target and wrongly
-    # REJECT a real finding. By default fall back to the non-differential gate
-    # (stability + effect + consensus). With --prove-input-control the operator opts
-    # into an INPUT data-framing ("spotlighting") differential — raw vs a build that
-    # wraps the payload as untrusted data — to measure whether that realistic input
-    # defence is load-bearing for their agent. `--fast` (skip the differential leg)
-    # takes precedence over --prove-input-control: without this guard the plan
-    # printed above ("--fast: skipping the differential leg") would be silently
-    # contradicted by re-enabling it here (DCR-0017).
-    rest_input_frame = (
-        prove_input_control and spec.transport == "rest" and not server_layer and not fast
-    )
-    if fast and prove_input_control and spec.transport == "rest" and not server_layer:
-        # Re-emit the diff note: the printed plan must match what actually runs.
-        echo_err(
-            "validate: --fast overrides --prove-input-control — the differential leg "
-            "(including the input data-framing check) stays skipped."
-        )
-    if rest_input_frame:
-        run_diff = True
-        control_weakness = control_weakness or "W2"
-        echo_err(
-            "validate: rest input-control differential — raw vs input data-framing "
-            "(spotlighting). `kept` means input framing IS load-bearing for this attack."
-        )
-    elif spec.transport == "rest" and not server_layer:
-        run_diff = False
-        echo_err(
-            "validate: rest (HTTP-agent) target — the boundary-control differential does "
-            "not apply to a black box, so `kept` is decided by stability + effect + consensus "
-            "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
-            "for a server-layer differential, or pass --prove-input-control to test input "
-            "data-framing."
-        )
-
-    if spec.vulnerable_launch is not None or server_layer:
-        echo_err(
-            f"validate: the raw side runs {spec.family!r} with the "
-            f"{control_weakness or 'target'} guard DISABLED (deliberately unguarded) — "
-            "ensure you are authorized to run it. Env values are never logged."
-        )
-
     def _factory() -> Any:
-        if server_layer:
-            if control_weakness is None:
-                raise RuntimeError(
-                    "internal error: server_layer is True but control_weakness is "
-                    "None — server_layer is defined as "
-                    "`control_weakness is not None and control_weakness in "
-                    "spec.control_env`, so this should be unreachable"
-                )
-            return build_mcp_adapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=model,
-                launch_env=spec.launch_env(disable_controls=(control_weakness,)),
-            )
-        return _vulnerable_adapter(spec, tf.scope, model)
+        return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.raw)
 
     guarded_factory: Any = None
-    control_context: str | None = None
-    if run_diff and rest_input_frame:
-        # Guarded build = the SAME HTTP agent driven with input data-framing applied.
-        control_context = "Control: input data-framing (spotlighting)"
+    if plan.control_weakness is not None:
 
         def _guarded() -> Any:
-            return build_mcp_adapter(
-                family=spec.family, scope=tf.scope, model=model, input_frame=True
-            )
-
-        guarded_factory = _guarded
-    elif run_diff and control_weakness is not None:
-        from mylonite.gate.mitigation import _snippet
-
-        cw = control_weakness
-        # Name the control in force for the report (control-efficacy oracle).
-        control_context = f"Control {cw}: {_snippet(cw)}"
-
-        def _guarded() -> Any:
-            return _guarded_factory(spec, tf.scope, model, cw)
+            return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.guarded)
 
         guarded_factory = _guarded
 
-    if server_layer:
+    if plan.guarded_is_server_layer:
         twin_kind = "real server-layer twin"
-    elif rest_input_frame:
+    elif plan.guarded.input_frame:
         twin_kind = "input data-framing guard"
-    elif run_diff:
+    elif plan.control_weakness is not None:
         twin_kind = "synthetic boundary twin"
     else:
         twin_kind = "none (differential not applicable to a black-box target)"
@@ -2133,7 +1954,11 @@ def _validate_custom(
         f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
         f"+ multi-judge consensus + effect probe (guarded side: {twin_kind})."
     )
-    if run_diff and not server_layer and not rest_input_frame:
+    if (
+        plan.control_weakness is not None
+        and not plan.guarded_is_server_layer
+        and not plan.guarded.input_frame
+    ):
         bar = "=" * 74
         echo_err(
             f"{bar}\n"
@@ -2150,10 +1975,10 @@ def _validate_custom(
         model=model,
         target_adapter_factory=_factory,
         guarded_adapter_factory=guarded_factory,
-        control_weakness=control_weakness,
+        control_weakness=plan.control_weakness,
         randomize_exfil=randomize_exfil,
-        guarded_is_server_layer=server_layer,
-        control_context=control_context,
+        guarded_is_server_layer=plan.guarded_is_server_layer,
+        control_context=plan.control_context,
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: echo_err(f"  … {msg}"),
     )
@@ -3556,6 +3381,13 @@ def gate(
         raise typer.Exit(code=EXIT_CONFIG)
 
     tf = None
+    # Built once, right after `tf` loads, and reused by BOTH scan_fn (tagging)
+    # and validate_fn (twin-building) below — so the two closures share the
+    # exact same TargetSpec, not two independently-rebuilt-but-structurally-
+    # equal ones. Not strictly required for plan_twins to agree (it's pure), but
+    # it removes even the theoretical possibility of the two calls resolving a
+    # target file differently.
+    custom_spec: Any = None
     routed_to: str
 
     if target_file is not None or target == "mcp:custom":
@@ -3565,13 +3397,14 @@ def gate(
             echo_err("--authorize is required for custom targets. See SECURITY.md.")
             raise typer.Exit(code=EXIT_CONFIG)
         if target_file is not None:
-            from mylonite.plugins._mcp.target_file import load_target_file
+            from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
+            custom_spec = build_target_spec(tf)
         else:
             # mcp:custom with inline flags — not supported via gate (no --command etc.)
             echo_err(
@@ -3661,55 +3494,31 @@ def gate(
         # behaviour; the old --prove-control opt-in flag was removed in 0.7.7.
         if fast or is_reference:
             return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
-        if tf is not None and tf.transport == "rest":
-            if prove_input_control:
-                # Opt-in: measure whether input data-framing (spotlighting) is
-                # load-bearing. Tag with the input-frame sentinel so validate_fn builds
-                # the framing-guarded HTTP build for the differential.
-                echo_err(
-                    "gate: rest input-control differential — raw vs input data-framing "
-                    "(spotlighting)."
-                )
-                return ScanOutcomeBundle(
-                    outcome=outcome,
-                    exploits=[
-                        ex.model_copy(
-                            update={
-                                "payload": ex.payload.model_copy(
-                                    update={
-                                        "metadata": {
-                                            **ex.payload.metadata,
-                                            "synthetic_control": "input-frame",
-                                        }
-                                    }
-                                )
-                            }
-                        )
-                        for ex in exploits
-                    ],
-                )
-            # A black-box HTTP agent has no adapter-boundary control to apply, so a
-            # boundary-guarded twin would equal the raw target and wrongly REJECT a
-            # real finding. Don't tag; the gate is decided by stability/effect/consensus.
-            echo_err(
-                "gate: rest (HTTP-agent) target — the control-efficacy differential does not "
-                "apply to a black box; the emitted test is gated by stability + effect + "
-                "consensus. Declare control_env / vulnerable_launch for a server-layer "
-                "differential, or pass --prove-input-control to test input data-framing."
-            )
-            return ScanOutcomeBundle(outcome=outcome, exploits=exploits)
+        if custom_spec is None:
+            echo_err("internal: expected a resolved TargetSpec for custom scan_fn tagging")
+            raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.gate.mitigation import weakness_class_for
-        from mylonite.scan.control_shim import make_control
+        from mylonite.plugins._mcp.twins import plan_twins
 
+        # plan_twins is the SAME function validate_fn calls below to build the
+        # actual twin — tagging each exploit with plan.control_weakness (rather
+        # than independently re-deriving "is this controllable") is what makes it
+        # structurally impossible for the tag and the later twin to disagree.
         tagged: list[Any] = []
+        announced: set[str] = set()
         for ex in exploits:
             cw = weakness_class_for(ex)
-            try:
-                make_control(cw)
-            except ValueError:
+            plan = plan_twins(
+                custom_spec, weakness=cw, fast=False, prove_input_control=prove_input_control
+            )
+            if plan.banner and plan.banner not in announced:
+                announced.add(plan.banner)
+                for line in plan.banner.split("\n"):
+                    echo_err(f"gate: {line}")
+            if plan.control_weakness is None:
                 tagged.append(ex)
                 continue
-            meta = {**ex.payload.metadata, "synthetic_control": cw}
+            meta = {**ex.payload.metadata, "synthetic_control": plan.control_weakness}
             tagged.append(
                 ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
             )
@@ -3746,39 +3555,36 @@ def gate(
             echo_err("internal: expected a loaded TargetFile for custom validate_fn")
             raise typer.Exit(code=EXIT_CONFIG)
         from mylonite.plugins._mcp import target_registry
-        from mylonite.plugins._mcp.factory import build_mcp_adapter
+        from mylonite.plugins._mcp.factory import build_adapter_for_spec
         from mylonite.plugins._mcp.target_file import build_target_spec
+        from mylonite.plugins._mcp.twins import plan_twins
 
-        spec = build_target_spec(tf)
+        spec = custom_spec if custom_spec is not None else build_target_spec(tf)
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
 
+        # Control-efficacy leg: a controllable finding (tagged in scan_fn, via the
+        # SAME plan_twins) gets a guarded twin so the differential leg proves the
+        # control is load-bearing (model held constant). Re-deriving the plan from
+        # the tagged weakness — rather than re-deciding server_layer/rest/boundary
+        # ad hoc here — is what makes it structurally impossible for this twin to
+        # disagree with scan_fn's tag or with `validate`'s own plan for the same
+        # spec+weakness (the bug this closes: the raw side here used to be a plain
+        # adapter that never honoured control_env at all).
+        control_weakness = generated.exploit.payload.metadata.get("synthetic_control") or None
+        plan = plan_twins(spec, weakness=control_weakness, fast=False)
+
         def _factory() -> Any:
-            return build_mcp_adapter(family=spec.family, scope=tf.scope, model=effective_model)
+            return build_adapter_for_spec(
+                spec, scope=tf.scope, model=effective_model, intent=plan.raw
+            )
 
-        # Control-efficacy leg: a controllable finding (tagged in scan_fn) gets a
-        # boundary-guarded twin so the differential leg proves the control is
-        # load-bearing (model held constant).
         guarded_factory: Any = None
-        control_weakness = generated.exploit.payload.metadata.get("synthetic_control")
-        if control_weakness == "input-frame":
-            # rest input-control: the guarded build is the SAME HTTP agent driven with
-            # input data-framing (spotlighting) applied.
-            def _guarded_framed() -> Any:
-                return build_mcp_adapter(
-                    family=spec.family, scope=tf.scope, model=effective_model, input_frame=True
-                )
-
-            guarded_factory = _guarded_framed
-        elif control_weakness:
-            cw: str = control_weakness
+        if plan.control_weakness is not None:
 
             def _guarded() -> Any:
-                return build_mcp_adapter(
-                    family=spec.family,
-                    scope=tf.scope,
-                    model=effective_model,
-                    controls=[_boundary_control(cw, spec)],
+                return build_adapter_for_spec(
+                    spec, scope=tf.scope, model=effective_model, intent=plan.guarded
                 )
 
             guarded_factory = _guarded
@@ -3795,7 +3601,9 @@ def gate(
             model=effective_model,
             target_adapter_factory=_factory,
             guarded_adapter_factory=guarded_factory,
-            control_weakness=control_weakness,
+            control_weakness=plan.control_weakness,
+            guarded_is_server_layer=plan.guarded_is_server_layer,
+            control_context=plan.control_context,
             randomize_exfil=randomize_exfil,
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
@@ -3953,8 +3761,9 @@ def ablate(
     actually carries the security. LIVE: launches the target's MCP server + provider.
     """
     from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.factory import build_mcp_adapter
+    from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._mcp.twins import boundary_control_for
     from mylonite.scan.ablation import (
         REP_SEED_BY_WEAKNESS,
         FireOutcome,
@@ -4064,24 +3873,24 @@ def ablate(
     observed_outcomes: list[ScanOutcome] = []
 
     def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
+        # Builds through the same build_adapter_for_spec/LaunchIntent chokepoint
+        # plan_twins-routed callers use (T10), and boundary_control_for is the
+        # exact ControlConfig-aware factory plan_twins itself uses for the
+        # single-weakness case. WHICH controls to disable/apply is deliberately
+        # ablate's own decision (see twins.py's module docstring): it toggles the
+        # FULL requested control set against each other (N-ary), not a single
+        # weakness in isolation — a different question from plan_twins'.
         if server_layer:
             # ``applied`` = controls currently ON. The raw side (applied=()) turns
             # them all OFF; the "only C" side leaves only C on. Translate to the
             # complement and disable those server-layer guards via the launch env.
             disable = tuple(c for c in usable if c not in applied)
-            adapter = build_mcp_adapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=effective_model,
-                launch_env=spec.launch_env(disable_controls=disable),
-            )
+            intent = LaunchIntent(disable_controls=disable)
         else:
-            adapter = build_mcp_adapter(
-                family=spec.family,
-                scope=tf.scope,
-                model=effective_model,
-                controls=[_boundary_control(w, spec) for w in applied],
+            intent = LaunchIntent(
+                boundary_controls=tuple(boundary_control_for(spec, w) for w in applied)
             )
+        adapter = build_adapter_for_spec(spec, scope=tf.scope, model=effective_model, intent=intent)
         return scan_target_fires(
             adapter,
             pattern_id,

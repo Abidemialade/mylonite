@@ -127,3 +127,38 @@ def test_unimplemented_control_raises_value_error(tmp_path: Path) -> None:
     target_file = _write_target_yaml(tmp_path)
     with pytest.raises(ValueError, match="W9"):
         testkit.assert_control_holds(_exploit(), target_file=target_file, control="W9")
+
+
+_REST_TARGET_YAML = """\
+family: myapp-rest
+transport: rest
+weakness_classes:
+  - W2
+request:
+  url: https://agent.example/chat
+  body: '{"prompt": "{prompt}"}'
+"""
+
+
+def test_input_frame_control_on_rest_target_does_not_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``control="input-frame"`` (the sentinel ``gate``/``validate
+    --prove-input-control`` tag a rest finding with — see
+    ``plugins._mcp.twins.INPUT_FRAME_CONTROL``) is not a W1-W4 class and must
+    NOT be rejected by the fail-fast ``make_control`` check; it must drive the
+    input data-framing differential instead (``_run_target_scan``'s guarded
+    leg gets ``input_frame=True``, not a boundary control)."""
+    p = tmp_path / "target.yaml"
+    p.write_text(_REST_TARGET_YAML, encoding="utf-8")
+
+    seen_input_frame: list[bool] = []
+
+    def fake_run(*, controls: Any, input_frame: bool = False, **kwargs: Any) -> Any:
+        seen_input_frame.append(input_frame)
+        return _fired() if not input_frame else _resisted()
+
+    monkeypatch.setattr(testkit, "_run_target_scan", fake_run)
+    assert testkit.assert_control_holds(_exploit(), target_file=p, control="input-frame") is None
+    # Raw (plain call, input_frame=False) fires; guarded (input_frame=True) resists.
+    assert seen_input_frame == [False, True]

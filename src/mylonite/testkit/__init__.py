@@ -286,6 +286,7 @@ def _run_target_scan(
     controls: list[Any] | None,
     completion_fn: Callable[..., Any] | None,
     disable_controls: tuple[str, ...] = (),
+    input_frame: bool = False,
 ) -> ScanResult:
     """Re-drive the declared target once, scoped to one seed.
 
@@ -294,9 +295,13 @@ def _run_target_scan(
     control differs. ``disable_controls`` (when non-empty) instead toggles OFF
     the named SERVER-LAYER guard(s) via the target's declared ``control_env``,
     so the re-drive exercises the target's own real guard rather than only the
-    low-fidelity adapter-boundary shim. Shared by :func:`assert_target_resists`
-    (raw, no controls, no disables) and :func:`assert_control_holds` (raw +
-    boundary-guarded, or raw-with-server-guard-disabled + real-guard-on).
+    low-fidelity adapter-boundary shim. ``input_frame`` wraps the payload as
+    untrusted data for a ``transport: rest`` target's input data-framing
+    ("spotlighting") differential — ignored by every other transport. Shared by
+    :func:`assert_target_resists` (raw, no controls/disables/framing) and
+    :func:`assert_control_holds` (raw vs one of: boundary-guarded,
+    raw-with-server-guard-disabled + real-guard-on, or input-framed) — every
+    combination a :class:`~mylonite.plugins._mcp.twins.TwinPlan` can produce.
 
     Builds its adapter through :func:`~mylonite.plugins._mcp.factory.build_adapter_for_spec`
     — the shared transport-dispatching chokepoint — rather than constructing an
@@ -324,6 +329,7 @@ def _run_target_scan(
         intent=LaunchIntent(
             boundary_controls=tuple(controls or ()),
             disable_controls=disable_controls,
+            input_frame=input_frame,
         ),
     )
     config = ScanConfig(
@@ -558,18 +564,25 @@ def assert_control_holds(
 
     Notes
     -----
+    The raw-vs-guarded decision is delegated to
+    :func:`~mylonite.plugins._mcp.twins.plan_twins` — the SAME pure function
+    ``mylonite validate``/``mylonite gate`` call for this target+control, so an
+    emitted test's twin can never disagree with what those commands proved.
     When the target declares a SERVER-LAYER toggle for ``control`` (its target
     file's ``control_env``), the raw leg re-drives with that REAL guard turned
     OFF (via ``disable_controls``) rather than relying only on the adapter-
-    boundary shim — mirroring the CLI's ``validate``/``ablate`` server-layer
-    differential — and the guarded leg is simply the plain default launch (the
+    boundary shim, and the guarded leg is simply the plain default launch (the
     real guard is ON by default, so no shim is layered on top of it). A target
     with no ``control_env`` entry for ``control`` is unaffected: both legs
-    behave exactly as before (boundary shim only).
+    behave exactly as before (boundary shim only). ``control="input-frame"``
+    (the sentinel ``mylonite gate``/``validate --prove-input-control`` tag a
+    ``transport: rest`` finding with) runs the input data-framing differential
+    instead of a W1-W4 boundary control.
     """
     from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._mcp.twins import INPUT_FRAME_CONTROL, plan_twins
     from mylonite.scan.control_shim import make_control
 
     enable_truststore()
@@ -584,12 +597,17 @@ def assert_control_holds(
         )
     tf = load_target_file(target_path)
     spec = build_target_spec(tf)
-    server_layer = control in spec.control_env
-    # Resolve the boundary control up front so a bad control name fails clearly
-    # (ValueError) before we spawn any subprocess. Still resolved even on the
-    # server_layer path — it validates ``control`` names a real weakness class,
-    # and stays available in case a future caller wants to combine both legs.
-    boundary_control = make_control(control)
+    # Resolve the control up front so a bad name fails clearly (ValueError)
+    # before any subprocess spawns. This is a hard, fail-fast check specific to
+    # this explicit, hand-picked argument — unlike plan_twins' own "no
+    # implemented control" branch, which is a SOFT degrade-to-no-differential
+    # for gate/validate's auto-detected weakness class, not appropriate here (a
+    # committed control-efficacy gate must never silently become a no-op).
+    # INPUT_FRAME_CONTROL is not a W1-W4 class and has no boundary control to
+    # resolve; plan_twins handles it directly below.
+    if control != INPUT_FRAME_CONTROL:
+        make_control(control)
+    plan = plan_twins(spec, weakness=control, fast=False)
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     try:
@@ -599,9 +617,10 @@ def assert_control_holds(
             pattern_id=exploit.pattern_id,
             model=model,
             provider=provider,
-            controls=None,
+            controls=list(plan.raw.boundary_controls) or None,
             completion_fn=_completion_fn,
-            disable_controls=(control,) if server_layer else (),
+            disable_controls=plan.raw.disable_controls,
+            input_frame=plan.raw.input_frame,
         )
         guarded = _run_target_scan(
             spec=spec,
@@ -609,8 +628,10 @@ def assert_control_holds(
             pattern_id=exploit.pattern_id,
             model=model,
             provider=provider,
-            controls=None if server_layer else [boundary_control],
+            controls=list(plan.guarded.boundary_controls) or None,
             completion_fn=_completion_fn,
+            disable_controls=plan.guarded.disable_controls,
+            input_frame=plan.guarded.input_frame,
         )
     finally:
         target_registry.clear_runtime_targets()

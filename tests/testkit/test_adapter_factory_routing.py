@@ -152,3 +152,90 @@ def test_testkit_threads_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyP
     # so the REAL server-layer guard for W2 is actually turned off — not just
     # the low-fidelity adapter-boundary shim.
     assert seen_disable_controls == [("W2",), ()]
+
+
+def test_assert_control_holds_routes_through_plan_twins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T11: ``assert_control_holds`` must derive its raw/guarded scan parameters
+    from ``plugins._mcp.twins.plan_twins`` — replacing the ad-hoc ``server_layer
+    = control in spec.control_env`` check T10 added as an interim fix — so the
+    emitted test's twin can never disagree with ``gate``/``validate``'s.
+
+    Proven by stubbing ``plan_twins`` to return a DISTINCTIVE ``TwinPlan`` (a
+    sentinel ``disable_controls`` on raw, ``input_frame`` on guarded — neither
+    of which this target/control would naturally produce) and confirming
+    ``_run_target_scan`` receives exactly those fields: this only passes if
+    ``assert_control_holds`` actually reads plan_twins' return value, not some
+    independently-reimplemented decision that happens to agree with it.
+    """
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+    from mylonite.plugins._mcp import twins as twins_module
+    from mylonite.plugins._mcp.factory import LaunchIntent
+
+    target_file = _write_target_yaml(tmp_path)  # plain target.yaml, no control_env
+    pattern_id = "indirect-injection-note-body-direct"
+    exploit = ExploitRecord(
+        target_id="mcp:myapp-routing",
+        pattern_id=pattern_id,
+        payload=Payload(pattern_id=pattern_id, channel="tool-result", body="x"),
+        response=AdapterResponse(payload_pattern_id=pattern_id, raw_response="ok", tool_calls=[]),
+        success_reason="test fixture",
+        compliance=ComplianceTags(),
+    )
+
+    sentinel_plan = twins_module.TwinPlan(
+        raw=LaunchIntent(disable_controls=("SENTINEL",)),
+        guarded=LaunchIntent(input_frame=True),
+        control_weakness="W2",
+        guarded_is_server_layer=False,
+        control_context="Control W2: sentinel",
+        banner=None,
+    )
+    plan_calls: list[dict[str, Any]] = []
+
+    def fake_plan_twins(spec: Any, **kwargs: Any) -> Any:
+        plan_calls.append(kwargs)
+        return sentinel_plan
+
+    monkeypatch.setattr(twins_module, "plan_twins", fake_plan_twins)
+
+    seen: list[dict[str, Any]] = []
+
+    def fake_run_target_scan(
+        *,
+        controls: Any,
+        disable_controls: tuple[str, ...] = (),
+        input_frame: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        from types import SimpleNamespace
+
+        seen.append(
+            {"controls": controls, "disable_controls": disable_controls, "input_frame": input_frame}
+        )
+        fired = SimpleNamespace(
+            exploits=[SimpleNamespace(pattern_id=pattern_id)],
+            report=SimpleNamespace(
+                attempts=[SimpleNamespace(pattern_id=pattern_id, outcome="finding")]
+            ),
+        )
+        resisted = SimpleNamespace(
+            exploits=[],
+            report=SimpleNamespace(
+                attempts=[SimpleNamespace(pattern_id=pattern_id, outcome="no_finding")]
+            ),
+        )
+        # Raw (sentinel disable_controls) fires; guarded (sentinel input_frame)
+        # resists -- distinguishable purely by which sentinel field is set.
+        return fired if disable_controls else resisted
+
+    monkeypatch.setattr(testkit, "_run_target_scan", fake_run_target_scan)
+
+    testkit.assert_control_holds(exploit, target_file=target_file, control="W2")
+
+    assert plan_calls == [{"weakness": "W2", "fast": False}]
+    assert seen == [
+        {"controls": None, "disable_controls": ("SENTINEL",), "input_frame": False},
+        {"controls": None, "disable_controls": (), "input_frame": True},
+    ]
