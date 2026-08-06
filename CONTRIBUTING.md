@@ -109,7 +109,11 @@ drifts from what's tagged/published (this happened for 0.7.6 and 0.7.7: both
 merged with the version bump and CHANGELOG update either missing or
 unfinished, and no tag was ever pushed for either).
 
-1. **Bump `pyproject.toml`.** Update `[project].version` to the new version.
+1. **Bump the version in both places.** Update `[project].version` in
+   `pyproject.toml` *and* `__version__` in `src/mylonite/version.py` — they
+   must match (`tests/test_version.py::test_version_matches_pyproject`
+   enforces it in CI). It's easy to update only one; that's exactly what
+   happened for 0.7.7 the first time around.
 2. **Update `CHANGELOG.md`.** Rename the `## [Unreleased]` section header to
    `## [X.Y.Z] - YYYY-MM-DD`, then add a fresh empty `## [Unreleased]` header
    above it for the next round of changes. Add a compare link at the bottom:
