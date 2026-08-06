@@ -415,11 +415,20 @@ def _run_target_scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    modules = [
-        m
-        for m in discover("mylonite.attack_modules")
-        if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
-    ]
+    # DCR-0002: every discovered attack module is passed through, not just the
+    # two bundled families — this re-drive is scoped to ONE already-known
+    # pattern_id via `ScanConfig.pattern_id_filter` below, which already makes
+    # `ScanEngine.run()` drop every payload that doesn't match it. Hardcoding a
+    # 2-id allowlist here excluded any OTHER discovered module (a third-party
+    # plugin author's own `AttackModule`, registered via the same
+    # entry-point mechanism Mylonite's own bundled modules use) from ever
+    # contributing a payload for its own pattern_ids — so an exploit whose
+    # pattern_id came from such a module silently re-drove ZERO payloads,
+    # surfacing upstream as a misleading "inconclusive: likely a
+    # replay/fixture problem" rather than the real cause. `discover()` already
+    # instantiates every registered module regardless of any filtering
+    # applied afterwards, so passing them all through costs nothing extra.
+    modules = discover("mylonite.attack_modules")
     adapter = build_adapter_for_spec(
         spec,
         scope=scope,

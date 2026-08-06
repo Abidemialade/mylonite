@@ -3412,6 +3412,11 @@ def gate(
         ReferenceVulnerableOracle,
     )
 
+    # Captured BEFORE mylonite.yaml may fill target_file in below, so the
+    # DCR-0001 guard further down can name the actual source (explicit flag vs.
+    # config) in its error rather than just reporting the resolved path.
+    _target_file_flag = target_file
+
     # Declarative run config (mylonite.yaml): mirror `scan` so `gate` fills any flag
     # the user omitted (target_file / authorize / provider / model / budget) from a
     # project config. Auto-discovered from ./mylonite.yaml when present and no
@@ -3466,6 +3471,37 @@ def gate(
             "--target-file. Pass a custom target via --target-file alone (drop the "
             "'reference:' target argument), or drop --target-file to gate the "
             "reference twin."
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    # DCR-0001: a real 'mcp:<family>[:<scope>]' positional target + a resolved
+    # target_file is the same footgun as the 'reference:*' case above, but worse
+    # — the branch below (`target_file is not None or target == "mcp:custom"`)
+    # tests target_file FIRST, so it would silently gate target_file's target and
+    # discard the 'mcp:<family>' argument with NO warning at all. And target_file
+    # need not even be an explicit --target-file flag: it may have been pulled
+    # from an auto-discovered ./mylonite.yaml (or an explicit --config) above,
+    # in which case a command line with zero target-file-shaped flags would still
+    # silently override the positional argument. Reject the combination up
+    # front, naming both the ignored argument and where target_file came from.
+    if (
+        target is not None
+        and target != "mcp:custom"
+        and target.startswith("mcp:")
+        and target_file is not None
+    ):
+        if _target_file_flag is not None:
+            target_file_source = "--target-file"
+        else:
+            target_file_source = f"{config_path} (auto-discovered `target_file:`)"
+        echo_err(
+            f"gate: a bundled target {target!r} was given on the command line, but "
+            f"target_file ({target_file}) is also set via {target_file_source} — "
+            "these are mutually exclusive. `gate` would otherwise silently gate the "
+            f"target_file's target and discard the {target!r} argument. Drop "
+            "--target-file (and any mylonite.yaml `target_file:` entry) to gate "
+            f"the bundled {target!r} target, or drop the positional target "
+            "argument to gate the custom target."
         )
         raise typer.Exit(code=EXIT_CONFIG)
 

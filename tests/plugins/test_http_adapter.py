@@ -92,6 +92,18 @@ def test_escape_for_body_leaves_non_json_templates_raw() -> None:
     assert escaped == 'hi \\"there\\"\\nx'
 
 
+def test_escape_for_body_leaves_quoted_slot_raw_in_non_json_template() -> None:
+    """DCR-0003: a plain-text/form-encoded template can legitimately wrap
+    {prompt} in literal quotes for PROSE reasons (not JSON syntax). The old
+    quoted-slot branch fired purely off the local quote-character heuristic
+    with no trial-parse, so this got misdetected as JSON-shaped and
+    JSON-escaped -- corrupting a real newline into a literal backslash-n
+    even though the template was never JSON at all."""
+    body = 'text=Hello, "{prompt}" said the user'
+    escaped = _escape_for_body("line one\nline two", body)
+    assert escaped == "line one\nline two"  # a real newline, NOT escaped to \\n
+
+
 def test_escape_for_body_mixed_context_still_escapes_the_quoted_slot() -> None:
     """DCR-0014: a template with two {prompt} slots in different JSON contexts
     (one quoted, one bare) used to fail a whole-document parse and silently
