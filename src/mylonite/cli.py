@@ -1249,38 +1249,25 @@ def scan(
 
         echo(redact(render_summary(result)))
 
-    # C4 / G5: map aborted reason to distinct exit code.
-    if result.report.aborted == "budget_exceeded":
-        raise typer.Exit(code=EXIT_BUDGET)
-    if result.report.aborted == "provider_unreachable":
-        raise typer.Exit(code=EXIT_PROVIDER)
-    if result.report.aborted == "no_payloads":
-        # Issue #3: nothing ran — a misconfigured/unknown target must not look
-        # like a clean pass. Point the user at the on-ramp for custom targets.
-        echo_err(
-            "error: no seeds were applicable to this target, so nothing was scanned. "
-            "If this is a custom MCP app, declare which weakness classes it exposes "
-            "via --target-file (weakness_classes) or --weakness-class."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    if result.report.aborted == "describe_failed":
-        # The adapter couldn't describe the target (e.g. the MCP server failed to
-        # launch). Zero attempts ran — must not exit 0 and read as a clean pass.
-        echo_err(
-            "error: could not describe the target (adapter.describe() failed); "
-            "nothing was scanned. Check the target command/scope and connectivity."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    if result.report.aborted == "wall_clock_timeout":
-        # The scan hit its wall-clock budget before finishing. Coverage is
-        # incomplete, so it must not exit 0 and read as a clean pass (same honesty
-        # rule as no_payloads / describe_failed).
-        echo_err(
-            "error: scan exceeded its wall-clock budget and stopped early; coverage "
-            "is incomplete. Raise the timeout or narrow the scan, then re-run."
-        )
-        raise typer.Exit(code=EXIT_CONFIG)
-    raise typer.Exit(code=EXIT_SUCCESS)
+    # C4 / G5 / A1: the exit code is derived from ScanOutcome — the single
+    # "did this scan actually work" authority (mylonite.scan.coverage) — rather
+    # than hand-matching `result.report.aborted` here. That hand-matching used
+    # to fall through to EXIT_SUCCESS for any report that wasn't formally
+    # `aborted`, which missed the case where every attempt errored (e.g.
+    # missing/invalid provider credentials) without ever tripping the
+    # consecutive-failures threshold that sets `aborted="provider_unreachable"`
+    # (too few applicable attempts to reach it) — `scan` would print a summary
+    # and exit 0, indistinguishable from a genuine clean pass. ScanOutcome
+    # closes that gap (it was already closed for `gate` — see coverage.py).
+    # For the 5 previously-handled abort reasons this is behaviour-identical:
+    # ScanOutcome's exit-code mapping and operator_message text were extracted
+    # verbatim from this exact block.
+    from mylonite.scan.coverage import ScanOutcome
+
+    outcome = ScanOutcome.from_report(result.report)
+    if outcome.operator_message:
+        echo_err(outcome.operator_message)
+    raise typer.Exit(code=outcome.exit_code)
 
 
 @app.command()

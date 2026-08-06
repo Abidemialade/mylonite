@@ -264,6 +264,27 @@ class TestCoverageComputation:
         assert outcome.not_tested == 0
         assert outcome.exercised == 0
         assert outcome.coverage is Coverage.NOT_EXERCISED
+        # A `--dry-run` report collapses to `coverage is NOT_EXERCISED` just
+        # like a genuine "nothing ran" gap does, but it's deliberate BY
+        # DESIGN (no customisation/invocation is attempted in dry-run mode) —
+        # it must NOT trip the untrustworthy-without-abort exit code, or
+        # `mylonite scan --dry-run` would start exiting non-zero on every run.
+        assert outcome.exit_code == EXIT_SUCCESS
+        assert outcome.operator_message is None
+
+    def test_mixed_dry_run_and_real_gap_still_exits_nonzero(self) -> None:
+        # Not every attempt is skipped_dry_run here — one is a genuine
+        # structural gap — so this must NOT be excused as "dry-run shaped".
+        report = _report(
+            attempts=[
+                _attempt("skipped_dry_run"),
+                _attempt("error", seed_id="s2"),
+            ],
+            findings_count=0,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.coverage is Coverage.NOT_EXERCISED
+        assert outcome.exit_code == EXIT_CONFIG
 
     def test_mixed_fired_and_resisted_count_as_exercised(self) -> None:
         report = _report(

@@ -705,12 +705,78 @@ def test_scan_exit_4_on_provider_failure(
             "200",
         ],
     )
-    # Either exit code 4 (provider_unreachable) or the adapter skip path produced
-    # every attempt as skipped_planner_failure (still fine — no findings, no abort).
-    # The engine aborts on 3 consecutive provider failures via consecutive_failures.
-    # In practice the wrapped completion in the adapter increments
-    # consecutive_failures on the counter; after 3, ScanEngine sets aborted.
-    assert result.exit_code in (EXIT_PROVIDER, EXIT_SUCCESS)
+    # Either exit code 4 (provider_unreachable, the common case: 3 consecutive
+    # provider failures trip ScanEngine's threshold and it sets `aborted`), or
+    # — if there were too few applicable attempts to ever reach that threshold
+    # — every attempt comes back skipped_planner_failure/error with `aborted`
+    # left None. That second shape is NOT "fine": it's the exact fail-open
+    # gap ScanOutcome closes (scan/coverage.py) — `scan` must still refuse to
+    # exit 0 for it. EXIT_SUCCESS is deliberately NOT in this set any more.
+    assert result.exit_code in (EXIT_PROVIDER, EXIT_CONFIG)
+
+
+def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live sibling of gate's fail-open fix, for plain `mylonite scan`
+    itself: `scan`'s exit code is now derived from ScanOutcome.from_report
+    (mylonite.scan.coverage) rather than hand-matching `report.aborted`
+    against the 5 known strings. Before this fix, a report where every
+    attempt errored but the engine never tripped the consecutive-failures
+    threshold (too few applicable attempts) had `aborted=None`, and the old
+    hand-matching fell through to EXIT_SUCCESS — `scan` printed a summary and
+    exited 0, indistinguishable from a genuine clean pass to any CI step
+    checking $?. Deterministic (no live LLM calls, no threshold-timing
+    flakiness): the engine run itself is monkeypatched to return a canned,
+    already-errored ScanResult, mirroring the gate regression test
+    (test_gate_exits_nonzero_when_every_attempt_errored_without_formal_abort
+    in tests/gate/test_orchestrator.py)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanEngine, ScanResult
+
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason="litellm.AuthenticationError: Missing Anthropic API Key",
+                error_detail=None,
+            ),
+            ScanAttempt(
+                seed_id="s2",
+                pattern_id="s2",
+                outcome="error",
+                verdict_mechanism=None,
+                verdict_reason="litellm.AuthenticationError: Missing Anthropic API Key",
+                error_detail=None,
+            ),
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--output-dir", str(tmp_path)],
+    )
+    assert result.exit_code != EXIT_SUCCESS, result.output
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "never formally aborted" in result.output
 
 
 # ---------------------------------------------------------------------------

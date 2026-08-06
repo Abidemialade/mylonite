@@ -271,6 +271,7 @@ class ScanOutcome:
 
         exercised = 0
         not_tested = 0
+        intentionally_skipped = 0
         for attempt in report.attempts:
             attempt_class = ATTEMPT_CLASS[attempt.outcome]
             if attempt_class in (
@@ -280,7 +281,8 @@ class ScanOutcome:
                 exercised += 1
             elif attempt_class is AttemptClass.NOT_TESTED:
                 not_tested += 1
-            # INTENTIONALLY_SKIPPED counts toward neither — it's not a gap.
+            elif attempt_class is AttemptClass.INTENTIONALLY_SKIPPED:
+                intentionally_skipped += 1
 
         if exercised == 0:
             coverage = Coverage.NOT_EXERCISED
@@ -289,10 +291,28 @@ class ScanOutcome:
         else:
             coverage = Coverage.EXERCISED
 
+        # A ``--dry-run`` report is EVERY attempt coming back
+        # `skipped_dry_run` (INTENTIONALLY_SKIPPED) — deliberately not
+        # exercised BY DESIGN, not a coverage gap (see AttemptClass's
+        # docstring). It collapses to `coverage is NOT_EXERCISED` just like a
+        # genuine "nothing ran" gap does, so it must be excluded from the
+        # untrustworthy-without-abort branch below or `--dry-run` would start
+        # exiting non-zero for every scan.
+        is_dry_run_shaped = (
+            bool(report.attempts)
+            and intentionally_skipped == len(report.attempts)
+            and exercised == 0
+            and not_tested == 0
+        )
+
         if abort is not None:
             exit_code = _EXIT_CODE_BY_ABORT[abort]
             operator_message = _OPERATOR_MESSAGE_BY_ABORT[abort]
-        elif coverage is not Coverage.EXERCISED and report.findings_count == 0:
+        elif (
+            coverage is not Coverage.EXERCISED
+            and report.findings_count == 0
+            and not is_dry_run_shaped
+        ):
             # No formal AbortReason was recorded, yet coverage never reached
             # EXERCISED (PARTIAL or NOT_EXERCISED) and nothing was found. Must
             # not be indistinguishable from a genuine clean pass — see the
