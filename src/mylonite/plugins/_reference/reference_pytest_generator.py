@@ -185,7 +185,7 @@ def _slugify(value: str) -> str:
     right proxy (DCR-0028). Restrict to ASCII alnum and prefix a digit-leading
     slug so the emitted ``def test_security_<slug>`` always parses.
 
-    Two callers, both attacker-influenceable strings that need a display- or
+    Three callers, all attacker-influenceable strings that need a display- or
     identifier-safe form rather than rejection:
 
     * A validated ``pattern_id`` (see :data:`_SAFE_PATTERN_ID`) -> the test
@@ -200,6 +200,17 @@ def _slugify(value: str) -> str:
       distinct from (and not fixed by) quoting it as an argument literal.
       Slugifying it for display removes that sequence too, and is a no-op for
       realistic control names (e.g. ``"W2"``).
+    * An unvalidated ``target_id`` (DCR-0006) -> the same DOCSTRING-safe
+      preview, for the same reason. ``target_id`` (``mcp:<family>:<scope>``)
+      has no CODE site at all in this file — it is interpolated ONLY into
+      docstrings (module docstring in every template, plus the function
+      docstring of ``_TEMPLATE_CUSTOM`` / ``_TEMPLATE_CONTROL``) — so
+      ``_py_literal`` would not even help here: a ``repr()``-quoted value is
+      safe as an argument literal, but the same text bare-embedded inside a
+      *different* (docstring) string can still carry a live triple-double-quote
+      sequence. ``TargetFile.family`` is a bare ``str`` with only a 3-reserved-name
+      validator, so this is genuinely attacker-influenceable, not just
+      theoretically so.
     """
     slug = "".join(ch if (ch.isascii() and ch.isalnum()) else "_" for ch in value)
     return f"_{slug}" if slug[:1].isdigit() else slug
@@ -284,6 +295,14 @@ class ReferencePytestGenerator(TestGeneratorBase):
         else:
             template = _TEMPLATE_CUSTOM
 
+        # DCR-0006: target_id is interpolated ONLY into docstrings below (never
+        # a code site), so it gets the same treatment as control_display just
+        # above — slugified for display. A bare `{target_id}` here let a
+        # hostile value (TargetFile.family has no charset validation) embed a
+        # `"""` that terminates the emitted module's own docstring early and
+        # turns the remainder of the file into live top-level code.
+        target_id_display = _slugify(exploit.target_id)
+
         # T12: read back the exec context ScanEngine._finalize stamped onto the
         # exploit's payload (mylonite.exec.* metadata) and render it as explicit
         # model=/provider= literals in the CUSTOM/CONTROL templates -- so the
@@ -303,7 +322,10 @@ class ReferencePytestGenerator(TestGeneratorBase):
 
         source = template.format(
             pattern_id=exploit.pattern_id,  # validated above; docstring use only
-            target_id=exploit.target_id,
+            # Docstring-only site (no code site exists for target_id): slugified,
+            # so a hostile value can't smuggle a `"""` that terminates the
+            # enclosing docstring early (DCR-0006). See `_slugify`'s docstring.
+            target_id=target_id_display,
             slug=slug,
             decorators=decorators,
             compliance_inline=compliance_inline,

@@ -23,6 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mylonite._redaction import redact
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
@@ -519,7 +520,7 @@ class ScanEngine:
                         pattern_id=payload.pattern_id,
                         outcome="error",
                         verdict_mechanism=None,
-                        verdict_reason=str(exc),
+                        verdict_reason=redact(str(exc)),
                         error_detail=type(exc).__name__,
                     ),
                     exploit=None,
@@ -803,7 +804,7 @@ class ScanEngine:
                     pattern_id=payload.pattern_id,
                     outcome="error",
                     verdict_mechanism=None,
-                    verdict_reason=str(exc),
+                    verdict_reason=redact(str(exc)),
                     error_detail=type(exc).__name__,
                 ),
                 exploit=None,
@@ -841,7 +842,7 @@ class ScanEngine:
                     pattern_id=payload.pattern_id,
                     outcome="error",
                     verdict_mechanism=None,
-                    verdict_reason=str(exc),
+                    verdict_reason=redact(str(exc)),
                     error_detail=type(exc).__name__,
                 ),
                 exploit=None,
