@@ -67,6 +67,7 @@ from mylonite.demo._replay import (
     packaged_fixture_dir,
 )
 from mylonite.scan.engine import ScanResult
+from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.wiring import build_scan, note_id_counter
 
 #: On-disk format version for a ``fixtures_dir`` sidecar (``_meta.json``). Bumped
@@ -105,6 +106,24 @@ class TestkitFixtureError(FixtureError):
 
     The message always names the re-record path so the gate stays honest rather
     than silently green.
+    """
+
+
+class TestkitConfigError(ValueError):
+    """Raised when the model/provider execution context an emitted LIVE test
+    needs to re-drive its target cannot be resolved from any source (T12).
+
+    :func:`assert_target_resists` and :func:`assert_control_holds` used to
+    default their ``model``/``provider`` parameters to a hardcoded value
+    (``"claude-haiku-4-5"`` / ``"anthropic"``) — meaning a committed regression
+    test could silently gate CI using a DIFFERENT model than the one that
+    actually discovered/validated the exploit. Both now resolve, per field,
+    independently: an explicit keyword argument -> the exploit's own
+    ``mylonite.exec.*`` :class:`~mylonite.contracts._types.Payload.metadata`
+    (stamped by :class:`~mylonite.scan.engine.ScanEngine` at scan time) -> a
+    sibling ``scan_report.json`` next to ``target_file`` (back-fill for an
+    exploit committed before T12) -> this error. A missing execution context
+    must be a LOUD failure, never a silent wrong-model run.
     """
 
 
@@ -274,6 +293,66 @@ def _exploit_fired(result: ScanResult, exploit: ExploitRecord) -> bool:
     return any(e.pattern_id == pid for e in result.exploits) or any(
         a.outcome == "finding" for a in result.report.attempts if a.pattern_id == pid
     )
+
+
+def _resolve_exec_context(
+    exploit: ExploitRecord,
+    *,
+    model: str | None,
+    provider: str | None,
+    target_file: Path,
+) -> tuple[str, str]:
+    """Resolve the (model, provider) a LIVE re-drive gates on (T12).
+
+    Each field resolves INDEPENDENTLY through the same three-step order:
+
+    1. The explicit ``model=``/``provider=`` keyword argument, if the caller
+       (or the emitted test source, when the generator had exec context at
+       ``mylonite generate`` time) passed one.
+    2. The exploit's own ``mylonite.exec.*`` ``Payload.metadata`` (stamped by
+       ``ScanEngine._finalize`` when the exploit was originally scanned) — see
+       :class:`~mylonite.scan.exec_context.ExecContext`.
+    3. A sibling ``scan_report.json`` next to ``target_file`` — back-fill for
+       an exploit committed BEFORE T12, which carries no exec-context
+       metadata at all.
+
+    Raises :class:`TestkitConfigError` if either field is still unresolved
+    after all three steps — a missing execution context must be a loud
+    failure, never a silent fall-through to a hardcoded default model.
+    """
+    ctx = ExecContext.from_metadata(exploit.payload.metadata)
+    resolved_model = model or (ctx.model if ctx is not None else None)
+    resolved_provider = provider or (ctx.provider if ctx is not None else None)
+
+    sibling_report = Path(target_file).parent / "scan_report.json"
+    if (resolved_model is None or resolved_provider is None) and sibling_report.is_file():
+        try:
+            report_data: Any = json.loads(sibling_report.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report_data = None
+        if isinstance(report_data, dict):
+            raw_model = report_data.get("model")
+            raw_provider = report_data.get("provider")
+            if resolved_model is None and isinstance(raw_model, str):
+                resolved_model = raw_model
+            if resolved_provider is None and isinstance(raw_provider, str):
+                resolved_provider = raw_provider
+
+    if resolved_model is None or resolved_provider is None:
+        missing = [
+            name
+            for name, value in (("model", resolved_model), ("provider", resolved_provider))
+            if value is None
+        ]
+        raise TestkitConfigError(
+            f"cannot resolve {' and '.join(missing)} to re-drive exploit "
+            f"{exploit.pattern_id!r}: no explicit model=/provider= kwarg was passed, the "
+            "exploit carries no 'mylonite.exec.*' execution-context metadata, and no "
+            f"sibling scan_report.json was found at {sibling_report}. Pass model=/provider= "
+            "explicitly, or re-run `mylonite scan` + `mylonite generate` against a current "
+            "scan so the exploit carries its execution context."
+        )
+    return resolved_model, resolved_provider
 
 
 def _run_target_scan(
@@ -469,8 +548,8 @@ def assert_target_resists(
     exploit: ExploitRecord,
     *,
     target_file: str | os.PathLike[str],
-    model: str = "claude-haiku-4-5",
-    provider: str = "anthropic",
+    model: str | None = None,
+    provider: str | None = None,
     _completion_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Assert the REAL declared target still RESISTS ``exploit`` — fails on regression.
@@ -486,6 +565,16 @@ def assert_target_resists(
     This is a LIVE check (it launches the target's MCP server and calls the
     provider), so emitted tests gate it behind ``MYLONITE_LIVE_TARGET=1``.
     ``_completion_fn`` is the test-only offline seam.
+
+    Parameters
+    ----------
+    model, provider:
+        The model/provider to re-drive with. ``None`` (the default) resolves
+        via :func:`_resolve_exec_context` — the exploit's own execution-context
+        metadata, then a sibling ``scan_report.json``, else
+        :class:`TestkitConfigError` (T12: this used to silently default to a
+        hardcoded model, so an emitted gate could validate a DIFFERENT model
+        than the one that found the exploit).
     """
     from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
@@ -507,6 +596,9 @@ def assert_target_resists(
             "`mylonite generate <exploit> --target-file <your-target>.yaml`, or copy your "
             "scan's target YAML next to this test as target.yaml."
         )
+    resolved_model, resolved_provider = _resolve_exec_context(
+        exploit, model=model, provider=provider, target_file=target_path
+    )
     tf = load_target_file(target_path)
     spec = build_target_spec(tf)
     target_registry.clear_runtime_targets()
@@ -516,8 +608,8 @@ def assert_target_resists(
             spec=spec,
             scope=tf.scope,
             pattern_id=exploit.pattern_id,
-            model=model,
-            provider=provider,
+            model=resolved_model,
+            provider=resolved_provider,
             controls=None,
             completion_fn=_completion_fn,
         )
@@ -531,8 +623,8 @@ def assert_control_holds(
     *,
     target_file: str | os.PathLike[str],
     control: str,
-    model: str = "claude-haiku-4-5",
-    provider: str = "anthropic",
+    model: str | None = None,
+    provider: str | None = None,
     _completion_fn: Callable[..., Any] | None = None,
 ) -> None:
     """Assert a boundary CONTROL is load-bearing for ``exploit`` on the real target.
@@ -584,6 +676,13 @@ def assert_control_holds(
     (the sentinel ``mylonite gate``/``validate --prove-input-control`` tag a
     ``transport: rest`` finding with) runs the input data-framing differential
     instead of a W1-W4 boundary control.
+
+    ``model``/``provider`` resolve the same way as :func:`assert_target_resists`
+    (T12): ``None`` (the default) reads the exploit's own execution-context
+    metadata, then a sibling ``scan_report.json``, else :class:`TestkitConfigError`.
+    Resolved AFTER the ``control``/``plan_twins`` fail-fast checks above (a bad
+    control name or a non-differential target+control pair is diagnosed first —
+    those are unconditional preconditions, independent of which model is used).
     """
     from mylonite._bootstrap import enable_truststore
     from mylonite.plugins._mcp import target_registry
@@ -631,6 +730,9 @@ def assert_control_holds(
             "instead, or declare control_env / pass control='input-frame' so a "
             "real twin exists to test."
         )
+    resolved_model, resolved_provider = _resolve_exec_context(
+        exploit, model=model, provider=provider, target_file=target_path
+    )
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
     try:
@@ -638,8 +740,8 @@ def assert_control_holds(
             spec=spec,
             scope=tf.scope,
             pattern_id=exploit.pattern_id,
-            model=model,
-            provider=provider,
+            model=resolved_model,
+            provider=resolved_provider,
             controls=list(plan.raw.boundary_controls) or None,
             completion_fn=_completion_fn,
             disable_controls=plan.raw.disable_controls,
@@ -649,8 +751,8 @@ def assert_control_holds(
             spec=spec,
             scope=tf.scope,
             pattern_id=exploit.pattern_id,
-            model=model,
-            provider=provider,
+            model=resolved_model,
+            provider=resolved_provider,
             controls=list(plan.guarded.boundary_controls) or None,
             completion_fn=_completion_fn,
             disable_controls=plan.guarded.disable_controls,
@@ -671,6 +773,7 @@ def assert_control_holds(
 
 
 __all__ = [
+    "TestkitConfigError",
     "TestkitFixtureError",
     "assert_control_holds",
     "assert_guard_holds",

@@ -30,6 +30,7 @@ from typing import ClassVar, Literal
 
 from mylonite.contracts import ExploitRecord, GeneratedTest, TestGeneratorBase
 from mylonite.contracts.test_generator import CONTRACT_VERSION
+from mylonite.scan.exec_context import ExecContext
 from mylonite.testkit._pytest_plugin import (
     MYLONITE_SECURITY_MARKER,
     REGISTERED_ATLAS_MARKERS,
@@ -94,7 +95,7 @@ def test_security_{slug}() -> None:
     """{target_id} must remain resistant to {pattern_id} ({compliance_inline})."""
     here = Path(__file__).parent
     exploit = testkit.load_exploit(here / {exploit_filename})
-    testkit.assert_target_resists(exploit, target_file=here / "target.yaml")
+    testkit.assert_target_resists(exploit, target_file=here / "target.yaml"{model_kwarg}{provider_kwarg})
 '''
 
 
@@ -138,7 +139,7 @@ def test_security_{slug}() -> None:
 ({compliance_inline})."""
     here = Path(__file__).parent
     exploit = testkit.load_exploit(here / {exploit_filename})
-    testkit.assert_control_holds(exploit, target_file=here / "target.yaml", control={control_literal})
+    testkit.assert_control_holds(exploit, target_file=here / "target.yaml", control={control_literal}{model_kwarg}{provider_kwarg})
 '''
 
 
@@ -282,6 +283,24 @@ class ReferencePytestGenerator(TestGeneratorBase):
             template = _TEMPLATE
         else:
             template = _TEMPLATE_CUSTOM
+
+        # T12: read back the exec context ScanEngine._finalize stamped onto the
+        # exploit's payload (mylonite.exec.* metadata) and render it as explicit
+        # model=/provider= literals in the CUSTOM/CONTROL templates -- so the
+        # emitted CI gate re-drives the SAME model that discovered/validated
+        # this finding, not testkit's own hardcoded fallback default. Only the
+        # CUSTOM/CONTROL templates reference these placeholders; harmless
+        # no-ops for the reference-twin template (assert_guard_holds takes no
+        # model/provider kwargs at all). A pre-T12 exploit with no exec context
+        # renders no kwargs at all -- testkit resolves it at RUN time instead
+        # (explicit kwarg -> exec-context metadata -> sibling scan_report.json
+        # back-fill -> loud failure).
+        exec_ctx = ExecContext.from_metadata(exploit.payload.metadata)
+        model_kwarg = f", model={_py_literal(exec_ctx.model)}" if exec_ctx is not None else ""
+        provider_kwarg = (
+            f", provider={_py_literal(exec_ctx.provider)}" if exec_ctx is not None else ""
+        )
+
         source = template.format(
             pattern_id=exploit.pattern_id,  # validated above; docstring use only
             target_id=exploit.target_id,
@@ -301,6 +320,8 @@ class ReferencePytestGenerator(TestGeneratorBase):
             # the literal it sits in and start executing (DCR-0001, DCR-0002).
             exploit_filename=_py_literal(f"exploit_{exploit.pattern_id}.json"),
             control_literal=_py_literal(control),
+            model_kwarg=model_kwarg,
+            provider_kwarg=provider_kwarg,
         )
 
         return GeneratedTest(

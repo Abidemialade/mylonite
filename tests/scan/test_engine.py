@@ -222,6 +222,44 @@ async def test_engine_records_finding_on_success_verdict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_stamps_exec_context_metadata_on_exploit() -> None:
+    """T12: ``_finalize`` stamps ``mylonite.exec.*`` exec-context metadata onto
+    every finding's payload -- provider/model (from ``ScanConfig``) and the
+    resolved role models -- so an emitted regression test can gate on the SAME
+    model that discovered the finding, instead of a testkit hardcoded default.
+    """
+    from mylonite.scan.exec_context import ExecContext
+    from mylonite.version import __version__
+
+    payload = _payload_from_seed_index(0)
+    module = _ModuleStub([payload])
+    adapter = _AdapterStub(_ok_response())
+    customiser = _CustomiserStub()
+    judge = _JudgeStub(
+        Verdict(success=True, reason="caught it", evidence={}, mechanism="predicate")
+    )
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,
+        attack_modules=[module],
+        customiser=customiser,
+        judge=judge,
+    )
+    result = await engine.run()
+    assert len(result.exploits) == 1
+    ctx = ExecContext.from_metadata(result.exploits[0].payload.metadata)
+    assert ctx is not None
+    assert ctx.provider == "anthropic"
+    assert ctx.model == "stub-model"
+    # _config() sets no role overrides, so every role falls back to `model`.
+    assert ctx.planner_model == "stub-model"
+    assert ctx.customiser_model == "stub-model"
+    assert ctx.judge_model == "stub-model"
+    assert ctx.mylonite_version == __version__
+
+
+@pytest.mark.asyncio
 async def test_engine_stamps_compliance_from_firing_seed_not_module() -> None:
     """Provenance (#4): the emitted ExploitRecord carries the FIRING seed's
     compliance tags, not the umbrella module's. A module spans several weakness

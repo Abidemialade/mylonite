@@ -96,7 +96,12 @@ def test_passes_when_raw_fires_and_guarded_resists(
 ) -> None:
     target_file = _write_target_yaml(tmp_path)
     seen = _patch_scans(monkeypatch, raw=_fired(), guarded=_resisted())
-    assert testkit.assert_control_holds(_exploit(), target_file=target_file, control="W2") is None
+    assert (
+        testkit.assert_control_holds(
+            _exploit(), target_file=target_file, control="W2", model="stub-model", provider="stub"
+        )
+        is None
+    )
     # Two scans: raw (no controls) then boundary-guarded (one control).
     assert len(seen) == 2
     assert seen[0] is None and seen[1] and seen[1][0].weakness == "W2"
@@ -109,7 +114,9 @@ def test_raises_when_control_not_load_bearing(
     target_file = _write_target_yaml(tmp_path)
     _patch_scans(monkeypatch, raw=_fired(), guarded=_fired())
     with pytest.raises(AssertionError, match="guard did not hold"):
-        testkit.assert_control_holds(_exploit(), target_file=target_file, control="W2")
+        testkit.assert_control_holds(
+            _exploit(), target_file=target_file, control="W2", model="stub-model", provider="stub"
+        )
 
 
 def test_raises_when_attack_does_not_reproduce_on_raw(
@@ -119,7 +126,9 @@ def test_raises_when_attack_does_not_reproduce_on_raw(
     target_file = _write_target_yaml(tmp_path)
     _patch_scans(monkeypatch, raw=_resisted(), guarded=_resisted())
     with pytest.raises(AssertionError, match="no longer fires against the RAW target"):
-        testkit.assert_control_holds(_exploit(), target_file=target_file, control="W2")
+        testkit.assert_control_holds(
+            _exploit(), target_file=target_file, control="W2", model="stub-model", provider="stub"
+        )
 
 
 def test_unimplemented_control_raises_value_error(tmp_path: Path) -> None:
@@ -159,7 +168,16 @@ def test_input_frame_control_on_rest_target_does_not_raise(
         return _fired() if not input_frame else _resisted()
 
     monkeypatch.setattr(testkit, "_run_target_scan", fake_run)
-    assert testkit.assert_control_holds(_exploit(), target_file=p, control="input-frame") is None
+    assert (
+        testkit.assert_control_holds(
+            _exploit(),
+            target_file=p,
+            control="input-frame",
+            model="stub-model",
+            provider="stub",
+        )
+        is None
+    )
     # Raw (plain call, input_frame=False) fires; guarded (input_frame=True) resists.
     assert seen_input_frame == [False, True]
 

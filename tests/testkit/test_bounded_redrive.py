@@ -256,6 +256,8 @@ def test_assert_target_resists_passes_when_effect_not_confirmed(tmp_path: Path) 
         result = testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 
@@ -286,6 +288,8 @@ def test_assert_target_resists_raises_when_attack_lands(tmp_path: Path) -> None:
         testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 
@@ -312,6 +316,8 @@ def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
         testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 

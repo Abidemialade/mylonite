@@ -146,7 +146,9 @@ def test_testkit_threads_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(testkit, "_run_target_scan", fake_run_target_scan)
 
-    testkit.assert_control_holds(exploit, target_file=target_file, control="W2")
+    testkit.assert_control_holds(
+        exploit, target_file=target_file, control="W2", model="stub-model", provider="stub"
+    )
 
     # Exactly two legs (raw, guarded); the raw leg must carry disable_controls
     # so the REAL server-layer guard for W2 is actually turned off — not just
@@ -232,7 +234,9 @@ def test_assert_control_holds_routes_through_plan_twins(
 
     monkeypatch.setattr(testkit, "_run_target_scan", fake_run_target_scan)
 
-    testkit.assert_control_holds(exploit, target_file=target_file, control="W2")
+    testkit.assert_control_holds(
+        exploit, target_file=target_file, control="W2", model="stub-model", provider="stub"
+    )
 
     assert plan_calls == [{"weakness": "W2", "fast": False}]
     assert seen == [

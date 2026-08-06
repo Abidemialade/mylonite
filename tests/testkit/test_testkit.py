@@ -315,6 +315,7 @@ def test_load_exploit_invalid_raises(tmp_path: Path) -> None:
 def test_public_surface() -> None:
     """The stability-promised surface: the helpers + error class."""
     assert testkit.__all__ == [
+        "TestkitConfigError",
         "TestkitFixtureError",
         "assert_control_holds",
         "assert_guard_holds",
@@ -325,6 +326,7 @@ def test_public_surface() -> None:
     assert callable(testkit.assert_guard_holds)
     assert callable(testkit.load_exploit)
     assert issubclass(testkit.TestkitFixtureError, Exception)
+    assert issubclass(testkit.TestkitConfigError, Exception)
 
 
 def test_assert_target_resists_missing_target_file_actionable(tmp_path: Path) -> None:
@@ -340,3 +342,127 @@ def test_assert_target_resists_missing_target_file_actionable(tmp_path: Path) ->
     msg = str(excinfo.value)
     assert "target.yaml" in msg
     assert "--target-file" in msg  # points at the fix
+
+
+# --- T12: execution-context resolution (model/provider), no hardcoded default -----
+
+
+def test_assert_target_resists_without_context_raises(tmp_path: Path) -> None:
+    """T12: no explicit model=/provider= kwarg, no ``mylonite.exec.*`` metadata on
+    the exploit, and no sibling ``scan_report.json`` to back-fill from -> a LOUD,
+    actionable :class:`testkit.TestkitConfigError` -- never a silent fall back to
+    the old hardcoded ``model="claude-haiku-4-5", provider="anthropic"`` default.
+
+    The target file only needs to EXIST (an empty file suffices): resolution
+    happens before the YAML is parsed, so a missing exec context fails fast,
+    before any target-file validation, subprocess spawn, or registry mutation.
+    """
+    target_file = tmp_path / "target.yaml"
+    target_file.touch()
+    exploit = _exploit().model_copy(update={"target_id": "mcp:myapp"})
+    with pytest.raises(testkit.TestkitConfigError) as excinfo:
+        testkit.assert_target_resists(exploit, target_file=target_file)
+    msg = str(excinfo.value)
+    assert "model" in msg
+    assert "provider" in msg
+
+
+def test_assert_control_holds_without_context_raises(tmp_path: Path) -> None:
+    """Same T12 loud-failure property for ``assert_control_holds``."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        "family: myapp-notes\ncommand: echo\nargs: []\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    exploit = _exploit().model_copy(
+        update={
+            "target_id": "mcp:myapp-notes",
+            "payload": _exploit().payload.model_copy(
+                update={"metadata": {**_exploit().payload.metadata, "synthetic_control": "W2"}}
+            ),
+        }
+    )
+    with pytest.raises(testkit.TestkitConfigError) as excinfo:
+        testkit.assert_control_holds(exploit, target_file=target_file, control="W2")
+    msg = str(excinfo.value)
+    assert "model" in msg
+    assert "provider" in msg
+
+
+def test_resolve_exec_context_prefers_explicit_kwarg_over_metadata() -> None:
+    """An explicit kwarg wins over the exploit's own exec-context metadata."""
+    from mylonite.scan.exec_context import ExecContext
+
+    ctx = ExecContext(provider="anthropic", model="claude-haiku-4-5")
+    exploit = _exploit().model_copy(
+        update={
+            "payload": _exploit().payload.model_copy(
+                update={"metadata": {**_exploit().payload.metadata, **ctx.to_metadata()}}
+            )
+        }
+    )
+    model, provider = testkit._resolve_exec_context(
+        exploit,
+        model="claude-sonnet-4-5",
+        provider="anthropic",
+        target_file=Path("target.yaml"),
+    )
+    assert model == "claude-sonnet-4-5"
+    assert provider == "anthropic"
+
+
+def test_resolve_exec_context_reads_the_exploits_own_metadata() -> None:
+    """No explicit kwarg, but the exploit carries ``mylonite.exec.*`` metadata
+    (stamped by ``ScanEngine._finalize`` at scan time) -> resolved from there."""
+    from mylonite.scan.exec_context import ExecContext
+
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    exploit = _exploit().model_copy(
+        update={
+            "payload": _exploit().payload.model_copy(
+                update={"metadata": {**_exploit().payload.metadata, **ctx.to_metadata()}}
+            )
+        }
+    )
+    model, provider = testkit._resolve_exec_context(
+        exploit, model=None, provider=None, target_file=Path("target.yaml")
+    )
+    assert model == "gpt-4.1-mini"
+    assert provider == "openai"
+
+
+def test_resolve_exec_context_backfills_from_sibling_scan_report(tmp_path: Path) -> None:
+    """T12 back-fill path: a pre-T12 exploit carries no ``mylonite.exec.*``
+    metadata, but a sibling ``scan_report.json`` next to ``target_file`` does
+    carry ``model``/``provider`` -- resolution reads them from there rather
+    than raising.
+    """
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text("family: myapp\n", encoding="utf-8")
+    (tmp_path / "scan_report.json").write_text(
+        json.dumps({"model": "claude-opus-4-5", "provider": "anthropic", "other": "ignored"}),
+        encoding="utf-8",
+    )
+    exploit = _exploit()  # no mylonite.exec.* metadata
+    model, provider = testkit._resolve_exec_context(
+        exploit, model=None, provider=None, target_file=target_file
+    )
+    assert model == "claude-opus-4-5"
+    assert provider == "anthropic"
+
+
+def test_resolve_exec_context_raises_when_sibling_report_is_incomplete(tmp_path: Path) -> None:
+    """The back-fill path's own failure mode: a sibling scan_report.json exists
+    but is missing the field(s) actually needed -> still the loud error, not a
+    partially-resolved (model, None) pair silently passed on."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text("family: myapp\n", encoding="utf-8")
+    (tmp_path / "scan_report.json").write_text(
+        json.dumps({"model": "claude-opus-4-5"}),  # no "provider" key
+        encoding="utf-8",
+    )
+    exploit = _exploit()
+    with pytest.raises(testkit.TestkitConfigError, match="provider"):
+        testkit._resolve_exec_context(
+            exploit, model=None, provider=None, target_file=target_file
+        )

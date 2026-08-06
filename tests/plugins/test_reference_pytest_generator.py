@@ -259,6 +259,59 @@ def test_emit_matches_golden_snapshot() -> None:
     assert generated.source == _GOLDEN
 
 
+def test_emitted_test_carries_model_and_provider() -> None:
+    """T12: a custom-target exploit carrying ``mylonite.exec.*`` exec-context
+    metadata must render the model/provider it was VALIDATED with into the
+    emitted source -- so the emitted CI gate re-drives the SAME model, not
+    testkit's hardcoded fallback default.
+    """
+    from mylonite.scan.exec_context import ExecContext
+
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    base = _exploit(pattern_id="safe-id", target_id="mcp:acme")
+    exploit = base.model_copy(
+        update={
+            "payload": base.payload.model_copy(
+                update={"metadata": {**base.payload.metadata, **ctx.to_metadata()}}
+            )
+        }
+    )
+    src = ReferencePytestGenerator().emit(exploit).source
+    assert "testkit.assert_target_resists(" in src
+    assert "model='gpt-4.1-mini'" in src
+    assert "provider='openai'" in src
+
+
+def test_emitted_test_omits_model_kwargs_without_exec_context() -> None:
+    """No ``mylonite.exec.*`` metadata (a pre-T12 exploit) -> no explicit
+    model=/provider= kwargs rendered; the emitted test falls through to
+    testkit's own metadata/sibling-report resolution at run time."""
+    exploit = _exploit(pattern_id="safe-id", target_id="mcp:acme")
+    src = ReferencePytestGenerator().emit(exploit).source
+    assert "testkit.assert_target_resists(exploit, target_file=here / \"target.yaml\")" in src
+    assert "model=" not in src
+    assert "provider=" not in src
+
+
+def test_control_template_carries_model_and_provider() -> None:
+    """Same T12 property for the control-efficacy template (assert_control_holds)."""
+    from mylonite.scan.exec_context import ExecContext
+
+    ctx = ExecContext(provider="anthropic", model="claude-sonnet-4-5")
+    base = _exploit(pattern_id="safe-id", synthetic_control="W2", target_id="mcp:acme")
+    exploit = base.model_copy(
+        update={
+            "payload": base.payload.model_copy(
+                update={"metadata": {**base.payload.metadata, **ctx.to_metadata()}}
+            )
+        }
+    )
+    src = ReferencePytestGenerator().emit(exploit).source
+    assert "testkit.assert_control_holds(" in src
+    assert "model='claude-sonnet-4-5'" in src
+    assert "provider='anthropic'" in src
+
+
 def test_custom_target_emits_real_target_assertion() -> None:
     """A custom target_id emits a test that re-drives the REAL target, not the twin."""
     custom = _EXPLOIT.model_copy(update={"target_id": "mcp:acme"})
