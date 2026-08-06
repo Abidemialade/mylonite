@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from mylonite.demo._replay import (
+    CACHE_KEY_VERSION_FIELD,
     CorruptFixtureError,
     FixtureConflictError,
     LiteLLMRecorder,
@@ -322,12 +323,26 @@ def test_format_version_defaults_to_v2_on_record_with_no_sidecar(tmp_path: Path)
 
 
 def test_format_version_honours_explicit_sidecar_in_either_mode(tmp_path: Path) -> None:
-    (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 1}), encoding="utf-8")
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({CACHE_KEY_VERSION_FIELD: 1}), encoding="utf-8"
+    )
     assert _resolve_key_version(tmp_path, "replay") == 1
     assert _resolve_key_version(tmp_path, "record") == 1
 
-    (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 2}), encoding="utf-8")
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({CACHE_KEY_VERSION_FIELD: 2}), encoding="utf-8"
+    )
     assert _resolve_key_version(tmp_path, "replay") == 2
+    assert _resolve_key_version(tmp_path, "record") == 2
+
+
+def test_format_version_field_alone_is_ignored_by_cache_key_dispatch(tmp_path: Path) -> None:
+    """A sidecar with ONLY the unrelated `format_version` field (testkit's own,
+    NOT the cache-key field) must NOT be mistaken for a cache_key_version
+    declaration — this is exactly the coupling-by-coincidence the two
+    independent fields exist to rule out."""
+    (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 2}), encoding="utf-8")
+    assert _resolve_key_version(tmp_path, "replay") == 1
     assert _resolve_key_version(tmp_path, "record") == 2
 
 
@@ -440,7 +455,7 @@ async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(
     # v2 dispatch on a fresh directory would stamp it (reference_validator.py /
     # record_reference_example.py stamp it right after recording).
     (tmp_path / "_meta.json").write_text(
-        json.dumps({"format_version": 2, "model": "claude-x"}), encoding="utf-8"
+        json.dumps({CACHE_KEY_VERSION_FIELD: 2, "model": "claude-x"}), encoding="utf-8"
     )
     recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
     await recorder(model="claude-x", messages=_MSGS, tools=tools)

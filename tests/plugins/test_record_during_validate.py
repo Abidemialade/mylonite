@@ -176,6 +176,12 @@ def test_record_then_full_pass_offline(tmp_path: Path, monkeypatch: pytest.Monke
     assert written, "expected recorded fixture JSON files"
     meta = _meta(fixtures_dir)
     assert meta["format_version"] == 2
+    # A SEPARATE field from `format_version` (testkit's own per-exploit-scope
+    # versioning) — this is the _replay.LiteLLMRecorder cache-key algorithm
+    # field the code-review flagged as accidentally sharing `format_version`'s
+    # name. Both happen to be 2 today but are independently sourced: this one
+    # comes straight off `recorder.key_version`.
+    assert meta["cache_key_version"] == 2
     assert meta["model"] == validator._model
     assert meta["pattern_id"] == exploit.pattern_id
 
