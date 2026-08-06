@@ -13,14 +13,27 @@ follow-up rather than expanding the 0.7.7 diff further. None are fail-opens; all
 either correctness gaps in already-correct-in-spirit code, or non-blocking performance.
 
 - **`--target-file` silently overrides a non-`reference:`/non-`mcp:custom` positional
-  `TARGET`, in both `scan()` and `gate()`** (DCR-0001, DCR-0003 — `cli.py:1081`,
-  `:3530`), and **`gate()`'s custom-target `target_id` drops the scope and diverges
-  from `scan()`'s formula** (DCR-0004 — `cli.py:3604`). Same root cause: both commands
-  independently re-derive "did the operator mean `--target-file` or the positional
-  argument" instead of sharing one resolution function — the exact fail-open class this
-  release exists to close, just found too late in review to fold into this diff without
-  re-triggering full verification. *Trigger:* next patch release; candidate for a small
-  `_resolve_target_and_file()` helper shared by both commands.
+  `TARGET` in `scan()`** (originally DCR-0001/0.7.7 — `cli.py:1081`). **`gate()`'s
+  equivalent instance is now fixed** (0.7.8's own deep-code-review, DCR-0001 —
+  `cli.py:3487-3506`; the fix additionally covers the auto-discovered-`mylonite.yaml`
+  case, not just an explicit `--target-file` flag). `scan()`'s is still open — same
+  root cause, re-derives "did the operator mean `--target-file` or the positional
+  argument" independently instead of sharing gate's now-fixed guard. **`gate()`'s
+  custom-target `target_id` still drops the scope and diverges from `scan()`'s
+  formula** (originally DCR-0004/0.7.7 — `cli.py:3593`, unchanged). *Trigger:* next
+  patch release; candidate for a small `_resolve_target_and_file()` helper shared by
+  both commands, since `gate()`'s new guard (0.7.8) is the pattern to replicate onto
+  `scan()`.
+- **`scan/engine.py`'s new exception redaction (0.7.8 DCR-0005) uses `redact(str(exc))`
+  instead of the more defensive `redact_exception(exc)`** that already exists for this
+  purpose (`_redaction.py:294-317`) — `redact_exception` also catches a pydantic
+  `ValidationError`'s raw `input_value`, which `redact()`'s pattern set doesn't
+  structurally guarantee catching. Currently low-risk (no `ValidationError` is raised
+  inside the customiser/adapter/judge call chains these 3 sites wrap today), but a
+  third-party plugin constructing a contract object there could raise one. *Trigger:*
+  next patch release; not a drop-in swap since `redact_exception` prepends
+  `type(exc).__name__:` — needs a shared helper so the two "make exception text safe to
+  persist" call sites don't drift.
 - **`_first_balanced_object` can silently pick an earlier draft JSON object over the
   model's real final answer** in prose-only response mode (DCR-0006 — `scan/_llm.py:231`).
   Only reachable when `build_response_format` degrades to prose (a model with no native
