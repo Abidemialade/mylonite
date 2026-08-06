@@ -105,7 +105,7 @@ def test_redact_masks_quoted_dict_repr_kv() -> None:
     (e.g. str(exc) embedding {'GH_TOKEN': 'ghp_...'}, or logging a headers
     dict) must still be masked even though the closing quote breaks the
     key-sep-value adjacency the plain KV pattern requires."""
-    token = "ghp_1234567890abcdEFGHijklMNOP"
+    token = "ghp_1234567890abcdEFGHijklMNOP"  # pragma: allowlist secret
     out = redact("{'GH_TOKEN': '" + token + "'}")
     assert token not in out
     # The captured quote groups are re-emitted, so the surrounding quote
@@ -272,9 +272,9 @@ def test_redact_exception_drops_pydantic_input_value() -> None:
         headers: dict[str, str]
 
     with pytest.raises(ValidationError) as excinfo:
-        M(headers="Bearer sk-live-abcdefghijklmnopqrstuvwxyz")  # type: ignore[arg-type]
+        M(headers="Bearer sk-live-abcdefghijklmnopqrstuvwxyz")  # type: ignore[arg-type]  # pragma: allowlist secret
     rendered = redact_exception(excinfo.value)
-    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in rendered
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in rendered  # pragma: allowlist secret
     assert "headers" in rendered  # the field path still helps the operator
 
 
@@ -286,14 +286,14 @@ def test_redact_target_yaml_masks_headers_and_secret_env() -> None:
         "family: app\n"
         "command: python\n"
         "headers:\n"
-        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"
+        "  Authorization: Bearer sk-live-abcdefghijklmnopqrstuvwxyz\n"  # pragma: allowlist secret
         "env:\n"
-        "  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz1234\n"
+        "  GITHUB_TOKEN: ghp_abcdefghijklmnopqrstuvwxyz1234\n"  # pragma: allowlist secret
         "  LOG_LEVEL: debug\n"
     )
     out = redact_target_yaml(src)
-    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in out
-    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out
+    assert "sk-live-abcdefghijklmnopqrstuvwxyz" not in out  # pragma: allowlist secret
+    assert "ghp_abcdefghijklmnopqrstuvwxyz1234" not in out  # pragma: allowlist secret
     assert "LOG_LEVEL: debug" in out  # non-secret values survive
     assert "Authorization" in out  # key names survive
     assert REDACTION_PLACEHOLDER not in out  # no longer the opaque, non-runnable placeholder
@@ -320,10 +320,10 @@ def test_redact_target_yaml_masks_url_embedded_credential() -> None:
         "family: app\n"
         "transport: rest\n"
         "weakness_classes: [W2]\n"
-        'url: "postgres://svc_user:S3cretPassw0rd123@internal-db:5432/app"\n'
+        'url: "postgres://svc_user:S3cretPassw0rd123@internal-db:5432/app"\n'  # pragma: allowlist secret
     )
     out = redact_target_yaml(src)
-    assert "S3cretPassw0rd123" not in out
+    assert "S3cretPassw0rd123" not in out  # pragma: allowlist secret
 
 
 def test_redact_target_yaml_output_still_loads() -> None:
@@ -421,7 +421,7 @@ def test_env_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     copy is genuinely runnable, not just structurally parseable."""
     from mylonite.plugins._mcp.target_file import load_target_file
 
-    secret = "sk-abc123-realvalue"
+    secret = "sk-abc123-realvalue"  # pragma: allowlist secret
     src = f"family: app\ncommand: python\nenv:\n  API_TOKEN: {secret}\n"
     out = redact_target_yaml(src)
 
@@ -441,13 +441,8 @@ def test_headers_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path:
     and for the rest transport's nested ``request.headers``."""
     from mylonite.plugins._mcp.target_file import load_target_file
 
-    secret = "Bearer sk-live-abcdefghijklmnopqrstuvwxyz"
-    src = (
-        "family: app\n"
-        "command: python\n"
-        "headers:\n"
-        f"  Authorization: {secret}\n"
-    )
+    secret = "Bearer sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    src = f"family: app\ncommand: python\nheaders:\n  Authorization: {secret}\n"
     out = redact_target_yaml(src)
     assert secret not in out
     headers_var = target_yaml_env_ref_name("headers", "Authorization")
@@ -461,7 +456,7 @@ def test_headers_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     # request.headers (rest transport) — a distinct nested field path, so a
     # distinct derived var name (collision-resistant against the top-level one).
-    rest_secret = "Bearer sk-live-zyxwvutsrqponmlkjihgfedcba"
+    rest_secret = "Bearer sk-live-zyxwvutsrqponmlkjihgfedcba"  # pragma: allowlist secret
     rest_src = (
         "family: app2\n"
         "transport: rest\n"
@@ -498,8 +493,8 @@ def test_colliding_header_keys_get_distinct_var_names(
     defeats T9's whole point (genuinely re-runnable, not just safely masked)."""
     from mylonite.plugins._mcp.target_file import load_target_file
 
-    secret_1 = "firstSECRETvalueAAAAAAAAAAAA"
-    secret_2 = "secondSECRETvalueBBBBBBBBBBB"
+    secret_1 = "firstSECRETvalueAAAAAAAAAAAA"  # pragma: allowlist secret
+    secret_2 = "secondSECRETvalueBBBBBBBBBBB"  # pragma: allowlist secret
     src = (
         "family: app\n"
         "command: python\n"
@@ -635,10 +630,10 @@ def test_no_raw_secret_survives_redaction() -> None:
     secret-shaped values across env AND headers AND request.headers must ALL
     be gone from the redacted output — not one substring surviving anywhere."""
     secrets = [
-        "sk-live-firstSECRETvalueHERE12345",
-        "ghp_secondSECRETtoken67890abcdef",
-        "Bearer thirdSECREToauthBEARERtoken999",
-        "Bearer fourthSECRETrestHeaderTOKEN000",
+        "sk-live-firstSECRETvalueHERE12345",  # pragma: allowlist secret
+        "ghp_secondSECRETtoken67890abcdef",  # pragma: allowlist secret
+        "Bearer thirdSECREToauthBEARERtoken999",  # pragma: allowlist secret
+        "Bearer fourthSECRETrestHeaderTOKEN000",  # pragma: allowlist secret
     ]
     src = (
         "family: app\n"

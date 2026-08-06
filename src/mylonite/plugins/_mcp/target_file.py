@@ -291,9 +291,7 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(parent, dict):
             block = parent.get(child_key)
             if isinstance(block, dict):
-                parent[child_key] = _expand_dict_block(
-                    block, f"{parent_key}.{child_key}", missing
-                )
+                parent[child_key] = _expand_dict_block(block, f"{parent_key}.{child_key}", missing)
 
     env = data.get(CREDENTIAL_ENV_FIELD)
     if isinstance(env, dict):

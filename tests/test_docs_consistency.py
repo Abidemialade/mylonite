@@ -250,7 +250,12 @@ def test_demo_render_next_step_scaffold_then_scan_chain_actually_authorizes() ->
         ("test-your-app.md family: my-app example", "my-app", None, "my-app"),
         # docs/test-your-app.md's bundled-target example:
         # `mcp:filesystem:/tmp/sandbox --authorize /tmp/sandbox`.
-        ("test-your-app.md mcp:filesystem:/tmp/sandbox example", "filesystem", "/tmp/sandbox", "/tmp/sandbox"),
+        (
+            "test-your-app.md mcp:filesystem:/tmp/sandbox example",
+            "filesystem",
+            "/tmp/sandbox",
+            "/tmp/sandbox",
+        ),
         # docs/quarry.md: `mylonite scan mcp:fetch --authorize fetch`.
         ("quarry.md mcp:fetch example", "fetch", None, "fetch"),
         # docs/ci-gating.md / cli.py's root epilog: `scan --scaffold` with no

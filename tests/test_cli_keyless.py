@@ -458,8 +458,8 @@ def test_no_provider_keys_fixture_actually_clears_ambient_key(
     what it claims, not just that the fixture ran."""
     import os
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-survive-the-fixture")
-    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-should-not-survive-the-fixture"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-survive-the-fixture")  # pragma: allowlist secret
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-should-not-survive-the-fixture"  # pragma: allowlist secret
     for var in _ALL_PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     assert "ANTHROPIC_API_KEY" not in os.environ

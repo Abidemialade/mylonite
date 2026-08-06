@@ -304,8 +304,12 @@ def test_api_key_excluded_from_key() -> None:
 
 
 def test_v2_key_unaffected_by_dict_key_ordering() -> None:
-    tools_ordered_a = [{"type": "function", "function": {"name": "x", "parameters": {"a": 1, "b": 2}}}]
-    tools_ordered_b = [{"function": {"parameters": {"b": 2, "a": 1}, "name": "x"}, "type": "function"}]
+    tools_ordered_a = [
+        {"type": "function", "function": {"name": "x", "parameters": {"a": 1, "b": 2}}}
+    ]
+    tools_ordered_b = [
+        {"function": {"parameters": {"b": 2, "a": 1}, "name": "x"}, "type": "function"}
+    ]
     assert _stable_key_v2("claude-x", _MSGS, tools=tools_ordered_a) == _stable_key_v2(
         "claude-x", _MSGS, tools=tools_ordered_b
     )
@@ -323,15 +327,11 @@ def test_format_version_defaults_to_v2_on_record_with_no_sidecar(tmp_path: Path)
 
 
 def test_format_version_honours_explicit_sidecar_in_either_mode(tmp_path: Path) -> None:
-    (tmp_path / "_meta.json").write_text(
-        json.dumps({CACHE_KEY_VERSION_FIELD: 1}), encoding="utf-8"
-    )
+    (tmp_path / "_meta.json").write_text(json.dumps({CACHE_KEY_VERSION_FIELD: 1}), encoding="utf-8")
     assert _resolve_key_version(tmp_path, "replay") == 1
     assert _resolve_key_version(tmp_path, "record") == 1
 
-    (tmp_path / "_meta.json").write_text(
-        json.dumps({CACHE_KEY_VERSION_FIELD: 2}), encoding="utf-8"
-    )
+    (tmp_path / "_meta.json").write_text(json.dumps({CACHE_KEY_VERSION_FIELD: 2}), encoding="utf-8")
     assert _resolve_key_version(tmp_path, "replay") == 2
     assert _resolve_key_version(tmp_path, "record") == 2
 

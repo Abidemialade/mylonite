@@ -482,7 +482,7 @@ def redact_target_yaml(text: str) -> str:
     Beyond the three named sections, every OTHER string leaf in the document
     (``url``, ``args``, ``command``, ``request.url``, ...) is still swept with
     shape-based :func:`redact` (DCR-0015) — so a credential embedded in, say,
-    a DB connection URL (``postgres://user:pass@host/db``) is still caught by
+    a DB connection URL (``postgres://<user>:<password>@host/db``) is still caught by
     ``_URL_CRED_PATTERN`` even though ``url`` isn't a named credential
     section. This sweep is shape-based ONLY (never the key-name-unconditional
     rule) and explicitly skips the fields already replaced with a ``${VAR}``
@@ -524,8 +524,7 @@ def redact_target_yaml(text: str) -> str:
             continue
         if key in nested_skip and isinstance(val, dict):
             data[key] = {
-                k: (v if k in nested_skip[key] else _redact_remaining(v))
-                for k, v in val.items()
+                k: (v if k in nested_skip[key] else _redact_remaining(v)) for k, v in val.items()
             }
             continue
         data[key] = _redact_remaining(val)

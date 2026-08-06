@@ -197,7 +197,9 @@ def _read_meta_cache_key_version(fixtures_dir: Path | Traversable) -> int | None
     return version if isinstance(version, int) else None
 
 
-def _resolve_key_version(fixtures_dir: Path | Traversable, mode: Literal["record", "replay"]) -> int:
+def _resolve_key_version(
+    fixtures_dir: Path | Traversable, mode: Literal["record", "replay"]
+) -> int:
     """Pick which cache-key algorithm (1 or 2) a recorder over ``fixtures_dir`` uses.
 
     A directory that declares its own ``_meta.json`` :data:`CACHE_KEY_VERSION_FIELD`
