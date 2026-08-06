@@ -1614,7 +1614,7 @@ def _tag_control_for_generate(exploit: Any) -> Any:
 
     Passes the exploit through unchanged (with a notice) for a reference target or
     a weakness with no boundary control — those can't be emitted as a committable
-    custom-target control test. Mirrors the tagging ``gate --prove-control`` does.
+    custom-target control test. Mirrors the tagging ``gate`` does by default.
     """
     from mylonite.gate.mitigation import weakness_class_for
     from mylonite.scan.control_shim import make_control
@@ -3517,8 +3517,8 @@ def gate(
         # M1: tag each controllable CUSTOM finding BY DEFAULT so generate_fn emits the
         # control test and validate_fn runs the differential (the safeguard, not the
         # model, carries the security). --fast opts out; reference targets use the
-        # in-repo differential and are not tagged here. --prove-control is now the
-        # default behaviour and kept for back-compat.
+        # in-repo differential and are not tagged here. This tagging is the default
+        # behaviour; the old --prove-control opt-in flag was removed in 0.7.7.
         if fast or is_reference:
             return exploits
         if tf is not None and tf.transport == "rest":
@@ -3613,7 +3613,7 @@ def gate(
         def _factory() -> Any:
             return build_mcp_adapter(family=spec.family, scope=tf.scope, model=effective_model)
 
-        # --prove-control: a controllable finding (tagged in scan_fn) gets a
+        # Control-efficacy leg: a controllable finding (tagged in scan_fn) gets a
         # boundary-guarded twin so the differential leg proves the control is
         # load-bearing (model held constant).
         guarded_factory: Any = None
