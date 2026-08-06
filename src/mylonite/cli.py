@@ -3928,6 +3928,7 @@ def ablate(
         run_control_ablation,
         scan_target_fires,
         seeds_for_weaknesses,
+        total_failure_exit_code,
     )
     from mylonite.scan.control_shim import make_control
     from mylonite.scan.coverage import ScanOutcome
@@ -4096,27 +4097,16 @@ def ablate(
         # via the table's status column and the "hint" line) rather than a
         # failure of the run itself.
         #
-        # The exit code mirrors scan/gate's own authority for "did this scan
-        # actually work" (ScanOutcome, mylonite.scan.coverage) rather than
-        # hardcoding EXIT_PROVIDER: it's the most severe exit_code observed
-        # across the underlying scoped scans that fed the all-inconclusive
-        # result. In practice this is usually EXIT_CONFIG (2), not
-        # EXIT_PROVIDER (4): each scan_target_fires call is a single-seed
-        # scoped scan, so it never accumulates the 3 consecutive LLM-call
-        # failures ScanEngine.run() requires to set a formal
-        # aborted="provider_unreachable" -- it lands in the same
-        # "untrustworthy without a formal abort" bucket ScanOutcome already
-        # uses for scan/gate when a report is too small to trip that
-        # threshold (see coverage.py's _EXIT_INCOMPLETE_NO_ABORT). Only a
-        # formal provider_unreachable abort (e.g. a much larger --iterations/
-        # --max-seeds run) actually earns EXIT_PROVIDER here.
-        exit_code = max((oc.exit_code for oc in observed_outcomes), default=EXIT_PROVIDER)
+        # Exit-code derivation itself lives in ablation.py's
+        # total_failure_exit_code (pure, directly unit-tested there) --
+        # matching the gate/ScanOutcomeBundle precedent of keeping that
+        # decision out of the Typer command body.
         echo_err(
             "error: every control came back inconclusive — ablate could not determine "
             "ANY control's status (total failure, not a null result). Check provider "
             "credentials/connectivity, then re-run."
         )
-        raise typer.Exit(code=exit_code)
+        raise typer.Exit(code=total_failure_exit_code(observed_outcomes))
 
 
 @taxonomy_app.command("list")

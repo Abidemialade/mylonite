@@ -12,6 +12,7 @@ from mylonite.scan.ablation import (
     all_inconclusive,
     run_control_ablation,
     seeds_for_weaknesses,
+    total_failure_exit_code,
 )
 
 FIRED = FireOutcome.FIRED
@@ -281,6 +282,70 @@ def test_all_inconclusive_false_when_nothing_is_inconclusive() -> None:
 def test_all_inconclusive_false_for_empty_results() -> None:
     """Defensive: an empty results list is not itself a 'total failure' to report."""
     assert not all_inconclusive([])
+
+
+# -- total_failure_exit_code: the exit-code half of the same decision --------
+#
+# Code review (0.7.7 follow-up): `all_inconclusive` was well-tested but the
+# `max(exit_code for ...)` aggregation that picks WHICH non-zero code to exit
+# with was only exercised via the CLI's `on_outcome` sink -- every existing
+# test either bypassed it entirely (degenerating to the fallback) or used a
+# single control (so `max()` never had to pick among genuinely different
+# values). Extracted to its own pure function specifically so this can be
+# proven directly, the same way `all_inconclusive` already is.
+
+
+def _outcome(*, exit_code: int, abort: Any = None) -> Any:
+    """A minimal, directly-constructed ScanOutcome for exit-code tests only --
+    the other fields don't matter here (unlike the scan_target_fires tests
+    above, which build one from a real ScanReport to exercise from_report's
+    own derivation)."""
+    from mylonite.scan.coverage import Coverage, ScanOutcome
+
+    return ScanOutcome(
+        coverage=Coverage.NOT_EXERCISED,
+        abort=abort,
+        exercised=0,
+        not_tested=0,
+        findings=0,
+        fallbacks=0,
+        exit_code=exit_code,
+        operator_message=None,
+    )
+
+
+def test_total_failure_exit_code_picks_the_more_severe_value() -> None:
+    """The exact gap code review flagged: two controls' underlying scans land
+    in genuinely DIFFERENT ScanOutcome buckets -- one EXIT_CONFIG (2, the
+    'untrustworthy without a formal abort' bucket), one EXIT_PROVIDER (4, a
+    formal provider_unreachable abort) -- and the more severe one must win,
+    regardless of order."""
+    from mylonite.scan.coverage import AbortReason
+
+    config_outcome = _outcome(exit_code=2)
+    provider_outcome = _outcome(exit_code=4, abort=AbortReason.PROVIDER_UNREACHABLE)
+
+    assert total_failure_exit_code([config_outcome, provider_outcome]) == 4
+    assert total_failure_exit_code([provider_outcome, config_outcome]) == 4
+
+
+def test_total_failure_exit_code_ignores_trustworthy_zero_legs() -> None:
+    """A control can be 'inconclusive' overall while one of its two legs was
+    genuinely trustworthy (exit_code == 0) -- e.g. raw resisted cleanly but
+    guarded crashed. The 0 from the clean leg must never mask a real nonzero
+    code from another control's crashed leg."""
+    clean_leg = _outcome(exit_code=0)
+    crashed_leg = _outcome(exit_code=2)
+
+    assert total_failure_exit_code([clean_leg, crashed_leg]) == 2
+
+
+def test_total_failure_exit_code_falls_back_when_nothing_observed() -> None:
+    """Defensive-only path: a caller that bypasses scan_target_fires's
+    on_outcome sink entirely (as some CLI-level tests do, via a fully-stubbed
+    scan_fires) has no ScanOutcome to work with -- falls back to a
+    conservative non-zero default rather than crashing on an empty max()."""
+    assert total_failure_exit_code([]) == 4
 
 
 # -- scan_target_fires: the real classification logic, not the injected fake --

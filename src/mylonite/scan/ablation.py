@@ -25,7 +25,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from mylonite._concurrency import gather_bounded
 from mylonite.scan.coverage import ScanOutcome
@@ -374,8 +374,54 @@ def all_inconclusive(results: list[ControlContribution]) -> bool:
     the time the CLI calls this (it exits earlier if there are no ablatable
     controls). An empty list is treated as NOT a total failure (nothing to
     report having failed).
+
+    This is ``ablate``-specific — unlike :class:`~mylonite.scan.coverage.ScanOutcome`
+    (which ``scan``/``gate``/``validate`` all share as their "did this actually
+    work" authority), this predicate operates on ``ControlContribution``, a
+    shape only ``ablate``'s multi-control matrix produces. Not intended for
+    reuse by other commands.
     """
     return bool(results) and all(r.status == "inconclusive" for r in results)
+
+
+#: Duplicated from cli.py's EXIT_PROVIDER (same convention as coverage.py's
+#: own duplicated EXIT_* ints -- this module must stay free of CLI/typer
+#: concerns). Used ONLY as total_failure_exit_code's conservative fallback
+#: when it's called with no observed outcomes at all -- see its docstring.
+_EXIT_PROVIDER_FALLBACK: Final = 4
+
+
+def total_failure_exit_code(observed_outcomes: list[ScanOutcome]) -> int:
+    """Pick the exit code for a TOTAL-failure ``ablate`` run (see :func:`all_inconclusive`).
+
+    The most severe (numerically highest) ``ScanOutcome.exit_code`` observed
+    across every underlying scoped scan that fed the all-inconclusive result —
+    mirrors how ``scan``/``gate`` already derive their own exit codes from
+    ``ScanOutcome`` (``mylonite.scan.coverage``) rather than hardcoding a
+    single value. In practice this is usually ``EXIT_CONFIG`` (2), not
+    ``EXIT_PROVIDER`` (4): each ``scan_target_fires`` call is a single-seed
+    scoped scan, so it never accumulates the 3 consecutive LLM-call failures
+    ``ScanEngine.run()`` requires to set a formal
+    ``aborted="provider_unreachable"`` — it lands in the same "untrustworthy
+    without a formal abort" bucket ``ScanOutcome`` already uses for
+    ``scan``/``gate`` when a report is too small to trip that threshold (see
+    ``coverage.py``'s ``_EXIT_INCOMPLETE_NO_ABORT``). Only a formal
+    ``provider_unreachable`` abort (e.g. a much larger ``--iterations``/
+    ``--max-seeds`` run) actually earns ``EXIT_PROVIDER`` here.
+
+    A genuinely trustworthy leg (``exit_code == 0``) mixed in with a crashed
+    one never masks the crashed leg's nonzero code — ``max()`` only ever
+    moves toward more severe, never less.
+
+    Falls back to a conservative non-zero default (``EXIT_PROVIDER``'s value)
+    if ``observed_outcomes`` is empty — should not happen once the CLI wires
+    ``scan_target_fires``'s ``on_outcome`` sink through a live engine (every
+    leg that contributes to "inconclusive" invokes it), but a caller that
+    bypasses ``scan_target_fires`` entirely (e.g. a fully-stubbed
+    ``scan_fires``, as some CLI-level tests use) has no ``ScanOutcome`` to
+    work with at all.
+    """
+    return max((oc.exit_code for oc in observed_outcomes), default=_EXIT_PROVIDER_FALLBACK)
 
 
 def scan_target_fires(

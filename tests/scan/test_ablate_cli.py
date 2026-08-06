@@ -113,6 +113,44 @@ def test_ablate_renders_inconclusive_without_crashing(
     assert "inconclusive)" in combined  # the "(N inconclusive)" fired-count suffix
 
 
+def test_ablate_mixed_result_still_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.7.7 fix, code-review follow-up: a MIXED result -- one control
+    resolved (load-bearing), a DIFFERENT control wholly inconclusive -- must
+    NOT be treated as a total failure. Only exiting non-zero when EVERY
+    control is inconclusive is the whole point of `all_inconclusive` (see its
+    direct unit tests in test_ablation.py); this proves that contract through
+    the real `ablate` command end-to-end, not just at the pure-predicate
+    level."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        applied = {c.weakness for c in adapter._controls}
+        if pattern_id.startswith("indirect"):  # W2 seed -> resolves cleanly: load-bearing
+            return FireOutcome.FIRED if len(applied) == 0 else FireOutcome.RESISTED
+        return FireOutcome.INCONCLUSIVE  # W4 seed -> crashes on both sides
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2,W4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    combined = result.output + (result.stderr or "")
+    assert "load-bearing: W2" in combined  # W2 resolved and is reported as such
+    assert "inconclusive" in combined  # W4's row/hint still surfaces -- not silently dropped
+
+
 def test_render_ablation_matrix_neutralises_inconclusive_row() -> None:
     """Unit-level reproduction of the code-review finding: a row whose
     `status` is "inconclusive" must not ALSO carry a bare contribution
