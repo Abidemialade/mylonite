@@ -68,7 +68,7 @@ import json
 import logging
 import re
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -86,7 +86,8 @@ from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.demo._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan._types import AdapterInvocationSkipped
+from mylonite.scan._llm import BudgetExceededError
+from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
@@ -761,6 +762,30 @@ class DifferentialValidator(ValidatorBase):
             )
         return _CustomRun(finding=False, effect_confirmed="unprobed", response=None)
 
+    @staticmethod
+    async def _judge_or_none(coro: Coroutine[Any, Any, Verdict]) -> Verdict | None:
+        """Await one consensus judge call; ``None`` on a non-budget failure.
+
+        T4 follow-up (reviewer-flagged): ``judge.judge()`` here was completely
+        unguarded, so a ``NonRecoverableProviderError`` (auth/tls/context_window
+        — see ``scan/_llm.py``) would escape ``gather_bounded``'s bare
+        ``asyncio.gather`` (no ``return_exceptions=True``) and propagate all the
+        way to the ``gate``/``validate`` CLI as a raw traceback. ``BudgetExceededError``
+        still propagates unchanged — a real budget exhaustion should still abort
+        the run, same as everywhere else in the codebase. Any other exception
+        degrades to ``None``, filtered out of both the numerator and denominator
+        by the caller — NOT counted as "judge disagreed" — so an infra failure
+        can never be misread as "the judges reviewed this and rejected it" (the
+        same DCR-0022-style non-inversion the adapter-error path already applies).
+        """
+        try:
+            return await coro
+        except BudgetExceededError:
+            raise
+        except Exception:
+            logger.exception("multi-judge consensus: judge.judge raised unexpectedly")
+            return None
+
     def _multi_judge_consensus(self, firing_runs: list[_CustomRun], payload: Any) -> float:
         """Fraction of independent judge calls (across firing runs) that agree it's real.
 
@@ -768,6 +793,12 @@ class DifferentialValidator(ValidatorBase):
         gap for custom targets. When an effect probe drove the verdict the judge is
         deterministic (agreement ~1.0); otherwise repeated LLM judging surfaces
         flaky/over-eager verdicts.
+
+        A judge call that raises (see ``_judge_or_none``) contributes to NEITHER
+        ``agree`` nor ``total`` — it never happened, as far as the consensus
+        metric is concerned. If EVERY judge call fails this returns 0.0 (not an
+        exception, not a fabricated 1.0) — a broken judge model must fail the
+        consensus gate closed, never pass it by default.
         """
         from mylonite.scan.judge import SuccessJudge
 
@@ -779,9 +810,12 @@ class DifferentialValidator(ValidatorBase):
         # judged repeatedly for consensus) — build them all up front and drive
         # them concurrently, bounded, inside one event loop.
         judge_coros = [
-            judge.judge(payload, r.response) for r in runs for _ in range(self._consensus_judges)
+            self._judge_or_none(judge.judge(payload, r.response))
+            for r in runs
+            for _ in range(self._consensus_judges)
         ]
-        verdicts = asyncio.run(gather_bounded(judge_coros))
+        raw_verdicts = asyncio.run(gather_bounded(judge_coros))
+        verdicts = [v for v in raw_verdicts if v is not None]
         total = len(verdicts)
         agree = sum(1 for v in verdicts if v.success)
         return (agree / total) if total else 0.0
@@ -1132,7 +1166,21 @@ class DifferentialValidator(ValidatorBase):
         except Exception:
             logger.exception("metamorphic: adapter.invoke raised unexpectedly")
             return None
-        verdict = await judge.judge(payload, response)
+        try:
+            verdict = await judge.judge(payload, response)
+        except BudgetExceededError:
+            raise
+        except Exception:
+            # Same shape as the adapter.invoke() failure above (T4 follow-up —
+            # reviewer-flagged: this call was completely unguarded, including
+            # against `NonRecoverableProviderError`, which `run_twins`/
+            # `asyncio.gather` — no `return_exceptions=True` — would otherwise
+            # let escape all the way to the `gate` CLI as a raw traceback).
+            # `None` means "never judged" here too: this variant contributes
+            # neither a fired nor a resisted result (DCR-0022) — a judge
+            # infra failure must not be misread as "the guard resisted".
+            logger.exception("metamorphic: judge.judge raised unexpectedly")
+            return None
         return verdict.success
 
     # -- build stage ----------------------------------------------------------

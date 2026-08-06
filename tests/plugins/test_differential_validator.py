@@ -42,6 +42,9 @@ from mylonite.plugins._reference.reference_validator import (
     _deterministic_strategies,
 )
 from mylonite.plugins.registry import discover
+from mylonite.scan._llm import BudgetExceededError, NonRecoverableProviderError
+from mylonite.scan._types import Verdict
+from mylonite.scan.diagnostics import Diagnosis
 
 # The exploit the validator validates. W2 indirect-injection: the planner reads
 # a poisoned note then sends an email to attacker@example.com. The vulnerable
@@ -453,6 +456,132 @@ def test_invoke_and_judge_async_returns_none_on_adapter_error(monkeypatch) -> No
     validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
     assert result is None
+
+
+def test_invoke_and_judge_async_returns_none_on_judge_non_recoverable_error(monkeypatch) -> None:
+    """T4 follow-up (reviewer-flagged): ``judge.judge()`` inside
+    ``_invoke_and_judge_async`` was completely unguarded — a
+    ``NonRecoverableProviderError`` (auth/tls/context_window; see
+    ``scan/_llm.py``) would escape ``run_twins``'s bare ``asyncio.gather`` (no
+    ``return_exceptions=True``) and propagate all the way to the ``gate``/
+    ``validate`` CLI as a raw traceback. Same DCR-0022 non-inversion shape as
+    the adapter-error case above: a judge infra failure degrades to ``None``
+    (never judged), NOT a fabricated "resisted".
+    """
+    from mylonite.scan import judge as judge_mod
+
+    async def _boom(self, payload, response):
+        del self, payload, response
+        raise NonRecoverableProviderError(
+            Diagnosis(category="auth", detail="boom: bad key", remedy="fix your key"),
+            caller="judge",
+        )
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _boom)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+    assert result is None
+
+
+def test_invoke_and_judge_async_reraises_budget_exceeded_from_judge(monkeypatch) -> None:
+    """Regression guard: BudgetExceededError from the judge must keep propagating
+    (so ``run()``/the caller can still abort on budget exhaustion) — the new
+    ``except Exception`` degrade must not accidentally widen to swallow it too.
+    """
+    from mylonite.scan import judge as judge_mod
+
+    async def _boom(self, payload, response):
+        del self, payload, response
+        raise BudgetExceededError("cap hit")
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _boom)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    with pytest.raises(BudgetExceededError):
+        asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+
+
+# --- T4 follow-up: _multi_judge_consensus must not crash on a judge failure --
+
+
+def test_multi_judge_consensus_excludes_non_recoverable_judge_errors(monkeypatch) -> None:
+    """A judge call that raises must be excluded from BOTH the numerator and the
+    denominator — not counted as "disagreed" — mirroring the adapter-error
+    non-inversion convention (DCR-0022). 1 of 3 scripted judge calls raises;
+    the other 2 agree, so the consensus is 2/2 = 1.0, not 2/3.
+    """
+    from mylonite.scan import judge as judge_mod
+
+    call_count = 0
+
+    async def _flaky_judge(self, payload, response):
+        del self, payload, response
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise NonRecoverableProviderError(
+                Diagnosis(category="tls", detail="boom", remedy="check your proxy"),
+                caller="judge",
+            )
+        return Verdict(success=True, reason="agree", evidence={}, mechanism="llm")
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _flaky_judge)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(
+        iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
+    )
+    run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
+    agree = validator._multi_judge_consensus([run], exploit.payload)
+    assert agree == 1.0
+    assert call_count == 3  # all 3 scripted calls still ran; only 1 raised
+
+
+def test_multi_judge_consensus_returns_zero_when_every_judge_errors(monkeypatch) -> None:
+    """A fully-broken judge model (e.g. every call auth-fails) must fail the
+    consensus gate CLOSED — 0.0, never a fabricated pass — not raise and never
+    silently report full agreement.
+    """
+    from mylonite.scan import judge as judge_mod
+
+    async def _always_boom(self, payload, response):
+        del self, payload, response
+        raise NonRecoverableProviderError(
+            Diagnosis(category="auth", detail="boom", remedy="fix your key"), caller="judge"
+        )
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _always_boom)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(
+        iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
+    )
+    run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
+    agree = validator._multi_judge_consensus([run], exploit.payload)
+    assert agree == 0.0
+
+
+def test_multi_judge_consensus_reraises_budget_exceeded(monkeypatch) -> None:
+    """Regression guard: BudgetExceededError must still propagate out of
+    ``_multi_judge_consensus`` (through ``gather_bounded``'s bare
+    ``asyncio.gather``), not be swallowed by the new degrade-to-None path.
+    """
+    from mylonite.scan import judge as judge_mod
+
+    async def _budget_boom(self, payload, response):
+        del self, payload, response
+        raise BudgetExceededError("cap hit")
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _budget_boom)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
+    with pytest.raises(BudgetExceededError):
+        validator._multi_judge_consensus([run], exploit.payload)
 
 
 def test_run_perturbed_does_not_invert_a_guarded_adapter_error_into_resisted(monkeypatch) -> None:
