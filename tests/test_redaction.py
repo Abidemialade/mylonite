@@ -108,9 +108,13 @@ def test_redact_masks_quoted_dict_repr_kv() -> None:
     token = "ghp_1234567890abcdEFGHijklMNOP"
     out = redact("{'GH_TOKEN': '" + token + "'}")
     assert token not in out
+    # The captured quote groups are re-emitted, so the surrounding quote
+    # structure survives intact rather than getting mangled.
+    assert out == "{'GH_TOKEN': '" + REDACTION_PLACEHOLDER + "'}"
 
     out2 = redact('{"GH_TOKEN": "' + token + '"}')
     assert token not in out2
+    assert out2 == '{"GH_TOKEN": "' + REDACTION_PLACEHOLDER + '"}'
 
 
 # --- Preservation: these must NEVER be masked -------------------------------

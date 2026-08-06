@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Final
 
 REDACTION_PLACEHOLDER: Final = "***REDACTED***"
@@ -75,14 +76,20 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 # value, so a quoted dict-repr rendering (e.g. "'GH_TOKEN': 'ghp_...'" from
 # str(exc) embedding a headers/env dict) still matches (DCR-0014) even though
 # the closing/opening quotes would otherwise break key-sep-value adjacency.
+# Both quote spans are captured (not just matched) so _mask_kv can re-emit
+# them and keep the surrounding quote structure intact in the output.
 _KV_PATTERN: Final = re.compile(
-    rf"(?P<key>{_KV_KEYS})['\"]?(?P<sep>\s*[:=]\s*)['\"]?(?P<val>{_KV_VALUE})",
+    rf"(?P<key>{_KV_KEYS})(?P<keyquote>['\"]?)(?P<sep>\s*[:=]\s*)"
+    rf"(?P<valquote>['\"]?)(?P<val>{_KV_VALUE})",
     re.IGNORECASE,
 )
 
 
 def _mask_kv(match: re.Match[str]) -> str:
-    return f"{match.group('key')}{match.group('sep')}{REDACTION_PLACEHOLDER}"
+    return (
+        f"{match.group('key')}{match.group('keyquote')}{match.group('sep')}"
+        f"{match.group('valquote')}{REDACTION_PLACEHOLDER}"
+    )
 
 
 def _key_looks_secret(name: str) -> bool:
@@ -201,6 +208,29 @@ def redact_value(value: object) -> object:
     return value
 
 
+def _walk_strings(value: object, leaf: Callable[[str], str]) -> object:
+    """Recurse through ``value``, applying ``leaf`` to every string found,
+    preserving the shape of any nested dict/list/tuple containers.
+
+    The single shared tree-walk both :func:`_mask_all_strings` and
+    :func:`_redact_remaining` build on — they differ only in what happens at a
+    string leaf (an unconditional placeholder vs. shape-based :func:`redact`),
+    not in how the tree is walked. Keeping one walker here is what stops that
+    walk logic drifting apart the next time either caller changes, exactly the
+    duplication :func:`_key_looks_secret`'s docstring warns about elsewhere in
+    this module.
+    """
+    if isinstance(value, str):
+        return leaf(value)
+    if isinstance(value, dict):
+        return {k: _walk_strings(v, leaf) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_walk_strings(v, leaf) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_walk_strings(v, leaf) for v in value)
+    return value
+
+
 def _mask_all_strings(value: object) -> object:
     """Replace every string leaf in ``value`` with the placeholder unconditionally.
 
@@ -211,15 +241,7 @@ def _mask_all_strings(value: object) -> object:
     passwords). Non-string leaves (ints, bools, ``None``) are left alone —
     there is nothing to mask.
     """
-    if isinstance(value, str):
-        return REDACTION_PLACEHOLDER
-    if isinstance(value, dict):
-        return {k: _mask_all_strings(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_mask_all_strings(v) for v in value]
-    if isinstance(value, tuple):
-        return tuple(_mask_all_strings(v) for v in value)
-    return value
+    return _walk_strings(value, lambda _s: REDACTION_PLACEHOLDER)
 
 
 class SecretRedactingFilter(logging.Filter):
@@ -521,12 +543,4 @@ def _redact_remaining(value: object) -> object:
     no key name to trust as unconditional signal, only a shape to catch
     defense-in-depth (e.g. a URL with an embedded ``user:pass@`` credential).
     """
-    if isinstance(value, str):
-        return redact(value)
-    if isinstance(value, dict):
-        return {k: _redact_remaining(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_remaining(v) for v in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_remaining(v) for v in value)
-    return value
+    return _walk_strings(value, redact)
