@@ -94,7 +94,50 @@ def test_ablate_renders_inconclusive_without_crashing(
     combined = result.output + (result.stderr or "")
     assert "inconclusive" in combined
     assert "load-bearing: W2" not in combined  # the summary list, not the caveat prose
-    assert combined.count("inconclusive") >= 2  # the table row + the post-render hint
+    # The row's numbers must not be independently readable as a genuine
+    # load-bearing signal: no bare percentage (contribution is neutralised to
+    # "n/a"), and the inconclusive count is surfaced in the fired-count cell
+    # rather than silently dropped (code review: "2/0 of 2" + "+100%" reads
+    # exactly like a real load-bearing result even though status says
+    # inconclusive).
+    assert "n/a" in combined
+    assert "+100%" not in combined
+    assert "inconclusive)" in combined  # the "(N inconclusive)" fired-count suffix
+
+
+def test_render_ablation_matrix_neutralises_inconclusive_row() -> None:
+    """Unit-level reproduction of the code-review finding: a row whose
+    `status` is "inconclusive" must not ALSO carry a bare contribution
+    percentage or a fired-count string that reads like a genuine
+    load-bearing/theater result. Uses the exact shape the reviewer
+    reproduced -- raw_fired=2, guarded_fired=0, total=2, contribution=+1.0
+    -- to pin that "n/a" and the inconclusive-count suffix replace the
+    misleading "+100%" / "2/0 of 2" output."""
+    import io
+
+    from rich.console import Console
+
+    from mylonite.cli import _render_ablation_matrix
+    from mylonite.scan.ablation import ControlContribution
+
+    misleading_row = ControlContribution(
+        weakness="W2",
+        raw_fired=2,
+        guarded_fired=0,
+        total=2,
+        contribution=1.0,
+        status="inconclusive",
+        inconclusive=2,
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, width=200, force_terminal=False)
+    _render_ablation_matrix([misleading_row], console=console)
+    out = buf.getvalue()
+
+    assert "inconclusive" in out
+    assert "n/a" in out
+    assert "+100%" not in out  # the exact misleading percentage from review
+    assert "2/0 of 2 (2 inconclusive)" in out
 
 
 def test_ablate_requires_authorize(tmp_path: Path) -> None:

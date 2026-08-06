@@ -3710,12 +3710,24 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
     table.add_column("contribution", no_wrap=True)
     table.add_column("raw/guarded fired", no_wrap=True)
     for r in results:
-        table.add_row(
-            r.weakness,
-            r.status,
-            f"{r.contribution:+.0%}",
-            f"{r.raw_fired}/{r.guarded_fired} of {r.total}",
-        )
+        # An inconclusive row's raw/guarded fired counts and contribution
+        # percentage are computed purely from the FIRED/RESISTED legs and
+        # exclude the crashed leg(s) entirely — left alone, they can still
+        # read as a genuine load-bearing/theater signal (e.g. "2/0 of 2",
+        # "+100%") to anyone skimming the table or copying a row out of
+        # context, even though `status` correctly says "inconclusive". Never
+        # render a bare percentage or count for this row; always surface the
+        # inconclusive count instead.
+        if r.status == "inconclusive":
+            contribution_cell = "n/a"
+            fired_cell = (
+                f"{r.raw_fired}/{r.guarded_fired} of {r.total} "
+                f"({r.inconclusive} inconclusive)"
+            )
+        else:
+            contribution_cell = f"{r.contribution:+.0%}"
+            fired_cell = f"{r.raw_fired}/{r.guarded_fired} of {r.total}"
+        table.add_row(r.weakness, r.status, contribution_cell, fired_cell)
     console_print(console, table)
     load_bearing = [r.weakness for r in results if r.load_bearing]
     redundant = [r.weakness for r in results if r.status == "redundant"]
