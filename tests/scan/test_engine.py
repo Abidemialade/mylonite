@@ -222,6 +222,44 @@ async def test_engine_records_finding_on_success_verdict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_stamps_exec_context_metadata_on_exploit() -> None:
+    """T12: ``_finalize`` stamps ``mylonite.exec.*`` exec-context metadata onto
+    every finding's payload -- provider/model (from ``ScanConfig``) and the
+    resolved role models -- so an emitted regression test can gate on the SAME
+    model that discovered the finding, instead of a testkit hardcoded default.
+    """
+    from mylonite.scan.exec_context import ExecContext
+    from mylonite.version import __version__
+
+    payload = _payload_from_seed_index(0)
+    module = _ModuleStub([payload])
+    adapter = _AdapterStub(_ok_response())
+    customiser = _CustomiserStub()
+    judge = _JudgeStub(
+        Verdict(success=True, reason="caught it", evidence={}, mechanism="predicate")
+    )
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,
+        attack_modules=[module],
+        customiser=customiser,
+        judge=judge,
+    )
+    result = await engine.run()
+    assert len(result.exploits) == 1
+    ctx = ExecContext.from_metadata(result.exploits[0].payload.metadata)
+    assert ctx is not None
+    assert ctx.provider == "anthropic"
+    assert ctx.model == "stub-model"
+    # _config() sets no role overrides, so every role falls back to `model`.
+    assert ctx.planner_model == "stub-model"
+    assert ctx.customiser_model == "stub-model"
+    assert ctx.judge_model == "stub-model"
+    assert ctx.mylonite_version == __version__
+
+
+@pytest.mark.asyncio
 async def test_engine_stamps_compliance_from_firing_seed_not_module() -> None:
     """Provenance (#4): the emitted ExploitRecord carries the FIRING seed's
     compliance tags, not the umbrella module's. A module spans several weakness
@@ -650,6 +688,100 @@ async def test_customiser_non_recoverable_error_degrades_to_error_outcome_not_cr
     assert attempt.verdict_reason is not None
     assert "auth" in attempt.verdict_reason
     assert result.report.findings_count == 0
+
+
+# --- DCR-0005: exception text persisted to ScanAttempt must be redacted ----
+
+#: A RuntimeError message shaped like a real leak: an Authorization header
+#: echoed back by an httpx error, or an env-var value baked into an MCP
+#: subprocess launch failure. `write_artefacts` persists `verdict_reason`
+#: verbatim to `scan_report.json` -- a directory the CLI's own next-step
+#: guidance (`cli.py`) tells the operator to commit.
+_SECRET_EXC_TEXT = (
+    "connection failed: Authorization: Bearer sk-live-shouldnotleak123"  # pragma: allowlist secret
+)
+
+
+@pytest.mark.asyncio
+async def test_customiser_exception_text_is_redacted_before_persisting() -> None:
+    """DCR-0005: a customiser exception carrying a credential-shaped string must
+    not land verbatim in the persisted `ScanAttempt.verdict_reason`.
+    """
+
+    class _LeakyCustomiser:
+        async def customise(self, seed: Any, target: Any) -> Payload:
+            del seed, target
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_LeakyCustomiser(),  # type: ignore[arg-type]
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "error"
+    assert attempt.verdict_reason is not None
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_adapter_invoke_exception_text_is_redacted_before_persisting() -> None:
+    """DCR-0005: same guarantee at the `adapter.invoke()` catch site in `_one_pass`."""
+
+    class _LeakyAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            del payload
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+        async def close(self) -> None:
+            return None
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_LeakyAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "error"
+    assert attempt.verdict_reason is not None
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_judge_exception_text_is_redacted_before_persisting() -> None:
+    """DCR-0005: same guarantee at the `judge.judge()` catch site in `_one_pass`."""
+
+    class _LeakyJudge:
+        async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+            del payload, response
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_LeakyJudge(),  # type: ignore[arg-type]
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "error"
+    assert attempt.verdict_reason is not None
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio

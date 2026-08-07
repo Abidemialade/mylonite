@@ -61,3 +61,45 @@ def test_gate_requires_authorize_for_custom(tmp_path):
     )
     res = runner.invoke(app, ["gate", "--target-file", str(tf)])
     assert res.exit_code == 2
+
+
+def test_gate_rejects_bundled_mcp_target_with_explicit_target_file(tmp_path):
+    # DCR-0001: a real 'mcp:<family>' positional target combined with an
+    # explicit --target-file must be rejected loudly rather than silently
+    # gating the target-file's target and discarding the positional argument.
+    tf = tmp_path / "custom-app.yaml"
+    tf.write_text(
+        "family: demo\ncommand: 'python'\nargs: ['-c', 'pass']\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        app,
+        [
+            "gate",
+            "mcp:filesystem:/scope",
+            "--target-file",
+            str(tf),
+            "--authorize",
+            "my-app",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    assert "mcp:filesystem:/scope" in res.output
+    assert "--target-file" in res.output
+
+
+def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(tmp_path, monkeypatch):
+    # DCR-0001: the same rejection must fire even when target_file comes from an
+    # auto-discovered ./mylonite.yaml and NO --target-file flag was typed at all.
+    tf = tmp_path / "custom-app.yaml"
+    tf.write_text(
+        "family: demo\ncommand: 'python'\nargs: ['-c', 'pass']\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"target_file: {tf.name}\nauthorize: my-app\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    res = runner.invoke(app, ["gate", "mcp:filesystem:/scope"])
+    assert res.exit_code == 2, res.output
+    assert "mcp:filesystem:/scope" in res.output
+    assert "mylonite.yaml" in res.output

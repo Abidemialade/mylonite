@@ -29,10 +29,22 @@ from unittest.mock import patch
 import pytest
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
+from typer.testing import CliRunner
 
 from mylonite import testkit
-from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
-from mylonite.plugins._mcp import stdio_adapter
+from mylonite.cli import EXIT_SUCCESS, app
+from mylonite.contracts._types import (
+    AdapterResponse,
+    ComplianceTags,
+    ExploitRecord,
+    Payload,
+    ScanAttempt,
+    ScanReport,
+)
+from mylonite.plugins._mcp import stdio_adapter, target_registry
+from mylonite.scan.engine import ScanEngine, ScanResult
+
+_cli_runner = CliRunner()
 
 # ── pattern under test ──────────────────────────────────────────────────────
 
@@ -256,6 +268,8 @@ def test_assert_target_resists_passes_when_effect_not_confirmed(tmp_path: Path) 
         result = testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 
@@ -286,6 +300,8 @@ def test_assert_target_resists_raises_when_attack_lands(tmp_path: Path) -> None:
         testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 
@@ -312,6 +328,8 @@ def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
         testkit.assert_target_resists(
             _exploit(),
             target_file=target_file,
+            model="stub-model",
+            provider="stub",
             _completion_fn=completion,
         )
 
@@ -325,3 +343,128 @@ def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
     assert completion.planner_calls == 1, (
         f"expected exactly 1 planner call, got {completion.planner_calls}"
     )
+
+
+# ── T12 real-CLI-layout regression ──────────────────────────────────────────
+
+
+def test_generate_backfills_scan_report_into_real_cli_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T12 real-layout regression.
+
+    ``mylonite scan`` writes ``scan_report.json`` into the SCAN directory;
+    ``mylonite generate`` writes the emitted test into a DIFFERENT directory
+    (``layout.generated_for(slug)``, e.g. ``.mylonite/generated/<slug>/``) and
+    did not copy ``scan_report.json`` alongside ``target.yaml`` there. An
+    exploit with no embedded ``mylonite.exec.*`` metadata (e.g. one scanned
+    before this release) relies ENTIRELY on that sibling report for
+    ``testkit._resolve_exec_context``'s back-fill — so without ``generate``
+    copying it, the back-fill was dead in practice against the real
+    CLI-produced layout. The earlier back-fill unit tests (in
+    ``test_testkit.py``) artificially co-located ``target.yaml`` and
+    ``scan_report.json`` in the same ``tmp_path``, which hid this gap.
+
+    Drives the REAL ``scan`` + ``generate`` CLI commands (only
+    ``ScanEngine.run`` is faked, to avoid a live provider/subprocess for the
+    ``scan`` step — the same pattern
+    ``test_custom_target_flow_needs_target_file_at_most_once`` in
+    ``test_cli.py`` uses), then re-drives EXACTLY what the emitted test's own
+    body calls — ``assert_target_resists(exploit, target_file=here /
+    "target.yaml")``, no explicit ``model=``/``provider=`` — against the REAL
+    ``.mylonite/scans/`` + ``.mylonite/generated/`` layout ``generate``
+    actually produced. A raised ``TestkitConfigError`` would fail this test;
+    reaching a clean resist proves the back-fill genuinely resolved
+    (model, provider) from the copied sibling report.
+    """
+    target_registry.clear_runtime_targets()
+
+    exploit = _exploit()  # no mylonite.exec.* metadata — pre-T12-style
+    assert not any(k.startswith("mylonite.exec.") for k in exploit.payload.metadata)
+
+    report = ScanReport(
+        target_id=exploit.target_id,
+        attack_modules=["mylonite.excessive-agency"],
+        provider="anthropic",
+        model="claude-t12-real-layout",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=exploit.pattern_id,
+                pattern_id=exploit.pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="x",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[exploit])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    target_yaml = _write_target_yaml(tmp_path)
+    scan_root = tmp_path / "scans"
+
+    r1 = _cli_runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp-email",
+            "--output-dir",
+            str(scan_root),
+        ],
+    )
+    assert r1.exit_code == EXIT_SUCCESS, r1.output
+    scan_dir = next(p for p in scan_root.iterdir() if p.is_dir())
+    assert (scan_dir / "scan_report.json").is_file()
+
+    # The real ScanEngine.run is needed again for the live re-drive at the end.
+    monkeypatch.undo()
+
+    gen = tmp_path / "gen"
+    r2 = _cli_runner.invoke(app, ["generate", str(scan_dir), "--out", str(gen)])
+    assert r2.exit_code == EXIT_SUCCESS, r2.output
+    assert gen.resolve() != scan_dir.resolve()  # genuinely a DIFFERENT directory
+    assert (gen / "target.yaml").is_file()
+
+    # The regression this test pins: generate must copy a (trimmed)
+    # scan_report.json alongside target.yaml into the GENERATED dir.
+    copied_report_path = gen / "scan_report.json"
+    assert copied_report_path.is_file(), (
+        "generate did not back-fill scan_report.json into the generated dir — "
+        "testkit._resolve_exec_context's sibling lookup has nothing to find "
+        "against the real CLI-produced layout"
+    )
+    copied_report = json.loads(copied_report_path.read_text(encoding="utf-8"))
+    assert copied_report == {"model": "claude-t12-real-layout", "provider": "anthropic"}
+
+    # Re-drive exactly as the emitted test's own body does: load_exploit +
+    # assert_target_resists(exploit, target_file=here / "target.yaml"), no
+    # explicit model=/provider= — against the REAL generated-dir layout.
+    loaded_exploit = testkit.load_exploit(next(gen.glob("exploit_*.json")))
+    assert not any(k.startswith("mylonite.exec.") for k in loaded_exploit.payload.metadata)
+
+    session = _CountingFakeSession(effect_lands=False)
+    fake_open = _TrackingFakeOpen(session)
+    completion = _ScriptedCompletion()
+
+    with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
+        result = testkit.assert_target_resists(
+            loaded_exploit,
+            target_file=gen / "target.yaml",
+            _completion_fn=completion,
+        )
+
+    assert result is None, "assert_target_resists must return None when target resists"
+    target_registry.clear_runtime_targets()

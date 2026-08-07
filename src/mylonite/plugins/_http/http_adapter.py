@@ -20,6 +20,7 @@ probe a black box can't provide.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -96,18 +97,28 @@ def _escape_for_body(text: str, body: str) -> str:
     template (form-encoded, plain text) must NOT be JSON-escaped or the payload is
     corrupted (a newline becomes a literal ``\\n``, a quote becomes ``\\"``).
 
-    Per-occurrence detection (#33/DCR-0014): rather than trial-parsing the
-    WHOLE document with every ``{prompt}`` replaced by one bare sentinel (which
-    breaks the instant ANY occurrence sits in a non-string position, silently
-    disabling escaping even for occurrences that DO need it), each occurrence
-    is checked independently via ``_prompt_occurrences_quoted``:
+    Per-occurrence detection (#33/DCR-0014), GATED by a whole-document
+    trial-parse (DCR-0003): each occurrence's local quoting is checked
+    independently via ``_prompt_occurrences_quoted`` (rather than
+    trial-parsing the whole document with every ``{prompt}`` replaced by one
+    bare sentinel, which breaks the instant ANY occurrence sits in a
+    non-string position, silently disabling escaping even for occurrences
+    that DO need it) — but the quote-character heuristic alone is never
+    trusted to decide "this is JSON": ``_substitute_probe`` builds a
+    whole-document probe (a JSON-safe stand-in per occurrence, honouring each
+    occurrence's own quoted-ness) and ``json.loads``s it first. A template
+    that fails that trial-parse is not JSON at all — e.g. a plain-text/
+    form-encoded template that happens to wrap ``{prompt}`` in literal quotes
+    for PROSE reasons (``Hello, "{prompt}" said the user``) — and is always
+    substituted raw, regardless of what the local quote characters look like.
+    Only once the trial-parse confirms genuine JSON shape does the
+    per-occurrence quoting decide the strategy:
 
     * every occurrence quoted -> escape (the common single-slot JSON case).
-    * NO occurrence quoted -> either the template isn't JSON at all (raw
-      substitution is correct), or it IS JSON-shaped and ``{prompt}`` sits in
-      a bare, non-string value position — no escaping strategy can safely put
-      natural-language prose there, so this raises loudly instead of quietly
-      sending a broken/misleading request.
+    * NO occurrence quoted -> the template IS JSON-shaped and ``{prompt}``
+      sits in a bare, non-string value position — no escaping strategy can
+      safely put natural-language prose there, so this raises loudly instead
+      of quietly sending a broken/misleading request.
     * SOME quoted, some not (mixed) -> escape. The function returns a single
       string substituted at every occurrence (the call site does one global
       ``body.replace(...)``, matching every other template substitution in
@@ -139,24 +150,54 @@ def _escape_for_body(text: str, body: str) -> str:
     quoted_flags = _prompt_occurrences_quoted(body)
     if not quoted_flags:
         return text  # no {prompt} in body — nothing to decide (callers validate presence)
-    if any(quoted_flags):
-        return json.dumps(text)[1:-1]
-    # No occurrence is quoted. Distinguish "not JSON at all" (raw substitution
-    # is correct) from "JSON-shaped with {prompt} in a bare value position"
-    # (unsafe at any escaping — reject loudly) by trial-substituting a valid
-    # bare JSON literal (0) at every occurrence and checking whether the
-    # WHOLE document then parses.
-    probe = body.replace(_PROMPT_SLOT, "0")
+
+    # Trial-substitute a JSON-SAFE placeholder at each occurrence — "x" for a
+    # quoted slot (the surrounding literal quotes are already in the template,
+    # so this forms a valid JSON string), "0" for a bare slot (a valid bare
+    # JSON literal) — and check whether the WHOLE document then parses as
+    # JSON. This confirms the template is GENUINELY JSON-shaped before
+    # trusting either heuristic (DCR-0003): the quote-character check alone
+    # (``any(quoted_flags)``) fires on a plain-text/form-encoded template that
+    # happens to quote {prompt} for PROSE reasons (e.g. `Hello, "{prompt}"
+    # said the user`), which is not JSON at all — escaping it there would
+    # corrupt the delivered payload (a real newline becomes a literal
+    # backslash-n) into a template that was never JSON to begin with.
+    probe = _substitute_probe(body, quoted_flags)
     try:
         json.loads(probe)
     except (ValueError, TypeError):
-        return text  # not JSON at all — substitute raw
+        return text  # not JSON at all — substitute raw, regardless of quoting
+    if any(quoted_flags):
+        return json.dumps(text)[1:-1]
+    # Genuinely JSON-shaped, but no occurrence is quoted: {prompt} sits in a
+    # bare (non-string) value position — unsafe at any escaping, reject loudly
+    # rather than silently sending a broken/misleading request.
     raise ValueError(
         "request.body's {prompt} placeholder sits in a non-string JSON position "
         "(not inside quotes) — a natural-language attack payload can't be "
         'safely substituted there. Wrap it in quotes, e.g. "{prompt}", so it '
         "lands as a JSON string."
     )
+
+
+def _substitute_probe(body: str, quoted_flags: list[bool]) -> str:
+    """Replace each ``{prompt}`` occurrence with a JSON-safe stand-in for the
+    whole-document trial-parse in :func:`_escape_for_body`: ``"x"``'s worth of
+    bare text for a quoted occurrence (the literal quotes already surrounding
+    it in ``body`` complete the JSON string), or the bare literal ``0`` for a
+    non-quoted occurrence. Must substitute per-occurrence (not a single
+    blanket ``str.replace``) since a mixed template can have both kinds in one
+    document.
+    """
+    parts: list[str] = []
+    start = 0
+    for quoted in quoted_flags:
+        idx = body.find(_PROMPT_SLOT, start)
+        parts.append(body[start:idx])
+        parts.append("x" if quoted else "0")
+        start = idx + len(_PROMPT_SLOT)
+    parts.append(body[start:])
+    return "".join(parts)
 
 
 def _extract_reply(raw: str, response_path: str | None) -> str:
@@ -237,7 +278,23 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         family: str,
         scope: str | None = None,
         input_frame: bool = False,
-        **_ignored: Any,
+        # Everything below is an MCP-only kwarg (see MCPSessionAdapterBase):
+        # accepted-and-IGNORED so ``build_mcp_adapter``/``build_adapter_for_spec``
+        # can pass the same call shape to any transport without special-casing
+        # ``rest``. Named explicitly — rather than a ``**_ignored: Any`` catch-all
+        # — so a genuinely unrecognised keyword (a typo, or a future param this
+        # adapter really does need to observe, e.g. a caller meaning to pass
+        # ``completion_fn`` under some other name) raises ``TypeError`` instead of
+        # being silently swallowed. A caller that intends an offline/fixture-
+        # replayed differential and misspells a kwarg here now fails loudly
+        # instead of the "offline" run silently doing something else.
+        model: str | None = None,
+        completion_fn: Callable[..., Any] | None = None,
+        planner_timeout_s: float | None = None,
+        controls: list[Any] | None = None,
+        launch_env: dict[str, str] | None = None,
+        launch_command: str | None = None,
+        launch_args: list[str] | None = None,
     ) -> None:
         spec = target_registry.resolve_target(family, scope)
         if spec.request is None:

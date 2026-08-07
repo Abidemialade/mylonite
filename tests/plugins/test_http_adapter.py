@@ -92,6 +92,18 @@ def test_escape_for_body_leaves_non_json_templates_raw() -> None:
     assert escaped == 'hi \\"there\\"\\nx'
 
 
+def test_escape_for_body_leaves_quoted_slot_raw_in_non_json_template() -> None:
+    """DCR-0003: a plain-text/form-encoded template can legitimately wrap
+    {prompt} in literal quotes for PROSE reasons (not JSON syntax). The old
+    quoted-slot branch fired purely off the local quote-character heuristic
+    with no trial-parse, so this got misdetected as JSON-shaped and
+    JSON-escaped -- corrupting a real newline into a literal backslash-n
+    even though the template was never JSON at all."""
+    body = 'text=Hello, "{prompt}" said the user'
+    escaped = _escape_for_body("line one\nline two", body)
+    assert escaped == "line one\nline two"  # a real newline, NOT escaped to \\n
+
+
 def test_escape_for_body_mixed_context_still_escapes_the_quoted_slot() -> None:
     """DCR-0014: a template with two {prompt} slots in different JSON contexts
     (one quoted, one bare) used to fail a whole-document parse and silently
@@ -354,6 +366,37 @@ def test_guarded_build_frames_payload_raw_build_does_not() -> None:
 def test_factory_routes_rest_transport_to_http_adapter() -> None:
     _register_rest()
     adapter = build_mcp_adapter(family="myagent", scope=None, model="anthropic/claude-haiku-4-5")
+    assert isinstance(adapter, HTTPAgentAdapter)
+
+
+# --- explicit __init__ signature (no `**_ignored` catch-all) ----------------
+
+
+def test_unknown_kwarg_raises_type_error_instead_of_silently_swallowing() -> None:
+    """The old ``**_ignored: Any`` catch-all silently dropped ANY keyword,
+    including a typo'd or wrong-named argument a caller actually meant to be
+    observed (e.g. an offline differential's ``completion_fn`` under some other
+    name). The explicit signature must let Python's normal keyword handling
+    raise ``TypeError`` on a name it doesn't recognise."""
+    with pytest.raises(TypeError):
+        HTTPAgentAdapter(family="myagent", not_a_real_kwarg="boom")  # type: ignore[call-arg]
+
+
+def test_mcp_only_kwargs_are_still_accepted_and_ignored() -> None:
+    """The MCP-only kwargs the shared factory passes for every transport
+    (model/completion_fn/controls/launch overrides) must still be accepted —
+    just explicitly named now, rather than via a catch-all — so the SAME
+    factory call shape keeps working for a `rest` target."""
+    _register_rest()
+    adapter = HTTPAgentAdapter(
+        family="myagent",
+        model="m",
+        completion_fn=lambda **_kw: None,
+        controls=[],
+        launch_env={"X": "1"},
+        launch_command="cmd",
+        launch_args=["--flag"],
+    )
     assert isinstance(adapter, HTTPAgentAdapter)
 
 

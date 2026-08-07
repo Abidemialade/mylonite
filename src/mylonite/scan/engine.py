@@ -23,12 +23,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mylonite._redaction import redact
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
+from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
@@ -367,7 +369,41 @@ class ScanEngine:
             single_run=self._config.runs == 1,
             mylonite_version=__version__,
         )
-        return ScanResult(report=report, exploits=exploits)
+        return ScanResult(report=report, exploits=self._stamp_exec_context(exploits))
+
+    def _stamp_exec_context(self, exploits: list[ExploitRecord]) -> list[ExploitRecord]:
+        """Stamp T12 execution-context metadata onto every finding's payload.
+
+        Writer half of the T12 fix (see ``mylonite.scan.exec_context``): the
+        model/provider that actually produced this scan's findings otherwise
+        lives only on the sibling ``ScanReport`` (which ``TestGenerator.emit``
+        never reads) -- so without this, an emitted regression test falls back
+        to a hardcoded default that can silently differ from the model that
+        found/validated the exploit. Rides in ``Payload.metadata`` (allowlisted,
+        schema-invisible) rather than a new ``ExploitRecord`` field or an
+        ``emit()`` signature change, so this needs no `contract-change`.
+        """
+        if not exploits:
+            return exploits
+        exec_context = ExecContext(
+            provider=self._config.provider,
+            model=self._config.model,
+            planner_model=self._config.resolved_planner_model,
+            customiser_model=self._config.resolved_customiser_model,
+            judge_model=self._config.resolved_judge_model,
+            mylonite_version=__version__,
+        )
+        stamped_metadata = exec_context.to_metadata()
+        return [
+            exploit.model_copy(
+                update={
+                    "payload": exploit.payload.model_copy(
+                        update={"metadata": {**exploit.payload.metadata, **stamped_metadata}}
+                    )
+                }
+            )
+            for exploit in exploits
+        ]
 
     async def _process_one(
         self,
@@ -484,7 +520,7 @@ class ScanEngine:
                         pattern_id=payload.pattern_id,
                         outcome="error",
                         verdict_mechanism=None,
-                        verdict_reason=str(exc),
+                        verdict_reason=redact(str(exc)),
                         error_detail=type(exc).__name__,
                     ),
                     exploit=None,
@@ -768,7 +804,7 @@ class ScanEngine:
                     pattern_id=payload.pattern_id,
                     outcome="error",
                     verdict_mechanism=None,
-                    verdict_reason=str(exc),
+                    verdict_reason=redact(str(exc)),
                     error_detail=type(exc).__name__,
                 ),
                 exploit=None,
@@ -806,7 +842,7 @@ class ScanEngine:
                     pattern_id=payload.pattern_id,
                     outcome="error",
                     verdict_mechanism=None,
-                    verdict_reason=str(exc),
+                    verdict_reason=redact(str(exc)),
                     error_detail=type(exc).__name__,
                 ),
                 exploit=None,

@@ -72,3 +72,4 @@ Thumbs.db
 # Mylonite scan output (runtime artefacts)
 .mylonite/
 .deep-review/
+.gstack/

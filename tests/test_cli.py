@@ -2432,109 +2432,146 @@ def test_custom_target_flow_needs_target_file_at_most_once(
     target_registry.clear_runtime_targets()
 
 
-# --- Theme B: _vulnerable_adapter honors vulnerable_launch ------------------
+# --- Theme B: raw/guarded twin construction moved to plugins._mcp.twins -----
+# (see tests/mcp_plugin/test_twins.py for plan_twins / boundary_control_for
+# coverage — T11 replaced _vulnerable_adapter/_guarded_factory/_differential_plan
+# with the single, pure plan_twins(), shared by validate/gate/ablate/testkit.)
 
 
-def test_vulnerable_adapter_uses_vulnerable_launch_when_declared() -> None:
-    """The raw side of a differential launches the declared unguarded variant."""
-    from mylonite.cli import _vulnerable_adapter
-    from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
-
-    target_registry.clear_runtime_targets()
-    try:
-        tf = TargetFile(
-            family="vuln-srv",
-            command="python",
-            args=["-m", "srv"],
-            env={"BASE": "1"},
-            vulnerable_launch={
-                "command": "python",
-                "args": ["-m", "srv", "--raw"],
-                "env": {"PROFILE": "vuln"},
-            },
-        )
-        spec = build_target_spec(tf)
-        target_registry.register_target(spec)
-        adapter = _vulnerable_adapter(spec, None, "m")
-        assert adapter._launch_command == "python"
-        assert adapter._launch_args == ["-m", "srv", "--raw"]
-        assert adapter._launch_env == {"BASE": "1", "PROFILE": "vuln"}
-    finally:
-        target_registry.clear_runtime_targets()
+# --- T12 review follow-up: cli.py's _backfill_scan_report block --------------
+# Direct coverage of the ~20-line back-fill copy block generate's
+# _emit_generated_test runs for every custom-target finding (the actual fix
+# for "the sibling scan_report.json back-fill is dead in practice against the
+# real CLI layout" — see tests/testkit/test_bounded_redrive.py for the
+# end-to-end proof via a real scan+generate round trip). These are narrower,
+# faster unit-style tests pinning the block's own behaviour in isolation:
+# what it writes, what it trims, and when it no-ops.
 
 
-def test_vulnerable_adapter_is_default_when_no_vulnerable_launch() -> None:
-    """No vulnerable_launch → the default adapter (today's behaviour) — no overrides."""
-    from mylonite.cli import _vulnerable_adapter
-    from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
-
-    target_registry.clear_runtime_targets()
-    try:
-        tf = TargetFile(family="plain-srv", command="python", args=["-m", "srv"])
-        spec = build_target_spec(tf)
-        target_registry.register_target(spec)
-        adapter = _vulnerable_adapter(spec, None, "m")
-        assert adapter._launch_command is None
-        assert adapter._launch_args is None
-        assert adapter._launch_env is None
-    finally:
-        target_registry.clear_runtime_targets()
+def _write_custom_exploit_and_target(scan_dir: Path) -> Path:
+    """A minimal custom-target exploit + target.yaml co-located in ``scan_dir``,
+    mirroring what `mylonite scan` actually writes. Returns the exploit path."""
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
+    ep = scan_dir / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    (scan_dir / "target.yaml").write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    return ep
 
 
-# --- Theme B: _guarded_factory server-layer parity (validate differential) ---
+def test_generate_backfills_trimmed_scan_report_only(tmp_path: Path) -> None:
+    """A sibling scan_report.json co-located with the exploit gets copied into
+    the generated dir TRIMMED to exactly {model, provider} -- never a verbatim
+    copy. A verbatim copy would leak whatever's in `attempts` (target/judge
+    free text, potentially secret-shaped) into a directory this project tells
+    the operator to commit.
+    """
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps(
+            {
+                "target_id": "mcp:myapp",
+                "attack_modules": ["mylonite.prompt-injection"],
+                "provider": "anthropic",
+                "model": "claude-t12-cli-unit",
+                "elapsed_seconds": 1.2,
+                "attempts": [
+                    {
+                        "seed_id": "x",
+                        "pattern_id": "x",
+                        "outcome": "finding",
+                        "verdict_mechanism": "predicate",
+                        # A decoy secret-shaped value the trim must drop.
+                        "verdict_reason": "sk-live-should-never-be-copied",
+                        "error_detail": None,
+                    }
+                ],
+                "findings_count": 1,
+                "mylonite_version": "0.0.0-test",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    copied_path = out / "scan_report.json"
+    assert copied_path.is_file()
+    raw_text = copied_path.read_text(encoding="utf-8")
+    data = json.loads(raw_text)
+    assert data == {"model": "claude-t12-cli-unit", "provider": "anthropic"}
+    assert "attempts" not in data
+    assert "target_id" not in data
+    assert "sk-live-should-never-be-copied" not in raw_text
 
 
-def test_guarded_factory_uses_real_default_launch_for_server_layer_control() -> None:
-    """When control_env declares the weakness, the guarded twin is the REAL default
-    launch (no boundary shim) so the differential measures the server-layer guard —
-    parity with ablate. This is the fix for the 'oracle can't model server controls'
-    finding: the guarded side was previously ALWAYS the synthetic shim."""
-    from mylonite.cli import _guarded_factory
-    from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+def test_generate_skips_scan_report_backfill_when_source_absent(tmp_path: Path) -> None:
+    """No sibling scan_report.json next to the exploit -> generate writes
+    nothing (a no-op, not an error) -- the back-fill is best-effort."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    # Deliberately no scan_report.json written.
 
-    target_registry.clear_runtime_targets()
-    try:
-        spec = build_target_spec(
-            TargetFile(
-                family="srv-sl",
-                command="python",
-                args=["-m", "srv"],
-                weakness_classes=["W2"],
-                control_env={"W2": {"DISABLE_MARKING": "1"}},
-            )
-        )
-        target_registry.register_target(spec)
-        guarded = _guarded_factory(spec, None, "m", "W2")
-        # Real server, guard ON: no adapter-boundary shim applied.
-        assert guarded._controls == []
-        assert guarded._launch_env is None
-    finally:
-        target_registry.clear_runtime_targets()
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
 
 
-def test_guarded_factory_falls_back_to_boundary_shim_without_control_env() -> None:
-    """No control_env for the weakness → the boundary shim (byte-identical to the
-    prior default behaviour). Honesty about the low-fidelity twin lives in the
-    verdict, not here."""
-    from mylonite.cli import _guarded_factory
-    from mylonite.plugins._mcp import target_registry
-    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+def test_generate_skips_scan_report_backfill_when_source_malformed(tmp_path: Path) -> None:
+    """A sibling scan_report.json that isn't valid JSON -> skipped silently,
+    not a generate failure (testkit raises its own loud error at test-run time
+    if nothing else ever supplies a usable model/provider)."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text("not valid json {{{", encoding="utf-8")
 
-    target_registry.clear_runtime_targets()
-    try:
-        spec = build_target_spec(
-            TargetFile(
-                family="srv-bd", command="python", args=["-m", "srv"], weakness_classes=["W2"]
-            )
-        )
-        target_registry.register_target(spec)
-        guarded = _guarded_factory(spec, None, "m", "W2")
-        assert len(guarded._controls) == 1  # synthetic boundary control
-    finally:
-        target_registry.clear_runtime_targets()
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
+def test_generate_skips_scan_report_backfill_when_source_incomplete(tmp_path: Path) -> None:
+    """A sibling scan_report.json missing model OR provider -> skipped, not a
+    partial {model} or {provider}-only file silently written."""
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+    ep = _write_custom_exploit_and_target(scan_dir)
+    (scan_dir / "scan_report.json").write_text(
+        json.dumps({"model": "claude-t12-cli-unit"}),
+        encoding="utf-8",  # no "provider"
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
+
+
+def test_generate_skips_scan_report_backfill_for_reference_target(tmp_path: Path) -> None:
+    """A reference-target finding replays the bundled twin via
+    assert_guard_holds (no model/provider kwargs at all) -- the back-fill must
+    not run (and must not write a stray scan_report.json) for it."""
+    exploit = _sample_exploit()  # target_id="reference:vulnerable"
+    ep = tmp_path / "exploit_indirect-injection-note-body-direct.json"
+    ep.write_text(json.dumps(exploit.model_dump(mode="json")), encoding="utf-8")
+    (tmp_path / "scan_report.json").write_text(
+        json.dumps({"model": "claude-t12-cli-unit", "provider": "anthropic"}), encoding="utf-8"
+    )
+
+    out = tmp_path / "gen"
+    result = runner.invoke(app, ["generate", str(ep), "--out", str(out)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not (out / "scan_report.json").exists()
 
 
 # --- Theme C: generate --prove-control emits assert_control_holds ------------
@@ -2690,27 +2727,35 @@ def test_report_scan_dir_shows_derived_nist(tmp_path: Path) -> None:
 
 
 # --- M1: differential gates real targets by default -------------------------
+# (the decision itself now lives in plan_twins — see tests/mcp_plugin/test_twins.py
+# for its table-driven coverage; these three pin the M1 CONTRACT — weakness_class_for
+# + plan_twins together decide "run/skip the differential" for a real exploit — the
+# same composition _validate_custom/gate's scan_fn now use.)
+
+
+def _plan_for_exploit(exploit: Any, *, fast: bool) -> Any:
+    from mylonite.gate.mitigation import weakness_class_for
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+    from mylonite.plugins._mcp.twins import plan_twins
+
+    spec = build_target_spec(TargetFile(family="myapp", command="python", args=["-m", "srv"]))
+    cw = weakness_class_for(exploit)
+    return plan_twins(spec, weakness=cw, fast=fast)
 
 
 def test_differential_plan_default_runs_for_controllable_weakness() -> None:
-    from mylonite.cli import _differential_plan
-
-    run, cw, note = _differential_plan(_sample_exploit(), fast=False)
-    assert run is True
-    assert cw == "W2"
-    assert "differential" in note.lower()
+    plan = _plan_for_exploit(_sample_exploit(), fast=False)
+    assert plan.control_weakness == "W2"
+    assert plan.banner is not None and "differential" in plan.banner.lower()
 
 
 def test_differential_plan_fast_skips() -> None:
-    from mylonite.cli import _differential_plan
-
-    run, cw, note = _differential_plan(_sample_exploit(), fast=True)
-    assert run is False and cw is None
-    assert "fast" in note.lower()
+    plan = _plan_for_exploit(_sample_exploit(), fast=True)
+    assert plan.control_weakness is None
+    assert plan.banner is not None and "fast" in plan.banner.lower()
 
 
 def test_differential_plan_no_control_falls_back_loudly() -> None:
-    from mylonite.cli import _differential_plan
     from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
 
     ex = ExploitRecord(
@@ -2723,9 +2768,10 @@ def test_differential_plan_no_control_falls_back_loudly() -> None:
         success_reason="x",
         compliance=ComplianceTags(),
     )
-    run, cw, note = _differential_plan(ex, fast=False)
-    assert run is False and cw is None
-    assert "no boundary control" in note.lower() and "weaker" in note.lower()
+    plan = _plan_for_exploit(ex, fast=False)
+    assert plan.control_weakness is None
+    assert plan.banner is not None
+    assert "no boundary control" in plan.banner.lower() and "weaker" in plan.banner.lower()
 
 
 def test_validate_custom_runs_differential_by_default(
@@ -2771,6 +2817,280 @@ def test_validate_custom_runs_differential_by_default(
         captured.clear()
         _validate_custom(gen, tf, 1, "anthropic", "m", fast=True, authorize="myapp")
         assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+_SERVER_LAYER_TARGET_YAML = (
+    "family: myapp-server\ncommand: python\nargs: [-m, srv]\n"
+    "weakness_classes: [W2]\n"
+    "control_env:\n  W2:\n    DISABLE_MARKING: '1'\n"
+    "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n"
+)
+
+
+def _canned_finding_result(target_id: str, exploit: Any) -> Any:
+    """A real ScanResult carrying ONE finding + its exploit (engine-patched tests)."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanResult
+
+    report = ScanReport(
+        target_id=target_id,
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=exploit.pattern_id,
+                pattern_id=exploit.pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="x",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    return ScanResult(report=report, exploits=[exploit])
+
+
+def _stub_differential_validator(monkeypatch: pytest.MonkeyPatch, target: str) -> dict[str, Any]:
+    """Patch ``DifferentialValidator`` at ``target`` with a capturing stub; return
+    the dict its constructor kwargs land in. The stub's ``.validate()`` returns a
+    real, minimal ``ValidationReport`` (not a bare SimpleNamespace) so a full
+    `gate` CLI invocation — which reads ``report.kept``/``build_pr_body`` fields
+    on a KEPT verdict — doesn't blow up on a missing attribute."""
+    from mylonite.contracts._types import ValidationReport
+
+    captured: dict[str, Any] = {}
+
+    class _StubValidator:
+        def __init__(self, **kw: Any) -> None:
+            captured.update(kw)
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return ValidationReport(test_filename="test_security_x.py", kept=True)
+
+    monkeypatch.setattr(target, _StubValidator)
+    return captured
+
+
+def _stub_open_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub out the PR-opening step (git/gh mechanics — irrelevant to the twin-
+    decision tests below, which only care that ``validate_fn`` was reached with
+    a KEPT verdict) so a KEPT `gate` run doesn't need an actual git repo."""
+    from mylonite.gate import pr as pr_mod
+
+    monkeypatch.setattr(
+        pr_mod, "open_or_print_pr", lambda *_a, **_k: SimpleNamespace(opened=False, branch=None)
+    )
+
+
+def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T11 / finding E: for a target with a SERVER-LAYER control_env toggle,
+    gate's raw side must genuinely launch with that guard DISABLED — not be a
+    plain adapter identical to the guarded (real) launch.
+
+    Before this fix, `gate`'s validate_fn built the raw factory via a bare
+    ``build_mcp_adapter(family, scope, model)`` call that never threaded
+    disable_controls, so the raw side WAS the guarded server: the differential
+    could never fire and a real finding on a server-layer-controlled target was
+    silently rejected by `gate` even though `validate` (via _validate_custom)
+    already handled this correctly. This test fails against that old code (the
+    raw adapter's ``_launch_env`` would be empty, not
+    ``{"DISABLE_MARKING": "1"}``).
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    captured = _stub_differential_validator(
+        monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+    )
+    _stub_open_pr(monkeypatch)
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    out = tmp_path / "gate_out"
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(out),
+                "--no-workflows",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert captured.get("control_weakness") == "W2"
+        assert captured.get("guarded_is_server_layer") is True
+        # The core assertion: build the adapter gate actually WOULD drive the raw
+        # scan with, and confirm the server-layer guard is genuinely off.
+        raw_adapter = captured["target_adapter_factory"]()
+        assert raw_adapter._launch_env == {"DISABLE_MARKING": "1"}
+        # And the guarded side is the plain default launch (real guard ON).
+        guarded_adapter = captured["guarded_adapter_factory"]()
+        assert not guarded_adapter._launch_env
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_and_validate_produce_identical_twin_plans(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`gate` and `validate` must derive the IDENTICAL raw-vs-guarded twin for
+    the same target+finding — the structural guarantee T11 exists for. Exercises
+    each command's OWN real code path (gate's validate_fn via the full CLI
+    invocation; validate's own _validate_custom function) rather than calling
+    plan_twins directly twice, so this would have failed against the pre-T11
+    code where the two were independently (and, for control_env, incorrectly)
+    derived.
+    """
+    from mylonite.cli import _validate_custom
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+
+    try:
+        # --- gate's own code path ---
+        gate_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        _stub_open_pr(monkeypatch)
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        gate_raw_env = gate_captured["target_adapter_factory"]()._launch_env
+        gate_guarded_env = gate_captured["guarded_adapter_factory"]()._launch_env
+
+        # --- validate's own code path (_validate_custom) ---
+        monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+        validate_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        gen = SimpleNamespace(exploit=exploit)
+        _validate_custom(
+            gen, target_yaml, 1, "anthropic", "m", fast=False, authorize="myapp-server"
+        )
+        validate_raw_env = validate_captured["target_adapter_factory"]()._launch_env
+        validate_guarded_env = validate_captured["guarded_adapter_factory"]()._launch_env
+
+        assert gate_captured["control_weakness"] == validate_captured["control_weakness"] == "W2"
+        assert (
+            gate_captured["guarded_is_server_layer"]
+            == validate_captured["guarded_is_server_layer"]
+            is True
+        )
+        assert gate_raw_env == validate_raw_env == {"DISABLE_MARKING": "1"}
+        assert gate_guarded_env == validate_guarded_env
+        assert not gate_guarded_env
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_fast_passes_fast_to_plan_twins_in_validate_fn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gate --fast must pass fast=True through to validate_fn's own plan_twins
+    call too (defense-in-depth) -- not rely SOLELY on scan_fn's early-return
+    under --fast (which never tags an exploit, so control_weakness stays None)
+    to keep validate_fn's twin non-differential. Before this fix, validate_fn
+    hardcoded fast=False in its plan_twins call, which happened to be safe only
+    because of that separate, implicit cross-closure guarantee. Confirmed by
+    capturing plan_twins' actual `fast` kwarg on a real `gate --fast` run
+    against a custom target: scan_fn never even imports plan_twins under
+    --fast (it returns before that import), so the single captured call is
+    validate_fn's own."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp import twins as twins_module
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-fast"})
+    canned = _canned_finding_result("mcp:myapp-fast", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_differential_validator(
+        monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+    )
+    _stub_open_pr(monkeypatch)
+
+    real_plan_twins = twins_module.plan_twins
+    calls: list[dict[str, Any]] = []
+
+    def spying_plan_twins(spec: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real_plan_twins(spec, **kwargs)
+
+    monkeypatch.setattr(twins_module, "plan_twins", spying_plan_twins)
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(
+        "family: myapp-fast\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-fast",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+                "--fast",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert calls == [{"weakness": None, "fast": True}]
     finally:
         target_registry.clear_runtime_targets()
 
