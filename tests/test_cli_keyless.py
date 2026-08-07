@@ -12,6 +12,18 @@ provider-key env var cleared and asserts the actual exit code, so a future
 change that reintroduces any of those fail-opens gets caught here even if the
 unit-level tests it also broke somehow don't catch it.
 
+T14 (0.7.9-any-provider) changed WHICH exit code a missing key produces on
+scan/gate/validate, from EXIT_PROVIDER (4, discovered late -- one real LiteLLM
+call attempt fails auth, deep inside the engine/preflight) to EXIT_CONFIG (2,
+caught early -- ``mylonite.config.require_llm_configured()`` pre-flights every
+resolved model's credential env var BEFORE any adapter/subprocess/engine work
+starts, listing every way to set one). This is the "no default provider, fail
+loudly" invariant CLAUDE.md describes -- previously dead code
+(``MyloniteSettings.require_llm()``, never called), now a real, early check.
+``ablate`` already used EXIT_CONFIG for this case before T14 (see its own
+section below) and is unaffected in exit code, only in HOW early/directly it
+fires.
+
 Every test clears env vars via ``monkeypatch.delenv(..., raising=False)``
 (never raw ``os.environ`` mutation) -- pytest restores the real environment
 after each test, so there is no cross-test leakage risk.
@@ -34,7 +46,6 @@ from typer.testing import CliRunner
 
 from mylonite.cli import (
     EXIT_CONFIG,
-    EXIT_PROVIDER,
     EXIT_SUCCESS,
     app,
 )
@@ -118,16 +129,18 @@ def _write_exploit_json(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# scan -- EXIT_PROVIDER (4)
+# scan -- EXIT_CONFIG (2), as of T14
 # ---------------------------------------------------------------------------
 
 
-def test_scan_reference_vulnerable_no_key_exits_provider(tmp_path: Path) -> None:
-    """`scan reference:vulnerable` with no key: the in-process reference adapter
-    needs no subprocess and no LLM to describe itself, so the scan starts, the
-    customiser's first real LiteLLM call fails auth, T4 classifies it as
-    non-recoverable, and T1's ScanOutcome-derived exit code maps that to
-    EXIT_PROVIDER (4) -- never a silent 0."""
+def test_scan_reference_vulnerable_no_key_exits_config(tmp_path: Path) -> None:
+    """`scan reference:vulnerable` with no key: T14's require_llm_configured()
+    pre-flight (mylonite.config) checks every resolved role model's credential
+    env var BEFORE the adapter/engine are even constructed -- no LiteLLM call
+    is attempted at all, so this is faster AND more specific than the old
+    "customiser's first real call fails auth, T4 classifies it" path (which
+    now only fires for a credential that IS set but doesn't actually work --
+    see test_doctor_classifies_* in test_cli.py for that case)."""
     t0 = time.monotonic()
     result = runner.invoke(
         app,
@@ -136,21 +149,25 @@ def test_scan_reference_vulnerable_no_key_exits_provider(tmp_path: Path) -> None
     elapsed = time.monotonic() - t0
 
     assert elapsed < _MAX_SECONDS, f"scan took {elapsed:.1f}s -- expected a fast local failure"
-    assert result.exit_code == EXIT_PROVIDER, (
-        f"expected EXIT_PROVIDER (4), got {result.exit_code}.\nOutput:\n{result.output}"
+    assert result.exit_code == EXIT_CONFIG, (
+        f"expected EXIT_CONFIG (2), got {result.exit_code}.\nOutput:\n{result.output}"
     )
+    out = result.stderr or result.output
+    assert "no LLM credential configured" in out
+    assert "ANTHROPIC_API_KEY" in out
 
 
 # ---------------------------------------------------------------------------
-# gate -- EXIT_PROVIDER (4)
+# gate -- EXIT_CONFIG (2), as of T14
 # ---------------------------------------------------------------------------
 
 
-def test_gate_reference_vulnerable_no_key_exits_provider(tmp_path: Path) -> None:
-    """`gate reference:vulnerable`: same scan machinery as `scan`, so the same
-    missing-key auth failure aborts the scan; T2's ScanOutcomeBundle seam
-    means gate reports "cannot gate" and exits EXIT_PROVIDER (4), matching
-    scan's contract rather than gate's old fail-open (exit 0, no PR, silence)."""
+def test_gate_reference_vulnerable_no_key_exits_config(tmp_path: Path) -> None:
+    """`gate reference:vulnerable`: same require_llm_configured() pre-flight as
+    `scan` (T14), fired directly in `gate`'s own command body before scan_fn/
+    validate_fn/run_gate are ever invoked -- EXIT_CONFIG (2), not gate's old
+    fail-open (exit 0, no PR, silence) NOR the intermediate EXIT_PROVIDER (4)
+    "cannot gate" this test pinned before T14."""
     t0 = time.monotonic()
     result = runner.invoke(
         app,
@@ -165,23 +182,24 @@ def test_gate_reference_vulnerable_no_key_exits_provider(tmp_path: Path) -> None
     elapsed = time.monotonic() - t0
 
     assert elapsed < _MAX_SECONDS, f"gate took {elapsed:.1f}s -- expected a fast local failure"
-    assert result.exit_code == EXIT_PROVIDER, (
-        f"expected EXIT_PROVIDER (4), got {result.exit_code}.\nOutput:\n{result.output}"
+    assert result.exit_code == EXIT_CONFIG, (
+        f"expected EXIT_CONFIG (2), got {result.exit_code}.\nOutput:\n{result.output}"
     )
-    assert "cannot gate" in result.output.lower()
+    out = result.stderr or result.output
+    assert "no LLM credential configured" in out
 
 
 # ---------------------------------------------------------------------------
-# validate -- EXIT_PROVIDER (4)
+# validate -- EXIT_CONFIG (2), as of T14
 # ---------------------------------------------------------------------------
 
 
-def test_validate_reference_no_key_exits_provider(tmp_path: Path) -> None:
-    """`validate` on a real `generate`d dir for a reference:* exploit: the
-    reference validation path calls `_provider_preflight` -- a real one-shot
-    LiteLLM ping -- before doing anything else. With no key that preflight
-    fails fast and validate exits EXIT_PROVIDER (4) (the validator itself is
-    never constructed)."""
+def test_validate_reference_no_key_exits_config(tmp_path: Path) -> None:
+    """`validate` on a real `generate`d dir for a reference:* exploit: T14's
+    require_llm_configured() pre-flight now runs before `_provider_preflight`
+    (the real one-shot LiteLLM ping that used to be the first thing to fail,
+    producing EXIT_PROVIDER) -- so a wholly-missing credential is now caught
+    earlier and more specifically, at EXIT_CONFIG (2)."""
     exploit_json = tmp_path / "exploit_src.json"
     _write_exploit_json(exploit_json)
     gen_dir = tmp_path / "gen"
@@ -195,11 +213,11 @@ def test_validate_reference_no_key_exits_provider(tmp_path: Path) -> None:
     elapsed = time.monotonic() - t0
 
     assert elapsed < _MAX_SECONDS, f"validate took {elapsed:.1f}s -- expected a fast local failure"
-    assert result.exit_code == EXIT_PROVIDER, (
-        f"expected EXIT_PROVIDER (4), got {result.exit_code}.\nOutput:\n{result.output}"
+    assert result.exit_code == EXIT_CONFIG, (
+        f"expected EXIT_CONFIG (2), got {result.exit_code}.\nOutput:\n{result.output}"
     )
     out = result.stderr or result.output
-    assert "ANTHROPIC_API_KEY" in out or "no provider reachable" in out.lower()
+    assert "ANTHROPIC_API_KEY" in out
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +225,7 @@ def test_validate_reference_no_key_exits_provider(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ablate_no_key_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ablate_no_key_exits_nonzero(tmp_path: Path) -> None:
     """`ablate` must not exit 0 on total provider failure.
 
     THIS WAS A CONFIRMED FAIL-OPEN BUG (0.7.7 remediation, direct follow-up to
@@ -215,87 +233,19 @@ def test_ablate_no_key_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyP
     "every control came back inconclusive because no LLM call could
     authenticate" -- it printed an "inconclusive ... check
     connectivity/credentials" hint and still exited 0, indistinguishable from a
-    genuine (if uninteresting) clean run. This test used to be named
-    `test_ablate_no_key_exits_zero_documented_gap` and asserted exactly that
-    gap (exit 0) as a pinned "known-bad, not an endorsement" regression guard.
-    It's flipped here to prove the fix and now guards the FIXED contract.
+    genuine (if uninteresting) clean run. That was fixed pre-T14 by wiring
+    `scan_target_fires`'s `on_outcome` sink through `all_inconclusive` (see
+    mylonite/scan/ablation.py) -- still the mechanism for a credential that IS
+    set but every call still fails (rate limit, network, an expired key), e.g.
+    tests/scan/test_ablate_cli.py's inconclusive-rendering tests.
 
-    The fix: `scan_target_fires` (mylonite/scan/ablation.py) now accepts an
-    `on_outcome` sink invoked with the full `ScanOutcome` (not just the
-    collapsed `FireOutcome`) whenever a scoped scan doesn't fire. The `ablate`
-    CLI command wires that sink to collect every underlying `ScanOutcome`, and
-    once `run_control_ablation` returns, if EVERY control's status is
-    "inconclusive" (a total failure -- nothing could be determined for ANY
-    control, not just some), it raises `typer.Exit` with the most severe
-    `ScanOutcome.exit_code` observed across the underlying scans -- the same
-    authority `scan`/`gate` already use (mylonite.scan.coverage.ScanOutcome).
-
-    The exact code here is EXIT_CONFIG (2), not EXIT_PROVIDER (4): each
-    `scan_target_fires` call is a SINGLE-seed scoped scan (`pattern_id_filter`
-    pins it to exactly one attempt), so it never accumulates the 3 consecutive
-    LLM-call failures `ScanEngine.run()` requires to set the formal
-    `aborted="provider_unreachable"` abort (see `engine.py`'s
-    `provider_failure_threshold`, default 3). Instead it lands in the exact
-    same "untrustworthy without a formal abort" bucket `ScanOutcome` already
-    uses for `scan`/`gate` when a report is too small to trip that threshold
-    (see `coverage.py`'s `_EXIT_INCOMPLETE_NO_ABORT` / its own comment: "a
-    common cause is missing or invalid provider credentials") -- EXIT_CONFIG.
-    This was verified empirically (not assumed) by driving `scan_target_fires`
-    directly against this exact fixture before writing this assertion.
-
-    The only thing monkeypatched here is the MCP STDIO TRANSPORT (spawning a
-    real OS subprocess) -- not the scan engine, not the customiser, not the
-    judge, not LiteLLM. This mirrors tests/test_cli.py's own
-    `_patch_fake_adapter` convention (used for `scan --scaffold`). It exists
-    for two reasons unrelated to what's under test here: (1) no real,
-    protocol-conformant stdio target ships in this repo yet for a plain
-    `--target-file` run (wiring one is tracked separately, T19); (2) Typer's
-    `CliRunner` replaces stdout/stderr with non-fd streams, and the bundled
-    `mcp` SDK's Windows stdio transport needs a real `fileno()` to redirect a
-    child's stderr -- a Windows-CliRunner-only limitation confirmed to fire
-    identically with a REAL key present (i.e. unrelated to this test's
-    subject). Stubbing only the transport keeps the actual thing under test --
-    the provider-key failure path -- 100% real.
+    T14 adds an EARLIER, more specific layer on top for the WHOLLY-missing-
+    credential case this test drives: require_llm_configured() pre-flights
+    before any adapter/subprocess is even constructed, so a real MCP stdio
+    subprocess is never spawned at all -- unlike before T14, this test no
+    longer needs to stub the transport to keep it fast/offline. Same exit
+    code (EXIT_CONFIG, 2) as the pre-T14 fallback path; just caught earlier.
     """
-    import mylonite.plugins._mcp.stdio_adapter as stdio_mod
-    from mylonite.contracts import TargetDescriptor, ToolSpec
-
-    def _descriptor() -> TargetDescriptor:
-        return TargetDescriptor(
-            target_id="mcp:myapp-notes",
-            kind="mcp",
-            system_prompt="x",
-            tools=[
-                ToolSpec(name="read_note", description="read a stored note", json_schema={}),
-                ToolSpec(
-                    name="send_email",
-                    description="send an email to a recipient",
-                    json_schema={"properties": {"to": {"type": "string"}}},
-                ),
-            ],
-        )
-
-    class _FakeTransportOnlyAdapter:
-        """Stands in for the OS-level MCP stdio transport ONLY -- describe()
-        returns a canned descriptor exactly like a real, already-connected
-        server would; invoke() is never expected to be reached because the
-        real customiser's real LiteLLM call fails auth first."""
-
-        def __init__(self, **kwargs: Any) -> None:
-            self._controls = kwargs.get("controls", [])
-            self._launch_env = kwargs.get("launch_env")
-
-        async def describe(self) -> TargetDescriptor:
-            return _descriptor()
-
-        async def invoke(self, *args: Any, **kwargs: Any) -> Any:
-            raise AssertionError(
-                "invoke() reached -- the real provider-key failure should have "
-                "stopped the scan before any tool invocation."
-            )
-
-    monkeypatch.setattr(stdio_mod, "MCPStdioAdapter", _FakeTransportOnlyAdapter)
-
     target_yaml = tmp_path / "target.yaml"
     target_yaml.write_text(
         "family: myapp-notes\ncommand: echo\nargs: []\nweakness_classes:\n  - W2\n",
@@ -325,12 +275,10 @@ def test_ablate_no_key_exits_nonzero(tmp_path: Path, monkeypatch: pytest.MonkeyP
         f"Output:\n{result.output}"
     )
     assert result.exit_code == EXIT_CONFIG, (
-        f"expected EXIT_CONFIG (2) -- see this test's docstring for why total "
-        f"failure here lands in the same bucket scan/gate use for a report too "
-        f"small to trip the formal provider_unreachable abort, rather than "
-        f"EXIT_PROVIDER (4). Got {result.exit_code}.\nOutput:\n{result.output}"
+        f"expected EXIT_CONFIG (2), got {result.exit_code}.\nOutput:\n{result.output}"
     )
-    assert "inconclusive" in result.output.lower()
+    out = result.stderr or result.output
+    assert "no LLM credential configured" in out
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +357,7 @@ def test_demo_replay_no_key_succeeds() -> None:
 # generate -- bonus positive control (named explicitly in the T6 brief as an
 # established fully-offline command; not one of the 6 files listed for this
 # task, but strengthens the "honest matrix" goal at near-zero cost since
-# test_validate_reference_no_key_exits_provider already drives it as a setup
+# test_validate_reference_no_key_exits_config already drives it as a setup
 # step).
 # ---------------------------------------------------------------------------
 

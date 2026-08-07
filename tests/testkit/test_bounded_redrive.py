@@ -409,6 +409,13 @@ def test_generate_backfills_scan_report_into_real_cli_layout(
         return canned
 
     monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    # T14: the first `scan` CLI invocation below now pre-flights
+    # require_llm_configured() before ScanEngine is even constructed (which is
+    # stubbed above, so no live call happens); the LIVE re-drive at the end
+    # goes through testkit.assert_target_resists directly (not the CLI), which
+    # T14 does not gate, and is itself fully offline via _completion_fn/
+    # _open_mcp_session below.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     target_yaml = _write_target_yaml(tmp_path)
     scan_root = tmp_path / "scans"

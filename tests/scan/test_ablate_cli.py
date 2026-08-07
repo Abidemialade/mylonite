@@ -12,6 +12,19 @@ from mylonite.cli import app
 
 _runner = CliRunner()
 
+
+@pytest.fixture(autouse=True)
+def _fake_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T14: `ablate` now pre-flights require_llm_configured() before any
+    adapter/subprocess/engine work starts -- a credential env var just needs
+    to be PRESENT for it, never actually used, since every test in this file
+    stubs `scan_target_fires` (the real LiteLLM call never happens). Applied
+    file-wide via autouse rather than per-test, matching this file's own
+    "offline test... engine-backed scan patched out" docstring.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+
 _YAML = """\
 family: myapp-notes
 command: echo

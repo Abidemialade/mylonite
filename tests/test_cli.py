@@ -629,6 +629,10 @@ def test_scan_custom_target_without_weakness_classes_is_loud(
     from mylonite.plugins._mcp import target_registry
 
     target_registry.clear_runtime_targets()
+    # T14: this exercises the real (fake-session-backed) engine run reaching
+    # its own "no applicable seeds" abort -- clear the require_llm_configured()
+    # pre-flight so that abort is what actually fires.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     _patch_fake_mcp_session(monkeypatch)
     p = tmp_path / "t.yaml"
     p.write_text("family: acme\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
@@ -992,6 +996,12 @@ def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
     from mylonite.contracts._types import ScanAttempt, ScanReport
     from mylonite.scan.engine import ScanEngine, ScanResult
 
+    # T14: `scan` now pre-flights require_llm_configured() before ScanEngine
+    # is even constructed -- ScanEngine.run is stubbed below (no live call
+    # actually happens), but the pre-flight itself only checks a credential
+    # env var is SET, not that it works, so a fake key clears it.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
     report = ScanReport(
         target_id="reference:vulnerable",
         attack_modules=["mylonite.prompt-injection"],
@@ -1154,6 +1164,9 @@ def test_scan_reference_missing_kitchen_sink_maps_to_exit_2(
     """`scan reference:*` without the reference target → friendly exit 2, not a raw
     traceback (parity with `demo`). The adapter imports mcp_kitchen_sink lazily in
     describe(); the engine re-raises and the scan command now maps it like demo."""
+    # T14: clears the require_llm_configured() pre-flight so the run reaches
+    # the actual describe()-time ModuleNotFoundError this test exercises.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     class _BlockKitchenSink(MetaPathFinder):
         def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
@@ -1485,6 +1498,9 @@ def _patch_validator(
 def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """validate with a kept=True canned report → exit 0; report renders."""
     out_dir = _generated_dir(tmp_path)
+    # T14: require_llm_configured() pre-flight; _provider_preflight and the
+    # validator are both stubbed below (no live call happens).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
     _patch_validator(monkeypatch, kept=True, mutation_score=1.0)
 
@@ -1499,6 +1515,7 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """validate with kept=False → EXIT_NOT_KEPT (5) with a remediation line."""
     out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # T14 pre-flight; preflight/validator stubbed
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
     _patch_validator(monkeypatch, kept=False)
 
@@ -1513,6 +1530,10 @@ def test_validate_provider_unreachable_exit_4(
 ) -> None:
     """An unreachable provider (preflight aborts) → exit 4 with the key hint."""
     out_dir = _generated_dir(tmp_path)
+    # T14: a credential IS configured here (distinguishing this from the
+    # EXIT_CONFIG "no credential at all" pre-flight) -- it's the LIVE call
+    # that fails, which is exactly what this test means to exercise.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: False)
     # The validator should never be constructed; patch it to blow up if it is.
     _patch_validator(monkeypatch, kept=True)
@@ -1537,7 +1558,10 @@ def test_validate_uses_on_disk_source_and_records(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """validate builds the GeneratedTest from the ON-DISK test (no re-emit) and
-    points record_fixtures_dir at the gen dir's fixtures/ (offline — no key)."""
+    points record_fixtures_dir at the gen dir's fixtures/ (no live network call
+    -- _provider_preflight and DifferentialValidator are both stubbed below;
+    T14's require_llm_configured() pre-flight still needs a credential env var
+    PRESENT, even though it's never actually used)."""
     from mylonite.plugins._reference import reference_validator
 
     out_dir = _generated_dir(tmp_path)
@@ -1547,6 +1571,7 @@ def test_validate_uses_on_disk_source_and_records(
     sentinel = "# SENTINEL: edited-on-disk committed test\n"
     on_disk_test.write_text(sentinel + on_disk_test.read_text(encoding="utf-8"), encoding="utf-8")
 
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
 
     captured: dict[str, Any] = {}
@@ -1683,6 +1708,9 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
     from mylonite.scan.engine import ScanEngine
 
     target_registry.clear_runtime_targets()
+    # T14: ScanEngine.run is stubbed below (no live call happens); clears the
+    # require_llm_configured() pre-flight that now runs before it's constructed.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     source = _MINIMAL_TARGET_YAML
     target_yaml = tmp_path / "open.yaml"
@@ -1734,6 +1762,9 @@ def test_scan_persisted_target_yaml_has_no_secret_env(
     from mylonite.scan.engine import ScanEngine
 
     target_registry.clear_runtime_targets()
+    # T14: ScanEngine.run is stubbed below (no live call happens); clears the
+    # require_llm_configured() pre-flight that now runs before it's constructed.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     scan_root = tmp_path / "scans"
 
     async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
@@ -2422,6 +2453,7 @@ def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
 
     cfg = tmp_path / "mylonite.yaml"
     cfg.write_text("max_llm_calls: 10\n", encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # T14 pre-flight; ScanEngine.run is stubbed
 
     captured: dict[str, Any] = {}
     real_init = ScanEngine.__init__
@@ -2610,6 +2642,9 @@ def test_custom_target_flow_needs_target_file_at_most_once(
     from mylonite.scan.engine import ScanEngine, ScanResult
 
     target_registry.clear_runtime_targets()
+    # T14: ScanEngine.run is stubbed below (no live call happens); clears the
+    # require_llm_configured() pre-flight that now runs before it's constructed.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp"})
     report = ScanReport(
         target_id="mcp:myapp",
@@ -2872,6 +2907,10 @@ def test_gate_reads_target_file_from_mylonite_yaml(
     """gate auto-discovers ./mylonite.yaml and fills target_file/authorize, so it
     no longer exits 2 'no target given' when the project config declares them."""
     monkeypatch.chdir(tmp_path)
+    # T14: gate now pre-flights require_llm_configured() before run_gate is
+    # even called -- run_gate itself is stubbed below, so this just needs a
+    # credential PRESENT to reach that stub.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     target = tmp_path / "target.yaml"
     target.write_text(
         "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
@@ -3045,6 +3084,9 @@ def test_validate_custom_runs_differential_by_default(
     # OTHER live calls, so the preflight (the one live-call-making piece not
     # already stubbed) needs stubbing too.
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+    # T14: require_llm_configured() pre-flight runs before _provider_preflight
+    # (both check against the "anthropic" provider passed explicitly below).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     tf = tmp_path / "t.yaml"
     tf.write_text(
         "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
@@ -3094,6 +3136,10 @@ def test_validate_custom_threads_role_models_and_policy(
         "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
     )
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+    # T14: require_llm_configured() pre-flight checks all three role models
+    # against the explicit "anthropic" provider hint passed to _validate_custom
+    # below.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     tf = tmp_path / "t.yaml"
     tf.write_text(
         "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
@@ -3230,6 +3276,9 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
     from mylonite.scan.engine import ScanEngine
 
     monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    # T14: gate now pre-flights require_llm_configured(); ScanEngine.run and
+    # DifferentialValidator are both stubbed below (no live call happens).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     target_registry.clear_runtime_targets()
     exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
     canned = _canned_finding_result("mcp:myapp-server", exploit)
@@ -3290,6 +3339,9 @@ def test_gate_and_validate_produce_identical_twin_plans(
     from mylonite.scan.engine import ScanEngine
 
     monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    # T14: gate now pre-flights require_llm_configured(); ScanEngine.run and
+    # DifferentialValidator are both stubbed below (no live call happens).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     target_registry.clear_runtime_targets()
     exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
     canned = _canned_finding_result("mcp:myapp-server", exploit)
@@ -3368,6 +3420,9 @@ def test_gate_fast_passes_fast_to_plan_twins_in_validate_fn(
     from mylonite.scan.engine import ScanEngine
 
     monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    # T14: gate now pre-flights require_llm_configured(); ScanEngine.run and
+    # DifferentialValidator are both stubbed below (no live call happens).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     target_registry.clear_runtime_targets()
     exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-fast"})
     canned = _canned_finding_result("mcp:myapp-fast", exploit)

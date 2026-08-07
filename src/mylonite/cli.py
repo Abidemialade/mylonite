@@ -438,7 +438,8 @@ def doctor(
             help=(
                 "A declarative mylonite.yaml run config. Fills provider/model when "
                 "you omit the flags, so `doctor` pings the SAME model your scan will "
-                "use; an explicit flag always wins."
+                "use; auto-discovered from ./mylonite.yaml when present; an explicit "
+                "flag always wins."
             ),
         ),
     ] = None,
@@ -451,22 +452,23 @@ def doctor(
     Exit 0 if reachable, 4 on a provider failure.
     """
     from mylonite._redaction import looks_like_api_key, redact
+    from mylonite.config import env_run_config
     from mylonite.scan.diagnostics import classify_provider_error
     from mylonite.scan.providers import env_vars_for
 
-    # Mirror `scan`: fill provider/model from mylonite.yaml when the flags are
-    # omitted, so `doctor` checks the same model the scan will actually use
-    # rather than silently falling back to the default.
-    if run_config_path is not None:
-        from mylonite.config import load_run_config
-
-        try:
-            rc = load_run_config(run_config_path)
-        except Exception as exc:
-            echo_exc(f"invalid --config {run_config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+    # Mirror scan/gate/validate/ablate: fill provider/model from mylonite.yaml
+    # (auto-discovered from ./mylonite.yaml when --config is omitted, T14) then
+    # the flat MYLONITE_* env vars, so `doctor` checks the SAME model those
+    # commands will actually use rather than silently falling back to its own
+    # default -- doctor is exactly the command that should show an operator
+    # what config would actually be used.
+    _config_path, rc = _discover_run_config(run_config_path, command="doctor")
+    env_rc = env_run_config()
+    if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
 
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
@@ -660,6 +662,33 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
     if num_retries is not None:
         kwargs["num_retries"] = num_retries
     return LLMPolicy(**kwargs)
+
+
+def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -> None:
+    """Pre-flight :func:`~mylonite.config.require_llm_configured` for every
+    resolved model a live run will actually call (planner/customiser/judge
+    can each be a different provider — see ``scan``'s ``_resolve_role_model``)
+    — ``EXIT_CONFIG`` before any adapter/subprocess/engine work starts,
+    naming every way to set a credential, instead of a scan/gate/validate/
+    ablate run burning a full attempt (spinning up an MCP subprocess, etc.)
+    one attempt at a time before a missing key surfaces buried in a report.
+
+    This is the ONE place the deleted ``MyloniteSettings.require_llm()``'s
+    "no default provider, fail loudly" invariant (CLAUDE.md) is actually
+    enforced as a pre-flight, not just as a later per-attempt diagnosis.
+    """
+    from mylonite.config import LLMNotConfiguredError, require_llm_configured
+
+    seen: set[str] = set()
+    for m in models:
+        if m in seen:
+            continue
+        seen.add(m)
+        try:
+            require_llm_configured(model=m, provider=provider)
+        except LLMNotConfiguredError as exc:
+            echo_err(str(exc))
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -1423,6 +1452,21 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts (not just later, one
+    # attempt at a time, as a buried per-attempt diagnosis) -- but AFTER
+    # every other config/usage validation above (authorize, target shape,
+    # seed_arm, ...) so a more specific error still wins when both apply.
+    # --dry-run makes no live LLM call at all (ScanConfig.dry_run
+    # short-circuits before invocation), so it is deliberately exempt.
+    if not dry_run:
+        _require_llm_configured_or_exit(
+            effective_planner_model,
+            effective_customiser_model,
+            effective_judge_model,
+            provider=provider,
+        )
+
     customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
     judge = SuccessJudge(model=effective_judge_model)
 
@@ -2174,6 +2218,15 @@ def _validate_custom(
         spec.family, tf.scope, spec.requires_scope, authorize, command="validate"
     )
 
+    # T14/H3: the "no default provider, fail loudly" invariant -- a cheap,
+    # no-network credential-presence check, distinct from (and cheaper than)
+    # _provider_preflight's real live call just below. Ordered AFTER the
+    # authorize check above for the same DCR-0008 reason that preflight is:
+    # authorization gates every live-driving action, even one this static.
+    _require_llm_configured_or_exit(
+        planner_model or model, customiser_model or model, judge_model or model, provider=provider
+    )
+
     # DCR-0008: fail fast on an unreachable provider with a distinct exit 4 —
     # otherwise the full N-iteration live loop against the REAL target would
     # just run to a misleading non-discriminating REJECTED. Always AFTER the
@@ -2803,6 +2856,15 @@ def validate(
         echo_err(
             f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
             "minute, a few cents; needs a provider (ANTHROPIC_API_KEY)."
+        )
+        # T14/H3: cheap, no-network credential-presence pre-flight before the
+        # real live _provider_preflight call just below (no authorize gate on
+        # this branch -- the bundled reference twins are safe-by-construction).
+        _require_llm_configured_or_exit(
+            effective_planner_model,
+            effective_customiser_model,
+            effective_judge_model,
+            provider=provider,
         )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
@@ -3931,6 +3993,15 @@ def gate(
     # string — see the up-front rejection above for why the two could diverge.
     is_reference = routed_to == "reference"
 
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts -- but AFTER every
+    # other config/usage validation above (authorize, target shape, ...), so
+    # a more specific error still wins when both apply. `gate` has no
+    # --dry-run of its own, so this is unconditional.
+    _require_llm_configured_or_exit(
+        effective_planner_model, effective_customiser_model, effective_judge_model, provider=provider
+    )
+
     # --- closures injected into run_gate ---
 
     def scan_fn() -> ScanOutcomeBundle:
@@ -4405,6 +4476,14 @@ def ablate(
     # validate — same rule, same derivation (scope if declared, else family name).
     _enforce_custom_authorize(
         spec.family, tf.scope, spec.requires_scope, authorize, command="ablate"
+    )
+
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts -- AFTER the authorize
+    # check above (DCR-0008/one-gate: authorization gates every live-driving
+    # action, even one this static).
+    _require_llm_configured_or_exit(
+        effective_planner_model, effective_customiser_model, effective_judge_model, provider=provider
     )
 
     # Server-layer mode: the target bakes its guards into the server (toggled by
