@@ -20,6 +20,7 @@ from mylonite.scan._llm import (
     LiteLLMCallCounter,
     NonRecoverableProviderError,
     active_counter,
+    litellm_tool_call_async,
 )
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable, Verdict
 from mylonite.scan.diagnostics import Diagnosis
@@ -612,6 +613,143 @@ async def test_engine_counts_inconclusive_judge_fallbacks() -> None:
     assert result.report.attempts[0].outcome == "no_finding"
     assert result.report.inconclusive_attempts == 1
     assert result.report.fallback_breakdown == {"judge_unparseable_output": 1}
+
+
+# --- T15/H4: tool_schema_sanitised end-to-end through a real ScanEngine.run --
+
+#: A $ref-bearing tool schema shaped like real pydantic-generated MCP output
+#: (see scan/schema_sanitise.py's module docstring) -- STRICT-dialect
+#: providers (Gemini/Vertex/Bedrock) reject this unsanitised.
+_REF_BEARING_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "note_id": {"type": "string"},
+        "filter": {"$ref": "#/$defs/NoteFilter"},
+    },
+    "required": ["note_id"],
+    "$defs": {
+        "NoteFilter": {
+            "type": "object",
+            "properties": {"tag": {"type": "string"}},
+            "required": ["tag"],
+        }
+    },
+}
+
+_CLEAN_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"note_id": {"type": "string"}},
+    "required": ["note_id"],
+}
+
+
+class _PlannerCallingAdapterStub:
+    """Simulates what a REAL adapter's invoke() does mid-scan: drive
+    ``litellm_tool_call_async`` -- the planner's SOLE chokepoint (T14) -- with
+    a real tool schema and a stubbed ``completion_fn``. Close enough to
+    exercise T15's ``LiteLLMCallCounter.tool_schema_sanitised`` bump ->
+    ``ScanEngine._finalize``'s ``fallback_breakdown`` fold end-to-end through
+    a genuine ``ScanEngine.run()``, without spinning up a real MCP
+    session/subprocess (unlike ``_AdapterStub``, which never touches the LLM
+    chokepoint at all and so could never have caught this wiring breaking).
+    """
+
+    def __init__(self, *, model: str, tool_schema: dict[str, Any]) -> None:
+        self._model = model
+        self._tool_schema = tool_schema
+
+    async def describe(self) -> TargetDescriptor:
+        return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
+
+    async def invoke(self, payload: Payload) -> AdapterResponse:
+        del payload
+
+        async def _stub_completion(**_: Any) -> Any:
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="done.", tool_calls=None))]
+            )
+
+        await litellm_tool_call_async(
+            model=self._model,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_notes",
+                        "description": "fetch notes",
+                        "parameters": self._tool_schema,
+                    },
+                }
+            ],
+            completion_fn=_stub_completion,
+        )
+        return _ok_response()
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_engine_folds_tool_schema_sanitisation_into_fallback_breakdown() -> None:
+    """A STRICT-dialect model (bedrock/...) whose planner tool schema carries a
+    $ref must show up as ``fallback_breakdown["tool_schema_sanitised"]`` on the
+    finished report -- the counter bump inside ``litellm_tool_call_async``
+    (T15) has to survive all the way through ``ScanEngine._finalize``'s fold,
+    not just be observable by poking ``LiteLLMCallCounter`` directly."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="bedrock/anthropic.claude-3-haiku", tool_schema=_REF_BEARING_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.fallback_breakdown.get("tool_schema_sanitised") == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_tool_schema_sanitised_absent_for_permissive_model() -> None:
+    """A PERMISSIVE-dialect model (anthropic/...) with the SAME $ref-bearing
+    schema must leave ``tool_schema_sanitised`` out of the breakdown entirely
+    -- sanitisation never ran, so there is nothing to count."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="anthropic/claude-haiku-4-5", tool_schema=_REF_BEARING_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert "tool_schema_sanitised" not in result.report.fallback_breakdown
+
+
+@pytest.mark.asyncio
+async def test_engine_tool_schema_sanitised_absent_for_already_clean_schema() -> None:
+    """A STRICT-dialect model with an already-clean schema (no $ref/anyOf/
+    const/additionalProperties) must also leave the key out -- sanitisation
+    ran but had no real effect, matching the "only when it changes something"
+    contract."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="bedrock/anthropic.claude-3-haiku", tool_schema=_CLEAN_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert "tool_schema_sanitised" not in result.report.fallback_breakdown
 
 
 # --- G7 budget tracking across layers -------------------------------------
