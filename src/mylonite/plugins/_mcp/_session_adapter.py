@@ -47,7 +47,6 @@ from mylonite.contracts._types import ToolSpec
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
-from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
@@ -334,12 +333,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     inner_shim, planner_calls, full_results=planner_result_texts
                 )
 
-                wrapped_completion = self._wrap_completion()
                 planner = LLMPlanner(
                     server=recording_shim,
                     model=self._model,
                     system_prompt=self._spec.default_system_prompt,
-                    completion_fn=wrapped_completion,
+                    completion_fn=self._completion_fn,
                 )
 
                 user_message = _user_message_for_drive(
@@ -726,29 +724,6 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return "init_failure"
         return "planner_exception"
 
-    def _wrap_completion(self) -> Callable[..., Any]:
-        """Same A1 budget-counter wrap as the in-process reference adapter."""
-        import litellm  # local import keeps cold-start cheap
-
-        underlying = self._completion_fn or litellm.acompletion
-
-        async def _counted(**kwargs: Any) -> Any:
-            counter = active_counter()
-            if counter is not None:
-                counter.record("planner")
-            try:
-                response = await underlying(**kwargs)
-            except Exception:
-                if counter is not None:
-                    counter.mark_failure()
-                raise
-            if counter is not None:
-                counter.mark_success()
-            return response
-
-        return _counted
-
-
 class _RecordingServerShim:
     """Wraps a ``MCPSessionAsServerLike`` so planner calls land in a list.
 
@@ -824,7 +799,11 @@ class _MCPAttackSession:
         self._adapter = adapter
         self._cm = cm
         self._session = session
-        self._completion = adapter._wrap_completion()
+        # T14: the raw completion_fn (or None) — LLMPlanner routes every call
+        # through _llm.litellm_tool_call_async, which owns budget-counting
+        # (caller="planner") + the active LLMPolicy's kwargs itself; no
+        # per-adapter wrapping needed any more.
+        self._completion = adapter._completion_fn
         # What this session planted (for delivery detection + the effect probe in
         # drive_planner). String arg values carry the injected body.
         self._planted_bodies: list[str] = []
