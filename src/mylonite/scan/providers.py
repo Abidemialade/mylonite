@@ -137,6 +137,16 @@ def looks_like_provider_env_var(key: str) -> bool:
     (covers AWS's two-var Bedrock credential pair, which doesn't match either
     pattern). Callers that reject an unmatched key should still report it
     (never drop silently) -- this function only answers "known or not".
+
+    Accepted tradeoff: the ``*_API_KEY`` pattern is intentionally broader
+    than "known LLM provider" -- it also matches an unrelated credential
+    that happens to be shaped the same way (e.g. ``STRIPE_API_KEY`` sitting
+    in a ``.env`` reused from a wider project) and `_load_env_file` WILL load
+    it. This trades the old allowlist's narrower false-negative surface
+    (silently dropping a real, unlisted provider key) for a broader
+    false-positive one; `_load_env_file` echoes every loaded key to stderr,
+    so an interactive operator sees it happen, but a non-interactive/CI
+    invocation may not have anyone reading that line.
     """
     if _RE_API_KEY_VAR.match(key) or _RE_AZURE_VAR.match(key):
         return True

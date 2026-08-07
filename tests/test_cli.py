@@ -465,6 +465,31 @@ def test_env_file_reports_unrecognized_key_on_stderr_model_ref(
     assert "MYLONITE_TRULY_UNRECOGNIZED_VAR" in out
 
 
+def test_env_file_loads_unrelated_api_key_shaped_var_model_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Documents the accepted tradeoff of going pattern-based: `*_API_KEY`
+    is broader than "known LLM provider" -- an unrelated credential shaped
+    the same way (e.g. a Stripe key sitting in a .env reused from a wider
+    project) DOES get loaded too. This is intentional (see
+    `looks_like_provider_env_var`'s docstring) -- the old closed allowlist's
+    failure mode (silently dropping a real, unlisted provider key) was
+    strictly worse, and every load is still echoed to stderr, never silent.
+    This test exists so the tradeoff is discovered here, not in production.
+    """
+    monkeypatch.delenv("STRIPE_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("STRIPE_API_KEY=sk-test-unrelated-1234567890\n", encoding="utf-8")
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    try:
+        assert os.environ.get("STRIPE_API_KEY") == "sk-test-unrelated-1234567890"
+        out = result.stderr or result.output
+        assert "STRIPE_API_KEY" in out  # loaded, and visibly so -- never silent
+    finally:
+        os.environ.pop("STRIPE_API_KEY", None)
+
+
 def test_doctor_warns_on_non_key_shaped_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """doctor flags an ANTHROPIC_API_KEY that clearly isn't a key (without printing it)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "changeme")
@@ -689,6 +714,55 @@ def test_provider_flag_omitted_never_warns_model_ref(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_SUCCESS, result.output
     out = result.stderr or result.output
     assert "deprecated" not in out
+
+
+def test_scan_planner_model_override_rejects_unroutable_model_model_ref(
+    tmp_path: Path,
+) -> None:
+    """A role-separated override (--planner-model/--customiser-model/
+    --judge-model) drives the IDENTICAL LiteLLM call path as the base
+    --model, so it must reject an unroutable model at CLI-argument time too
+    -- not silently pass it through to fail later, mid-scan, at the live
+    call. Covers the gap where only the base model went through
+    ModelRef.parse and its three role siblings still used the old
+    shape-only `_validate_model_string` + un-deriving `_route_model`."""
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--planner-model",
+            "not-a-real-model-xyz123",
+            "--dry-run",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "can't determine a provider" in (result.stderr or result.output)
+
+
+def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
+    tmp_path: Path,
+) -> None:
+    """The SAME override, but with --provider given as a hint, resolves and
+    routes fine -- proving the rejection above is about the missing hint/
+    prefix, not a blanket regression on role overrides."""
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--planner-model",
+            "some-custom-finetune",
+            "--provider",
+            "openai",
+            "--dry-run",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
 
 
 def test_doctor_classifies_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:

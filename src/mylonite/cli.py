@@ -516,11 +516,15 @@ def _validate_model_string(model: str) -> None:
 def _route_model(provider: str | None, model: str) -> str:
     """Apply LiteLLM ``provider/model`` routing when the user set --provider.
 
-    Backward-compat wrapper: the actual prefixing rule now lives in
-    :func:`mylonite.scan.model_ref.route_model` (the single source of truth
-    :class:`~mylonite.scan.model_ref.ModelRef` also uses to build ``.raw``),
-    kept importable here under its original name for existing callers
-    (``_resolve_role_model`` below) and tests.
+    Backward-compat wrapper only — new code should resolve a model via
+    :func:`_resolve_model_ref` (base model) or :func:`_parse_model_ref_or_exit`
+    (a second/role model in the same invocation), which additionally derive
+    ``.provider`` and raise loudly on an unroutable model instead of silently
+    passing it through to fail later, mid-call. The actual prefixing rule
+    lives in :func:`mylonite.scan.model_ref.route_model` (the single source
+    of truth :class:`~mylonite.scan.model_ref.ModelRef` also uses to build
+    ``.raw``); this wrapper stays importable under its original name only for
+    existing tests.
     """
     from mylonite.scan.model_ref import route_model
 
@@ -542,9 +546,32 @@ def _warn_deprecated_provider_flag() -> None:
     )
 
 
-def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
-    """``ModelRef.parse`` for a CLI command, degrading a bad/unroutable model
+def _parse_model_ref_or_exit(model: str, provider: str | None) -> ModelRef:
+    """``ModelRef.parse`` for a CLI argument, degrading a bad/unroutable model
     to a friendly ``EXIT_CONFIG`` instead of an unhandled traceback.
+
+    No deprecation warning here — a command resolving a SECOND model in the
+    same invocation (a role-separated ``--planner-model``/``--customiser-
+    model``/``--judge-model`` override in ``scan``) reuses this directly so
+    reusing ``--provider`` for that override doesn't re-fire the warning
+    :func:`_resolve_model_ref` already fired once for the base ``--model``.
+    Every model a command resolves goes through this (or ``_resolve_model_ref``
+    for the base one) — a role override must reject an unroutable model at
+    CLI-argument time exactly like the base model does, since it drives the
+    identical LiteLLM call path.
+    """
+    from mylonite.scan.model_ref import ModelRef
+
+    try:
+        return ModelRef.parse(model, provider_hint=provider)
+    except ValueError as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
+    """``ModelRef.parse`` for a command's BASE model — see
+    :func:`_parse_model_ref_or_exit` for the shared parse-or-exit behaviour.
 
     Also warns (once) when ``provider`` is set — see
     :func:`_warn_deprecated_provider_flag` — whether it came from an explicit
@@ -554,15 +581,9 @@ def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
     apart, and a config-file nudge toward the model-prefix convention is just
     as useful as a flag one).
     """
-    from mylonite.scan.model_ref import ModelRef
-
     if provider is not None:
         _warn_deprecated_provider_flag()
-    try:
-        return ModelRef.parse(model, provider_hint=provider)
-    except ValueError as exc:
-        echo_err(str(exc))
-        raise typer.Exit(code=EXIT_CONFIG) from exc
+    return _parse_model_ref_or_exit(model, provider)
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -1075,13 +1096,17 @@ def scan(
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
 
-    # Role-separated models: each defaults to the base model. Validate + route
-    # any explicit override exactly like --model.
+    # Role-separated models: each defaults to the base model. Validate +
+    # resolve any explicit override through ModelRef exactly like --model —
+    # it drives the identical LiteLLM call path, so an unroutable override
+    # must reject at CLI-argument time too, not just fail later mid-scan.
+    # `.provider` is discarded: a role override doesn't get its own env-var
+    # check, only the base model's provider feeds ScanConfig/env lookups.
     def _resolve_role_model(override: str | None) -> str:
         if not override:
             return effective_model
         _validate_model_string(override)
-        return _route_model(provider, override)
+        return _parse_model_ref_or_exit(override, provider).raw
 
     effective_planner_model = _resolve_role_model(planner_model)
     effective_customiser_model = _resolve_role_model(customiser_model)
