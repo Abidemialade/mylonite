@@ -270,6 +270,102 @@ def test_ablate_controls_dedupes_repeated_entries(
     assert captured["controls"] == ["W2", "W4"]
 
 
+# --- T14: role-model flags + mylonite.yaml auto-discovery -------------------
+
+
+def test_ablate_role_model_flags_reach_scan_target_fires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--planner-model/--customiser-model/--judge-model (new in T14, mirroring
+    scan/gate/validate) must actually thread through to scan_target_fires'
+    model/customiser_model/judge_model kwargs -- not just be accepted and
+    silently dropped."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    seen: list[dict[str, Any]] = []
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        seen.append(kwargs)
+        return FireOutcome.RESISTED
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2",
+            "--model",
+            "claude-sonnet-4-6",
+            "--planner-model",
+            "claude-opus-4-1",
+            "--customiser-model",
+            "claude-opus-4-1",
+            "--judge-model",
+            "claude-haiku-4-5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen, "scan_target_fires was never called"
+    assert seen[0]["model"] == "claude-opus-4-1"
+    assert seen[0]["customiser_model"] == "claude-opus-4-1"
+    assert seen[0]["judge_model"] == "claude-haiku-4-5"
+
+
+def test_ablate_exposes_role_model_and_config_flags():
+    """Flag-presence check mirroring gate's own -- these were entirely absent
+    from `ablate` before T14."""
+    import click
+    import typer as _typer
+
+    command = _typer.main.get_command(app)
+    ctx = click.Context(command)
+    ablate_cmd = command.get_command(ctx, "ablate")  # type: ignore[attr-defined]
+    names: set[str] = set()
+    for param in ablate_cmd.params:
+        names.update(param.opts)
+    assert "--planner-model" in names
+    assert "--customiser-model" in names
+    assert "--judge-model" in names
+    assert "--config" in names
+
+
+def test_ablate_autodiscovers_mylonite_yaml_role_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mylonite.yaml auto-discovery (previously gate-only) now also fills
+    ablate's role models -- proven end to end via a captured kwarg, not just
+    "the command didn't crash"."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    seen: list[dict[str, Any]] = []
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        seen.append(kwargs)
+        return FireOutcome.RESISTED
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    _write(tmp_path)
+    (tmp_path / "mylonite.yaml").write_text(
+        "model: claude-sonnet-4-6\njudge_model: claude-haiku-4-5\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    result = _runner.invoke(
+        app,
+        ["ablate", "--target-file", "target.yaml", "--authorize", "myapp-notes", "--controls", "W2"],
+    )
+    assert result.exit_code == 0, result.output
+    out = result.stderr or result.output
+    assert "mylonite.yaml" in out and "auto-discovered" in out
+    assert seen[0]["judge_model"] == "claude-haiku-4-5"
+
+
 # --- Theme B: server-layer ablation (control_env toggles) -------------------
 
 _YAML_SERVER_LAYER = """\

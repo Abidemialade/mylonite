@@ -765,6 +765,45 @@ def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
     assert result.exit_code == EXIT_SUCCESS, result.output
 
 
+def test_scan_autodiscovers_mylonite_yaml(tmp_path: Path, monkeypatch) -> None:
+    """T14/H3: mylonite.yaml auto-discovery was gate-only before this release
+    (T11's block in cli.py checked ``Path("mylonite.yaml").is_file()`` only
+    inside ``gate``). ``scan`` now shares the same ``_discover_run_config``
+    helper -- proven here by a mylonite.yaml the CLI never gets an explicit
+    --config flag for, whose ``max_llm_calls`` still lands (visible on stderr
+    via the "using ... (auto-discovered)" note this shares with gate)."""
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text("max_llm_calls: 7\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path / "out")],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert "mylonite.yaml" in out
+    assert "auto-discovered" in out
+
+
+def test_scan_rejects_credentialed_api_base_from_mylonite_yaml(tmp_path: Path, monkeypatch) -> None:
+    """T14/CEO §3: a credentialed api_base in a COMMITTED mylonite.yaml must be
+    a hard EXIT_CONFIG naming the env-var alternative -- not silently stripped,
+    not silently allowed. Caught at RunConfig-load time (auto-discovery included),
+    before any live call is even attempted."""
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(
+        "api_base: 'https://my-proxy.internal/v1?api_key=sk-abc123'\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path / "out")],
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "env var" in out
+
+
 def test_doctor_classifies_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     import litellm
 
@@ -3023,6 +3062,85 @@ def test_validate_custom_runs_differential_by_default(
         assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
     finally:
         target_registry.clear_runtime_targets()
+
+
+def test_validate_custom_threads_role_models_and_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T14: _validate_custom gained planner_model/customiser_model/judge_model/
+    policy params -- DifferentialValidator already accepted the three role
+    models; this was purely a missing plumbing gap between _validate_custom
+    and its caller. Proves both the role-model pass-through AND that the live
+    call is wrapped in scan._llm.llm_scope(policy=...)."""
+    from types import SimpleNamespace
+
+    from mylonite.cli import _validate_custom
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan._llm import active_policy
+    from mylonite.scan.llm_policy import LLMPolicy
+
+    captured: dict[str, Any] = {}
+    seen_policy_during_validate: list[Any] = []
+
+    class _StubValidator:
+        def __init__(self, **kw: Any) -> None:
+            captured.update(kw)
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            seen_policy_during_validate.append(active_policy())
+            return SimpleNamespace(kept=True, gating_legs=[])
+
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
+    )
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+    tf = tmp_path / "t.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
+    target_registry.clear_runtime_targets()
+    custom_policy = LLMPolicy(max_tokens=999)
+    try:
+        _validate_custom(
+            gen,
+            tf,
+            1,
+            "anthropic",
+            "m",
+            fast=True,
+            authorize="myapp",
+            planner_model="planner-x",
+            customiser_model="customiser-y",
+            judge_model="judge-z",
+            policy=custom_policy,
+        )
+        assert captured["planner_model"] == "planner-x"
+        assert captured["customiser_model"] == "customiser-y"
+        assert captured["judge_model"] == "judge-z"
+        assert seen_policy_during_validate == [custom_policy]
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_validate_exposes_role_model_and_config_flags():
+    import click
+    import typer as _typer
+
+    from mylonite.cli import app as _app
+
+    command = _typer.main.get_command(_app)
+    ctx = click.Context(command)
+    validate_cmd = command.get_command(ctx, "validate")  # type: ignore[attr-defined]
+    names: set[str] = set()
+    for param in validate_cmd.params:
+        names.update(param.opts)
+    assert "--planner-model" in names
+    assert "--customiser-model" in names
+    assert "--judge-model" in names
+    assert "--config" in names
 
 
 _SERVER_LAYER_TARGET_YAML = (

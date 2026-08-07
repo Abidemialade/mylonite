@@ -586,6 +586,82 @@ def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
     return _parse_model_ref_or_exit(model, provider)
 
 
+def _discover_run_config(
+    explicit_path: Path | None, *, command: str
+) -> tuple[Path | None, Any]:
+    """Resolve the ``mylonite.yaml`` run config for ``command``.
+
+    An explicit ``--config`` always wins; otherwise auto-discover
+    ``./mylonite.yaml`` when present. Returns ``(path_used_or_None,
+    RunConfig_or_None)`` — ``(None, None)`` when no config applies at all.
+
+    T14/H3: this was ``gate``-only (the ``if config_path is None and
+    Path("mylonite.yaml").is_file(): ...`` block T11 added) — every other
+    command that accepts ``--config`` (``scan``, ``doctor``, and now
+    ``validate``/``ablate``) re-implemented (or, for ``scan``/``doctor``,
+    simply lacked) the SAME auto-discovery check. Centralising it here means
+    a future command gets auto-discovery by construction, not by remembering
+    to copy the ``gate``-specific block.
+    """
+    from mylonite.config import load_run_config
+
+    path = explicit_path
+    if path is None and Path("mylonite.yaml").is_file():
+        path = Path("mylonite.yaml")
+    if path is None:
+        return None, None
+    try:
+        rc = load_run_config(path)
+    except Exception as exc:
+        echo_exc(f"invalid config {path}", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    if explicit_path is None:
+        echo_err(f"{command}: using {path} (auto-discovered).")
+    return path, rc
+
+
+def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
+    """Build the :class:`~mylonite.scan.llm_policy.LLMPolicy` for a live run.
+
+    Sources, in precedence order: ``rc`` (the resolved ``mylonite.yaml``, if
+    any) then ``env_rc`` (the flat ``MYLONITE_*`` env vars — see
+    :func:`~mylonite.config.env_run_config`, called ONCE per command
+    invocation and reused for both this and the model/provider/role-model
+    resolution alongside it); a field left unset by both keeps
+    ``LLMPolicy``'s own documented default. There is deliberately no
+    CLI-flag layer for these fields yet (T14 scope: ``--api-base``/
+    ``--max-tokens``/etc. would be five more flags apiece across ``scan``/
+    ``gate``/``validate``/``ablate`` — left for a follow-up if operators
+    actually need a per-invocation override rather than a per-project/
+    per-shell one); ``mylonite.yaml``/env cover the "my org runs a LiteLLM
+    proxy" and "I want max_tokens=4096 for every run" cases this was written
+    for.
+    """
+    from mylonite.scan.llm_policy import LLMPolicy
+
+    api_base = (rc.api_base if rc is not None else None) or env_rc.api_base
+    max_tokens = (rc.max_tokens if rc is not None else None) or env_rc.max_tokens
+    temperature = rc.temperature if rc is not None else None
+    if temperature is None:
+        temperature = env_rc.temperature
+    timeout = (rc.timeout if rc is not None else None) or env_rc.timeout
+    num_retries = rc.num_retries if rc is not None else None
+    if num_retries is None:
+        num_retries = env_rc.num_retries
+    kwargs: dict[str, Any] = {}
+    if api_base is not None:
+        kwargs["api_base"] = api_base
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if num_retries is not None:
+        kwargs["num_retries"] = num_retries
+    return LLMPolicy(**kwargs)
+
+
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
     """Map a missing reference target to a friendly EXIT_CONFIG, else return.
 
@@ -1063,23 +1139,33 @@ def scan(
     """
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
-    config_root: Path | None = None
-    if run_config_path is not None:
-        from mylonite.config import load_run_config
+    # T14: auto-discovered from ./mylonite.yaml when no --config is passed —
+    # was gate-only before; see _discover_run_config.
+    from mylonite.config import env_run_config
 
-        try:
-            rc = load_run_config(run_config_path)
-        except Exception as exc:
-            echo_exc(f"invalid --config {run_config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+    config_root: Path | None = None
+    _config_path, rc = _discover_run_config(run_config_path, command="scan")
+    env_rc = env_run_config()
+    if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
         config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+    # MYLONITE_MODEL / MYLONITE_PROVIDER / role-model env vars are the
+    # lowest-precedence source, below mylonite.yaml.
+    model = model or env_rc.model
+    provider = provider or env_rc.provider
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
 
     # The resolved artefact Layout: an explicit --output-dir always wins outright
     # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
@@ -1361,8 +1447,18 @@ def scan(
         judge=judge,
     )
 
+    from mylonite.scan._llm import llm_scope
+
     try:
-        result = asyncio.run(engine.run())
+        # T14: activates effective_policy (mylonite.yaml/env-resolved
+        # LLMPolicy) for every LiteLLM call this run makes — the customiser,
+        # judge, and (via LLMPlanner) the planner all read it through
+        # scan._llm.active_policy(). asyncio.run() copies the current
+        # contextvar context into the coroutine it schedules, so entering
+        # this scope BEFORE asyncio.run (rather than inside ScanEngine.run,
+        # which separately owns the budget-counter scope) is sufficient.
+        with llm_scope(policy=effective_policy):
+            result = asyncio.run(engine.run())
     except (ModuleNotFoundError, ImportError) as exc:
         # `scan reference:*` lazily imports the bundled reference target inside the
         # adapter; on an editable checkout without it this surfaces here. Fail with
@@ -2033,6 +2129,10 @@ def _validate_custom(
     fast: bool = False,
     prove_input_control: bool = False,
     authorize: str | None = None,
+    planner_model: str | None = None,
+    customiser_model: str | None = None,
+    judge_model: str | None = None,
+    policy: Any | None = None,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8).
 
@@ -2040,6 +2140,12 @@ def _validate_custom(
     payloads (including exfil) — so it is gated by the same ``--authorize``
     rule as ``scan``/``gate`` (:func:`_enforce_custom_authorize`), not zero
     checks.
+
+    ``planner_model``/``customiser_model``/``judge_model`` (T14) each default
+    to ``model`` (via ``DifferentialValidator``'s own fallback, mirroring
+    ``ScanConfig.resolved_planner_model`` et al.) when ``None``. ``policy``
+    (an :class:`~mylonite.scan.llm_policy.LLMPolicy`) is activated for the
+    live re-drive via ``scan._llm.llm_scope`` when given.
     """
     from mylonite.gate.mitigation import weakness_class_for
     from mylonite.plugins._mcp import target_registry
@@ -2114,14 +2220,20 @@ def _validate_custom(
             "default for custom targets) to avoid 'teaching to the test'."
         )
 
+    effective_planner_model = planner_model or model
+
     def _factory() -> Any:
-        return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.raw)
+        return build_adapter_for_spec(
+            spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
+        )
 
     guarded_factory: Any = None
     if plan.control_weakness is not None:
 
         def _guarded() -> Any:
-            return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.guarded)
+            return build_adapter_for_spec(
+                spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
+            )
 
         guarded_factory = _guarded
 
@@ -2156,6 +2268,9 @@ def _validate_custom(
         iterations=iterations,
         provider=provider,
         model=model,
+        planner_model=planner_model,
+        customiser_model=customiser_model,
+        judge_model=judge_model,
         target_adapter_factory=_factory,
         guarded_adapter_factory=guarded_factory,
         control_weakness=plan.control_weakness,
@@ -2165,7 +2280,10 @@ def _validate_custom(
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: echo_err(f"  … {msg}"),
     )
-    return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+    from mylonite.scan._llm import llm_scope
+
+    with llm_scope(policy=policy):
+        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
 
 def _locate_generated(target: Path) -> tuple[Path, Path]:
@@ -2425,6 +2543,47 @@ def validate(
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
     ] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner). "
+                "Defaults to --model. Same three-role split as `scan`/`gate`."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads. "
+                "Defaults to --model."
+            ),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=(
+                "Override the model that JUDGES whether an attack landed. "
+                "Defaults to --model."
+            ),
+        ),
+    ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (provider / model / the role "
+                "models). Auto-discovered from ./mylonite.yaml when present; an "
+                "explicit flag always wins."
+            ),
+        ),
+    ] = None,
     target_file: Annotated[
         Path | None,
         typer.Option(
@@ -2520,6 +2679,26 @@ def validate(
     no provider.
     """
     from mylonite import testkit
+    from mylonite.config import env_run_config
+
+    # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
+    # scan/gate — `validate` previously had neither --config nor
+    # --planner-model/--customiser-model/--judge-model at all, despite
+    # DifferentialValidator already accepting all three.
+    _config_path, rc = _discover_run_config(run_config_path, command="validate")
+    env_rc = env_run_config()
+    if rc is not None:
+        provider = provider or rc.provider
+        model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
 
     # T13: `validate` used to be the ONE model-taking command that skipped
     # BOTH `_validate_model_string` and provider routing/derivation entirely
@@ -2533,6 +2712,16 @@ def validate(
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
+
+    def _resolve_validate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_validate_role_model(planner_model)
+    effective_customiser_model = _resolve_validate_role_model(customiser_model)
+    effective_judge_model = _resolve_validate_role_model(judge_model)
 
     test_path, exploit_path = _locate_generated(target)
 
@@ -2605,6 +2794,10 @@ def validate(
             fast=fast,
             prove_input_control=prove_input_control,
             authorize=authorize,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
+            policy=effective_policy,
         )
     else:
         echo_err(
@@ -2643,6 +2836,9 @@ def validate(
             iterations=iterations,
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
             metamorphic_strategies=["paraphrase"] if fast else None,
             # Record the canonical guarded fixtures into the gen dir's `fixtures/`
             # and run the on-disk committed test offline as a full-pass build —
@@ -2650,11 +2846,14 @@ def validate(
             record_fixtures_dir=test_path.parent / "fixtures",
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
-        report = validator.validate(
-            generated,
-            ReferenceVulnerableOracle().adapter(),
-            ReferenceVulnerableOracle(),
-        )
+        from mylonite.scan._llm import llm_scope
+
+        with llm_scope(policy=effective_policy):
+            report = validator.validate(
+                generated,
+                ReferenceVulnerableOracle().adapter(),
+                ReferenceVulnerableOracle(),
+            )
 
     # T2: stamp the model the differential was proven against, so the committed
     # regression is honest about which model version it gates (a fix can silently
@@ -3423,6 +3622,37 @@ def gate(
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
     ] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner). "
+                "Defaults to --model. Same three-role split as `scan` — see its "
+                "--planner-model help for the rationale."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads (the red-team / "
+                "attacker side). Defaults to --model."
+            ),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=(
+                "Override the model that JUDGES whether an attack landed. Defaults to "
+                "--model."
+            ),
+        ),
+    ] = None,
     out: Annotated[
         Path | None,
         typer.Option(
@@ -3540,28 +3770,30 @@ def gate(
     # project config. Auto-discovered from ./mylonite.yaml when present and no
     # --config is passed; an explicit flag always wins. Closes the parity gap where
     # `gate` required --target-file even though the project's mylonite.yaml set it.
-    config_path = run_config_path
-    if config_path is None and Path("mylonite.yaml").is_file():
-        config_path = Path("mylonite.yaml")
-    if config_path is not None:
-        from mylonite.config import load_run_config
+    # T14: delegates to the same _discover_run_config every command shares now.
+    from mylonite.config import env_run_config
 
-        try:
-            rc = load_run_config(config_path)
-        except Exception as exc:
-            echo_exc(f"invalid config {config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        if run_config_path is None:
-            echo_err(f"gate: using {config_path} (auto-discovered).")
+    config_path, rc = _discover_run_config(run_config_path, command="gate")
+    env_rc = env_run_config()
+    if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
         config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
         config_root = None
+    model = model or env_rc.model
+    provider = provider or env_rc.provider
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
 
     # The resolved artefact Layout, mirroring `scan`: an explicit --out always
     # wins outright; absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the
@@ -3575,6 +3807,18 @@ def gate(
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
+
+    # Role-separated models (T14, mirroring `scan`'s _resolve_role_model):
+    # each defaults to the base model.
+    def _resolve_gate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_gate_role_model(planner_model)
+    effective_customiser_model = _resolve_gate_role_model(customiser_model)
+    effective_judge_model = _resolve_gate_role_model(judge_model)
 
     # --- resolve adapter (mirrors scan command routing) ---
     # 'reference:*' + --target-file is never meaningful — the reference targets
@@ -3657,13 +3901,15 @@ def gate(
                 "Pass a target YAML via --target-file."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_custom(tf, authorize, effective_model, command="gate")
+        adapter = _build_adapter_for_custom(
+            tf, authorize, effective_planner_model, command="gate"
+        )
         routed_to = "custom"
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
-        adapter = _build_adapter_for_reference(target, effective_model)
+        adapter = _build_adapter_for_reference(target, effective_planner_model)
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
@@ -3672,7 +3918,7 @@ def gate(
                 "See SECURITY.md."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+        adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         routed_to = "mcp"
     else:
         echo_err(
@@ -3689,6 +3935,7 @@ def gate(
 
     def scan_fn() -> ScanOutcomeBundle:
         from mylonite.plugins.registry import discover
+        from mylonite.scan._llm import llm_scope
         from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.customiser import PayloadCustomiser
         from mylonite.scan.engine import ScanConfig, ScanEngine
@@ -3712,6 +3959,9 @@ def gate(
             target_id=target if target is not None else f"mcp:{tf.family if tf else 'custom'}",
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
             max_llm_calls=max_llm_calls,
         )
         engine = ScanEngine(
@@ -3719,11 +3969,12 @@ def gate(
             adapter=adapter,
             attack_modules=attack_modules,
             customiser=PayloadCustomiser(
-                model=effective_model, purpose=purpose or (tf.purpose if tf else None)
+                model=effective_customiser_model, purpose=purpose or (tf.purpose if tf else None)
             ),
-            judge=SuccessJudge(model=effective_model),
+            judge=SuccessJudge(model=effective_judge_model),
         )
-        result = asyncio.run(engine.run())
+        with llm_scope(policy=effective_policy):
+            result = asyncio.run(engine.run())
         # The typed verdict for "did this scan actually run" (A1 fix) — carried
         # alongside the exploits so run_gate can tell a genuine clean scan apart
         # from one that never meaningfully ran (e.g. provider_unreachable).
@@ -3781,19 +4032,25 @@ def gate(
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
     def validate_fn(generated: Any) -> Any:
+        from mylonite.scan._llm import llm_scope
+
         if is_reference:
             validator = DifferentialValidator(
                 iterations=iterations,
                 provider=effective_provider,
                 model=effective_model,
+                planner_model=effective_planner_model if planner_model else None,
+                customiser_model=effective_customiser_model if customiser_model else None,
+                judge_model=effective_judge_model if judge_model else None,
                 record_fixtures_dir=out / "fixtures",
                 progress_cb=lambda msg: echo_err(f"  … {msg}"),
             )
-            return validator.validate(
-                generated,
-                ReferenceVulnerableOracle().adapter(),
-                ReferenceVulnerableOracle(),
-            )
+            with llm_scope(policy=effective_policy):
+                return validator.validate(
+                    generated,
+                    ReferenceVulnerableOracle().adapter(),
+                    ReferenceVulnerableOracle(),
+                )
         # Custom target: mirror _validate_custom — re-drive the REAL target.
         if tf is None:
             echo_err("internal: expected a loaded TargetFile for custom validate_fn")
@@ -3828,7 +4085,7 @@ def gate(
 
         def _factory() -> Any:
             return build_adapter_for_spec(
-                spec, scope=tf.scope, model=effective_model, intent=plan.raw
+                spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
             )
 
         guarded_factory: Any = None
@@ -3836,7 +4093,7 @@ def gate(
 
             def _guarded() -> Any:
                 return build_adapter_for_spec(
-                    spec, scope=tf.scope, model=effective_model, intent=plan.guarded
+                    spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
                 )
 
             guarded_factory = _guarded
@@ -3851,6 +4108,9 @@ def gate(
             vuln_threshold=max(1, iterations - 1),
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
             target_adapter_factory=_factory,
             guarded_adapter_factory=guarded_factory,
             control_weakness=plan.control_weakness,
@@ -3859,7 +4119,8 @@ def gate(
             randomize_exfil=randomize_exfil,
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
-        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+        with llm_scope(policy=effective_policy):
+            return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
     def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
         from mylonite._redaction import redact_target_yaml
@@ -3893,15 +4154,23 @@ def gate(
             )
         return pr
 
-    result = run_gate(
-        out_dir=out,
-        scan_fn=scan_fn,
-        generate_fn=generate_fn,
-        validate_fn=validate_fn,
-        open_pr_fn=open_pr_fn,
-        open_pr=open_pr,
-        llm_enrich=llm_enrich,
-    )
+    from mylonite.scan._llm import llm_scope
+
+    # Wraps the WHOLE pipeline (scan -> validate -> mitigation enrichment) so
+    # the enrichment call (build_pr_body's --llm-enrich path, which run_gate
+    # makes AFTER scan_fn/validate_fn's own narrower scopes have already
+    # exited) still sees effective_policy — e.g. a configured api_base.
+    with llm_scope(policy=effective_policy):
+        result = run_gate(
+            out_dir=out,
+            scan_fn=scan_fn,
+            generate_fn=generate_fn,
+            validate_fn=validate_fn,
+            open_pr_fn=open_pr_fn,
+            open_pr=open_pr,
+            llm_enrich=llm_enrich,
+            mitigation_model=effective_model,
+        )
     raise typer.Exit(code=result.exit_code)
 
 
@@ -3997,6 +4266,48 @@ def ablate(
         ),
     ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner) "
+                "while scoring controls. Defaults to --model. Same three-role split "
+                "as `scan`/`gate`/`validate`."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads. "
+                "Defaults to --model."
+            ),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=(
+                "Override the model that JUDGES whether an attack landed. "
+                "Defaults to --model."
+            ),
+        ),
+    ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / the role models). Auto-discovered from "
+                "./mylonite.yaml when present; an explicit flag always wins."
+            ),
+        ),
+    ] = None,
     redundancy: Annotated[
         bool,
         typer.Option(
@@ -4021,6 +4332,7 @@ def ablate(
     against its weakness's attack (model held constant) and report whether it
     actually carries the security. LIVE: launches the target's MCP server + provider.
     """
+    from mylonite.config import env_run_config
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -4037,6 +4349,25 @@ def ablate(
     from mylonite.scan.control_shim import make_control
     from mylonite.scan.coverage import ScanOutcome
 
+    # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
+    # scan/gate/validate.
+    _config_path, rc = _discover_run_config(run_config_path, command="ablate")
+    env_rc = env_run_config()
+    if rc is not None:
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
+
     if target_file is None:
         echo_err("ablate requires --target-file (the app whose controls you want to score).")
         raise typer.Exit(code=EXIT_CONFIG)
@@ -4052,6 +4383,16 @@ def ablate(
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
+
+    def _resolve_ablate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_ablate_role_model(planner_model)
+    effective_customiser_model = _resolve_ablate_role_model(customiser_model)
+    effective_judge_model = _resolve_ablate_role_model(judge_model)
 
     try:
         tf = load_target_file(target_file)
@@ -4152,27 +4493,32 @@ def ablate(
             intent = LaunchIntent(
                 boundary_controls=tuple(boundary_control_for(spec, w) for w in applied)
             )
-        adapter = build_adapter_for_spec(spec, scope=tf.scope, model=effective_model, intent=intent)
+        adapter = build_adapter_for_spec(
+            spec, scope=tf.scope, model=effective_planner_model, intent=intent
+        )
         return scan_target_fires(
             adapter,
             pattern_id,
             provider=effective_provider,
-            model=effective_model,
-            customiser_model=effective_model,
-            judge_model=effective_model,
+            model=effective_planner_model,
+            customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
             on_outcome=observed_outcomes.append,
         )
 
+    from mylonite.scan._llm import llm_scope
+
     try:
-        results = run_control_ablation(
-            controls=usable,
-            seeds_by_weakness=seeds_by_weakness,
-            scan_fires=scan_fires,
-            iterations=iterations,
-            progress=lambda msg: echo_err(f"  … {msg}"),
-            redundancy=redundancy,
-            all_controls=usable,
-        )
+        with llm_scope(policy=effective_policy):
+            results = run_control_ablation(
+                controls=usable,
+                seeds_by_weakness=seeds_by_weakness,
+                scan_fires=scan_fires,
+                iterations=iterations,
+                progress=lambda msg: echo_err(f"  … {msg}"),
+                redundancy=redundancy,
+                all_controls=usable,
+            )
     finally:
         target_registry.clear_runtime_targets()
 
