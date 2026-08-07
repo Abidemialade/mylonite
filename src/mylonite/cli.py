@@ -615,7 +615,23 @@ def _discover_run_config(explicit_path: Path | None, *, command: str) -> tuple[P
         echo_exc(f"invalid config {path}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
     if explicit_path is None:
-        echo_err(f"{command}: using {path} (auto-discovered).")
+        # DCR-0001: api_base is security-sensitive in a way no other RunConfig
+        # field is -- honoring it from a repo-shipped, auto-discovered
+        # mylonite.yaml the operator never asked to load would let a
+        # malicious repo silently redirect every outbound LiteLLM call (and
+        # the operator's real provider API key riding on it) to an attacker
+        # host. Auto-discovery still applies to every OTHER field; api_base
+        # specifically requires an explicit --config opt-in.
+        if rc.api_base is not None:
+            echo_err(
+                f"{command}: using {path} (auto-discovered) -- its api_base "
+                "will NOT be honored automatically (it could redirect your "
+                "provider API key to an untrusted host); pass --config "
+                f"{path} explicitly to opt in."
+            )
+            rc = rc.model_copy(update={"api_base": None})
+        else:
+            echo_err(f"{command}: using {path} (auto-discovered).")
     return path, rc
 
 
@@ -1878,7 +1894,7 @@ def _emit_generated_test(
     ``scan_report_cache`` is the same style of cache for
     :func:`_backfill_scan_report`'s trimmed ``scan_report.json`` read.
     """
-    from mylonite._redaction import redact_target_yaml
+    from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -1897,9 +1913,15 @@ def _emit_generated_test(
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
+    # Never write the exploit's captured response/payload verbatim into a
+    # directory we tell the operator to commit — a successful exfiltration
+    # attack can carry a live secret in raw_response (DCR-0002 companion).
+    # Mirrors the redact_target_yaml() treatment applied to colocated_target
+    # a few lines below.
     colocated_exploit = out_dir / f"exploit_{safe_slug(enriched.pattern_id)}.json"
     colocated_exploit.write_text(
-        json_mod.dumps(enriched.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json_mod.dumps(redact_value(enriched.model_dump(mode="json")), indent=2, sort_keys=True)
+        + "\n",
         encoding="utf-8",
     )
 
@@ -2462,10 +2484,15 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     # legible: kept = build [ok] AND differential [ok] AND flakiness [x].
     legs_by_stage = {o.stage: o for o in report.outcomes}
     if getattr(report, "gating_legs", None):
+        # DCR-0004: a gating_legs entry with no matching outcome must render
+        # explicitly as missing, not silently drop out of the AND-chain — an
+        # operator reading an incomplete formula with no mark or mention of
+        # the missing leg can't tell the VERDICT might depend on it.
         rendered = " AND ".join(
             f"{leg} {_mark(legs_by_stage[leg].passed)}"
-            for leg in report.gating_legs
             if leg in legs_by_stage
+            else f"{leg} (missing)"
+            for leg in report.gating_legs
         )
         verdict = "KEPT" if report.kept else "REJECTED"
         console_print(console, f"gate: kept = {rendered}  =>  {verdict}")
@@ -2937,8 +2964,25 @@ def validate(
     # Persist the full ValidationReport (incl. the PR2 structured evidence) next
     # to the test so `mylonite report` can re-render the trust panel offline and
     # the JSON artefact carries the oracle's discrimination, not just a verdict.
+    # Redact the per-leg free text first (DCR-0003): outcome.detail can carry a
+    # live exception message or third-party ValidatorBase detail string, and
+    # `validate` tells the operator to commit this exact directory when the
+    # test is kept — the console table already redacts this same field before
+    # printing it (_render_validation_report), so persist the same sanitized
+    # copy instead of the raw report.
+    from mylonite._redaction import redact as _redact_report_text
+
+    sanitized_report = report.model_copy(
+        update={
+            "outcomes": [
+                outcome.model_copy(update={"detail": _redact_report_text(outcome.detail)})
+                for outcome in report.outcomes
+            ],
+            "notes": _redact_report_text(report.notes) if report.notes else report.notes,
+        }
+    )
     report_path = test_path.parent / "validation_report.json"
-    report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    report_path.write_text(sanitized_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     _render_validation_report(report)
 
@@ -3942,6 +3986,13 @@ def gate(
     # it removes even the theoretical possibility of the two calls resolving a
     # target file differently.
     custom_spec: Any = None
+    # DCR-0014/DCR-0015: the bundled `mcp:<family>[:<scope>]` route sets
+    # custom_spec too (below) so scan_fn's tagging step and validate_fn's
+    # twin-building can treat it exactly like the custom-target route instead
+    # of assuming only `custom`/`reference` routes exist. `mcp_scope` is the
+    # scope segment that route's TargetSpec needs (the `custom` route reads it
+    # off `tf.scope` instead — there is no TargetFile here to read it from).
+    mcp_scope: str | None = None
     routed_to: str
 
     if target_file is not None or target == "mcp:custom":
@@ -3984,6 +4035,14 @@ def gate(
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         routed_to = "mcp"
+        # Resolve the same TargetSpec `_build_adapter_for_mcp` just validated
+        # (family/scope already known-good at this point) so downstream code
+        # can treat this route like the custom-target one — see the
+        # custom_spec/mcp_scope comment above.
+        from mylonite.plugins._mcp import target_registry
+
+        mcp_family, mcp_scope = _parse_mcp_target(target)
+        custom_spec = target_registry.resolve_target(mcp_family, mcp_scope)
     else:
         echo_err(
             f"unknown target shape {target!r}. "
@@ -4127,18 +4186,38 @@ def gate(
                     ReferenceVulnerableOracle().adapter(),
                     ReferenceVulnerableOracle(),
                 )
-        # Custom target: mirror _validate_custom — re-drive the REAL target.
-        if tf is None:
-            echo_err("internal: expected a loaded TargetFile for custom validate_fn")
-            raise typer.Exit(code=EXIT_CONFIG)
+        # Custom / mcp: both re-drive the REAL target via a TargetSpec-driven
+        # twin, mirroring _validate_custom. DCR-0014: the bundled
+        # `mcp:<family>[:<scope>]` route never sets `tf` (there is no
+        # TargetFile to load for a bundled target) but DOES set custom_spec /
+        # mcp_scope at routing time above — branch on routed_to instead of
+        # assuming every non-reference route went through the target_file
+        # path (which used to make `gate mcp:<family>` exit here on ANY
+        # finding).
         from mylonite.plugins._mcp import target_registry
         from mylonite.plugins._mcp.factory import build_adapter_for_spec
-        from mylonite.plugins._mcp.target_file import build_target_spec
         from mylonite.plugins._mcp.twins import plan_twins
 
-        spec = custom_spec if custom_spec is not None else build_target_spec(tf)
-        target_registry.clear_runtime_targets()
-        target_registry.register_target(spec)
+        if routed_to == "mcp":
+            # custom_spec/mcp_scope are set unconditionally in the mcp routing
+            # branch above; BUNDLED_TARGETS is already resolvable as-is, and
+            # target_registry.register_target() would raise trying to shadow
+            # a bundled family — skip the custom route's registration step.
+            if custom_spec is None:
+                echo_err("internal: expected a resolved TargetSpec for mcp validate_fn")
+                raise typer.Exit(code=EXIT_CONFIG)
+            spec = custom_spec
+            scope_for_factory = mcp_scope
+        else:
+            if tf is None:
+                echo_err("internal: expected a loaded TargetFile for custom validate_fn")
+                raise typer.Exit(code=EXIT_CONFIG)
+            from mylonite.plugins._mcp.target_file import build_target_spec
+
+            spec = custom_spec if custom_spec is not None else build_target_spec(tf)
+            target_registry.clear_runtime_targets()
+            target_registry.register_target(spec)
+            scope_for_factory = tf.scope
 
         # Control-efficacy leg: a controllable finding (tagged in scan_fn, via the
         # SAME plan_twins) gets a guarded twin so the differential leg proves the
@@ -4161,7 +4240,7 @@ def gate(
 
         def _factory() -> Any:
             return build_adapter_for_spec(
-                spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
+                spec, scope=scope_for_factory, model=effective_planner_model, intent=plan.raw
             )
 
         guarded_factory: Any = None
@@ -4169,7 +4248,10 @@ def gate(
 
             def _guarded() -> Any:
                 return build_adapter_for_spec(
-                    spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
+                    spec,
+                    scope=scope_for_factory,
+                    model=effective_planner_model,
+                    intent=plan.guarded,
                 )
 
             guarded_factory = _guarded

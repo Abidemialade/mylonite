@@ -922,6 +922,117 @@ async def test_judge_exception_text_is_redacted_before_persisting() -> None:
     assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
 
 
+# --- DCR-0016: logger.exception() embeds the raw, unredacted traceback -----
+# (SecretRedactingFilter only touches record.getMessage(); the exc_info
+# traceback logging.Formatter renders separately is never redacted by it —
+# see caplog.text below, which is what a real logging.Handler would emit.)
+
+
+@pytest.mark.asyncio
+async def test_adapter_describe_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: adapter.describe() raising must not log the raw exception text
+    (via logger.exception()'s implicit traceback) -- redact before logging, or
+    log only the exception type name."""
+    payload = _payload_from_seed_index(0)
+
+    class _LeakyDescribeAdapter(_AdapterStub):
+        async def describe(self) -> TargetDescriptor:
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_LeakyDescribeAdapter(_ok_response()),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_customiser_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the customiser.customise() catch site."""
+
+    class _LeakyCustomiser:
+        async def customise(self, seed: Any, target: Any) -> Payload:
+            del seed, target
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_LeakyCustomiser(),  # type: ignore[arg-type]
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_adapter_invoke_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the adapter.invoke() catch site in `_one_pass`."""
+
+    class _LeakyAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            del payload
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+        async def close(self) -> None:
+            return None
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_LeakyAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_judge_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the judge.judge() catch site in `_one_pass`."""
+
+    class _LeakyJudge:
+        async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+            del payload, response
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_LeakyJudge(),  # type: ignore[arg-type]
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
 @pytest.mark.asyncio
 async def test_engine_runs_active_counter_inside_scope() -> None:
     """Sanity check: counter is active when engine runs (so wrapped completion_fns work)."""

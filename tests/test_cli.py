@@ -787,6 +787,51 @@ def test_scan_autodiscovers_mylonite_yaml(tmp_path: Path, monkeypatch) -> None:
     assert "auto-discovered" in out
 
 
+def test_autodiscovered_mylonite_yaml_api_base_is_not_honoured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DCR-0001: a repo-shipped mylonite.yaml an operator never asked to load
+    (no --config) must not be able to silently redirect the live LLM call's
+    api_base to an attacker host -- that host would then receive the
+    operator's real provider API key on the outbound LiteLLM call. Only an
+    EXPLICIT --config opt-in may honor api_base; auto-discovery still applies
+    to every other field."""
+    from mylonite.cli import _discover_run_config
+
+    sentinel_base = "https://evil.example/v1"
+    cfg = tmp_path / "mylonite.yaml"
+    cfg.write_text(f"api_base: {sentinel_base}\nmax_llm_calls: 7\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    path, rc = _discover_run_config(None, command="scan")
+
+    assert path == Path("mylonite.yaml")
+    assert rc is not None
+    assert rc.api_base is None  # stripped -- auto-discovery does not opt in
+    assert rc.max_llm_calls == 7  # every OTHER field still auto-discovers fine
+
+    err = capsys.readouterr().err
+    assert "api_base" in err
+    assert "--config" in err
+
+
+def test_explicit_config_flag_still_honours_api_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The counterpart to the above: an operator who explicitly opts in via
+    --config gets api_base honoured, exactly as documented."""
+    from mylonite.cli import _discover_run_config
+
+    cfg = tmp_path / "custom-config.yaml"
+    cfg.write_text("api_base: https://my-litellm-proxy.internal/v1\n", encoding="utf-8")
+
+    path, rc = _discover_run_config(cfg, command="scan")
+
+    assert path == cfg
+    assert rc is not None
+    assert rc.api_base == "https://my-litellm-proxy.internal/v1"
+
+
 def test_scan_rejects_credentialed_api_base_from_mylonite_yaml(tmp_path: Path, monkeypatch) -> None:
     """T14/CEO §3: a credentialed api_base in a COMMITTED mylonite.yaml must be
     a hard EXIT_CONFIG naming the env-var alternative -- not silently stripped,
@@ -1061,6 +1106,81 @@ def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
     assert "never formally aborted" in result.output
 
 
+def test_scan_model_prefixed_provider_needs_no_provider_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0005 (reviewer LOW confidence -- flagged without seeing
+    `_require_llm_configured_or_exit`'s body): `--model openai/gpt-4o` with
+    only OPENAI_API_KEY set and no `--provider` flag must NOT fail the
+    provider-configured preflight -- exactly the "any provider via --model
+    prefix, no --provider needed" pitch this release's T13-T16 shipped to
+    build. Verified NOT a regression (see the direct unit test below for the
+    full reasoning): this locks in the passing behaviour."""
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanEngine, ScanResult
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="openai",
+        model="openai/gpt-4o",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="rejected",
+            )
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    canned = ScanResult(report=report, exploits=[])
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    result = runner.invoke(
+        app,
+        ["scan", "--model", "openai/gpt-4o", "reference:vulnerable", "--output-dir", str(tmp_path)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert result.exit_code != EXIT_CONFIG, result.output
+    assert result.exit_code != EXIT_PROVIDER, result.output
+
+
+def test_require_llm_configured_or_exit_rederives_provider_from_prefixed_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0005, direct unit-level confirmation of why the CLI-level test above
+    passes even though `scan`/`_validate_custom` pass the raw (possibly-None)
+    `--provider` flag through to this helper rather than `effective_provider`:
+    `require_llm_configured` (which this wraps) re-derives the provider via
+    `provider_from_model(model, declared=provider)` -- the SAME computation
+    that produced `effective_provider` in the first place at every call site,
+    because every `effective_*_model` string passed in is `ModelRef.raw`,
+    which already carries a `provider/` prefix whenever a provider was
+    determined at parse time (`route_model` synthesises the prefix even for
+    the deprecated bare-model + --provider combo). So `provider=None` here,
+    with a prefixed model, resolves the SAME provider `effective_provider`
+    would have -- not a discrepancy."""
+    from mylonite.cli import _require_llm_configured_or_exit
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+    # provider=None here mirrors `--provider` never being passed; must not exit.
+    _require_llm_configured_or_exit("openai/gpt-4o", provider=None)
+
+
 # ---------------------------------------------------------------------------
 # `mylonite demo` — the offline reference-app playground (v0.3.0, PR A, Task A5).
 #
@@ -1239,6 +1359,40 @@ def test_generate_happy_path(tmp_path: Path) -> None:
     assert (out_dir / "fixtures").is_dir()
     # The emitted test loads the co-located exploit by the same name.
     assert f"mylonite validate {out_dir}" in result.output
+
+
+def test_generate_colocated_exploit_json_is_redacted(tmp_path: Path) -> None:
+    """DCR-0002 companion: the co-located exploit_<pattern_id>.json `generate`
+    writes alongside the emitted test must be redacted the same way the
+    co-located target.yaml already is — a secret captured in the exploit's
+    raw_response must not survive verbatim into a directory the operator is
+    told to commit."""
+    from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    sentinel = "sk-ant-" + "b" * 40
+    pid = "indirect-injection-note-body-direct"
+    exploit = ExploitRecord(
+        target_id="reference:vulnerable",
+        pattern_id=pid,
+        payload=Payload(pattern_id=pid, channel="tool-result", body="x"),
+        response=AdapterResponse(payload_pattern_id=pid, raw_response=f"leaked: {sentinel}"),
+        success_reason="caught it",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    exploit_json.parent.mkdir(parents=True, exist_ok=True)
+    exploit_json.write_text(
+        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit_json), "--out", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    colocated = out_dir / f"exploit_{pid}.json"
+    assert colocated.is_file()
+    assert sentinel not in colocated.read_text(encoding="utf-8")
 
 
 def test_generate_latest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1558,6 +1712,50 @@ def test_validate_provider_unreachable_exit_4(
     assert result.exit_code == EXIT_PROVIDER, result.output
     out = result.stderr or result.output
     assert "ANTHROPIC_API_KEY" in out or "no provider reachable" in out
+
+
+def test_validate_persists_redacted_validation_report_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0003: a secret-shaped string captured in an outcome's free-text
+    ``detail`` (e.g. a live exception message) must not survive verbatim into
+    the persisted ``validation_report.json`` -- the console table already
+    redacts that same field before printing it, and `validate` tells the
+    operator to commit this directory when the test is kept."""
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+    from mylonite.plugins._reference import reference_validator
+
+    sentinel = "sk-ant-" + "c" * 40
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+
+    report = ValidationReport(
+        test_filename="test_security_indirect_injection_note_body_direct.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail=f"collected; leaked {sentinel}"),
+        ],
+        kept=True,
+        notes=f"live exception embedded {sentinel}",
+        mutation_score=1.0,
+    )
+
+    class _FakeValidator:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def validate(self, *_: Any, **__: Any) -> Any:
+            return report
+
+    monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert sentinel not in result.output
+
+    report_path = out_dir / "validation_report.json"
+    assert report_path.is_file()
+    assert sentinel not in report_path.read_text(encoding="utf-8")
 
 
 def test_validate_missing_target_exit_2(tmp_path: Path) -> None:
@@ -1991,6 +2189,32 @@ def test_render_validation_report_shows_oracle_evidence(capsys: pytest.CaptureFi
     # metamorphic.passed`) has always included it.
     assert "gates kept" in out
     assert "report-only" not in out
+
+
+def test_render_validation_report_shows_missing_gating_leg_not_silent_drop(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DCR-0004: a `gating_legs` entry with no matching `outcomes` entry must
+    render explicitly as missing, not be silently omitted from the AND-chain
+    -- an operator reading an incomplete formula with no mark or mention of
+    the missing leg can't tell the VERDICT might depend on it."""
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(stage="differential", passed=True, detail="discriminates"),
+            # No "flakiness" outcome, even though it's in gating_legs below.
+        ],
+        kept=False,
+        gating_legs=["build", "differential", "flakiness"],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    assert "flakiness" in out
+    assert "missing" in out.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -3337,6 +3561,126 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
         # And the guarded side is the plain default launch (real guard ON).
         guarded_adapter = captured["guarded_adapter_factory"]()
         assert not guarded_adapter._launch_env
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_bundled_mcp_route_validates_a_real_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0014: `gate mcp:<family>` is a documented route (the command's own
+    help text lists it), but validate_fn used to assume every non-reference
+    route went through --target-file and set `tf` -- which the bundled `mcp:`
+    route never does -- so ANY finding on a bundled target made `gate` exit
+    with an internal-error message instead of validating it. Reproduced here
+    against `mcp:fetch` (a scope-free bundled family) with a canned finding;
+    must complete rather than hit `if tf is None: ... internal: expected a
+    loaded TargetFile`."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:fetch"})
+    canned = _canned_finding_result("mcp:fetch", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_differential_validator(
+        monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+    )
+    _stub_open_pr(monkeypatch)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:fetch",
+                "--authorize",
+                "fetch",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        out = result.stderr or result.output
+        assert "internal:" not in out
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_bundled_mcp_route_completes_a_clean_scan_without_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0015: scan_fn's controllable-finding tagging step made the same
+    custom_spec-is-always-set assumption, breaking the `mcp:<family>` route a
+    SECOND way -- even a completely clean (zero-exploit) scan hit the
+    unconditional `if custom_spec is None: ... internal: expected a resolved
+    TargetSpec` check before `run_gate` ever got to return its
+    'no exploit found' clean-pass result, UNLESS --fast was also passed."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+    from mylonite.scan.engine import ScanResult as _ScanResult
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+
+    clean_report = ScanReport(
+        target_id="mcp:fetch",
+        attack_modules=["mylonite.prompt-injection"],
+        provider="anthropic",
+        model="m",
+        elapsed_seconds=0.1,
+        # At least one EXERCISED no_finding attempt -- an empty attempts list
+        # would make ScanOutcome.trustworthy_clean False (coverage never
+        # reaches EXERCISED), taking run_gate's OTHER early-return branch
+        # instead of the "no exploit found" one this test means to exercise.
+        attempts=[
+            ScanAttempt(
+                seed_id="s",
+                pattern_id="s",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="rejected",
+            )
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    clean_result = _ScanResult(report=clean_report, exploits=[])
+
+    async def _fake_run(self: Any) -> Any:
+        return clean_result
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:fetch",
+                "--authorize",
+                "fetch",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+            ],
+        )
+        assert result.exit_code == EXIT_SUCCESS, result.output
+        out = result.stderr or result.output
+        assert "internal:" not in out
+        assert "no exploit found" in out
     finally:
         target_registry.clear_runtime_targets()
 

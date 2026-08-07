@@ -25,7 +25,7 @@ from rich.table import Table
 
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
-from mylonite._redaction import redact
+from mylonite._redaction import redact, redact_value
 from mylonite.contracts._types import ExploitRecord
 from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass
 from mylonite.scan.engine import ScanResult
@@ -139,9 +139,17 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     scan_dir = _timestamped_subdir(output_root)
 
+    # Redact before writing (DCR-0002): these artefacts are loadable/replayable
+    # data, but a successful exfiltration attack can capture a live secret in
+    # e.g. an exploit's response.raw_response, and the CLI's own UX tells the
+    # operator to commit this exact directory. redact_value() masks only
+    # secret-shaped string leaves (by key name or shape); it never changes the
+    # JSON's structure or non-string values, so schema validation and replay
+    # both keep working on the redacted copy.
     report_path = scan_dir / "scan_report.json"
     report_path.write_text(
-        json.dumps(result.report.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json.dumps(redact_value(result.report.model_dump(mode="json")), indent=2, sort_keys=True)
+        + "\n",
         encoding="utf-8",
     )
 
@@ -149,7 +157,8 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
     for exploit, filename in zip(result.exploits, filenames, strict=True):
         path = scan_dir / filename
         path.write_text(
-            json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+            json.dumps(redact_value(exploit.model_dump(mode="json")), indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
         )
 

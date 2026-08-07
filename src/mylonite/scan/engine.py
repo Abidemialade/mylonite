@@ -226,8 +226,15 @@ class ScanEngine:
                 # CLI can map it to a clear exit, rather than hiding it behind a
                 # generic "describe_failed".
                 raise
-            except Exception:
-                logger.exception("ScanEngine: adapter.describe() raised")
+            except Exception as exc:
+                # DCR-0016: logger.exception()'s implicit exc_info renders the
+                # RAW (unredacted) exception text + traceback -- the
+                # SecretRedactingFilter installed on the "mylonite" logger only
+                # touches record.getMessage(), never the exc_info traceback a
+                # handler's Formatter renders separately. Log only the
+                # exception type name; nothing secret-shaped ever reaches a
+                # handler this way.
+                logger.error("ScanEngine: adapter.describe() raised: %s", type(exc).__name__)
                 aborted = AbortReason.DESCRIBE_FAILED.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
@@ -533,7 +540,10 @@ class ScanEngine:
             except BudgetExceededError:
                 raise
             except Exception as exc:
-                logger.exception("ScanEngine: customiser raised unexpectedly")
+                # DCR-0016: see the identical note at the adapter.describe()
+                # catch site above -- logger.exception()'s traceback bypasses
+                # the redaction filter entirely.
+                logger.error("ScanEngine: customiser raised unexpectedly: %s", type(exc).__name__)
                 return _PerPayloadOutcome(
                     attempt=ScanAttempt(
                         seed_id=seed_id,
@@ -817,7 +827,10 @@ class ScanEngine:
             # Propagate up so run() can flip aborted="budget_exceeded".
             raise
         except Exception as exc:
-            logger.exception("ScanEngine: adapter.invoke raised unexpectedly")
+            # DCR-0016: see the identical note at the adapter.describe() catch
+            # site in run() -- logger.exception()'s traceback bypasses the
+            # redaction filter entirely.
+            logger.error("ScanEngine: adapter.invoke raised unexpectedly: %s", type(exc).__name__)
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
@@ -855,7 +868,10 @@ class ScanEngine:
         except BudgetExceededError:
             raise
         except Exception as exc:
-            logger.exception("ScanEngine: judge raised unexpectedly")
+            # DCR-0016: see the identical note at the adapter.describe() catch
+            # site in run() -- logger.exception()'s traceback bypasses the
+            # redaction filter entirely.
+            logger.error("ScanEngine: judge raised unexpectedly: %s", type(exc).__name__)
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,

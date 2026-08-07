@@ -36,7 +36,7 @@ from mcp import ClientSession
 
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
-from mylonite._redaction import redact_value
+from mylonite._redaction import redact, redact_value
 from mylonite.contracts import (
     AdapterResponse,
     AsyncTargetAdapterBase,
@@ -386,8 +386,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 payload.pattern_id,
                 reason,
             )
+            # DCR-0023: {exc!r} can embed a live secret (e.g. an Authorization
+            # header echoed back by a transport error) -- redact it before it
+            # rides into ScanAttempt.verdict_reason (via skip.reason in
+            # scan/engine.py's AdapterInvocationSkipped handler) and on into
+            # scan_report.json. attempt_metadata["exception"] below already
+            # carries the exception TYPE name unredacted; only the free-text
+            # repr needs masking.
             raise AdapterInvocationSkipped(
-                f"adapter failure on {payload.pattern_id}: {exc!r}",
+                f"adapter failure on {payload.pattern_id}: {redact(repr(exc))}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
@@ -773,7 +780,12 @@ class _RecordingServerShim:
         self._sink.append(entry)
         result = await self._inner.call_tool(name, arguments)
         content = getattr(result, "content", "")
-        entry["result"] = _truncate_result(content)
+        # DCR-0022: mirror the redaction already applied to entry["args"]
+        # above — the RESULT of a tool call is exactly as capable of carrying
+        # a live secret (e.g. a planner-triggered read of a credential file)
+        # as an argument is, and this same sink is what mcp_trace_planner
+        # (persisted to scan_report.json / exploit_*.json) is built from.
+        entry["result"] = redact(_truncate_result(content))
         entry["is_error"] = bool(getattr(result, "isError", False))
         if self._full_results is not None:
             # Generously bounded (delivery detection only) — far larger than the
