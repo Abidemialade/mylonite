@@ -44,7 +44,9 @@ from pydantic import BaseModel
 
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
 from mylonite.scan.llm_policy import LLMPolicy
+from mylonite.scan.model_ref import ModelRef
 from mylonite.scan.providers import provider_from_model
+from mylonite.scan.schema_sanitise import SchemaDialect, dialect_for, sanitise_tool_schema
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,13 @@ class LiteLLMCallCounter:
     count: int = 0
     consecutive_failures: int = 0
     by_caller: dict[str, int] = field(default_factory=dict)
+    #: How many tool schemas ``litellm_tool_call_async`` has actually
+    #: rewritten via ``schema_sanitise.sanitise_tool_schema`` (T15/H4) --
+    #: incremented only when sanitisation had a real effect, never on every
+    #: call. ``ScanEngine`` folds this into ``fallback_breakdown`` under the
+    #: ``"tool_schema_sanitised"`` key once the scan finishes, so operators
+    #: can see how often a STRICT-dialect provider needed the rewrite.
+    tool_schema_sanitised: int = 0
 
     def record(self, caller: str) -> None:
         if self.count + 1 > self.cap:
@@ -150,6 +159,13 @@ class LiteLLMCallCounter:
             raise BudgetExceededError(msg)
         self.count += 1
         self.by_caller[caller] = self.by_caller.get(caller, 0) + 1
+
+    def record_schema_sanitised(self) -> None:
+        """Bump :attr:`tool_schema_sanitised`. Deliberately NOT routed through
+        :meth:`record` -- a schema rewrite is not an LLM call, so it must
+        never count against ``--max-llm-calls`` or raise
+        ``BudgetExceededError``."""
+        self.tool_schema_sanitised += 1
 
     def mark_success(self) -> None:
         self.consecutive_failures = 0
@@ -241,6 +257,71 @@ def _mark_failure() -> None:
     counter = _ACTIVE_COUNTER.get()
     if counter is not None:
         counter.mark_failure()
+
+
+def _bump_schema_sanitised() -> None:
+    counter = _ACTIVE_COUNTER.get()
+    if counter is not None:
+        counter.record_schema_sanitised()
+
+
+def _sanitised_tools(tools: list[dict[str, Any]], model: str) -> list[dict[str, Any]]:
+    """Sanitise each tool's ``function.parameters`` schema for the dialect
+    ``model``'s provider needs (T15/H4), before it is ever sent to LiteLLM.
+
+    A no-op passthrough under :data:`SchemaDialect.PERMISSIVE` (OpenAI,
+    Anthropic, an unrecognised provider — see ``dialect_for``'s docstring for
+    why unknown defaults to permissive). Under :data:`SchemaDialect.STRICT`
+    (Gemini/Vertex/Bedrock), rewrites ``$ref``/``anyOf``/``const``/
+    ``additionalProperties`` into a shape those providers' function-calling
+    APIs actually accept.
+
+    Deliberately builds and returns a NEW list of (possibly new) dicts rather
+    than mutating ``tools`` in place — this is the planner's OWN copy of the
+    tool schema headed to the LLM, not the adapter's ``TargetDescriptor``
+    (attack modules must keep reasoning over the target's real, unsanitised
+    tool surface; see the module docstring on ``schema_sanitise``).
+
+    Bumps the active counter's ``tool_schema_sanitised`` once per tool whose
+    schema sanitisation actually changed (never on a no-op call, and never
+    for a tool with no ``function.parameters`` at all).
+    """
+    # ModelRef's own provider-derivation (provider_from_model) never raises —
+    # it degrades to `None` for an unroutable model (see providers.py) — so
+    # constructing directly here (bypassing ModelRef.parse's raising
+    # validation) is safe: `model` has already been used for the real
+    # completion call by this point, so it is a non-empty string.
+    ref = ModelRef(raw=model, provider=provider_from_model(model))
+    dialect = dialect_for(ref)
+    if dialect is SchemaDialect.PERMISSIVE:
+        return tools
+    sanitised: list[dict[str, Any]] = []
+    for tool in tools:
+        # Separate `if ... : continue` narrowing (rather than a ternary) so
+        # mypy --strict actually tracks `function` as a dict from here on —
+        # a ternary's isinstance check doesn't narrow the assigned name.
+        if not isinstance(tool, dict):
+            sanitised.append(tool)
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            sanitised.append(tool)
+            continue
+        parameters = function.get("parameters")
+        if not isinstance(parameters, dict):
+            sanitised.append(tool)
+            continue
+        new_parameters = sanitise_tool_schema(parameters, dialect)
+        if new_parameters == parameters:
+            sanitised.append(tool)
+            continue
+        _bump_schema_sanitised()
+        new_function = dict(function)
+        new_function["parameters"] = new_parameters
+        new_tool = dict(tool)
+        new_tool["function"] = new_function
+        sanitised.append(new_tool)
+    return sanitised
 
 
 def _extract_text(response: Any) -> str:
@@ -687,6 +768,16 @@ async def litellm_tool_call_async(
     compatibility. A caller that wants a tighter/looser per-call bound than
     the policy (e.g. ``LLMPlanner(completion_timeout_s=...)``) still overrides
     it explicitly.
+
+    T15/H4: when ``tools`` is given, each tool's ``function.parameters``
+    schema is run through ``schema_sanitise.sanitise_tool_schema`` (dialect
+    resolved from ``model`` via ``schema_sanitise.dialect_for``) before it is
+    handed to LiteLLM — this is the ONE place a tool schema is ever sent TO an
+    LLM for tool-calling, so it's the one place that needs to close the
+    STRICT-dialect-provider interop gap (Gemini/Vertex/Bedrock rejecting
+    ``$ref``/``anyOf``/``const``/``additionalProperties``). The adapter's own
+    ``TargetDescriptor`` (what attack modules reason over) is never touched —
+    see ``_sanitised_tools``'s docstring.
     """
     _bump(caller)
     fn = completion_fn or litellm.acompletion
@@ -695,7 +786,7 @@ async def litellm_tool_call_async(
     if timeout_s is not None:
         call_kwargs["timeout"] = timeout_s
     if tools:
-        call_kwargs["tools"] = tools
+        call_kwargs["tools"] = _sanitised_tools(tools, model)
         call_kwargs["tool_choice"] = tool_choice or "auto"
     try:
         response = await fn(**call_kwargs)

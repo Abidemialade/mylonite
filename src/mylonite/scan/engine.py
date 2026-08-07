@@ -343,6 +343,17 @@ class ScanEngine:
             # done, so this returns immediately.
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        # T15/H4: the planner's tool-schema sanitisation (scan._llm's
+        # litellm_tool_call_async, via the SAME counter this run scoped
+        # above) is counted on the counter itself, not per-_PerPayloadOutcome
+        # like judge/customiser fallbacks — a planner run isn't a single
+        # judged pass, it's a multi-iteration tool-calling loop nested inside
+        # one payload attempt. Folded into fallback_breakdown here, after the
+        # counter has seen every call the run made, so it's visible in the
+        # report alongside the other fallback causes.
+        if counter.tool_schema_sanitised:
+            fallback_breakdown["tool_schema_sanitised"] = counter.tool_schema_sanitised
+
         return self._finalize(
             attempts,
             exploits,
