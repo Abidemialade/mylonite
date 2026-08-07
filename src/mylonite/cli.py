@@ -432,17 +432,6 @@ def init(
 
 @app.command()
 def doctor(
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "LiteLLM provider to check, e.g. 'anthropic'. DEPRECATED (warns; "
-                "removal planned 0.7.10) -- prefix --model instead, e.g. "
-                "'anthropic/claude-haiku-4-5'."
-            ),
-        ),
-    ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model id to ping (defaults to claude-sonnet-4-6)."),
@@ -476,9 +465,14 @@ def doctor(
     # the flat MYLONITE_* env vars, so `doctor` checks the SAME model those
     # commands will actually use rather than silently falling back to its own
     # default -- doctor is exactly the command that should show an operator
-    # what config would actually be used.
+    # what config would actually be used. No --provider CLI flag any more
+    # (removed 0.7.10, T13's deprecated alias) -- `provider` can still arrive
+    # via mylonite.yaml's `provider:` key or MYLONITE_PROVIDER, both of which
+    # remain (separately deprecated, but not removed) sources _resolve_model_ref
+    # still warns on.
     _config_path, rc = _discover_run_config(run_config_path, command="doctor")
     env_rc = _env_run_config_or_exit()
+    provider: str | None = None
     if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
@@ -548,18 +542,26 @@ def _route_model(provider: str | None, model: str) -> str:
     return route_model(provider, model)
 
 
-def _warn_deprecated_provider_flag() -> None:
-    """H1: ``--provider`` is deprecated (still works, through 0.7.10) in
+def _warn_deprecated_provider_config() -> None:
+    """H1/close-the-loop: a separate ``provider`` value is deprecated in
     favour of a provider-prefixed model string — the convention LiteLLM
-    itself uses and that promptfoo/garak adopters already know. Emits once
-    per command invocation: each command reads its own ``provider`` value
-    exactly once, so a single call here (guarded on ``provider is not None``)
-    at that point naturally fires once, never spammed across a retry loop.
+    itself uses and that promptfoo/garak adopters already know.
+
+    The ``--provider`` CLI flag itself was REMOVED in 0.7.10 (it no longer
+    exists on any command but ``demo``, whose ``--provider`` is a different,
+    non-deprecated thing — see that command's help). This warning still
+    fires for the two remaining ways to set a bare ``provider``: a
+    ``mylonite.yaml`` ``provider:`` key, or a ``MYLONITE_PROVIDER`` env var
+    (see :class:`~mylonite.config.RunConfig`). Emits once per command
+    invocation: each command reads its own ``provider`` value exactly once,
+    so a single call here (guarded on ``provider is not None``) at that
+    point naturally fires once, never spammed across a retry loop.
     """
     echo_err(
-        "warning: --provider is deprecated and will be removed in 0.7.10 — prefix "
-        "the model instead, e.g. --model anthropic/claude-haiku-4-5 instead of "
-        "--model claude-haiku-4-5 --provider anthropic."
+        "warning: setting a bare provider (mylonite.yaml's `provider:` key, or "
+        "MYLONITE_PROVIDER) is deprecated -- prefix the model instead, e.g. "
+        "model: anthropic/claude-haiku-4-5 instead of model: claude-haiku-4-5 "
+        "plus provider: anthropic."
     )
 
 
@@ -570,8 +572,9 @@ def _parse_model_ref_or_exit(model: str, provider: str | None) -> ModelRef:
     No deprecation warning here — a command resolving a SECOND model in the
     same invocation (a role-separated ``--planner-model``/``--customiser-
     model``/``--judge-model`` override in ``scan``) reuses this directly so
-    reusing ``--provider`` for that override doesn't re-fire the warning
-    :func:`_resolve_model_ref` already fired once for the base ``--model``.
+    reusing the resolved ``provider`` for that override doesn't re-fire the
+    warning :func:`_resolve_model_ref` already fired once for the base
+    ``--model``.
     Every model a command resolves goes through this (or ``_resolve_model_ref``
     for the base one) — a role override must reject an unroutable model at
     CLI-argument time exactly like the base model does, since it drives the
@@ -591,15 +594,16 @@ def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
     :func:`_parse_model_ref_or_exit` for the shared parse-or-exit behaviour.
 
     Also warns (once) when ``provider`` is set — see
-    :func:`_warn_deprecated_provider_flag` — whether it came from an explicit
-    ``--provider`` flag or a declarative ``mylonite.yaml`` ``provider:`` key
-    (the same deprecated field either way; ``scan``/``gate`` fold the config
-    value into ``provider`` before calling here, so this can't tell the two
-    apart, and a config-file nudge toward the model-prefix convention is just
-    as useful as a flag one).
+    :func:`_warn_deprecated_provider_config`. The ``--provider`` CLI flag was
+    removed in 0.7.10 (T-close-the-loop), so by construction ``provider``
+    here can now only have come from a declarative ``mylonite.yaml``
+    ``provider:`` key or a ``MYLONITE_PROVIDER`` env var — every caller folds
+    either into its own ``provider`` local before calling here (see
+    ``scan``/``gate``/``doctor``/``validate``/``ablate``), so this can't tell
+    (and doesn't need to tell) which of the two it was.
     """
     if provider is not None:
-        _warn_deprecated_provider_flag()
+        _warn_deprecated_provider_config()
     return _parse_model_ref_or_exit(model, provider)
 
 
@@ -1090,17 +1094,6 @@ def scan(
             ),
         ),
     ] = None,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
-                "removal planned 0.7.10) -- prefix --model instead, e.g. "
-                "'anthropic/claude-haiku-4-5'."
-            ),
-        ),
-    ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
@@ -1223,6 +1216,11 @@ def scan(
     config_root: Path | None = None
     _config_path, rc = _discover_run_config(run_config_path, command="scan")
     env_rc = _env_run_config_or_exit()
+    # No --provider CLI flag any more (removed 0.7.10, T13's deprecated
+    # alias). `provider` can still arrive via mylonite.yaml's `provider:` key
+    # or MYLONITE_PROVIDER below -- both remain (separately deprecated, but
+    # not removed) sources _resolve_model_ref still warns on.
+    provider: str | None = None
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -2301,7 +2299,8 @@ def _validate_custom(
     if not reachable:
         echo_err(
             "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-            "--provider/--model for another LiteLLM provider."
+            "--model provider/modelname for another LiteLLM provider (e.g. "
+            "--model openai/gpt-4o)."
         )
         raise typer.Exit(code=EXIT_PROVIDER)
 
@@ -2645,17 +2644,6 @@ def validate(
             help="Differential/flakiness iterations (each runs both twins). Default 5.",
         ),
     ] = 5,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "LiteLLM provider for the live validation run. DEPRECATED (warns; "
-                "removal planned 0.7.10) -- prefix --model instead, e.g. "
-                "'anthropic/claude-haiku-4-5'."
-            ),
-        ),
-    ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
@@ -2797,6 +2785,11 @@ def validate(
     # DifferentialValidator already accepting all three.
     _config_path, rc = _discover_run_config(run_config_path, command="validate")
     env_rc = _env_run_config_or_exit()
+    # No --provider CLI flag any more (removed 0.7.10, T13's deprecated
+    # alias). `provider` can still arrive via mylonite.yaml's `provider:` key
+    # or MYLONITE_PROVIDER below -- both remain (separately deprecated, but
+    # not removed) sources _resolve_model_ref still warns on.
+    provider: str | None = None
     if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
@@ -2933,7 +2926,8 @@ def validate(
         if not reachable:
             echo_err(
                 "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider."
+                "--model provider/modelname for another LiteLLM provider (e.g. "
+                "--model openai/gpt-4o)."
             )
             raise typer.Exit(code=EXIT_PROVIDER)
 
@@ -3761,17 +3755,6 @@ def gate(
             help="Push a branch and open the gating PR via gh (opt-in).",
         ),
     ] = False,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
-                "removal planned 0.7.10) -- prefix --model instead, e.g. "
-                "'anthropic/claude-haiku-4-5'."
-            ),
-        ),
-    ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
@@ -3924,6 +3907,11 @@ def gate(
     # T14: delegates to the same _discover_run_config every command shares now.
     config_path, rc = _discover_run_config(run_config_path, command="gate")
     env_rc = _env_run_config_or_exit()
+    # No --provider CLI flag any more (removed 0.7.10, T13's deprecated
+    # alias). `provider` can still arrive via mylonite.yaml's `provider:` key
+    # or MYLONITE_PROVIDER below -- both remain (separately deprecated, but
+    # not removed) sources _resolve_model_ref still warns on.
+    provider: str | None = None
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -4452,16 +4440,6 @@ def ablate(
         int,
         typer.Option("--iterations", help="Scans per control per side (raw/guarded). Default 1."),
     ] = 1,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help=(
-                "LiteLLM provider. DEPRECATED (warns; removal planned 0.7.10) -- "
-                "prefix --model instead, e.g. 'anthropic/claude-haiku-4-5'."
-            ),
-        ),
-    ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
     planner_model: Annotated[
         str | None,
@@ -4543,6 +4521,11 @@ def ablate(
     # scan/gate/validate.
     _config_path, rc = _discover_run_config(run_config_path, command="ablate")
     env_rc = _env_run_config_or_exit()
+    # No --provider CLI flag any more (removed 0.7.10, T13's deprecated
+    # alias). `provider` can still arrive via mylonite.yaml's `provider:` key
+    # or MYLONITE_PROVIDER below -- both remain (separately deprecated, but
+    # not removed) sources _resolve_model_ref still warns on.
+    provider: str | None = None
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize

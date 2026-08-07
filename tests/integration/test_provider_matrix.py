@@ -180,12 +180,12 @@ async def test_recorder_mechanism_round_trips_through_the_real_chokepoint(
 
     fixture_dir = tmp_path / "fake-provider"
     # Stamp the cache-key-version sidecar BEFORE recording — exactly what
-    # scripts/record_provider_fixtures.py's own _stamp_meta does, and for the
-    # same reason: a sidecar-less directory resolves v2 on record but v1 on
-    # REPLAY (see demo/_replay.py's _resolve_key_version docstring), which
-    # would make this round-trip depend on `tools`/`response_format`/
-    # `api_base` all happening to be absent rather than on an explicit,
-    # future-proof declaration.
+    # scripts/record_provider_fixtures.py's own _stamp_meta does. A
+    # sidecar-less directory now resolves the same CACHE_KEY_VERSION default
+    # in either mode (see demo/_replay.py's _resolve_key_version docstring —
+    # the old replay-only v1 fallback was retired), but this fixture
+    # directory should still declare itself explicitly, like every
+    # non-legacy fixtures_dir in this codebase does.
     fixture_dir.mkdir(parents=True, exist_ok=True)
     (fixture_dir / "_meta.json").write_text(
         json.dumps({CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION}), encoding="utf-8"

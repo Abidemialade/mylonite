@@ -37,10 +37,12 @@ module's cache-key versioning). The two fields are deliberately independent
 so a future bump to either, for its own reason, cannot silently confuse
 dispatch in the other subsystem — see :data:`CACHE_KEY_VERSION_FIELD`. No
 sidecar, OR a legacy sidecar that only carries the unrelated
-``format_version`` field, means: v1 on REPLAY (the shipped dirs predate the
-sidecar entirely and must keep working), v2 on RECORD (a fresh recording
-should always use the best available algorithm). See
-:func:`_resolve_key_version` for the full dispatch rule.
+``format_version`` field, means :data:`CACHE_KEY_VERSION` (the best
+available algorithm) in EITHER mode. The two shipped, pre-sidecar fixture
+directories (``src/mylonite/demo/fixtures/vulnerable``, ``.../guarded``) now
+declare ``cache_key_version: 1`` EXPLICITLY via their own ``_meta.json`` —
+there is no longer an implicit "no sidecar means legacy v1" assumption for
+REPLAY. See :func:`_resolve_key_version` for the full dispatch rule.
 
 Replay mode accepts any ``importlib.resources`` Traversable for
 ``fixtures_dir``, so fixtures can be read straight out of an installed
@@ -160,13 +162,12 @@ def _stable_key_v2(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
 #: in the OTHER subsystem. This field lets the two vary independently.
 CACHE_KEY_VERSION_FIELD = "cache_key_version"
 
-#: The cache-key algorithm this module's RECORD mode uses by default when a
-#: ``fixtures_dir`` has no ``_meta.json`` (or no ``cache_key_version`` field
-#: in it) to declare otherwise — i.e. what a brand-new recording gets keyed
-#: with. Writers that stamp ``_meta.json`` after (or before) recording into a
-#: fresh directory should use THIS constant rather than a locally hardcoded
-#: literal, so the sidecar can never drift from what the recorder actually
-#: used.
+#: The cache-key algorithm this module uses by default — in EITHER mode —
+#: when a ``fixtures_dir`` has no ``_meta.json`` (or no ``cache_key_version``
+#: field in it) to declare otherwise. Writers that stamp ``_meta.json`` after
+#: (or before) recording into a fresh directory should use THIS constant
+#: rather than a locally hardcoded literal, so the sidecar can never drift
+#: from what the recorder actually used.
 CACHE_KEY_VERSION = 2
 
 
@@ -203,28 +204,40 @@ def _resolve_key_version(
     """Pick which cache-key algorithm (1 or 2) a recorder over ``fixtures_dir`` uses.
 
     A directory that declares its own ``_meta.json`` :data:`CACHE_KEY_VERSION_FIELD`
-    wins outright, in EITHER mode — an explicit sidecar speaks for itself. No
-    sidecar, or a legacy sidecar that only carries the unrelated
-    ``format_version`` field (see :data:`CACHE_KEY_VERSION_FIELD`'s docstring),
-    means the two modes deliberately default differently:
+    wins outright, in EITHER mode — an explicit sidecar speaks for itself.
 
-    * REPLAY defaults to **v1**. The already-shipped fixture directories
-      (``src/mylonite/demo/fixtures/vulnerable``, ``.../guarded``) predate
-      this sidecar entirely, so "no signal" must mean "the original
-      algorithm" or every one of them would immediately stop replaying
-      (every real lookup would miss).
-    * RECORD defaults to :data:`CACHE_KEY_VERSION`. An empty/fresh
-      ``fixtures_dir`` has no legacy fixtures to protect, so a brand-new
-      recording should always use the most complete algorithm. Callers that
-      stamp ``_meta.json`` when recording into a fresh directory
-      (``reference_validator.py``, ``scripts/record_reference_example.py``,
-      ``scripts/record_demo_fixtures.py``) write ``cache_key_version:
-      CACHE_KEY_VERSION``, matching what got recorded.
+    No sidecar, or a legacy sidecar that only carries the unrelated
+    ``format_version`` field (see :data:`CACHE_KEY_VERSION_FIELD`'s
+    docstring), means :data:`CACHE_KEY_VERSION` in EITHER mode — ``mode`` is
+    accepted for API stability (existing callers pass it, and record mode's
+    own guard rails elsewhere still reason about it independently) but no
+    longer changes this function's answer.
+
+    This used to be mode-dependent: REPLAY silently defaulted to **v1**
+    while RECORD defaulted to :data:`CACHE_KEY_VERSION`. That asymmetry
+    existed ONLY to keep the already-shipped, pre-sidecar fixture
+    directories (``src/mylonite/demo/fixtures/vulnerable``, ``.../guarded``)
+    replaying — "no signal" had to mean "the original algorithm" or every
+    lookup against them would miss. Retiring that implicit fallback (T-close-
+    the-loop): those two directories now declare ``cache_key_version: 1``
+    EXPLICITLY via their own ``_meta.json`` (an explicit sidecar wins
+    outright, per the first paragraph above), so nothing depends on the old
+    mode-dependent guess any more. Collapsing the no-sidecar default to a
+    single, mode-independent answer — the best available algorithm, always,
+    unless a directory explicitly opts out — removes the implicit "assume
+    legacy v1" behaviour :data:`CACHE_KEY_VERSION_FIELD`'s docstring warns
+    can silently return a stale, wrong response for a tool-bearing call: a
+    brand-new, sidecar-less directory now gets v2 (folding in
+    ``tools``/``tool_choice``/``response_format``/``api_base``) rather than
+    silently inheriting v1 behaviour it was never recorded with. A call with
+    none of those extra kwargs hashes identically under v1 and v2 (see
+    :func:`_stable_key_v2`'s docstring), so this default only ever changes
+    behaviour for the case that mattered.
     """
     declared = _read_meta_cache_key_version(fixtures_dir)
     if declared is not None:
         return declared
-    return CACHE_KEY_VERSION if mode == "record" else 1
+    return CACHE_KEY_VERSION
 
 
 def _response_from_dict(data: dict[str, Any]) -> SimpleNamespace:

@@ -23,8 +23,9 @@ A GitHub-hosted runner can't reach services behind your corporate gate. Options:
 
 If you use an internal model gateway (Azure OpenAI private endpoint, an
 internal LiteLLM proxy, a Bedrock VPC endpoint), Mylonite routes there via
-LiteLLM (`--provider`/`--model` and the provider's `api_base`). With a
-local or small model the provider need never be public egress.
+LiteLLM (`--model` with a `provider/model` prefix, and the provider's
+`api_base`). With a local or small model the provider need never be public
+egress.
 
 ## 3. TLS-inspecting corporate proxy (or local AV)
 

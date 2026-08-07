@@ -296,7 +296,7 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
         f"no LLM credential configured for model {model!r} (resolved provider: "
         f"{resolved or 'unknown'}). Missing: {', '.join(missing)} "
         "-- via your shell env, --api-key-file, --env-file, or a CI secret -- "
-        "or point --model/--provider (or mylonite.yaml's model:/provider:) at "
-        "a provider that IS configured."
+        "or point --model (a provider-prefixed model, e.g. openai/gpt-4o; or "
+        "mylonite.yaml's model:) at a provider that IS configured."
     )
     raise LLMNotConfiguredError(msg)

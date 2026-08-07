@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The deprecated `--provider` CLI flag on `doctor`, `scan`, `validate`,
+  `gate`, and `ablate` (deprecated since 0.7.9, T13). Use a
+  provider-prefixed `--model` instead (e.g. `--model openai/gpt-4o` rather
+  than `--model gpt-4o --provider openai`) — the same LiteLLM convention
+  `route_model`/`ModelRef` already implement. `demo`'s `--provider` is
+  unaffected: it selects the provider for `--live` runs directly (it was
+  never the deprecated alias) and remains. A bare `provider` set via
+  `mylonite.yaml`'s `provider:` key or the `MYLONITE_PROVIDER` env var still
+  works but stays deprecated (warns) for now.
+
+### Changed
+
+- `mylonite demo`'s LiteLLM fixture-replay cache-key resolution no longer
+  falls back to the legacy v1 key algorithm implicitly when a fixtures
+  directory has no `_meta.json` sidecar. The two shipped demo fixture
+  directories (`src/mylonite/demo/fixtures/{vulnerable,guarded}`) now
+  declare `cache_key_version: 1` explicitly via their own `_meta.json`; a
+  sidecar-less directory now resolves the modern `cache_key_version` (v2) in
+  either record or replay mode, closing a latent risk where a hand-placed or
+  interrupted-recording fixture directory could silently mis-key a
+  tool-bearing call under the old v1 algorithm instead of failing loudly.
+
 ## [0.7.8] - 2026-08-07
 
 "Correct twins": fixes `gate`'s server-layer differential and consolidates

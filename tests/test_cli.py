@@ -704,10 +704,11 @@ def test_validate_rejects_unroutable_model_with_no_hint_model_ref(tmp_path: Path
     assert "can't determine a provider" in out
 
 
-def test_provider_flag_still_works_and_warns_deprecated_model_ref(tmp_path: Path) -> None:
-    """--provider is backward compatible (still routes the model exactly as
-    before) but now warns on stderr, once per invocation, pointing at the
-    provider-prefixed-model-string convention instead."""
+def test_provider_flag_removed_from_scan(tmp_path: Path) -> None:
+    """(close-the-loop) The deprecated ``--provider`` CLI flag was REMOVED in
+    0.7.10 (T13 deprecated it in 0.7.9, promising removal in 0.7.10) --
+    passing it to `scan` must now fail as an unrecognised option, not
+    silently route the model the old way."""
     result = runner.invoke(
         app,
         [
@@ -720,14 +721,37 @@ def test_provider_flag_still_works_and_warns_deprecated_model_ref(tmp_path: Path
             str(tmp_path),
         ],
     )
+    assert result.exit_code != EXIT_SUCCESS
+    out = result.stderr or result.output
+    assert "no such option" in out.lower()
+
+
+def test_provider_yaml_key_still_works_and_warns_deprecated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI flag is gone, but a bare ``provider`` set via mylonite.yaml's
+    ``provider:`` key is a SEPARATE, still-deprecated (not yet removed)
+    mechanism -- it still routes the model exactly as before and still warns
+    on stderr, once per invocation, pointing at the provider-prefixed-model-
+    string convention instead."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mylonite.yaml").write_text(
+        "provider: anthropic\nmodel: claude-3-5-haiku-latest\n", encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path)],
+    )
     assert result.exit_code == EXIT_SUCCESS, result.output
     out = result.stderr or result.output
-    assert out.count("--provider is deprecated") == 1
+    assert out.count("provider") >= 1
+    assert "deprecated" in out.lower()
     assert "anthropic/claude" in out or "provider-prefixed" in out.lower()
 
 
 def test_provider_flag_omitted_never_warns_model_ref(tmp_path: Path) -> None:
-    """No --provider flag → no deprecation noise at all."""
+    """No provider (flag, mylonite.yaml key, or env var) → no deprecation
+    noise at all."""
     result = runner.invoke(
         app,
         ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path)],
@@ -764,11 +788,14 @@ def test_scan_planner_model_override_rejects_unroutable_model_model_ref(
 
 
 def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The SAME override, but with --provider given as a hint, resolves and
-    routes fine -- proving the rejection above is about the missing hint/
-    prefix, not a blanket regression on role overrides."""
+    """The SAME override, but with a provider hint given (via
+    MYLONITE_PROVIDER -- the CLI ``--provider`` flag this used to use was
+    removed in 0.7.10, T-close-the-loop), resolves and routes fine --
+    proving the rejection above is about the missing hint/prefix, not a
+    blanket regression on role overrides."""
+    monkeypatch.setenv("MYLONITE_PROVIDER", "openai")
     result = runner.invoke(
         app,
         [
@@ -776,8 +803,6 @@ def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
             "reference:vulnerable",
             "--planner-model",
             "some-custom-finetune",
-            "--provider",
-            "openai",
             "--dry-run",
             "--output-dir",
             str(tmp_path),
@@ -2823,12 +2848,15 @@ def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
         # cannot distinguish from "omitted". This is the only row below that
         # reproduces that specific shape — see the docstring.
         ("max_llm_calls", "--max-llm-calls", "max_llm_calls", 50, 10),
-        # GENERAL precedence coverage only (see docstring): `provider`/`model`
-        # never had the DCR-0004-style bug in the first place, because their
-        # Typer option default is already `None` (`explicit or rc.value`
-        # already distinguishes "omitted" from "explicitly set" for any
-        # realistic string value — there is no default VALUE to collide with).
-        ("provider", "--provider", "provider", "openai", "anthropic"),
+        # GENERAL precedence coverage only (see docstring): `model` never had
+        # the DCR-0004-style bug in the first place, because its Typer option
+        # default is already `None` (`explicit or rc.value` already
+        # distinguishes "omitted" from "explicitly set" for any realistic
+        # string value — there is no default VALUE to collide with). The
+        # sibling `provider` row was removed (close-the-loop): `scan` no
+        # longer has a `--provider` CLI flag to test this precedence through
+        # (removed 0.7.10) -- `mylonite.yaml`'s `provider:` key / env var
+        # precedence has no CLI-flag counterpart left to race against.
         ("model", "--model", "model", "gpt-4o-mini", "claude-haiku-4-5-20251001"),
     ],
 )
@@ -2853,17 +2881,19 @@ def test_scan_config_precedence_conformance(
     testing any FUTURE field whose Typer option default is a concrete
     value (not `None`) that could collide with a meaningful explicit setting.
 
-    The ``provider``/``model`` rows exercise the weaker, general property
-    ("an explicit flag beats --config") rather than the default-collision edge
-    case — those fields' Typer defaults are already ``None``, so
-    ``explicit or rc.value`` already distinguishes "omitted" from "explicitly
-    set" for them and they never had this bug class to begin with. They are
-    included for RunConfig field-coverage completeness, not because they are
-    at risk of the same regression `max_llm_calls` was.
+    The ``model`` row exercises the weaker, general property ("an explicit
+    flag beats --config") rather than the default-collision edge case — that
+    field's Typer default is already ``None``, so ``explicit or rc.value``
+    already distinguishes "omitted" from "explicitly set" and it never had
+    this bug class to begin with. It is included for RunConfig field-coverage
+    completeness, not because it is at risk of the same regression
+    `max_llm_calls` was. (A sibling ``provider`` row previously covered
+    the same property for ``scan``'s now-removed ``--provider`` CLI flag —
+    see the parametrize list above.)
 
     Each case only sets its OWN field (leaving provider/model at their true
     defaults) so the asserted :class:`ScanConfig` attribute isn't perturbed by
-    ``--provider``'s LiteLLM routing prefix on ``model``.
+    an unrelated field's LiteLLM routing prefix on ``model``.
     """
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine

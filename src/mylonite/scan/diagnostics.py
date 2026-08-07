@@ -130,7 +130,7 @@ def classify_provider_error(
             "unknown",
             detail,
             "The provider rejected the request — often an unknown model id or a "
-            "response_format the provider doesn't support. Check --model/--provider.",
+            "response_format the provider doesn't support. Check --model.",
         )
 
     # 3. Substring fallback for non-LiteLLM exceptions (raw ssl/httpx, stubs) or

@@ -61,7 +61,8 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
   (`owasp-llm`, `owasp-asi`, `atlas`, `nist`).
 - `mylonite scan <target>` — run the live exploit-finding loop. Needs an LLM
   API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
-  provider via `--provider`/`--model` plus that provider's own key env var.
+  provider via `--model` with a `provider/model` prefix (e.g.
+  `--model openai/gpt-4o`) plus that provider's own key env var.
   Targets: `reference:vulnerable` / `reference:guarded`
   (the in-process reference app builds), and the bundled MCP (Model Context
   Protocol) stdio families

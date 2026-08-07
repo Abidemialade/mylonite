@@ -16,21 +16,24 @@ JSON fixture per unique ``(model, messages, ...)`` pair. The same deterministic
 per-variant note-id factory the replay path uses is reset per variant, so the
 recorded note IDs (``n_demo_0001`` …) match replay exactly.
 
-Cache-key format (T8)
-----------------------
+Cache-key format (T8 / close-the-loop)
+---------------------------------------
 The CURRENTLY COMMITTED fixtures under ``src/mylonite/demo/fixtures/{vulnerable,
-guarded}/`` predate the ``_meta.json`` sidecar entirely and were recorded with
-the v1 key (``(model, messages)`` only) — :mod:`mylonite.demo._replay` keeps
-replaying them correctly (v1 is the documented default for a sidecar-less
-directory in replay mode). A FRESH re-record (an EMPTY ``variant_dir``, as
-happens the first time this script targets a variant) defaults to
-``mylonite.demo._replay.CACHE_KEY_VERSION`` (currently v2 — folds in
+guarded}/`` were recorded with the v1 key (``(model, messages)`` only), from
+before the ``_meta.json`` sidecar existed. They now ship an EXPLICIT
+``_meta.json`` declaring ``cache_key_version: 1`` — :mod:`mylonite.demo._replay`
+no longer has an implicit "no sidecar means v1" replay default (that fallback
+was retired: a sidecar-less directory now resolves
+``mylonite.demo._replay.CACHE_KEY_VERSION`` in EITHER mode), so these two
+directories would silently stop replaying correctly for any tools-bearing call
+without their own explicit declaration. A FRESH re-record (an EMPTY
+``variant_dir``, as happens the first time this script targets a variant)
+still gets ``CACHE_KEY_VERSION`` (currently v2 — folds in
 ``tools``/``tool_choice``/``response_format``/``api_base``), and this script
 stamps ``_meta.json`` with the matching ``cache_key_version`` field BEFORE
 recording begins (not after — see :func:`_stamp_meta`'s docstring for why),
 so a later replay of the freshly-recorded directory resolves the SAME key
-rather than silently falling back to v1 (which would ignore ``tools=`` and
-miss every lookup).
+explicitly rather than depending on any implicit default.
 
 Re-recording an EXISTING directory in place is guarded by
 :func:`_check_dir_safe_to_record`: if ``variant_dir`` already holds fixture
@@ -117,8 +120,12 @@ def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
     file untouched AND write a NEW, differently-keyed v2 file alongside it —
     a genuinely mixed directory — and if the run were interrupted before the
     post-run stamp, the directory would have a v1/v2 mix with NO sidecar at
-    all: the next replay would default to v1 and could silently return a
-    stale, wrong response for a tool-bearing call, with no error.
+    all: the next replay now resolves ``CACHE_KEY_VERSION`` (v2) by default
+    (the old implicit "no sidecar means v1" fallback was retired), so it
+    would silently MISS the leftover v1-keyed file for any tools-bearing
+    call it still matched — a confusing "fixture missing" failure for a
+    directory that visibly has fixtures in it, rather than the loud, explicit
+    refusal below.
 
     An EMPTY (or not-yet-existing) ``variant_dir`` is always safe. A
     NON-EMPTY one is safe only if its ``_meta.json`` already declares the
@@ -140,8 +147,9 @@ def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
             "almost certainly LEGACY v1 fixtures (recorded before the v2 cache key "
             "existed) — recording new v2-keyed fixtures alongside them would leave a "
             "mixed, confusing directory, and if this script is interrupted before it "
-            "can stamp _meta.json, a later replay would default to v1 and could "
-            "SILENTLY return a stale, wrong response for a tools-bearing call. Delete "
+            "can stamp _meta.json, a later replay now defaults to v2 (the old "
+            "implicit v1 fallback was retired) and would SILENTLY miss the leftover "
+            "v1-keyed fixture for a tools-bearing call. Delete "
             f"the stale *.json files under {variant_dir} first (or move them aside), "
             "then re-run."
         )
