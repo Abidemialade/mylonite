@@ -667,9 +667,7 @@ def test_validate_rejects_blank_model_via_model_ref(tmp_path: Path) -> None:
     or `_route_model`. It must now go through the same checks (via
     `ModelRef.parse`) as scan/gate/ablate/doctor, and fail on the SAME blank
     model before it ever needs a real generated-test dir on disk."""
-    result = runner.invoke(
-        app, ["validate", str(tmp_path / "nonexistent"), "--model", "  "]
-    )
+    result = runner.invoke(app, ["validate", str(tmp_path / "nonexistent"), "--model", "  "])
     assert result.exit_code == EXIT_CONFIG
     assert "invalid --model" in (result.stderr or result.output)
 
@@ -795,10 +793,26 @@ def test_scan_rejects_credentialed_api_base_from_mylonite_yaml(tmp_path: Path, m
     not silently allowed. Caught at RunConfig-load time (auto-discovery included),
     before any live call is even attempted."""
     cfg = tmp_path / "mylonite.yaml"
-    cfg.write_text(
-        "api_base: 'https://my-proxy.internal/v1?api_key=sk-abc123'\n", encoding="utf-8"
-    )
+    cfg.write_text("api_base: 'https://my-proxy.internal/v1?api_key=sk-abc123'\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path / "out")],
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "env var" in out
+
+
+def test_scan_rejects_credentialed_api_base_from_env_var(tmp_path: Path, monkeypatch) -> None:
+    """T14/CEO §3, code-review follow-up: a credentialed MYLONITE_API_BASE must
+    fail EXACTLY like the mylonite.yaml layer above -- a clean EXIT_CONFIG
+    naming the env-var alternative, not an uncaught CredentialedApiBaseError
+    (a raw Rich traceback, exit 1). Before this fix env_run_config() was
+    called unguarded at all 5 cli.py call sites; _env_run_config_or_exit()
+    now catches it the same way _discover_run_config already catches the
+    mylonite.yaml layer's identical error."""
+    monkeypatch.setenv("MYLONITE_API_BASE", "https://proxy.example.com/v1?api_key=sk-test123")
     result = runner.invoke(
         app,
         ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path / "out")],
@@ -1515,7 +1529,9 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """validate with kept=False → EXIT_NOT_KEPT (5) with a remediation line."""
     out_dir = _generated_dir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # T14 pre-flight; preflight/validator stubbed
+    monkeypatch.setenv(
+        "ANTHROPIC_API_KEY", "sk-ant-test"
+    )  # T14 pre-flight; preflight/validator stubbed
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
     _patch_validator(monkeypatch, kept=False)
 
@@ -2453,7 +2469,9 @@ def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
 
     cfg = tmp_path / "mylonite.yaml"
     cfg.write_text("max_llm_calls: 10\n", encoding="utf-8")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # T14 pre-flight; ScanEngine.run is stubbed
+    monkeypatch.setenv(
+        "ANTHROPIC_API_KEY", "sk-ant-test"
+    )  # T14 pre-flight; ScanEngine.run is stubbed
 
     captured: dict[str, Any] = {}
     real_init = ScanEngine.__init__

@@ -270,18 +270,31 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
     truth for "is this a valid model", not this function; this only checks
     "is there evidently a credential for it", the narrower question the
     deleted ``require_llm()`` asked.
+
+    Uses :func:`~mylonite.scan.providers.required_env_vars` (the key PLUS
+    anything else LiteLLM needs to actually route a call, e.g. Azure's
+    endpoint/API-version pair) and requires ALL of them to be set, not just
+    one — ``env_vars_for`` alone plus an ``any()`` check would (a) pass a
+    Bedrock setup with only ``AWS_ACCESS_KEY_ID`` set, silently missing the
+    also-required ``AWS_SECRET_ACCESS_KEY`` (every current
+    ``PROVIDER_ENV_VARS`` entry with more than one var means ALL of them are
+    required together, never "any one of"), and (b) pass an Azure setup with
+    only ``AZURE_API_KEY`` set, which still fails the live call this
+    pre-flight exists to prevent because ``AZURE_API_BASE``/
+    ``AZURE_API_VERSION`` are also unset.
     """
-    from mylonite.scan.providers import env_vars_for, provider_from_model
+    from mylonite.scan.providers import provider_from_model, required_env_vars
 
     resolved = provider_from_model(model, declared=provider)
-    needed = env_vars_for(resolved)
+    needed = required_env_vars(resolved)
     if not needed:
         return
-    if any(os.environ.get(var) for var in needed):
+    missing = [var for var in needed if not os.environ.get(var)]
+    if not missing:
         return
     msg = (
         f"no LLM credential configured for model {model!r} (resolved provider: "
-        f"{resolved or 'unknown'}). Set one of: {', '.join(needed)} "
+        f"{resolved or 'unknown'}). Missing: {', '.join(missing)} "
         "-- via your shell env, --api-key-file, --env-file, or a CI secret -- "
         "or point --model/--provider (or mylonite.yaml's model:/provider:) at "
         "a provider that IS configured."

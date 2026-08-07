@@ -452,7 +452,6 @@ def doctor(
     Exit 0 if reachable, 4 on a provider failure.
     """
     from mylonite._redaction import looks_like_api_key, redact
-    from mylonite.config import env_run_config
     from mylonite.scan.diagnostics import classify_provider_error
     from mylonite.scan.providers import env_vars_for
 
@@ -463,7 +462,7 @@ def doctor(
     # default -- doctor is exactly the command that should show an operator
     # what config would actually be used.
     _config_path, rc = _discover_run_config(run_config_path, command="doctor")
-    env_rc = env_run_config()
+    env_rc = _env_run_config_or_exit()
     if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
@@ -588,9 +587,7 @@ def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
     return _parse_model_ref_or_exit(model, provider)
 
 
-def _discover_run_config(
-    explicit_path: Path | None, *, command: str
-) -> tuple[Path | None, Any]:
+def _discover_run_config(explicit_path: Path | None, *, command: str) -> tuple[Path | None, Any]:
     """Resolve the ``mylonite.yaml`` run config for ``command``.
 
     An explicit ``--config`` always wins; otherwise auto-discover
@@ -620,6 +617,27 @@ def _discover_run_config(
     if explicit_path is None:
         echo_err(f"{command}: using {path} (auto-discovered).")
     return path, rc
+
+
+def _env_run_config_or_exit() -> Any:
+    """``env_run_config()``, catching a credentialed ``MYLONITE_API_BASE`` the
+    same way :func:`_discover_run_config` catches one from ``mylonite.yaml``
+    (``echo_err`` + ``EXIT_CONFIG``) rather than letting
+    :class:`~mylonite.scan.llm_policy.CredentialedApiBaseError` propagate as a
+    raw traceback. The security property is identical either way (the value
+    is refused, never silently used) — this only makes the failure mode
+    consistent across all three sources (CLI flag validation, mylonite.yaml,
+    env var) instead of the env-var layer alone surfacing as an uncaught
+    exception (exit 1) rather than a clean, actionable exit 2.
+    """
+    from mylonite.config import env_run_config
+    from mylonite.scan.llm_policy import CredentialedApiBaseError
+
+    try:
+        return env_run_config()
+    except CredentialedApiBaseError as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
@@ -1170,11 +1188,9 @@ def scan(
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
     # T14: auto-discovered from ./mylonite.yaml when no --config is passed —
     # was gate-only before; see _discover_run_config.
-    from mylonite.config import env_run_config
-
     config_root: Path | None = None
     _config_path, rc = _discover_run_config(run_config_path, command="scan")
-    env_rc = env_run_config()
+    env_rc = _env_run_config_or_exit()
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -2610,20 +2626,14 @@ def validate(
         str | None,
         typer.Option(
             "--customiser-model",
-            help=(
-                "Override the model that CRAFTS/REFINES attack payloads. "
-                "Defaults to --model."
-            ),
+            help=("Override the model that CRAFTS/REFINES attack payloads. Defaults to --model."),
         ),
     ] = None,
     judge_model: Annotated[
         str | None,
         typer.Option(
             "--judge-model",
-            help=(
-                "Override the model that JUDGES whether an attack landed. "
-                "Defaults to --model."
-            ),
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
         ),
     ] = None,
     run_config_path: Annotated[
@@ -2732,14 +2742,13 @@ def validate(
     no provider.
     """
     from mylonite import testkit
-    from mylonite.config import env_run_config
 
     # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
     # scan/gate — `validate` previously had neither --config nor
     # --planner-model/--customiser-model/--judge-model at all, despite
     # DifferentialValidator already accepting all three.
     _config_path, rc = _discover_run_config(run_config_path, command="validate")
-    env_rc = env_run_config()
+    env_rc = _env_run_config_or_exit()
     if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
@@ -3709,10 +3718,7 @@ def gate(
         str | None,
         typer.Option(
             "--judge-model",
-            help=(
-                "Override the model that JUDGES whether an attack landed. Defaults to "
-                "--model."
-            ),
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
         ),
     ] = None,
     out: Annotated[
@@ -3833,10 +3839,8 @@ def gate(
     # --config is passed; an explicit flag always wins. Closes the parity gap where
     # `gate` required --target-file even though the project's mylonite.yaml set it.
     # T14: delegates to the same _discover_run_config every command shares now.
-    from mylonite.config import env_run_config
-
     config_path, rc = _discover_run_config(run_config_path, command="gate")
-    env_rc = env_run_config()
+    env_rc = _env_run_config_or_exit()
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -3963,9 +3967,7 @@ def gate(
                 "Pass a target YAML via --target-file."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_custom(
-            tf, authorize, effective_planner_model, command="gate"
-        )
+        adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model, command="gate")
         routed_to = "custom"
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
@@ -3999,7 +4001,10 @@ def gate(
     # a more specific error still wins when both apply. `gate` has no
     # --dry-run of its own, so this is unconditional.
     _require_llm_configured_or_exit(
-        effective_planner_model, effective_customiser_model, effective_judge_model, provider=provider
+        effective_planner_model,
+        effective_customiser_model,
+        effective_judge_model,
+        provider=provider,
     )
 
     # --- closures injected into run_gate ---
@@ -4352,20 +4357,14 @@ def ablate(
         str | None,
         typer.Option(
             "--customiser-model",
-            help=(
-                "Override the model that CRAFTS/REFINES attack payloads. "
-                "Defaults to --model."
-            ),
+            help=("Override the model that CRAFTS/REFINES attack payloads. Defaults to --model."),
         ),
     ] = None,
     judge_model: Annotated[
         str | None,
         typer.Option(
             "--judge-model",
-            help=(
-                "Override the model that JUDGES whether an attack landed. "
-                "Defaults to --model."
-            ),
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
         ),
     ] = None,
     run_config_path: Annotated[
@@ -4403,7 +4402,6 @@ def ablate(
     against its weakness's attack (model held constant) and report whether it
     actually carries the security. LIVE: launches the target's MCP server + provider.
     """
-    from mylonite.config import env_run_config
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -4423,7 +4421,7 @@ def ablate(
     # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
     # scan/gate/validate.
     _config_path, rc = _discover_run_config(run_config_path, command="ablate")
-    env_rc = env_run_config()
+    env_rc = _env_run_config_or_exit()
     if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
@@ -4483,7 +4481,10 @@ def ablate(
     # check above (DCR-0008/one-gate: authorization gates every live-driving
     # action, even one this static).
     _require_llm_configured_or_exit(
-        effective_planner_model, effective_customiser_model, effective_judge_model, provider=provider
+        effective_planner_model,
+        effective_customiser_model,
+        effective_judge_model,
+        provider=provider,
     )
 
     # Server-layer mode: the target bakes its guards into the server (toggled by

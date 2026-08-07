@@ -724,6 +724,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return "init_failure"
         return "planner_exception"
 
+
 class _RecordingServerShim:
     """Wraps a ``MCPSessionAsServerLike`` so planner calls land in a list.
 

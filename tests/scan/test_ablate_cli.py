@@ -371,7 +371,15 @@ def test_ablate_autodiscovers_mylonite_yaml_role_models(
     monkeypatch.chdir(tmp_path)
     result = _runner.invoke(
         app,
-        ["ablate", "--target-file", "target.yaml", "--authorize", "myapp-notes", "--controls", "W2"],
+        [
+            "ablate",
+            "--target-file",
+            "target.yaml",
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2",
+        ],
     )
     assert result.exit_code == 0, result.output
     out = result.stderr or result.output

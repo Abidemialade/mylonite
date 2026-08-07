@@ -166,6 +166,52 @@ def test_require_llm_configured_passes_for_an_unrecognised_model(monkeypatch) ->
     require_llm_configured(model="totally-unknown-model-xyz")  # must not raise
 
 
+def test_require_llm_configured_bedrock_requires_both_aws_vars(monkeypatch) -> None:
+    """Code-review follow-up: Bedrock needs BOTH AWS_ACCESS_KEY_ID and
+    AWS_SECRET_ACCESS_KEY -- a naive `any()` over the pair would wrongly pass
+    with only one set. Must require ALL of a multi-var provider's vars."""
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+
+    with pytest.raises(LLMNotConfiguredError) as excinfo:
+        require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")
+    assert "AWS_ACCESS_KEY_ID" in str(excinfo.value)
+    assert "AWS_SECRET_ACCESS_KEY" in str(excinfo.value)
+
+    # Only ONE of the two set -- still not configured.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFAKE")
+    with pytest.raises(LLMNotConfiguredError) as excinfo:
+        require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")
+    assert "AWS_SECRET_ACCESS_KEY" in str(excinfo.value)
+    assert "AWS_ACCESS_KEY_ID" not in str(excinfo.value)  # already-set var not listed as missing
+
+    # BOTH set -- passes.
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fake-secret")
+    require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")  # must not raise
+
+
+def test_require_llm_configured_azure_requires_base_and_version_too(monkeypatch) -> None:
+    """Code-review follow-up: an Azure deployment needs its endpoint + API
+    version alongside the key (LiteLLM reads AZURE_API_BASE/AZURE_API_VERSION
+    too) -- required_env_vars (not env_vars_for alone) is what surfaces those,
+    so an operator with only AZURE_API_KEY set is told what's ACTUALLY
+    missing before burning a live call, not just told the key looks present."""
+    monkeypatch.setenv("AZURE_API_KEY", "fake-azure-key")
+    monkeypatch.delenv("AZURE_API_BASE", raising=False)
+    monkeypatch.delenv("AZURE_API_VERSION", raising=False)
+
+    with pytest.raises(LLMNotConfiguredError) as excinfo:
+        require_llm_configured(model="azure/my-deployment")
+    msg = str(excinfo.value)
+    assert "AZURE_API_BASE" in msg
+    assert "AZURE_API_VERSION" in msg
+    assert "AZURE_API_KEY" not in msg  # already-set var not listed as missing
+
+    monkeypatch.setenv("AZURE_API_BASE", "https://my-azure.openai.azure.com")
+    monkeypatch.setenv("AZURE_API_VERSION", "2024-02-01")
+    require_llm_configured(model="azure/my-deployment")  # must not raise
+
+
 # --- T14: flat MYLONITE_* env vars (lowest-precedence source) ---------------
 
 

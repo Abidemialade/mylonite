@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mylonite._redaction import redact
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
-from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
+from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
@@ -208,7 +208,16 @@ class ScanEngine:
             m.attack_metadata().id: m.attack_metadata().compliance for m in self._attack_modules
         }
 
-        with counter.active():
+        # T14 code-review follow-up: routes through llm_scope(counter=...)
+        # rather than counter.active() directly -- functionally identical
+        # (both just set/reset the same _ACTIVE_COUNTER contextvar), but this
+        # is what makes llm_scope's counter= parameter a real, exercised
+        # production path instead of dead (only ever passed policy= in
+        # practice; the CLI's own llm_scope(policy=...) calls for the active
+        # LLMPolicy nest around this one, since asyncio.run() copies the
+        # calling context). counter.active() itself stays available as a
+        # narrower entry point for a caller that only wants the counter.
+        with llm_scope(counter=counter):
             try:
                 descriptor = await self._adapter.describe()
             except ImportError:
