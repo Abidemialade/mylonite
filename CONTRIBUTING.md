@@ -120,6 +120,16 @@ unfinished, and no tag was ever pushed for either).
    `[X.Y.Z]: https://github.com/Abidemialade/mylonite/compare/vPREV...vX.Y.Z`.
    The `## [X.Y.Z]` section body becomes the GitHub Release notes verbatim
    (see step 4), so write it as such.
+
+   Editing `CHANGELOG.md` shifts the line number of the one pre-existing,
+   deliberately-fake credential `detect-secrets` has baselined in it (a
+   test-fixture-shaped string in a changelog entry describing the redaction
+   feature). Regenerate the baseline before pushing, or CI's `precommit` and
+   `security` jobs both fail on it (happened for both 0.7.7 and 0.7.8):
+   ```bash
+   git ls-files | python -m detect_secrets.pre_commit_hook --baseline .secrets.baseline
+   git add .secrets.baseline
+   ```
 3. **Land both changes on `main`** (same PR as the release work, or a
    dedicated `release: vX.Y.Z` PR/commit).
 4. **Tag and push** — this is the step that actually triggers the build +
