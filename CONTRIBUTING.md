@@ -99,6 +99,37 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.
 
+## Cutting a release
+
+A release PR title alone (e.g. "0.7.7: ...") does **not** ship anything —
+`.github/workflows/release.yml` only fires on a pushed `vX.Y.Z` tag, and
+`pyproject.toml`'s `version` field doesn't move on its own. Every release
+needs all four steps, in order, or the version string on `main` silently
+drifts from what's tagged/published (this happened for 0.7.6 and 0.7.7: both
+merged with the version bump and CHANGELOG update either missing or
+unfinished, and no tag was ever pushed for either).
+
+1. **Bump the version in both places.** Update `[project].version` in
+   `pyproject.toml` *and* `__version__` in `src/mylonite/version.py` — they
+   must match (`tests/test_version.py::test_version_matches_pyproject`
+   enforces it in CI). It's easy to update only one; that's exactly what
+   happened for 0.7.7 the first time around.
+2. **Update `CHANGELOG.md`.** Rename the `## [Unreleased]` section header to
+   `## [X.Y.Z] - YYYY-MM-DD`, then add a fresh empty `## [Unreleased]` header
+   above it for the next round of changes. Add a compare link at the bottom:
+   `[X.Y.Z]: https://github.com/Abidemialade/mylonite/compare/vPREV...vX.Y.Z`.
+3. **Land both changes on `main`** (same PR as the release work, or a
+   dedicated `release: vX.Y.Z` PR/commit).
+4. **Tag and push** — this is the step that actually triggers the build +
+   TestPyPI + PyPI publish workflow, so do it deliberately, from `main`, once
+   1–3 are merged:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+   The tag must match `release.yml`'s trigger patterns (`v0.[6-9].*`,
+   `v0.[1-9][0-9].*`, or `v[1-9]*.*.*`) or the workflow won't run.
+
 ## Running live e2e tests before a release
 
 Mylonite ships recorded integration tests under

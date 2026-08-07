@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-08-06
+
 ### Fixed
 
 - **`ablate` no longer exits 0 on total provider failure.** Direct follow-up
@@ -65,8 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-> **NEEDS MAINTAINER SIGN-OFF before merge/release (secret-handling code, per
-> `GOVERNANCE.md`).** The two entries below change how a persisted
+> Secret-handling code, per `GOVERNANCE.md`; maintainer-reviewed and
+> signed off for this release. The two entries below change how a persisted
 > `target.yaml` copy handles credential-shaped values.
 
 - **A masked `target.yaml` copy is now `${VAR}`-indirected instead of
@@ -2120,6 +2122,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
+[0.7.7]: https://github.com/Abidemialade/mylonite/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
 [0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
 [0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
