@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-08-07
+
+"Correct twins": fixes `gate`'s server-layer differential and consolidates
+raw-vs-guarded twin construction to a single source of truth.
+
+### Added
+
+- `mylonite.plugins._mcp.twins.plan_twins()` — the one place that now decides
+  a target's raw-vs-guarded twin plan, replacing three separately-drifting
+  copies previously held by `gate`, `validate`, and `testkit`.
+- `mylonite.plugins._mcp.factory.build_adapter_for_spec` + `LaunchIntent` — a
+  transport-aware adapter-construction entry point that always recomputes the
+  launch triple (`launch_command`/`launch_args`/`launch_env`) from the target
+  spec, so a caller can no longer skip a server-layer control toggle by
+  constructing an adapter directly.
+- Execution context is now threaded onto emitted findings:
+  `mylonite.scan.exec_context.ExecContext` stamps the model/provider/planner/
+  customiser/judge model and Mylonite version onto `Payload.metadata`
+  (reserved `mylonite.exec.*` prefix), and the emitted regression test pins
+  that model instead of falling back to a hardcoded `claude-haiku-4-5`/
+  `anthropic` default. `generate` also back-fills a trimmed (model/provider
+  only) copy of `scan_report.json` alongside `target.yaml` in the generated
+  dir so exploits from before this release can still resolve it.
+
+### Fixed
+
+- **`gate`'s raw-vs-guarded differential could silently reject a real finding
+  on a server-layer-controlled target.** `gate`'s own twin-building logic
+  never threaded a target's `control_env`/`vulnerable_launch` server-layer
+  toggles the way `validate`'s did, so for those targets "raw" and "guarded"
+  were the same server — the differential could never fire. Fixed by routing
+  `gate`, `validate`, `ablate`, and `testkit.assert_control_holds` through the
+  shared `plan_twins()`.
+- `testkit` constructed `MCPStdioAdapter` directly instead of going through
+  the transport-aware factory, hardcoding stdio and silently mis-driving any
+  non-stdio custom target on re-drive.
+- `HTTPAgentAdapter.__init__`'s `**_ignored: Any` catch-all swallowed
+  genuinely unrecognised keywords instead of raising; replaced with an
+  explicit accepted-and-ignored parameter list.
+- `testkit`'s live re-drive hardcoded a 2-entry attack-module allowlist, so an
+  exploit owned by any other discovered module (including third-party
+  plugins) silently re-drove zero payloads instead of the intended attack.
+- The HTTP adapter's JSON-vs-plain-text template detection could misdetect a
+  quoted-for-prose plain-text template as JSON and corrupt the delivered
+  payload; it now trial-parses the whole template instead of using a local
+  quote-character heuristic.
+- `gate` silently discarded a real `mcp:<family>` positional target whenever a
+  `target_file` was also resolved (explicit `--target-file` or an
+  auto-discovered `mylonite.yaml`) instead of rejecting the ambiguous
+  combination the way `reference:*` + `--target-file` already does.
+
+### Security
+
+- **Docstring injection in generated regression tests (critical).**
+  `ReferencePytestGenerator.emit()` interpolated `exploit.target_id` bare into
+  every emitted test file's docstrings; a hostile `target_id` containing
+  `"""` could terminate the docstring early and turn the rest of a committed
+  test file into live code on collection. `target_id` is now slugified for
+  docstring display.
+- **Unredacted exception text could reach a committed `scan_report.json`
+  (high).** `ScanEngine` stored raw `str(exc)` into `ScanAttempt.verdict_reason`
+  at three catch sites; an adapter/customiser/judge exception can embed
+  credentials (e.g. an echoed `Authorization` header). Exception text is now
+  routed through `mylonite._redaction.redact()` before being persisted.
+
 ## [0.7.7] - 2026-08-06
 
 ### Fixed
@@ -2122,6 +2187,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
+[0.7.8]: https://github.com/Abidemialade/mylonite/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/Abidemialade/mylonite/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
 [0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
