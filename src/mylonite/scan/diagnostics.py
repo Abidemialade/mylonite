@@ -90,9 +90,9 @@ def classify_provider_error(
 ) -> Diagnosis:
     """Map a provider/LiteLLM exception to a category + provider-correct remedy.
 
-    ``provider`` (and optional ``env_var_override`` from
-    ``LLMConfig.api_key_env_var``) make the auth remedy name the right env var.
-    Both default to ``None`` (back-compatible; falls back to a generic remedy).
+    ``provider`` (and an optional ``env_var_override`` naming a non-default
+    credential env var) make the auth remedy name the right env var. Both
+    default to ``None`` (back-compatible; falls back to a generic remedy).
     """
     detail = _detail(exc)
     low = detail.lower()

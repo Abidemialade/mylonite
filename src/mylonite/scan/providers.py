@@ -93,8 +93,8 @@ def provider_from_model(model: str, declared: str | None = None) -> str | None:
 def env_vars_for(provider: str | None, override: str | None = None) -> tuple[str, ...]:
     """Env var name(s) holding the API key for ``provider``.
 
-    ``override`` (from ``LLMConfig.api_key_env_var``) wins when set; otherwise
-    the map is consulted; an unknown provider yields ``()``.
+    ``override`` (an explicit non-default credential env var name) wins when
+    set; otherwise the map is consulted; an unknown provider yields ``()``.
     """
     if override:
         return (override,)
