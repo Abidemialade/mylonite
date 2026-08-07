@@ -413,12 +413,13 @@ async def test_v1_fixtures_still_replay() -> None:
 
     The critical non-regression proof: drive the ACTUAL demo wiring
     (``mylonite.demo.runner.run_demo``) against the real packaged
-    ``vulnerable``/``guarded`` fixtures — which ship with no ``_meta.json``
-    sidecar — end to end. Every real call the demo's ``LLMPlanner`` makes
-    includes ``tools=``/``tool_choice=``; if v1 dispatch (or the key-version
-    detection defaulting) were broken, this would raise
-    ``DemoFixtureError``/``MissingFixtureError`` instead of completing with
-    the expected differential.
+    ``vulnerable``/``guarded`` fixtures — which now ship an explicit
+    ``_meta.json`` sidecar declaring ``cache_key_version: 1`` (retiring the
+    old implicit no-sidecar-defaults-to-v1 fallback) — end to end. Every real
+    call the demo's ``LLMPlanner`` makes includes ``tools=``/``tool_choice=``;
+    if v1 dispatch (or the key-version detection reading the sidecar) were
+    broken, this would raise ``DemoFixtureError``/``MissingFixtureError``
+    instead of completing with the expected differential.
     """
     from mylonite.demo.runner import run_demo
 
