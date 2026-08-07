@@ -86,7 +86,9 @@ def test_model_ref_env_vars_matches_required_env_vars_helper() -> None:
 def test_route_model_helper_matches_model_ref_raw() -> None:
     """`route_model` (the single source of truth `mylonite.cli._route_model`
     now delegates to) must agree with what `ModelRef.parse` bakes into `.raw`."""
-    assert route_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    assert (
+        route_model("anthropic", "claude-3-5-haiku-latest") == "anthropic/claude-3-5-haiku-latest"
+    )
     assert route_model(None, "claude-sonnet-4-6") == "claude-sonnet-4-6"
     assert route_model("anthropic", "openai/gpt-4o") == "openai/gpt-4o"
 
