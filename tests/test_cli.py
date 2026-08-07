@@ -2547,7 +2547,8 @@ def test_generate_skips_scan_report_backfill_when_source_incomplete(tmp_path: Pa
     scan_dir.mkdir()
     ep = _write_custom_exploit_and_target(scan_dir)
     (scan_dir / "scan_report.json").write_text(
-        json.dumps({"model": "claude-t12-cli-unit"}), encoding="utf-8"  # no "provider"
+        json.dumps({"model": "claude-t12-cli-unit"}),
+        encoding="utf-8",  # no "provider"
     )
 
     out = tmp_path / "gen"

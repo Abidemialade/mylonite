@@ -342,8 +342,7 @@ def _resolve_exec_context(
         else:
             if not isinstance(report_data, dict):
                 sibling_detail = (
-                    f"a sibling scan_report.json exists at {sibling_report} but isn't "
-                    "a JSON object"
+                    f"a sibling scan_report.json exists at {sibling_report} but isn't a JSON object"
                 )
             else:
                 raw_model = report_data.get("model")

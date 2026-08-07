@@ -172,9 +172,7 @@ def test_emit_escapes_target_id_that_would_break_the_docstring() -> None:
     a collision with an already-present, legitimate import.
     """
     hostile = 'reference:evil"""\nimport os\n\nos.system("touch pwned")\n"""'
-    generated = ReferencePytestGenerator().emit(
-        _exploit(pattern_id="safe-id", target_id=hostile)
-    )
+    generated = ReferencePytestGenerator().emit(_exploit(pattern_id="safe-id", target_id=hostile))
     tree = ast.parse(generated.source)  # must remain valid Python
     top_level_imports = {
         alias.name for node in tree.body if isinstance(node, ast.Import) for alias in node.names
@@ -196,9 +194,7 @@ def test_emit_escapes_target_id_in_custom_and_control_templates() -> None:
     assignment, rather than merely checking for an import that's already there.
     """
     hostile = 'mcp:evil"""\nPWNED = True\n"""'
-    generated = ReferencePytestGenerator().emit(
-        _exploit(pattern_id="safe-id", target_id=hostile)
-    )
+    generated = ReferencePytestGenerator().emit(_exploit(pattern_id="safe-id", target_id=hostile))
     tree = ast.parse(generated.source)  # must remain valid Python
     top_level_assigns = {
         target.id
@@ -345,7 +341,7 @@ def test_emitted_test_omits_model_kwargs_without_exec_context() -> None:
     testkit's own metadata/sibling-report resolution at run time."""
     exploit = _exploit(pattern_id="safe-id", target_id="mcp:acme")
     src = ReferencePytestGenerator().emit(exploit).source
-    assert "testkit.assert_target_resists(exploit, target_file=here / \"target.yaml\")" in src
+    assert 'testkit.assert_target_resists(exploit, target_file=here / "target.yaml")' in src
     assert "model=" not in src
     assert "provider=" not in src
 

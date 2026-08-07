@@ -697,7 +697,9 @@ async def test_customiser_non_recoverable_error_degrades_to_error_outcome_not_cr
 #: subprocess launch failure. `write_artefacts` persists `verdict_reason`
 #: verbatim to `scan_report.json` -- a directory the CLI's own next-step
 #: guidance (`cli.py`) tells the operator to commit.
-_SECRET_EXC_TEXT = "connection failed: Authorization: Bearer sk-live-shouldnotleak123"
+_SECRET_EXC_TEXT = (
+    "connection failed: Authorization: Bearer sk-live-shouldnotleak123"  # pragma: allowlist secret
+)
 
 
 @pytest.mark.asyncio
@@ -723,7 +725,7 @@ async def test_customiser_exception_text_is_redacted_before_persisting() -> None
     attempt = result.report.attempts[0]
     assert attempt.outcome == "error"
     assert attempt.verdict_reason is not None
-    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio
@@ -755,7 +757,7 @@ async def test_adapter_invoke_exception_text_is_redacted_before_persisting() -> 
     attempt = result.report.attempts[0]
     assert attempt.outcome == "error"
     assert attempt.verdict_reason is not None
-    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio
@@ -779,7 +781,7 @@ async def test_judge_exception_text_is_redacted_before_persisting() -> None:
     attempt = result.report.attempts[0]
     assert attempt.outcome == "error"
     assert attempt.verdict_reason is not None
-    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason
+    assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio

@@ -88,9 +88,7 @@ def test_gate_rejects_bundled_mcp_target_with_explicit_target_file(tmp_path):
     assert "--target-file" in res.output
 
 
-def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(
-    tmp_path, monkeypatch
-):
+def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(tmp_path, monkeypatch):
     # DCR-0001: the same rejection must fire even when target_file comes from an
     # auto-discovered ./mylonite.yaml and NO --target-file flag was typed at all.
     tf = tmp_path / "custom-app.yaml"
