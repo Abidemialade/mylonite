@@ -93,7 +93,16 @@ class ScanConfig(BaseModel):
             "JSON-fence parse fix landed."
         ),
     )
-    provider_failure_threshold: int = DEFAULT_PROVIDER_FAILURE_THRESHOLD
+    provider_failure_threshold: int = Field(
+        default=DEFAULT_PROVIDER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive provider failures before the scan aborts. A value <1 "
+            "would abort after the very FIRST attempt regardless of outcome "
+            "(DCR-0012) — not a config a caller could have MEANT, so reject it "
+            "at construction, mirroring max_concurrent."
+        ),
+    )
     pattern_id_filter: str | None = Field(
         default=None,
         description=(
@@ -441,7 +450,12 @@ class ScanEngine:
         semaphore: asyncio.Semaphore,
         compliance: Any,
     ) -> _PerPayloadOutcome:
-        seed_id = payload.metadata.get("seed_id") or payload.pattern_id
+        # DCR-0013: an explicit `is None` check, not truthy-`or` — a
+        # present-but-EMPTY seed_id must not silently fall back to pattern_id
+        # (which would corrupt compliance provenance for an otherwise-valid
+        # metadata dict).
+        _raw_seed_id = payload.metadata.get("seed_id")
+        seed_id = _raw_seed_id if _raw_seed_id is not None else payload.pattern_id
 
         # G2 / A4: metadata validation runs before any LLM call.
         missing = REQUIRED_METADATA_KEYS - payload.metadata.keys()

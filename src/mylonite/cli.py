@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import os
 import sys
@@ -97,6 +98,13 @@ _DEFAULT_MAX_LLM_CALLS = 50
 #: a real subprocess spawn + a multi-turn planner run; pass a larger value
 #: explicitly for a target known to need more headroom.
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
+
+#: DCR-0008: bound on the outbound `gh api` check-run POST in the gate path —
+#: no CLI-flag layer exists for this internal call, so a single sane constant
+#: (not zero, no existing codebase convention to mirror for a subprocess
+#: timeout) stands in for one. A stalled GitHub API call must fail fast
+#: instead of hanging the gate job indefinitely.
+_GH_API_TIMEOUT_S: Final = 30.0
 
 _T = TypeVar("_T")
 
@@ -264,7 +272,15 @@ def _load_api_key_file(path: Path) -> None:
     if "=" in first:
         _load_env_file(path)
         return
-    key = content.split()[0] if content else ""
+    # DCR-0009: derive the key from the first non-comment, non-blank line, not
+    # `content.split()[0]` over the WHOLE file — a leading `#`-comment line
+    # (e.g. `# my key\nsk-ant-abc123`) made that yield the literal `"#"`.
+    key = ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            key = stripped.split()[0]
+            break
     var = _infer_key_env_var(key)
     if var is None:
         echo_err(
@@ -1294,24 +1310,29 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    # 'reference:*' + --target-file is never meaningful — the reference targets
-    # are bundled in-process twins with no target file of their own. The custom-
-    # target branch below (`target_file is not None or target == "mcp:custom"`)
-    # is checked BEFORE the reference branch, so passing both would silently
-    # ignore the 'reference:...' positional argument entirely and scan
-    # --target-file instead — surprising for an operator who typed a
-    # 'reference:' target expecting the bundled twin, and who would now hit an
-    # unexpected --authorize requirement. (Unlike `gate`'s #24 fix, `scan` never
-    # computed a separate `is_reference`-style variable read downstream —
-    # `report_target_id` is always set INSIDE the branch that actually ran, so
-    # there is no oracle/routing-divergence bug here, just this silent-argument-
-    # ignoring footgun.) Reject the combination up front with a clear message.
-    if target is not None and target.startswith("reference:") and target_file is not None:
+    # A named positional target (e.g. 'reference:vulnerable', 'mcp:filesystem')
+    # combined with --target-file is never meaningful — --target-file already
+    # fully describes a custom target on its own. The custom-target branch below
+    # (`target_file is not None or target == "mcp:custom"`) is checked BEFORE
+    # every other branch, so passing both would silently ignore the named
+    # positional argument entirely and scan --target-file's target instead —
+    # surprising for an operator who typed e.g. 'mcp:filesystem' expecting the
+    # BUNDLED family (DCR-0010: this used to be checked only for 'reference:*',
+    # leaving 'mcp:<family>' + --target-file silently mis-routed the same way).
+    # (Unlike `gate`'s #24 fix, `scan` never computed a separate
+    # `is_reference`-style variable read downstream — `report_target_id` is
+    # always set INSIDE the branch that actually ran, so there is no
+    # oracle/routing-divergence bug here, just this silent-argument-ignoring
+    # footgun.) Reject the combination up front with a clear message. Only
+    # 'mcp:custom' (which itself means "build the custom target from CLI
+    # flags", never from --target-file) and no positional target at all are
+    # exempt.
+    if target is not None and target != "mcp:custom" and target_file is not None:
         echo_err(
-            "scan: 'reference:*' targets are bundled in-process twins and don't take "
-            "--target-file. Pass a custom target via --target-file alone (drop the "
-            "'reference:' target argument), or drop --target-file to scan the "
-            "reference twin."
+            f"scan: --target-file already fully describes a custom target and can't "
+            f"be combined with a positional target ({target!r}). Pass a custom "
+            "target via --target-file alone (drop the positional target argument), "
+            f"or drop --target-file to scan {target!r} instead."
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
@@ -2937,6 +2958,11 @@ def validate(
             planner_model=effective_planner_model if planner_model else None,
             customiser_model=effective_customiser_model if customiser_model else None,
             judge_model=effective_judge_model if judge_model else None,
+            # DCR-0007: thread --iteration-timeout through on the reference-target
+            # path too, matching the guard already applied to _validate_custom — a
+            # stalled provider call must not be able to hang the CLI/CI job
+            # indefinitely just because this branch omitted the kwarg.
+            iteration_timeout_s=iteration_timeout,
             metamorphic_strategies=["paraphrase"] if fast else None,
             # Record the canonical guarded fixtures into the gen dir's `fixtures/`
             # and run the on-disk committed test offline as a full-pass build —
@@ -3284,15 +3310,23 @@ def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
     flagged: list[str] = []
     for key, val in env.items():
         low = val.lower()
-        if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
-            continue
         if "://" in val:
-            # URL form. The single '/' after the authority separator is NOT part
-            # of the path, so `sqlite:///data.db` is RELATIVE `data.db` while
+            # URL form. DCR-0011: match the SQLite marker against the URL
+            # SCHEME, not an unanchored substring test anywhere in the value —
+            # `"sqlite" in low` used to misclassify e.g.
+            # `postgresql://sqlite-cache.internal:5432/app` (a non-SQLite URL
+            # whose HOSTNAME merely contains "sqlite") as a relative SQLite path.
+            scheme = low.split("://", 1)[0]
+            if scheme not in ("sqlite", "sqlite3"):
+                continue
+            # The single '/' after the authority separator is NOT part of the
+            # path, so `sqlite:///data.db` is RELATIVE `data.db` while
             # `sqlite:////abs/x.db` is absolute `/abs/x.db` — the exact #18 trap.
             after = val.split("://", 1)[1]
             path = after[1:] if after.startswith("/") else after
         else:
+            if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
+                continue
             path = val
         is_posix_abs = path.startswith("/")
         is_win_abs = len(path) >= 2 and path[1] == ":"  # C:\… or C:/…
@@ -3655,7 +3689,12 @@ def _post_gate_annotations(
             title="Mylonite AI-layer findings",
             summary=f"{len(anns)} finding(s) localized to a source line.",
         )
-        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=pr_mod._default_run)
+        # DCR-0008: no visible timeout on this outbound GitHub API call — a
+        # stalled call could hang the gate job indefinitely. Bind a sane
+        # explicit timeout onto the runner at this call site rather than
+        # changing post_check_run's/Runner's signature.
+        _bounded_run = functools.partial(pr_mod._default_run, timeout=_GH_API_TIMEOUT_S)
+        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=_bounded_run)
     except Exception:  # live glue must never break the gate
         return
 

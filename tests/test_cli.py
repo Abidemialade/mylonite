@@ -320,6 +320,25 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
     assert "relative SQLite path" in (result.stderr or result.output)
 
 
+def test_relative_sqlite_env_keys_does_not_misclassify_hostname_substring() -> None:
+    """DCR-0011: the unanchored `"sqlite" in low` substring match misclassified a
+    non-SQLite URL whose HOSTNAME merely contains "sqlite" as a relative SQLite
+    path warning. Must match against the URL SCHEME, not a bare substring
+    anywhere in the value."""
+    from mylonite.cli import _relative_sqlite_env_keys
+
+    flagged = _relative_sqlite_env_keys({"DB_URL": "postgresql://sqlite-cache.internal:5432/app"})
+    assert flagged == []
+
+
+def test_relative_sqlite_env_keys_still_flags_relative_sqlite_url() -> None:
+    """Regression guard: a genuine relative sqlite:// URL is still flagged."""
+    from mylonite.cli import _relative_sqlite_env_keys
+
+    flagged = _relative_sqlite_env_keys({"DB_URL": "sqlite:///data.db"})
+    assert flagged == ["DB_URL"]
+
+
 def test_scan_scaffold_masks_secret_shaped_env_in_written_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1693,6 +1712,83 @@ def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert result.exit_code == EXIT_NOT_KEPT, result.output
     assert "REJECTED" in result.output
     assert "remediation" in result.output
+
+
+def test_validate_reference_target_threads_iteration_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0007: the reference-target `validate` path (no --target-file) never
+    threaded --iteration-timeout into DifferentialValidator, unlike the
+    custom-target branch (which passes iteration_timeout_s) -- a stalled
+    provider call on the reference path could hang the CLI/CI job
+    indefinitely."""
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+    from mylonite.plugins._reference import reference_validator
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+
+    captured: dict[str, Any] = {}
+
+    class _FakeValidator:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def validate(self, *_: Any, **__: Any) -> Any:
+            return ValidationReport(
+                test_filename="test_x.py",
+                outcomes=[ValidationOutcome(stage="build", passed=True, detail="ok", metric=None)],
+                kept=True,
+                notes="canned",
+                mutation_score=1.0,
+            )
+
+    monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--iteration-timeout", "12.5"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert captured.get("iteration_timeout_s") == 12.5
+
+
+def test_post_gate_annotations_passes_a_timeout_to_the_check_run_post(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0008: post_check_run's outbound `gh api` call had no visible
+    timeout at this call site -- a stalled GitHub API call could hang the
+    gate job indefinitely. Assert the underlying runner is actually invoked
+    with a positive timeout kwarg."""
+    from mylonite.cli import _post_gate_annotations
+    from mylonite.gate import annotate as annotate_mod
+
+    monkeypatch.setattr(
+        annotate_mod,
+        "annotations_from_findings",
+        lambda *_, **__: [annotate_mod.Annotation(path="p", start_line=1, message="m")],
+    )
+
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_default_run(cmd: list[str], **kwargs: Any) -> Any:
+        calls.append((list(cmd), kwargs))
+        if cmd[:2] == ["git", "rev-parse"]:
+            return SimpleNamespace(stdout="deadbeef\n", returncode=0)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"html_url": "u"}), stderr="")
+
+    pr_mod = SimpleNamespace(_default_run=fake_default_run)
+
+    _post_gate_annotations(
+        tmp_path,
+        SimpleNamespace(),
+        None,
+        None,
+        pr_mod,
+        gate_dir=Path(".mylonite/gate"),
+    )
+
+    api_calls = [c for c in calls if "check-runs" in " ".join(c[0])]
+    assert api_calls, "expected a gh api check-runs call"
+    assert api_calls[0][1].get("timeout")  # present and truthy (a positive number)
 
 
 def test_validate_provider_unreachable_exit_4(
@@ -4033,3 +4129,49 @@ def test_init_unknown_transport_errors(tmp_path: Path) -> None:
     result = runner.invoke(app, ["init", str(out), "--transport", "carrier-pigeon"])
     assert result.exit_code != EXIT_SUCCESS
     assert not out.exists()
+
+
+# --- DCR-0009: --api-key-file bare-key mode with a leading comment line -------
+
+
+def test_load_api_key_file_bare_key_with_leading_comment_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file shaped `# my key\\nsk-ant-abc123` (a comment line followed by the
+    real bare key) must still resolve ANTHROPIC_API_KEY to the key itself, not
+    the OLD `content.split()[0]` over the WHOLE file (which yielded the
+    literal '#' from the comment's leading character, failing
+    `_infer_key_env_var` and exiting EXIT_CONFIG despite a valid key being
+    present)."""
+    from mylonite.cli import _load_api_key_file
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    key_file = tmp_path / "key.txt"
+    key_file.write_text("# my key\nsk-ant-abc123\n", encoding="utf-8")
+
+    try:
+        _load_api_key_file(key_file)
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-abc123"
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+# --- DCR-0010: named 'mcp:<family>' target + --target-file silently ignores ---
+# --- the positional target -----------------------------------------------------
+
+
+def test_scan_named_mcp_target_plus_target_file_is_rejected(tmp_path: Path) -> None:
+    """`scan mcp:<family> --target-file other.yaml` used to silently ignore the
+    positional 'mcp:<family>' target and scan `other.yaml`'s target instead,
+    with no error -- the symmetric 'reference:' + --target-file combo was
+    already rejected two lines above for the same reason. The rejection must
+    cover any non-'mcp:custom' positional target, not just 'reference:'."""
+    target_file = tmp_path / "other.yaml"
+    target_file.write_text("family: acme\ncommand: python\nargs: ['-m', 'srv']\n", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        ["scan", "mcp:filesystem", "--target-file", str(target_file), "--authorize", "acme"],
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "--target-file" in result.output

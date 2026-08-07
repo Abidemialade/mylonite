@@ -258,9 +258,22 @@ async def _main(argv: list[str]) -> int:
             return 2
 
     print(f"Recording {len(cases)} provider-matrix fixture(s)...")
+    # DCR-0024: these are independent, network-I/O-bound provider recordings —
+    # await them concurrently rather than one at a time. `return_exceptions=True`
+    # preserves per-case error isolation (one provider failing/raising must not
+    # stop the others from completing); `_record_one` already catches its own
+    # exceptions and returns False, but this is defence in depth for anything
+    # that slips past that.
+    results = await asyncio.gather(
+        *(_record_one(case, api_base=args.api_base) for case in cases),
+        return_exceptions=True,
+    )
     recorded = 0
-    for case in cases:
-        if await _record_one(case, api_base=args.api_base):
+    for case, outcome in zip(cases, results, strict=True):
+        if isinstance(outcome, BaseException):
+            print(f"[FAIL] {case.name} ({case.model}): unexpected error: {outcome!r}")
+            continue
+        if outcome:
             recorded += 1
 
     print(f"\n=== Recording summary: {recorded}/{len(cases)} recorded ===")

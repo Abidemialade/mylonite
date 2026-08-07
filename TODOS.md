@@ -73,68 +73,11 @@ regression tests locking in the correct behavior — see the review doc and comm
 message for the full trace. The `gate mcp:<family>` route (DCR-0014/0015, medium
 severity but a real regression in a documented CLI path) was also fixed in the same
 pass since it's correlated with the redaction work and blocks the release's own
-headline feature otherwise. These are the remaining medium/low findings, deferred
-rather than expanding the 0.7.9 diff further:
+headline feature otherwise. The remaining medium/low findings (DCR-0007/0008/0009/
+0010/0011/0012/0013/0018/0019/0020/0021/0024) were all fixed in a follow-up pass,
+each with a red→green TDD regression test — see the same review doc and the
+follow-up commit for the full trace. What's left:
 
-- **`_load_api_key_file`'s bare-key mode picks the first whitespace-split token of
-  the WHOLE file, not the key's own line** (DCR-0009 — `cli.py:267`). A file shaped
-  `# my key\nsk-ant-abc123` (comment line + bare key) yields `key = "#"` instead of
-  the real key, failing `_infer_key_env_var` and exiting `EXIT_CONFIG` even though a
-  valid key is present. *Trigger:* next patch release; fix is small (derive from the
-  first non-comment, non-blank line).
-- **`scan mcp:<family> --target-file other.yaml` silently ignores the positional
-  target** (DCR-0010 — `cli.py:1306`), scanning `other.yaml`'s target instead with no
-  error — the symmetric `reference:` + `--target-file` case is explicitly rejected two
-  lines above for the same reason. *Trigger:* next patch release; extend that guard to
-  any non-`mcp:custom` positional target.
-- **`_relative_sqlite_env_keys`'s unanchored `"sqlite" in low` substring match**
-  misclassifies a non-SQLite URL whose hostname merely contains "sqlite" (e.g.
-  `postgresql://sqlite-cache.internal:5432/app`) as a relative SQLite path warning
-  (DCR-0011 — `cli.py:3243`). Cosmetic false-positive only. *Trigger:* next patch
-  release; match against the URL scheme, not a bare substring.
-- **`ScanConfig.provider_failure_threshold` has no lower-bound validation**, unlike
-  `max_concurrent` (`Field(ge=1)`) (DCR-0012 — `scan/engine.py:331`). A
-  `provider_failure_threshold=0` config aborts a scan after the very first attempt
-  regardless of outcome. *Trigger:* next patch release; add the same `Field(ge=1)`
-  guard.
-- **`ScanEngine._process_one`'s `seed_id = payload.metadata.get("seed_id") or
-  payload.pattern_id` uses truthy-`or`, not an `is None` check** (DCR-0013 —
-  `scan/engine.py:437`), so a present-but-empty `seed_id` silently falls back to
-  `pattern_id` for compliance provenance. *Trigger:* next patch release.
-- **Reference-target `validate` never threads `--iteration-timeout` into
-  `DifferentialValidator`**, unlike the custom-target branch (DCR-0007 —
-  `cli.py:2906`) — a stalled provider call on the reference path can hang the CLI/CI
-  job indefinitely. **`_post_gate_annotations`'s `post_check_run` call has no visible
-  timeout** either (DCR-0008 — `cli.py:3614`), same hang class. *Trigger:* next patch
-  release; both are one-line timeout threading fixes.
-- **`_MCPAttackSession.drive_planner`'s effect-probe body falls back to an incidental
-  (non-payload) planted string** when no real payload was planted short enough to skip
-  `_MIN_PLANTED_PAYLOAD_CHARS` (DCR-0018 — `_session_adapter.py:895`), reintroducing
-  the false-negative shape a prior fix (referenced in-repo as DCR-0006) closed for a
-  different code path — silently under-reports confirmed exploits. **The delivery
-  check pulls in the opposite direction**: it matches on ANY planted string arg
-  (ids/paths/titles), not just payload-shaped content (DCR-0020 —
-  `_session_adapter.py:889`), over-reporting delivery when an incidental filename
-  happens to reappear in unrelated planner output. Both stem from tracking planted
-  content in one generic list instead of a payload-typed subset, and share a fix
-  shape (use the payload-shaped list in both places). *Trigger:* next patch release —
-  this pair directly affects Mylonite's own detection precision/recall, prioritize
-  ahead of the others in this section.
-- **`_render_seed_args`'s chained `.replace("{payload}", ...).replace("{scope}", ...)`
-  lets a payload containing the literal substring `{scope}` get silently re-mutated**
-  by the second substitution (DCR-0019 — `_session_adapter.py:166`), so the actually
-  planted content can diverge from `payload.body`, breaking downstream delivery-token
-  matching. *Trigger:* next patch release; substitute both placeholders in one pass.
-- **`_extract_first_number` runs an unbounded synchronous `re.search` directly on the
-  event loop** inside `async def _run_setup`/`_run_seed_arm`, with no size cap unlike
-  every other tool-result read in the file (DCR-0021 — `_session_adapter.py:1040`) —
-  a large target-controlled result blocks every concurrently in-flight scan attempt.
-  *Trigger:* next patch release; cap length and/or run via
-  `run_in_executor`/`asyncio.to_thread`, matching `_bounded_regex_search`'s existing
-  pattern in the same file.
-- **`scripts/record_provider_fixtures.py`'s `_main` awaits each provider recording
-  sequentially** instead of concurrently (DCR-0024, low — maintainer-run tooling, not
-  production path). *Trigger:* quality-of-life only, no forcing trigger.
 - **One high-severity finding was quarantined by the verification gate** for evidence
   spanning 4 lines against `verify.py`'s 3-line cap — confirmed genuinely verbatim,
   not noise (the original DCR-0007/0.7.9-review numbering, generate's

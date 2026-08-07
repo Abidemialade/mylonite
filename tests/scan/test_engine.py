@@ -441,6 +441,40 @@ async def test_engine_skips_unknown_seed_id() -> None:
     assert result.report.attempts[0].outcome == "skipped_unknown_seed"
 
 
+@pytest.mark.asyncio
+async def test_engine_treats_present_but_empty_seed_id_as_unknown_not_pattern_id_fallback() -> None:
+    """DCR-0013: `seed_id = payload.metadata.get("seed_id") or payload.pattern_id`
+    used truthy-`or`, not an `is None` check -- a present-but-EMPTY seed_id
+    silently fell back to pattern_id, corrupting compliance provenance. Uses a
+    pattern_id that IS a real catalogue seed id so the OLD buggy fallback would
+    resolve it successfully (treated as a known seed, proceeding normally)
+    while the fixed behaviour (an explicit empty seed_id is not in the
+    catalogue) correctly reports skipped_unknown_seed."""
+    real_seed_id = SEED_CATALOGUE[0].pattern_id
+    payload = Payload(
+        pattern_id=real_seed_id,
+        channel="tool-result",
+        body="x",
+        metadata={
+            "seed_id": "",  # present but EMPTY -- must NOT fall back to pattern_id
+            "weakness": "W2",
+            "predicate": "send_email_to_attacker",
+            "setup": "seed_note",
+            "drive": "read_note_for_summary",
+            "needs_customisation": "true",
+        },
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "skipped_unknown_seed"
+
+
 # --- pattern_id_filter (single-seed scoping) -------------------------------
 
 
@@ -1264,5 +1298,27 @@ def test_scan_config_rejects_non_positive_max_concurrent(bad_value: int) -> None
             provider="anthropic",
             model="stub-model",
             max_concurrent=bad_value,
+            output_dir=Path(".mylonite/scans"),
+        )
+
+
+# --- DCR-0012: provider_failure_threshold must be >= 1 ------------------------
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_scan_config_rejects_non_positive_provider_failure_threshold(bad_value: int) -> None:
+    """provider_failure_threshold had no lower-bound validation, unlike
+    max_concurrent (Field(ge=1)) -- a value of 0 aborts a scan after the very
+    FIRST attempt regardless of outcome (`consecutive_failures >= threshold`
+    is true even at 0 consecutive failures). Not a config a caller could have
+    MEANT -- reject it at ScanConfig construction, mirroring max_concurrent."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        ScanConfig(
+            target_id="reference:vulnerable",
+            provider="anthropic",
+            model="stub-model",
+            provider_failure_threshold=bad_value,
             output_dir=Path(".mylonite/scans"),
         )
