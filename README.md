@@ -8,6 +8,8 @@
 > silently strip the protection away.
 
 [![CI](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml/badge.svg)](https://github.com/Abidemialade/mylonite/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mylonite.svg)](https://pypi.org/project/mylonite/)
+[![GitHub release](https://img.shields.io/github/v/release/Abidemialade/mylonite)](https://github.com/Abidemialade/mylonite/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 **Built for teams shipping MCP or agentic apps who need CI-enforced regression coverage on

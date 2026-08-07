@@ -118,17 +118,34 @@ unfinished, and no tag was ever pushed for either).
    `## [X.Y.Z] - YYYY-MM-DD`, then add a fresh empty `## [Unreleased]` header
    above it for the next round of changes. Add a compare link at the bottom:
    `[X.Y.Z]: https://github.com/Abidemialade/mylonite/compare/vPREV...vX.Y.Z`.
+   The `## [X.Y.Z]` section body becomes the GitHub Release notes verbatim
+   (see step 4), so write it as such.
+
+   Editing `CHANGELOG.md` shifts the line number of the one pre-existing,
+   deliberately-fake credential `detect-secrets` has baselined in it (a
+   test-fixture-shaped string in a changelog entry describing the redaction
+   feature). Regenerate the baseline before pushing, or CI's `precommit` and
+   `security` jobs both fail on it (happened for both 0.7.7 and 0.7.8):
+   ```bash
+   git ls-files | python -m detect_secrets.pre_commit_hook --baseline .secrets.baseline
+   git add .secrets.baseline
+   ```
 3. **Land both changes on `main`** (same PR as the release work, or a
    dedicated `release: vX.Y.Z` PR/commit).
 4. **Tag and push** — this is the step that actually triggers the build +
-   TestPyPI + PyPI publish workflow, so do it deliberately, from `main`, once
-   1–3 are merged:
+   TestPyPI + PyPI publish + GitHub Release workflow, so do it deliberately,
+   from `main`, once 1–3 are merged:
    ```bash
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
    The tag must match `release.yml`'s trigger patterns (`v0.[6-9].*`,
    `v0.[1-9][0-9].*`, or `v[1-9]*.*.*`) or the workflow won't run.
+   `release.yml`'s final job creates the GitHub Release automatically (title
+   `vX.Y.Z`, notes = the matching `CHANGELOG.md` section) — a pushed tag by
+   itself does **not** show up on the repo's Releases page or the
+   `/releases/latest` API; without this job that page silently goes stale
+   even though PyPI is current (this happened from v0.7.0 through v0.7.6).
 
 ## Running live e2e tests before a release
 
