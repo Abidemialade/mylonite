@@ -394,6 +394,77 @@ def test_env_file_loads_only_known_provider_vars(
     os.environ.pop("GEMINI_API_KEY", None)
 
 
+def test_env_file_loads_previously_dropped_provider_keys_model_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T13: the old closed allowlist (PROVIDER_ENV_VARS's ~9 entries) silently
+    dropped ANY provider key outside it -- Groq/Mistral/DeepSeek/OpenRouter
+    keys vanished with no trace. The pattern-based funnel (`*_API_KEY`) must
+    now load them."""
+    for var in ("GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "GROQ_API_KEY=gsk-test-1234567890\n"
+        "MISTRAL_API_KEY=mistral-test-1234567890\n"
+        "DEEPSEEK_API_KEY=deepseek-test-1234567890\n"
+        "OPENROUTER_API_KEY=openrouter-test-1234567890\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    try:
+        assert os.environ.get("GROQ_API_KEY") == "gsk-test-1234567890"
+        assert os.environ.get("MISTRAL_API_KEY") == "mistral-test-1234567890"
+        assert os.environ.get("DEEPSEEK_API_KEY") == "deepseek-test-1234567890"
+        assert os.environ.get("OPENROUTER_API_KEY") == "openrouter-test-1234567890"
+    finally:
+        for var in ("GROQ_API_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY", "OPENROUTER_API_KEY"):
+            os.environ.pop(var, None)
+
+
+def test_env_file_loads_all_three_azure_vars_model_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Azure needs AZURE_API_KEY + AZURE_API_BASE + AZURE_API_VERSION -- the
+    old allowlist only recognised AZURE_API_KEY (one of three)."""
+    for var in ("AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION"):
+        monkeypatch.delenv(var, raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "AZURE_API_KEY=azure-test-1234567890\n"
+        "AZURE_API_BASE=https://example.openai.azure.com/\n"
+        "AZURE_API_VERSION=2024-02-01\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    try:
+        assert os.environ.get("AZURE_API_KEY") == "azure-test-1234567890"
+        assert os.environ.get("AZURE_API_BASE") == "https://example.openai.azure.com/"
+        assert os.environ.get("AZURE_API_VERSION") == "2024-02-01"
+    finally:
+        for var in ("AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION"):
+            os.environ.pop(var, None)
+
+
+def test_env_file_reports_unrecognized_key_on_stderr_model_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A key that matches NEITHER the pattern layer nor the explicit map must
+    be reported to stderr, not silently dropped without a trace (T13 closes
+    the same "allowlist that can't fail loudly" shape T1 fixed for
+    NOT_TESTED_OUTCOMES)."""
+    monkeypatch.delenv("MYLONITE_TRULY_UNRECOGNIZED_VAR", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("MYLONITE_TRULY_UNRECOGNIZED_VAR=nope\n", encoding="utf-8")
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    assert "MYLONITE_TRULY_UNRECOGNIZED_VAR" not in os.environ
+    out = result.stderr or result.output
+    assert "MYLONITE_TRULY_UNRECOGNIZED_VAR" in out
+
+
 def test_doctor_warns_on_non_key_shaped_value(monkeypatch: pytest.MonkeyPatch) -> None:
     """doctor flags an ANTHROPIC_API_KEY that clearly isn't a key (without printing it)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "changeme")
@@ -559,6 +630,65 @@ def test_scan_rejects_blank_model() -> None:
     result = runner.invoke(app, ["scan", "reference:vulnerable", "--model", "  ", "--dry-run"])
     assert result.exit_code == EXIT_CONFIG
     assert "invalid --model" in (result.stderr or result.output)
+
+
+def test_validate_rejects_blank_model_via_model_ref(tmp_path: Path) -> None:
+    """`validate` used to be the ONE model-taking command that skipped model
+    validation/routing entirely -- it never called `_validate_model_string`
+    or `_route_model`. It must now go through the same checks (via
+    `ModelRef.parse`) as scan/gate/ablate/doctor, and fail on the SAME blank
+    model before it ever needs a real generated-test dir on disk."""
+    result = runner.invoke(
+        app, ["validate", str(tmp_path / "nonexistent"), "--model", "  "]
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid --model" in (result.stderr or result.output)
+
+
+def test_validate_rejects_unroutable_model_with_no_hint_model_ref(tmp_path: Path) -> None:
+    """A model `validate` can't route (no --provider, no 'provider/' prefix,
+    unknown to LiteLLM) must fail loudly via `ModelRef.parse`, closing the
+    gap that let `validate` silently assume Anthropic no matter the model."""
+    result = runner.invoke(
+        app,
+        ["validate", str(tmp_path / "nonexistent"), "--model", "not-a-real-model-xyz123"],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "can't determine a provider" in out
+
+
+def test_provider_flag_still_works_and_warns_deprecated_model_ref(tmp_path: Path) -> None:
+    """--provider is backward compatible (still routes the model exactly as
+    before) but now warns on stderr, once per invocation, pointing at the
+    provider-prefixed-model-string convention instead."""
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--provider",
+            "anthropic",
+            "--dry-run",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert out.count("--provider is deprecated") == 1
+    assert "anthropic/claude" in out or "provider-prefixed" in out.lower()
+
+
+def test_provider_flag_omitted_never_warns_model_ref(tmp_path: Path) -> None:
+    """No --provider flag → no deprecation noise at all."""
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert "deprecated" not in out
 
 
 def test_doctor_classifies_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:

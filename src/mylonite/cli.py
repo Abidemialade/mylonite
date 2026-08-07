@@ -29,7 +29,7 @@ import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Final, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar
 
 import typer
 from rich.console import Console
@@ -41,6 +41,9 @@ from mylonite._paths import safe_slug
 from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
+
+if TYPE_CHECKING:
+    from mylonite.scan.model_ref import ModelRef
 
 logger = logging.getLogger(__name__)
 
@@ -183,26 +186,32 @@ def _warn_unsupported_python() -> None:
         )
 
 
-def _provider_key_var_names() -> set[str]:
-    from mylonite.scan.providers import PROVIDER_ENV_VARS
-
-    return {var for variables in PROVIDER_ENV_VARS.values() for var in variables}
-
-
 def _load_env_file(path: Path) -> None:
-    """Load ONLY known provider API-key vars from a dotenv file — never blanket.
+    """Load recognised provider credential/config vars from a dotenv file —
+    never blanket.
 
-    Reads ``KEY=VALUE`` lines and sets a var when it is a known provider API-key
-    env var (``providers.PROVIDER_ENV_VARS``), so a stray ``.env`` can't inject
-    arbitrary environment. An explicitly-passed flag OVERRIDES an ambient value
-    (standard CLI precedence: explicit > ambient — the exact case the flag exists
-    for is a wrong key already in the shell), warning on stderr when it does.
+    Reads ``KEY=VALUE`` lines and sets a var when
+    ``providers.looks_like_provider_env_var`` recognises the key name, so a
+    stray ``.env`` can't inject arbitrary environment. That recognition is
+    PATTERN-based (``*_API_KEY``, ``AZURE_*``) plus a small explicit map for
+    the rest (``providers.PROVIDER_ENV_VARS`` — AWS's two-var Bedrock
+    credential pair, which matches neither pattern) — not a closed allowlist,
+    which used to silently drop any provider's key it didn't already know
+    about (Groq/Mistral/DeepSeek/OpenRouter) and Azure's non-key vars
+    (``AZURE_API_BASE``/``AZURE_API_VERSION``, only 1 of its 3 required vars).
+    Every unrecognised key is reported on stderr — dropped, never silent.
+
+    An explicitly-passed flag OVERRIDES an ambient value (standard CLI
+    precedence: explicit > ambient — the exact case the flag exists for is a
+    wrong key already in the shell), warning on stderr when it does.
     """
+    from mylonite.scan.providers import looks_like_provider_env_var
+
     if not path.exists():
         echo_err(f"env file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
-    known = _provider_key_var_names()
     loaded: list[str] = []
+    dropped: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -214,7 +223,8 @@ def _load_env_file(path: Path) -> None:
         # not every quote char, which would corrupt a value ending in a quote.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
-        if key not in known:
+        if not looks_like_provider_env_var(key):
+            dropped.append(key)
             continue
         if key in os.environ and os.environ[key] != value:
             echo_err(f"warning: overriding ambient {key} with the value from {path}.")
@@ -222,6 +232,12 @@ def _load_env_file(path: Path) -> None:
         loaded.append(key)
     if loaded:
         echo_err(f"loaded {', '.join(sorted(loaded))} from {path}.")
+    if dropped:
+        echo_err(
+            f"ignored {', '.join(sorted(dropped))} from {path}: not a recognised "
+            "provider credential/config var name (expected e.g. *_API_KEY, "
+            "AZURE_*, or an entry in providers.PROVIDER_ENV_VARS)."
+        )
 
 
 def _infer_key_env_var(key: str) -> str | None:
@@ -402,7 +418,14 @@ def init(
 def doctor(
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider to check, e.g. 'anthropic'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider to check, e.g. 'anthropic'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -429,7 +452,7 @@ def doctor(
     """
     from mylonite._redaction import looks_like_api_key, redact
     from mylonite.scan.diagnostics import classify_provider_error
-    from mylonite.scan.providers import env_vars_for, provider_from_model
+    from mylonite.scan.providers import env_vars_for
 
     # Mirror `scan`: fill provider/model from mylonite.yaml when the flags are
     # omitted, so `doctor` checks the same model the scan will actually use
@@ -445,11 +468,12 @@ def doctor(
         provider = provider or rc.provider
         model = model or rc.model
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
-    routed = _route_model(provider, base_model)
-    resolved_provider = provider_from_model(routed, provider)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    routed = ref.raw
+    resolved_provider = ref.provider
 
     # Warn (don't fail) if the resolved API key clearly isn't key-shaped — a common
     # footgun (placeholder, path, truncated paste). Never print the value itself.
@@ -492,16 +516,53 @@ def _validate_model_string(model: str) -> None:
 def _route_model(provider: str | None, model: str) -> str:
     """Apply LiteLLM ``provider/model`` routing when the user set --provider.
 
-    LiteLLM routes by model-string prefix; some Anthropic aliases (e.g.
-    ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM Provider
-    NOT provided". When the user explicitly passes ``--provider`` and the model
-    carries no ``provider/`` prefix yet, prefix it so the alias routes. When
-    ``--provider`` is unset we leave the model untouched, preserving the
-    auto-routing the bundled ``claude-*`` defaults already rely on.
+    Backward-compat wrapper: the actual prefixing rule now lives in
+    :func:`mylonite.scan.model_ref.route_model` (the single source of truth
+    :class:`~mylonite.scan.model_ref.ModelRef` also uses to build ``.raw``),
+    kept importable here under its original name for existing callers
+    (``_resolve_role_model`` below) and tests.
     """
-    if provider and "/" not in model:
-        return f"{provider}/{model}"
-    return model
+    from mylonite.scan.model_ref import route_model
+
+    return route_model(provider, model)
+
+
+def _warn_deprecated_provider_flag() -> None:
+    """H1: ``--provider`` is deprecated (still works, through 0.7.10) in
+    favour of a provider-prefixed model string — the convention LiteLLM
+    itself uses and that promptfoo/garak adopters already know. Emits once
+    per command invocation: each command reads its own ``provider`` value
+    exactly once, so a single call here (guarded on ``provider is not None``)
+    at that point naturally fires once, never spammed across a retry loop.
+    """
+    echo_err(
+        "warning: --provider is deprecated and will be removed in 0.7.10 — prefix "
+        "the model instead, e.g. --model anthropic/claude-haiku-4-5 instead of "
+        "--model claude-haiku-4-5 --provider anthropic."
+    )
+
+
+def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
+    """``ModelRef.parse`` for a CLI command, degrading a bad/unroutable model
+    to a friendly ``EXIT_CONFIG`` instead of an unhandled traceback.
+
+    Also warns (once) when ``provider`` is set — see
+    :func:`_warn_deprecated_provider_flag` — whether it came from an explicit
+    ``--provider`` flag or a declarative ``mylonite.yaml`` ``provider:`` key
+    (the same deprecated field either way; ``scan``/``gate`` fold the config
+    value into ``provider`` before calling here, so this can't tell the two
+    apart, and a config-file nudge toward the model-prefix convention is just
+    as useful as a flag one).
+    """
+    from mylonite.scan.model_ref import ModelRef
+
+    if provider is not None:
+        _warn_deprecated_provider_flag()
+    try:
+        return ModelRef.parse(model, provider_hint=provider)
+    except ValueError as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -855,7 +916,14 @@ def scan(
     ] = None,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -1001,10 +1069,11 @@ def scan(
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
 
     # Role-separated models: each defaults to the base model. Validate + route
     # any explicit override exactly like --model.
@@ -2318,7 +2387,14 @@ def validate(
     ] = 5,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider for the live validation run."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider for the live validation run. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -2420,8 +2496,18 @@ def validate(
     """
     from mylonite import testkit
 
-    effective_provider = provider or "anthropic"
-    effective_model = model or "claude-haiku-4-5-20251001"
+    # T13: `validate` used to be the ONE model-taking command that skipped
+    # BOTH `_validate_model_string` and provider routing/derivation entirely
+    # -- a plain `provider or "anthropic"` / `model or "<default>"` with no
+    # validation at all. It now goes through the same `ModelRef.parse` path
+    # as scan/gate/ablate/doctor, deliberately BEFORE `_locate_generated`
+    # below so a bad --model fails fast without first requiring a real
+    # generated-test dir on disk.
+    base_model = model or "claude-haiku-4-5-20251001"
+    _validate_model_string(base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
 
     test_path, exploit_path = _locate_generated(target)
 
@@ -3299,7 +3385,14 @@ def gate(
     ] = False,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -3452,10 +3545,11 @@ def gate(
     layout = _layout_for(ctx, config_root=config_root)
     out = out if out is not None else layout.gate
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
 
     # --- resolve adapter (mirrors scan command routing) ---
     # 'reference:*' + --target-file is never meaningful — the reference targets
@@ -3867,7 +3961,16 @@ def ablate(
         int,
         typer.Option("--iterations", help="Scans per control per side (raw/guarded). Default 1."),
     ] = 1,
-    provider: Annotated[str | None, typer.Option("--provider")] = None,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider. DEPRECATED (warns; removal planned 0.7.10) -- "
+                "prefix --model instead, e.g. 'anthropic/claude-haiku-4-5'."
+            ),
+        ),
+    ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
     redundancy: Annotated[
         bool,
@@ -3919,10 +4022,11 @@ def ablate(
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
 
     try:
         tf = load_target_file(target_file)
