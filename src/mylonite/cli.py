@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import os
 import sys
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Any, Final, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar
 
 import typer
 from rich.console import Console
@@ -41,6 +42,9 @@ from mylonite._paths import safe_slug
 from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
+
+if TYPE_CHECKING:
+    from mylonite.scan.model_ref import ModelRef
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +98,13 @@ _DEFAULT_MAX_LLM_CALLS = 50
 #: a real subprocess spawn + a multi-turn planner run; pass a larger value
 #: explicitly for a target known to need more headroom.
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
+
+#: DCR-0008: bound on the outbound `gh api` check-run POST in the gate path —
+#: no CLI-flag layer exists for this internal call, so a single sane constant
+#: (not zero, no existing codebase convention to mirror for a subprocess
+#: timeout) stands in for one. A stalled GitHub API call must fail fast
+#: instead of hanging the gate job indefinitely.
+_GH_API_TIMEOUT_S: Final = 30.0
 
 _T = TypeVar("_T")
 
@@ -183,26 +194,32 @@ def _warn_unsupported_python() -> None:
         )
 
 
-def _provider_key_var_names() -> set[str]:
-    from mylonite.scan.providers import PROVIDER_ENV_VARS
-
-    return {var for variables in PROVIDER_ENV_VARS.values() for var in variables}
-
-
 def _load_env_file(path: Path) -> None:
-    """Load ONLY known provider API-key vars from a dotenv file — never blanket.
+    """Load recognised provider credential/config vars from a dotenv file —
+    never blanket.
 
-    Reads ``KEY=VALUE`` lines and sets a var when it is a known provider API-key
-    env var (``providers.PROVIDER_ENV_VARS``), so a stray ``.env`` can't inject
-    arbitrary environment. An explicitly-passed flag OVERRIDES an ambient value
-    (standard CLI precedence: explicit > ambient — the exact case the flag exists
-    for is a wrong key already in the shell), warning on stderr when it does.
+    Reads ``KEY=VALUE`` lines and sets a var when
+    ``providers.looks_like_provider_env_var`` recognises the key name, so a
+    stray ``.env`` can't inject arbitrary environment. That recognition is
+    PATTERN-based (``*_API_KEY``, ``AZURE_*``) plus a small explicit map for
+    the rest (``providers.PROVIDER_ENV_VARS`` — AWS's two-var Bedrock
+    credential pair, which matches neither pattern) — not a closed allowlist,
+    which used to silently drop any provider's key it didn't already know
+    about (Groq/Mistral/DeepSeek/OpenRouter) and Azure's non-key vars
+    (``AZURE_API_BASE``/``AZURE_API_VERSION``, only 1 of its 3 required vars).
+    Every unrecognised key is reported on stderr — dropped, never silent.
+
+    An explicitly-passed flag OVERRIDES an ambient value (standard CLI
+    precedence: explicit > ambient — the exact case the flag exists for is a
+    wrong key already in the shell), warning on stderr when it does.
     """
+    from mylonite.scan.providers import looks_like_provider_env_var
+
     if not path.exists():
         echo_err(f"env file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
-    known = _provider_key_var_names()
     loaded: list[str] = []
+    dropped: list[str] = []
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -214,7 +231,8 @@ def _load_env_file(path: Path) -> None:
         # not every quote char, which would corrupt a value ending in a quote.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
-        if key not in known:
+        if not looks_like_provider_env_var(key):
+            dropped.append(key)
             continue
         if key in os.environ and os.environ[key] != value:
             echo_err(f"warning: overriding ambient {key} with the value from {path}.")
@@ -222,6 +240,12 @@ def _load_env_file(path: Path) -> None:
         loaded.append(key)
     if loaded:
         echo_err(f"loaded {', '.join(sorted(loaded))} from {path}.")
+    if dropped:
+        echo_err(
+            f"ignored {', '.join(sorted(dropped))} from {path}: not a recognised "
+            "provider credential/config var name (expected e.g. *_API_KEY, "
+            "AZURE_*, or an entry in providers.PROVIDER_ENV_VARS)."
+        )
 
 
 def _infer_key_env_var(key: str) -> str | None:
@@ -248,7 +272,15 @@ def _load_api_key_file(path: Path) -> None:
     if "=" in first:
         _load_env_file(path)
         return
-    key = content.split()[0] if content else ""
+    # DCR-0009: derive the key from the first non-comment, non-blank line, not
+    # `content.split()[0]` over the WHOLE file — a leading `#`-comment line
+    # (e.g. `# my key\nsk-ant-abc123`) made that yield the literal `"#"`.
+    key = ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            key = stripped.split()[0]
+            break
     var = _infer_key_env_var(key)
     if var is None:
         echo_err(
@@ -402,7 +434,14 @@ def init(
 def doctor(
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider to check, e.g. 'anthropic'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider to check, e.g. 'anthropic'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -415,7 +454,8 @@ def doctor(
             help=(
                 "A declarative mylonite.yaml run config. Fills provider/model when "
                 "you omit the flags, so `doctor` pings the SAME model your scan will "
-                "use; an explicit flag always wins."
+                "use; auto-discovered from ./mylonite.yaml when present; an explicit "
+                "flag always wins."
             ),
         ),
     ] = None,
@@ -429,27 +469,28 @@ def doctor(
     """
     from mylonite._redaction import looks_like_api_key, redact
     from mylonite.scan.diagnostics import classify_provider_error
-    from mylonite.scan.providers import env_vars_for, provider_from_model
+    from mylonite.scan.providers import env_vars_for
 
-    # Mirror `scan`: fill provider/model from mylonite.yaml when the flags are
-    # omitted, so `doctor` checks the same model the scan will actually use
-    # rather than silently falling back to the default.
-    if run_config_path is not None:
-        from mylonite.config import load_run_config
-
-        try:
-            rc = load_run_config(run_config_path)
-        except Exception as exc:
-            echo_exc(f"invalid --config {run_config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+    # Mirror scan/gate/validate/ablate: fill provider/model from mylonite.yaml
+    # (auto-discovered from ./mylonite.yaml when --config is omitted, T14) then
+    # the flat MYLONITE_* env vars, so `doctor` checks the SAME model those
+    # commands will actually use rather than silently falling back to its own
+    # default -- doctor is exactly the command that should show an operator
+    # what config would actually be used.
+    _config_path, rc = _discover_run_config(run_config_path, command="doctor")
+    env_rc = _env_run_config_or_exit()
+    if rc is not None:
         provider = provider or rc.provider
         model = model or rc.model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
-    routed = _route_model(provider, base_model)
-    resolved_provider = provider_from_model(routed, provider)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    routed = ref.raw
+    resolved_provider = ref.provider
 
     # Warn (don't fail) if the resolved API key clearly isn't key-shaped — a common
     # footgun (placeholder, path, truncated paste). Never print the value itself.
@@ -492,16 +533,212 @@ def _validate_model_string(model: str) -> None:
 def _route_model(provider: str | None, model: str) -> str:
     """Apply LiteLLM ``provider/model`` routing when the user set --provider.
 
-    LiteLLM routes by model-string prefix; some Anthropic aliases (e.g.
-    ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM Provider
-    NOT provided". When the user explicitly passes ``--provider`` and the model
-    carries no ``provider/`` prefix yet, prefix it so the alias routes. When
-    ``--provider`` is unset we leave the model untouched, preserving the
-    auto-routing the bundled ``claude-*`` defaults already rely on.
+    Backward-compat wrapper only — new code should resolve a model via
+    :func:`_resolve_model_ref` (base model) or :func:`_parse_model_ref_or_exit`
+    (a second/role model in the same invocation), which additionally derive
+    ``.provider`` and raise loudly on an unroutable model instead of silently
+    passing it through to fail later, mid-call. The actual prefixing rule
+    lives in :func:`mylonite.scan.model_ref.route_model` (the single source
+    of truth :class:`~mylonite.scan.model_ref.ModelRef` also uses to build
+    ``.raw``); this wrapper stays importable under its original name only for
+    existing tests.
     """
-    if provider and "/" not in model:
-        return f"{provider}/{model}"
-    return model
+    from mylonite.scan.model_ref import route_model
+
+    return route_model(provider, model)
+
+
+def _warn_deprecated_provider_flag() -> None:
+    """H1: ``--provider`` is deprecated (still works, through 0.7.10) in
+    favour of a provider-prefixed model string — the convention LiteLLM
+    itself uses and that promptfoo/garak adopters already know. Emits once
+    per command invocation: each command reads its own ``provider`` value
+    exactly once, so a single call here (guarded on ``provider is not None``)
+    at that point naturally fires once, never spammed across a retry loop.
+    """
+    echo_err(
+        "warning: --provider is deprecated and will be removed in 0.7.10 — prefix "
+        "the model instead, e.g. --model anthropic/claude-haiku-4-5 instead of "
+        "--model claude-haiku-4-5 --provider anthropic."
+    )
+
+
+def _parse_model_ref_or_exit(model: str, provider: str | None) -> ModelRef:
+    """``ModelRef.parse`` for a CLI argument, degrading a bad/unroutable model
+    to a friendly ``EXIT_CONFIG`` instead of an unhandled traceback.
+
+    No deprecation warning here — a command resolving a SECOND model in the
+    same invocation (a role-separated ``--planner-model``/``--customiser-
+    model``/``--judge-model`` override in ``scan``) reuses this directly so
+    reusing ``--provider`` for that override doesn't re-fire the warning
+    :func:`_resolve_model_ref` already fired once for the base ``--model``.
+    Every model a command resolves goes through this (or ``_resolve_model_ref``
+    for the base one) — a role override must reject an unroutable model at
+    CLI-argument time exactly like the base model does, since it drives the
+    identical LiteLLM call path.
+    """
+    from mylonite.scan.model_ref import ModelRef
+
+    try:
+        return ModelRef.parse(model, provider_hint=provider)
+    except ValueError as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
+    """``ModelRef.parse`` for a command's BASE model — see
+    :func:`_parse_model_ref_or_exit` for the shared parse-or-exit behaviour.
+
+    Also warns (once) when ``provider`` is set — see
+    :func:`_warn_deprecated_provider_flag` — whether it came from an explicit
+    ``--provider`` flag or a declarative ``mylonite.yaml`` ``provider:`` key
+    (the same deprecated field either way; ``scan``/``gate`` fold the config
+    value into ``provider`` before calling here, so this can't tell the two
+    apart, and a config-file nudge toward the model-prefix convention is just
+    as useful as a flag one).
+    """
+    if provider is not None:
+        _warn_deprecated_provider_flag()
+    return _parse_model_ref_or_exit(model, provider)
+
+
+def _discover_run_config(explicit_path: Path | None, *, command: str) -> tuple[Path | None, Any]:
+    """Resolve the ``mylonite.yaml`` run config for ``command``.
+
+    An explicit ``--config`` always wins; otherwise auto-discover
+    ``./mylonite.yaml`` when present. Returns ``(path_used_or_None,
+    RunConfig_or_None)`` — ``(None, None)`` when no config applies at all.
+
+    T14/H3: this was ``gate``-only (the ``if config_path is None and
+    Path("mylonite.yaml").is_file(): ...`` block T11 added) — every other
+    command that accepts ``--config`` (``scan``, ``doctor``, and now
+    ``validate``/``ablate``) re-implemented (or, for ``scan``/``doctor``,
+    simply lacked) the SAME auto-discovery check. Centralising it here means
+    a future command gets auto-discovery by construction, not by remembering
+    to copy the ``gate``-specific block.
+    """
+    from mylonite.config import load_run_config
+
+    path = explicit_path
+    if path is None and Path("mylonite.yaml").is_file():
+        path = Path("mylonite.yaml")
+    if path is None:
+        return None, None
+    try:
+        rc = load_run_config(path)
+    except Exception as exc:
+        echo_exc(f"invalid config {path}", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    if explicit_path is None:
+        # DCR-0001: api_base is security-sensitive in a way no other RunConfig
+        # field is -- honoring it from a repo-shipped, auto-discovered
+        # mylonite.yaml the operator never asked to load would let a
+        # malicious repo silently redirect every outbound LiteLLM call (and
+        # the operator's real provider API key riding on it) to an attacker
+        # host. Auto-discovery still applies to every OTHER field; api_base
+        # specifically requires an explicit --config opt-in.
+        if rc.api_base is not None:
+            echo_err(
+                f"{command}: using {path} (auto-discovered) -- its api_base "
+                "will NOT be honored automatically (it could redirect your "
+                "provider API key to an untrusted host); pass --config "
+                f"{path} explicitly to opt in."
+            )
+            rc = rc.model_copy(update={"api_base": None})
+        else:
+            echo_err(f"{command}: using {path} (auto-discovered).")
+    return path, rc
+
+
+def _env_run_config_or_exit() -> Any:
+    """``env_run_config()``, catching a credentialed ``MYLONITE_API_BASE`` the
+    same way :func:`_discover_run_config` catches one from ``mylonite.yaml``
+    (``echo_err`` + ``EXIT_CONFIG``) rather than letting
+    :class:`~mylonite.scan.llm_policy.CredentialedApiBaseError` propagate as a
+    raw traceback. The security property is identical either way (the value
+    is refused, never silently used) — this only makes the failure mode
+    consistent across all three sources (CLI flag validation, mylonite.yaml,
+    env var) instead of the env-var layer alone surfacing as an uncaught
+    exception (exit 1) rather than a clean, actionable exit 2.
+    """
+    from mylonite.config import env_run_config
+    from mylonite.scan.llm_policy import CredentialedApiBaseError
+
+    try:
+        return env_run_config()
+    except CredentialedApiBaseError as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
+    """Build the :class:`~mylonite.scan.llm_policy.LLMPolicy` for a live run.
+
+    Sources, in precedence order: ``rc`` (the resolved ``mylonite.yaml``, if
+    any) then ``env_rc`` (the flat ``MYLONITE_*`` env vars — see
+    :func:`~mylonite.config.env_run_config`, called ONCE per command
+    invocation and reused for both this and the model/provider/role-model
+    resolution alongside it); a field left unset by both keeps
+    ``LLMPolicy``'s own documented default. There is deliberately no
+    CLI-flag layer for these fields yet (T14 scope: ``--api-base``/
+    ``--max-tokens``/etc. would be five more flags apiece across ``scan``/
+    ``gate``/``validate``/``ablate`` — left for a follow-up if operators
+    actually need a per-invocation override rather than a per-project/
+    per-shell one); ``mylonite.yaml``/env cover the "my org runs a LiteLLM
+    proxy" and "I want max_tokens=4096 for every run" cases this was written
+    for.
+    """
+    from mylonite.scan.llm_policy import LLMPolicy
+
+    api_base = (rc.api_base if rc is not None else None) or env_rc.api_base
+    max_tokens = (rc.max_tokens if rc is not None else None) or env_rc.max_tokens
+    temperature = rc.temperature if rc is not None else None
+    if temperature is None:
+        temperature = env_rc.temperature
+    timeout = (rc.timeout if rc is not None else None) or env_rc.timeout
+    num_retries = rc.num_retries if rc is not None else None
+    if num_retries is None:
+        num_retries = env_rc.num_retries
+    kwargs: dict[str, Any] = {}
+    if api_base is not None:
+        kwargs["api_base"] = api_base
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if num_retries is not None:
+        kwargs["num_retries"] = num_retries
+    return LLMPolicy(**kwargs)
+
+
+def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -> None:
+    """Pre-flight :func:`~mylonite.config.require_llm_configured` for every
+    resolved model a live run will actually call (planner/customiser/judge
+    can each be a different provider — see ``scan``'s ``_resolve_role_model``)
+    — ``EXIT_CONFIG`` before any adapter/subprocess/engine work starts,
+    naming every way to set a credential, instead of a scan/gate/validate/
+    ablate run burning a full attempt (spinning up an MCP subprocess, etc.)
+    one attempt at a time before a missing key surfaces buried in a report.
+
+    This is the ONE place the deleted ``MyloniteSettings.require_llm()``'s
+    "no default provider, fail loudly" invariant (CLAUDE.md) is actually
+    enforced as a pre-flight, not just as a later per-attempt diagnosis.
+    """
+    from mylonite.config import LLMNotConfiguredError, require_llm_configured
+
+    seen: set[str] = set()
+    for m in models:
+        if m in seen:
+            continue
+        seen.add(m)
+        try:
+            require_llm_configured(model=m, provider=provider)
+        except LLMNotConfiguredError as exc:
+            echo_err(str(exc))
+            raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -855,7 +1092,14 @@ def scan(
     ] = None,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
@@ -974,23 +1218,31 @@ def scan(
     """
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
+    # T14: auto-discovered from ./mylonite.yaml when no --config is passed —
+    # was gate-only before; see _discover_run_config.
     config_root: Path | None = None
-    if run_config_path is not None:
-        from mylonite.config import load_run_config
-
-        try:
-            rc = load_run_config(run_config_path)
-        except Exception as exc:
-            echo_exc(f"invalid --config {run_config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+    _config_path, rc = _discover_run_config(run_config_path, command="scan")
+    env_rc = _env_run_config_or_exit()
+    if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
         config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
+    # MYLONITE_MODEL / MYLONITE_PROVIDER / role-model env vars are the
+    # lowest-precedence source, below mylonite.yaml.
+    model = model or env_rc.model
+    provider = provider or env_rc.provider
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
 
     # The resolved artefact Layout: an explicit --output-dir always wins outright
     # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
@@ -1001,18 +1253,23 @@ def scan(
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-sonnet-4-6"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
 
-    # Role-separated models: each defaults to the base model. Validate + route
-    # any explicit override exactly like --model.
+    # Role-separated models: each defaults to the base model. Validate +
+    # resolve any explicit override through ModelRef exactly like --model —
+    # it drives the identical LiteLLM call path, so an unroutable override
+    # must reject at CLI-argument time too, not just fail later mid-scan.
+    # `.provider` is discarded: a role override doesn't get its own env-var
+    # check, only the base model's provider feeds ScanConfig/env lookups.
     def _resolve_role_model(override: str | None) -> str:
         if not override:
             return effective_model
         _validate_model_string(override)
-        return _route_model(provider, override)
+        return _parse_model_ref_or_exit(override, provider).raw
 
     effective_planner_model = _resolve_role_model(planner_model)
     effective_customiser_model = _resolve_role_model(customiser_model)
@@ -1053,24 +1310,29 @@ def scan(
     from mylonite.scan.engine import ScanConfig, ScanEngine
     from mylonite.scan.judge import SuccessJudge
 
-    # 'reference:*' + --target-file is never meaningful — the reference targets
-    # are bundled in-process twins with no target file of their own. The custom-
-    # target branch below (`target_file is not None or target == "mcp:custom"`)
-    # is checked BEFORE the reference branch, so passing both would silently
-    # ignore the 'reference:...' positional argument entirely and scan
-    # --target-file instead — surprising for an operator who typed a
-    # 'reference:' target expecting the bundled twin, and who would now hit an
-    # unexpected --authorize requirement. (Unlike `gate`'s #24 fix, `scan` never
-    # computed a separate `is_reference`-style variable read downstream —
-    # `report_target_id` is always set INSIDE the branch that actually ran, so
-    # there is no oracle/routing-divergence bug here, just this silent-argument-
-    # ignoring footgun.) Reject the combination up front with a clear message.
-    if target is not None and target.startswith("reference:") and target_file is not None:
+    # A named positional target (e.g. 'reference:vulnerable', 'mcp:filesystem')
+    # combined with --target-file is never meaningful — --target-file already
+    # fully describes a custom target on its own. The custom-target branch below
+    # (`target_file is not None or target == "mcp:custom"`) is checked BEFORE
+    # every other branch, so passing both would silently ignore the named
+    # positional argument entirely and scan --target-file's target instead —
+    # surprising for an operator who typed e.g. 'mcp:filesystem' expecting the
+    # BUNDLED family (DCR-0010: this used to be checked only for 'reference:*',
+    # leaving 'mcp:<family>' + --target-file silently mis-routed the same way).
+    # (Unlike `gate`'s #24 fix, `scan` never computed a separate
+    # `is_reference`-style variable read downstream — `report_target_id` is
+    # always set INSIDE the branch that actually ran, so there is no
+    # oracle/routing-divergence bug here, just this silent-argument-ignoring
+    # footgun.) Reject the combination up front with a clear message. Only
+    # 'mcp:custom' (which itself means "build the custom target from CLI
+    # flags", never from --target-file) and no positional target at all are
+    # exempt.
+    if target is not None and target != "mcp:custom" and target_file is not None:
         echo_err(
-            "scan: 'reference:*' targets are bundled in-process twins and don't take "
-            "--target-file. Pass a custom target via --target-file alone (drop the "
-            "'reference:' target argument), or drop --target-file to scan the "
-            "reference twin."
+            f"scan: --target-file already fully describes a custom target and can't "
+            f"be combined with a positional target ({target!r}). Pass a custom "
+            "target via --target-file alone (drop the positional target argument), "
+            f"or drop --target-file to scan {target!r} instead."
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
@@ -1243,6 +1505,21 @@ def scan(
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts (not just later, one
+    # attempt at a time, as a buried per-attempt diagnosis) -- but AFTER
+    # every other config/usage validation above (authorize, target shape,
+    # seed_arm, ...) so a more specific error still wins when both apply.
+    # --dry-run makes no live LLM call at all (ScanConfig.dry_run
+    # short-circuits before invocation), so it is deliberately exempt.
+    if not dry_run:
+        _require_llm_configured_or_exit(
+            effective_planner_model,
+            effective_customiser_model,
+            effective_judge_model,
+            provider=provider,
+        )
+
     customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
     judge = SuccessJudge(model=effective_judge_model)
 
@@ -1267,8 +1544,18 @@ def scan(
         judge=judge,
     )
 
+    from mylonite.scan._llm import llm_scope
+
     try:
-        result = asyncio.run(engine.run())
+        # T14: activates effective_policy (mylonite.yaml/env-resolved
+        # LLMPolicy) for every LiteLLM call this run makes — the customiser,
+        # judge, and (via LLMPlanner) the planner all read it through
+        # scan._llm.active_policy(). asyncio.run() copies the current
+        # contextvar context into the coroutine it schedules, so entering
+        # this scope BEFORE asyncio.run (rather than inside ScanEngine.run,
+        # which separately owns the budget-counter scope) is sufficient.
+        with llm_scope(policy=effective_policy):
+            result = asyncio.run(engine.run())
     except (ModuleNotFoundError, ImportError) as exc:
         # `scan reference:*` lazily imports the bundled reference target inside the
         # adapter; on an editable checkout without it this surfaces here. Fail with
@@ -1628,7 +1915,7 @@ def _emit_generated_test(
     ``scan_report_cache`` is the same style of cache for
     :func:`_backfill_scan_report`'s trimmed ``scan_report.json`` read.
     """
-    from mylonite._redaction import redact_target_yaml
+    from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -1647,9 +1934,15 @@ def _emit_generated_test(
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
+    # Never write the exploit's captured response/payload verbatim into a
+    # directory we tell the operator to commit — a successful exfiltration
+    # attack can carry a live secret in raw_response (DCR-0002 companion).
+    # Mirrors the redact_target_yaml() treatment applied to colocated_target
+    # a few lines below.
     colocated_exploit = out_dir / f"exploit_{safe_slug(enriched.pattern_id)}.json"
     colocated_exploit.write_text(
-        json_mod.dumps(enriched.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        json_mod.dumps(redact_value(enriched.model_dump(mode="json")), indent=2, sort_keys=True)
+        + "\n",
         encoding="utf-8",
     )
 
@@ -1939,6 +2232,10 @@ def _validate_custom(
     fast: bool = False,
     prove_input_control: bool = False,
     authorize: str | None = None,
+    planner_model: str | None = None,
+    customiser_model: str | None = None,
+    judge_model: str | None = None,
+    policy: Any | None = None,
 ) -> Any:
     """Validate a custom-target test by re-driving the REAL target (R1/R8).
 
@@ -1946,6 +2243,12 @@ def _validate_custom(
     payloads (including exfil) — so it is gated by the same ``--authorize``
     rule as ``scan``/``gate`` (:func:`_enforce_custom_authorize`), not zero
     checks.
+
+    ``planner_model``/``customiser_model``/``judge_model`` (T14) each default
+    to ``model`` (via ``DifferentialValidator``'s own fallback, mirroring
+    ``ScanConfig.resolved_planner_model`` et al.) when ``None``. ``policy``
+    (an :class:`~mylonite.scan.llm_policy.LLMPolicy`) is activated for the
+    live re-drive via ``scan._llm.llm_scope`` when given.
     """
     from mylonite.gate.mitigation import weakness_class_for
     from mylonite.plugins._mcp import target_registry
@@ -1972,6 +2275,15 @@ def _validate_custom(
 
     _enforce_custom_authorize(
         spec.family, tf.scope, spec.requires_scope, authorize, command="validate"
+    )
+
+    # T14/H3: the "no default provider, fail loudly" invariant -- a cheap,
+    # no-network credential-presence check, distinct from (and cheaper than)
+    # _provider_preflight's real live call just below. Ordered AFTER the
+    # authorize check above for the same DCR-0008 reason that preflight is:
+    # authorization gates every live-driving action, even one this static.
+    _require_llm_configured_or_exit(
+        planner_model or model, customiser_model or model, judge_model or model, provider=provider
     )
 
     # DCR-0008: fail fast on an unreachable provider with a distinct exit 4 —
@@ -2020,14 +2332,20 @@ def _validate_custom(
             "default for custom targets) to avoid 'teaching to the test'."
         )
 
+    effective_planner_model = planner_model or model
+
     def _factory() -> Any:
-        return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.raw)
+        return build_adapter_for_spec(
+            spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
+        )
 
     guarded_factory: Any = None
     if plan.control_weakness is not None:
 
         def _guarded() -> Any:
-            return build_adapter_for_spec(spec, scope=tf.scope, model=model, intent=plan.guarded)
+            return build_adapter_for_spec(
+                spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
+            )
 
         guarded_factory = _guarded
 
@@ -2062,6 +2380,9 @@ def _validate_custom(
         iterations=iterations,
         provider=provider,
         model=model,
+        planner_model=planner_model,
+        customiser_model=customiser_model,
+        judge_model=judge_model,
         target_adapter_factory=_factory,
         guarded_adapter_factory=guarded_factory,
         control_weakness=plan.control_weakness,
@@ -2071,7 +2392,10 @@ def _validate_custom(
         iteration_timeout_s=iteration_timeout_s,
         progress_cb=lambda msg: echo_err(f"  … {msg}"),
     )
-    return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+    from mylonite.scan._llm import llm_scope
+
+    with llm_scope(policy=policy):
+        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
 
 def _locate_generated(target: Path) -> tuple[Path, Path]:
@@ -2181,10 +2505,15 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     # legible: kept = build [ok] AND differential [ok] AND flakiness [x].
     legs_by_stage = {o.stage: o for o in report.outcomes}
     if getattr(report, "gating_legs", None):
+        # DCR-0004: a gating_legs entry with no matching outcome must render
+        # explicitly as missing, not silently drop out of the AND-chain — an
+        # operator reading an incomplete formula with no mark or mention of
+        # the missing leg can't tell the VERDICT might depend on it.
         rendered = " AND ".join(
             f"{leg} {_mark(legs_by_stage[leg].passed)}"
-            for leg in report.gating_legs
             if leg in legs_by_stage
+            else f"{leg} (missing)"
+            for leg in report.gating_legs
         )
         verdict = "KEPT" if report.kept else "REJECTED"
         console_print(console, f"gate: kept = {rendered}  =>  {verdict}")
@@ -2318,11 +2647,53 @@ def validate(
     ] = 5,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider for the live validation run."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider for the live validation run. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model for the live validation run."),
+    ] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner). "
+                "Defaults to --model. Same three-role split as `scan`/`gate`."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=("Override the model that CRAFTS/REFINES attack payloads. Defaults to --model."),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
+        ),
+    ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (provider / model / the role "
+                "models). Auto-discovered from ./mylonite.yaml when present; an "
+                "explicit flag always wins."
+            ),
+        ),
     ] = None,
     target_file: Annotated[
         Path | None,
@@ -2420,8 +2791,47 @@ def validate(
     """
     from mylonite import testkit
 
-    effective_provider = provider or "anthropic"
-    effective_model = model or "claude-haiku-4-5-20251001"
+    # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
+    # scan/gate — `validate` previously had neither --config nor
+    # --planner-model/--customiser-model/--judge-model at all, despite
+    # DifferentialValidator already accepting all three.
+    _config_path, rc = _discover_run_config(run_config_path, command="validate")
+    env_rc = _env_run_config_or_exit()
+    if rc is not None:
+        provider = provider or rc.provider
+        model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
+
+    # T13: `validate` used to be the ONE model-taking command that skipped
+    # BOTH `_validate_model_string` and provider routing/derivation entirely
+    # -- a plain `provider or "anthropic"` / `model or "<default>"` with no
+    # validation at all. It now goes through the same `ModelRef.parse` path
+    # as scan/gate/ablate/doctor, deliberately BEFORE `_locate_generated`
+    # below so a bad --model fails fast without first requiring a real
+    # generated-test dir on disk.
+    base_model = model or "claude-haiku-4-5-20251001"
+    _validate_model_string(base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
+
+    def _resolve_validate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_validate_role_model(planner_model)
+    effective_customiser_model = _resolve_validate_role_model(customiser_model)
+    effective_judge_model = _resolve_validate_role_model(judge_model)
 
     test_path, exploit_path = _locate_generated(target)
 
@@ -2494,11 +2904,24 @@ def validate(
             fast=fast,
             prove_input_control=prove_input_control,
             authorize=authorize,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
+            policy=effective_policy,
         )
     else:
         echo_err(
             f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
             "minute, a few cents; needs a provider (ANTHROPIC_API_KEY)."
+        )
+        # T14/H3: cheap, no-network credential-presence pre-flight before the
+        # real live _provider_preflight call just below (no authorize gate on
+        # this branch -- the bundled reference twins are safe-by-construction).
+        _require_llm_configured_or_exit(
+            effective_planner_model,
+            effective_customiser_model,
+            effective_judge_model,
+            provider=provider,
         )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
@@ -2532,6 +2955,14 @@ def validate(
             iterations=iterations,
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
+            # DCR-0007: thread --iteration-timeout through on the reference-target
+            # path too, matching the guard already applied to _validate_custom — a
+            # stalled provider call must not be able to hang the CLI/CI job
+            # indefinitely just because this branch omitted the kwarg.
+            iteration_timeout_s=iteration_timeout,
             metamorphic_strategies=["paraphrase"] if fast else None,
             # Record the canonical guarded fixtures into the gen dir's `fixtures/`
             # and run the on-disk committed test offline as a full-pass build —
@@ -2539,11 +2970,14 @@ def validate(
             record_fixtures_dir=test_path.parent / "fixtures",
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
-        report = validator.validate(
-            generated,
-            ReferenceVulnerableOracle().adapter(),
-            ReferenceVulnerableOracle(),
-        )
+        from mylonite.scan._llm import llm_scope
+
+        with llm_scope(policy=effective_policy):
+            report = validator.validate(
+                generated,
+                ReferenceVulnerableOracle().adapter(),
+                ReferenceVulnerableOracle(),
+            )
 
     # T2: stamp the model the differential was proven against, so the committed
     # regression is honest about which model version it gates (a fix can silently
@@ -2556,8 +2990,25 @@ def validate(
     # Persist the full ValidationReport (incl. the PR2 structured evidence) next
     # to the test so `mylonite report` can re-render the trust panel offline and
     # the JSON artefact carries the oracle's discrimination, not just a verdict.
+    # Redact the per-leg free text first (DCR-0003): outcome.detail can carry a
+    # live exception message or third-party ValidatorBase detail string, and
+    # `validate` tells the operator to commit this exact directory when the
+    # test is kept — the console table already redacts this same field before
+    # printing it (_render_validation_report), so persist the same sanitized
+    # copy instead of the raw report.
+    from mylonite._redaction import redact as _redact_report_text
+
+    sanitized_report = report.model_copy(
+        update={
+            "outcomes": [
+                outcome.model_copy(update={"detail": _redact_report_text(outcome.detail)})
+                for outcome in report.outcomes
+            ],
+            "notes": _redact_report_text(report.notes) if report.notes else report.notes,
+        }
+    )
     report_path = test_path.parent / "validation_report.json"
-    report_path.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    report_path.write_text(sanitized_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     _render_validation_report(report)
 
@@ -2859,15 +3310,23 @@ def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
     flagged: list[str] = []
     for key, val in env.items():
         low = val.lower()
-        if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
-            continue
         if "://" in val:
-            # URL form. The single '/' after the authority separator is NOT part
-            # of the path, so `sqlite:///data.db` is RELATIVE `data.db` while
+            # URL form. DCR-0011: match the SQLite marker against the URL
+            # SCHEME, not an unanchored substring test anywhere in the value —
+            # `"sqlite" in low` used to misclassify e.g.
+            # `postgresql://sqlite-cache.internal:5432/app` (a non-SQLite URL
+            # whose HOSTNAME merely contains "sqlite") as a relative SQLite path.
+            scheme = low.split("://", 1)[0]
+            if scheme not in ("sqlite", "sqlite3"):
+                continue
+            # The single '/' after the authority separator is NOT part of the
+            # path, so `sqlite:///data.db` is RELATIVE `data.db` while
             # `sqlite:////abs/x.db` is absolute `/abs/x.db` — the exact #18 trap.
             after = val.split("://", 1)[1]
             path = after[1:] if after.startswith("/") else after
         else:
+            if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
+                continue
             path = val
         is_posix_abs = path.startswith("/")
         is_win_abs = len(path) >= 2 and path[1] == ":"  # C:\… or C:/…
@@ -3230,7 +3689,12 @@ def _post_gate_annotations(
             title="Mylonite AI-layer findings",
             summary=f"{len(anns)} finding(s) localized to a source line.",
         )
-        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=pr_mod._default_run)
+        # DCR-0008: no visible timeout on this outbound GitHub API call — a
+        # stalled call could hang the gate job indefinitely. Bind a sane
+        # explicit timeout onto the runner at this call site rather than
+        # changing post_check_run's/Runner's signature.
+        _bounded_run = functools.partial(pr_mod._default_run, timeout=_GH_API_TIMEOUT_S)
+        post_check_run(repo_root, payload, gate_dir=gate_dir, _run=_bounded_run)
     except Exception:  # live glue must never break the gate
         return
 
@@ -3299,11 +3763,46 @@ def gate(
     ] = False,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="LiteLLM provider, e.g. 'anthropic' or 'openai'."),
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider, e.g. 'anthropic' or 'openai'. DEPRECATED (warns; "
+                "removal planned 0.7.10) -- prefix --model instead, e.g. "
+                "'anthropic/claude-haiku-4-5'."
+            ),
+        ),
     ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
+    ] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner). "
+                "Defaults to --model. Same three-role split as `scan` — see its "
+                "--planner-model help for the rationale."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=(
+                "Override the model that CRAFTS/REFINES attack payloads (the red-team / "
+                "attacker side). Defaults to --model."
+            ),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
+        ),
     ] = None,
     out: Annotated[
         Path | None,
@@ -3422,28 +3921,28 @@ def gate(
     # project config. Auto-discovered from ./mylonite.yaml when present and no
     # --config is passed; an explicit flag always wins. Closes the parity gap where
     # `gate` required --target-file even though the project's mylonite.yaml set it.
-    config_path = run_config_path
-    if config_path is None and Path("mylonite.yaml").is_file():
-        config_path = Path("mylonite.yaml")
-    if config_path is not None:
-        from mylonite.config import load_run_config
-
-        try:
-            rc = load_run_config(config_path)
-        except Exception as exc:
-            echo_exc(f"invalid config {config_path}", exc)
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-        if run_config_path is None:
-            echo_err(f"gate: using {config_path} (auto-discovered).")
+    # T14: delegates to the same _discover_run_config every command shares now.
+    config_path, rc = _discover_run_config(run_config_path, command="gate")
+    env_rc = _env_run_config_or_exit()
+    if rc is not None:
         target_file = target_file or rc.target_file
         authorize = authorize or rc.authorize
         provider = provider or rc.provider
         model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
         max_llm_calls = _resolve_option(max_llm_calls, rc.max_llm_calls, _DEFAULT_MAX_LLM_CALLS)
         config_root = rc.root
     else:
         max_llm_calls = _resolve_option(max_llm_calls, None, _DEFAULT_MAX_LLM_CALLS)
         config_root = None
+    model = model or env_rc.model
+    provider = provider or env_rc.provider
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
 
     # The resolved artefact Layout, mirroring `scan`: an explicit --out always
     # wins outright; absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the
@@ -3452,10 +3951,23 @@ def gate(
     layout = _layout_for(ctx, config_root=config_root)
     out = out if out is not None else layout.gate
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
+
+    # Role-separated models (T14, mirroring `scan`'s _resolve_role_model):
+    # each defaults to the base model.
+    def _resolve_gate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_gate_role_model(planner_model)
+    effective_customiser_model = _resolve_gate_role_model(customiser_model)
+    effective_judge_model = _resolve_gate_role_model(judge_model)
 
     # --- resolve adapter (mirrors scan command routing) ---
     # 'reference:*' + --target-file is never meaningful — the reference targets
@@ -3513,6 +4025,13 @@ def gate(
     # it removes even the theoretical possibility of the two calls resolving a
     # target file differently.
     custom_spec: Any = None
+    # DCR-0014/DCR-0015: the bundled `mcp:<family>[:<scope>]` route sets
+    # custom_spec too (below) so scan_fn's tagging step and validate_fn's
+    # twin-building can treat it exactly like the custom-target route instead
+    # of assuming only `custom`/`reference` routes exist. `mcp_scope` is the
+    # scope segment that route's TargetSpec needs (the `custom` route reads it
+    # off `tf.scope` instead — there is no TargetFile here to read it from).
+    mcp_scope: str | None = None
     routed_to: str
 
     if target_file is not None or target == "mcp:custom":
@@ -3538,13 +4057,13 @@ def gate(
                 "Pass a target YAML via --target-file."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_custom(tf, authorize, effective_model, command="gate")
+        adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model, command="gate")
         routed_to = "custom"
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
-        adapter = _build_adapter_for_reference(target, effective_model)
+        adapter = _build_adapter_for_reference(target, effective_planner_model)
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
@@ -3553,8 +4072,16 @@ def gate(
                 "See SECURITY.md."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_mcp(target, authorize, effective_model)
+        adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
         routed_to = "mcp"
+        # Resolve the same TargetSpec `_build_adapter_for_mcp` just validated
+        # (family/scope already known-good at this point) so downstream code
+        # can treat this route like the custom-target one — see the
+        # custom_spec/mcp_scope comment above.
+        from mylonite.plugins._mcp import target_registry
+
+        mcp_family, mcp_scope = _parse_mcp_target(target)
+        custom_spec = target_registry.resolve_target(mcp_family, mcp_scope)
     else:
         echo_err(
             f"unknown target shape {target!r}. "
@@ -3566,10 +4093,23 @@ def gate(
     # string — see the up-front rejection above for why the two could diverge.
     is_reference = routed_to == "reference"
 
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts -- but AFTER every
+    # other config/usage validation above (authorize, target shape, ...), so
+    # a more specific error still wins when both apply. `gate` has no
+    # --dry-run of its own, so this is unconditional.
+    _require_llm_configured_or_exit(
+        effective_planner_model,
+        effective_customiser_model,
+        effective_judge_model,
+        provider=provider,
+    )
+
     # --- closures injected into run_gate ---
 
     def scan_fn() -> ScanOutcomeBundle:
         from mylonite.plugins.registry import discover
+        from mylonite.scan._llm import llm_scope
         from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.customiser import PayloadCustomiser
         from mylonite.scan.engine import ScanConfig, ScanEngine
@@ -3593,6 +4133,9 @@ def gate(
             target_id=target if target is not None else f"mcp:{tf.family if tf else 'custom'}",
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
             max_llm_calls=max_llm_calls,
         )
         engine = ScanEngine(
@@ -3600,11 +4143,12 @@ def gate(
             adapter=adapter,
             attack_modules=attack_modules,
             customiser=PayloadCustomiser(
-                model=effective_model, purpose=purpose or (tf.purpose if tf else None)
+                model=effective_customiser_model, purpose=purpose or (tf.purpose if tf else None)
             ),
-            judge=SuccessJudge(model=effective_model),
+            judge=SuccessJudge(model=effective_judge_model),
         )
-        result = asyncio.run(engine.run())
+        with llm_scope(policy=effective_policy):
+            result = asyncio.run(engine.run())
         # The typed verdict for "did this scan actually run" (A1 fix) — carried
         # alongside the exploits so run_gate can tell a genuine clean scan apart
         # from one that never meaningfully ran (e.g. provider_unreachable).
@@ -3662,31 +4206,57 @@ def gate(
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
     def validate_fn(generated: Any) -> Any:
+        from mylonite.scan._llm import llm_scope
+
         if is_reference:
             validator = DifferentialValidator(
                 iterations=iterations,
                 provider=effective_provider,
                 model=effective_model,
+                planner_model=effective_planner_model if planner_model else None,
+                customiser_model=effective_customiser_model if customiser_model else None,
+                judge_model=effective_judge_model if judge_model else None,
                 record_fixtures_dir=out / "fixtures",
                 progress_cb=lambda msg: echo_err(f"  … {msg}"),
             )
-            return validator.validate(
-                generated,
-                ReferenceVulnerableOracle().adapter(),
-                ReferenceVulnerableOracle(),
-            )
-        # Custom target: mirror _validate_custom — re-drive the REAL target.
-        if tf is None:
-            echo_err("internal: expected a loaded TargetFile for custom validate_fn")
-            raise typer.Exit(code=EXIT_CONFIG)
+            with llm_scope(policy=effective_policy):
+                return validator.validate(
+                    generated,
+                    ReferenceVulnerableOracle().adapter(),
+                    ReferenceVulnerableOracle(),
+                )
+        # Custom / mcp: both re-drive the REAL target via a TargetSpec-driven
+        # twin, mirroring _validate_custom. DCR-0014: the bundled
+        # `mcp:<family>[:<scope>]` route never sets `tf` (there is no
+        # TargetFile to load for a bundled target) but DOES set custom_spec /
+        # mcp_scope at routing time above — branch on routed_to instead of
+        # assuming every non-reference route went through the target_file
+        # path (which used to make `gate mcp:<family>` exit here on ANY
+        # finding).
         from mylonite.plugins._mcp import target_registry
         from mylonite.plugins._mcp.factory import build_adapter_for_spec
-        from mylonite.plugins._mcp.target_file import build_target_spec
         from mylonite.plugins._mcp.twins import plan_twins
 
-        spec = custom_spec if custom_spec is not None else build_target_spec(tf)
-        target_registry.clear_runtime_targets()
-        target_registry.register_target(spec)
+        if routed_to == "mcp":
+            # custom_spec/mcp_scope are set unconditionally in the mcp routing
+            # branch above; BUNDLED_TARGETS is already resolvable as-is, and
+            # target_registry.register_target() would raise trying to shadow
+            # a bundled family — skip the custom route's registration step.
+            if custom_spec is None:
+                echo_err("internal: expected a resolved TargetSpec for mcp validate_fn")
+                raise typer.Exit(code=EXIT_CONFIG)
+            spec = custom_spec
+            scope_for_factory = mcp_scope
+        else:
+            if tf is None:
+                echo_err("internal: expected a loaded TargetFile for custom validate_fn")
+                raise typer.Exit(code=EXIT_CONFIG)
+            from mylonite.plugins._mcp.target_file import build_target_spec
+
+            spec = custom_spec if custom_spec is not None else build_target_spec(tf)
+            target_registry.clear_runtime_targets()
+            target_registry.register_target(spec)
+            scope_for_factory = tf.scope
 
         # Control-efficacy leg: a controllable finding (tagged in scan_fn, via the
         # SAME plan_twins) gets a guarded twin so the differential leg proves the
@@ -3709,7 +4279,7 @@ def gate(
 
         def _factory() -> Any:
             return build_adapter_for_spec(
-                spec, scope=tf.scope, model=effective_model, intent=plan.raw
+                spec, scope=scope_for_factory, model=effective_planner_model, intent=plan.raw
             )
 
         guarded_factory: Any = None
@@ -3717,7 +4287,10 @@ def gate(
 
             def _guarded() -> Any:
                 return build_adapter_for_spec(
-                    spec, scope=tf.scope, model=effective_model, intent=plan.guarded
+                    spec,
+                    scope=scope_for_factory,
+                    model=effective_planner_model,
+                    intent=plan.guarded,
                 )
 
             guarded_factory = _guarded
@@ -3732,6 +4305,9 @@ def gate(
             vuln_threshold=max(1, iterations - 1),
             provider=effective_provider,
             model=effective_model,
+            planner_model=effective_planner_model if planner_model else None,
+            customiser_model=effective_customiser_model if customiser_model else None,
+            judge_model=effective_judge_model if judge_model else None,
             target_adapter_factory=_factory,
             guarded_adapter_factory=guarded_factory,
             control_weakness=plan.control_weakness,
@@ -3740,7 +4316,8 @@ def gate(
             randomize_exfil=randomize_exfil,
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
-        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+        with llm_scope(policy=effective_policy):
+            return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
     def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
         from mylonite._redaction import redact_target_yaml
@@ -3774,15 +4351,23 @@ def gate(
             )
         return pr
 
-    result = run_gate(
-        out_dir=out,
-        scan_fn=scan_fn,
-        generate_fn=generate_fn,
-        validate_fn=validate_fn,
-        open_pr_fn=open_pr_fn,
-        open_pr=open_pr,
-        llm_enrich=llm_enrich,
-    )
+    from mylonite.scan._llm import llm_scope
+
+    # Wraps the WHOLE pipeline (scan -> validate -> mitigation enrichment) so
+    # the enrichment call (build_pr_body's --llm-enrich path, which run_gate
+    # makes AFTER scan_fn/validate_fn's own narrower scopes have already
+    # exited) still sees effective_policy — e.g. a configured api_base.
+    with llm_scope(policy=effective_policy):
+        result = run_gate(
+            out_dir=out,
+            scan_fn=scan_fn,
+            generate_fn=generate_fn,
+            validate_fn=validate_fn,
+            open_pr_fn=open_pr_fn,
+            open_pr=open_pr,
+            llm_enrich=llm_enrich,
+            mitigation_model=effective_model,
+        )
     raise typer.Exit(code=result.exit_code)
 
 
@@ -3867,8 +4452,53 @@ def ablate(
         int,
         typer.Option("--iterations", help="Scans per control per side (raw/guarded). Default 1."),
     ] = 1,
-    provider: Annotated[str | None, typer.Option("--provider")] = None,
+    provider: Annotated[
+        str | None,
+        typer.Option(
+            "--provider",
+            help=(
+                "LiteLLM provider. DEPRECATED (warns; removal planned 0.7.10) -- "
+                "prefix --model instead, e.g. 'anthropic/claude-haiku-4-5'."
+            ),
+        ),
+    ] = None,
     model: Annotated[str | None, typer.Option("--model")] = None,
+    planner_model: Annotated[
+        str | None,
+        typer.Option(
+            "--planner-model",
+            help=(
+                "Override the model that DRIVES the agent-under-test (the planner) "
+                "while scoring controls. Defaults to --model. Same three-role split "
+                "as `scan`/`gate`/`validate`."
+            ),
+        ),
+    ] = None,
+    customiser_model: Annotated[
+        str | None,
+        typer.Option(
+            "--customiser-model",
+            help=("Override the model that CRAFTS/REFINES attack payloads. Defaults to --model."),
+        ),
+    ] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(
+            "--judge-model",
+            help=("Override the model that JUDGES whether an attack landed. Defaults to --model."),
+        ),
+    ] = None,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config (target_file / authorize / "
+                "provider / model / the role models). Auto-discovered from "
+                "./mylonite.yaml when present; an explicit flag always wins."
+            ),
+        ),
+    ] = None,
     redundancy: Annotated[
         bool,
         typer.Option(
@@ -3909,6 +4539,25 @@ def ablate(
     from mylonite.scan.control_shim import make_control
     from mylonite.scan.coverage import ScanOutcome
 
+    # T14/H3: mylonite.yaml auto-discovery + role-model overrides, mirroring
+    # scan/gate/validate.
+    _config_path, rc = _discover_run_config(run_config_path, command="ablate")
+    env_rc = _env_run_config_or_exit()
+    if rc is not None:
+        target_file = target_file or rc.target_file
+        authorize = authorize or rc.authorize
+        provider = provider or rc.provider
+        model = model or rc.model
+        planner_model = planner_model or rc.planner_model
+        customiser_model = customiser_model or rc.customiser_model
+        judge_model = judge_model or rc.judge_model
+    provider = provider or env_rc.provider
+    model = model or env_rc.model
+    planner_model = planner_model or env_rc.planner_model
+    customiser_model = customiser_model or env_rc.customiser_model
+    judge_model = judge_model or env_rc.judge_model
+    effective_policy = _resolve_llm_policy(rc, env_rc)
+
     if target_file is None:
         echo_err("ablate requires --target-file (the app whose controls you want to score).")
         raise typer.Exit(code=EXIT_CONFIG)
@@ -3919,10 +4568,21 @@ def ablate(
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
 
-    effective_provider = provider or "anthropic"
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
-    effective_model = _route_model(provider, base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
+
+    def _resolve_ablate_role_model(override: str | None) -> str:
+        if not override:
+            return effective_model
+        _validate_model_string(override)
+        return _parse_model_ref_or_exit(override, provider).raw
+
+    effective_planner_model = _resolve_ablate_role_model(planner_model)
+    effective_customiser_model = _resolve_ablate_role_model(customiser_model)
+    effective_judge_model = _resolve_ablate_role_model(judge_model)
 
     try:
         tf = load_target_file(target_file)
@@ -3935,6 +4595,17 @@ def ablate(
     # validate — same rule, same derivation (scope if declared, else family name).
     _enforce_custom_authorize(
         spec.family, tf.scope, spec.requires_scope, authorize, command="ablate"
+    )
+
+    # T14/H3: the "no default provider, fail loudly" invariant, enforced
+    # BEFORE any adapter/subprocess/engine work starts -- AFTER the authorize
+    # check above (DCR-0008/one-gate: authorization gates every live-driving
+    # action, even one this static).
+    _require_llm_configured_or_exit(
+        effective_planner_model,
+        effective_customiser_model,
+        effective_judge_model,
+        provider=provider,
     )
 
     # Server-layer mode: the target bakes its guards into the server (toggled by
@@ -4023,27 +4694,32 @@ def ablate(
             intent = LaunchIntent(
                 boundary_controls=tuple(boundary_control_for(spec, w) for w in applied)
             )
-        adapter = build_adapter_for_spec(spec, scope=tf.scope, model=effective_model, intent=intent)
+        adapter = build_adapter_for_spec(
+            spec, scope=tf.scope, model=effective_planner_model, intent=intent
+        )
         return scan_target_fires(
             adapter,
             pattern_id,
             provider=effective_provider,
-            model=effective_model,
-            customiser_model=effective_model,
-            judge_model=effective_model,
+            model=effective_planner_model,
+            customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
             on_outcome=observed_outcomes.append,
         )
 
+    from mylonite.scan._llm import llm_scope
+
     try:
-        results = run_control_ablation(
-            controls=usable,
-            seeds_by_weakness=seeds_by_weakness,
-            scan_fires=scan_fires,
-            iterations=iterations,
-            progress=lambda msg: echo_err(f"  … {msg}"),
-            redundancy=redundancy,
-            all_controls=usable,
-        )
+        with llm_scope(policy=effective_policy):
+            results = run_control_ablation(
+                controls=usable,
+                seeds_by_weakness=seeds_by_weakness,
+                scan_fires=scan_fires,
+                iterations=iterations,
+                progress=lambda msg: echo_err(f"  … {msg}"),
+                redundancy=redundancy,
+                all_controls=usable,
+            )
     finally:
         target_registry.clear_runtime_targets()
 

@@ -36,7 +36,7 @@ from mcp import ClientSession
 
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
-from mylonite._redaction import redact_value
+from mylonite._redaction import redact, redact_value
 from mylonite.contracts import (
     AdapterResponse,
     AsyncTargetAdapterBase,
@@ -47,7 +47,6 @@ from mylonite.contracts._types import ToolSpec
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
-from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
@@ -75,6 +74,14 @@ DEFAULT_MCP_READ_TIMEOUT = timedelta(seconds=60.0)
 #: incidental short args (DCR-0006).
 _MIN_PLANTED_PAYLOAD_CHARS = 40
 
+#: Cap on how much target-controlled tool-result text ``_extract_first_number``
+#: scans (DCR-0021) — mirrors ``_truncate_result``'s 800-char trace cap /
+#: ``_full_results``' 16000-char delivery-detection cap elsewhere in this
+#: module. This is id-extraction over a setup-arm result, closer in spirit to
+#: the delivery-detection use (an id can plausibly appear anywhere in a large
+#: response), hence the larger of the two existing bounds.
+_MAX_EXTRACT_NUMBER_CHARS = 16000
+
 
 def _regex_search(pattern: str, text: str) -> re.Match[str] | None:
     """Indirection over ``re.search`` (#32).
@@ -101,6 +108,12 @@ def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
 #: `get_issue_and_act` sent the planner to read/act on a literal "unknown"
 #: id/path and the attack never reached the model (DCR-0005).
 _ID_DEPENDENT_DRIVES: tuple[str, ...] = ("read_note", "read_file", "get_issue_and_act")
+
+#: DCR-0019: matches either seed-arm template placeholder for a SINGLE-pass
+#: substitution (see ``_render_seed_args``) — a chained `.replace(...).replace(...)`
+#: would let a `payload_body` containing the literal substring "{scope}" get
+#: re-scanned and mutated by the second call.
+_SEED_ARG_PLACEHOLDER_RE = re.compile(r"\{payload\}|\{scope\}")
 
 
 def _user_message_for_drive(
@@ -164,7 +177,15 @@ def _render_seed_args(template: Any, payload_body: str, scope: str | None, _dept
     if _depth > 50:
         raise ValueError("seed_arm args_template nested too deeply (cyclic or malformed?)")
     if isinstance(template, str):
-        return template.replace("{payload}", payload_body).replace("{scope}", scope or "")
+        # DCR-0019: substitute both placeholders in a SINGLE pass. The old
+        # chained `.replace("{payload}", ...).replace("{scope}", ...)` let a
+        # payload_body containing the literal substring "{scope}" get
+        # silently re-mutated by the SECOND replace call — the actually-
+        # planted content then diverged from payload.body, breaking
+        # downstream delivery-token matching.
+        return _SEED_ARG_PLACEHOLDER_RE.sub(
+            lambda m: payload_body if m.group(0) == "{payload}" else (scope or ""), template
+        )
     if isinstance(template, dict):
         return {
             k: _render_seed_args(v, payload_body, scope, _depth + 1) for k, v in template.items()
@@ -334,12 +355,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     inner_shim, planner_calls, full_results=planner_result_texts
                 )
 
-                wrapped_completion = self._wrap_completion()
                 planner = LLMPlanner(
                     server=recording_shim,
                     model=self._model,
                     system_prompt=self._spec.default_system_prompt,
-                    completion_fn=wrapped_completion,
+                    completion_fn=self._completion_fn,
                 )
 
                 user_message = _user_message_for_drive(
@@ -388,8 +408,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 payload.pattern_id,
                 reason,
             )
+            # DCR-0023: {exc!r} can embed a live secret (e.g. an Authorization
+            # header echoed back by a transport error) -- redact it before it
+            # rides into ScanAttempt.verdict_reason (via skip.reason in
+            # scan/engine.py's AdapterInvocationSkipped handler) and on into
+            # scan_report.json. attempt_metadata["exception"] below already
+            # carries the exception TYPE name unredacted; only the free-text
+            # repr needs masking.
             raise AdapterInvocationSkipped(
-                f"adapter failure on {payload.pattern_id}: {exc!r}",
+                f"adapter failure on {payload.pattern_id}: {redact(repr(exc))}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
@@ -487,6 +514,25 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             timeout=self._planner_timeout_s,
         )
 
+    async def _bounded_extract_first_number(self, content: Any) -> str | None:
+        """Run ``_extract_first_number`` off the event loop (DCR-0021).
+
+        Mirrors ``_bounded_regex_search``'s run_in_executor + wait_for
+        pattern: unlike every other read of a tool result in this file (the
+        800-char cap in ``_truncate_result``, the 16000-char cap on
+        ``_full_results``), the direct synchronous call this replaces had no
+        size cap AND ran straight on the event loop — a target returning a
+        large text block would block every other concurrently in-flight scan
+        attempt for the full match duration. ``_extract_first_number`` itself
+        is now also length-capped (defence in depth), but this wrapper is
+        still what keeps even a capped-but-slow match from blocking the loop.
+        """
+        loop = asyncio.get_running_loop()
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _extract_first_number, content),
+            timeout=self._planner_timeout_s,
+        )
+
     async def open_session(self) -> _MCPAttackSession:
         """Open a stateful session that persists ONE MCP session across steps.
 
@@ -561,8 +607,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             }
             result = await self._bounded(session.call_tool("create_issue", args))
             setup_calls.append({"tool": "create_issue", "args": {"title": args["title"]}})
-            # Extract issue number from result text content.
-            return _extract_first_number(result.content) if hasattr(result, "content") else None
+            # Extract issue number from result text content. DCR-0021: run off
+            # the event loop — result.content is target-controlled and
+            # unbounded until _extract_first_number's own cap applies.
+            return (
+                await self._bounded_extract_first_number(result.content)
+                if hasattr(result, "content")
+                else None
+            )
         # Generic declarable seed arm (custom targets, #5): the target's
         # TargetFile declared which tool plants untrusted content. This is what
         # makes indirect injection testable against a non-bundled MCP app.
@@ -619,7 +671,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # text — a genuine "guess" compared to id_key/id_pattern's precise
             # extraction. Only trust it when it actually found something.
             extracted = (
-                _extract_first_number(result.content) if hasattr(result, "content") else None
+                await self._bounded_extract_first_number(result.content)
+                if hasattr(result, "content")
+                else None
             )
             if extracted is not None:
                 return extracted
@@ -726,28 +780,6 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return "init_failure"
         return "planner_exception"
 
-    def _wrap_completion(self) -> Callable[..., Any]:
-        """Same A1 budget-counter wrap as the in-process reference adapter."""
-        import litellm  # local import keeps cold-start cheap
-
-        underlying = self._completion_fn or litellm.acompletion
-
-        async def _counted(**kwargs: Any) -> Any:
-            counter = active_counter()
-            if counter is not None:
-                counter.record("planner")
-            try:
-                response = await underlying(**kwargs)
-            except Exception:
-                if counter is not None:
-                    counter.mark_failure()
-                raise
-            if counter is not None:
-                counter.mark_success()
-            return response
-
-        return _counted
-
 
 class _RecordingServerShim:
     """Wraps a ``MCPSessionAsServerLike`` so planner calls land in a list.
@@ -797,7 +829,12 @@ class _RecordingServerShim:
         self._sink.append(entry)
         result = await self._inner.call_tool(name, arguments)
         content = getattr(result, "content", "")
-        entry["result"] = _truncate_result(content)
+        # DCR-0022: mirror the redaction already applied to entry["args"]
+        # above — the RESULT of a tool call is exactly as capable of carrying
+        # a live secret (e.g. a planner-triggered read of a credential file)
+        # as an argument is, and this same sink is what mcp_trace_planner
+        # (persisted to scan_report.json / exploit_*.json) is built from.
+        entry["result"] = redact(_truncate_result(content))
         entry["is_error"] = bool(getattr(result, "isError", False))
         if self._full_results is not None:
             # Generously bounded (delivery detection only) — far larger than the
@@ -824,7 +861,11 @@ class _MCPAttackSession:
         self._adapter = adapter
         self._cm = cm
         self._session = session
-        self._completion = adapter._wrap_completion()
+        # T14: the raw completion_fn (or None) — LLMPlanner routes every call
+        # through _llm.litellm_tool_call_async, which owns budget-counting
+        # (caller="planner") + the active LLMPolicy's kwargs itself; no
+        # per-adapter wrapping needed any more.
+        self._completion = adapter._completion_fn
         # What this session planted (for delivery detection + the effect probe in
         # drive_planner). String arg values carry the injected body.
         self._planted_bodies: list[str] = []
@@ -905,17 +946,29 @@ class _MCPAttackSession:
             # planted body, when it depends only on `result_texts`, which
             # doesn't change across the loop.
             haystack = _delivery_haystack(result_texts)
+            # DCR-0020: match against the payload-SHAPED subset
+            # (_planted_payloads), not every string arg ever call_tool'd
+            # (_planted_bodies) — matching on ANY planted string (ids/paths/
+            # titles) over-reports delivery when an incidental filename/id
+            # happens to reappear in UNRELATED planner output. The outer
+            # `if self._planted_bodies:` guard is intentionally left as-is:
+            # it only decides whether the key is stamped at all, which should
+            # still happen (as an honest "false") even when nothing
+            # payload-shaped was ever planted.
             delivered = any(
-                _payload_retrieved_in_haystack(body, haystack) for body in self._planted_bodies
+                _payload_retrieved_in_haystack(body, haystack) for body in self._planted_payloads
             )
             metadata["payload_delivered"] = "true" if delivered else "false"
         probe = self._adapter._spec.effect_probe
         if probe is not None:
-            probe_body = (
-                self._planted_payloads[-1]
-                if self._planted_payloads
-                else (self._planted_bodies[-1] if self._planted_bodies else "")
-            )
+            # DCR-0018: fall back to an HONEST empty string when nothing
+            # payload-shaped was planted — NOT self._planted_bodies[-1] (an
+            # incidental, non-payload planted string), which reintroduced the
+            # false-negative shape DCR-0006 already closed for this same
+            # fallback: substituting an irrelevant filename/id into the
+            # probe's {payload} slot can silently under-report a materialised
+            # effect as unconfirmed.
+            probe_body = self._planted_payloads[-1] if self._planted_payloads else ""
             probe_calls: list[dict[str, Any]] = []
             metadata["effect_confirmed"] = await self._adapter._run_effect_probe(
                 self._session, probe, probe_body, probe_calls
@@ -1048,7 +1101,17 @@ def _planted_payload_retrieved(planted_body: str, result_texts: list[str]) -> bo
 
 
 def _extract_first_number(content: Any) -> str | None:
-    """Pull the first integer from MCP ``CallToolResult.content`` text blocks."""
+    """Pull the first integer from MCP ``CallToolResult.content`` text blocks.
+
+    DCR-0021: bounded to ``_MAX_EXTRACT_NUMBER_CHARS`` before the regex runs —
+    mirrors the 800/16000-char caps this module already applies elsewhere to
+    target-controlled tool-result text (``_truncate_result`` / the
+    ``_full_results`` delivery-detection cap). This function itself stays
+    synchronous/pure (so it's still directly unit-testable); callers that run
+    it against LIVE target-controlled content run it off the event loop via
+    ``MCPSessionAdapterBase._bounded_extract_first_number`` instead of calling
+    it directly.
+    """
     if not content:
         return None
     text = ""
@@ -1056,6 +1119,9 @@ def _extract_first_number(content: Any) -> str | None:
         block_text = getattr(block, "text", None)
         if block_text:
             text += block_text + "\n"
+        if len(text) >= _MAX_EXTRACT_NUMBER_CHARS:
+            break
+    text = text[:_MAX_EXTRACT_NUMBER_CHARS]
 
     m = re.search(r"\b(\d+)\b", text)
     return m.group(1) if m else None

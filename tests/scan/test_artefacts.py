@@ -97,6 +97,85 @@ def test_scan_report_validates_against_schema(tmp_path: Path) -> None:
     jsonschema.validate(payload, schema)
 
 
+def test_write_artefacts_redacts_secret_shaped_response_before_persisting(
+    tmp_path: Path,
+) -> None:
+    """DCR-0002: a successful exfiltration attack can capture a live secret in
+    an exploit's ``response.raw_response``. ``write_artefacts`` must redact it
+    the same way the console-rendered summary already is — the CLI's own UX
+    tells the operator to commit this exact directory."""
+    sentinel = "sk-ant-" + "a" * 40
+    pattern_id = "leaky-pattern"
+    exploit = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id=pattern_id,
+        payload=Payload(pattern_id=pattern_id, channel="tool-result", body="x"),
+        response=AdapterResponse(
+            payload_pattern_id=pattern_id, raw_response=f"leaked key: {sentinel}"
+        ),
+        success_reason="caught it",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id=pattern_id,
+                pattern_id=pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason=f"secret found: {sentinel}",
+            )
+        ],
+        findings_count=1,
+        mylonite_version="0.2.0",
+    )
+    scan_dir = write_artefacts(ScanResult(report=report, exploits=[exploit]), tmp_path)
+
+    report_text = (scan_dir / "scan_report.json").read_text(encoding="utf-8")
+    assert sentinel not in report_text
+
+    exploit_files = list(scan_dir.glob("exploit_*.json"))
+    assert len(exploit_files) == 1
+    assert sentinel not in exploit_files[0].read_text(encoding="utf-8")
+
+
+def test_write_artefacts_redacts_tool_call_trace_and_judge_evidence(tmp_path: Path) -> None:
+    """DCR-0017: `ScanAttempt.tool_call_trace` / `.judge_evidence` are persisted
+    for every judged attempt (finding AND no_finding), unredacted, before this
+    fix -- a target-controlled tool-call arg or a judge-evidence string can
+    legitimately carry a live secret (e.g. a planner echoing back a credential
+    it was tricked into reading)."""
+    sentinel = "sk-ant-" + "e" * 40
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s1",
+                pattern_id="s1",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="rejected",
+                tool_call_trace=[f"read_secret({sentinel})"],
+                judge_evidence={"confidence": f"leaked {sentinel}"},
+            )
+        ],
+        findings_count=0,
+        mylonite_version="0.2.0",
+    )
+    scan_dir = write_artefacts(ScanResult(report=report, exploits=[]), tmp_path)
+    report_text = (scan_dir / "scan_report.json").read_text(encoding="utf-8")
+    assert sentinel not in report_text
+
+
 def test_write_artefacts_never_overwrites_existing_dir(tmp_path: Path) -> None:
     result = _result()
     first = write_artefacts(result, tmp_path)

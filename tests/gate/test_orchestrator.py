@@ -161,6 +161,62 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     assert pr_calls["open_pr"] is False
 
 
+def test_run_gate_threads_a_real_configurable_mitigation_model(tmp_path):
+    """T14: gate/mitigation.py used to hardcode
+    ``litellm.completion(model="claude-haiku-4-5-20251001", ...)`` with no
+    model parameter reachable from the caller at all. ``run_gate`` now takes
+    ``mitigation_model``/``mitigation_completion_fn`` and threads both into
+    ``build_pr_body`` — proving the enrichment call is a real, configurable,
+    injectable LiteLLM call (reachable by an offline recorder/cache) instead
+    of an unpindownable literal."""
+    ex = _exploit()
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        kept=True,
+        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        mutation_score=None,
+    )
+    seen_models: list[str] = []
+
+    def fake_completion(*, model, messages, **kwargs):
+        seen_models.append(model)
+
+        class _Msg:
+            content = "Wrap it in an untrusted envelope."
+
+        class _Choice:
+            message: _Msg = _Msg()  # type: ignore[misc]
+
+        class _Resp:
+            def __init__(self) -> None:
+                self.choices = [_Choice()]
+
+        return _Resp()
+
+    pr_calls = {}
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
+        generate_fn=lambda exploit: GeneratedTest(
+            framework="pytest",
+            filename="test_security_x.py",
+            source="# test\n",
+            exploit=exploit,
+        ),
+        validate_fn=lambda test: report,
+        open_pr_fn=lambda **k: pr_calls.update(k) or "printed",
+        open_pr=False,
+        llm_enrich=True,
+        mitigation_model="my-custom/enrichment-model",
+        mitigation_completion_fn=fake_completion,
+    )
+    assert result.exit_code == 0
+    assert seen_models == ["my-custom/enrichment-model"]
+    assert "Unverified LLM suggestion" in pr_calls["body"]
+    assert "untrusted envelope" in pr_calls["body"]
+
+
 def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
     result = run_gate(
         out_dir=tmp_path / ".mylonite" / "gate",

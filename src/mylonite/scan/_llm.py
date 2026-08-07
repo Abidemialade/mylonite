@@ -43,7 +43,10 @@ from json_repair import repair_json
 from pydantic import BaseModel
 
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
+from mylonite.scan.llm_policy import LLMPolicy
+from mylonite.scan.model_ref import ModelRef
 from mylonite.scan.providers import provider_from_model
+from mylonite.scan.schema_sanitise import SchemaDialect, dialect_for, sanitise_tool_schema
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +142,13 @@ class LiteLLMCallCounter:
     count: int = 0
     consecutive_failures: int = 0
     by_caller: dict[str, int] = field(default_factory=dict)
+    #: How many tool schemas ``litellm_tool_call_async`` has actually
+    #: rewritten via ``schema_sanitise.sanitise_tool_schema`` (T15/H4) --
+    #: incremented only when sanitisation had a real effect, never on every
+    #: call. ``ScanEngine`` folds this into ``fallback_breakdown`` under the
+    #: ``"tool_schema_sanitised"`` key once the scan finishes, so operators
+    #: can see how often a STRICT-dialect provider needed the rewrite.
+    tool_schema_sanitised: int = 0
 
     def record(self, caller: str) -> None:
         if self.count + 1 > self.cap:
@@ -149,6 +159,13 @@ class LiteLLMCallCounter:
             raise BudgetExceededError(msg)
         self.count += 1
         self.by_caller[caller] = self.by_caller.get(caller, 0) + 1
+
+    def record_schema_sanitised(self) -> None:
+        """Bump :attr:`tool_schema_sanitised`. Deliberately NOT routed through
+        :meth:`record` -- a schema rewrite is not an LLM call, so it must
+        never count against ``--max-llm-calls`` or raise
+        ``BudgetExceededError``."""
+        self.tool_schema_sanitised += 1
 
     def mark_success(self) -> None:
         self.consecutive_failures = 0
@@ -175,6 +192,55 @@ def active_counter() -> LiteLLMCallCounter | None:
     return _ACTIVE_COUNTER.get()
 
 
+#: Scoped the same way as ``_ACTIVE_COUNTER`` (contextvars, nestable, opt-in) —
+#: see ``llm_scope``. Unlike the counter, ``active_policy`` never returns
+#: ``None``: a call site that never scopes a policy at all still gets the
+#: load-bearing defaults (``LLMPolicy()`` — temperature=0.0, drop_params=True,
+#: ...) documented on ``LLMPolicy`` itself, rather than silently falling back
+#: to a provider's own (oracle-breaking) defaults.
+_ACTIVE_POLICY: contextvars.ContextVar[LLMPolicy | None] = contextvars.ContextVar(
+    "mylonite_active_llm_policy", default=None
+)
+
+
+def active_policy() -> LLMPolicy:
+    """The currently-active :class:`LLMPolicy`, or ``LLMPolicy()`` (the
+    documented defaults) when nothing is scoped via :func:`llm_scope`."""
+    return _ACTIVE_POLICY.get() or LLMPolicy()
+
+
+@contextmanager
+def llm_scope(
+    *, counter: LiteLLMCallCounter | None = None, policy: LLMPolicy | None = None
+) -> Iterator[None]:
+    """Activate a budget counter and/or a call-kwargs policy for every LiteLLM
+    call made inside the ``with`` block.
+
+    This is THE chokepoint (H2): ``litellm_json_call``/``_async``,
+    ``litellm_tool_call_async`` (the planner), and ``litellm_text_call`` (gate's
+    mitigation enrichment) all read ``active_counter()``/``active_policy()``
+    unconditionally, with no parallel "skip the policy" path — a new call site
+    that wants budget-counting or the policy kwargs applied has nowhere else to
+    plug into LiteLLM's completion API except one of those three functions, so
+    it cannot silently opt out the way the pre-T14 planner call site did.
+
+    Either argument may be omitted; omitting one leaves that contextvar
+    untouched (so e.g. a caller that only wants to change the policy inside an
+    already-``counter.active()``-scoped block can do so without re-passing the
+    counter). Nestable — a caller can layer a narrower policy inside a wider
+    one (e.g. per-command override inside a per-run default).
+    """
+    counter_token = _ACTIVE_COUNTER.set(counter) if counter is not None else None
+    policy_token = _ACTIVE_POLICY.set(policy) if policy is not None else None
+    try:
+        yield
+    finally:
+        if policy_token is not None:
+            _ACTIVE_POLICY.reset(policy_token)
+        if counter_token is not None:
+            _ACTIVE_COUNTER.reset(counter_token)
+
+
 def _bump(caller: str) -> None:
     counter = _ACTIVE_COUNTER.get()
     if counter is not None:
@@ -191,6 +257,71 @@ def _mark_failure() -> None:
     counter = _ACTIVE_COUNTER.get()
     if counter is not None:
         counter.mark_failure()
+
+
+def _bump_schema_sanitised() -> None:
+    counter = _ACTIVE_COUNTER.get()
+    if counter is not None:
+        counter.record_schema_sanitised()
+
+
+def _sanitised_tools(tools: list[dict[str, Any]], model: str) -> list[dict[str, Any]]:
+    """Sanitise each tool's ``function.parameters`` schema for the dialect
+    ``model``'s provider needs (T15/H4), before it is ever sent to LiteLLM.
+
+    A no-op passthrough under :data:`SchemaDialect.PERMISSIVE` (OpenAI,
+    Anthropic, an unrecognised provider — see ``dialect_for``'s docstring for
+    why unknown defaults to permissive). Under :data:`SchemaDialect.STRICT`
+    (Gemini/Vertex/Bedrock), rewrites ``$ref``/``anyOf``/``const``/
+    ``additionalProperties`` into a shape those providers' function-calling
+    APIs actually accept.
+
+    Deliberately builds and returns a NEW list of (possibly new) dicts rather
+    than mutating ``tools`` in place — this is the planner's OWN copy of the
+    tool schema headed to the LLM, not the adapter's ``TargetDescriptor``
+    (attack modules must keep reasoning over the target's real, unsanitised
+    tool surface; see the module docstring on ``schema_sanitise``).
+
+    Bumps the active counter's ``tool_schema_sanitised`` once per tool whose
+    schema sanitisation actually changed (never on a no-op call, and never
+    for a tool with no ``function.parameters`` at all).
+    """
+    # ModelRef's own provider-derivation (provider_from_model) never raises —
+    # it degrades to `None` for an unroutable model (see providers.py) — so
+    # constructing directly here (bypassing ModelRef.parse's raising
+    # validation) is safe: `model` has already been used for the real
+    # completion call by this point, so it is a non-empty string.
+    ref = ModelRef(raw=model, provider=provider_from_model(model))
+    dialect = dialect_for(ref)
+    if dialect is SchemaDialect.PERMISSIVE:
+        return tools
+    sanitised: list[dict[str, Any]] = []
+    for tool in tools:
+        # Separate `if ... : continue` narrowing (rather than a ternary) so
+        # mypy --strict actually tracks `function` as a dict from here on —
+        # a ternary's isinstance check doesn't narrow the assigned name.
+        if not isinstance(tool, dict):
+            sanitised.append(tool)
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            sanitised.append(tool)
+            continue
+        parameters = function.get("parameters")
+        if not isinstance(parameters, dict):
+            sanitised.append(tool)
+            continue
+        new_parameters = sanitise_tool_schema(parameters, dialect)
+        if new_parameters == parameters:
+            sanitised.append(tool)
+            continue
+        _bump_schema_sanitised()
+        new_function = dict(function)
+        new_function["parameters"] = new_parameters
+        new_tool = dict(tool)
+        new_tool["function"] = new_function
+        sanitised.append(new_tool)
+    return sanitised
 
 
 def _extract_text(response: Any) -> str:
@@ -534,7 +665,18 @@ def litellm_json_call(
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
+    # The active policy's kwargs (temperature/max_tokens/drop_params/seed/
+    # api_base/...) first, so this call's own model/messages/timeout always win
+    # on a name collision — timeout_s stays the caller-facing knob (unchanged
+    # default/behaviour); the policy only ever ADDS kwargs this call never set
+    # explicitly before T14 (see llm_policy.py's module docstring for why each
+    # one is load-bearing for the oracle, not tuning).
+    call_kwargs: dict[str, Any] = {
+        **active_policy().kwargs(),
+        "model": model,
+        "messages": messages,
+        "timeout": timeout_s,
+    }
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format
@@ -569,7 +711,14 @@ async def litellm_json_call_async(
     if system is not None:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    call_kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": timeout_s}
+    # See the sync sibling's comment: policy kwargs first, this call's own
+    # model/messages/timeout always win on a name collision.
+    call_kwargs: dict[str, Any] = {
+        **active_policy().kwargs(),
+        "model": model,
+        "messages": messages,
+        "timeout": timeout_s,
+    }
     response_format = build_response_format(model, schema_model)
     if response_format is not None:
         call_kwargs["response_format"] = response_format
@@ -579,3 +728,115 @@ async def litellm_json_call_async(
         return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
     return _parse_or_fallback(response, expected_keys, fallback, caller)
+
+
+async def litellm_tool_call_async(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
+    caller: str = "planner",
+    completion_fn: Callable[..., Any] | None = None,
+    timeout_s: float | None = None,
+) -> Any:
+    """The planner's chokepoint (H2/T14): owns budget-counting (``_bump`` +
+    success/failure marking) and the active :class:`LLMPolicy`'s kwargs,
+    exactly like ``litellm_json_call``/``_async`` — but returns the RAW
+    LiteLLM response (``message.tool_calls`` lives there) instead of parsed
+    JSON, since ``LLMPlanner``'s tool-calling loop needs the untouched
+    response shape, not a verdict dict.
+
+    Before T14 the planner called ``completion(**call_kwargs)`` directly
+    (see ``llm_planner.py``'s git history), bypassing both the budget counter
+    and every policy kwarg below — each adapter that drove ``LLMPlanner``
+    (the in-process reference adapter, the MCP session adapter) had grown its
+    own ad hoc ``_bump``-only wrapper around ``completion_fn`` to claw back
+    JUST the budget-counting half. Routing ``LLMPlanner.run`` through this
+    function instead is what let those wrappers be deleted — the planner now
+    goes through the exact same chokepoint the customiser/judge always did.
+
+    Exceptions propagate (marking a failure first, never swallowed into a
+    fallback) — ``LLMPlanner.run``'s contract is that a completion exception
+    aborts the whole run; the adapter above it decides whether that becomes
+    an ``AdapterInvocationSkipped`` (single-shot ``invoke``) or a bare raise
+    (a stateful ``AttackSession``'s ``drive_planner``).
+
+    ``timeout_s=None`` (the default) defers entirely to the active policy's
+    own ``timeout`` — unlike ``litellm_json_call``, which keeps its
+    pre-existing ``DEFAULT_LLM_CALL_TIMEOUT_S`` default for backward
+    compatibility. A caller that wants a tighter/looser per-call bound than
+    the policy (e.g. ``LLMPlanner(completion_timeout_s=...)``) still overrides
+    it explicitly.
+
+    T15/H4: when ``tools`` is given, each tool's ``function.parameters``
+    schema is run through ``schema_sanitise.sanitise_tool_schema`` (dialect
+    resolved from ``model`` via ``schema_sanitise.dialect_for``) before it is
+    handed to LiteLLM — this is the ONE place a tool schema is ever sent TO an
+    LLM for tool-calling, so it's the one place that needs to close the
+    STRICT-dialect-provider interop gap (Gemini/Vertex/Bedrock rejecting
+    ``$ref``/``anyOf``/``const``/``additionalProperties``). The adapter's own
+    ``TargetDescriptor`` (what attack modules reason over) is never touched —
+    see ``_sanitised_tools``'s docstring.
+    """
+    _bump(caller)
+    fn = completion_fn or litellm.acompletion
+    policy = active_policy()
+    call_kwargs: dict[str, Any] = {**policy.kwargs(), "model": model, "messages": messages}
+    if timeout_s is not None:
+        call_kwargs["timeout"] = timeout_s
+    if tools:
+        call_kwargs["tools"] = _sanitised_tools(tools, model)
+        call_kwargs["tool_choice"] = tool_choice or "auto"
+    try:
+        response = await fn(**call_kwargs)
+    except Exception:
+        _mark_failure()
+        raise
+    _mark_success()
+    return response
+
+
+def litellm_text_call(
+    *,
+    model: str,
+    prompt: str,
+    caller: str,
+    system: str | None = None,
+    completion_fn: Callable[..., Any] | None = None,
+    timeout_s: float | None = None,
+) -> str | None:
+    """A free-text (not JSON) completion through the SAME chokepoint as
+    ``litellm_json_call`` — budget-counted, policy-kwarg'd, provider-error
+    classified — for a caller that wants prose rather than a structured
+    verdict, e.g. ``gate.mitigation``'s best-effort fix suggestion (H2/T14:
+    that call site used to hardcode ``litellm.completion(model="claude-
+    haiku-4-5-20251001", ...)`` directly, with no budget counting, no policy
+    kwargs, and — critically — no way to route through a self-hosted/proxy
+    ``api_base`` at all).
+
+    Unlike ``litellm_json_call``, ANY failure (a call exception of any
+    classification, or an empty/whitespace-only response) returns ``None``
+    rather than raising or falling back to a caller-supplied sentinel —
+    mitigation enrichment is opportunistic and, per its own docstring, must
+    never break PR-body assembly.
+    """
+    _bump(caller)
+    fn = completion_fn or litellm.completion
+    messages: list[dict[str, str]] = []
+    if system is not None:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    policy = active_policy()
+    call_kwargs: dict[str, Any] = {**policy.kwargs(), "model": model, "messages": messages}
+    if timeout_s is not None:
+        call_kwargs["timeout"] = timeout_s
+    try:
+        response = fn(**call_kwargs)
+    except Exception:
+        logger.info("%s: LiteLLM completion raised; enrichment skipped", caller)
+        _mark_failure()
+        return None
+    _mark_success()
+    text = _extract_text(response).strip()
+    return text or None

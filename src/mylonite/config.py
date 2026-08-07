@@ -4,66 +4,37 @@ The configuration object is intentionally strict:
 
 * The LLM provider has **no default** — every consumer must declare one before
   Call sites fail loudly on misconfiguration rather than silently
-  defaulting to a hosted model.
+  defaulting to a hosted model. See :func:`require_llm_configured`.
 * Target authorization is opt-in per scan: ``AuthorizationConfig.authorize``
   must be set to ``True`` and the target hostname/identifier must appear in
   ``allowed_targets`` for any tool that touches a target.
 * Logging defaults to redacting secret-shaped tokens from log records and
   rendered CLI reports (see ``LoggingConfig`` and ``mylonite._redaction``).
+
+``MyloniteSettings``/``LLMConfig`` (a ``pydantic-settings`` object keyed off
+``MYLONITE_LLM__PROVIDER``/``MYLONITE_LLM__MODEL``) were deleted in 0.7.9
+(T14/H3): a repo-wide search found zero ``src/`` call sites — every live
+command resolves its model/provider through
+:class:`~mylonite.scan.model_ref.ModelRef` and :class:`RunConfig` below
+instead, and nothing exported it. Reviving a third, unreachable config path
+with its own (never-set) env-var spelling would have been worse than
+deleting it outright. ``RunConfig`` (``mylonite.yaml``) is the one
+declarative config surface; :func:`require_llm_configured` is the one place
+the "no default provider, fail loudly" invariant its docstring described is
+actually enforced at runtime.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LlmProvider = Literal[
-    "anthropic",
-    "openai",
-    "azure",
-    "bedrock",
-    "google",
-    "ollama",
-    "vllm",
-    "litellm-proxy",
-    "stub",
-]
-
-
-class LLMConfig(BaseModel):
-    """LLM provider config, consumed by every LiteLLM call site.
-
-    No default provider: callers must pick one. This avoids the failure mode
-    where a misconfigured Mylonite silently fans out to a hosted provider the
-    user did not intend.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    provider: LlmProvider = Field(
-        ...,
-        description="LiteLLM provider id. Required; no default.",
-    )
-    model: str = Field(
-        ...,
-        description="Model identifier passed to LiteLLM (e.g. 'claude-sonnet-4-6').",
-    )
-    base_url: str | None = Field(
-        default=None,
-        description="Override base URL for self-hosted or proxy endpoints.",
-    )
-    api_key_env_var: str | None = Field(
-        default=None,
-        description=(
-            "Name of the env var holding the provider API key, if any. When set, "
-            "it overrides the built-in provider→env-var map used by diagnostics "
-            "remedies (see mylonite.scan.providers.env_vars_for)."
-        ),
-    )
+from mylonite.scan.llm_policy import validate_api_base
 
 
 class AuthorizationConfig(BaseModel):
@@ -107,53 +78,28 @@ class LoggingConfig(BaseModel):
     redact_secrets: bool = True
 
 
-class MyloniteSettings(BaseSettings):
-    """Top-level settings object.
-
-    Loaded from environment variables (``MYLONITE_*``) or an explicit
-    YAML/JSON file passed via the CLI. Nested models are flattened with a
-    double underscore delimiter — e.g. ``MYLONITE_LLM__PROVIDER=anthropic``.
-    """
-
-    model_config = SettingsConfigDict(
-        env_prefix="MYLONITE_",
-        env_nested_delimiter="__",
-        extra="forbid",
-    )
-
-    llm: LLMConfig | None = None
-    authorization: AuthorizationConfig = Field(default_factory=AuthorizationConfig)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
-
-    def require_llm(self) -> LLMConfig:
-        """Return the LLM config or raise.
-
-        Call sites use this so the error surfaces at the call site
-        rather than as a confusing ``None`` later.
-        """
-        if self.llm is None:
-            msg = (
-                "No LLM provider configured. Set MYLONITE_LLM__PROVIDER, "
-                "MYLONITE_LLM__MODEL, and (if applicable) MYLONITE_LLM__API_KEY_ENV_VAR, "
-                "or pass --config pointing at a config file. See .env.example."
-            )
-            raise RuntimeError(msg)
-        return self.llm
-
-
 class RunConfig(BaseModel):
     """Declarative run configuration (``mylonite.yaml``).
 
     One file that threads a run so the same flags need not be re-passed across
-    ``scan`` / ``generate`` / ``validate`` — single-file run ergonomics.
-    Every field is optional and an explicit CLI flag always wins; a field left
-    unset simply doesn't override the command default. Example::
+    ``scan`` / ``generate`` / ``validate`` / ``gate`` / ``ablate`` — single-file
+    run ergonomics. Every field is optional and an explicit CLI flag always
+    wins; a field left unset simply doesn't override the command default.
+    ``mylonite.yaml`` is auto-discovered from the current directory by every
+    command that accepts ``--config`` (T14 generalised this from a
+    ``gate``-only behaviour). Example::
 
         target_file: ./target.yaml
         authorize: my-app
         provider: anthropic
         model: claude-sonnet-4-6
+        planner_model: claude-opus-4-1
         max_llm_calls: 50
+        api_base: https://my-litellm-proxy.internal/v1
+        max_tokens: 4096
+        temperature: 0.0
+        timeout: 90
+        num_retries: 3
         root: .mylonite-custom
     """
 
@@ -165,11 +111,48 @@ class RunConfig(BaseModel):
     authorize: str | None = Field(
         default=None, description="Ownership assertion for a custom/non-reference target."
     )
-    provider: str | None = Field(default=None, description="LiteLLM provider id.")
+    provider: str | None = Field(
+        default=None,
+        description="LiteLLM provider id. DEPRECATED -- prefix `model` instead.",
+    )
     model: str | None = Field(default=None, description="Model identifier passed to LiteLLM.")
+    planner_model: str | None = Field(
+        default=None,
+        description="Model that DRIVES the agent-under-test (the planner). Defaults to `model`.",
+    )
+    customiser_model: str | None = Field(
+        default=None,
+        description="Model that crafts/refines attack payloads. Defaults to `model`.",
+    )
+    judge_model: str | None = Field(
+        default=None,
+        description="Model for the LLM-judge verdict fallback. Defaults to `model`.",
+    )
     max_llm_calls: int | None = Field(
         default=None, ge=1, description="Process-wide LLM call cap (budget) for a scan."
     )
+    api_base: str | None = Field(
+        default=None,
+        description=(
+            "Override base URL for a self-hosted/proxy LiteLLM endpoint (Ollama, "
+            "vLLM, a corporate LiteLLM proxy/gateway, ...). MUST NOT embed a "
+            "credential (no userinfo, no key-shaped query param) -- mylonite.yaml "
+            "is a COMMITTED file; put the credential in an env var instead. "
+            "Validated on load -- see `validate_api_base`."
+        ),
+    )
+    max_tokens: int | None = Field(
+        default=None, ge=1, description="Per-call max_tokens passed to every LiteLLM completion."
+    )
+    temperature: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Per-call temperature. The oracle's rate-gap measurement assumes 0.0.",
+    )
+    timeout: float | None = Field(
+        default=None, gt=0, description="Per-call socket-level timeout (seconds)."
+    )
+    num_retries: int | None = Field(default=None, ge=0, description="Per-call LiteLLM retry count.")
     root: Path | None = Field(
         default=None,
         description=(
@@ -179,6 +162,20 @@ class RunConfig(BaseModel):
             "MYLONITE_ROOT env var. See mylonite.layout.Layout."
         ),
     )
+
+    @field_validator("api_base")
+    @classmethod
+    def _reject_credentialed_api_base(cls, value: str | None) -> str | None:
+        """Validate on load (CEO §3): a credentialed api_base in a COMMITTED
+        mylonite.yaml would leak the secret into version control. Raises
+        (surfacing as a ``ValidationError`` from ``load_run_config``, which the
+        CLI maps to ``EXIT_CONFIG``) rather than silently stripping or
+        silently allowing it. See ``mylonite.scan.llm_policy.validate_api_base``
+        — the SAME check ``LLMPolicy`` itself runs on construction, so this is
+        defense in depth (catches it at yaml-load time too), not the only gate.
+        """
+        validate_api_base(value)
+        return value
 
 
 def load_run_config(path: Path) -> RunConfig:
@@ -190,3 +187,116 @@ def load_run_config(path: Path) -> RunConfig:
         msg = f"run config {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)
     return RunConfig.model_validate(data)
+
+
+#: Flat ``MYLONITE_*`` env vars (T14) — the SAME naming convention already
+#: used elsewhere in the codebase (``MYLONITE_ROOT``, ``MYLONITE_NO_TRUSTSTORE``,
+#: ``MYLONITE_LIVE_TARGET``) rather than the deleted ``MyloniteSettings``'
+#: ``pydantic-settings`` double-underscore nesting (``MYLONITE_LLM__PROVIDER``),
+#: which nothing ever actually set. Lowest-precedence source in every command's
+#: resolution order: explicit CLI flag > mylonite.yaml > this env var > the
+#: command's own built-in default.
+class _EnvRunConfig(BaseSettings):
+    """Reads the flat ``MYLONITE_*`` env vars into ``RunConfig``-shaped fields.
+
+    A separate ``pydantic-settings`` object (not merged into ``RunConfig``
+    itself) because ``RunConfig`` also has a non-settings use — parsing an
+    arbitrary ``mylonite.yaml`` file — and ``extra="forbid"`` there must keep
+    rejecting an unrecognised YAML key without also trying to interpret it as
+    an env var name.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="MYLONITE_", extra="ignore")
+
+    model: str | None = None
+    provider: str | None = None
+    planner_model: str | None = None
+    customiser_model: str | None = None
+    judge_model: str | None = None
+    api_base: str | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    timeout: float | None = None
+    num_retries: int | None = None
+
+
+def env_run_config() -> RunConfig:
+    """The subset of :class:`RunConfig` fillable from flat ``MYLONITE_*`` env
+    vars (``MYLONITE_MODEL``, ``MYLONITE_API_BASE``, ``MYLONITE_PLANNER_MODEL``,
+    ...) — the lowest-precedence source in a command's resolution order, above
+    only the command's own hardcoded default.
+
+    Validates ``api_base`` the same way :class:`RunConfig` does (raises
+    :class:`~mylonite.scan.llm_policy.CredentialedApiBaseError` on a
+    credentialed value) — an env var is a less likely leak path than a
+    committed ``mylonite.yaml``, but a shell history / CI job log can still
+    persist it, so the same hard rejection applies.
+    """
+    env = _EnvRunConfig()
+    validate_api_base(env.api_base)
+    return RunConfig(
+        model=env.model,
+        provider=env.provider,
+        planner_model=env.planner_model,
+        customiser_model=env.customiser_model,
+        judge_model=env.judge_model,
+        api_base=env.api_base,
+        max_tokens=env.max_tokens,
+        temperature=env.temperature,
+        timeout=env.timeout,
+        num_retries=env.num_retries,
+    )
+
+
+class LLMNotConfiguredError(RuntimeError):
+    """Raised by :func:`require_llm_configured` when no credential is
+    resolvable for the effective provider.
+
+    Mirrors the deleted ``MyloniteSettings.require_llm()``'s intent (CLAUDE.md:
+    "There is no default provider ... `require_llm()` raises if one isn't
+    set") as a REAL runtime check in the config-resolution path every live
+    command actually goes through, rather than a class nothing called.
+    """
+
+
+def require_llm_configured(*, model: str, provider: str | None = None) -> None:
+    """Raise :class:`LLMNotConfiguredError` when no credential is resolvable
+    for ``model``'s effective provider.
+
+    A local/self-hosted/proxy provider (ollama, vllm, a litellm-proxy — see
+    ``scan.providers.PROVIDER_ENV_VARS``) needs no key and always passes. An
+    unrecognised model/provider also passes (nothing to check) — deliberately
+    permissive there, since ``ModelRef``/LiteLLM itself is the source of
+    truth for "is this a valid model", not this function; this only checks
+    "is there evidently a credential for it", the narrower question the
+    deleted ``require_llm()`` asked.
+
+    Uses :func:`~mylonite.scan.providers.required_env_vars` (the key PLUS
+    anything else LiteLLM needs to actually route a call, e.g. Azure's
+    endpoint/API-version pair) and requires ALL of them to be set, not just
+    one — ``env_vars_for`` alone plus an ``any()`` check would (a) pass a
+    Bedrock setup with only ``AWS_ACCESS_KEY_ID`` set, silently missing the
+    also-required ``AWS_SECRET_ACCESS_KEY`` (every current
+    ``PROVIDER_ENV_VARS`` entry with more than one var means ALL of them are
+    required together, never "any one of"), and (b) pass an Azure setup with
+    only ``AZURE_API_KEY`` set, which still fails the live call this
+    pre-flight exists to prevent because ``AZURE_API_BASE``/
+    ``AZURE_API_VERSION`` are also unset.
+    """
+    from mylonite.scan.providers import provider_from_model, required_env_vars
+
+    resolved = provider_from_model(model, declared=provider)
+    needed = required_env_vars(resolved)
+    if not needed:
+        return
+    missing = [var for var in needed if not os.environ.get(var)]
+    if not missing:
+        return
+    msg = (
+        f"no LLM credential configured for model {model!r} (resolved provider: "
+        f"{resolved or 'unknown'}). Missing: {', '.join(missing)} "
+        "-- via your shell env, --api-key-file, --env-file, or a CI secret -- "
+        "or point --model/--provider (or mylonite.yaml's model:/provider:) at "
+        "a provider that IS configured."
+    )
+    raise LLMNotConfiguredError(msg)

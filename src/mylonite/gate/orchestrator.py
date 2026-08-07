@@ -14,7 +14,7 @@ from typing import Any
 
 from mylonite._cli_io import echo
 from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
-from mylonite.gate.mitigation import build_pr_body
+from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_pr_body
 from mylonite.scan.coverage import ScanOutcome
 
 EXIT_SUCCESS = 0
@@ -55,6 +55,8 @@ def run_gate(
     open_pr_fn: Callable[..., Any],
     open_pr: bool,
     llm_enrich: bool = False,
+    mitigation_model: str = DEFAULT_MITIGATION_MODEL,
+    mitigation_completion_fn: Callable[..., Any] | None = None,
 ) -> GateResult:
     bundle = scan_fn()
     exploits = bundle.exploits
@@ -100,7 +102,13 @@ def run_gate(
         echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)
 
-    body = build_pr_body(exploit, report, llm_enrich=llm_enrich)
+    body = build_pr_body(
+        exploit,
+        report,
+        llm_enrich=llm_enrich,
+        model=mitigation_model,
+        completion_fn=mitigation_completion_fn,
+    )
     pr = open_pr_fn(out_dir=out_dir, exploit=exploit, report=report, body=body, open_pr=open_pr)
     opened = bool(getattr(pr, "opened", False))
     branch = getattr(pr, "branch", None)

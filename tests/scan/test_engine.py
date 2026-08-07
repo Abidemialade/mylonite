@@ -20,6 +20,7 @@ from mylonite.scan._llm import (
     LiteLLMCallCounter,
     NonRecoverableProviderError,
     active_counter,
+    litellm_tool_call_async,
 )
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable, Verdict
 from mylonite.scan.diagnostics import Diagnosis
@@ -440,6 +441,40 @@ async def test_engine_skips_unknown_seed_id() -> None:
     assert result.report.attempts[0].outcome == "skipped_unknown_seed"
 
 
+@pytest.mark.asyncio
+async def test_engine_treats_present_but_empty_seed_id_as_unknown_not_pattern_id_fallback() -> None:
+    """DCR-0013: `seed_id = payload.metadata.get("seed_id") or payload.pattern_id`
+    used truthy-`or`, not an `is None` check -- a present-but-EMPTY seed_id
+    silently fell back to pattern_id, corrupting compliance provenance. Uses a
+    pattern_id that IS a real catalogue seed id so the OLD buggy fallback would
+    resolve it successfully (treated as a known seed, proceeding normally)
+    while the fixed behaviour (an explicit empty seed_id is not in the
+    catalogue) correctly reports skipped_unknown_seed."""
+    real_seed_id = SEED_CATALOGUE[0].pattern_id
+    payload = Payload(
+        pattern_id=real_seed_id,
+        channel="tool-result",
+        body="x",
+        metadata={
+            "seed_id": "",  # present but EMPTY -- must NOT fall back to pattern_id
+            "weakness": "W2",
+            "predicate": "send_email_to_attacker",
+            "setup": "seed_note",
+            "drive": "read_note_for_summary",
+            "needs_customisation": "true",
+        },
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "skipped_unknown_seed"
+
+
 # --- pattern_id_filter (single-seed scoping) -------------------------------
 
 
@@ -614,6 +649,143 @@ async def test_engine_counts_inconclusive_judge_fallbacks() -> None:
     assert result.report.fallback_breakdown == {"judge_unparseable_output": 1}
 
 
+# --- T15/H4: tool_schema_sanitised end-to-end through a real ScanEngine.run --
+
+#: A $ref-bearing tool schema shaped like real pydantic-generated MCP output
+#: (see scan/schema_sanitise.py's module docstring) -- STRICT-dialect
+#: providers (Gemini/Vertex/Bedrock) reject this unsanitised.
+_REF_BEARING_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "note_id": {"type": "string"},
+        "filter": {"$ref": "#/$defs/NoteFilter"},
+    },
+    "required": ["note_id"],
+    "$defs": {
+        "NoteFilter": {
+            "type": "object",
+            "properties": {"tag": {"type": "string"}},
+            "required": ["tag"],
+        }
+    },
+}
+
+_CLEAN_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"note_id": {"type": "string"}},
+    "required": ["note_id"],
+}
+
+
+class _PlannerCallingAdapterStub:
+    """Simulates what a REAL adapter's invoke() does mid-scan: drive
+    ``litellm_tool_call_async`` -- the planner's SOLE chokepoint (T14) -- with
+    a real tool schema and a stubbed ``completion_fn``. Close enough to
+    exercise T15's ``LiteLLMCallCounter.tool_schema_sanitised`` bump ->
+    ``ScanEngine._finalize``'s ``fallback_breakdown`` fold end-to-end through
+    a genuine ``ScanEngine.run()``, without spinning up a real MCP
+    session/subprocess (unlike ``_AdapterStub``, which never touches the LLM
+    chokepoint at all and so could never have caught this wiring breaking).
+    """
+
+    def __init__(self, *, model: str, tool_schema: dict[str, Any]) -> None:
+        self._model = model
+        self._tool_schema = tool_schema
+
+    async def describe(self) -> TargetDescriptor:
+        return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
+
+    async def invoke(self, payload: Payload) -> AdapterResponse:
+        del payload
+
+        async def _stub_completion(**_: Any) -> Any:
+            from types import SimpleNamespace
+
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="done.", tool_calls=None))]
+            )
+
+        await litellm_tool_call_async(
+            model=self._model,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_notes",
+                        "description": "fetch notes",
+                        "parameters": self._tool_schema,
+                    },
+                }
+            ],
+            completion_fn=_stub_completion,
+        )
+        return _ok_response()
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_engine_folds_tool_schema_sanitisation_into_fallback_breakdown() -> None:
+    """A STRICT-dialect model (bedrock/...) whose planner tool schema carries a
+    $ref must show up as ``fallback_breakdown["tool_schema_sanitised"]`` on the
+    finished report -- the counter bump inside ``litellm_tool_call_async``
+    (T15) has to survive all the way through ``ScanEngine._finalize``'s fold,
+    not just be observable by poking ``LiteLLMCallCounter`` directly."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="bedrock/anthropic.claude-3-haiku", tool_schema=_REF_BEARING_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.fallback_breakdown.get("tool_schema_sanitised") == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_tool_schema_sanitised_absent_for_permissive_model() -> None:
+    """A PERMISSIVE-dialect model (anthropic/...) with the SAME $ref-bearing
+    schema must leave ``tool_schema_sanitised`` out of the breakdown entirely
+    -- sanitisation never ran, so there is nothing to count."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="anthropic/claude-haiku-4-5", tool_schema=_REF_BEARING_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert "tool_schema_sanitised" not in result.report.fallback_breakdown
+
+
+@pytest.mark.asyncio
+async def test_engine_tool_schema_sanitised_absent_for_already_clean_schema() -> None:
+    """A STRICT-dialect model with an already-clean schema (no $ref/anyOf/
+    const/additionalProperties) must also leave the key out -- sanitisation
+    ran but had no real effect, matching the "only when it changes something"
+    contract."""
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_PlannerCallingAdapterStub(
+            model="bedrock/anthropic.claude-3-haiku", tool_schema=_CLEAN_TOOL_SCHEMA
+        ),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert "tool_schema_sanitised" not in result.report.fallback_breakdown
+
+
 # --- G7 budget tracking across layers -------------------------------------
 
 
@@ -782,6 +954,117 @@ async def test_judge_exception_text_is_redacted_before_persisting() -> None:
     assert attempt.outcome == "error"
     assert attempt.verdict_reason is not None
     assert "sk-live-shouldnotleak123" not in attempt.verdict_reason  # pragma: allowlist secret
+
+
+# --- DCR-0016: logger.exception() embeds the raw, unredacted traceback -----
+# (SecretRedactingFilter only touches record.getMessage(); the exc_info
+# traceback logging.Formatter renders separately is never redacted by it —
+# see caplog.text below, which is what a real logging.Handler would emit.)
+
+
+@pytest.mark.asyncio
+async def test_adapter_describe_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: adapter.describe() raising must not log the raw exception text
+    (via logger.exception()'s implicit traceback) -- redact before logging, or
+    log only the exception type name."""
+    payload = _payload_from_seed_index(0)
+
+    class _LeakyDescribeAdapter(_AdapterStub):
+        async def describe(self) -> TargetDescriptor:
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_LeakyDescribeAdapter(_ok_response()),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_customiser_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the customiser.customise() catch site."""
+
+    class _LeakyCustomiser:
+        async def customise(self, seed: Any, target: Any) -> Payload:
+            del seed, target
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_LeakyCustomiser(),  # type: ignore[arg-type]
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_adapter_invoke_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the adapter.invoke() catch site in `_one_pass`."""
+
+    class _LeakyAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            del payload
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+        async def close(self) -> None:
+            return None
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_LeakyAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
+
+
+@pytest.mark.asyncio
+async def test_judge_exception_not_logged_with_raw_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DCR-0016: same guarantee at the judge.judge() catch site in `_one_pass`."""
+
+    class _LeakyJudge:
+        async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+            del payload, response
+            raise RuntimeError(_SECRET_EXC_TEXT)
+
+    payload = _payload_from_seed_index(0)
+    engine = ScanEngine(
+        config=_config(customise=False),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_LeakyJudge(),  # type: ignore[arg-type]
+    )
+    with caplog.at_level("DEBUG", logger="mylonite.scan.engine"):
+        await engine.run()
+    assert "sk-live-shouldnotleak123" not in caplog.text  # pragma: allowlist secret
 
 
 @pytest.mark.asyncio
@@ -1015,5 +1298,27 @@ def test_scan_config_rejects_non_positive_max_concurrent(bad_value: int) -> None
             provider="anthropic",
             model="stub-model",
             max_concurrent=bad_value,
+            output_dir=Path(".mylonite/scans"),
+        )
+
+
+# --- DCR-0012: provider_failure_threshold must be >= 1 ------------------------
+
+
+@pytest.mark.parametrize("bad_value", [0, -1])
+def test_scan_config_rejects_non_positive_provider_failure_threshold(bad_value: int) -> None:
+    """provider_failure_threshold had no lower-bound validation, unlike
+    max_concurrent (Field(ge=1)) -- a value of 0 aborts a scan after the very
+    FIRST attempt regardless of outcome (`consecutive_failures >= threshold`
+    is true even at 0 consecutive failures). Not a config a caller could have
+    MEANT -- reject it at ScanConfig construction, mirroring max_concurrent."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        ScanConfig(
+            target_id="reference:vulnerable",
+            provider="anthropic",
+            model="stub-model",
+            provider_failure_threshold=bad_value,
             output_dir=Path(".mylonite/scans"),
         )

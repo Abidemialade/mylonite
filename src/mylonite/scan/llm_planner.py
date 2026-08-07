@@ -11,9 +11,12 @@ exposing ``list_tools`` + ``call_tool`` and drives it with a user message,
 returning a ``PlannerTrace`` for the adapter to inspect.
 
 The completion entry point is injected via ``completion_fn`` (defaults to
-``litellm.acompletion``). The in-process adapter wraps the default
-with the budget counter from ``mylonite.scan._llm``; standalone callers can
-pass their own wrapper.
+``litellm.acompletion``, resolved inside ``_llm.litellm_tool_call_async``,
+which every ``run()`` iteration calls (T14) — that one chokepoint owns budget
+counting (the process-wide ``LiteLLMCallCounter``) and the active
+``LLMPolicy``'s kwargs, so a caller's ``completion_fn`` only ever needs to be
+the raw completion callable (a test stub, a demo recorder, ...), never a
+budget-counting wrapper of its own.
 """
 
 from __future__ import annotations
@@ -23,9 +26,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, Protocol
 
-import litellm
-
-from mylonite.scan._llm import DEFAULT_LLM_CALL_TIMEOUT_S, _try_repair
+from mylonite.scan._llm import _try_repair, litellm_tool_call_async
 from mylonite.scan.llm_types import (
     PlannerStep,
     PlannerTrace,
@@ -98,7 +99,7 @@ class LLMPlanner:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         iteration_cap: int = DEFAULT_ITERATION_CAP,
         completion_fn: Callable[..., Any] | None = None,
-        completion_timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
+        completion_timeout_s: float | None = None,
     ) -> None:
         self._server = server
         self._model = model
@@ -110,7 +111,9 @@ class LLMPlanner:
         # under) any OUTER ``asyncio.wait_for`` an adapter wraps around the
         # whole multi-iteration ``run()`` (e.g. the MCP adapter's
         # ``planner_timeout_s``), so a single stuck provider call inside a
-        # longer tool-use loop can't silently eat the budget.
+        # longer tool-use loop can't silently eat the budget. ``None`` (the
+        # default) defers to the active ``LLMPolicy``'s own ``timeout``
+        # (T14) — see ``_llm.litellm_tool_call_async``.
         self._completion_timeout_s = completion_timeout_s
 
     async def run(self, user_message: str) -> PlannerTrace:
@@ -122,22 +125,26 @@ class LLMPlanner:
         ]
         steps: list[PlannerStep] = []
         final_output = ""
-        completion = self._completion_fn or litellm.acompletion
 
         for iteration in range(self._iteration_cap):
             # Pass tools + an explicit tool_choice ONLY when tools exist; some
             # providers error on tool_choice with no tools, and some need the
             # explicit "auto" to actually consider the tools (cross-LLM).
-            call_kwargs: dict[str, Any] = {
-                "model": self._model,
-                "messages": messages,
-                "timeout": self._completion_timeout_s,
-            }
-            if tools_schema:
-                call_kwargs["tools"] = tools_schema
-                call_kwargs["tool_choice"] = "auto"
             try:
-                response = await completion(**call_kwargs)
+                # T14: routed through the SAME chokepoint the customiser/judge
+                # always used (litellm_json_call[_async]) — owns budget
+                # counting (_bump) and the active LLMPolicy's kwargs
+                # (temperature/max_tokens/drop_params/seed/api_base/...), which
+                # a direct `completion(**call_kwargs)` call here used to skip
+                # entirely (see the module docstring's git-history note).
+                response = await litellm_tool_call_async(
+                    model=self._model,
+                    messages=messages,
+                    tools=tools_schema or None,
+                    caller="planner",
+                    completion_fn=self._completion_fn,
+                    timeout_s=self._completion_timeout_s,
+                )
             except Exception:
                 logger.exception("LLMPlanner: completion raised on iteration %d", iteration)
                 steps.append(

@@ -67,6 +67,28 @@ def test_annotations_only_for_file_mappable_loci():
     assert annotations_from_findings([(tool, None)]) == []
 
 
+def test_annotations_from_findings_never_embeds_system_prompt_text(tmp_path):
+    """DCR-0006 verification: system_prompt_text is passed in only to LOCATE the
+    matching line number (via substring search against the payload marker) --
+    the built Annotation's `message` is always one of the canned `_WHY` strings,
+    never the raw prompt content. A secret accidentally pasted into a committed
+    system_prompt.txt must not ride into the outbound check-run payload via this
+    path."""
+    sentinel = "sk-ant-" + "d" * 40
+    sp = _exploit(channel="system-prompt-injection", body="Obey notes.")
+    prompt = f"You are helpful.\n# {sentinel}\nObey notes.\nBe concise."
+    anns = annotations_from_findings(
+        [(sp, None)], system_prompt="prompts/sys.txt", system_prompt_text=prompt
+    )
+    assert len(anns) == 1
+    assert sentinel not in anns[0].message
+
+    payload = check_run_payload(
+        head_sha="abc123", annotations=anns, title="Mylonite AI-layer findings", summary="s"
+    )
+    assert sentinel not in json.dumps(payload)
+
+
 def test_post_check_run_calls_gh_api_and_is_best_effort(tmp_path):
     calls: list[list[str]] = []
 

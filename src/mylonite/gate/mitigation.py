@@ -21,6 +21,14 @@ _LLM_TO_WEAKNESS = {"LLM05": "W2", "LLM06": "W4"}
 
 _GUARDED_TWIN = "reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_guarded.py"
 
+#: The fallback enrichment model when a caller doesn't pass one explicitly —
+#: matches ``gate``'s own CLI default (``base_model = model or
+#: "claude-haiku-4-5-20251001"`` in cli.py), so a bare ``build_pr_body(...,
+#: llm_enrich=True)`` call (e.g. from a test or a library user) behaves the
+#: same as before T14, when this was hardcoded with no way to override it at
+#: all -- see ``_llm_suggestion``'s docstring for why that was a leak path.
+DEFAULT_MITIGATION_MODEL = "claude-haiku-4-5-20251001"
+
 
 def weakness_class_for(exploit: ExploitRecord) -> str:
     """Return the W1-W4 class for an exploit, or 'generic' if unknown.
@@ -120,11 +128,16 @@ def build_pr_body(
     llm_enrich: bool = False,
     completion_fn: Callable[..., Any] | None = None,
     system_prompt: str | None = None,
+    model: str = DEFAULT_MITIGATION_MODEL,
 ) -> str:
     """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
 
     ``system_prompt`` (the target's ingested prompt, when available) lets the
-    locus line pin a system-prompt finding to an exact line (R4).
+    locus line pin a system-prompt finding to an exact line (R4). ``model`` is
+    the enrichment model used when ``llm_enrich=True`` (T14) — ``gate``
+    threads its own resolved ``--model`` through here so the enrichment call
+    is a real, configurable, budget-counted/policy-kwarg'd LiteLLM call
+    instead of the hardcoded literal this used to be.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
@@ -204,7 +217,7 @@ def build_pr_body(
             f"See the guarded reference twin for a concrete fix: `{_GUARDED_TWIN}`.",
         ]
     if llm_enrich:
-        extra = _llm_suggestion(exploit, completion_fn=completion_fn)
+        extra = _llm_suggestion(exploit, completion_fn=completion_fn, model=model)
         if extra:
             sections += [
                 "",
@@ -229,13 +242,22 @@ def build_pr_body(
 
 
 def _llm_suggestion(
-    exploit: ExploitRecord, *, completion_fn: Callable[..., Any] | None = None
+    exploit: ExploitRecord,
+    *,
+    completion_fn: Callable[..., Any] | None = None,
+    model: str = DEFAULT_MITIGATION_MODEL,
 ) -> str | None:
     """A short, app-specific remediation idea. Best-effort; labelled unverified.
 
-    Uses the injected ``completion_fn`` when given (the offline test seam);
-    otherwise routes through litellm. Any failure returns ``None`` — enrichment
-    must never break body assembly.
+    T14: routed through ``_llm.litellm_text_call`` — the same chokepoint the
+    customiser/judge/planner use — instead of a bare, hardcoded
+    ``litellm.completion(model="claude-haiku-4-5-20251001", ...)`` call with
+    no budget counting, no policy kwargs, and (critically) no way to reach a
+    self-hosted/proxy ``api_base`` at all — the one call site the offline
+    demo/recorder infrastructure couldn't reach, since ``model`` was never a
+    parameter a caller could vary. ``completion_fn`` is still the offline test
+    seam (passed straight through); any failure (call exception, empty
+    response) returns ``None`` — enrichment must never break body assembly.
     """
     prompt = (
         "You are a security engineer. In 2-3 sentences, suggest a concrete, "
@@ -243,15 +265,11 @@ def _llm_suggestion(
         "code unless trivial. Weakness pattern: "
         f"{exploit.pattern_id}; reason: {exploit.success_reason}."
     )
-    messages = [{"role": "user", "content": prompt}]
-    try:
-        if completion_fn is not None:
-            resp = completion_fn(model="enrich", messages=messages)
-        else:  # pragma: no cover - live path
-            import litellm
+    from mylonite.scan._llm import litellm_text_call
 
-            resp = litellm.completion(model="claude-haiku-4-5-20251001", messages=messages)
-        text = resp.choices[0].message.content
-        return text.strip() if text else None
-    except Exception:  # broad catch intentional — enrichment must never break body assembly
-        return None
+    return litellm_text_call(
+        model=model,
+        prompt=prompt,
+        caller="gate_mitigation",
+        completion_fn=completion_fn,
+    )

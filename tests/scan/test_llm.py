@@ -20,10 +20,15 @@ from mylonite.scan._llm import (
     NonRecoverableProviderError,
     _extract_json_object,
     active_counter,
+    active_policy,
     litellm_json_call,
     litellm_json_call_async,
+    litellm_text_call,
+    litellm_tool_call_async,
+    llm_scope,
     pop_fallback_cause,
 )
+from mylonite.scan.llm_policy import LLMPolicy
 
 
 def _stub_response(text: str) -> SimpleNamespace:
@@ -532,3 +537,286 @@ async def test_async_helper_works_same_way() -> None:
         )
     assert result == {"body": "async"}
     assert counter.count == 1
+
+
+# --- T14/H2 code-review follow-up: direct chokepoint coverage ---------------
+#
+# Every call site (litellm_json_call[_async], litellm_tool_call_async,
+# litellm_text_call) is supposed to merge active_policy().kwargs() into the
+# call it makes. Everything above only ever asserted on `timeout`; these
+# tests assert on the OTHER policy fields (drop_params/temperature/
+# max_tokens/seed/num_retries) so a regression that silently drops the merge
+# from any one call site is actually caught.
+
+
+def test_litellm_json_call_merges_default_policy_kwargs_when_unscoped() -> None:
+    """No llm_scope active -> LLMPolicy()'s documented defaults still apply
+    (this is the actual bug T14 fixed: before it, NONE of these kwargs were
+    ever set at all, so a provider's own defaults silently applied)."""
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    litellm_json_call(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller="test",
+        completion_fn=stub,
+    )
+    assert seen[0]["temperature"] == 0.0
+    assert seen[0]["max_tokens"] == 2048
+    assert seen[0]["drop_params"] is True
+    assert seen[0]["num_retries"] == 2
+    assert seen[0]["seed"] == 0
+
+
+def test_litellm_json_call_merges_a_scoped_policy() -> None:
+    """A caller-supplied LLMPolicy (via llm_scope) overrides the defaults --
+    proving the merge reads the ACTIVE policy, not a hardcoded one."""
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    policy = LLMPolicy(temperature=0.9, max_tokens=64, drop_params=False, num_retries=5, seed=None)
+    with llm_scope(policy=policy):
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert seen[0]["temperature"] == 0.9
+    assert seen[0]["max_tokens"] == 64
+    assert seen[0]["drop_params"] is False
+    assert seen[0]["num_retries"] == 5
+    assert "seed" not in seen[0]  # seed=None is omitted by LLMPolicy.kwargs()
+    # Outside the `with` block the scope is gone -- active_policy() reverts.
+    assert active_policy() == LLMPolicy()
+
+
+def test_litellm_json_call_includes_api_base_when_policy_sets_it() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    with llm_scope(policy=LLMPolicy(api_base="https://my-proxy.internal/v1")):
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert seen[0]["api_base"] == "https://my-proxy.internal/v1"
+
+
+@pytest.mark.asyncio
+async def test_litellm_json_call_async_merges_a_scoped_policy() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response('{"body": "hi"}')
+
+    with llm_scope(policy=LLMPolicy(temperature=0.5, max_tokens=99)):
+        await litellm_json_call_async(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert seen[0]["temperature"] == 0.5
+    assert seen[0]["max_tokens"] == 99
+    assert seen[0]["drop_params"] is True  # untouched fields keep LLMPolicy's defaults
+
+
+# --- litellm_tool_call_async (the planner's chokepoint) ---------------------
+
+
+@pytest.mark.asyncio
+async def test_litellm_tool_call_async_merges_active_policy_kwargs() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))])
+
+    with llm_scope(policy=LLMPolicy(temperature=0.3, max_tokens=77, drop_params=False)):
+        response = await litellm_tool_call_async(
+            model="stub",
+            messages=[{"role": "user", "content": "hi"}],
+            completion_fn=stub,
+        )
+    assert seen[0]["temperature"] == 0.3
+    assert seen[0]["max_tokens"] == 77
+    assert seen[0]["drop_params"] is False
+    assert seen[0]["model"] == "stub"
+    assert response.choices[0].message.content == "hi"  # raw response, not parsed JSON
+
+
+@pytest.mark.asyncio
+async def test_litellm_tool_call_async_passes_tools_and_tool_choice_only_when_given() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+    await litellm_tool_call_async(
+        model="stub", messages=[], tools=tools, completion_fn=stub, caller="planner"
+    )
+    assert seen[0]["tools"] == tools
+    assert seen[0]["tool_choice"] == "auto"
+
+    seen.clear()
+    await litellm_tool_call_async(model="stub", messages=[], completion_fn=stub)
+    assert "tools" not in seen[0]
+    assert "tool_choice" not in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_litellm_tool_call_async_bumps_budget_counter() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
+
+    with counter.active():
+        await litellm_tool_call_async(
+            model="stub", messages=[], completion_fn=stub, caller="planner"
+        )
+    assert counter.by_caller == {"planner": 1}
+    assert counter.count == 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_tool_call_async_marks_failure_and_reraises_on_exception() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError("provider down")
+
+    with counter.active(), pytest.raises(RuntimeError, match="provider down"):
+        await litellm_tool_call_async(model="stub", messages=[], completion_fn=stub)
+    # Exceptions propagate (never swallowed into a fallback, unlike
+    # litellm_json_call) -- but a failure is still recorded for the engine's
+    # provider_failure_threshold.
+    assert counter.consecutive_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_litellm_tool_call_async_explicit_timeout_overrides_policy() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+
+    with llm_scope(policy=LLMPolicy(timeout=120.0)):
+        await litellm_tool_call_async(model="stub", messages=[], completion_fn=stub, timeout_s=9.0)
+    assert seen[0]["timeout"] == 9.0
+
+    seen.clear()
+    with llm_scope(policy=LLMPolicy(timeout=42.0)):
+        await litellm_tool_call_async(model="stub", messages=[], completion_fn=stub)
+    assert seen[0]["timeout"] == 42.0  # timeout_s=None (default) defers to the policy
+
+
+# --- litellm_text_call (gate mitigation's chokepoint) ------------------------
+
+
+def test_litellm_text_call_merges_policy_and_returns_text() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def stub(**kwargs: Any) -> SimpleNamespace:
+        seen.append(kwargs)
+        return _stub_response("a suggestion")
+
+    with llm_scope(policy=LLMPolicy(temperature=0.6, max_tokens=33)):
+        result = litellm_text_call(
+            model="stub", prompt="p", caller="gate_mitigation", completion_fn=stub
+        )
+    assert result == "a suggestion"
+    assert seen[0]["temperature"] == 0.6
+    assert seen[0]["max_tokens"] == 33
+    assert seen[0]["drop_params"] is True
+
+
+def test_litellm_text_call_bumps_budget_counter() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response("x")
+
+    with counter.active():
+        litellm_text_call(model="stub", prompt="p", caller="gate_mitigation", completion_fn=stub)
+    assert counter.by_caller.get("gate_mitigation", 0) == 1
+
+
+def test_litellm_text_call_returns_none_on_exception_never_raises() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError("provider down")
+
+    result = litellm_text_call(
+        model="stub", prompt="p", caller="gate_mitigation", completion_fn=stub
+    )
+    assert result is None  # must never raise -- enrichment is best-effort
+
+
+def test_litellm_text_call_returns_none_on_empty_response() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response("   ")  # whitespace-only
+
+    result = litellm_text_call(
+        model="stub", prompt="p", caller="gate_mitigation", completion_fn=stub
+    )
+    assert result is None
+
+
+# --- llm_scope: nestability + selective (counter-only / policy-only) scoping -
+
+
+def test_llm_scope_nested_policy_overrides_outer() -> None:
+    """llm_scope's own docstring claims it's "nestable -- a caller can layer a
+    narrower policy inside a wider one"; this exercises exactly that."""
+    outer = LLMPolicy(temperature=0.1)
+    inner = LLMPolicy(temperature=0.9)
+    with llm_scope(policy=outer):
+        assert active_policy().temperature == 0.1
+        with llm_scope(policy=inner):
+            assert active_policy().temperature == 0.9
+        # Back to the outer policy after the inner scope exits.
+        assert active_policy().temperature == 0.1
+    # Back to the default after both exit.
+    assert active_policy() == LLMPolicy()
+
+
+def test_llm_scope_counter_only_leaves_policy_untouched() -> None:
+    """Passing only `counter=` (no `policy=`) must not disturb whatever policy
+    (or lack of one) was already active -- the two contextvars are independent."""
+    policy = LLMPolicy(temperature=0.77)
+    counter = LiteLLMCallCounter(cap=1)
+    with llm_scope(policy=policy), llm_scope(counter=counter):
+        assert active_policy().temperature == 0.77  # untouched by the counter-only scope
+        assert active_counter() is counter
+
+
+def test_llm_scope_policy_only_leaves_counter_untouched() -> None:
+    counter = LiteLLMCallCounter(cap=1)
+    with counter.active(), llm_scope(policy=LLMPolicy(temperature=0.42)):
+        assert active_counter() is counter  # untouched by the policy-only scope
+        assert active_policy().temperature == 0.42

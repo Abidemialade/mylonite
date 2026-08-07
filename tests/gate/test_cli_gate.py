@@ -88,6 +88,33 @@ def test_gate_rejects_bundled_mcp_target_with_explicit_target_file(tmp_path):
     assert "--target-file" in res.output
 
 
+def test_gate_exposes_role_model_flags():
+    """T14: gate gets the same three-role model split scan already had --
+    DifferentialValidator/ScanConfig always accepted planner_model/
+    customiser_model/judge_model; this was purely a missing CLI flag."""
+    names = _gate_option_names()
+    assert "--planner-model" in names
+    assert "--customiser-model" in names
+    assert "--judge-model" in names
+
+
+def test_gate_planner_model_override_rejects_unroutable_model(tmp_path):
+    """Mirrors scan's identical guard: a role override drives the SAME LiteLLM
+    call path as --model, so an unroutable one must reject at CLI-argument
+    time -- before any live scan -- not fail later mid-gate."""
+    res = runner.invoke(
+        app,
+        [
+            "gate",
+            "reference:vulnerable",
+            "--planner-model",
+            "not-a-real-model-xyz123",
+        ],
+    )
+    assert res.exit_code == 2, res.output
+    assert "can't determine a provider" in (res.stderr or res.output)
+
+
 def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(tmp_path, monkeypatch):
     # DCR-0001: the same rejection must fire even when target_file comes from an
     # auto-discovered ./mylonite.yaml and NO --target-file flag was typed at all.

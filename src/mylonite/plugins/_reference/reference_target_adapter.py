@@ -10,7 +10,7 @@ Three classes ship here:
 * ``InProcessReferenceAdapter`` — the real implementation. Takes ``variant``
   ("vulnerable" or "guarded"), ``model``, and ``completion_fn`` injection
   point. ScanEngine instantiates this directly with the config it built from
-  ``MyloniteSettings`` and the CLI flags.
+  ``RunConfig``/CLI flags (``mylonite.config``).
 * ``InProcessVulnerableReferenceAdapter`` — 0-arg subclass registered as the
   ``in_process_reference_vulnerable`` entry point. Lets the plugin registry's
   no-args instantiation contract (registry.py:105) still resolve the adapter,
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 from mylonite.contracts import AdapterResponse, AsyncTargetAdapterBase, Payload, TargetDescriptor
 from mylonite.contracts._types import ToolSpec
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
-from mylonite.scan._llm import active_counter
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
 from mylonite.scan.llm_types import ToolDescription, ToolResult
@@ -80,31 +79,6 @@ def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "")
     # validator should catch this earlier, but defending in depth here means we
     # never silently emit a malformed user message.
     return f"Process note {nid}."
-
-
-def _wrap_counted(completion_fn: Callable[..., Any] | None) -> Callable[..., Any]:
-    """Wrap a completion_fn (or the LiteLLM default) so each call increments the
-    active LiteLLMCallCounter as the 'planner' caller — closing the planner-side
-    budget leak (eng review A1). Shared by ``invoke`` and ``AttackSession``."""
-    import litellm  # local import keeps cold-start cheap
-
-    underlying = completion_fn or litellm.acompletion
-
-    async def _counted(**kwargs: Any) -> Any:
-        counter = active_counter()
-        if counter is not None:
-            counter.record("planner")
-        try:
-            response = await underlying(**kwargs)
-        except Exception:
-            if counter is not None:
-                counter.mark_failure()
-            raise
-        if counter is not None:
-            counter.mark_success()
-        return response
-
-    return _counted
 
 
 class _InProcessServer:
@@ -162,10 +136,12 @@ class _InProcessAttackSession:
 
         self._variant = variant
         self._model = model
-        # Wrap once for the session's lifetime (the budget counter is resolved
-        # per-call inside the wrapper, so caching it here is safe and avoids
-        # re-wrapping on every drive_planner turn).
-        self._counted_completion_fn = _wrap_counted(completion_fn)
+        # T14: no wrapping needed here any more — LLMPlanner routes every
+        # completion call through _llm.litellm_tool_call_async, which owns
+        # budget-counting (as caller="planner") + the active LLMPolicy's
+        # kwargs itself. This is the raw completion_fn (or None → LiteLLM's
+        # default), unchanged.
+        self._completion_fn = completion_fn
         self._store = NoteStore()
         self._server = _InProcessServer(variant, self._store)
 
@@ -182,7 +158,7 @@ class _InProcessAttackSession:
         planner = LLMPlanner(
             server=self._server,
             model=self._model,
-            completion_fn=self._counted_completion_fn,
+            completion_fn=self._completion_fn,
         )
         # Planner exceptions propagate; the attack loop (a later slice) owns
         # retry/abort — unlike invoke(), which wraps them in
@@ -274,11 +250,10 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
             )
             await server.call_tool("write_note", {"note_id": note_id, "body": payload.body})
 
-        wrapped_completion = self._wrap_completion()
         planner = LLMPlanner(
             server=server,
             model=self._model,
-            completion_fn=wrapped_completion,
+            completion_fn=self._completion_fn,
         )
 
         user_message = _drive_user_message(drive, note_id, payload.body)
@@ -319,10 +294,6 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
 
     async def close(self) -> None:
         return None
-
-    def _wrap_completion(self) -> Callable[..., Any]:
-        """Wrap the completion_fn with the planner budget counter (A1)."""
-        return _wrap_counted(self._completion_fn)
 
 
 class InProcessVulnerableReferenceAdapter(InProcessReferenceAdapter):

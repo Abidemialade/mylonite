@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mylonite._redaction import redact
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
-from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter
+from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
@@ -93,7 +93,16 @@ class ScanConfig(BaseModel):
             "JSON-fence parse fix landed."
         ),
     )
-    provider_failure_threshold: int = DEFAULT_PROVIDER_FAILURE_THRESHOLD
+    provider_failure_threshold: int = Field(
+        default=DEFAULT_PROVIDER_FAILURE_THRESHOLD,
+        ge=1,
+        description=(
+            "Consecutive provider failures before the scan aborts. A value <1 "
+            "would abort after the very FIRST attempt regardless of outcome "
+            "(DCR-0012) — not a config a caller could have MEANT, so reject it "
+            "at construction, mirroring max_concurrent."
+        ),
+    )
     pattern_id_filter: str | None = Field(
         default=None,
         description=(
@@ -208,7 +217,16 @@ class ScanEngine:
             m.attack_metadata().id: m.attack_metadata().compliance for m in self._attack_modules
         }
 
-        with counter.active():
+        # T14 code-review follow-up: routes through llm_scope(counter=...)
+        # rather than counter.active() directly -- functionally identical
+        # (both just set/reset the same _ACTIVE_COUNTER contextvar), but this
+        # is what makes llm_scope's counter= parameter a real, exercised
+        # production path instead of dead (only ever passed policy= in
+        # practice; the CLI's own llm_scope(policy=...) calls for the active
+        # LLMPolicy nest around this one, since asyncio.run() copies the
+        # calling context). counter.active() itself stays available as a
+        # narrower entry point for a caller that only wants the counter.
+        with llm_scope(counter=counter):
             try:
                 descriptor = await self._adapter.describe()
             except ImportError:
@@ -217,8 +235,15 @@ class ScanEngine:
                 # CLI can map it to a clear exit, rather than hiding it behind a
                 # generic "describe_failed".
                 raise
-            except Exception:
-                logger.exception("ScanEngine: adapter.describe() raised")
+            except Exception as exc:
+                # DCR-0016: logger.exception()'s implicit exc_info renders the
+                # RAW (unredacted) exception text + traceback -- the
+                # SecretRedactingFilter installed on the "mylonite" logger only
+                # touches record.getMessage(), never the exc_info traceback a
+                # handler's Formatter renders separately. Log only the
+                # exception type name; nothing secret-shaped ever reaches a
+                # handler this way.
+                logger.error("ScanEngine: adapter.describe() raised: %s", type(exc).__name__)
                 aborted = AbortReason.DESCRIBE_FAILED.value
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
@@ -334,6 +359,17 @@ class ScanEngine:
             # done, so this returns immediately.
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        # T15/H4: the planner's tool-schema sanitisation (scan._llm's
+        # litellm_tool_call_async, via the SAME counter this run scoped
+        # above) is counted on the counter itself, not per-_PerPayloadOutcome
+        # like judge/customiser fallbacks — a planner run isn't a single
+        # judged pass, it's a multi-iteration tool-calling loop nested inside
+        # one payload attempt. Folded into fallback_breakdown here, after the
+        # counter has seen every call the run made, so it's visible in the
+        # report alongside the other fallback causes.
+        if counter.tool_schema_sanitised:
+            fallback_breakdown["tool_schema_sanitised"] = counter.tool_schema_sanitised
+
         return self._finalize(
             attempts,
             exploits,
@@ -414,7 +450,12 @@ class ScanEngine:
         semaphore: asyncio.Semaphore,
         compliance: Any,
     ) -> _PerPayloadOutcome:
-        seed_id = payload.metadata.get("seed_id") or payload.pattern_id
+        # DCR-0013: an explicit `is None` check, not truthy-`or` — a
+        # present-but-EMPTY seed_id must not silently fall back to pattern_id
+        # (which would corrupt compliance provenance for an otherwise-valid
+        # metadata dict).
+        _raw_seed_id = payload.metadata.get("seed_id")
+        seed_id = _raw_seed_id if _raw_seed_id is not None else payload.pattern_id
 
         # G2 / A4: metadata validation runs before any LLM call.
         missing = REQUIRED_METADATA_KEYS - payload.metadata.keys()
@@ -513,7 +554,10 @@ class ScanEngine:
             except BudgetExceededError:
                 raise
             except Exception as exc:
-                logger.exception("ScanEngine: customiser raised unexpectedly")
+                # DCR-0016: see the identical note at the adapter.describe()
+                # catch site above -- logger.exception()'s traceback bypasses
+                # the redaction filter entirely.
+                logger.error("ScanEngine: customiser raised unexpectedly: %s", type(exc).__name__)
                 return _PerPayloadOutcome(
                     attempt=ScanAttempt(
                         seed_id=seed_id,
@@ -797,7 +841,10 @@ class ScanEngine:
             # Propagate up so run() can flip aborted="budget_exceeded".
             raise
         except Exception as exc:
-            logger.exception("ScanEngine: adapter.invoke raised unexpectedly")
+            # DCR-0016: see the identical note at the adapter.describe() catch
+            # site in run() -- logger.exception()'s traceback bypasses the
+            # redaction filter entirely.
+            logger.error("ScanEngine: adapter.invoke raised unexpectedly: %s", type(exc).__name__)
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
@@ -835,7 +882,10 @@ class ScanEngine:
         except BudgetExceededError:
             raise
         except Exception as exc:
-            logger.exception("ScanEngine: judge raised unexpectedly")
+            # DCR-0016: see the identical note at the adapter.describe() catch
+            # site in run() -- logger.exception()'s traceback bypasses the
+            # redaction filter entirely.
+            logger.error("ScanEngine: judge raised unexpectedly: %s", type(exc).__name__)
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,

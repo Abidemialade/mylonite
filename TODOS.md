@@ -60,6 +60,36 @@ either correctness gaps in already-correct-in-spirit code, or non-blocking perfo
   false-positive on adjudication — amortised against minutes of LLM latency, not worth
   fixing on its own).
 
+## 0.7.9 deep-code-review non-blocking findings (docs/reviews/2026-08-07-0.7.9-any-provider-review.md)
+
+The review's 5 blockers (DCR-0001/0002/0003/0004/0006, 3 critical + 2 high — a
+pervasive console-redacted-but-disk-persisted-unredacted gap, an auto-discovered
+`mylonite.yaml` `api_base` SSRF/key-exfil path, and a silently-incomplete gating
+formula) were fixed before merge (commit `79a4c68`), independently re-verified via a
+red→green checkout cycle against the pre-fix source, not just re-run. Two
+low-confidence findings from the same review (DCR-0005 credential-preflight,
+DCR-0006 system-prompt-in-GitHub-annotation) were investigated and REFUTED with
+regression tests locking in the correct behavior — see the review doc and commit
+message for the full trace. The `gate mcp:<family>` route (DCR-0014/0015, medium
+severity but a real regression in a documented CLI path) was also fixed in the same
+pass since it's correlated with the redaction work and blocks the release's own
+headline feature otherwise. The remaining medium/low findings (DCR-0007/0008/0009/
+0010/0011/0012/0013/0018/0019/0020/0021/0024) were all fixed in a follow-up pass,
+each with a red→green TDD regression test — see the same review doc and the
+follow-up commit for the full trace. What's left:
+
+- **One high-severity finding was quarantined by the verification gate** for evidence
+  spanning 4 lines against `verify.py`'s 3-line cap — confirmed genuinely verbatim,
+  not noise (the original DCR-0007/0.7.9-review numbering, generate's
+  `_emit_generated_test` colocated-exploit write — **this one was in fact fixed** as
+  part of the redaction-gap coordinated pass in `79a4c68`, so no follow-up needed;
+  noted here only so the quarantine event has a paper trail).
+- **`scan/_llm.py` (the T14 LLM chokepoint, 842 lines) and
+  `plugins/_reference/reference_target_adapter.py` were only swept, not
+  deep-reviewed**, despite security-sensitive surface tags — risk-ranking scored them
+  below this run's economy-profile deep-review cutoff. *Trigger:* a future
+  `thorough`-profile review should reconsider both.
+
 ## Phase 4 launch infrastructure (pre-launch readiness landed; these remain — human-gated)
 
 The pre-Phase-4 readiness work (flow, verification legibility, correctness

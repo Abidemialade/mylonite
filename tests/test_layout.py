@@ -211,6 +211,9 @@ def test_generate_latest_honours_custom_output_dir(
 
     monkeypatch.setattr(litellm, "acompletion", _acompletion)
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
+    # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
+    # above, so a fake key just needs to be PRESENT, never actually used.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.chdir(tmp_path)
 
     runner = CliRunner()
@@ -283,6 +286,9 @@ def test_scan_output_dir_flag_wins_over_config_root_and_env(
 
     monkeypatch.setattr(litellm, "acompletion", _acompletion)
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
+    # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
+    # above, so a fake key just needs to be PRESENT, never actually used.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MYLONITE_ROOT", "from-env-root")
     (tmp_path / "mylonite.yaml").write_text("root: from-config-root\n", encoding="utf-8")

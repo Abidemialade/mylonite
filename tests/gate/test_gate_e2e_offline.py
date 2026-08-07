@@ -94,6 +94,10 @@ def test_gate_reference_no_finding_exits_zero(
     # Also patch the sync path (used by doctor / litellm_json_call sync) in
     # case any branch under test uses it; the gate path is async-only but be safe.
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_response())
+    # T14: gate now pre-flights require_llm_configured() before any litellm
+    # call is attempted -- litellm itself is fully stubbed above, so a fake
+    # key just needs to be PRESENT, never actually used.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
     monkeypatch.chdir(tmp_path)
     out_dir = tmp_path / ".mylonite" / "gate"
