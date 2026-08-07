@@ -365,6 +365,74 @@ def test_control_template_carries_model_and_provider() -> None:
     assert "provider='anthropic'" in src
 
 
+def test_emit_uses_explicit_context_param_with_no_metadata_at_all() -> None:
+    """0.7.10 (CONTRACT_VERSION 0.2.0): the promoted ``emit(exploit,
+    context=...)`` parameter is used DIRECTLY -- no ``mylonite.exec.*``
+    ``Payload.metadata`` stamping is needed for this to work. This is the key
+    proof the promotion actually works: the exploit's payload metadata below
+    has NO exec-context keys whatsoever (unlike the pre-existing
+    ``test_emitted_test_carries_model_and_provider``, which proves the
+    metadata-fallback path), yet the generated test's ``model=``/``provider=``
+    kwargs reflect the passed ``context``, not "nothing".
+    """
+    from mylonite.contracts.exec_context import ExecContext
+
+    exploit = _exploit(pattern_id="safe-id", target_id="mcp:acme")
+    assert exploit.payload.metadata == {}  # no mylonite.exec.* keys at all
+
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    src = ReferencePytestGenerator().emit(exploit, context=ctx).source
+
+    assert "testkit.assert_target_resists(" in src
+    assert "model='gpt-4.1-mini'" in src
+    assert "provider='openai'" in src
+
+
+def test_emit_explicit_context_takes_priority_over_metadata() -> None:
+    """When BOTH an explicit ``context`` and ``mylonite.exec.*`` metadata are
+    present (e.g. a re-generation against a newer scan), the explicit
+    parameter wins -- ``from_metadata`` is never consulted."""
+    from mylonite.contracts.exec_context import ExecContext
+
+    metadata_ctx = ExecContext(provider="anthropic", model="claude-haiku-4-5")
+    base = _exploit(pattern_id="safe-id", target_id="mcp:acme")
+    exploit = base.model_copy(
+        update={
+            "payload": base.payload.model_copy(
+                update={"metadata": {**base.payload.metadata, **metadata_ctx.to_metadata()}}
+            )
+        }
+    )
+
+    explicit_ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    src = ReferencePytestGenerator().emit(exploit, context=explicit_ctx).source
+
+    assert "model='gpt-4.1-mini'" in src
+    assert "provider='openai'" in src
+    assert "claude-haiku-4-5" not in src
+    assert "'anthropic'" not in src
+
+
+def test_emit_falls_back_to_metadata_when_context_is_explicitly_none() -> None:
+    """Old-style call shape (``context=None``, exec-context metadata present)
+    keeps working exactly as before the promotion -- the generator falls
+    through to ``ExecContext.from_metadata(exploit.payload.metadata)``."""
+    from mylonite.contracts.exec_context import ExecContext
+
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    base = _exploit(pattern_id="safe-id", target_id="mcp:acme")
+    exploit = base.model_copy(
+        update={
+            "payload": base.payload.model_copy(
+                update={"metadata": {**base.payload.metadata, **ctx.to_metadata()}}
+            )
+        }
+    )
+    src = ReferencePytestGenerator().emit(exploit, context=None).source
+    assert "model='gpt-4.1-mini'" in src
+    assert "provider='openai'" in src
+
+
 def test_custom_target_emits_real_target_assertion() -> None:
     """A custom target_id emits a test that re-drives the REAL target, not the twin."""
     custom = _EXPLOIT.model_copy(update={"target_id": "mcp:acme"})

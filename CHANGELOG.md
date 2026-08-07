@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`TestGenerator.emit` gained an optional `context: ExecContext | None =
+  None` parameter** (`contracts/test_generator.py`, `CONTRACT_VERSION` 0.1.0
+  -> 0.2.0 — a `contract-change`, tracked by issue #78, which reserved the
+  `mylonite.exec.*` `Payload.metadata` namespace specifically for this
+  promotion). This is the T12 (0.7.8) execution-context shim promoted into a
+  real, typed parameter: `mylonite generate`'s call sites now build an
+  `ExecContext` from the exploit's stamped `mylonite.exec.*` metadata and
+  pass it explicitly, and `ReferencePytestGenerator.emit` uses it directly
+  (falling back to re-deriving it from `Payload.metadata` only when no
+  context is passed) to render explicit `model=`/`provider=` literals into
+  the generated test — so the emitted CI gate re-drives the SAME model that
+  discovered/validated the finding, not a hardcoded fallback.
+
+  **Migration for third-party `TestGenerator` plugin authors:** update your
+  `emit` signature to `emit(self, exploit: ExploitRecord, context:
+  ExecContext | None = None) -> GeneratedTest`. It's safe to ignore
+  `context` if your generator doesn't need model/provider provenance — the
+  parameter is optional and defaults to `None`. The bump is additive
+  (minor version), so an unmodified 0.1.x plugin keeps loading (the plugin
+  registry only refuses a *major*-version mismatch); the CLI also carries a
+  temporary compatibility bridge (`_dispatch_emit` in `cli.py`) that
+  inspects a discovered generator's `emit` signature and only passes
+  `context=` when the generator actually declares it, so an un-migrated
+  0.1.x plugin's `emit(self, exploit)` is still called correctly rather than
+  raising `TypeError`.
+
+- `mylonite.contracts.exec_context` — `ExecContext` (plus
+  `ALLOWED_METADATA_KEYS` / `METADATA_PREFIX`) moved here from
+  `mylonite.scan.exec_context`, which now re-exports the same names
+  unchanged for backward compatibility. The move avoids `contracts/`
+  importing from `scan/` (backwards from this project's layering) now that
+  `contracts/test_generator.py` needs a real type for the new `context`
+  parameter above. Existing `from mylonite.scan.exec_context import
+  ExecContext` imports are unaffected.
+
 ### Removed
 
 - The deprecated `--provider` CLI flag on `doctor`, `scan`, `validate`,
@@ -20,6 +57,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   works but stays deprecated (warns) for now.
 
 ### Changed
+
+- **`ScanReport.aborted`'s JSON schema is now a constrained `enum`, not a bare
+  string** (`scan_report.schema.json`; a `contract-change` per GOVERNANCE.md's
+  definition — "any change to the five extension-point Protocols **or their
+  JSON schemas**" — tracked by a dedicated `contract-change`-tagged issue and
+  authorized to land immediately by the maintainer, same as the `emit`
+  promotion above). `ScanReport.aborted` is now typed `AbortReason | None`
+  instead of `str | None`, where `AbortReason` is the existing 5-member
+  `StrEnum` (`budget_exceeded`, `provider_unreachable`, `describe_failed`,
+  `no_payloads`, and the previously-undocumented `wall_clock_timeout` — the
+  field's docstring was stale and is now corrected). `AbortReason` itself
+  moved from `mylonite.scan.coverage` to `mylonite.contracts._types` (to
+  avoid a circular import: `scan/coverage.py` imports `ScanReport` FROM
+  `contracts/_types.py`); `scan.coverage.AbortReason` re-exports it unchanged
+  for backward compatibility.
+
+  This is **non-breaking for existing consumers**: because `AbortReason` is a
+  `StrEnum`, its wire representation (`.value` / JSON serialisation) is
+  byte-identical to the plain string it replaces, and any code comparing
+  `report.aborted == "budget_exceeded"`-style still works. What changes is
+  that **an unrecognised `aborted` value now fails Pydantic validation at
+  `ScanReport` construction time** instead of being silently accepted — e.g.
+  a hand-edited or corrupted `scan_report.json`, or an artefact from an
+  incompatible future version. No `CONTRACT_VERSION` numeric bump accompanies
+  this change: `ScanReport` is produced by `ScanEngine`, not one of the five
+  Protocol-based extension points, so it has no single `CONTRACT_VERSION` of
+  its own to bump (see `CONTRIBUTING.md`'s extension-point table). Consumers
+  should not need any code changes; regenerate/re-validate any hand-built
+  `ScanReport` fixtures that used a non-standard `aborted` string.
 
 - `mylonite demo`'s LiteLLM fixture-replay cache-key resolution no longer
   falls back to the legacy v1 key algorithm implicitly when a fixtures

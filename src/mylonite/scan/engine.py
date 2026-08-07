@@ -209,7 +209,7 @@ class ScanEngine:
         start = time.monotonic()
         attempts: list[ScanAttempt] = []
         exploits: list[ExploitRecord] = []
-        aborted: str | None = None
+        aborted: AbortReason | None = None
         inconclusive_attempts = 0
         fallback_breakdown: dict[str, int] = {}
         module_ids = [m.attack_metadata().id for m in self._attack_modules]
@@ -244,7 +244,7 @@ class ScanEngine:
                 # exception type name; nothing secret-shaped ever reaches a
                 # handler this way.
                 logger.error("ScanEngine: adapter.describe() raised: %s", type(exc).__name__)
-                aborted = AbortReason.DESCRIBE_FAILED.value
+                aborted = AbortReason.DESCRIBE_FAILED
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -300,7 +300,7 @@ class ScanEngine:
                         family,
                         known,
                     )
-                    aborted = AbortReason.NO_PAYLOADS.value
+                    aborted = AbortReason.NO_PAYLOADS
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
@@ -318,12 +318,12 @@ class ScanEngine:
                     else:
                         outcome = await coro
                 except TimeoutError:
-                    aborted = AbortReason.WALL_CLOCK_TIMEOUT.value
+                    aborted = AbortReason.WALL_CLOCK_TIMEOUT
                     for pending in tasks:
                         pending.cancel()
                     break
                 except BudgetExceededError:
-                    aborted = AbortReason.BUDGET_EXCEEDED.value
+                    aborted = AbortReason.BUDGET_EXCEEDED
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -345,7 +345,7 @@ class ScanEngine:
                         fallback_breakdown.get("nrun_disagreement", 0) + 1
                     )
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
-                    aborted = AbortReason.PROVIDER_UNREACHABLE.value
+                    aborted = AbortReason.PROVIDER_UNREACHABLE
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -384,7 +384,7 @@ class ScanEngine:
         self,
         attempts: list[ScanAttempt],
         exploits: list[ExploitRecord],
-        aborted: str | None,
+        aborted: AbortReason | None,
         elapsed: float,
         module_ids: list[str],
         *,

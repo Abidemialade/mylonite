@@ -2641,22 +2641,35 @@ def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
 
 
 def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Path) -> None:
-    """Code-quality review of 43dc63b (Critical): `ScanOutcome.from_report`
-    raises `ValueError` for any `ScanReport.aborted` value outside the current
-    `AbortReason` enum -- `ScanReport.aborted` is a plain `str | None` at the
-    pydantic layer with no enum constraint, so an older-mylonite-version or
-    hand-edited/corrupted `scan_report.json` loads fine but then blew up
-    `report`'s new `ScanOutcome.from_report(sreport)` call as an UNCAUGHT
-    exception (bare traceback, exit 1, empty output) -- strictly worse than
-    the silent-exit-0 bug 43dc63b fixed. `report` must instead degrade
-    gracefully: a clear message, no traceback, and a distinguishing exit code
-    (EXIT_CONFIG, matching the sibling try/except a few lines above that
-    already handles "this artefact doesn't parse")."""
+    """Code-quality review of 43dc63b (Critical): an older-mylonite-version or
+    hand-edited/corrupted `scan_report.json` carrying an `aborted` value
+    outside the known `AbortReason` set must never blow up `report` as an
+    UNCAUGHT exception (bare traceback, exit 1, empty output) -- strictly
+    worse than the silent-exit-0 bug 43dc63b fixed. `report` must instead
+    degrade gracefully: a clear message, no traceback, and a distinguishing
+    exit code (EXIT_CONFIG, matching the sibling try/except a few lines above
+    that already handles "this artefact doesn't parse").
+
+    0.7.10 moved the enforcement point earlier: `ScanReport.aborted` is now
+    `AbortReason | None` (a real Pydantic enum, not a bare unconstrained
+    string), so this artefact is rejected right at
+    `ScanReport.model_validate_json()` -- the FIRST try/except in `report`
+    ("could not load ...") rather than the second ("could not classify ...",
+    `ScanOutcome.from_report`'s own hand-rolled re-validation, still exercised
+    for a report that bypasses Pydantic validation entirely; see
+    `tests/scan/test_coverage.py::TestUnknownAbortReason`). Either branch is
+    EXIT_CONFIG with a clear message, so the operator-facing guarantee this
+    test protects is unchanged; only which branch fires moved. The message no
+    longer echoes the bad value itself (`_cli_io.echo_exc` renders pydantic
+    `ValidationError`s via `redact_exception`, which deliberately strips
+    `input_value` for EVERY field --  DCR-0007/DCR-0011, since that same field
+    can carry a live credential elsewhere) but still names the offending
+    field and lists the known-good values, which is what this test checks.
+    """
     scan_dir = tmp_path / "legacy-abort"
     scan_dir.mkdir()
-    # Hand-write raw JSON (not via ScanReport(...)) since the model itself
-    # would happily accept this -- `aborted` has no enum constraint at the
-    # pydantic layer, which is exactly the point being tested.
+    # Hand-write raw JSON (not via ScanReport(...)) so this exercises the same
+    # "artefact loaded off disk" path `report` actually uses.
     (scan_dir / "scan_report.json").write_text(
         json.dumps(
             {
@@ -2680,7 +2693,9 @@ def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Pat
     assert result.exit_code == EXIT_CONFIG, result.output
     assert result.exit_code not in (EXIT_SUCCESS, 1)
     err = result.stderr or result.output
-    assert "some_future_reason" in err or "AbortReason" in err
+    assert "could not load" in err
+    assert "aborted" in err
+    assert "budget_exceeded" in err  # a known-good value, proving the list renders
 
 
 def test_report_clean_scan_still_exits_success(tmp_path: Path) -> None:
@@ -4205,3 +4220,108 @@ def test_scan_named_mcp_target_plus_target_file_is_rejected(tmp_path: Path) -> N
     )
     assert result.exit_code == EXIT_CONFIG, result.output
     assert "--target-file" in result.output
+
+
+# --- 0.7.10: _dispatch_emit — TestGenerator.emit(exploit, context=) compat bridge ---
+
+
+class _NewStyleFakeGenerator:
+    """A TestGenerator whose emit() accepts the 0.2.0 `context` parameter."""
+
+    def __init__(self) -> None:
+        self.received_context: Any = "NOT_CALLED"
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any, context: Any = None) -> str:
+        self.received_context = context
+        return "new-style-result"
+
+
+class _OldStyleFakeGenerator:
+    """A pre-0.2.0 TestGenerator plugin: emit() has NO `context` parameter at
+    all -- exactly the shape a third-party plugin built against
+    CONTRACT_VERSION 0.1.x would still have."""
+
+    def __init__(self) -> None:
+        self.called = False
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any) -> str:
+        self.called = True
+        return "old-style-result"
+
+
+class _VarKwargsFakeGenerator:
+    """A generator whose emit() accepts arbitrary kwargs (**kwargs) -- the
+    dispatch helper must also recognise this as context-capable."""
+
+    def __init__(self) -> None:
+        self.received_kwargs: dict[str, Any] = {}
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any, **kwargs: Any) -> str:
+        self.received_kwargs = kwargs
+        return "varkwargs-result"
+
+
+def test_dispatch_emit_calls_new_style_generator_with_context() -> None:
+    """A generator whose emit() declares `context` gets it passed explicitly."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _NewStyleFakeGenerator()
+    sentinel = object()
+    result = _dispatch_emit(gen, "exploit", sentinel)  # type: ignore[arg-type]
+
+    assert result == "new-style-result"
+    assert gen.received_context is sentinel
+
+
+def test_dispatch_emit_falls_back_for_old_style_generator() -> None:
+    """A generator whose emit() has NO `context` parameter is called with the
+    pre-0.2.0 signature -- proving the compat bridge works and does not raise
+    `TypeError: emit() got an unexpected keyword argument 'context'`."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _OldStyleFakeGenerator()
+    result = _dispatch_emit(gen, "exploit", object())  # type: ignore[arg-type]
+
+    assert result == "old-style-result"
+    assert gen.called is True
+
+
+def test_dispatch_emit_recognises_var_keyword_generator() -> None:
+    """A generator accepting `**kwargs` is treated as context-capable too."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _VarKwargsFakeGenerator()
+    sentinel = object()
+    result = _dispatch_emit(gen, "exploit", sentinel)  # type: ignore[arg-type]
+
+    assert result == "varkwargs-result"
+    assert gen.received_kwargs == {"context": sentinel}
+
+
+def test_dispatch_emit_real_reference_generator_receives_context() -> None:
+    """End-to-end: the real ReferencePytestGenerator (already updated for
+    0.2.0) receives the context via _dispatch_emit, not the compat fallback --
+    proven by the rendered model=/provider= literals in the generated source
+    (a CUSTOM target so the template actually emits those kwargs)."""
+    from mylonite.cli import _dispatch_emit
+    from mylonite.contracts.exec_context import ExecContext
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        ReferencePytestGenerator,
+    )
+
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:acme"})
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    generated = _dispatch_emit(ReferencePytestGenerator(), exploit, ctx)
+
+    assert generated.framework == "pytest"
+    assert "model='gpt-4.1-mini'" in generated.source
+    assert "provider='openai'" in generated.source

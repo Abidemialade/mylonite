@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import inspect
 import logging
 import os
 import sys
@@ -39,6 +40,7 @@ from rich.table import Table
 
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
+from mylonite.contracts.exec_context import ExecContext
 from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
 from mylonite.version import __version__
@@ -1885,6 +1887,40 @@ def _backfill_scan_report(
     echo(f"Wrote report:  {colocated_report} (model/provider back-fill only)")
 
 
+def _dispatch_emit(generator: Any, exploit: Any, context: ExecContext | None) -> Any:
+    """Call ``generator.emit()``, passing ``context=`` only if the generator
+    actually accepts it.
+
+    ``TestGenerator.CONTRACT_VERSION`` moved 0.1.0 -> 0.2.0 in 0.7.10 to add
+    an optional ``context: ExecContext | None = None`` parameter to ``emit``
+    (see ``contracts/test_generator.py``). A third-party plugin still built
+    against 0.1.x only defines ``emit(self, exploit)`` — unconditionally
+    calling ``generator.emit(exploit, context=context)`` would raise
+    ``TypeError: emit() got an unexpected keyword argument 'context'`` for
+    such a plugin.
+
+    This is a TEMPORARY compat bridge for pre-0.2.0 third-party
+    ``TestGenerator`` plugins: inspect the plugin's ``emit`` signature
+    BEFORE calling it (rather than wrapping the call in a broad
+    ``except TypeError``, which could just as easily mask a real bug
+    *inside* a conforming ``emit()`` implementation and misattribute it to
+    this bridge), and only pass ``context=`` when the signature declares it
+    (by name or via ``**kwargs``).
+    """
+    try:
+        sig = inspect.signature(generator.emit)
+    except (TypeError, ValueError):
+        # Signature couldn't be introspected (e.g. a non-Python callable) —
+        # be conservative and use the pre-0.2.0 call shape.
+        return generator.emit(exploit)
+    accepts_context = "context" in sig.parameters or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    if accepts_context:
+        return generator.emit(exploit, context=context)
+    return generator.emit(exploit)
+
+
 def _emit_generated_test(
     exploit: Any,
     exploit_path: Path,
@@ -1924,7 +1960,13 @@ def _emit_generated_test(
     # `mylonite report` reads) without the NIST tags the marks carried — the
     # marks-vs-report inconsistency from the v0.7.0 assessment.
     enriched = _map_compliance(exploit)
-    generated = ReferencePytestGenerator().emit(enriched)
+    # T12/0.7.10: build the exec context from the exploit's stamped
+    # mylonite.exec.* metadata and pass it explicitly rather than relying on
+    # the generator to re-derive it — see ExecContext.from_metadata's and
+    # TestGenerator.emit's docstrings. _dispatch_emit is the compat bridge
+    # for any pre-0.2.0 third-party generator that doesn't accept `context`.
+    exec_ctx = ExecContext.from_metadata(enriched.payload.metadata)
+    generated = _dispatch_emit(ReferencePytestGenerator(), enriched, exec_ctx)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
@@ -3181,16 +3223,21 @@ def report(
 
         from mylonite.scan.coverage import ScanOutcome
 
-        # Code-quality review of the A1 fix (43dc63b): `ScanReport.aborted` has
-        # no enum constraint at the pydantic layer, so a legacy-version or
-        # hand-edited/corrupted scan_report.json can load fine here yet carry
-        # an `aborted` value outside the current AbortReason enum --
-        # `ScanOutcome.from_report` raises ValueError for exactly that case.
-        # Left uncaught, that surfaces as a bare traceback (exit 1, empty
-        # output) -- strictly worse than the silent-exit-0 bug this branch
-        # exists to fix. Degrade the same way the sibling try/except a few
-        # lines above (unparseable report) already does: a clear message, no
-        # traceback, EXIT_CONFIG.
+        # Code-quality review of the A1 fix (43dc63b): a legacy-version or
+        # hand-edited/corrupted scan_report.json can carry an `aborted` value
+        # outside the current AbortReason enum -- `ScanOutcome.from_report`
+        # raises ValueError for exactly that case. Left uncaught, that
+        # surfaces as a bare traceback (exit 1, empty output) -- strictly
+        # worse than the silent-exit-0 bug this branch exists to fix.
+        # Degrade the same way the sibling try/except above (unparseable
+        # report) already does: a clear message, no traceback, EXIT_CONFIG.
+        #
+        # 0.7.10: `ScanReport.aborted` is now `AbortReason | None` (a real
+        # Pydantic enum), so an unrecognised value is normally already
+        # rejected above, at `ScanReport.model_validate_json()` -- this
+        # try/except is now defense-in-depth for a report that reached this
+        # point via a path that bypasses Pydantic validation (e.g.
+        # `model_construct()`), rather than the primary guard it used to be.
         try:
             exit_code = ScanOutcome.from_report(sreport).exit_code
         except ValueError as exc:
@@ -4188,7 +4235,8 @@ def gate(
         # not in the orchestrator, mirroring scan_fn's own echo_exc + typer.Exit
         # above for plugin-discovery failures.
         try:
-            return ReferencePytestGenerator().emit(exploit)
+            exec_ctx = ExecContext.from_metadata(exploit.payload.metadata)
+            return _dispatch_emit(ReferencePytestGenerator(), exploit, exec_ctx)
         except UnsafeExploitRecord as exc:
             echo_exc("could not generate a regression test for this finding", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc

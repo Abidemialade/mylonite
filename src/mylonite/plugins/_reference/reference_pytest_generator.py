@@ -29,8 +29,8 @@ import re
 from typing import ClassVar, Literal
 
 from mylonite.contracts import ExploitRecord, GeneratedTest, TestGeneratorBase
+from mylonite.contracts.exec_context import ExecContext
 from mylonite.contracts.test_generator import CONTRACT_VERSION
-from mylonite.scan.exec_context import ExecContext
 from mylonite.testkit._pytest_plugin import (
     MYLONITE_SECURITY_MARKER,
     REGISTERED_ATLAS_MARKERS,
@@ -229,7 +229,7 @@ class ReferencePytestGenerator(TestGeneratorBase):
     def framework(self) -> Literal["pytest", "jest"]:
         return "pytest"
 
-    def emit(self, exploit: ExploitRecord) -> GeneratedTest:
+    def emit(self, exploit: ExploitRecord, context: ExecContext | None = None) -> GeneratedTest:
         if not _SAFE_PATTERN_ID.fullmatch(exploit.pattern_id):
             msg = (
                 f"pattern_id {exploit.pattern_id!r} is not safe to embed in generated "
@@ -303,18 +303,25 @@ class ReferencePytestGenerator(TestGeneratorBase):
         # turns the remainder of the file into live top-level code.
         target_id_display = _slugify(exploit.target_id)
 
-        # T12: read back the exec context ScanEngine._finalize stamped onto the
-        # exploit's payload (mylonite.exec.* metadata) and render it as explicit
-        # model=/provider= literals in the CUSTOM/CONTROL templates -- so the
-        # emitted CI gate re-drives the SAME model that discovered/validated
-        # this finding, not testkit's own hardcoded fallback default. Only the
-        # CUSTOM/CONTROL templates reference these placeholders; harmless
-        # no-ops for the reference-twin template (assert_guard_holds takes no
-        # model/provider kwargs at all). A pre-T12 exploit with no exec context
-        # renders no kwargs at all -- testkit resolves it at RUN time instead
-        # (explicit kwarg -> exec-context metadata -> sibling scan_report.json
-        # back-fill -> loud failure).
-        exec_ctx = ExecContext.from_metadata(exploit.payload.metadata)
+        # T12 (promoted to a real parameter in 0.7.10, CONTRACT_VERSION 0.2.0):
+        # render the exec context as explicit model=/provider= literals in the
+        # CUSTOM/CONTROL templates -- so the emitted CI gate re-drives the SAME
+        # model that discovered/validated this finding, not testkit's own
+        # hardcoded fallback default. Only the CUSTOM/CONTROL templates
+        # reference these placeholders; harmless no-ops for the reference-twin
+        # template (assert_guard_holds takes no model/provider kwargs at all).
+        #
+        # Prefer the explicit `context` parameter (0.7.10+ callers). Fall back
+        # to re-deriving it from Payload.metadata (the T12 shim) only when no
+        # context was passed -- either a caller that hasn't updated to the new
+        # signature yet, or a pre-T12 exploit that carries no exec context at
+        # all, in which case from_metadata() also returns None and no kwargs
+        # are rendered -- testkit resolves it at RUN time instead (explicit
+        # kwarg -> exec-context metadata -> sibling scan_report.json back-fill
+        # -> loud failure).
+        exec_ctx = (
+            context if context is not None else ExecContext.from_metadata(exploit.payload.metadata)
+        )
         model_kwarg = f", model={_py_literal(exec_ctx.model)}" if exec_ctx is not None else ""
         provider_kwarg = (
             f", provider={_py_literal(exec_ctx.provider)}" if exec_ctx is not None else ""
