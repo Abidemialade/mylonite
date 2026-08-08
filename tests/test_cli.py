@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
+from dataclasses import replace
 from importlib.abc import MetaPathFinder
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import mylonite
@@ -556,6 +559,36 @@ def test_scan_mcp_filesystem_refuses_mismatched_authorize(tmp_path: Path) -> Non
     assert "--authorize must equal the scope segment" in (result.stderr or result.output)
 
 
+def test_build_adapter_for_mcp_rejects_none_authorize_and_none_scope_at_the_gate_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0001: with authorize=None AND scope=None, ``authorize != scope`` is
+    ``None != None`` -> False, so a naive check would vacuously pass. Every
+    CLI call site (``scan``/``gate``) happens to guard with ``if not
+    authorize`` before reaching this function, so today the CLI itself never
+    feeds it a bare ``None``. But ``_build_adapter_for_mcp`` is the actual
+    authorization gate and must be correct standing alone -- it must not rely
+    on an accidental caller-side guard, nor on a downstream family-specific
+    scope validator that happens to also reject an empty scope for an
+    unrelated reason. Prove the gate rejects this itself: patch filesystem's
+    scope_validator to a no-op that tolerates an empty/None scope (so if the
+    fix under test were reverted, the call would fall through to construct a
+    real adapter instead of raising), then call the function directly with
+    authorize=None and no scope segment, asserting it raises with the Step-2
+    authorize-gate message.
+    """
+    from mylonite.cli import _build_adapter_for_mcp
+    from mylonite.plugins._mcp import target_registry
+
+    original_spec = target_registry.BUNDLED_TARGETS["filesystem"]
+    permissive_spec = replace(original_spec, scope_validator=lambda scope: None)
+    monkeypatch.setitem(target_registry.BUNDLED_TARGETS, "filesystem", permissive_spec)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _build_adapter_for_mcp("mcp:filesystem", None, "claude-sonnet-4-6")
+    assert exc_info.value.exit_code == EXIT_CONFIG
+
+
 def test_scan_mcp_fetch_requires_family_as_authorize() -> None:
     """fetch is stateless — --authorize must equal the family name."""
     result = runner.invoke(
@@ -676,6 +709,21 @@ def test_route_model_prefixes_only_when_provider_explicit() -> None:
 
 def test_scan_rejects_blank_model() -> None:
     result = runner.invoke(app, ["scan", "reference:vulnerable", "--model", "  ", "--dry-run"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid --model" in (result.stderr or result.output)
+
+
+def test_doctor_rejects_explicit_empty_model_instead_of_silently_defaulting() -> None:
+    """DCR-0012: `base_model = model or "claude-sonnet-4-6"` treated an
+    explicit `--model ""` the same as omitting the flag entirely (`""` is
+    falsy), silently substituting the hardcoded default instead of letting
+    the empty string reach `_validate_model_string` and get rejected --
+    exactly the DCR-0004/0012/0015/0005 "None means omitted, an explicit
+    falsy value is not the same thing" pitfall `_resolve_option`'s own
+    docstring warns about. `--model ""` must be REJECTED with a clear error,
+    not silently defaulted.
+    """
+    result = runner.invoke(app, ["doctor", "--model", ""])
     assert result.exit_code == EXIT_CONFIG
     assert "invalid --model" in (result.stderr or result.output)
 
@@ -1594,6 +1642,56 @@ def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
     assert "target.yaml" in out
 
 
+def test_generate_multi_finding_reads_and_redacts_shared_target_file_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0013: a multi-finding scan dir's findings typically share ONE target
+    file. ``validated_target_files`` already caches "have we validated this
+    path" (a bool), but the redacted TEXT itself was still re-read from disk
+    and re-run through ``redact_target_yaml`` from scratch on EVERY finding.
+    Spies on ``redact_target_yaml`` (the module ``_emit_generated_test``
+    imports it from, at call time) and asserts it's invoked at most once for
+    two findings sharing the same ``--target-file``.
+    """
+    import json as _json
+
+    from mylonite import _redaction
+
+    scan_dir = tmp_path / "scans" / "s"
+    scan_dir.mkdir(parents=True)
+    exploit_one = _sample_exploit().model_copy(
+        update={"target_id": "mcp:myapp", "pattern_id": "custom-pid-one"}
+    )
+    exploit_two = _sample_exploit().model_copy(
+        update={"target_id": "mcp:myapp", "pattern_id": "custom-pid-two"}
+    )
+    (scan_dir / "exploit_custom-pid-one.json").write_text(
+        _json.dumps(exploit_one.model_dump(mode="json")), encoding="utf-8"
+    )
+    (scan_dir / "exploit_custom-pid-two.json").write_text(
+        _json.dumps(exploit_two.model_dump(mode="json")), encoding="utf-8"
+    )
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    calls: list[str] = []
+    real_redact_target_yaml = _redaction.redact_target_yaml
+
+    def _spy(text: str) -> str:
+        calls.append(text)
+        return real_redact_target_yaml(text)
+
+    monkeypatch.setattr(_redaction, "redact_target_yaml", _spy)
+
+    result = runner.invoke(
+        app,
+        ["generate", str(scan_dir), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert len(calls) == 1, f"expected redact_target_yaml called once, got {len(calls)}"
+
+
 def test_generate_custom_without_target_file_warns(tmp_path: Path) -> None:
     """A custom target generated without --target-file warns and writes no target.yaml."""
     exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
@@ -1705,6 +1803,35 @@ def _patch_validator(
             return report
 
     monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+
+def test_provider_preflight_bounded_by_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DCR-0008: ``_provider_preflight`` exists specifically to fail fast before
+    the expensive live validation loop, but had no timeout of its own -- a
+    provider that accepts the connection and then stalls mid-response (rather
+    than erroring outright) hung it open-ended. Stubs ``litellm.acompletion``
+    (the real call ``completion_fn=None`` falls back to) to sleep far longer
+    than the timeout under test, and asserts the call returns within a
+    bounded wall-clock budget instead of hanging.
+    """
+    import time
+
+    import litellm
+
+    from mylonite.cli import _provider_preflight
+
+    async def _hanging_acompletion(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(30)
+        raise AssertionError("should have been cut off by the timeout, not run to completion")
+
+    monkeypatch.setattr(litellm, "acompletion", _hanging_acompletion)
+
+    start = time.monotonic()
+    reachable = _provider_preflight("anthropic", "stub-model", timeout_s=0.2)
+    elapsed = time.monotonic() - start
+
+    assert reachable is False
+    assert elapsed < 10.0, f"expected preflight bounded by timeout_s=0.2, took {elapsed:.1f}s"
 
 
 def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2338,6 +2465,41 @@ def test_render_validation_report_shows_missing_gating_leg_not_silent_drop(
     assert "missing" in out.lower()
 
 
+def test_render_validation_report_gives_remediation_for_metamorphic_only_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DCR-0007: `_remediation` only keyed build/differential/flakiness/
+    stability/effect/consensus, so a REJECTED report whose ONLY failing leg
+    is metamorphic (every other leg passes -- a real, documented way to
+    REJECT on its own, per the "metamorphic robustness gates kept" note)
+    printed zero remediation guidance for the actual failing leg.
+    """
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=True, detail="5/5", metric=1.0),
+            ValidationOutcome(
+                stage="metamorphic", passed=False, detail="paraphrase broke it", metric=0.5
+            ),
+        ],
+        kept=False,
+        gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+        gating_legs=["build", "differential", "flakiness", "metamorphic"],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    assert "REJECTED" in out
+    assert "remediation" in out.lower()
+    assert "metamorphic" in out.lower()
+
+
 # ---------------------------------------------------------------------------
 # PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
 # ---------------------------------------------------------------------------
@@ -2464,6 +2626,28 @@ def test_report_validation_dir_renders_trust_panel(tmp_path: Path) -> None:
     assert "KEPT" in out
     assert "compliance:" in out
     assert "LLM01" in out  # from the co-located exploit's tags
+
+
+def test_report_sarif_warns_on_corrupt_exploit_instead_of_silent_empty_bundle(
+    tmp_path: Path,
+) -> None:
+    """DCR-0003: a validation dir with a valid validation_report.json but a
+    corrupt/schema-mismatched exploit_*.json must not silently produce an
+    empty --sarif bundle at exit 0 with no diagnostic -- that hides a real
+    REJECTED/vulnerable finding from GitHub code scanning. The command must
+    print a warning AND still produce the (degraded) bundle, not crash.
+    """
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    (gen / "exploit_pid.json").write_text("{not valid json", encoding="utf-8")
+
+    sarif = tmp_path / "out.sarif"
+    result = runner.invoke(app, ["report", str(gen), "--sarif", str(sarif)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    stderr = result.stderr or result.output
+    assert "warning" in stderr.lower()
+    assert "exploit_pid.json" in stderr
+    assert sarif.exists()
 
 
 def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
@@ -3706,6 +3890,45 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
         target_registry.clear_runtime_targets()
 
 
+def test_gate_llm_not_configured_never_constructs_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0010: the comment above `gate`'s LLM-configured pre-flight claims it
+    runs "BEFORE any adapter/subprocess/engine work starts", but the routed
+    target's adapter used to already be constructed by the time the check
+    ran (routing determined WHICH adapter to build, then built it, THEN
+    checked LLM config). Spies on `_build_adapter_for_mcp` (the mcp-route
+    adapter constructor) and asserts it is NEVER called when no LLM provider
+    is configured -- the command must exit on the LLM-configuration error
+    before the adapter is ever built.
+    """
+    import mylonite.cli as cli_module
+    from mylonite.plugins._mcp import target_registry
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    target_registry.clear_runtime_targets()
+
+    real_build_adapter_for_mcp = cli_module._build_adapter_for_mcp
+    calls: list[Any] = []
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return real_build_adapter_for_mcp(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_build_adapter_for_mcp", _spy)
+
+    try:
+        result = runner.invoke(app, ["gate", "mcp:fetch", "--authorize", "fetch"])
+        assert result.exit_code == EXIT_CONFIG, result.output
+        stderr = result.stderr or result.output
+        assert "llm credential" in stderr.lower() or "not configured" in stderr.lower()
+        assert calls == [], (
+            f"adapter must not be constructed before the LLM-configured check; got {calls}"
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+
 def test_gate_bundled_mcp_route_validates_a_real_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3751,6 +3974,172 @@ def test_gate_bundled_mcp_route_validates_a_real_finding(
         assert result.exit_code == EXIT_SUCCESS, result.output
         out = result.stderr or result.output
         assert "internal:" not in out
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_reference_and_custom_use_the_same_vuln_threshold_formula(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0009: the custom/mcp branch of `gate`'s `validate_fn` explicitly
+    passes `vuln_threshold=max(1, iterations - 1)` (the documented "all but
+    one" reproducibility rule) to `DifferentialValidator`, but the
+    reference-target branch omitted it -- so the reference/demo target's
+    pass/fail bar was resolved differently (silently relying on the
+    constructor's own default) instead of applying the same rule uniformly.
+    Drives `gate` for BOTH a reference target and a bundled mcp target with
+    the SAME --iterations, capturing each DifferentialValidator construction's
+    kwargs, and asserts both explicitly receive the identical threshold.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    async def _fake_run(self: Any) -> Any:
+        target_id = self._config.target_id
+        exploit = _sample_exploit().model_copy(update={"target_id": target_id})
+        return _canned_finding_result(target_id, exploit)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_open_pr(monkeypatch)
+
+    try:
+        reference_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        ref_result = runner.invoke(
+            app,
+            [
+                "gate",
+                "reference:vulnerable",
+                "--iterations",
+                "4",
+                "--out",
+                str(tmp_path / "gate_out_reference"),
+                "--no-workflows",
+            ],
+        )
+        assert ref_result.exit_code == EXIT_SUCCESS, ref_result.output
+
+        mcp_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        mcp_result = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:fetch",
+                "--authorize",
+                "fetch",
+                "--iterations",
+                "4",
+                "--out",
+                str(tmp_path / "gate_out_mcp"),
+                "--no-workflows",
+            ],
+        )
+        assert mcp_result.exit_code == EXIT_SUCCESS, mcp_result.output
+
+        expected = max(1, 4 - 1)
+        assert reference_captured.get("vuln_threshold") == expected
+        assert mcp_captured.get("vuln_threshold") == expected
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_custom_target_id_consistent_with_and_without_mcp_custom_positional(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0015: `target_id=target if target is not None else f"mcp:{tf.family}"`
+    gave the SAME custom target a DIFFERENT target_id depending on whether the
+    operator typed the optional `mcp:custom` positional argument -- the
+    literal string `"mcp:custom"` when typed, `f"mcp:{tf.family}"` (e.g.
+    `"mcp:myapp"`) when not. Drives `gate` for the same custom target both
+    ways and asserts the `ScanConfig.target_id` `ScanEngine` actually sees is
+    identical (always derived from `tf.family`).
+    """
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+    from mylonite.scan.engine import ScanResult as _ScanResult
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text("family: myapp\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+
+    captured_target_ids: list[str] = []
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured_target_ids.append(config.target_id)
+        real_init(self, config=config, **kwargs)
+
+    async def _fake_run(self: Any) -> Any:
+        report = ScanReport(
+            target_id=self._config.target_id,
+            attack_modules=["mylonite.prompt-injection"],
+            provider="anthropic",
+            model="m",
+            elapsed_seconds=0.1,
+            attempts=[
+                ScanAttempt(
+                    seed_id="s",
+                    pattern_id="s",
+                    outcome="no_finding",
+                    verdict_mechanism="llm",
+                    verdict_reason="rejected",
+                )
+            ],
+            findings_count=0,
+            aborted=None,
+            single_run=True,
+            mylonite_version="0.0.0-test",
+        )
+        return _ScanResult(report=report, exploits=[])
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    try:
+        result_no_positional = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp",
+                "--out",
+                str(tmp_path / "gate_out_1"),
+                "--no-workflows",
+            ],
+        )
+        assert result_no_positional.exit_code == EXIT_SUCCESS, result_no_positional.output
+
+        result_with_positional = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:custom",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp",
+                "--out",
+                str(tmp_path / "gate_out_2"),
+                "--no-workflows",
+            ],
+        )
+        assert result_with_positional.exit_code == EXIT_SUCCESS, result_with_positional.output
+
+        assert len(captured_target_ids) == 2
+        assert captured_target_ids[0] == captured_target_ids[1] == "mcp:myapp"
     finally:
         target_registry.clear_runtime_targets()
 
@@ -4127,6 +4516,32 @@ def test_scan_scaffold_rest_writes_runnable_http_target(tmp_path: Path) -> None:
     assert tf.family == "myagent"
 
 
+def test_scan_scaffold_rest_redacts_credential_shaped_query_param(tmp_path: Path) -> None:
+    """DCR-0002: a live-looking credential embedded in --rest-url's query string
+    must never be persisted verbatim into target.yaml -- the sibling MCP-scaffold
+    path already redacts --env this way; the REST scaffold must match it. Use a
+    param name ("session_ref") that the KV-pattern's known credential key names
+    (api_key/token/secret/password/...) do NOT match, so this specifically
+    proves the broader key-name-agnostic sweep, not the pre-existing
+    key=value redaction that `dump_target_file` already runs.
+    """
+    sentinel = "zzsentinelvalue1234567890abcdef1234567890"
+    out = tmp_path / "creds.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--scaffold",
+            str(out),
+            "--rest-url",
+            f"https://api.example.com/chat?session_ref={sentinel}",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    written = out.read_text(encoding="utf-8")
+    assert sentinel not in written
+
+
 def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> None:
     out = tmp_path / "bad.yaml"
     result = runner.invoke(
@@ -4194,6 +4609,31 @@ def test_load_api_key_file_bare_key_with_leading_comment_line(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     key_file = tmp_path / "key.txt"
     key_file.write_text("# my key\nsk-ant-abc123\n", encoding="utf-8")
+
+    try:
+        _load_api_key_file(key_file)
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-abc123"
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_load_api_key_file_dotenv_with_leading_comment_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0011: the dotenv-vs-bare-key SHAPE check only inspected the RAW
+    first line (`"=" in content.splitlines()[0]`), so a file shaped
+    `# comment\\nANTHROPIC_API_KEY=sk-ant-abc123` (a leading comment line
+    before a valid dotenv KEY=VALUE line) misrouted into the bare-key branch
+    -- the comment line has no `=` -- which then failed to infer a provider
+    from the literal string `"ANTHROPIC_API_KEY=sk-ant-abc123"` and exited
+    EXIT_CONFIG despite a valid key being present. Must still resolve
+    ANTHROPIC_API_KEY to just the value.
+    """
+    from mylonite.cli import _load_api_key_file
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    key_file = tmp_path / "key.env"
+    key_file.write_text("# my anthropic key\nANTHROPIC_API_KEY=sk-ant-abc123\n", encoding="utf-8")
 
     try:
         _load_api_key_file(key_file)

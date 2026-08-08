@@ -290,7 +290,10 @@ async def test_scan_cycle_against_real_stdio_subprocess(
         judge=judge,
     )
 
-    result = await engine.run()
+    try:
+        result = await engine.run()
+    finally:
+        await adapter.close()
 
     assert result.report.aborted is None, result.report
     weaknesses_attempted = {a.seed_id for a in result.report.attempts}

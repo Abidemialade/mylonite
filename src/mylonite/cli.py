@@ -270,19 +270,27 @@ def _load_api_key_file(path: Path) -> None:
         echo_err(f"--api-key-file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
     content = path.read_text(encoding="utf-8").strip()
-    first = content.splitlines()[0] if content else ""
-    if "=" in first:
+    # DCR-0011: derive the dotenv-vs-bare-key SHAPE decision from the first
+    # non-comment, non-blank line too, not the raw first line — a leading
+    # `#`-comment line (e.g. `# my key\nANTHROPIC_API_KEY=sk-ant-abc123`)
+    # otherwise misrouted a valid dotenv file into the bare-key branch below
+    # (the comment line has no `=`), which then went on to treat the WHOLE
+    # `KEY=VALUE` line as a bare key and failed to infer a provider from it.
+    # Reuses the same comment-skip logic the bare-key extraction loop below
+    # already has, instead of a second, independent implementation.
+    first_content_line = ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            first_content_line = stripped
+            break
+    if "=" in first_content_line:
         _load_env_file(path)
         return
     # DCR-0009: derive the key from the first non-comment, non-blank line, not
     # `content.split()[0]` over the WHOLE file — a leading `#`-comment line
     # (e.g. `# my key\nsk-ant-abc123`) made that yield the literal `"#"`.
-    key = ""
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            key = stripped.split()[0]
-            break
+    key = first_content_line.split()[0] if first_content_line else ""
     var = _infer_key_env_var(key)
     if var is None:
         echo_err(
@@ -475,13 +483,22 @@ def doctor(
     _config_path, rc = _discover_run_config(run_config_path, command="doctor")
     env_rc = _env_run_config_or_exit()
     provider: str | None = None
+    # DCR-0012: `is not None` throughout, not `or` -- the exact DCR-0004/0012/
+    # 0015/0005 precedence pattern `_resolve_option`'s own docstring explains
+    # (an explicit-but-falsy value, e.g. `--model ""`, is not the same as
+    # "omitted" and must not be silently replaced by a lower-precedence
+    # source or the hardcoded default). `provider` has no CLI flag of its own
+    # on `doctor` (removed 0.7.10), so only `model`'s chain can actually
+    # observe this in practice, but both are written the same way for the
+    # same reason `_resolve_option` exists: so this can't silently regress
+    # the next time a flag is added here.
     if rc is not None:
-        provider = provider or rc.provider
-        model = model or rc.model
-    provider = provider or env_rc.provider
-    model = model or env_rc.model
+        provider = provider if provider is not None else rc.provider
+        model = model if model is not None else rc.model
+    provider = provider if provider is not None else env_rc.provider
+    model = model if model is not None else env_rc.model
 
-    base_model = model or "claude-sonnet-4-6"
+    base_model = model if model is not None else "claude-sonnet-4-6"
     _validate_model_string(base_model)
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
@@ -947,7 +964,7 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
         raise typer.Exit(code=EXIT_CONFIG)
     spec = target_registry.BUNDLED_TARGETS[family]
     if spec.requires_scope:
-        if authorize != scope:
+        if scope is None or authorize != scope:
             echo_err(
                 f"--authorize must equal the scope segment for {family!r} "
                 f"(scope={scope!r}, authorize={authorize!r}). "
@@ -1568,8 +1585,11 @@ def scan(
     if not dry_run:
         from mylonite.scan.artefacts import render_summary, write_artefacts
 
-        # Persist artefacts UN-redacted (they are loadable/replayable data); only
-        # the console-rendered summary string is redacted before display.
+        # write_artefacts() redacts secret-shaped string leaves internally
+        # (redact_value(), 0.7.9/DCR-0002) before persisting scan_report.json
+        # and each exploit_*.json — never structural, so schema validation and
+        # replay both keep working on the redacted copy. The console-rendered
+        # summary string below is separately redacted before display.
         scan_dir = write_artefacts(result, effective_output_dir)
         # Co-locate the resolved target YAML so `generate`/`validate` auto-resolve
         # it from the scan dir — the custom-target journey needs the path ONCE.
@@ -1930,6 +1950,7 @@ def _emit_generated_test(
     json_mod: Any,
     validated_target_files: set[Path] | None = None,
     scan_report_cache: dict[Path, dict[str, str] | None] | None = None,
+    redacted_target_cache: dict[Path, str] | None = None,
 ) -> None:
     """Emit one regression test (+ co-located exploit/fixtures/target) for one
     exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
@@ -1948,6 +1969,15 @@ def _emit_generated_test(
 
     ``scan_report_cache`` is the same style of cache for
     :func:`_backfill_scan_report`'s trimmed ``scan_report.json`` read.
+
+    ``redacted_target_cache`` (DCR-0013) is the same style of cache for the
+    target file's REDACTED text written into each finding's ``target.yaml``
+    below: ``validated_target_files`` only remembers "already validated"
+    (a boolean), so before this the identical file was still re-read from
+    disk and re-run through ``redact_target_yaml`` on every finding in a
+    multi-finding scan dir sharing one target file. Absent (``None``), every
+    call reads+redacts independently — the original, always-correct
+    behaviour.
     """
     from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite.plugins._reference.reference_pytest_generator import (
@@ -2034,9 +2064,16 @@ def _emit_generated_test(
         colocated_target = out_dir / "target.yaml"
         # Never copy a target file verbatim into a directory we tell the operator
         # to commit: request.headers and env may carry live credentials (DCR-0010).
-        colocated_target.write_text(
-            redact_target_yaml(target_file.read_text(encoding="utf-8")), encoding="utf-8"
-        )
+        # DCR-0013: read + redact at most once per unique target file, cached
+        # across every finding in a multi-finding loop (see the cache's
+        # docstring above) instead of redoing this on every single finding.
+        if redacted_target_cache is not None and resolved_target_file in redacted_target_cache:
+            redacted_target_text = redacted_target_cache[resolved_target_file]
+        else:
+            redacted_target_text = redact_target_yaml(target_file.read_text(encoding="utf-8"))
+            if redacted_target_cache is not None:
+                redacted_target_cache[resolved_target_file] = redacted_target_text
+        colocated_target.write_text(redacted_target_text, encoding="utf-8")
         echo(f"Wrote target:  {colocated_target}")
         echo_err(
             "note: credential-shaped values in the copied target.yaml were masked. "
@@ -2179,21 +2216,27 @@ def generate(
         UnsafeExploitRecord,
     )
 
-    # No --config on `generate` (kept minimal): absent an explicit --scans-dir,
-    # the resolved Layout is MYLONITE_ROOT / the built-in default, via the root
-    # callback (ctx.obj) — the SAME resolution `scan`'s own default --output-dir
-    # uses, so a scan written under a root moved by mylonite.yaml/MYLONITE_ROOT is
-    # found here too. An explicit --scans-dir (highest priority; an INPUT read by
-    # --latest, deliberately NOT named --output-dir like scan's own flag — that
-    # name would mislead as "where generate writes", which is --out's job) points
-    # --latest at that exact scans root directly, closing the "generate --latest
-    # hardcodes .mylonite/scans" bug outright: a scan written to a one-off custom
-    # dir via `scan --output-dir X` is found by `generate --latest --scans-dir X`.
-    # Silently unused when SCAN_PATH is passed explicitly instead of --latest —
-    # consistent with how --latest itself is already ignored in that case (see
-    # _resolve_exploit_paths: an explicit scan_path short-circuits before either
-    # is consulted).
-    layout = _layout_for(ctx)
+    # No --config FLAG on `generate` (kept minimal), but DCR-0006: it still
+    # auto-discovers ./mylonite.yaml (same helper scan/gate/validate/ablate
+    # use) so its `root:` key is honored here too. Before this fix, absent an
+    # explicit --scans-dir, the resolved Layout was ONLY MYLONITE_ROOT / the
+    # built-in default via the root callback (ctx.obj) -- which per
+    # _CliState's own docstring resolves BEFORE mylonite.yaml's `root:` is
+    # even readable -- so a scan written under a `root:`-configured directory
+    # was invisible to `generate --latest`, reporting "no scans found" even
+    # though a scan just ran. An explicit --scans-dir (highest priority; an
+    # INPUT read by --latest, deliberately NOT named --output-dir like scan's
+    # own flag — that name would mislead as "where generate writes", which is
+    # --out's job) points --latest at that exact scans root directly, closing
+    # the "generate --latest hardcodes .mylonite/scans" bug outright: a scan
+    # written to a one-off custom dir via `scan --output-dir X` is found by
+    # `generate --latest --scans-dir X`. Silently unused when SCAN_PATH is
+    # passed explicitly instead of --latest — consistent with how --latest
+    # itself is already ignored in that case (see _resolve_exploit_paths: an
+    # explicit scan_path short-circuits before either is consulted).
+    _config_path, rc = _discover_run_config(None, command="generate")
+    config_root = rc.root if rc is not None else None
+    layout = _layout_for(ctx, config_root=config_root)
     scans_root = scans_dir if scans_dir is not None else layout.scans
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
     multi = len(exploit_paths) > 1
@@ -2211,6 +2254,11 @@ def generate(
     # Mirrors validated_target_files: a multi-finding scan dir shares one
     # scan_report.json across every finding's _backfill_scan_report call.
     scan_report_cache: dict[Path, dict[str, str] | None] = {}
+    # DCR-0013: same idea again for the target file's REDACTED text — a
+    # multi-finding scan dir's findings share one target file, so the
+    # read + redact_target_yaml() work below is done at most once per unique
+    # path, not once per finding.
+    redacted_target_cache: dict[Path, str] = {}
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
@@ -2253,6 +2301,7 @@ def generate(
                 json_mod=json,
                 validated_target_files=validated_target_files,
                 scan_report_cache=scan_report_cache,
+                redacted_target_cache=redacted_target_cache,
             )
         except UnsafeExploitRecord as exc:
             echo_exc(f"could not generate a test for {exploit_path}", exc)
@@ -2334,7 +2383,9 @@ def _validate_custom(
     # operator's real target) must not fire before an unauthorized request is
     # rejected.
     try:
-        reachable = _provider_preflight(provider, model)
+        reachable = _provider_preflight(
+            provider, model, timeout_s=iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S
+        )
     except (ModuleNotFoundError, ImportError) as exc:
         _exit_if_missing_kitchen_sink(exc)
         raise
@@ -2631,19 +2682,45 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             "stability": "stability fail: the attack did not reproduce against the real target.",
             "effect": "effect fail: the target's effect probe did not confirm the damage materialised.",
             "consensus": "consensus fail: judges disagreed the effect was real; add an effect_probe.",
+            # DCR-0007: a metamorphic-only failure (every other leg passes) is a
+            # documented gating leg that can REJECT a report on its own (see the
+            # "metamorphic robustness gates kept" note above) -- without this
+            # key the remediation loop below silently skipped it, so the
+            # operator saw "verdict: REJECTED" with zero guidance for the
+            # actual failing leg.
+            "metamorphic": (
+                "metamorphic fail: the differential did not survive a robustness "
+                "perturbation (see the failing row above) - the exploit may be "
+                "over-fit to the exact seed wording; try a paraphrase-robust payload."
+            ),
         }
         for outcome in report.outcomes:
             if not outcome.passed and outcome.stage in _remediation:
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
 
 
-def _provider_preflight(provider: str, model: str) -> bool:
+def _provider_preflight(
+    provider: str, model: str, *, timeout_s: float = _DEFAULT_ITERATION_TIMEOUT_S
+) -> bool:
     """Cheap reachability probe before the (expensive) live validation loop.
 
     Runs ONE vulnerable reference scan. If it aborts ``provider_unreachable``,
     the validator's N-iteration loop would too — so we fail fast with a distinct
     exit 4 rather than burning iterations and reporting a misleading non-discrim
     result. Returns True iff the provider is reachable.
+
+    DCR-0008: bounded by ``timeout_s`` (defaults to the same
+    ``_DEFAULT_ITERATION_TIMEOUT_S`` the sibling ``DifferentialValidator``
+    construction 30 lines below explicitly threads via
+    ``iteration_timeout_s``) — this preflight exists specifically to fail
+    fast rather than burn iterations, but had no bound of its own: a provider
+    that accepts the connection and then stalls mid-response (rather than
+    erroring outright) would hang ``asyncio.run(engine.run())`` open-ended,
+    defeating the whole "fail fast" purpose and hanging the CLI/CI job with
+    no way out. A timeout is treated the same as any other unreachable-
+    provider outcome (returns ``False``), not re-raised, so every caller's
+    existing ``if not reachable: ... exit(EXIT_PROVIDER)`` handling already
+    covers it without a new except clause.
     """
     from mylonite.scan.wiring import build_scan, note_id_counter
 
@@ -2654,7 +2731,10 @@ def _provider_preflight(provider: str, model: str) -> bool:
         provider=provider,
         model=model,
     )
-    result = asyncio.run(engine.run())
+    try:
+        result = asyncio.run(asyncio.wait_for(engine.run(), timeout=timeout_s))
+    except TimeoutError:
+        return False
     return result.report.aborted != "provider_unreachable"
 
 
@@ -2961,7 +3041,9 @@ def validate(
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
         try:
-            reachable = _provider_preflight(effective_provider, effective_model)
+            reachable = _provider_preflight(
+                effective_provider, effective_model, timeout_s=iteration_timeout
+            )
         except (ModuleNotFoundError, ImportError) as exc:
             _exit_if_missing_kitchen_sink(exc)
             raise
@@ -3206,8 +3288,19 @@ def report(
                     f"target: {dashboard_exploit.target_id}  "
                     f"pattern: {dashboard_exploit.pattern_id}",
                 )
-            except (FileNotFoundError, ValueError):
-                pass
+            except (FileNotFoundError, ValueError) as exc:
+                # DCR-0003: don't silently degrade to an empty --sarif/--json
+                # bundle. `dashboard_exploit` stays None below, which zeroes
+                # the findings list in `to_sarif`/`to_bundle` -- a
+                # REJECTED/vulnerable validation would otherwise show ZERO
+                # findings in GitHub code scanning with no diagnostic that
+                # compliance data was actually missing. Warn and keep going
+                # (degraded but honest), never crash the command over it.
+                echo_exc(
+                    f"warning: could not load compliance data from {exploit_matches[0]} "
+                    "-- --sarif/--json output for this artefact will omit the finding",
+                    exc,
+                )
         console_print(console, f"artefacts: {path.parent}")
     else:
         from mylonite import testkit
@@ -3379,6 +3472,66 @@ def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
 _RESERVED_FAMILIES = frozenset({"filesystem", "fetch", "github", "target", "app"})
 
 
+def _redact_credential_shaped_query_params(url: str) -> str:
+    """Mask any query-string parameter VALUE that looks like a live credential.
+
+    ``dump_target_file``/``redact_target_yaml``'s generic sweep already masks a
+    value keyed by a RECOGNISED credential name (``api_key=``, ``token=``,
+    ``secret=``, ...) or matching a known provider-key prefix (``sk-``,
+    ``AKIA``, ...). This closes the residual gap for an opaque,
+    key-name-agnostic token under a non-standard param name (e.g. a webhook
+    signing secret passed as ``?sig=<opaque>``), mirroring the broader
+    :func:`mylonite._redaction.looks_like_api_key` heuristic that ``--env``
+    values already get via ``redact_env``/``_is_secret_env`` (DCR-0002).
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    from mylonite._redaction import REDACTION_PLACEHOLDER, looks_like_api_key
+
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    masked = [(k, REDACTION_PLACEHOLDER if looks_like_api_key(v) else v) for k, v in pairs]
+    new_query = urlencode(masked)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
+def _redact_credential_shaped_json_body(body: str) -> str:
+    """Mask any JSON string leaf that looks like a live credential (DCR-0002).
+
+    Best-effort: only touches ``body`` when it parses as JSON (the common
+    case — the default/most rest-body templates are simple JSON objects) and
+    only rewrites it when something was actually masked, so a non-JSON or
+    already-clean body is returned byte-for-byte unchanged (never reformatted
+    for no reason). Uses the same :func:`~mylonite._redaction.looks_like_api_key`
+    heuristic as :func:`_redact_credential_shaped_query_params` — the
+    ``{prompt}`` placeholder itself is far too short to ever match it.
+    """
+    import json
+
+    from mylonite._redaction import REDACTION_PLACEHOLDER, looks_like_api_key
+
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return body
+
+    def _walk(value: object) -> object:
+        if isinstance(value, str):
+            return REDACTION_PLACEHOLDER if looks_like_api_key(value) else value
+        if isinstance(value, dict):
+            return {k: _walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_walk(v) for v in value]
+        return value
+
+    masked = _walk(data)
+    if masked == data:
+        return body
+    return json.dumps(masked)
+
+
 def _scaffold_rest_target_file(
     *,
     output: Path,
@@ -3410,12 +3563,19 @@ def _scaffold_rest_target_file(
     stem = re.sub(r"[^a-z0-9]+", "-", output.stem.lower()).strip("-") or "http-agent"
     family = "http-agent" if stem in _RESERVED_FAMILIES else stem
 
+    # This TargetFile is only ever serialised to disk below — no live request is
+    # made from this scaffold path — so redacting rest_url/rest_body BEFORE
+    # construction is safe and closes the credential-in-URL leak (DCR-0002)
+    # at the source, on top of dump_target_file's own generic redaction pass.
+    safe_url = _redact_credential_shaped_query_params(rest_url)
+    safe_body = _redact_credential_shaped_json_body(body)
+
     try:
         tf = TargetFile(
             family=family,
             transport="rest",
             weakness_classes=["W2"],
-            request=RequestSpec(url=rest_url, body=body, response_path=rest_response_path),
+            request=RequestSpec(url=safe_url, body=safe_body, response_path=rest_response_path),
         )
     except Exception as exc:
         echo_exc("invalid rest target", exc)
@@ -4068,6 +4228,15 @@ def gate(
     # off `tf.scope` instead — there is no TargetFile here to read it from).
     mcp_scope: str | None = None
     routed_to: str
+    # DCR-0010: the actual adapter CONSTRUCTION (never anything live/expensive
+    # -- no subprocess is spawned until a later invoke()/describe() call, see
+    # stdio_adapter.py's own "fresh subprocess per invoke()" docstring) is
+    # deferred into this zero-arg factory, invoked only after the
+    # LLM-configured pre-flight below succeeds. Every other check in this
+    # routing block (target-shape conflicts, `--authorize` presence) still
+    # runs eagerly, right here, so a more specific config/usage error still
+    # wins over "LLM not configured" when both apply -- unchanged from before.
+    adapter_factory: Callable[[], Any]
 
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
@@ -4092,13 +4261,17 @@ def gate(
                 "Pass a target YAML via --target-file."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model, command="gate")
+        adapter_factory = functools.partial(
+            _build_adapter_for_custom, tf, authorize, effective_planner_model, command="gate"
+        )
         routed_to = "custom"
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
         raise typer.Exit(code=EXIT_CONFIG)
     elif target.startswith("reference:"):
-        adapter = _build_adapter_for_reference(target, effective_planner_model)
+        adapter_factory = functools.partial(
+            _build_adapter_for_reference, target, effective_planner_model
+        )
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
@@ -4107,12 +4280,14 @@ def gate(
                 "See SECURITY.md."
             )
             raise typer.Exit(code=EXIT_CONFIG)
-        adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
+        adapter_factory = functools.partial(
+            _build_adapter_for_mcp, target, authorize, effective_planner_model
+        )
         routed_to = "mcp"
-        # Resolve the same TargetSpec `_build_adapter_for_mcp` just validated
-        # (family/scope already known-good at this point) so downstream code
-        # can treat this route like the custom-target one — see the
-        # custom_spec/mcp_scope comment above.
+        # Resolve the same TargetSpec `_build_adapter_for_mcp` will validate
+        # (family/scope shape only — cheap, no adapter construction) so
+        # downstream code can treat this route like the custom-target one —
+        # see the custom_spec/mcp_scope comment above.
         from mylonite.plugins._mcp import target_registry
 
         mcp_family, mcp_scope = _parse_mcp_target(target)
@@ -4128,9 +4303,11 @@ def gate(
     # string — see the up-front rejection above for why the two could diverge.
     is_reference = routed_to == "reference"
 
-    # T14/H3: the "no default provider, fail loudly" invariant, enforced
-    # BEFORE any adapter/subprocess/engine work starts -- but AFTER every
-    # other config/usage validation above (authorize, target shape, ...), so
+    # T14/H3/DCR-0010: the "no default provider, fail loudly" invariant,
+    # enforced BEFORE any adapter/subprocess/engine work ACTUALLY starts (the
+    # adapter itself is now only constructed by `adapter_factory()` below,
+    # after this check passes) -- but AFTER every other config/usage
+    # validation above (authorize, target shape, ...), so
     # a more specific error still wins when both apply. `gate` has no
     # --dry-run of its own, so this is unconditional.
     _require_llm_configured_or_exit(
@@ -4139,6 +4316,10 @@ def gate(
         effective_judge_model,
         provider=provider,
     )
+
+    # DCR-0010: the actual adapter object is constructed here, only after the
+    # LLM-configured check above has passed.
+    adapter = adapter_factory()
 
     # --- closures injected into run_gate ---
 
@@ -4165,7 +4346,27 @@ def gate(
             raise typer.Exit(code=EXIT_CONFIG)
 
         config = ScanConfig(
-            target_id=target if target is not None else f"mcp:{tf.family if tf else 'custom'}",
+            # DCR-0015: the custom route is reachable via TWO equivalent
+            # inputs -- an explicit `mcp:custom` positional target, or just
+            # `--target-file` with no positional target at all -- and both
+            # describe the exact same target. Deriving target_id from the
+            # literal `target` string (falling back to `tf.family` only when
+            # `target is None`) gave the SAME custom target a DIFFERENT
+            # target_id depending on which spelling the operator happened to
+            # use: `"mcp:custom"` when typed, `f"mcp:{tf.family}"` when not.
+            # Always derive it from `tf.family` on the custom route so it's
+            # identical either way; `tf` is always set whenever
+            # `routed_to == "custom"` (the only other custom-route branch,
+            # inline `mcp:custom` flags, exits before routed_to is assigned)
+            # -- branching on `tf is not None` rather than `routed_to ==
+            # "custom"` also lets mypy narrow `tf` in this branch.
+            target_id=(
+                f"mcp:{tf.family}"
+                if tf is not None
+                else target
+                if target is not None
+                else "mcp:custom"
+            ),
             provider=effective_provider,
             model=effective_model,
             planner_model=effective_planner_model if planner_model else None,
@@ -4245,8 +4446,14 @@ def gate(
         from mylonite.scan._llm import llm_scope
 
         if is_reference:
+            # DCR-0009: same "all but one" reproducibility rule the custom/mcp
+            # branch below explicitly sets (vuln_threshold = iterations - 1) --
+            # this branch used to fall back to the constructor default instead,
+            # so the reference/demo target's pass/fail reproducibility bar was
+            # silently looser than every other target type for no stated reason.
             validator = DifferentialValidator(
                 iterations=iterations,
+                vuln_threshold=max(1, iterations - 1),
                 provider=effective_provider,
                 model=effective_model,
                 planner_model=effective_planner_model if planner_model else None,

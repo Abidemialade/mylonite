@@ -100,7 +100,19 @@ class ScanConfig(BaseModel):
             "Consecutive provider failures before the scan aborts. A value <1 "
             "would abort after the very FIRST attempt regardless of outcome "
             "(DCR-0012) — not a config a caller could have MEANT, so reject it "
-            "at construction, mirroring max_concurrent."
+            "at construction, mirroring max_concurrent. DCR-0018: 'consecutive' "
+            "is a best-effort, PROCESS-WIDE notion under concurrency (max_concurrent "
+            "> 1 or runs > 1) — the counter this threshold compares against "
+            "(LiteLLMCallCounter.consecutive_failures) is ONE counter shared by "
+            "every in-flight call across every concurrently-running payload/pass, "
+            "not one per connection. It answers 'has the provider recently failed "
+            "N times in a row across the whole scan's interleaved call stream' "
+            "(a reasonable proxy for 'is the provider down'), NOT 'has any single "
+            "payload's connection failed N times in a row' — an unrelated "
+            "payload's success can reset the shared count and mask another "
+            "payload's own failure streak, or unrelated failures across several "
+            "payloads can cumulatively trip the threshold. See "
+            "LiteLLMCallCounter's docstring for the full reasoning."
         ),
     )
     pattern_id_filter: str | None = Field(
@@ -344,6 +356,14 @@ class ScanEngine:
                     fallback_breakdown["nrun_disagreement"] = (
                         fallback_breakdown.get("nrun_disagreement", 0) + 1
                     )
+                # DCR-0018: `counter` is ONE process-wide LiteLLMCallCounter
+                # shared across every concurrently-running payload/pass this
+                # `run()` drives (see its docstring) — this is a best-effort
+                # "has the provider recently failed repeatedly across the
+                # scan's interleaved call stream" signal, not a strict
+                # per-connection "this exact call chain failed N times in a
+                # row" one. Accepted trade-off; see
+                # ScanConfig.provider_failure_threshold's docstring.
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
                     aborted = AbortReason.PROVIDER_UNREACHABLE
                     for pending in tasks:
@@ -485,14 +505,19 @@ class ScanEngine:
                 exploit=None,
             )
 
-        async with semaphore:
-            return await self._run_payload(
-                payload=payload,
-                module_id=module_id,
-                descriptor=descriptor,
-                compliance=compliance,
-                seed_id=seed_id,
-            )
+        # DCR-0005: `semaphore` is threaded down into `_run_payload` (and from
+        # there into `_run_flakiness_passes`) rather than held open here for
+        # the payload's entire lifetime. See `_run_payload`'s docstring for
+        # why holding it here caused effective concurrency to scale to
+        # `max_concurrent ** 2` under `runs > 1`.
+        return await self._run_payload(
+            payload=payload,
+            module_id=module_id,
+            descriptor=descriptor,
+            compliance=compliance,
+            seed_id=seed_id,
+            semaphore=semaphore,
+        )
 
     async def _run_payload(
         self,
@@ -502,7 +527,31 @@ class ScanEngine:
         descriptor: TargetDescriptor,
         compliance: Any,
         seed_id: str,
+        semaphore: asyncio.Semaphore,
     ) -> _PerPayloadOutcome:
+        """Customise, invoke, and judge one payload (``runs`` times under the
+        scan-time flakiness filter).
+
+        ``semaphore`` (DCR-0005) is the SAME cross-payload semaphore ``run()``
+        constructs, threaded all the way down to every actual target-facing
+        call this payload makes -- the customiser call below, the single
+        ``_one_pass`` invocation (``runs == 1``), and every pass
+        ``_run_flakiness_passes`` fans out (``runs > 1``) -- each acquiring
+        and releasing it individually rather than one caller holding it open
+        for this whole coroutine's lifetime. Before this, `_process_one` held
+        one permit for the ENTIRE payload (customisation + all `runs`
+        passes), and `_run_flakiness_passes` separately constructed its OWN
+        fresh `Semaphore(max_concurrent)` to bound its `runs` passes -- so
+        with `max_concurrent` payloads simultaneously mid-flakiness-fan-out,
+        up to `max_concurrent ** 2` `adapter.invoke()` calls could be
+        in-flight at once, `max_concurrent` times over its documented "max
+        in-flight payload attempts" budget. Sharing one instance, acquired
+        per actual call rather than held across the whole function, also
+        rules out the deadlock a naive "just reuse it" fix would hit: a
+        held-open outer permit plus a nested acquire of the SAME semaphore
+        from the same task self-deadlocks the moment every permit is already
+        claimed by an outer hold.
+        """
         del module_id  # currently used only for filename; carried via compliance binding
         # Customisation step — requires looking up the SeedPattern by seed_id
         # so the customiser can build its prompt from the right shape. Third-
@@ -550,7 +599,8 @@ class ScanEngine:
             # an unhandled provider exception's raw text (`Diagnosis.detail`)
             # could otherwise reach stderr/CI logs unredacted.
             try:
-                payload = await self._customiser.customise(seed, descriptor)
+                async with semaphore:
+                    payload = await self._customiser.customise(seed, descriptor)
             except BudgetExceededError:
                 raise
             except Exception as exc:
@@ -595,12 +645,15 @@ class ScanEngine:
         # fan-out — see ``_run_flakiness_passes`` for why that helper (not a
         # plain ``gather_bounded`` call) is what actually does the work.
         # runs=1 (the default, and every demo/replay path) stays a single bare
-        # `await`, identical to the old sequential form.
+        # `await`, identical to the old sequential form -- just individually
+        # acquiring the SAME shared semaphore around the one invoke, like
+        # every other actual target-facing call in this function (DCR-0005).
         if runs == 1:
-            pass_results = [await self._one_pass(payload=payload, seed_id=seed_id)]
+            async with semaphore:
+                pass_results = [await self._one_pass(payload=payload, seed_id=seed_id)]
         else:
             pass_results = await self._run_flakiness_passes(
-                payload=payload, seed_id=seed_id, runs=runs
+                payload=payload, seed_id=seed_id, runs=runs, semaphore=semaphore
             )
         for result in pass_results:
             if isinstance(result, _PerPayloadOutcome):
@@ -688,7 +741,7 @@ class ScanEngine:
         )
 
     async def _run_flakiness_passes(
-        self, *, payload: Payload, seed_id: str, runs: int
+        self, *, payload: Payload, seed_id: str, runs: int, semaphore: asyncio.Semaphore
     ) -> list[_PerPayloadOutcome | _JudgedPass]:
         """Run ``runs`` invoke→judge passes for one payload, concurrently and bounded.
 
@@ -706,9 +759,18 @@ class ScanEngine:
         scan that would have completed under the old code into
         ``aborted=budget_exceeded``.
 
-        So instead: launch all ``runs`` passes as real ``asyncio.Task``s
-        (bounded by a semaphore, same limit as cross-payload fan-out). Each
-        task checks a shared ``terminal_found`` flag *immediately after*
+        So instead: launch all ``runs`` passes as real ``asyncio.Task``s,
+        bounded by ``semaphore`` -- the SAME cross-payload semaphore ``run()``
+        constructs and every sibling payload's passes also acquire (DCR-0005:
+        this used to construct its OWN fresh ``Semaphore(max_concurrent)``,
+        so total in-flight ``adapter.invoke()`` calls could reach
+        ``max_concurrent ** 2`` — every one of up to ``max_concurrent``
+        concurrently-processing payloads fanning out up to ``max_concurrent``
+        of its own passes. Sharing one instance instead means the TOTAL
+        in-flight invoke count across every payload and every one of its
+        passes is what's capped at ``max_concurrent``, matching the
+        setting's own documented "max in-flight payload attempts" budget).
+        Each task checks a shared ``terminal_found`` flag *immediately after*
         acquiring the semaphore and *before* calling ``self._one_pass(...)`` —
         i.e. before it would spend any budget — and skips the call entirely if
         the flag is already set. As soon as any pass resolves to a terminal
@@ -734,8 +796,7 @@ class ScanEngine:
         ``filterwarnings=error``-tripping "coroutine was never awaited" bug the
         runs=1 fast path avoids — see the call site).
         """
-        limit = max(1, self._config.max_concurrent)
-        sem = asyncio.Semaphore(limit)
+        sem = semaphore
         terminal_found = False
 
         async def _bounded(idx: int) -> tuple[int, _PerPayloadOutcome | _JudgedPass | None]:
@@ -826,6 +887,13 @@ class ScanEngine:
                 exploit=None,
             )
         except AdapterInvocationSkipped as skip:
+            # DCR-0017: redact, matching verdict_reason's treatment in the
+            # sibling exception handlers below — attempt_metadata["exception"]
+            # is raw exception text (e.g. from a str(exc) an adapter embedded),
+            # not just a bare type name, so it can carry a secret-shaped value
+            # (a credential embedded in a request that failed) straight into
+            # this ScanAttempt, which write_artefacts persists to disk.
+            _exc_detail = skip.attempt_metadata.get("exception")
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
@@ -833,7 +901,9 @@ class ScanEngine:
                     outcome="skipped_planner_failure",
                     verdict_mechanism=None,
                     verdict_reason=skip.reason,
-                    error_detail=skip.attempt_metadata.get("exception"),
+                    error_detail=redact(_exc_detail)
+                    if isinstance(_exc_detail, str)
+                    else _exc_detail,
                 ),
                 exploit=None,
             )

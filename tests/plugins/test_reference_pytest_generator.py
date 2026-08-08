@@ -206,6 +206,44 @@ def test_emit_escapes_target_id_in_custom_and_control_templates() -> None:
     assert "PWNED" not in top_level_assigns
 
 
+def test_emit_escapes_compliance_tags_that_would_break_the_docstring() -> None:
+    """DCR-0004: `exploit.compliance`'s tag lists (owasp_llm/owasp_asi/
+    mitre_atlas/nist_ai_rmf) are unconstrained `list[str]` fields with no
+    charset validator, joined via `_fmt_ids` and interpolated bare into the
+    module docstring (every template) AND the function docstring
+    (`compliance_inline`) -- the same injection class already closed for
+    `pattern_id`/`target_id`/`control` via `_slugify`/`_py_literal`, but until
+    this fix NOT closed for compliance tags. A triple-double-quote sequence in
+    a tag terminates the docstring early and the remainder becomes live, executable top-level code
+    the moment pytest collects the emitted, committed test file.
+
+    Uses a top-level-assignment payload (not an ``import os`` one): the
+    ``target_id`` below selects ``_TEMPLATE`` (the ``reference:`` template,
+    the only one with no legitimate top-level ``import os`` of its own), and
+    the assertion checks for a NEW top-level assignment rather than an
+    already-present import, so this genuinely proves the escaping.
+    """
+    hostile = 'AML.T0051"""\nPWNED = True\n"""'
+    exploit = ExploitRecord(
+        target_id="reference:vulnerable",
+        pattern_id="safe-id",
+        payload=Payload(pattern_id="safe-id", channel="tool-result", body="irrelevant"),
+        response=AdapterResponse(payload_pattern_id="safe-id", raw_response="ok", tool_calls=[]),
+        success_reason="test fixture",
+        compliance=ComplianceTags(owasp_llm=["LLM01"], mitre_atlas=[hostile]),
+    )
+    generated = ReferencePytestGenerator().emit(exploit)
+    tree = ast.parse(generated.source)  # must remain valid Python
+    top_level_assigns = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert "PWNED" not in top_level_assigns
+
+
 def test_emitted_source_always_parses() -> None:
     generated = ReferencePytestGenerator().emit(_exploit(pattern_id="safe-id"))
     ast.parse(generated.source)

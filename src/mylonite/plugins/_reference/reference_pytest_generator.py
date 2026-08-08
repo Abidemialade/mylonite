@@ -216,9 +216,41 @@ def _slugify(value: str) -> str:
     return f"_{slug}" if slug[:1].isdigit() else slug
 
 
+def _escape_triple_quotes(value: str) -> str:
+    """Neutralise a ``\"\"\"`` (or longer) run so ``value`` is safe to interpolate
+    BARE into a triple-double-quoted docstring, without altering any other
+    character (DCR-0004).
+
+    Compliance tag lists (``owasp_llm``/``owasp_asi``/``mitre_atlas``/
+    ``nist_ai_rmf``) are unconstrained ``list[str]`` fields with no charset
+    validator, and this is a docstring-only interpolation site (both the
+    module docstring's ``Compliance: ...`` line and the function docstring's
+    ``compliance_inline``). Left unescaped, a tag containing a triple-quote
+    sequence would terminate the enclosing docstring early and turn the rest
+    of the emitted ``test_security_<slug>.py`` into live executable Python at
+    pytest collection time — the exact injection class already closed for
+    ``pattern_id``/``target_id``/``control`` via ``_slugify``/``_py_literal``.
+
+    Deliberately narrower than :func:`_slugify`: a legitimate taxonomy ID
+    (``AML.T0051``, ``GOVERN-1.1``) carries no quote character at all, so this
+    is a no-op for every realistic value and the docstring keeps showing the
+    ID VERBATIM (unlike ``target_id``/``control``, which have no comparable
+    "real value always looks like this" invariant to preserve). Inserting a
+    single space between every pair of ADJACENT quote characters means no run
+    of 2+ quotes — hence no run of 3, the docstring-terminating sequence — can
+    survive in the output, however many consecutive quotes the input carries.
+    """
+    return re.sub(r'(?<=")(?=")', " ", value)
+
+
 def _fmt_ids(ids: list[str]) -> str:
-    """Render a sorted, comma-joined ID list for the docstring (``—`` if empty)."""
-    return ", ".join(sorted(ids)) if ids else "—"
+    """Render a sorted, comma-joined ID list for the docstring (``—`` if empty).
+
+    Each ID is routed through :func:`_escape_triple_quotes` first (DCR-0004) —
+    see that function's docstring for why triple-quote escaping, not full
+    :func:`_slugify`, is the right treatment for compliance tags specifically.
+    """
+    return ", ".join(_escape_triple_quotes(i) for i in sorted(ids)) if ids else "—"
 
 
 class ReferencePytestGenerator(TestGeneratorBase):
@@ -268,15 +300,18 @@ class ReferencePytestGenerator(TestGeneratorBase):
         decorators = "\n".join(markers)
 
         # Inline compliance summary for the test docstring (sorted, stable).
+        # Triple-quote-escaped (DCR-0004, see _fmt_ids/_escape_triple_quotes)
+        # -- this also lands bare in a function docstring, so it needs the
+        # same treatment, without mangling legitimate ID punctuation.
         inline_parts: list[str] = []
         for llm_id in sorted(compliance.owasp_llm):
-            inline_parts.append(llm_id)
+            inline_parts.append(_escape_triple_quotes(llm_id))
         for asi_id in sorted(compliance.owasp_asi):
-            inline_parts.append(asi_id)
+            inline_parts.append(_escape_triple_quotes(asi_id))
         for atlas_id in sorted(compliance.mitre_atlas):
-            inline_parts.append(atlas_id)
+            inline_parts.append(_escape_triple_quotes(atlas_id))
         for nist_id in sorted(compliance.nist_ai_rmf):
-            inline_parts.append(nist_id)
+            inline_parts.append(_escape_triple_quotes(nist_id))
         compliance_inline = " · ".join(inline_parts) if inline_parts else "no tags"
 
         # A control-efficacy finding (synthetic_control metadata) replays via

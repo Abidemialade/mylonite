@@ -352,6 +352,45 @@ async def test_engine_logs_skipped_planner_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_redacts_secret_shaped_exception_in_skipped_planner_failure() -> None:
+    """DCR-0017: ``AdapterInvocationSkipped.attempt_metadata["exception"]`` is raw
+    exception text (not just a bare type name) an adapter can embed a live
+    secret into (e.g. a credential from a failed request), stored VERBATIM
+    into ``ScanAttempt.error_detail`` -- which ``write_artefacts`` persists to
+    ``scan_report.json``, a file the operator is told to commit. Must be
+    redacted, matching the treatment ``verdict_reason`` already gets in the
+    sibling exception handlers in this same file.
+    """
+    sentinel = "sk-ant-sentinelsecretvalue1234567890"
+
+    class _SecretLeakingSkipAdapter(_AdapterStub):
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            self.invoke_call_count += 1
+            raise AdapterInvocationSkipped(
+                "planner failure: simulated",
+                attempt_metadata={
+                    "variant": "vulnerable",
+                    "exception": f"RuntimeError: connection failed ({sentinel})",
+                },
+            )
+
+    payload = _payload_from_seed_index(0)
+    adapter = _SecretLeakingSkipAdapter(raise_skipped=True)
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "skipped_planner_failure"
+    assert attempt.error_detail is not None
+    assert sentinel not in attempt.error_detail
+
+
+@pytest.mark.asyncio
 async def test_engine_undelivered_payload_is_skipped_not_clean() -> None:
     """Issue R6: an indirect attempt whose poison wasn't retrieved is skipped, not clean."""
     payload = _payload_from_seed_index(0)
@@ -1258,6 +1297,67 @@ async def test_engine_nrun_structural_skip_does_not_blow_the_shared_budget() -> 
         "expected the terminal skip to cancel still-pending passes before they "
         f"called adapter.invoke() (bounded by max_concurrent=2); got "
         f"{adapter.invoke_call_count} invoke() attempts out of runs=5"
+    )
+
+
+@pytest.mark.asyncio
+async def test_engine_concurrency_bounded_across_payloads_and_flakiness_runs() -> None:
+    """DCR-0005: ``max_concurrent`` must bound TOTAL in-flight ``adapter.invoke()``
+    calls across BOTH cross-payload fan-out AND per-payload ``runs>1``
+    flakiness fan-out -- not multiply them together.
+
+    Before the fix, ``_run_flakiness_passes`` constructed its OWN fresh
+    ``Semaphore(max_concurrent)`` instead of reusing the outer cross-payload
+    semaphore ``run()`` builds, so with ``max_concurrent`` payloads
+    concurrently mid-flakiness-fan-out, up to ``max_concurrent ** 2``
+    concurrent ``invoke()`` calls could be in flight -- 4 here, since
+    ``_config``'s fixed ``max_concurrent=2``.
+
+    Uses 2 payloads (== max_concurrent, so cross-payload fan-out actually
+    saturates) and ``runs=3`` (> max_concurrent, so per-payload flakiness
+    fan-out is also exercised) with a slow adapter, so the semaphore
+    genuinely has to hold work back rather than everything racing through in
+    one scheduler tick.
+    """
+
+    class _ConcurrencyTrackingAdapter:
+        def __init__(self, response: AdapterResponse) -> None:
+            self._response = response
+            self._current = 0
+            self.peak_concurrent = 0
+
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            del payload
+            self._current += 1
+            self.peak_concurrent = max(self.peak_concurrent, self._current)
+            try:
+                await asyncio.sleep(0.05)
+                return self._response
+            finally:
+                self._current -= 1
+
+        async def close(self) -> None:
+            return None
+
+    adapter = _ConcurrencyTrackingAdapter(_ok_response())
+    engine = ScanEngine(
+        config=_config(runs=3),  # max_concurrent=2 (see _config's fixed default)
+        adapter=adapter,
+        attack_modules=[_ModuleStub([_payload_from_seed_index(0), _payload_from_seed_index(1)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    await engine.run()
+
+    assert adapter.peak_concurrent <= 2, (
+        "expected peak concurrent adapter.invoke() calls bounded by "
+        f"max_concurrent=2 (2 payloads x runs=3 flakiness fan-out each); got "
+        f"{adapter.peak_concurrent} in flight at once"
     )
 
 
