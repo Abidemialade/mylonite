@@ -36,7 +36,8 @@ Run the exploit-finding loop against a target.
 reference app builds), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
 (your own MCP app). Non-reference targets need `--authorize`.
 
-Key options: `--target-file PATH`, `--authorize NAME`, `--provider`, `--model`,
+Key options: `--target-file PATH`, `--authorize NAME`, `--model` (any LiteLLM
+provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
 `--allow-no-seed-arm`, `--purpose "…"` (a one-line description of what the app is for;
@@ -75,8 +76,9 @@ Run the generated test through the [validation engine](validation.md), LIVE. On 
 holds the model constant and toggles only the safeguard; against the bundled reference app
 it runs the two-build differential. A test is **kept** only when it discriminates reliably.
 
-Options: `target` (the generated dir/file); `--iterations N` (default 5); `--provider`,
-`--model`; `--target-file PATH` (re-drive your REAL app instead of the reference build);
+Options: `target` (the generated dir/file); `--iterations N` (default 5); `--model`
+(any LiteLLM provider via a `provider/model` prefix); `--target-file PATH` (re-drive
+your REAL app instead of the reference build);
 `--authorize` (**required** when `--target-file` names a custom target — must equal the
 target's declared `scope`, or its family name if no scope is declared; see
 [target-file.md](target-file.md)); `--fast`
@@ -94,7 +96,8 @@ mylonite validate .mylonite/generated/my-finding --target-file app.yaml --author
 The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows.
 
 Options: `target` or `--target-file`; `--authorize`; `--open-pr` (push a branch + open
-the PR via `gh`); `--config`; `--provider`, `--model`; `--out PATH`; `--max-llm-calls`;
+the PR via `gh`); `--config`; `--model` (any LiteLLM provider via a `provider/model`
+prefix); `--out PATH`; `--max-llm-calls`;
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
@@ -126,7 +129,7 @@ Toggle each AI safeguard and report which are **load-bearing**, **security theat
 
 Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
-`--max-seeds N`; `--provider`, `--model`.
+`--max-seeds N`; `--model` (any LiteLLM provider via a `provider/model` prefix).
 
 ```bash
 mylonite ablate --target-file app.yaml --authorize my-app --controls W2,W4 --redundancy
@@ -150,10 +153,10 @@ mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
 
 Diagnose provider connectivity before a live scan. Exit `4` if unreachable.
 
-Options: `--provider`, `--model`, `--config`.
+Options: `--model` (any LiteLLM provider via a `provider/model` prefix), `--config`.
 
 ```bash
-mylonite doctor --provider anthropic
+mylonite doctor --model anthropic/claude-haiku-4-5
 ```
 
 ## `taxonomy list` — browse the threat data

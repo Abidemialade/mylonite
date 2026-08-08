@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import get_args
 
 import pytest
+from pydantic import ValidationError
 
 from mylonite.contracts._types import ScanAttempt, ScanAttemptOutcome, ScanReport
 from mylonite.scan.coverage import (
@@ -318,14 +319,42 @@ class TestCoverageComputation:
 
 
 class TestUnknownAbortReason:
-    def test_unrecognised_aborted_value_raises_actionable_error(self) -> None:
-        # A hand-edited replay fixture, a legacy artefact from an incompatible
-        # version, or a future typo could set `aborted` to something outside
-        # the 5 known AbortReason values. The bare `ValueError` StrEnum raises
-        # by default ("'x' is not a valid AbortReason") is undiagnosable once
-        # ScanReports are routinely loaded back off disk — this must name the
-        # offending value and the known-good ones instead.
-        report = _report(aborted="some_future_reason_nobody_declared")
+    def test_scan_report_construction_rejects_unknown_abort_value(self) -> None:
+        """0.7.10: ``ScanReport.aborted`` is now ``AbortReason | None`` (a real
+        JSON Schema ``enum``, not a bare unconstrained string) — Pydantic
+        itself rejects an unrecognised value at CONSTRUCTION time. A
+        hand-edited replay fixture, a legacy artefact from an incompatible
+        version, or a future typo can no longer even build a ``ScanReport``
+        carrying a bogus ``aborted`` string; this used to be silently
+        accepted (see the sibling test below for the ``from_report``-level
+        defence this replaces as the primary guard).
+        """
+        with pytest.raises(ValidationError, match="some_future_reason_nobody_declared") as excinfo:
+            _report(aborted="some_future_reason_nobody_declared")
+        assert "budget_exceeded" in str(excinfo.value)
+
+    def test_from_report_defensively_re_validates_a_validation_bypassed_report(self) -> None:
+        """Belt-and-suspenders: a ``ScanReport`` built via ``model_construct()``
+        (which skips field validation entirely — e.g. a lower-level
+        deserialisation path, or a hand-rolled test double) can still carry a
+        raw, unrecognised ``aborted`` string despite the field's declared
+        type. ``ScanOutcome.from_report`` must not blow up with the bare
+        ``ValueError`` a ``StrEnum`` raises by default; it re-validates and
+        raises an actionable error naming the offending value and the
+        known-good ones — the same property the pre-0.7.10 test proved
+        against a normally-constructed report.
+        """
+        report = ScanReport.model_construct(
+            target_id="t",
+            provider="p",
+            model="m",
+            elapsed_seconds=1.0,
+            attempts=[],
+            findings_count=0,
+            aborted="some_future_reason_nobody_declared",
+            fallback_breakdown={},
+            mylonite_version="0.0.0",
+        )
         with pytest.raises(ValueError, match="some_future_reason_nobody_declared") as excinfo:
             ScanOutcome.from_report(report)
         assert "AbortReason" in str(excinfo.value)

@@ -29,8 +29,8 @@ import re
 from typing import ClassVar, Literal
 
 from mylonite.contracts import ExploitRecord, GeneratedTest, TestGeneratorBase
+from mylonite.contracts.exec_context import ExecContext
 from mylonite.contracts.test_generator import CONTRACT_VERSION
-from mylonite.scan.exec_context import ExecContext
 from mylonite.testkit._pytest_plugin import (
     MYLONITE_SECURITY_MARKER,
     REGISTERED_ATLAS_MARKERS,
@@ -216,9 +216,41 @@ def _slugify(value: str) -> str:
     return f"_{slug}" if slug[:1].isdigit() else slug
 
 
+def _escape_triple_quotes(value: str) -> str:
+    """Neutralise a ``\"\"\"`` (or longer) run so ``value`` is safe to interpolate
+    BARE into a triple-double-quoted docstring, without altering any other
+    character (DCR-0004).
+
+    Compliance tag lists (``owasp_llm``/``owasp_asi``/``mitre_atlas``/
+    ``nist_ai_rmf``) are unconstrained ``list[str]`` fields with no charset
+    validator, and this is a docstring-only interpolation site (both the
+    module docstring's ``Compliance: ...`` line and the function docstring's
+    ``compliance_inline``). Left unescaped, a tag containing a triple-quote
+    sequence would terminate the enclosing docstring early and turn the rest
+    of the emitted ``test_security_<slug>.py`` into live executable Python at
+    pytest collection time — the exact injection class already closed for
+    ``pattern_id``/``target_id``/``control`` via ``_slugify``/``_py_literal``.
+
+    Deliberately narrower than :func:`_slugify`: a legitimate taxonomy ID
+    (``AML.T0051``, ``GOVERN-1.1``) carries no quote character at all, so this
+    is a no-op for every realistic value and the docstring keeps showing the
+    ID VERBATIM (unlike ``target_id``/``control``, which have no comparable
+    "real value always looks like this" invariant to preserve). Inserting a
+    single space between every pair of ADJACENT quote characters means no run
+    of 2+ quotes — hence no run of 3, the docstring-terminating sequence — can
+    survive in the output, however many consecutive quotes the input carries.
+    """
+    return re.sub(r'(?<=")(?=")', " ", value)
+
+
 def _fmt_ids(ids: list[str]) -> str:
-    """Render a sorted, comma-joined ID list for the docstring (``—`` if empty)."""
-    return ", ".join(sorted(ids)) if ids else "—"
+    """Render a sorted, comma-joined ID list for the docstring (``—`` if empty).
+
+    Each ID is routed through :func:`_escape_triple_quotes` first (DCR-0004) —
+    see that function's docstring for why triple-quote escaping, not full
+    :func:`_slugify`, is the right treatment for compliance tags specifically.
+    """
+    return ", ".join(_escape_triple_quotes(i) for i in sorted(ids)) if ids else "—"
 
 
 class ReferencePytestGenerator(TestGeneratorBase):
@@ -229,7 +261,7 @@ class ReferencePytestGenerator(TestGeneratorBase):
     def framework(self) -> Literal["pytest", "jest"]:
         return "pytest"
 
-    def emit(self, exploit: ExploitRecord) -> GeneratedTest:
+    def emit(self, exploit: ExploitRecord, context: ExecContext | None = None) -> GeneratedTest:
         if not _SAFE_PATTERN_ID.fullmatch(exploit.pattern_id):
             msg = (
                 f"pattern_id {exploit.pattern_id!r} is not safe to embed in generated "
@@ -268,15 +300,18 @@ class ReferencePytestGenerator(TestGeneratorBase):
         decorators = "\n".join(markers)
 
         # Inline compliance summary for the test docstring (sorted, stable).
+        # Triple-quote-escaped (DCR-0004, see _fmt_ids/_escape_triple_quotes)
+        # -- this also lands bare in a function docstring, so it needs the
+        # same treatment, without mangling legitimate ID punctuation.
         inline_parts: list[str] = []
         for llm_id in sorted(compliance.owasp_llm):
-            inline_parts.append(llm_id)
+            inline_parts.append(_escape_triple_quotes(llm_id))
         for asi_id in sorted(compliance.owasp_asi):
-            inline_parts.append(asi_id)
+            inline_parts.append(_escape_triple_quotes(asi_id))
         for atlas_id in sorted(compliance.mitre_atlas):
-            inline_parts.append(atlas_id)
+            inline_parts.append(_escape_triple_quotes(atlas_id))
         for nist_id in sorted(compliance.nist_ai_rmf):
-            inline_parts.append(nist_id)
+            inline_parts.append(_escape_triple_quotes(nist_id))
         compliance_inline = " · ".join(inline_parts) if inline_parts else "no tags"
 
         # A control-efficacy finding (synthetic_control metadata) replays via
@@ -303,18 +338,25 @@ class ReferencePytestGenerator(TestGeneratorBase):
         # turns the remainder of the file into live top-level code.
         target_id_display = _slugify(exploit.target_id)
 
-        # T12: read back the exec context ScanEngine._finalize stamped onto the
-        # exploit's payload (mylonite.exec.* metadata) and render it as explicit
-        # model=/provider= literals in the CUSTOM/CONTROL templates -- so the
-        # emitted CI gate re-drives the SAME model that discovered/validated
-        # this finding, not testkit's own hardcoded fallback default. Only the
-        # CUSTOM/CONTROL templates reference these placeholders; harmless
-        # no-ops for the reference-twin template (assert_guard_holds takes no
-        # model/provider kwargs at all). A pre-T12 exploit with no exec context
-        # renders no kwargs at all -- testkit resolves it at RUN time instead
-        # (explicit kwarg -> exec-context metadata -> sibling scan_report.json
-        # back-fill -> loud failure).
-        exec_ctx = ExecContext.from_metadata(exploit.payload.metadata)
+        # T12 (promoted to a real parameter in 0.7.10, CONTRACT_VERSION 0.2.0):
+        # render the exec context as explicit model=/provider= literals in the
+        # CUSTOM/CONTROL templates -- so the emitted CI gate re-drives the SAME
+        # model that discovered/validated this finding, not testkit's own
+        # hardcoded fallback default. Only the CUSTOM/CONTROL templates
+        # reference these placeholders; harmless no-ops for the reference-twin
+        # template (assert_guard_holds takes no model/provider kwargs at all).
+        #
+        # Prefer the explicit `context` parameter (0.7.10+ callers). Fall back
+        # to re-deriving it from Payload.metadata (the T12 shim) only when no
+        # context was passed -- either a caller that hasn't updated to the new
+        # signature yet, or a pre-T12 exploit that carries no exec context at
+        # all, in which case from_metadata() also returns None and no kwargs
+        # are rendered -- testkit resolves it at RUN time instead (explicit
+        # kwarg -> exec-context metadata -> sibling scan_report.json back-fill
+        # -> loud failure).
+        exec_ctx = (
+            context if context is not None else ExecContext.from_metadata(exploit.payload.metadata)
+        )
         model_kwarg = f", model={_py_literal(exec_ctx.model)}" if exec_ctx is not None else ""
         provider_kwarg = (
             f", provider={_py_literal(exec_ctx.provider)}" if exec_ctx is not None else ""

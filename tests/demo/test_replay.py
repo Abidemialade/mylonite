@@ -316,13 +316,26 @@ def test_v2_key_unaffected_by_dict_key_ordering() -> None:
 
 
 # --- (T8) fixture-format-version detection -------------------------------------
+#
+# (close-the-loop) The old fallback was mode-dependent: a sidecar-less
+# directory silently defaulted to v1 on REPLAY, v2 on RECORD. That asymmetry
+# existed only to keep the pre-sidecar shipped demo fixtures replaying; now
+# that those two directories declare `cache_key_version: 1` EXPLICITLY (see
+# `test_real_shipped_demo_fixtures_declare_v1_explicitly` below), the
+# no-sidecar default is unified to `CACHE_KEY_VERSION` in EITHER mode — see
+# `test_no_sidecar_defaults_to_cache_key_version_in_either_mode`.
 
 
-def test_format_version_defaults_to_v1_on_replay_with_no_sidecar(tmp_path: Path) -> None:
-    assert _resolve_key_version(tmp_path, "replay") == 1
+def test_no_sidecar_defaults_to_cache_key_version_in_either_mode(tmp_path: Path) -> None:
+    """The retired fallback: no more implicit "assume legacy v1" on replay.
 
-
-def test_format_version_defaults_to_v2_on_record_with_no_sidecar(tmp_path: Path) -> None:
+    A sidecar-less directory now resolves the SAME default — the best
+    available algorithm — whichever mode asks. Only a directory that
+    explicitly declares an older version (see
+    ``test_format_version_honours_explicit_sidecar_in_either_mode`` below)
+    still resolves to it.
+    """
+    assert _resolve_key_version(tmp_path, "replay") == 2
     assert _resolve_key_version(tmp_path, "record") == 2
 
 
@@ -340,17 +353,56 @@ def test_format_version_field_alone_is_ignored_by_cache_key_dispatch(tmp_path: P
     """A sidecar with ONLY the unrelated `format_version` field (testkit's own,
     NOT the cache-key field) must NOT be mistaken for a cache_key_version
     declaration — this is exactly the coupling-by-coincidence the two
-    independent fields exist to rule out."""
+    independent fields exist to rule out. With no cache_key_version signal,
+    both modes fall through to the same unified no-sidecar default."""
     (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 2}), encoding="utf-8")
-    assert _resolve_key_version(tmp_path, "replay") == 1
+    assert _resolve_key_version(tmp_path, "replay") == 2
     assert _resolve_key_version(tmp_path, "record") == 2
 
 
-def test_real_shipped_demo_fixtures_are_detected_as_v1() -> None:
-    """The committed demo fixtures ship with no `_meta.json` — must resolve v1."""
+def test_real_shipped_demo_fixtures_declare_v1_explicitly() -> None:
+    """The committed demo fixtures now ship an explicit `_meta.json`
+    declaring `cache_key_version: 1` (close-the-loop) — they predate the
+    sidecar and were recorded with the original (v1) algorithm, so retiring
+    the old implicit no-sidecar-means-v1 replay default requires them to say
+    so explicitly rather than rely on that default."""
     root = packaged_fixture_dir()
+    assert (root / "vulnerable" / "_meta.json").is_file()
+    assert (root / "guarded" / "_meta.json").is_file()
     assert _resolve_key_version(root / "vulnerable", "replay") == 1
     assert _resolve_key_version(root / "guarded", "replay") == 1
+
+
+# --- (close-the-loop) proof the implicit v1 fallback is actually gone ---------
+
+
+@pytest.mark.asyncio
+async def test_fresh_sidecar_less_dir_no_longer_silently_assumes_v1(tmp_path: Path) -> None:
+    """The concrete failure mode the old fallback risked, made impossible.
+
+    Before: a sidecar-less directory replayed under v1, which ignores
+    `tools=` entirely — a fixture recorded (or hand-placed) under the v1 key
+    for a tool-bearing call would silently satisfy ANY call with the same
+    (model, messages) regardless of its tool schema.
+
+    After: a sidecar-less directory now resolves `CACHE_KEY_VERSION` (v2) by
+    default, which folds `tools=` into the key. A fixture file that only
+    exists under the OLD v1 key name is no longer found for a tools-bearing
+    call — it misses loudly (`MissingFixtureError`) instead of silently
+    matching.
+    """
+    tools = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
+    # Written under the v1 key — the key a legacy (pre-close-the-loop) replay
+    # would have computed for this exact call.
+    v1_key = _stable_key_v1("claude-x", _MSGS)
+    (tmp_path / f"{v1_key}.json").write_text(
+        _fixture_payload("stale-v1-response"), encoding="utf-8"
+    )
+
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)  # no _meta.json anywhere
+    assert recorder.key_version == 2  # the unified default, not the old v1 fallback
+    with pytest.raises(MissingFixtureError):
+        await recorder(model="claude-x", messages=_MSGS, tools=tools)
 
 
 # --- (T8) the critical non-regression: shipped v1 fixtures still replay --------
@@ -361,12 +413,13 @@ async def test_v1_fixtures_still_replay() -> None:
 
     The critical non-regression proof: drive the ACTUAL demo wiring
     (``mylonite.demo.runner.run_demo``) against the real packaged
-    ``vulnerable``/``guarded`` fixtures — which ship with no ``_meta.json``
-    sidecar — end to end. Every real call the demo's ``LLMPlanner`` makes
-    includes ``tools=``/``tool_choice=``; if v1 dispatch (or the key-version
-    detection defaulting) were broken, this would raise
-    ``DemoFixtureError``/``MissingFixtureError`` instead of completing with
-    the expected differential.
+    ``vulnerable``/``guarded`` fixtures — which now ship an explicit
+    ``_meta.json`` sidecar declaring ``cache_key_version: 1`` (retiring the
+    old implicit no-sidecar-defaults-to-v1 fallback) — end to end. Every real
+    call the demo's ``LLMPlanner`` makes includes ``tools=``/``tool_choice=``;
+    if v1 dispatch (or the key-version detection reading the sidecar) were
+    broken, this would raise ``DemoFixtureError``/``MissingFixtureError``
+    instead of completing with the expected differential.
     """
     from mylonite.demo.runner import run_demo
 

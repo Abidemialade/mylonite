@@ -199,9 +199,9 @@ note body) both cause mail to leave without anyone confirming.
 The demo is the safe sandbox; the same scan loop runs against real MCP stdio
 servers. The honest prerequisites, stated up front: this is **not**
 zero-config like the demo — it needs an LLM API key (`ANTHROPIC_API_KEY` for
-the default provider; other LiteLLM providers via `--provider`/`--model`
-plus that provider's own key env var) and `uv` installed (the fetch target
-spawns via `uvx`).
+the default provider; other LiteLLM providers via `--model` with a
+`provider/model` prefix, plus that provider's own key env var) and `uv`
+installed (the fetch target spawns via `uvx`).
 
 On Linux / macOS (bash):
 

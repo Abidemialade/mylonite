@@ -11,6 +11,7 @@ breakage loud rather than silent.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -318,6 +319,35 @@ class ValidationReport(BaseModel):
 # --- Scan report --------------------------------------------------------------
 
 
+class AbortReason(StrEnum):
+    """Why a scan terminated early or ran nothing.
+
+    Lives here (rather than under ``scan/coverage.py``, where it originated)
+    because it is the value type of :attr:`ScanReport.aborted` below — a
+    Pydantic field. ``scan/coverage.py`` imports ``ScanAttemptOutcome`` and
+    ``ScanReport`` FROM this module, so defining ``AbortReason`` there instead
+    and importing it back here would be a circular import. It is
+    arguably contract-shaped data anyway: it is part of the wire shape of
+    ``scan_report.json`` (schema-validated, see
+    ``scripts/regenerate_schemas.py``), just like every other type in this
+    module. ``scan/coverage.py`` re-exports this name unchanged for backward
+    compatibility with existing ``from mylonite.scan.coverage import
+    AbortReason`` call sites.
+
+    ``StrEnum`` (a str-backed enum, matching the ``_Framework`` convention
+    already used in ``cli.py``) so ``AbortReason.X.value`` matches the
+    existing wire format on ``ScanReport.aborted`` exactly, and so
+    ``AbortReason.X == "x"``-style comparisons keep working for any call site
+    still comparing raw strings.
+    """
+
+    BUDGET_EXCEEDED = "budget_exceeded"
+    PROVIDER_UNREACHABLE = "provider_unreachable"
+    DESCRIBE_FAILED = "describe_failed"
+    NO_PAYLOADS = "no_payloads"
+    WALL_CLOCK_TIMEOUT = "wall_clock_timeout"
+
+
 ScanAttemptOutcome = Literal[
     "finding",
     "no_finding",
@@ -398,14 +428,16 @@ class ScanReport(BaseModel):
             "'judge_call_raised': n, 'customiser_fallback': n}."
         ),
     )
-    aborted: str | None = Field(
+    aborted: AbortReason | None = Field(
         default=None,
         description=(
             "Non-null if the scan terminated early or ran nothing. Values: "
             "'budget_exceeded' (--max-llm-calls hit), 'provider_unreachable' "
             "(consecutive LLM failures), 'describe_failed' (adapter.describe() "
-            "raised), or 'no_payloads' (no seeds were applicable to the target — "
-            "the scan did not actually exercise anything)."
+            "raised), 'no_payloads' (no seeds were applicable to the target — "
+            "the scan did not actually exercise anything), or "
+            "'wall_clock_timeout' (the scan exceeded its wall-clock budget and "
+            "stopped early, returning whatever completed)."
         ),
     )
     single_run: bool = Field(

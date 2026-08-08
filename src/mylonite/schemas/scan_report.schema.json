@@ -1,5 +1,17 @@
 {
   "$defs": {
+    "AbortReason": {
+      "description": "Why a scan terminated early or ran nothing.\n\nLives here (rather than under ``scan/coverage.py``, where it originated)\nbecause it is the value type of :attr:`ScanReport.aborted` below \u2014 a\nPydantic field. ``scan/coverage.py`` imports ``ScanAttemptOutcome`` and\n``ScanReport`` FROM this module, so defining ``AbortReason`` there instead\nand importing it back here would be a circular import. It is\narguably contract-shaped data anyway: it is part of the wire shape of\n``scan_report.json`` (schema-validated, see\n``scripts/regenerate_schemas.py``), just like every other type in this\nmodule. ``scan/coverage.py`` re-exports this name unchanged for backward\ncompatibility with existing ``from mylonite.scan.coverage import\nAbortReason`` call sites.\n\n``StrEnum`` (a str-backed enum, matching the ``_Framework`` convention\nalready used in ``cli.py``) so ``AbortReason.X.value`` matches the\nexisting wire format on ``ScanReport.aborted`` exactly, and so\n``AbortReason.X == \"x\"``-style comparisons keep working for any call site\nstill comparing raw strings.",
+      "enum": [
+        "budget_exceeded",
+        "provider_unreachable",
+        "describe_failed",
+        "no_payloads",
+        "wall_clock_timeout"
+      ],
+      "title": "AbortReason",
+      "type": "string"
+    },
     "ScanAttempt": {
       "additionalProperties": false,
       "description": "One attempt against the target \u2014 every seed produces exactly one.",
@@ -104,15 +116,14 @@
     "aborted": {
       "anyOf": [
         {
-          "type": "string"
+          "$ref": "#/$defs/AbortReason"
         },
         {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Non-null if the scan terminated early or ran nothing. Values: 'budget_exceeded' (--max-llm-calls hit), 'provider_unreachable' (consecutive LLM failures), 'describe_failed' (adapter.describe() raised), or 'no_payloads' (no seeds were applicable to the target \u2014 the scan did not actually exercise anything).",
-      "title": "Aborted"
+      "description": "Non-null if the scan terminated early or ran nothing. Values: 'budget_exceeded' (--max-llm-calls hit), 'provider_unreachable' (consecutive LLM failures), 'describe_failed' (adapter.describe() raised), 'no_payloads' (no seeds were applicable to the target \u2014 the scan did not actually exercise anything), or 'wall_clock_timeout' (the scan exceeded its wall-clock budget and stopped early, returning whatever completed)."
     },
     "attack_modules": {
       "items": {

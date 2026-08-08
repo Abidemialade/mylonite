@@ -29,33 +29,22 @@ Pure data/logic — no CLI concerns. Must not import ``typer`` or
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum, StrEnum, auto
+from enum import Enum, auto
 from typing import Final, get_args
 
+from mylonite.contracts._types import AbortReason as AbortReason
 from mylonite.contracts._types import ScanAttemptOutcome, ScanReport
 
 # --- Abort reasons -------------------------------------------------------------
-
-
-class AbortReason(StrEnum):
-    """Why a scan terminated early or ran nothing.
-
-    ``StrEnum`` (a str-backed enum, matching the ``_Framework`` convention
-    already used in ``cli.py``) so ``AbortReason.X.value`` matches the
-    existing wire format on ``ScanReport.aborted`` (a bare ``str | None`` —
-    NOT a contract change) exactly, and so ``AbortReason.X == "x"``-style
-    comparisons keep working during the transition while other call sites
-    still compare raw strings.
-    """
-
-    BUDGET_EXCEEDED = "budget_exceeded"
-    PROVIDER_UNREACHABLE = "provider_unreachable"
-    DESCRIBE_FAILED = "describe_failed"
-    NO_PAYLOADS = "no_payloads"
-    WALL_CLOCK_TIMEOUT = "wall_clock_timeout"
-
-
-# --- Attempt classification ----------------------------------------------------
+#
+# AbortReason itself moved to contracts/_types.py in 0.7.10 (T-close-the-loop
+# Change 2): ScanReport.aborted is now typed AbortReason | None (a real JSON
+# Schema enum constraint, generated via scripts/regenerate_schemas.py) rather
+# than a bare unconstrained string, and the enum has to live wherever
+# ScanReport does to avoid a circular import (this module already imports
+# ScanReport FROM contracts._types). Re-exported here, unchanged, so every
+# existing `from mylonite.scan.coverage import AbortReason` call site keeps
+# working.
 
 
 class AttemptClass(Enum):

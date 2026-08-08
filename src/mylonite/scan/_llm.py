@@ -136,6 +136,27 @@ class LiteLLMCallCounter:
     call to ``litellm_json_call`` / ``litellm_json_call_async`` inside that
     scope increments the counter and raises ``BudgetExceededError`` once the
     cap is hit.
+
+    DCR-0018: :attr:`consecutive_failures` is a SINGLE counter, mutated by
+    :meth:`mark_success`/:meth:`mark_failure`, shared by every call this
+    counter is active for — including every concurrently-running payload
+    attempt and every concurrently-running flakiness pass (``ScanEngine``
+    activates exactly ONE counter for the whole ``run()``, per the class
+    docstring above). It is NOT one counter per logical connection/payload.
+    Under concurrency (``max_concurrent > 1`` or ``runs > 1``) this makes
+    "consecutive" a best-effort, PROCESS-WIDE notion, not a strict "this one
+    connection failed N times in a row": an unrelated payload's success can
+    interleave and reset the shared count (masking a genuinely-failing
+    payload's own streak), and unrelated failures across several different
+    payloads can cumulatively trip the threshold even though no single
+    payload failed that many times itself. This is an accepted, deliberate
+    trade-off — see ``ScanConfig.provider_failure_threshold``'s docstring for
+    why a shared, best-effort "is the provider down" signal is still a
+    reasonable check to run, just not a precise per-connection one. Giving
+    this genuine per-connection semantics would need per-task failure
+    tracking threaded through every call site that currently just reaches
+    for the single process-wide active counter — a larger design change than
+    this fix, not attempted here.
     """
 
     cap: int

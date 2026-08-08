@@ -25,6 +25,11 @@ from mylonite.contracts.compliance_mapper import (
     ComplianceMapper,
     ComplianceMapperBase,
 )
+from mylonite.contracts.exec_context import (
+    ALLOWED_METADATA_KEYS,
+    METADATA_PREFIX,
+    ExecContext,
+)
 from mylonite.contracts.target_adapter import (
     AsyncTargetAdapter,
     AsyncTargetAdapterBase,
@@ -42,6 +47,8 @@ from mylonite.contracts.validator import (
 )
 
 __all__ = [
+    "ALLOWED_METADATA_KEYS",
+    "METADATA_PREFIX",
     "AdapterResponse",
     "AsyncTargetAdapter",
     "AsyncTargetAdapterBase",
@@ -52,6 +59,7 @@ __all__ = [
     "ComplianceMapper",
     "ComplianceMapperBase",
     "ComplianceTags",
+    "ExecContext",
     "ExploitRecord",
     "GeneratedTest",
     "Payload",

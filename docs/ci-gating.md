@@ -128,8 +128,8 @@ SARIF 2.1.0 if your platform ingests it.
 The scaffolded workflows map the `MYLONITE_API_KEY` secret to
 `ANTHROPIC_API_KEY` (Anthropic is the default provider). If you run a different
 provider, set that provider's key env var in the workflow instead (e.g.
-`OPENAI_API_KEY`) and pass `--provider`/`--model` — Mylonite routes through
-LiteLLM.
+`OPENAI_API_KEY`) and pass `--model` with a `provider/model` prefix (e.g.
+`--model openai/gpt-4o`) — Mylonite routes through LiteLLM.
 
 ### Surfacing findings in the Security tab
 

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
+from dataclasses import replace
 from importlib.abc import MetaPathFinder
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 import mylonite
@@ -556,6 +559,36 @@ def test_scan_mcp_filesystem_refuses_mismatched_authorize(tmp_path: Path) -> Non
     assert "--authorize must equal the scope segment" in (result.stderr or result.output)
 
 
+def test_build_adapter_for_mcp_rejects_none_authorize_and_none_scope_at_the_gate_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0001: with authorize=None AND scope=None, ``authorize != scope`` is
+    ``None != None`` -> False, so a naive check would vacuously pass. Every
+    CLI call site (``scan``/``gate``) happens to guard with ``if not
+    authorize`` before reaching this function, so today the CLI itself never
+    feeds it a bare ``None``. But ``_build_adapter_for_mcp`` is the actual
+    authorization gate and must be correct standing alone -- it must not rely
+    on an accidental caller-side guard, nor on a downstream family-specific
+    scope validator that happens to also reject an empty scope for an
+    unrelated reason. Prove the gate rejects this itself: patch filesystem's
+    scope_validator to a no-op that tolerates an empty/None scope (so if the
+    fix under test were reverted, the call would fall through to construct a
+    real adapter instead of raising), then call the function directly with
+    authorize=None and no scope segment, asserting it raises with the Step-2
+    authorize-gate message.
+    """
+    from mylonite.cli import _build_adapter_for_mcp
+    from mylonite.plugins._mcp import target_registry
+
+    original_spec = target_registry.BUNDLED_TARGETS["filesystem"]
+    permissive_spec = replace(original_spec, scope_validator=lambda scope: None)
+    monkeypatch.setitem(target_registry.BUNDLED_TARGETS, "filesystem", permissive_spec)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _build_adapter_for_mcp("mcp:filesystem", None, "claude-sonnet-4-6")
+    assert exc_info.value.exit_code == EXIT_CONFIG
+
+
 def test_scan_mcp_fetch_requires_family_as_authorize() -> None:
     """fetch is stateless — --authorize must equal the family name."""
     result = runner.invoke(
@@ -680,6 +713,21 @@ def test_scan_rejects_blank_model() -> None:
     assert "invalid --model" in (result.stderr or result.output)
 
 
+def test_doctor_rejects_explicit_empty_model_instead_of_silently_defaulting() -> None:
+    """DCR-0012: `base_model = model or "claude-sonnet-4-6"` treated an
+    explicit `--model ""` the same as omitting the flag entirely (`""` is
+    falsy), silently substituting the hardcoded default instead of letting
+    the empty string reach `_validate_model_string` and get rejected --
+    exactly the DCR-0004/0012/0015/0005 "None means omitted, an explicit
+    falsy value is not the same thing" pitfall `_resolve_option`'s own
+    docstring warns about. `--model ""` must be REJECTED with a clear error,
+    not silently defaulted.
+    """
+    result = runner.invoke(app, ["doctor", "--model", ""])
+    assert result.exit_code == EXIT_CONFIG
+    assert "invalid --model" in (result.stderr or result.output)
+
+
 def test_validate_rejects_blank_model_via_model_ref(tmp_path: Path) -> None:
     """`validate` used to be the ONE model-taking command that skipped model
     validation/routing entirely -- it never called `_validate_model_string`
@@ -704,10 +752,11 @@ def test_validate_rejects_unroutable_model_with_no_hint_model_ref(tmp_path: Path
     assert "can't determine a provider" in out
 
 
-def test_provider_flag_still_works_and_warns_deprecated_model_ref(tmp_path: Path) -> None:
-    """--provider is backward compatible (still routes the model exactly as
-    before) but now warns on stderr, once per invocation, pointing at the
-    provider-prefixed-model-string convention instead."""
+def test_provider_flag_removed_from_scan(tmp_path: Path) -> None:
+    """(close-the-loop) The deprecated ``--provider`` CLI flag was REMOVED in
+    0.7.10 (T13 deprecated it in 0.7.9, promising removal in 0.7.10) --
+    passing it to `scan` must now fail as an unrecognised option, not
+    silently route the model the old way."""
     result = runner.invoke(
         app,
         [
@@ -720,14 +769,37 @@ def test_provider_flag_still_works_and_warns_deprecated_model_ref(tmp_path: Path
             str(tmp_path),
         ],
     )
+    assert result.exit_code != EXIT_SUCCESS
+    out = result.stderr or result.output
+    assert "no such option" in out.lower()
+
+
+def test_provider_yaml_key_still_works_and_warns_deprecated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI flag is gone, but a bare ``provider`` set via mylonite.yaml's
+    ``provider:`` key is a SEPARATE, still-deprecated (not yet removed)
+    mechanism -- it still routes the model exactly as before and still warns
+    on stderr, once per invocation, pointing at the provider-prefixed-model-
+    string convention instead."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mylonite.yaml").write_text(
+        "provider: anthropic\nmodel: claude-3-5-haiku-latest\n", encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path)],
+    )
     assert result.exit_code == EXIT_SUCCESS, result.output
     out = result.stderr or result.output
-    assert out.count("--provider is deprecated") == 1
+    assert out.count("provider") >= 1
+    assert "deprecated" in out.lower()
     assert "anthropic/claude" in out or "provider-prefixed" in out.lower()
 
 
 def test_provider_flag_omitted_never_warns_model_ref(tmp_path: Path) -> None:
-    """No --provider flag → no deprecation noise at all."""
+    """No provider (flag, mylonite.yaml key, or env var) → no deprecation
+    noise at all."""
     result = runner.invoke(
         app,
         ["scan", "reference:vulnerable", "--dry-run", "--output-dir", str(tmp_path)],
@@ -764,11 +836,14 @@ def test_scan_planner_model_override_rejects_unroutable_model_model_ref(
 
 
 def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The SAME override, but with --provider given as a hint, resolves and
-    routes fine -- proving the rejection above is about the missing hint/
-    prefix, not a blanket regression on role overrides."""
+    """The SAME override, but with a provider hint given (via
+    MYLONITE_PROVIDER -- the CLI ``--provider`` flag this used to use was
+    removed in 0.7.10, T-close-the-loop), resolves and routes fine --
+    proving the rejection above is about the missing hint/prefix, not a
+    blanket regression on role overrides."""
+    monkeypatch.setenv("MYLONITE_PROVIDER", "openai")
     result = runner.invoke(
         app,
         [
@@ -776,8 +851,6 @@ def test_scan_planner_model_override_with_provider_hint_routes_model_ref(
             "reference:vulnerable",
             "--planner-model",
             "some-custom-finetune",
-            "--provider",
-            "openai",
             "--dry-run",
             "--output-dir",
             str(tmp_path),
@@ -1569,6 +1642,56 @@ def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
     assert "target.yaml" in out
 
 
+def test_generate_multi_finding_reads_and_redacts_shared_target_file_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0013: a multi-finding scan dir's findings typically share ONE target
+    file. ``validated_target_files`` already caches "have we validated this
+    path" (a bool), but the redacted TEXT itself was still re-read from disk
+    and re-run through ``redact_target_yaml`` from scratch on EVERY finding.
+    Spies on ``redact_target_yaml`` (the module ``_emit_generated_test``
+    imports it from, at call time) and asserts it's invoked at most once for
+    two findings sharing the same ``--target-file``.
+    """
+    import json as _json
+
+    from mylonite import _redaction
+
+    scan_dir = tmp_path / "scans" / "s"
+    scan_dir.mkdir(parents=True)
+    exploit_one = _sample_exploit().model_copy(
+        update={"target_id": "mcp:myapp", "pattern_id": "custom-pid-one"}
+    )
+    exploit_two = _sample_exploit().model_copy(
+        update={"target_id": "mcp:myapp", "pattern_id": "custom-pid-two"}
+    )
+    (scan_dir / "exploit_custom-pid-one.json").write_text(
+        _json.dumps(exploit_one.model_dump(mode="json")), encoding="utf-8"
+    )
+    (scan_dir / "exploit_custom-pid-two.json").write_text(
+        _json.dumps(exploit_two.model_dump(mode="json")), encoding="utf-8"
+    )
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(_MINIMAL_TARGET_YAML, encoding="utf-8")
+    out_dir = tmp_path / "gen"
+
+    calls: list[str] = []
+    real_redact_target_yaml = _redaction.redact_target_yaml
+
+    def _spy(text: str) -> str:
+        calls.append(text)
+        return real_redact_target_yaml(text)
+
+    monkeypatch.setattr(_redaction, "redact_target_yaml", _spy)
+
+    result = runner.invoke(
+        app,
+        ["generate", str(scan_dir), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert len(calls) == 1, f"expected redact_target_yaml called once, got {len(calls)}"
+
+
 def test_generate_custom_without_target_file_warns(tmp_path: Path) -> None:
     """A custom target generated without --target-file warns and writes no target.yaml."""
     exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
@@ -1680,6 +1803,35 @@ def _patch_validator(
             return report
 
     monkeypatch.setattr(reference_validator, "DifferentialValidator", _FakeValidator)
+
+
+def test_provider_preflight_bounded_by_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DCR-0008: ``_provider_preflight`` exists specifically to fail fast before
+    the expensive live validation loop, but had no timeout of its own -- a
+    provider that accepts the connection and then stalls mid-response (rather
+    than erroring outright) hung it open-ended. Stubs ``litellm.acompletion``
+    (the real call ``completion_fn=None`` falls back to) to sleep far longer
+    than the timeout under test, and asserts the call returns within a
+    bounded wall-clock budget instead of hanging.
+    """
+    import time
+
+    import litellm
+
+    from mylonite.cli import _provider_preflight
+
+    async def _hanging_acompletion(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(30)
+        raise AssertionError("should have been cut off by the timeout, not run to completion")
+
+    monkeypatch.setattr(litellm, "acompletion", _hanging_acompletion)
+
+    start = time.monotonic()
+    reachable = _provider_preflight("anthropic", "stub-model", timeout_s=0.2)
+    elapsed = time.monotonic() - start
+
+    assert reachable is False
+    assert elapsed < 10.0, f"expected preflight bounded by timeout_s=0.2, took {elapsed:.1f}s"
 
 
 def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2313,6 +2465,41 @@ def test_render_validation_report_shows_missing_gating_leg_not_silent_drop(
     assert "missing" in out.lower()
 
 
+def test_render_validation_report_gives_remediation_for_metamorphic_only_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """DCR-0007: `_remediation` only keyed build/differential/flakiness/
+    stability/effect/consensus, so a REJECTED report whose ONLY failing leg
+    is metamorphic (every other leg passes -- a real, documented way to
+    REJECT on its own, per the "metamorphic robustness gates kept" note)
+    printed zero remediation guidance for the actual failing leg.
+    """
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="differential", passed=True, detail="discriminates", metric=1.0
+            ),
+            ValidationOutcome(stage="flakiness", passed=True, detail="5/5", metric=1.0),
+            ValidationOutcome(
+                stage="metamorphic", passed=False, detail="paraphrase broke it", metric=0.5
+            ),
+        ],
+        kept=False,
+        gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+        gating_legs=["build", "differential", "flakiness", "metamorphic"],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    assert "REJECTED" in out
+    assert "remediation" in out.lower()
+    assert "metamorphic" in out.lower()
+
+
 # ---------------------------------------------------------------------------
 # PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
 # ---------------------------------------------------------------------------
@@ -2439,6 +2626,28 @@ def test_report_validation_dir_renders_trust_panel(tmp_path: Path) -> None:
     assert "KEPT" in out
     assert "compliance:" in out
     assert "LLM01" in out  # from the co-located exploit's tags
+
+
+def test_report_sarif_warns_on_corrupt_exploit_instead_of_silent_empty_bundle(
+    tmp_path: Path,
+) -> None:
+    """DCR-0003: a validation dir with a valid validation_report.json but a
+    corrupt/schema-mismatched exploit_*.json must not silently produce an
+    empty --sarif bundle at exit 0 with no diagnostic -- that hides a real
+    REJECTED/vulnerable finding from GitHub code scanning. The command must
+    print a warning AND still produce the (degraded) bundle, not crash.
+    """
+    gen = tmp_path / "gen"
+    _write_validation_report_json(gen)
+    (gen / "exploit_pid.json").write_text("{not valid json", encoding="utf-8")
+
+    sarif = tmp_path / "out.sarif"
+    result = runner.invoke(app, ["report", str(gen), "--sarif", str(sarif)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    stderr = result.stderr or result.output
+    assert "warning" in stderr.lower()
+    assert "exploit_pid.json" in stderr
+    assert sarif.exists()
 
 
 def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
@@ -2616,22 +2825,35 @@ def test_report_aborted_scan_exits_nonzero(tmp_path: Path) -> None:
 
 
 def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Path) -> None:
-    """Code-quality review of 43dc63b (Critical): `ScanOutcome.from_report`
-    raises `ValueError` for any `ScanReport.aborted` value outside the current
-    `AbortReason` enum -- `ScanReport.aborted` is a plain `str | None` at the
-    pydantic layer with no enum constraint, so an older-mylonite-version or
-    hand-edited/corrupted `scan_report.json` loads fine but then blew up
-    `report`'s new `ScanOutcome.from_report(sreport)` call as an UNCAUGHT
-    exception (bare traceback, exit 1, empty output) -- strictly worse than
-    the silent-exit-0 bug 43dc63b fixed. `report` must instead degrade
-    gracefully: a clear message, no traceback, and a distinguishing exit code
-    (EXIT_CONFIG, matching the sibling try/except a few lines above that
-    already handles "this artefact doesn't parse")."""
+    """Code-quality review of 43dc63b (Critical): an older-mylonite-version or
+    hand-edited/corrupted `scan_report.json` carrying an `aborted` value
+    outside the known `AbortReason` set must never blow up `report` as an
+    UNCAUGHT exception (bare traceback, exit 1, empty output) -- strictly
+    worse than the silent-exit-0 bug 43dc63b fixed. `report` must instead
+    degrade gracefully: a clear message, no traceback, and a distinguishing
+    exit code (EXIT_CONFIG, matching the sibling try/except a few lines above
+    that already handles "this artefact doesn't parse").
+
+    0.7.10 moved the enforcement point earlier: `ScanReport.aborted` is now
+    `AbortReason | None` (a real Pydantic enum, not a bare unconstrained
+    string), so this artefact is rejected right at
+    `ScanReport.model_validate_json()` -- the FIRST try/except in `report`
+    ("could not load ...") rather than the second ("could not classify ...",
+    `ScanOutcome.from_report`'s own hand-rolled re-validation, still exercised
+    for a report that bypasses Pydantic validation entirely; see
+    `tests/scan/test_coverage.py::TestUnknownAbortReason`). Either branch is
+    EXIT_CONFIG with a clear message, so the operator-facing guarantee this
+    test protects is unchanged; only which branch fires moved. The message no
+    longer echoes the bad value itself (`_cli_io.echo_exc` renders pydantic
+    `ValidationError`s via `redact_exception`, which deliberately strips
+    `input_value` for EVERY field --  DCR-0007/DCR-0011, since that same field
+    can carry a live credential elsewhere) but still names the offending
+    field and lists the known-good values, which is what this test checks.
+    """
     scan_dir = tmp_path / "legacy-abort"
     scan_dir.mkdir()
-    # Hand-write raw JSON (not via ScanReport(...)) since the model itself
-    # would happily accept this -- `aborted` has no enum constraint at the
-    # pydantic layer, which is exactly the point being tested.
+    # Hand-write raw JSON (not via ScanReport(...)) so this exercises the same
+    # "artefact loaded off disk" path `report` actually uses.
     (scan_dir / "scan_report.json").write_text(
         json.dumps(
             {
@@ -2655,7 +2877,9 @@ def test_report_scan_with_unknown_abort_reason_degrades_gracefully(tmp_path: Pat
     assert result.exit_code == EXIT_CONFIG, result.output
     assert result.exit_code not in (EXIT_SUCCESS, 1)
     err = result.stderr or result.output
-    assert "some_future_reason" in err or "AbortReason" in err
+    assert "could not load" in err
+    assert "aborted" in err
+    assert "budget_exceeded" in err  # a known-good value, proving the list renders
 
 
 def test_report_clean_scan_still_exits_success(tmp_path: Path) -> None:
@@ -2823,12 +3047,15 @@ def test_gate_explicit_max_llm_calls_beats_the_config_even_at_default_value(
         # cannot distinguish from "omitted". This is the only row below that
         # reproduces that specific shape — see the docstring.
         ("max_llm_calls", "--max-llm-calls", "max_llm_calls", 50, 10),
-        # GENERAL precedence coverage only (see docstring): `provider`/`model`
-        # never had the DCR-0004-style bug in the first place, because their
-        # Typer option default is already `None` (`explicit or rc.value`
-        # already distinguishes "omitted" from "explicitly set" for any
-        # realistic string value — there is no default VALUE to collide with).
-        ("provider", "--provider", "provider", "openai", "anthropic"),
+        # GENERAL precedence coverage only (see docstring): `model` never had
+        # the DCR-0004-style bug in the first place, because its Typer option
+        # default is already `None` (`explicit or rc.value` already
+        # distinguishes "omitted" from "explicitly set" for any realistic
+        # string value — there is no default VALUE to collide with). The
+        # sibling `provider` row was removed (close-the-loop): `scan` no
+        # longer has a `--provider` CLI flag to test this precedence through
+        # (removed 0.7.10) -- `mylonite.yaml`'s `provider:` key / env var
+        # precedence has no CLI-flag counterpart left to race against.
         ("model", "--model", "model", "gpt-4o-mini", "claude-haiku-4-5-20251001"),
     ],
 )
@@ -2853,17 +3080,19 @@ def test_scan_config_precedence_conformance(
     testing any FUTURE field whose Typer option default is a concrete
     value (not `None`) that could collide with a meaningful explicit setting.
 
-    The ``provider``/``model`` rows exercise the weaker, general property
-    ("an explicit flag beats --config") rather than the default-collision edge
-    case — those fields' Typer defaults are already ``None``, so
-    ``explicit or rc.value`` already distinguishes "omitted" from "explicitly
-    set" for them and they never had this bug class to begin with. They are
-    included for RunConfig field-coverage completeness, not because they are
-    at risk of the same regression `max_llm_calls` was.
+    The ``model`` row exercises the weaker, general property ("an explicit
+    flag beats --config") rather than the default-collision edge case — that
+    field's Typer default is already ``None``, so ``explicit or rc.value``
+    already distinguishes "omitted" from "explicitly set" and it never had
+    this bug class to begin with. It is included for RunConfig field-coverage
+    completeness, not because it is at risk of the same regression
+    `max_llm_calls` was. (A sibling ``provider`` row previously covered
+    the same property for ``scan``'s now-removed ``--provider`` CLI flag —
+    see the parametrize list above.)
 
     Each case only sets its OWN field (leaving provider/model at their true
     defaults) so the asserted :class:`ScanConfig` attribute isn't perturbed by
-    ``--provider``'s LiteLLM routing prefix on ``model``.
+    an unrelated field's LiteLLM routing prefix on ``model``.
     """
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine
@@ -3661,6 +3890,45 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
         target_registry.clear_runtime_targets()
 
 
+def test_gate_llm_not_configured_never_constructs_the_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DCR-0010: the comment above `gate`'s LLM-configured pre-flight claims it
+    runs "BEFORE any adapter/subprocess/engine work starts", but the routed
+    target's adapter used to already be constructed by the time the check
+    ran (routing determined WHICH adapter to build, then built it, THEN
+    checked LLM config). Spies on `_build_adapter_for_mcp` (the mcp-route
+    adapter constructor) and asserts it is NEVER called when no LLM provider
+    is configured -- the command must exit on the LLM-configuration error
+    before the adapter is ever built.
+    """
+    import mylonite.cli as cli_module
+    from mylonite.plugins._mcp import target_registry
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    target_registry.clear_runtime_targets()
+
+    real_build_adapter_for_mcp = cli_module._build_adapter_for_mcp
+    calls: list[Any] = []
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return real_build_adapter_for_mcp(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_build_adapter_for_mcp", _spy)
+
+    try:
+        result = runner.invoke(app, ["gate", "mcp:fetch", "--authorize", "fetch"])
+        assert result.exit_code == EXIT_CONFIG, result.output
+        stderr = result.stderr or result.output
+        assert "llm credential" in stderr.lower() or "not configured" in stderr.lower()
+        assert calls == [], (
+            f"adapter must not be constructed before the LLM-configured check; got {calls}"
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+
 def test_gate_bundled_mcp_route_validates_a_real_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3706,6 +3974,172 @@ def test_gate_bundled_mcp_route_validates_a_real_finding(
         assert result.exit_code == EXIT_SUCCESS, result.output
         out = result.stderr or result.output
         assert "internal:" not in out
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_reference_and_custom_use_the_same_vuln_threshold_formula(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0009: the custom/mcp branch of `gate`'s `validate_fn` explicitly
+    passes `vuln_threshold=max(1, iterations - 1)` (the documented "all but
+    one" reproducibility rule) to `DifferentialValidator`, but the
+    reference-target branch omitted it -- so the reference/demo target's
+    pass/fail bar was resolved differently (silently relying on the
+    constructor's own default) instead of applying the same rule uniformly.
+    Drives `gate` for BOTH a reference target and a bundled mcp target with
+    the SAME --iterations, capturing each DifferentialValidator construction's
+    kwargs, and asserts both explicitly receive the identical threshold.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)  # open_pr_fn requires --out to live under Path.cwd()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    async def _fake_run(self: Any) -> Any:
+        target_id = self._config.target_id
+        exploit = _sample_exploit().model_copy(update={"target_id": target_id})
+        return _canned_finding_result(target_id, exploit)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_open_pr(monkeypatch)
+
+    try:
+        reference_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        ref_result = runner.invoke(
+            app,
+            [
+                "gate",
+                "reference:vulnerable",
+                "--iterations",
+                "4",
+                "--out",
+                str(tmp_path / "gate_out_reference"),
+                "--no-workflows",
+            ],
+        )
+        assert ref_result.exit_code == EXIT_SUCCESS, ref_result.output
+
+        mcp_captured = _stub_differential_validator(
+            monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+        )
+        mcp_result = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:fetch",
+                "--authorize",
+                "fetch",
+                "--iterations",
+                "4",
+                "--out",
+                str(tmp_path / "gate_out_mcp"),
+                "--no-workflows",
+            ],
+        )
+        assert mcp_result.exit_code == EXIT_SUCCESS, mcp_result.output
+
+        expected = max(1, 4 - 1)
+        assert reference_captured.get("vuln_threshold") == expected
+        assert mcp_captured.get("vuln_threshold") == expected
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_custom_target_id_consistent_with_and_without_mcp_custom_positional(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0015: `target_id=target if target is not None else f"mcp:{tf.family}"`
+    gave the SAME custom target a DIFFERENT target_id depending on whether the
+    operator typed the optional `mcp:custom` positional argument -- the
+    literal string `"mcp:custom"` when typed, `f"mcp:{tf.family}"` (e.g.
+    `"mcp:myapp"`) when not. Drives `gate` for the same custom target both
+    ways and asserts the `ScanConfig.target_id` `ScanEngine` actually sees is
+    identical (always derived from `tf.family`).
+    """
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+    from mylonite.scan.engine import ScanResult as _ScanResult
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text("family: myapp\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")
+
+    captured_target_ids: list[str] = []
+    real_init = ScanEngine.__init__
+
+    def _capture_init(self: Any, *, config: Any, **kwargs: Any) -> None:
+        captured_target_ids.append(config.target_id)
+        real_init(self, config=config, **kwargs)
+
+    async def _fake_run(self: Any) -> Any:
+        report = ScanReport(
+            target_id=self._config.target_id,
+            attack_modules=["mylonite.prompt-injection"],
+            provider="anthropic",
+            model="m",
+            elapsed_seconds=0.1,
+            attempts=[
+                ScanAttempt(
+                    seed_id="s",
+                    pattern_id="s",
+                    outcome="no_finding",
+                    verdict_mechanism="llm",
+                    verdict_reason="rejected",
+                )
+            ],
+            findings_count=0,
+            aborted=None,
+            single_run=True,
+            mylonite_version="0.0.0-test",
+        )
+        return _ScanResult(report=report, exploits=[])
+
+    monkeypatch.setattr(ScanEngine, "__init__", _capture_init)
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    try:
+        result_no_positional = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp",
+                "--out",
+                str(tmp_path / "gate_out_1"),
+                "--no-workflows",
+            ],
+        )
+        assert result_no_positional.exit_code == EXIT_SUCCESS, result_no_positional.output
+
+        result_with_positional = runner.invoke(
+            app,
+            [
+                "gate",
+                "mcp:custom",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp",
+                "--out",
+                str(tmp_path / "gate_out_2"),
+                "--no-workflows",
+            ],
+        )
+        assert result_with_positional.exit_code == EXIT_SUCCESS, result_with_positional.output
+
+        assert len(captured_target_ids) == 2
+        assert captured_target_ids[0] == captured_target_ids[1] == "mcp:myapp"
     finally:
         target_registry.clear_runtime_targets()
 
@@ -4082,6 +4516,32 @@ def test_scan_scaffold_rest_writes_runnable_http_target(tmp_path: Path) -> None:
     assert tf.family == "myagent"
 
 
+def test_scan_scaffold_rest_redacts_credential_shaped_query_param(tmp_path: Path) -> None:
+    """DCR-0002: a live-looking credential embedded in --rest-url's query string
+    must never be persisted verbatim into target.yaml -- the sibling MCP-scaffold
+    path already redacts --env this way; the REST scaffold must match it. Use a
+    param name ("session_ref") that the KV-pattern's known credential key names
+    (api_key/token/secret/password/...) do NOT match, so this specifically
+    proves the broader key-name-agnostic sweep, not the pre-existing
+    key=value redaction that `dump_target_file` already runs.
+    """
+    sentinel = "zzsentinelvalue1234567890abcdef1234567890"
+    out = tmp_path / "creds.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--scaffold",
+            str(out),
+            "--rest-url",
+            f"https://api.example.com/chat?session_ref={sentinel}",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    written = out.read_text(encoding="utf-8")
+    assert sentinel not in written
+
+
 def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> None:
     out = tmp_path / "bad.yaml"
     result = runner.invoke(
@@ -4157,6 +4617,31 @@ def test_load_api_key_file_bare_key_with_leading_comment_line(
         os.environ.pop("ANTHROPIC_API_KEY", None)
 
 
+def test_load_api_key_file_dotenv_with_leading_comment_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0011: the dotenv-vs-bare-key SHAPE check only inspected the RAW
+    first line (`"=" in content.splitlines()[0]`), so a file shaped
+    `# comment\\nANTHROPIC_API_KEY=sk-ant-abc123` (a leading comment line
+    before a valid dotenv KEY=VALUE line) misrouted into the bare-key branch
+    -- the comment line has no `=` -- which then failed to infer a provider
+    from the literal string `"ANTHROPIC_API_KEY=sk-ant-abc123"` and exited
+    EXIT_CONFIG despite a valid key being present. Must still resolve
+    ANTHROPIC_API_KEY to just the value.
+    """
+    from mylonite.cli import _load_api_key_file
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    key_file = tmp_path / "key.env"
+    key_file.write_text("# my anthropic key\nANTHROPIC_API_KEY=sk-ant-abc123\n", encoding="utf-8")
+
+    try:
+        _load_api_key_file(key_file)
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-abc123"
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
 # --- DCR-0010: named 'mcp:<family>' target + --target-file silently ignores ---
 # --- the positional target -----------------------------------------------------
 
@@ -4175,3 +4660,108 @@ def test_scan_named_mcp_target_plus_target_file_is_rejected(tmp_path: Path) -> N
     )
     assert result.exit_code == EXIT_CONFIG, result.output
     assert "--target-file" in result.output
+
+
+# --- 0.7.10: _dispatch_emit — TestGenerator.emit(exploit, context=) compat bridge ---
+
+
+class _NewStyleFakeGenerator:
+    """A TestGenerator whose emit() accepts the 0.2.0 `context` parameter."""
+
+    def __init__(self) -> None:
+        self.received_context: Any = "NOT_CALLED"
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any, context: Any = None) -> str:
+        self.received_context = context
+        return "new-style-result"
+
+
+class _OldStyleFakeGenerator:
+    """A pre-0.2.0 TestGenerator plugin: emit() has NO `context` parameter at
+    all -- exactly the shape a third-party plugin built against
+    CONTRACT_VERSION 0.1.x would still have."""
+
+    def __init__(self) -> None:
+        self.called = False
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any) -> str:
+        self.called = True
+        return "old-style-result"
+
+
+class _VarKwargsFakeGenerator:
+    """A generator whose emit() accepts arbitrary kwargs (**kwargs) -- the
+    dispatch helper must also recognise this as context-capable."""
+
+    def __init__(self) -> None:
+        self.received_kwargs: dict[str, Any] = {}
+
+    def framework(self) -> str:
+        return "pytest"
+
+    def emit(self, exploit: Any, **kwargs: Any) -> str:
+        self.received_kwargs = kwargs
+        return "varkwargs-result"
+
+
+def test_dispatch_emit_calls_new_style_generator_with_context() -> None:
+    """A generator whose emit() declares `context` gets it passed explicitly."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _NewStyleFakeGenerator()
+    sentinel = object()
+    result = _dispatch_emit(gen, "exploit", sentinel)  # type: ignore[arg-type]
+
+    assert result == "new-style-result"
+    assert gen.received_context is sentinel
+
+
+def test_dispatch_emit_falls_back_for_old_style_generator() -> None:
+    """A generator whose emit() has NO `context` parameter is called with the
+    pre-0.2.0 signature -- proving the compat bridge works and does not raise
+    `TypeError: emit() got an unexpected keyword argument 'context'`."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _OldStyleFakeGenerator()
+    result = _dispatch_emit(gen, "exploit", object())  # type: ignore[arg-type]
+
+    assert result == "old-style-result"
+    assert gen.called is True
+
+
+def test_dispatch_emit_recognises_var_keyword_generator() -> None:
+    """A generator accepting `**kwargs` is treated as context-capable too."""
+    from mylonite.cli import _dispatch_emit
+
+    gen = _VarKwargsFakeGenerator()
+    sentinel = object()
+    result = _dispatch_emit(gen, "exploit", sentinel)  # type: ignore[arg-type]
+
+    assert result == "varkwargs-result"
+    assert gen.received_kwargs == {"context": sentinel}
+
+
+def test_dispatch_emit_real_reference_generator_receives_context() -> None:
+    """End-to-end: the real ReferencePytestGenerator (already updated for
+    0.2.0) receives the context via _dispatch_emit, not the compat fallback --
+    proven by the rendered model=/provider= literals in the generated source
+    (a CUSTOM target so the template actually emits those kwargs)."""
+    from mylonite.cli import _dispatch_emit
+    from mylonite.contracts.exec_context import ExecContext
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        ReferencePytestGenerator,
+    )
+
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:acme"})
+    ctx = ExecContext(provider="openai", model="gpt-4.1-mini")
+    generated = _dispatch_emit(ReferencePytestGenerator(), exploit, ctx)
+
+    assert generated.framework == "pytest"
+    assert "model='gpt-4.1-mini'" in generated.source
+    assert "provider='openai'" in generated.source

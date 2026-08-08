@@ -78,6 +78,36 @@ python -m mcp_kitchen_sink.server_guarded       # hardened, loopback only
 Both servers exit immediately if the configured bind address is not
 loopback (`127.0.0.1` / `::1`).
 
+## Real MCP stdio server (custom-target on-ramp)
+
+`server_vulnerable.py`/`server_guarded.py` above are in-process server
+*classes* only — programmatic use from tests, or `mylonite demo`'s built-in
+`reference:vulnerable`/`reference:guarded` targets. To drive this same tool
+surface through mylonite's generic `--target-file` custom-target flow
+(`scan`/`ablate`/`validate`/`gate`) — the same code path a real third-party
+MCP app goes through — use the real stdio-speaking wrappers instead:
+
+```bash
+pip install -e "./reference_targets/mcp_kitchen_sink[mcp]"   # needs the mcp SDK
+
+mcp-kitchen-sink-vulnerable   # console script, or:
+python -m mcp_kitchen_sink.stdio_vulnerable
+
+mcp-kitchen-sink-guarded      # / python -m mcp_kitchen_sink.stdio_guarded
+```
+
+Each speaks real MCP over stdin/stdout until the peer closes the pipe —
+exactly what a `target.yaml`'s `command`/`args` spawn. `examples/target.yaml`
+at the repo root is a ready-to-use target file pointed at the vulnerable
+variant:
+
+```bash
+mylonite scan --target-file examples/target.yaml --authorize kitchen-sink
+```
+
+See `tests/integration/test_custom_target_offline.py` for an offline
+(scripted-LLM) test that spawns this real subprocess end-to-end.
+
 ## Seeds
 
 `seeds/` contains a small bank of failure-mode descriptions used by the

@@ -10,12 +10,15 @@ validate` proved it, by being the one model-taking command that skipped BOTH
 ``ModelRef`` collapses that to one field a caller can't forget to populate:
 ``raw`` is exactly the string handed to LiteLLM (``litellm.completion(model=
 ref.raw, ...)``); ``provider`` is DERIVED from it (an explicit
-``provider_hint`` -- what the deprecated ``--provider`` flag now feeds in --
-wins when given, then a ``provider/`` prefix already on the model, then
-LiteLLM's own model registry). A model LiteLLM can't route, with no hint and
-no prefix, raises rather than silently assuming Anthropic -- the same
-"loud failure over a silently-wrong default" rule the rest of this release
-ladder applies (see ``NOT_TESTED_OUTCOMES`` in T1).
+``provider_hint`` -- fed by mylonite.yaml's ``provider:`` key, a
+``MYLONITE_PROVIDER`` env var, or ``demo``'s still-live ``--provider`` flag
+(the CLI ``--provider`` flag on every OTHER command was removed in 0.7.10;
+see ``mylonite.cli._warn_deprecated_provider_config``) -- wins when given,
+then a ``provider/`` prefix already on the model, then LiteLLM's own model
+registry). A model LiteLLM can't route, with no hint and no prefix, raises
+rather than silently assuming Anthropic -- the same "loud failure over a
+silently-wrong default" rule the rest of this release ladder applies (see
+``NOT_TESTED_OUTCOMES`` in T1).
 """
 
 from __future__ import annotations
@@ -32,7 +35,8 @@ def route_model(provider_hint: str | None, model: str) -> str:
     LiteLLM routes by model-string prefix; some Anthropic aliases (e.g.
     ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM
     Provider NOT provided". When a caller passes an explicit provider hint
-    (from the deprecated ``--provider`` flag) and the model carries no
+    (see :mod:`mylonite.scan.model_ref`'s module docstring for the
+    remaining, deprecated sources of one) and the model carries no
     ``provider/`` prefix yet, prefix it so the alias routes. With no hint the
     model is left untouched, preserving LiteLLM's own auto-routing for the
     common case.
@@ -64,7 +68,8 @@ class ModelRef:
     @classmethod
     def parse(cls, model: str, *, provider_hint: str | None = None) -> ModelRef:
         """Parse ``model`` (bare or ``provider/model``), honouring an explicit
-        ``provider_hint`` (from the deprecated ``--provider`` flag) if given.
+        ``provider_hint`` (see the module docstring for its remaining,
+        deprecated sources) if given.
 
         Raises ``ValueError`` for a blank model, or a bare model with no hint
         and no ``provider/`` prefix that LiteLLM's own registry doesn't
@@ -79,10 +84,10 @@ class ModelRef:
         if provider is None:
             raise ValueError(
                 f"can't determine a provider for model {model!r}: it has no "
-                "'<provider>/' prefix, no --provider was given, and LiteLLM "
+                "'<provider>/' prefix, no provider hint was given, and LiteLLM "
                 "doesn't recognise it as a known model id. Use a "
-                "provider-prefixed model string (e.g. "
-                "'anthropic/claude-haiku-4-5') or pass --provider (deprecated)."
+                "provider-prefixed model string instead (e.g. "
+                "'anthropic/claude-haiku-4-5')."
             )
         return cls(raw=route_model(provider_hint, model), provider=provider)
 

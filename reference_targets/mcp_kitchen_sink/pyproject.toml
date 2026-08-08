@@ -41,6 +41,14 @@ Homepage = "https://github.com/Abidemialade/mylonite"
 Source = "https://github.com/Abidemialade/mylonite/tree/main/reference_targets/mcp_kitchen_sink"
 Issues = "https://github.com/Abidemialade/mylonite/issues"
 
+[project.scripts]
+# Real stdio-speaking MCP servers wrapping the in-process reference classes
+# (see mcp_kitchen_sink/_stdio_common.py) -- the launchable `command` a
+# mylonite `target.yaml` points at. Require the `mcp` extra (`pip install
+# -e ".[mcp]"`); importing either entry point without it raises ModuleNotFoundError.
+mcp-kitchen-sink-vulnerable = "mcp_kitchen_sink.stdio_vulnerable:main"
+mcp-kitchen-sink-guarded = "mcp_kitchen_sink.stdio_guarded:main"
+
 [project.optional-dependencies]
 # Upper bound mirrors the root package: mcp 2.0 renamed Tool.inputSchema ->
 # input_schema and CallToolResult.isError -> is_error, which this target's

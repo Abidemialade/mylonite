@@ -239,6 +239,55 @@ def test_generate_latest_honours_custom_output_dir(
     assert "found no exploits" in gen_res.output
 
 
+def test_generate_latest_honours_mylonite_yaml_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DCR-0006: ``generate --latest`` (no flags) used to resolve its layout
+    with no ``config_root`` -- unlike ``scan``/``gate``/``validate``/``ablate``,
+    which all discover ``mylonite.yaml`` and honour its ``root:`` key -- so it
+    searched the DEFAULT scans dir even when a ``mylonite.yaml`` moved the
+    real root elsewhere. Writes a ``mylonite.yaml`` with a custom ``root:``,
+    runs a real (offline-stubbed) ``scan`` with NO ``--output-dir`` (so it
+    writes under the CONFIGURED root, exactly like an operator relying on
+    ``mylonite.yaml`` would), then runs ``generate --latest`` with NO flags
+    and asserts it FOUND that scan rather than reporting "no scans found"
+    under the wrong (default) directory.
+    """
+    import litellm
+
+    async def _acompletion(*args: object, **kwargs: object) -> SimpleNamespace:
+        return _benign_acompletion_response()
+
+    monkeypatch.setattr(litellm, "acompletion", _acompletion)
+    monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
+    # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
+    # above, so a fake key just needs to be PRESENT, never actually used.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.chdir(tmp_path)
+    custom_root = "from-mylonite-yaml-root"
+    (tmp_path / "mylonite.yaml").write_text(f"root: {custom_root}\n", encoding="utf-8")
+
+    runner = CliRunner()
+
+    scan_res = runner.invoke(app, ["scan", "reference:vulnerable"])
+    assert scan_res.exit_code == EXIT_SUCCESS, scan_res.output
+    assert (tmp_path / custom_root).is_dir(), (
+        "scan (no --output-dir) must write under mylonite.yaml's configured root"
+    )
+
+    gen_res = runner.invoke(app, ["generate", "--latest"])
+    assert "no scans found" not in gen_res.output.lower(), (
+        "generate --latest must discover mylonite.yaml's root: key like scan/gate "
+        f"do, not search the hardcoded default:\n{gen_res.output}"
+    )
+    # A genuinely-resolved scans root reports "the latest scan (<dir>) found no
+    # exploits" (a real scan dir was located, just with no findings) -- the
+    # pre-fix bug instead always reported "no scans found under .mylonite/scans"
+    # regardless of mylonite.yaml's root:.
+    assert gen_res.exit_code == EXIT_CONFIG
+    assert "found no exploits" in gen_res.output
+
+
 def test_generate_scans_dir_ignored_when_scan_path_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

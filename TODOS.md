@@ -5,6 +5,28 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## 0.7.10 deep-code-review — verification-pass follow-ups (docs/reviews/2026-08-07-0.7.10-close-the-loop-review.md)
+
+All 18 findings from this review (2 critical, 2 high, 6 medium, 8 low) were fixed
+before merge (commit `7ae82a5`) and independently re-verified, including adversarial
+testing distinct from the implementer's own tests on both criticals and the
+concurrency fix. Two small items surfaced *during that verification pass itself*
+(not review findings, just gaps the reviewer noticed while testing) are left here:
+
+- **`_redact_credential_shaped_json_body` (cli.py, REST-scaffold credential
+  redaction) has zero dedicated test coverage** — only the query-param redaction
+  path is tested; the JSON-body path was manually verified working during review
+  but ships without an automated regression test. *Trigger:* next patch release;
+  add a test mirroring `test_scan_scaffold_rest_redacts_credential_shaped_query_param`
+  for a JSON request body.
+- **REST-scaffold header comment says credential-shaped values become `${VAR}`
+  references, but the new query-param/body redaction actually substitutes a raw
+  `***REDACTED***` placeholder** — not a security issue (the credential still
+  doesn't leak either way), just a cosmetic mismatch between the stated and actual
+  redaction style for this one path. *Trigger:* next patch release; align the
+  comment or the placeholder, whichever better matches the `--env` path's
+  existing convention.
+
 ## 0.7.7 deep-code-review non-blocking findings (docs/reviews/2026-08-06-0.7.7-honest-results-review.md)
 
 The two high-severity blockers (DCR-0005, DCR-0009) were fixed before merge. These are
