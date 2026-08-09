@@ -118,9 +118,10 @@ The project enforces the following non-negotiables:
    to loopback by default and refuse to start on non-loopback interfaces
    without an explicit override flag.
 
-These rules apply to all official extensions and to anything shipped through
-the community attack-pattern registry. Third-party plugins are out of our
-direct control, but the registry's contribution guidelines forbid patterns
+These rules apply to all official extensions and — once the planned
+community attack-pattern registry ships (it does not exist yet) — to
+anything distributed through it. Third-party plugins are out of our direct
+control, but the registry's contribution guidelines will forbid patterns
 whose only use is offensive.
 
 ## What Mylonite does with your credentials

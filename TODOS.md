@@ -123,9 +123,8 @@ depend on the local SSL/cert environment or on tagging a release:
   (2026-06-18) via the Trusted-Publishing workflow
   ([`.github/workflows/release.yml`](./.github/workflows/release.yml): build →
   TestPyPI → PyPI); the TestPyPI + PyPI trusted publishers are registered.
-  **Remaining:** `mcp-kitchen-sink` (the reference app target) is not
-  published, so the `mylonite demo` walkthrough is still clone-first — see the
-  Phase 4 item below.
+  `mcp-kitchen-sink` (the reference app target) is also published (v0.1.0,
+  2026-08-05) — the `mylonite demo` walkthrough no longer requires a clone.
 - **Demo GIF + reference-validation example.** See the two items below — both are
   blocked on the live SSL/cert environment (Norton HTTPS inspection /
   `SSL_CERT_FILE`) and are maintainer-run.
@@ -164,10 +163,6 @@ depend on the local SSL/cert environment or on tagging a release:
 - **GitHub Codespaces / devcontainer one-click demo** — a zero-install,
   open-in-browser funnel that runs `mylonite demo`. Strong top-of-funnel asset,
   separate scope from the CLI. *Trigger:* Phase 4 launch prep.
-- **PyPI publishing of `mcp-kitchen-sink`** (and a possible `mylonite-quarry`
-  distribution rename). `mylonite` itself is now on PyPI (v0.7.0); the reference
-  target is not, so the "60-second" demo promise is still clone-first until it
-  ships. *Trigger:* Phase 4 launch.
 - **Phase 2 walking skeleton before the public demo** — a thin end-to-end
   `scan → generate → validate` slice to de-risk the demo timeline.
   *Trigger:* Phase 2 sequencing decision.

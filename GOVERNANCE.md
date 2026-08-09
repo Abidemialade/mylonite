@@ -21,8 +21,9 @@ more than one maintainer.
   the project's GitHub organisation. Currently a single person; see
   `.github/CODEOWNERS`.
 - **Contributor.** Anyone who has had a pull request merged.
-- **Registry contributor.** A contributor who has had at least one attack
-  pattern accepted into the community attack-pattern registry. See below.
+- **Registry contributor** *(planned role — not yet active; the registry
+  itself doesn't exist yet, see below).* Once it ships, this will apply to a
+  contributor who has had at least one attack pattern accepted into it.
 
 ## Decision scope
 
@@ -37,19 +38,22 @@ more than one maintainer.
   targets): require explicit maintainer approval and may not be merged by
   bots or auto-merge tools.
 
-## Community attack-pattern registry — acceptance criteria
+## Community attack-pattern registry — acceptance criteria (planned)
 
-The registry is a public good. Patterns submitted via the
-`attack_pattern_submission.yml` issue template are reviewed against:
+A versioned, CI-validated registry of contributed attack patterns is on the
+roadmap but not yet built — there is no registry directory or CI job today.
+The `attack_pattern_submission.yml` issue template is open for proposals in
+the meantime; the intended acceptance criteria, which will apply once the
+registry ships, are:
 
 1. **Mapping completeness.** Each pattern must declare its OWASP LLM Top 10
    ID, its OWASP Agentic Security Initiative (ASI) ID, at least one MITRE
    ATLAS technique, and a NIST AI RMF function/subcategory tag.
 2. **Differential-oracle proof.** Each pattern must come with (a) a seed
    vulnerable target it reliably exploits and (b) a guarded variant of that
-   target it reliably does not exploit. Proof is the registry CI passing the
-   differential check across five runs. (Where automated differential proof
-   isn't yet wired for a contribution, hand-verified evidence is accepted.)
+   target it reliably does not exploit. Proof will be the registry CI
+   passing the differential check across five runs, once that CI exists;
+   until then, submissions are reviewed with hand-verified evidence instead.
 3. **No live targeting.** Patterns must reproduce their behaviour on a
    bundled local target, not on a public third-party service.
 4. **Public-domain or Apache-2.0 contribution.** Submissions are accepted

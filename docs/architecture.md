@@ -95,3 +95,7 @@ an API change — see [Plugin authoring](plugin-authoring.md).
   pair is *intentionally* (un)guarded; the differential is proven against it.
 - **Scope discipline.** Only the AI attack surface — no general SAST/DAST, no non-AI test
   generation.
+- **Output and paths are funneled, not ad hoc.** Everything printed, persisted, pushed, or
+  published goes through `mylonite._cli_io.echo`/`_redaction.redact*`; every path sourced
+  from `target.yaml` resolves through `mylonite._paths.resolve_contained` before it reaches
+  `open()` or an argv — no direct `typer.echo` calls or unchecked paths remain in `cli.py`.

@@ -37,5 +37,6 @@ non-negotiables:
    `mcp_kitchen_sink` reference target and any future deliberately-insecure
    fixtures refuse to bind to non-loopback interfaces by default.
 
-These rules apply to bundled extensions and to anything accepted into the
-community attack-pattern registry.
+These rules apply to bundled extensions and — once the planned community
+attack-pattern registry ships (it does not exist yet) — to anything
+accepted into it.

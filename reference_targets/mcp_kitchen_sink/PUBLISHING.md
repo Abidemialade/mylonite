@@ -1,14 +1,13 @@
 # Publishing `mcp-kitchen-sink` to PyPI (front-door handoff)
 
-> **Why this matters.** `pip install "mylonite[demo]"` declares
-> `mcp-kitchen-sink>=0.1.0`, but that package is **not on PyPI yet**, so the `[demo]`
-> extra is currently inert — a clean `pip install "mylonite[demo]"` can't resolve it and
-> users must clone the repo to run `mylonite demo`. Publishing this package once is what
-> makes `mylonite demo` work from a clean install (the plan's "fix the front door"). The
-> base `pip install mylonite` is unaffected and **never** pulls this deliberately-
-> vulnerable agent — that invariant is preserved.
+> **Status: done.** `mcp-kitchen-sink` v0.1.0 was published to PyPI on 2026-08-05, so
+> `pip install "mylonite[demo]"` resolves from a clean install and `mylonite demo` no
+> longer requires a clone. The base `pip install mylonite` is unaffected and **never**
+> pulls this deliberately-vulnerable agent — that invariant is preserved. This doc is
+> kept as the record of how the release was set up, for future re-releases (`ks-vX.Y.Z`
+> tags) of this package.
 
-## Status (re-verified 2026-08-03)
+## Status (published 2026-08-05)
 
 - Builds cleanly: `python -m build reference_targets/mcp_kitchen_sink` → sdist + wheel.
 - `twine check` **PASSED** on both artifacts (metadata is PyPI-valid).
@@ -25,7 +24,7 @@
   builds from this directory and publishes TestPyPI → PyPI via Trusted Publishing on a
   `ks-v*` tag. Only the one-time PyPI-side setup below is outstanding.
 
-## Step 1 — one-time PyPI setup (maintainer, browser — REQUIRED FIRST)
+## Step 1 — one-time PyPI setup (maintainer, browser) — ✅ done
 
 The workflow exists but cannot publish until the projects exist and trust this repo. Do
 this on **both** [pypi.org](https://pypi.org/manage/account/publishing/) and
@@ -44,7 +43,7 @@ this on **both** [pypi.org](https://pypi.org/manage/account/publishing/) and
 The workflow filename is what distinguishes this from the `mylonite` publisher, so the
 two projects can safely share the `pypi`/`testpypi` environment names.
 
-## Step 2 — release it
+## Step 2 — release it — ✅ done (v0.1.0, 2026-08-05)
 
 ```bash
 git tag ks-v0.1.0
@@ -93,14 +92,10 @@ pip install "mylonite[demo]"          # must now resolve mcp-kitchen-sink from P
 mylonite demo                          # 2 exploits on vulnerable, 0 on guarded — no clone
 ```
 
-**No doc edits should be needed afterwards.** The README, `docs/quickstart.md` and
-`docs/quarry.md` already document `pip install "mylonite[demo]"` as the primary path —
-publishing is what makes those instructions true, rather than the docs being rewritten to
-match a missing package. If Step 3 does *not* come up green, that is the signal to fix the
-package or the docs, not to paper over it.
-
-The only place still describing the extra as unresolvable is the explanatory comment above
-`demo = [...]` in the root `pyproject.toml`; delete that caveat once Step 3 passes.
+The README, `docs/quickstart.md` and `docs/quarry.md` document `pip install
+"mylonite[demo]"` as the primary path, and that's now true. The root `pyproject.toml`'s
+explanatory comment above `demo = [...]` has been updated to drop the
+not-yet-published caveat accordingly.
 
 ## Caveats specific to this machine
 

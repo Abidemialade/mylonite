@@ -185,9 +185,8 @@ are correctness bugs in the oracle):
   `None` — deferring to the LLM judge or the effect probe — when the evidence simply
   isn't there.
 
-This is convention 5 in [`conventions.md`](conventions.md): *"Absent evidence is
-inconclusive. A predicate that cannot see the signal it needs should return `None`,
-never a confident verdict."*
+The house rule: *absent evidence is inconclusive* — a predicate that cannot see the
+signal it needs should return `None`, never a confident verdict.
 
 ### The customiser marker guarantee
 
