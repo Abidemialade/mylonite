@@ -149,14 +149,17 @@ Two tiers, on purpose:
   agreement on the committed fixture, crosswalk/catalogue/scorer logic, the
   vacuous-agreement flag, the delivery-channel synthesis) runs in the normal test
   job with no key and no network. It guards the wiring, not the independence claim.
-- **Live numbers are opt-in.** `.github/workflows/verification.yml` runs the larger-N
-  live runs on manual dispatch or a weekly schedule (needs the `ANTHROPIC_API_KEY`
-  secret): Layer 2 record→score over both InjecAgent splits and Layer 3 precision on
-  `reference:guarded`. Reports are uploaded as artifacts.
+- **Live numbers are opt-in, manual-dispatch only.** `.github/workflows/verification.yml`
+  runs the larger-N live runs on `workflow_dispatch` (needs the `ANTHROPIC_API_KEY`
+  secret, which is not currently configured — run locally with your own key until it
+  is): Layer 2 record→score over both InjecAgent splits and Layer 3 precision on
+  `reference:guarded`. Reports are uploaded as artifacts. There used to be a weekly
+  cron trigger; it was removed (2026-08-09) because with no secret configured every
+  scheduled run failed for over a month with nobody acting on it.
 
 **On sample size.** A quick manual `--limit 20` run is *directional*, not a
-leaderboard figure. The scheduled workflow answers this by running a larger N
-(default 100/split, override via dispatch input) periodically, so the numbers
-tighten over time without spending tokens on every push. Layer 1 (DVMCP) is kept
-out of the scheduled workflow on purpose — it executes a deliberately-vulnerable
-external server and should be run manually with explicit authorization.
+leaderboard figure. Dispatching the workflow answers this by running a larger N
+(default 100/split, override via dispatch input) on demand, so the numbers can
+tighten without spending tokens on every push. Layer 1 (DVMCP) is kept out of this
+workflow on purpose — it executes a deliberately-vulnerable external server and
+should be run manually with explicit authorization.

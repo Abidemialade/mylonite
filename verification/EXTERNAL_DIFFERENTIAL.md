@@ -151,7 +151,7 @@ to "shown on a target we didn't author" — the strongest form of the control-ef
 ## Caveats
 
 - Run DVMCP only with explicit authorization — it is a deliberately-vulnerable external
-  server. Layer 1 is intentionally **excluded** from the scheduled CI workflow for this
-  reason.
+  server. Layer 1 is intentionally **excluded** from the `verification.yml` CI workflow
+  for this reason.
 - Samples are small and cost-bounded; one KEPT external differential is the milestone, not
   a leaderboard number.
