@@ -55,9 +55,9 @@ Eight components organised around a single core use case:
    five contract types: attack/probe modules, test generators,
    validators/scorers, target adapters, and compliance mappers. Stable
    versioned `Protocol`s + JSON schemas; reference implementations in-repo.
-8. **Community attack-pattern registry.** A versioned, contributable
-   repository of attack patterns (schema-validated), each tagged with
-   OWASP / ASI / ATLAS IDs.
+8. **Community attack-pattern registry (planned, not yet built).** A versioned,
+   contributable repository of attack patterns (schema-validated), each tagged with
+   OWASP / ASI / ATLAS IDs. See "Direction" below.
 
 ### Tech choices
 
@@ -178,8 +178,8 @@ each release.
 This is a public, community-owned project; it is built to open-source
 norms from the first commit, not retrofitted later. Concretely:
 
-- **License & governance** — Apache-2.0, Contributor Covenant 2.1,
-  documented governance and registry-contribution flow.
+- **License & governance** — Apache-2.0, Contributor Covenant 2.1, documented
+  governance; a formal registry-contribution flow is planned (see "Direction").
 - **Repo hygiene** — clear quickstart, issue/PR templates, `CODEOWNERS`,
   `CHANGELOG` following "Keep a Changelog", semantic versioning.
 - **Security posture** — `SECURITY.md` with private vulnerability

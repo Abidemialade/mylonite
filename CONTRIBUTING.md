@@ -9,7 +9,7 @@ This guide covers:
 1. Setting up a dev environment
 2. The five extension points and how to author a plugin
 3. PR conventions (Conventional Commits, DCO)
-4. The community attack-pattern registry flow
+4. The community attack-pattern registry flow (planned) and reference-app scenarios (live today)
 5. Reporting security issues (link to `SECURITY.md`)
 
 ## Dev setup
@@ -51,7 +51,7 @@ Mylonite has five **versioned extension points**, each defined as a Python
 | -------------------- | ------------------------------------------------------------------ | --------------------------------------- |
 | Attack module        | Generates app-specific attack payloads                             | `contracts/attack_module.py`            |
 | Target adapter       | Speaks to a target system (MCP, RAG, HTTP, …)                      | `contracts/target_adapter.py`           |
-| Test generator       | Emits a regression test (pytest, jest, …) from a confirmed exploit | `contracts/test_generator.py`           |
+| Test generator       | Emits a regression test (pytest today; the contract allows jest) from a confirmed exploit | `contracts/test_generator.py`           |
 | Validator / scorer   | Decides whether a generated test is meaningful                     | `contracts/validator.py`                |
 | Compliance mapper    | Tags a confirmed exploit with OWASP/ASI/ATLAS/NIST IDs             | `contracts/compliance_mapper.py`        |
 
@@ -158,12 +158,14 @@ the bundled-target wiring still matches the upstream servers.
 
 Full instructions: [docs/contributing/live-e2e-tests.md](./docs/contributing/live-e2e-tests.md).
 
-## Community attack-pattern registry
+## Community attack-pattern registry (planned)
 
-The registry is how the project accumulates a body of validated, citable
-attack patterns. To submit one, open an issue using the
-**"Attack pattern submission"** template. Acceptance criteria are in
-`GOVERNANCE.md`; in short:
+A versioned, CI-validated registry of contributed attack patterns is on the
+roadmap (see `ROADMAP.md`) but not yet built — there is no registry
+directory or CI job today. The **"Attack pattern submission"** issue
+template is open for proposals in the meantime; the acceptance criteria in
+`GOVERNANCE.md` describe the intended design and will apply once the
+registry ships:
 
 1. The pattern declares its OWASP/ASI/ATLAS/NIST mappings.
 2. It comes with a seed vulnerable target it reliably exploits *and* a
@@ -174,12 +176,12 @@ attack patterns. To submit one, open an issue using the
 
 A "reference app scenario" is a new seeded weakness for the bundled reference agent
 (the reference app — `reference_targets/mcp_kitchen_sink/`) or for one of the real
-MCP target families. It is just a concrete instance of the
-[community attack-pattern registry](#community-attack-pattern-registry) flow
-above: open an issue with the **"Attack pattern submission"** template
-(`.github/ISSUE_TEMPLATE/attack_pattern_submission.yml`) and follow the
-registry acceptance criteria. Don't duplicate that section — this one only
-spells out the differential gate, which is the part people get wrong.
+MCP target families. This flow is live today, independent of the registry above:
+open an issue with the **"Attack pattern submission"** template
+(`.github/ISSUE_TEMPLATE/attack_pattern_submission.yml`), declaring the OWASP/ASI/ATLAS/NIST
+mappings and confirming it does not target third-party services — the same criteria the
+planned registry will formalize. This section spells out the differential gate, which is
+the part people get wrong and which is already enforced today:
 
 **The gate: every new scenario ships a differential proof.** The scenario
 must *fire on the vulnerable variant and stay clean on the guarded variant*.

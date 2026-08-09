@@ -113,9 +113,8 @@ docs = [
 # Opt-in offline demo: `pip install "mylonite[demo]"` pulls the deliberately-
 # vulnerable reference target so `mylonite demo` and `scan reference:*` run with no
 # clone and no API key. Kept out of the base install so a plain `pip install mylonite`
-# never pulls the vulnerable agent. REQUIRES `mcp-kitchen-sink` to be PUBLISHED to
-# PyPI — until then this extra cannot resolve (the graceful CLI error documents both
-# this and the editable-checkout path).
+# never pulls the vulnerable agent. `mcp-kitchen-sink` is published to PyPI (v0.1.0,
+# 2026-08-05), so this extra resolves from a clean install.
 demo = [
     "mcp-kitchen-sink>=0.1.0",
 ]
