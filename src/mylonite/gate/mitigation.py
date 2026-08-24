@@ -33,9 +33,21 @@ DEFAULT_MITIGATION_MODEL = "claude-haiku-4-5-20251001"
 def weakness_class_for(exploit: ExploitRecord) -> str:
     """Return the W1-W4 class for an exploit, or 'generic' if unknown.
 
-    Prefers the bundled seed catalogue (authoritative); falls back to the
-    exploit's compliance tags; finally 'generic'.
+    Prefers the exploit's own stamped ``payload.metadata["weakness"]`` — set by
+    the attack module at scan time, and the ground truth for a pattern_id the
+    bundled seed catalogue doesn't recognise (an adaptively-synthesised seed,
+    or a custom-target pattern_id that happens to collide with a bundled one).
+    Falls back to the bundled seed catalogue (authoritative for reference/
+    bundled patterns); then the exploit's compliance tags; finally 'generic'.
+
+    A4: ``report/bundle.py`` already applied this precedence independently
+    (stamped metadata over inference); this function did not, so
+    ``build_pr_body`` (and every other caller here) could disagree with the
+    JSON bundle about which weakness class the same finding belongs to.
     """
+    stamped = exploit.payload.metadata.get("weakness")
+    if stamped in {"W1", "W2", "W3", "W4"}:
+        return stamped
     if exploit.pattern_id in _PATTERN_TO_WEAKNESS:
         return _PATTERN_TO_WEAKNESS[exploit.pattern_id]
     for asi in exploit.compliance.owasp_asi:
@@ -45,6 +57,28 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
         if llm in _LLM_TO_WEAKNESS:
             return _LLM_TO_WEAKNESS[llm]
     return "generic"
+
+
+def _guarded_is_server_layer(
+    report: ValidationReport, guarded_is_server_layer: bool | None
+) -> bool:
+    """Resolve whether the guarded twin was the REAL server-side control.
+
+    An explicit ``guarded_is_server_layer`` (from a caller with direct access to
+    ``TwinPlan.guarded_is_server_layer``) always wins. Otherwise fall back to the
+    machine-readable ``[guarded-twin=server-layer|synthetic-boundary]`` marker
+    ``DifferentialValidator`` stamps into ``report.notes`` (the same marker
+    ``cli.py``'s REJECT-path remediation already parses) — this is how
+    ``run_gate`` gets an honest answer without any new plumbing through the
+    orchestrator, since it only ever holds a ``ValidationReport``, never the
+    ``TwinPlan`` that produced it. Absent either signal, default to ``False``
+    (proxy): a differential must not be captioned "server-layer verified"
+    without positive evidence.
+    """
+    if guarded_is_server_layer is not None:
+        return guarded_is_server_layer
+    notes = getattr(report, "notes", "") or ""
+    return "guarded-twin=server-layer" in notes
 
 
 def _snippet(weakness_class: str) -> str:
@@ -129,6 +163,7 @@ def build_pr_body(
     completion_fn: Callable[..., Any] | None = None,
     system_prompt: str | None = None,
     model: str = DEFAULT_MITIGATION_MODEL,
+    guarded_is_server_layer: bool | None = None,
 ) -> str:
     """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
 
@@ -138,11 +173,21 @@ def build_pr_body(
     threads its own resolved ``--model`` through here so the enrichment call
     is a real, configurable, budget-counted/policy-kwarg'd LiteLLM call
     instead of the hardcoded literal this used to be.
+
+    ``guarded_is_server_layer`` (A3): a caller with direct access to
+    ``TwinPlan.guarded_is_server_layer`` may pass it explicitly; otherwise it
+    is derived from ``report.notes``'s ``[guarded-twin=...]`` marker (see
+    :func:`_guarded_is_server_layer`). This used to be conflated with
+    ``is_control`` — every control-efficacy finding was captioned "(proxy)"
+    even when the differential toggled the target's REAL server-side control
+    (a declared ``control_env``), mislabelling the strongest possible result
+    as the weakest.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
     control = exploit.payload.metadata.get("synthetic_control") or ""
     is_control = bool(control)
+    server_layer = _guarded_is_server_layer(report, guarded_is_server_layer)
     loc = localize(exploit, system_prompt=system_prompt)
 
     if is_control:
@@ -162,16 +207,27 @@ def build_pr_body(
                 f"Control **{control}** is verified load-bearing for `{exploit.pattern_id}` "
                 f"against `{exploit.target_id}` (model held constant)."
             )
+        if server_layer:
+            layer_caveat = (
+                "> **Server-layer control verified.** Mylonite disabled and re-enabled your "
+                "REAL server-side control (declared via `control_env`) — not a synthetic "
+                "boundary shim. This differential proves your actual implementation is what "
+                "carries the security, not a canonical stand-in for it."
+            )
+        else:
+            layer_caveat = (
+                "> **Boundary-validated control (proxy).** Mylonite enforced this control at the "
+                "adapter boundary, not in your server. Implement it server-side for a production "
+                "fix (see the mitigation below), then re-point the committed test at your real "
+                "implementation."
+            )
         head = [
             "## Control efficacy verified",
             stat,
             "",
             "This proves the **safeguard** - not the model - carries the security.",
             "",
-            "> **Boundary-validated control (proxy).** Mylonite enforced this control at the "
-            "adapter boundary, not in your server. Implement it server-side for a production "
-            "fix (see the mitigation below), then re-point the committed test at your real "
-            "implementation.",
+            layer_caveat,
             "",
             f"**Compliance:** {_compliance_line(exploit)}",
             f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",

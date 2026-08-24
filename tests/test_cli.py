@@ -4458,6 +4458,19 @@ def test_gate_surfaces_iterations_and_randomize_toggle() -> None:
     assert _command_default("gate", "--randomize-exfil") is None
 
 
+def test_scan_surfaces_randomize_toggle() -> None:
+    """A5: `scan` — the command that actually MINTS the exfil literal into a
+    payload in the first place — used to have no --randomize-exfil flag at
+    all, so every custom-target scan taught to the one demo address
+    regardless of target type. It now matches generate/validate/gate's own
+    tri-state default (on for live custom targets, off for reference/replay,
+    explicit flag always wins)."""
+    opts = _command_option_names("scan")
+    assert "--randomize-exfil" in opts
+    assert "--no-randomize-exfil" in opts
+    assert _command_default("scan", "--randomize-exfil") is None
+
+
 def test_validate_iteration_timeout_has_a_sane_non_none_default() -> None:
     """DCR-0010: a stuck/slow custom target must not be able to block a CI
     job indefinitely just because --iteration-timeout was left unset."""

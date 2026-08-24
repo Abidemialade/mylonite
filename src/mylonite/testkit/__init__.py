@@ -18,7 +18,7 @@ calls::
 
     def test_guard_holds_<pattern>():
         exploit = testkit.load_exploit("exploit_<pattern>.json")
-        testkit.assert_guard_holds(exploit)
+        testkit.assert_guard_holds(exploit, fixtures_dir=Path(__file__).parent / "fixtures")
 
 :func:`assert_guard_holds` is the **offline gate**: it replays the recorded
 attack against the in-process GUARDED reference twin and asserts the exploit's
@@ -64,7 +64,6 @@ from mylonite.contracts._types import ExploitRecord
 from mylonite.demo._replay import (
     FixtureError,
     LiteLLMRecorder,
-    packaged_fixture_dir,
 )
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
@@ -506,11 +505,15 @@ def assert_guard_holds(
         verdict is read from.
     fixtures_dir:
         Directory of recorded replay fixtures plus a ``_meta.json`` sidecar
-        (``{"format_version": int, "model": str, "pattern_id": str}``). When a
-        real directory, the recorded ``model`` is used for the replay keying.
-        When ``None`` (the default), the packaged guarded reference fixtures
-        (``packaged_fixture_dir() / "guarded"``) are used; ``model`` is read from
-        their ``_meta.json``.
+        (``{"format_version": int, "model": str, "pattern_id": str}``). The
+        recorded ``model`` is used for the replay keying. Required unless
+        ``_completion_fn`` is supplied (the test-only seam bypasses fixtures
+        entirely). There is deliberately no packaged-fixture default: the
+        bundled reference fixtures predate the ``format_version`` sidecar field
+        and cannot satisfy :func:`_read_meta`'s version check, so a ``None``
+        default here would raise :class:`TestkitFixtureError` on every call —
+        an honest-fail-shaped bug is still a bug. Emitted tests always pass an
+        explicit ``fixtures_dir`` (see :mod:`mylonite.plugins._reference.reference_pytest_generator`).
     _completion_fn:
         Test-only injection seam. When provided, it drives the scan directly and
         fixtures / ``_meta.json`` are skipped entirely. The post-run recorder
@@ -521,6 +524,8 @@ def assert_guard_holds(
     ------
     AssertionError:
         The guard did not hold — the exploit fired against the guarded twin.
+    TestkitConfigError:
+        Neither ``fixtures_dir`` nor ``_completion_fn`` was supplied.
     TestkitFixtureError:
         The fixtures are missing / corrupt / version-mismatched, or the run was
         inconclusive (only skip/error outcomes) — the gate refuses to pass.
@@ -546,14 +551,16 @@ def assert_guard_holds(
         _assert_from_result(result, exploit)
         return
 
-    if fixtures_dir is not None:
-        fixtures_path = Path(fixtures_dir)
-        meta = _read_meta(fixtures_path)
-        model = str(meta.get("model", "")) or "unknown"
-    else:
-        fixtures_path = Path(str(packaged_fixture_dir() / "guarded"))
-        meta = _read_meta(fixtures_path)
-        model = str(meta.get("model", "")) or "unknown"
+    if fixtures_dir is None:
+        raise TestkitConfigError(
+            "assert_guard_holds() needs fixtures_dir (no packaged default exists — "
+            "the bundled reference fixtures predate the format_version sidecar "
+            "field and cannot pass _read_meta's version check). Pass the "
+            "fixtures_dir an emitted test ships alongside its exploit JSON."
+        )
+    fixtures_path = Path(fixtures_dir)
+    meta = _read_meta(fixtures_path)
+    model = str(meta.get("model", "")) or "unknown"
 
     recorder = LiteLLMRecorder(
         fixtures_path,

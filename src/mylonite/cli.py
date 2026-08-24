@@ -1221,6 +1221,20 @@ def scan(
             ),
         ),
     ] = None,
+    randomize_exfil: Annotated[
+        bool | None,
+        typer.Option(
+            "--randomize-exfil/--no-randomize-exfil",
+            help=(
+                "Mint a unique exfil destination per run instead of the demo address, so "
+                "a finding proves the target leaks to ANY attacker destination "
+                "(generalizes) rather than only the one literal address (avoids 'teaching "
+                "to the test'). Defaults ON for live custom-target scans; the reference/"
+                "replay path never randomizes. Matches generate/validate/gate's own default "
+                "(A5)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run the exploit-finding loop against a target.
 
@@ -1540,6 +1554,15 @@ def scan(
     customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
     judge = SuccessJudge(model=effective_judge_model)
 
+    # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
+    # finding proves the target leaks to ANY attacker address, not the one demo literal
+    # baked into every W2/W3 seed (avoids 'teaching to the test'). The reference/replay
+    # path must never randomize — it replays committed fixtures pinned to the demo
+    # address. Explicit --randomize-exfil / --no-randomize-exfil always wins. Mirrors
+    # generate's/gate's own tri-state resolution.
+    if randomize_exfil is None:
+        randomize_exfil = not report_target_id.startswith("reference:")
+
     config = ScanConfig(
         target_id=report_target_id,
         provider=effective_provider,
@@ -1551,6 +1574,7 @@ def scan(
         max_concurrent=max_concurrent,
         output_dir=effective_output_dir,
         dry_run=dry_run,
+        randomize_exfil=randomize_exfil,
     )
 
     engine = ScanEngine(
@@ -4600,6 +4624,19 @@ def gate(
     # the enrichment call (build_pr_body's --llm-enrich path, which run_gate
     # makes AFTER scan_fn/validate_fn's own narrower scopes have already
     # exited) still sees effective_policy — e.g. a configured api_base.
+    # A2: thread the target's own system prompt through to build_pr_body so
+    # localize() can pin a system-prompt finding to a line number (gate/
+    # annotate.py's inline-annotation path was otherwise unreachable — it only
+    # fires when a line is resolved). Safe to call unconditionally when tf is
+    # set: build_target_spec(tf) above (custom_spec's construction) already
+    # calls resolved_system_prompt(tf) once, so a second, pure/deterministic
+    # call here cannot newly fail.
+    gate_system_prompt: str | None = None
+    if tf is not None:
+        from mylonite.plugins._mcp.target_file import resolved_system_prompt
+
+        gate_system_prompt = resolved_system_prompt(tf)
+
     with llm_scope(policy=effective_policy):
         result = run_gate(
             out_dir=out,
@@ -4610,6 +4647,7 @@ def gate(
             open_pr=open_pr,
             llm_enrich=llm_enrich,
             mitigation_model=effective_model,
+            system_prompt=gate_system_prompt,
         )
     raise typer.Exit(code=result.exit_code)
 
