@@ -79,6 +79,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from mylonite._concurrency import gather_bounded, run_twins
+from mylonite._replay import LiteLLMRecorder
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -89,7 +90,6 @@ from mylonite.contracts import (
 from mylonite.contracts._types import Payload, ReproducibilityEvidence, SeedKill
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
-from mylonite.demo._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
@@ -1308,7 +1308,7 @@ class DifferentialValidator(ValidatorBase):
         #    locally hardcoded literal) so the sidecar can never drift from what
         #    the recorder actually used to key the files just written above. The
         #    two fields share this one sidecar file but are independent axes; see
-        #    mylonite.demo._replay.CACHE_KEY_VERSION_FIELD's docstring.
+        #    mylonite._replay.CACHE_KEY_VERSION_FIELD's docstring.
         meta_path = fixtures_dir / "_meta.json"
         meta_path.write_text(
             json.dumps(

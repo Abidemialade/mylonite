@@ -49,8 +49,8 @@ jobs:
         run: mypy src
 
   docs-consistency:
-    # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs,
-    # demo/render.py's printed next-step text) against the real Typer app. Runs in
+    # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs)
+    # against the real Typer app. Runs in
     # main CI (not docs.yml, which only triggers on docs/** changes) specifically
     # because a cli.py-only change -- a renamed/removed flag, a dropped command --
     # never touches docs/ and would otherwise never trip a docs check at all.
@@ -159,14 +159,14 @@ jobs:
         run: git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
       - name: pip-audit (dependency CVEs, informational)
         # Not --strict: this job installs mcp-kitchen-sink editable from a local
-        # path (it isn't published to PyPI yet — see pyproject.toml's `demo`
-        # extra comment), which pip-audit always reports as an un-auditable
+        # path (even though it's also published to PyPI as `mcp-kitchen-sink`,
+        # this CI job always installs the in-repo checkout so it tests THIS
+        # commit's copy), which pip-audit always reports as an un-auditable
         # skip. --strict promotes ANY skip to a hard failure, even a skip
         # produced by the deliberate --skip-editable flag (verified locally),
         # so a strict gate here would fail on every run regardless of real
         # CVEs. Verified locally against this exact dependency set
         # (pip install -e ".[dev]" + -e ./reference_targets/mcp_kitchen_sink):
-        # `pip-audit` reports "No known vulnerabilities found". Revisit
-        # --strict once mcp-kitchen-sink is published to PyPI.
+        # `pip-audit` reports "No known vulnerabilities found".
         continue-on-error: true
         run: pip-audit

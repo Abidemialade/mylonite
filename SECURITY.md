@@ -88,8 +88,9 @@ The project enforces the following non-negotiables:
    can fail `CERTIFICATE_VERIFY_FAILED`. Install `pip install "mylonite[enterprise]"`
    (the CLI then uses the OS trust store via `truststore`; opt out with
    `MYLONITE_NO_TRUSTSTORE=1`) or set `SSL_CERT_FILE` to your corporate CA bundle.
-   Run `mylonite doctor` to distinguish a TLS failure from an auth/network/rate
-   problem. Mylonite never disables certificate verification.
+   A live `scan`/`gate`/`validate` run classifies a provider-call failure as
+   TLS vs. auth vs. network vs. rate-limit, each with a concrete remedy, rather
+   than a raw traceback. Mylonite never disables certificate verification.
 
    Each `invoke()` spawns a fresh subprocess of the bundled server. Users
    are advised to point `mcp:filesystem` at a throwaway sandbox directory
@@ -147,7 +148,7 @@ place that value could otherwise leave the machine unmasked is routed through
   which drops `input_value` and prints only the field path + message.
 - **Any `target.yaml` Mylonite writes or copies.** The scan-dir copy
   (`mylonite scan`), the co-located copy (`mylonite generate`), the gate PR
-  copy (`mylonite gate`), and the `scan --scaffold` / `mylonite init` starter
+  copy (`mylonite gate`), and the `scan --scaffold` starter
   all go through the same `redact_env` / `redact_target_yaml` masking: every
   `headers` / `request.headers` value is replaced unconditionally, and every
   credential-shaped `env` value — by key name (`password`, `api_key`,

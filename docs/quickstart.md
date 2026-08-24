@@ -8,12 +8,12 @@ on PyPI:
 
 ```bash
 pip install mylonite                 # the CLI that scans your app
-pip install "mylonite[demo]"         # + the offline reference target for `mylonite demo`
+pip install mcp-kitchen-sink         # + the reference target for `scan reference:*`
 ```
 
-The `[demo]` extra adds the reference target (`mcp-kitchen-sink`) that `mylonite demo` and
-the offline examples drive. A plain `pip install mylonite` never pulls the
-deliberately-vulnerable reference agent.
+`mcp-kitchen-sink` is a separate package: a plain `pip install mylonite` never pulls
+the deliberately-vulnerable reference agent. Install it alongside `mylonite` only if
+you want to run the [reference-app walkthrough](quarry.md).
 
 To hack on Mylonite or the reference target, use a development checkout with **two**
 editable installs (the `mylonite` package, then the reference target):
@@ -46,19 +46,12 @@ Contributors should also run `pre-commit install` after installing.
 
 ```bash
 mylonite version
-mylonite taxonomy list --framework owasp-llm
-mylonite demo
 mylonite scan reference:vulnerable
 mylonite scan mcp:fetch --authorize fetch
 mylonite gate reference:vulnerable                 # scan -> test -> validate, the full pipeline
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
-- `mylonite demo` — the 60-second offline showcase: replays recorded scans
-  against the reference app's vulnerable and guarded versions and prints the
-  differential. **No API key needed.** See [the reference app](quarry.md).
-- `mylonite taxonomy list` — browse the bundled threat taxonomy
-  (`owasp-llm`, `owasp-asi`, `atlas`, `nist`).
 - `mylonite scan <target>` — run the live exploit-finding loop. Needs an LLM
   API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
   provider via `--model` with a `provider/model` prefix (e.g.

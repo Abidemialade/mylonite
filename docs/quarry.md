@@ -1,14 +1,13 @@
 # The reference app
 
 !!! danger "Read this first"
-    **DEMO ONLY — the reference app is a deliberately vulnerable in-process
-    agent. It never binds to a network. Never point Mylonite at a
+    **The reference app is a deliberately vulnerable in-process agent. It
+    never binds to a network. Never point Mylonite at a
     system you don't own or operate** (see
     [SECURITY.md](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)).
 
-The reference app exists so you can watch Mylonite find real AI-layer exploits in
-about a minute, offline, without an API key, and without touching anything
-outside your own machine. Per the project's
+The reference app exists so you can watch Mylonite find real AI-layer exploits
+against a target it doesn't own the code of. Per the project's
 [security policy](security.md), vulnerable reference agents are a
 non-negotiable **loopback-only** affair: it runs entirely in-process
 inside the Python interpreter that invokes it — there is no port, no socket,
@@ -18,9 +17,9 @@ and nothing for anyone else to reach.
     You will meet the same thing under three names, and they are all the
     **same artifact**:
 
-    - **the reference app** — the plain name used in docs and demo output;
-    - **`mcp-kitchen-sink`** — the pip package it ships as (the
-      `mylonite[demo]` extra), under `reference_targets/mcp_kitchen_sink/`;
+    - **the reference app** — the plain name used in docs;
+    - **`mcp-kitchen-sink`** — the pip package it ships as, under
+      `reference_targets/mcp_kitchen_sink/`;
     - **`reference:vulnerable` / `reference:guarded`** — the scan-target IDs
       the `mylonite scan` command uses to address its two builds.
 
@@ -37,14 +36,16 @@ and come up clean on the guarded build. That same differential is the
 if it FAILS on the vulnerable build and PASSES on the guarded one. See
 [Concepts](concepts.md) for the full validation-engine story.
 
-## The 60-second demo
+## Try it
 
-Requires **Python 3.11–3.13**. Install the CLI plus the offline reference target
-(the `[demo]` extra), then run the demo:
+Requires **Python 3.11–3.13** and an LLM API key (`ANTHROPIC_API_KEY` for the
+default provider). Install the CLI plus the reference target as two packages,
+no cloning required:
 
 ```bash
-pip install "mylonite[demo]"
-mylonite demo
+pip install mylonite mcp-kitchen-sink
+export ANTHROPIC_API_KEY="sk-ant-..."
+mylonite scan reference:vulnerable
 ```
 
 To hack on the code instead, use a development checkout with two editable installs
@@ -59,7 +60,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 pip install -e ./reference_targets/mcp_kitchen_sink
-mylonite demo
+mylonite scan reference:vulnerable
 ```
 
 On Windows (PowerShell):
@@ -71,52 +72,25 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pip install -e ./reference_targets/mcp_kitchen_sink
-mylonite demo
+mylonite scan reference:vulnerable
 ```
 
-`mylonite demo` needs **no API key**: it replays committed recorded fixtures
-(pinned to `anthropic/claude-sonnet-4-6`) through the real scan pipeline. Use
-`mylonite demo --live` to re-run the attacks for real — that variant does
-need an LLM API key.
+`mylonite scan reference:vulnerable` runs the live exploit-finding loop against
+the in-process vulnerable build and writes `exploit_*.json` artefacts under
+`.mylonite/scans/<ts>/`. Run it again against `reference:guarded` and the same
+attack patterns should come up clean — that vulnerable/guarded gap is the
+differential oracle in action. See [Quickstart](quickstart.md#the-full-flow-scan-generate-validate)
+for the rest of the flow: turning a finding into a committed regression test
+and validating it.
 
-### What you should see
+### How to read the table
 
-The demo prints a safety banner, then one table row per weakness, then a
-computed headline. Which weaknesses land depends on the planner model — a robust
-model resists some outright — so your exact count varies. Abridged (exact styling
-and the computed numbers come from your run):
-
-```text
-╭──────────────────────────────────────────────────────────────────────────╮
-│ DEMO ONLY — the reference app is a deliberately vulnerable in-process     │
-│ agent. It never binds to a network. Never point Mylonite at a system you  │
-│ don't own or operate (see SECURITY.md).                                   │
-╰──────────────────────────────────────────────────────────────────────────╯
-
- weakness  name                                     taxonomy IDs                              vulnerable  guarded
- W1        tool-description-instruction-smuggling   LLM01 / ASI02 / AML.T0051                 FOUND       clean
- W2        indirect-injection-via-note-body         LLM01, LLM05 / ASI01, ASI06 / AML.T0051   FOUND       clean
- W3        unrestricted-web-fetch                   LLM06 / ASI02, ASI05 / AML.T0049          clean       clean
- W4        unconfirmed-email-send                   LLM06 / ASI02                             clean       clean
-
-reference app: 2 exploits on vulnerable, 0 on guarded — this differential is the
-oracle that validates every generated regression test
-
-Each finding becomes a committed regression test, validated against this same
-vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable
-
-Try it on a real target next: mylonite scan mcp:fetch --authorize fetch
-(needs an LLM API key + uv) — see docs/quarry.md
-
-mode: replay (offline) · elapsed 0.9s
-```
-
-How to read the table: the attack patterns in `src/mylonite/scan/seeds.py` exercise
-the four weaknesses (each pattern's `pattern_id` maps to a W row). A row shows
-**FOUND** if *any* pattern for that weakness landed an exploit, **SKIPPED** if any
-pattern skipped or errored (and none found), and clean otherwise. The taxonomy-ID
-column carries the OWASP LLM Top 10 / OWASP ASI / MITRE ATLAS IDs from the pattern
-catalogue — the same compliance metadata every future generated test will carry.
+The attack patterns in `src/mylonite/scan/seeds.py` exercise the four
+weaknesses below (each pattern's `pattern_id` maps to a W row). Which
+weaknesses land depends on the planner model — a robust model resists some
+outright. Every exploit carries OWASP LLM Top 10 / OWASP ASI / MITRE ATLAS IDs
+from the pattern catalogue — the same compliance metadata every generated
+test carries.
 
 ## The four seeded weaknesses
 
@@ -196,12 +170,11 @@ note body) both cause mail to leave without anyone confirming.
 
 ## Now point it at a real MCP server
 
-The demo is the safe sandbox; the same scan loop runs against real MCP stdio
-servers. The honest prerequisites, stated up front: this is **not**
-zero-config like the demo — it needs an LLM API key (`ANTHROPIC_API_KEY` for
-the default provider; other LiteLLM providers via `--model` with a
-`provider/model` prefix, plus that provider's own key env var) and `uv`
-installed (the fetch target spawns via `uvx`).
+The reference app is the safe sandbox; the same scan loop runs against real MCP
+stdio servers. The honest prerequisites, stated up front: it needs an LLM API
+key (`ANTHROPIC_API_KEY` for the default provider; other LiteLLM providers via
+`--model` with a `provider/model` prefix, plus that provider's own key env
+var) and `uv` installed (the fetch target spawns via `uvx`).
 
 On Linux / macOS (bash):
 

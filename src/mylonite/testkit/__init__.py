@@ -46,9 +46,9 @@ Synchronous API
 :func:`assert_guard_holds` is synchronous (it wraps ``asyncio.run``) because the
 emitted pytest function is a plain ``def``. It is intended for standalone pytest
 invocation; calling it from inside an already-running event loop raises
-``RuntimeError`` from ``asyncio.run`` (the same constraint the ``mylonite demo``
-CLI lives under). Library callers already inside a loop should ``await``
-:func:`_run_guarded_scan` directly.
+``RuntimeError`` from ``asyncio.run`` (the same constraint every synchronous
+Typer command in ``cli.py`` lives under). Library callers already inside a
+loop should ``await`` :func:`_run_guarded_scan` directly.
 """
 
 from __future__ import annotations
@@ -60,11 +60,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from mylonite.contracts._types import ExploitRecord
-from mylonite.demo._replay import (
+from mylonite._replay import (
     FixtureError,
     LiteLLMRecorder,
 )
+from mylonite.contracts._types import ExploitRecord
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.wiring import build_scan, note_id_counter
@@ -81,8 +81,8 @@ from mylonite.scan.wiring import build_scan, note_id_counter
 FIXTURE_FORMAT_VERSION = 2
 
 #: Re-record guidance surfaced in every fixture-trouble error. Names the
-#: consumer-facing regeneration command (mirrors the demo's
-#: ``DEMO_RERECORD_HINT`` but points at the user-run ``mylonite generate``).
+#: consumer-facing regeneration command (``mylonite generate``), overriding
+#: ``_replay.GENERIC_RERECORD_HINT``'s generic default.
 TESTKIT_RERECORD_HINT = (
     "Regenerate the fixtures with `mylonite generate` (or re-run "
     "`mylonite scan` + `mylonite generate` against a live provider) so the "
@@ -93,7 +93,7 @@ TESTKIT_RERECORD_HINT = (
 class TestkitFixtureError(FixtureError):
     """Raised when the offline gate cannot trust its replay fixtures.
 
-    Subclasses the recorder's :class:`~mylonite.demo._replay.FixtureError` so
+    Subclasses the recorder's :class:`~mylonite._replay.FixtureError` so
     consumers can catch either. Covers four honest-fail cases:
 
     * a missing / corrupt fixture (recorder ``cache_misses`` or ``last_error``);

@@ -54,94 +54,37 @@ See [ROADMAP.md](./ROADMAP.md) for the architecture, scope, and direction, and t
 > reference app. The control-efficacy check proves which safeguard is load-bearing on any
 > single-build app; `mylonite ablate` scores the whole control set (load-bearing vs.
 > security theater). A third-party [verification harness](./docs/verification.md) checks every
-> claim against external ground truth. `pip install mylonite` installs the CLI from PyPI;
-> the offline demo target is an opt-in extra — `pip install "mylonite[demo]"`. See
+> claim against external ground truth. `pip install mylonite` installs the CLI from PyPI. See
 > [CHANGELOG.md](./CHANGELOG.md).
 
-## Try it in 60 seconds
+## Try it
 
-*(Once installed.)* `mylonite demo` runs the real scan offline against a deliberately
-vulnerable agent and its guarded version — no API key, deterministic. Sample output is
-[below](#demo-output).
-
-**Install the CLI and run the demo** — `mylonite` is on PyPI. The base install is just the
-tool that scans your app; the offline demo target is an opt-in extra (a
-deliberately-vulnerable mock agent, never pulled by a plain install). Requires **Python
-3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14 wheels yet, so create
-your virtualenv with a 3.11–3.13 interpreter. The CLI prints a clear note if it detects
-3.14+.
-
-```bash
-pip install "mylonite[demo]"   # the [demo] extra adds the offline reference target
-mylonite demo                  # no clone, no API key
-```
-
-For a development checkout (to hack on Mylonite or the reference target):
-
-```bash
-git clone https://github.com/Abidemialade/mylonite.git
-cd mylonite
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-pip install -e ./reference_targets/mcp_kitchen_sink
-mylonite demo
-```
-
-```powershell
-git clone https://github.com/Abidemialade/mylonite.git
-cd mylonite
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-pip install -e ./reference_targets/mcp_kitchen_sink
-mylonite demo
-```
-
-**No API key needed** — the demo replays recorded model behavior; add `--live` to re-run
-for real.
-
-<a id="demo-output"></a>
-The demo runs the real scan twice — once against the deliberately vulnerable reference
-agent and once against its guarded version — and prints a safety banner, a weakness table,
-and the headline differential (an example run; which patterns land depends on the planner
-model):
-
-```text
-  DEMO ONLY — the reference app is a deliberately vulnerable in-process agent.
-
-  tool-description-instruction-smuggling   LLM01 / ASI02 / AML.T0051     ✓
-  indirect-injection-via-note-body         LLM01, LLM05 / ASI01, ASI06   ✓
-  unrestricted-web-fetch                   LLM06 / ASI02, ASI05          ✗
-  unconfirmed-email-send                   LLM06 / ASI02                 ✗
-
-  reference app: 2 exploits on vulnerable, 0 on guarded
-  mode: replay (offline)
-```
-
-That **vulnerable-vs-guarded differential is what validates every generated regression
-test.** Whatever fires on the vulnerable version is resisted on the guarded one; a robust
-model resists some patterns outright, which is why the exact count varies by model. The
-reference app runs entirely in-process and never binds to a network. Full walkthrough:
-[docs/quarry.md](./docs/quarry.md).
-
-Once you've seen it, point `scan` at your own MCP app. **The first step is free** — it needs
-no API key and makes no model call:
+**The first step is free** — point `scan` at your own MCP app with `--scaffold`. It needs
+no API key and makes no model call: it connects to your server, lists the tools it
+exposes, tells you which weakness classes apply to that surface, flags the
+consequential-action tools worth guarding, and writes a starter `app.yaml`:
 
 ```bash
 mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml --scope my-app   # free, no API key
 ```
 
-That connects to your server, lists the tools it exposes, tells you which weakness classes
-apply to that surface, flags the consequential-action tools worth guarding, and writes a
-starter `app.yaml`. Treat it as a scope check, not a verdict: it reads your tool *surface*,
-not your tool descriptions, and everything it suggests is a hint for you to confirm.
+Treat it as a scope check, not a verdict: it reads your tool *surface*, not your tool
+descriptions, and everything it suggests is a hint for you to confirm.
 
 Proving which weaknesses actually land — and which of your controls stops them — is the
 scan itself, and that needs a key:
 
 ```bash
 mylonite scan --target-file app.yaml --authorize my-app                    # needs an LLM API key
+```
+
+Don't have your own app handy yet? `pip install mcp-kitchen-sink` alongside `mylonite` and
+run the same loop against the bundled, deliberately-vulnerable reference app instead — see
+[the reference app](./docs/quarry.md):
+
+```bash
+mylonite scan reference:vulnerable   # finds seeded weaknesses
+mylonite scan reference:guarded      # same attacks, comes up clean
 ```
 
 ## From scan to a gating PR
@@ -177,10 +120,7 @@ differential proof. The core surface:
 - **`mylonite ablate <target>`** — scores each safeguard as load-bearing vs. security theater.
 - **`mylonite report <dir>`** — a terminal trust panel, **SARIF 2.1.0**, or a JSON bundle,
   all carrying the differential proof and the compliance tags.
-- **`mylonite init`** — guided setup that writes a runnable `target.yaml` for your app
-  (HTTP agent or MCP server).
-- **`mylonite demo` / `doctor` / `taxonomy list`** — offline demo, provider diagnostics,
-  and the bundled OWASP/ASI/ATLAS/NIST threat taxonomy.
+- **`mylonite version`** — print the installed version.
 
 Full command details in the [CLI reference](./docs/cli-reference.md). Remote MCP transport
 (SSE / streamable-HTTP), versioned extension contracts, and entry-point plugins are covered

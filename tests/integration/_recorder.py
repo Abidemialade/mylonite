@@ -1,6 +1,6 @@
 """Back-compat shim — the LiteLLM record/replay core now lives in
-``mylonite.demo._replay`` (promoted in v0.3.0, PR A, so recorded fixtures can
-ship inside the wheel).
+``mylonite._replay`` (promoted in v0.3.0, PR A, so recorded fixtures can ship
+inside the wheel).
 
 This module keeps the test-side pieces (``ScriptedLLM``, ``make_recorder``,
 ``fixture_dir``) and re-exports the promoted core, including the private
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from mylonite.demo._replay import (
+from mylonite._replay import (
     CorruptFixtureError,
     FixtureConflictError,
     LiteLLMRecorder,

@@ -18,8 +18,9 @@ updates:
       # streamable_http_client, and ClientSession(read_timeout_seconds=) moved
       # from timedelta to float. It also swaps httpx for httpx2. Adopting it is
       # blocked on the published mcp-kitchen-sink==0.1.0, which pins mcp<2.0 in
-      # immutable PyPI metadata — widening only the root package would make
-      # `pip install "mylonite[demo]"` unresolvable. See #68 (closed).
+      # immutable PyPI metadata — widening only the root package would leave
+      # `pip install mylonite mcp-kitchen-sink` with an unresolvable pair of
+      # pins. See #68 (closed).
       # Re-evaluate as a deliberate port: fix the call sites, republish the
       # reference target, then move both pins together. Minor/patch updates
       # within mcp 1.x are unaffected by this rule.

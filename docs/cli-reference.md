@@ -11,23 +11,6 @@ the validator returned nothing (internal collaborator failure).
 
 ---
 
-## `init` — guided setup
-
-Write a runnable `target.yaml` for your app, guided. Prompts for the transport (`rest`
-for a plain HTTP agent, `mcp` for a stdio server) and what each needs, then writes a
-ready-to-scan file. Pass the options to skip the prompts.
-
-Options: `output` (positional, default `target.yaml`); `--transport rest|mcp`; for rest:
-`--url`, `--rest-body`, `--rest-response-path`; for mcp: `--command`, `--arg`; `--force`.
-
-```bash
-mylonite init app.yaml --transport rest --url https://my-agent/v1/chat
-mylonite init app.yaml --transport mcp --command python --arg server.py
-```
-
-The interactive front-end over `scan --scaffold`; for HTTP agents see
-[docs/http-agent.md](http-agent.md).
-
 ## `scan` — find weaknesses
 
 Run the exploit-finding loop against a target.
@@ -143,34 +126,6 @@ mylonite ablate --target-file app.yaml --authorize my-app --controls W2,W4 --red
 > --scaffold PATH` (see [`scan`](#scan-find-weaknesses) above). See [Test your own
 > app](test-your-app.md) and the [target.yaml reference](target-file.md).
 
-## `demo` — the reference-app playground
-
-Zero-config: run the vulnerable-vs-guarded differential on the bundled reference agent.
-Replays recorded fixtures by default; `--live` makes real calls. See [the reference app](quarry.md).
-
-```bash
-mylonite demo            # offline, instant
-mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
-```
-
-## `doctor` — preflight the provider
-
-Diagnose provider connectivity before a live scan. Exit `4` if unreachable.
-
-Options: `--model` (any LiteLLM provider via a `provider/model` prefix), `--config`.
-
-```bash
-mylonite doctor --model anthropic/claude-haiku-4-5
-```
-
-## `taxonomy list` — browse the threat data
-
-List entries from a bundled threat taxonomy. See [Standards mapping](standards-mapping.md).
-
-```bash
-mylonite taxonomy list --framework owasp-llm
-```
-
 ## `version`
 
 Print the installed version.
@@ -185,4 +140,4 @@ mylonite version
 
 `scan` and `gate` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)
 to declare `target_file` / `authorize` / `provider` / `model` / budget once. An explicit
-flag always wins. `doctor` reads it too, so it pings the same model your scan will use.
+flag always wins.

@@ -178,34 +178,17 @@ depend on the local SSL/cert environment or on tagging a release:
   HTTPS calls fail `CERTIFICATE_VERIFY_FAILED` on this machine): needs a Norton
   HTTPS-inspection exclusion, or `SSL_CERT_FILE` pointed at certifi's bundle,
   before the run will reach the provider. Once recorded, the example replays
-  **offline** forever (analogous to the demo fixtures), and a committed offline
-  test asserting it passes can be added. Human step.
-
-## Phase 1.5 finishing touches (v0.3.0 shipped; these remain)
-
-- **Record the demo GIF** → `docs/assets/quarry-demo.gif`. The recording script
-  is ready at [`docs/assets/recording-script.md`](./docs/assets/recording-script.md);
-  it needs a terminal recorder (terminalizer, or asciinema + agg). Human step.
-  The README already embeds the path as a placeholder.
-
-## Deferred to later phases (from the v0.3.0 review)
-
-- **`--save` / `--out` demo artefact flag** — write the demo's differential
-  report to disk. The demo is side-effect-free by design; add only on demand.
-  *Trigger:* user request.
-- **GitHub Codespaces / devcontainer one-click demo** — a zero-install,
-  open-in-browser funnel that runs `mylonite demo`. Strong top-of-funnel asset,
-  separate scope from the CLI. *Trigger:* Phase 4 launch prep.
-- **Phase 2 walking skeleton before the public demo** — a thin end-to-end
-  `scan → generate → validate` slice to de-risk the demo timeline.
-  *Trigger:* Phase 2 sequencing decision.
+  **offline** forever (the same `_replay.LiteLLMRecorder` mechanism the testkit
+  uses), and a committed offline test asserting it passes can be added. Human step.
 
 ## Rejected (recorded so they aren't re-raised)
 
-- **`--variant` single-side demo flag** — the vulnerable-vs-guarded differential
-  *is* the demo; a single-side view undercuts the point.
-- **asciinema `.cast` as a second committed artifact** — the GIF is the single
-  recording artifact.
+- **`mylonite demo` GIF / recording script / `--save`-`--out` artefact flag /
+  Codespaces one-click demo** — all retired along with the `mylonite demo`
+  command itself (see the deterministic-controls-and-recommendations wipe,
+  below); `docs/assets/recording-script.md` and the GIF plan are gone with it.
+  The reference app is still exercised directly via `mylonite scan
+  reference:vulnerable` (see [the reference app](docs/quarry.md)).
 - **Fresh-venv wheel-install CI job** — `ci.yml` stayed frozen for v0.3.0;
   packaged-fixture loading is proven by the recorded e2e plus a one-off
   wheel-content check.

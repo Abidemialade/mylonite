@@ -332,28 +332,6 @@ def test_report_no_key_succeeds(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# demo -- positive control: default replay mode is fully offline
-# ---------------------------------------------------------------------------
-
-
-def test_demo_replay_no_key_succeeds() -> None:
-    """`demo` (no --live) replays recorded fixtures -- deterministic, no
-    network, no API key, per its own docstring. Companion positive control:
-    a --live run WOULD need a key and correctly hits EXIT_PROVIDER (that path
-    is exercised in tests/gate/test_gate_e2e_offline.py's live-gated leg), but
-    the default, zero-config path must succeed keyless."""
-    t0 = time.monotonic()
-    result = runner.invoke(app, ["demo"])
-    elapsed = time.monotonic() - t0
-
-    assert elapsed < _MAX_SECONDS, f"demo took {elapsed:.1f}s -- expected an offline replay"
-    assert result.exit_code == EXIT_SUCCESS, (
-        f"expected EXIT_SUCCESS (0), got {result.exit_code}.\nOutput:\n{result.output}"
-    )
-    assert "replay" in result.output.lower()
-
-
-# ---------------------------------------------------------------------------
 # generate -- bonus positive control (named explicitly in the T6 brief as an
 # established fully-offline command; not one of the 6 files listed for this
 # task, but strengthens the "honest matrix" goal at near-zero cost since

@@ -191,32 +191,6 @@ exactly that build behaviour and **runs in the main test suite** (it is on
 `testpaths`, so a broken differential fails CI for everyone — not just an
 opt-in job). A scenario without a green differential proof will not be merged.
 
-## Demo fixtures
-
-`mylonite demo` is offline and deterministic because it replays committed LLM
-fixtures rather than calling a model. The fixtures live at
-`src/mylonite/demo/fixtures/` (one set per variant: `vulnerable/`,
-`guarded/`). They were recorded with `anthropic/claude-haiku-4-5-20251001`.
-
-**They are a maintenance contract.** Any change to the planner, judge, or
-customiser prompts — or to the demo model — invalidates the recorded
-fixtures, and the demo's replay check will fail. When that happens the fix is
-to **re-record**, not to loosen the check:
-
-```bash
-ANTHROPIC_API_KEY=… python scripts/record_demo_fixtures.py
-```
-
-```powershell
-$env:ANTHROPIC_API_KEY="…"; python scripts/record_demo_fixtures.py
-```
-
-**Decision rule: a maintainer re-records on any PR that breaks the fixtures.**
-External contributors do **not** need an API key to contribute — if your
-change invalidates the fixtures, say so in the PR and a maintainer with the
-key will re-record before merge. CI failure messages point back to this
-section.
-
 ## Reporting security issues
 
 Do **not** open public issues for security-sensitive reports. See

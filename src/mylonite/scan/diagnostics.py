@@ -3,7 +3,7 @@
 LiteLLM wraps provider errors opaquely — a corporate-proxy TLS failure surfaces
 as ``AnthropicException - [SSL: CERTIFICATE_VERIFY_FAILED]``, which reads like a
 bad API key. This module maps the exception to a category + a concrete remedy so
-``mylonite doctor`` (and the scan preflight) can tell auth from TLS from network
+a live ``scan``/``gate``/``validate`` run can tell auth from TLS from network
 from rate-limit — across providers. Classification is **typed-exception-first**
 (LiteLLM raises typed exceptions), with substring matching as a robust fallback
 for non-LiteLLM exceptions or future type renames.

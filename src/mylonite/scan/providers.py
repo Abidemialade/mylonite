@@ -1,7 +1,7 @@
 """Provider identity → API-key env var mapping (cross-LLM).
 
-So error remedies and ``mylonite doctor`` name the RIGHT environment variable
-for whichever provider is in use — not always ``ANTHROPIC_API_KEY``. Kept apart
+So error remedies name the RIGHT environment variable for whichever provider
+is in use — not always ``ANTHROPIC_API_KEY``. Kept apart
 from ``config.py`` (pure schema) and ``diagnostics.py`` to avoid import cycles;
 both import from here.
 """

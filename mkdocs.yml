@@ -32,10 +32,9 @@ theme:
 exclude_docs: |
   superpowers/
 
-# Peripheral pages intentionally not in the main nav (a dev/contributing guide and an
-# internal asset note) — listed here so `--strict` doesn't flag them as orphaned.
+# Peripheral pages intentionally not in the main nav (a dev/contributing guide) —
+# listed here so `--strict` doesn't flag it as orphaned.
 not_in_nav: |
-  /assets/recording-script.md
   /contributing/live-e2e-tests.md
 
 nav:

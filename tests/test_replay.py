@@ -1,12 +1,13 @@
 """Tests for the promoted LiteLLM record/replay core (PR A, Task A1).
 
 The core moved from ``tests/integration/_recorder.py`` to
-``mylonite.demo._replay`` so recorded real-LLM fixtures can ship inside the
-wheel. Hashing behaviour must stay identical; these tests cover the new
-behaviours added during promotion:
+``mylonite._replay`` (originally ``mylonite.demo._replay``, relocated when
+the ``demo`` on-ramp was removed) so recorded real-LLM fixtures can ship
+inside the wheel. Hashing behaviour must stay identical; these tests cover
+the new behaviours added during promotion:
 
-* parameterised ``MissingFixtureError`` hint (demo default names the
-  re-record script),
+* parameterised ``MissingFixtureError`` hint (each construction site names
+  its own re-record procedure),
 * corrupt-fixture JSON wrapped in ``CorruptFixtureError`` (never a bare
   ``JSONDecodeError``),
 * record mode forwards extra kwargs (``tools=``) to ``litellm.acompletion``,
@@ -27,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from mylonite.demo._replay import (
+from mylonite._replay import (
     CACHE_KEY_VERSION_FIELD,
     CorruptFixtureError,
     FixtureConflictError,
@@ -37,7 +38,6 @@ from mylonite.demo._replay import (
     _stable_key,
     _stable_key_v1,
     _stable_key_v2,
-    packaged_fixture_dir,
 )
 
 _MSGS = [{"role": "user", "content": "hi"}]
@@ -80,17 +80,17 @@ async def test_replay_hit_returns_fixture_shaped_response(tmp_path: Path) -> Non
     assert recorder.last_error is None
 
 
-# --- (2) replay miss names the demo re-record script ---------------------------
+# --- (2) replay miss names the construction site's re-record hint --------------
 
 
 @pytest.mark.asyncio
-async def test_replay_miss_raises_missing_fixture_error_naming_rerecord_script(
+async def test_replay_miss_raises_missing_fixture_error_naming_rerecord_hint(
     tmp_path: Path,
 ) -> None:
     recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
     with pytest.raises(MissingFixtureError) as excinfo:
         await recorder(model="claude-x", messages=_MSGS)
-    assert "scripts/record_demo_fixtures.py" in str(excinfo.value)
+    assert "Re-record this fixture set" in str(excinfo.value)
     assert recorder.cache_misses == 1
     assert recorder.last_error is excinfo.value
 
@@ -249,18 +249,6 @@ def test_record_mode_rejects_traversable_fixtures_dir(tmp_path: Path) -> None:
         LiteLLMRecorder(fixtures_dir=root, mode="record")
 
 
-def test_packaged_fixture_dir_points_at_demo_package() -> None:
-    root = packaged_fixture_dir()
-    assert root.name == "fixtures"
-    # The fixture root must live inside the mylonite.demo package itself.
-    import mylonite.demo
-
-    demo_pkg_dir = Path(mylonite.demo.__file__).resolve().parent
-    assert Path(str(root)).resolve().parent == demo_pkg_dir
-    # Per-variant namespaces must be joinable underneath the root.
-    assert (root / "vulnerable").name == "vulnerable"
-
-
 # --- (T8) v2 cache key: extra call-shape kwargs must change the key ------------
 #
 # The bug: the shipped key function hashes ONLY (model, messages), so two
@@ -268,8 +256,8 @@ def test_packaged_fixture_dir_points_at_demo_package() -> None:
 # the same fixture file — replay silently returns whichever response was
 # recorded first, which may not be shaped for the call actually being made.
 # `_stable_key_v2` is the fix; `_stable_key_v1` (== the original `_stable_key`)
-# is kept byte-for-byte so the already-shipped v1 fixture directories
-# (`src/mylonite/demo/fixtures/*`) keep replaying under the old algorithm.
+# is kept byte-for-byte so any fixture directory recorded under it keeps
+# replaying under the old algorithm.
 
 
 def test_tool_schema_change_produces_distinct_key() -> None:
@@ -319,9 +307,10 @@ def test_v2_key_unaffected_by_dict_key_ordering() -> None:
 #
 # (close-the-loop) The old fallback was mode-dependent: a sidecar-less
 # directory silently defaulted to v1 on REPLAY, v2 on RECORD. That asymmetry
-# existed only to keep the pre-sidecar shipped demo fixtures replaying; now
-# that those two directories declare `cache_key_version: 1` EXPLICITLY (see
-# `test_real_shipped_demo_fixtures_declare_v1_explicitly` below), the
+# existed only to keep pre-sidecar fixture directories recorded under v1
+# replaying; a directory that still needs v1 now declares
+# `cache_key_version: 1` EXPLICITLY (see
+# `test_format_version_honours_explicit_sidecar_in_either_mode` below), so the
 # no-sidecar default is unified to `CACHE_KEY_VERSION` in EITHER mode — see
 # `test_no_sidecar_defaults_to_cache_key_version_in_either_mode`.
 
@@ -360,19 +349,6 @@ def test_format_version_field_alone_is_ignored_by_cache_key_dispatch(tmp_path: P
     assert _resolve_key_version(tmp_path, "record") == 2
 
 
-def test_real_shipped_demo_fixtures_declare_v1_explicitly() -> None:
-    """The committed demo fixtures now ship an explicit `_meta.json`
-    declaring `cache_key_version: 1` (close-the-loop) — they predate the
-    sidecar and were recorded with the original (v1) algorithm, so retiring
-    the old implicit no-sidecar-means-v1 replay default requires them to say
-    so explicitly rather than rely on that default."""
-    root = packaged_fixture_dir()
-    assert (root / "vulnerable" / "_meta.json").is_file()
-    assert (root / "guarded" / "_meta.json").is_file()
-    assert _resolve_key_version(root / "vulnerable", "replay") == 1
-    assert _resolve_key_version(root / "guarded", "replay") == 1
-
-
 # --- (close-the-loop) proof the implicit v1 fallback is actually gone ---------
 
 
@@ -403,31 +379,6 @@ async def test_fresh_sidecar_less_dir_no_longer_silently_assumes_v1(tmp_path: Pa
     assert recorder.key_version == 2  # the unified default, not the old v1 fallback
     with pytest.raises(MissingFixtureError):
         await recorder(model="claude-x", messages=_MSGS, tools=tools)
-
-
-# --- (T8) the critical non-regression: shipped v1 fixtures still replay --------
-
-
-async def test_v1_fixtures_still_replay() -> None:
-    """The real, already-shipped ``mylonite demo`` fixtures must keep working.
-
-    The critical non-regression proof: drive the ACTUAL demo wiring
-    (``mylonite.demo.runner.run_demo``) against the real packaged
-    ``vulnerable``/``guarded`` fixtures — which now ship an explicit
-    ``_meta.json`` sidecar declaring ``cache_key_version: 1`` (retiring the
-    old implicit no-sidecar-defaults-to-v1 fallback) — end to end. Every real
-    call the demo's ``LLMPlanner`` makes includes ``tools=``/``tool_choice=``;
-    if v1 dispatch (or the key-version detection reading the sidecar) were
-    broken, this would raise ``DemoFixtureError``/``MissingFixtureError``
-    instead of completing with the expected differential.
-    """
-    from mylonite.demo.runner import run_demo
-
-    result = await run_demo(live=False)
-    assert result.vulnerable.report.aborted is None
-    assert result.guarded.report.aborted is None
-    assert result.vulnerable.report.findings_count >= 1
-    assert result.guarded.report.findings_count == 0
 
 
 # --- (T8) usage / finish_reason round-trip through record + replay -------------

@@ -110,14 +110,6 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
 ]
-# Opt-in offline demo: `pip install "mylonite[demo]"` pulls the deliberately-
-# vulnerable reference target so `mylonite demo` and `scan reference:*` run with no
-# clone and no API key. Kept out of the base install so a plain `pip install mylonite`
-# never pulls the vulnerable agent. `mcp-kitchen-sink` is published to PyPI (v0.1.0,
-# 2026-08-05), so this extra resolves from a clean install.
-demo = [
-    "mcp-kitchen-sink>=0.1.0",
-]
 # Back-compat alias: `truststore` (OS trust store for TLS-inspecting proxies / local
 # AV CAs) is now a BASE dependency, so `pip install mylonite` already handles the
 # corporate-proxy case out of the box. This extra is kept only so existing
@@ -170,8 +162,9 @@ mylonite = "mylonite.testkit._pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
 # Base wheel ships ONLY the tool that scans your app. The deliberately-vulnerable
-# reference target `mcp_kitchen_sink` is NOT bundled — it is an onboarding/test
-# artifact, available opt-in via the `[demo]` extra (see optional-dependencies).
+# reference target `mcp_kitchen_sink` is NOT bundled — it is a separate PyPI
+# package (`mcp-kitchen-sink`), installed alongside `mylonite` when a user wants
+# to run `scan reference:*` against it.
 packages = ["src/mylonite"]
 # The gate package's data files (mitigations/*.md, fixes/*.md, templates/*.yml) are shipped
 # by the default package selection above — hatchling includes all files under a
@@ -256,7 +249,7 @@ exclude_lines = [
 [tool.bandit]
 # Product code only. The deliberately-vulnerable reference targets under
 # reference_targets/ are the project's ground-truth oracle and MUST NOT be
-# "hardened" (they are intentionally insecure by design); the recorded demo fixtures and
+# "hardened" (they are intentionally insecure by design); recorded fixtures and
 # test fakes are data, not runnable code. The CI security job scans
 # `src/mylonite` explicitly; these exclusions keep an ad-hoc `bandit -r .` from
 # flagging the intentional vulns or fixtures.
@@ -265,5 +258,4 @@ exclude_dirs = [
     "tests",
     ".venv",
     ".wt",
-    "src/mylonite/demo/fixtures",
 ]

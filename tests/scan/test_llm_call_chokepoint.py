@@ -35,14 +35,8 @@ _ALLOWED_FILES: dict[Path, str] = {
         "litellm_tool_call_async/litellm_text_call are WHERE the real call "
         "happens; everything else is supposed to go through one of them."
     ),
-    (SRC_ROOT / "cli.py").resolve(): (
-        "doctor()'s one-shot (max_tokens=1) connectivity ping. Deliberately "
-        "bypasses budget-counting/LLMPolicy: it is not part of a scan's call "
-        "budget and its whole job is probing a REAL provider round-trip "
-        "before any policy/oracle concern applies."
-    ),
-    (SRC_ROOT / "demo" / "_replay.py").resolve(): (
-        "the demo recorder's record-mode passthrough -- this IS the "
+    (SRC_ROOT / "_replay.py").resolve(): (
+        "LiteLLMRecorder's record-mode passthrough -- this IS the "
         "'real completion' a caller's completion_fn injection point "
         "(the seam every chokepoint function exposes) resolves to when "
         "MYLONITE_TEST_RECORD=1; it is downstream of the chokepoint, not a "
@@ -122,7 +116,7 @@ def test_litellm_completion_calls_are_confined_to_the_allowlist() -> None:
     assert offenders == [], (
         "litellm.completion/litellm.acompletion must only be called from the "
         "explicit allowlist in this test (scan/_llm.py's chokepoint, "
-        "cli.py's doctor() ping, demo/_replay.py's recorder passthrough) — "
+        "_replay.py's LiteLLMRecorder passthrough) — "
         "found a direct call elsewhere, which can silently skip both "
         f"budget-counting and every LLMPolicy kwarg: {offenders}"
     )
