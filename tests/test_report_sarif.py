@@ -149,9 +149,9 @@ def test_to_sarif_recommendation_never_uses_result_fixes() -> None:
     from mylonite.gate.recommend import TargetContext
     from mylonite.report.sarif import to_sarif
 
-    res = to_sarif(
-        [(_exploit("W4"), None)], target=TargetContext(target_id="mcp:myapp")
-    )["runs"][0]["results"][0]
+    res = to_sarif([(_exploit("W4"), None)], target=TargetContext(target_id="mcp:myapp"))["runs"][
+        0
+    ]["results"][0]
     assert "fixes" not in res
 
 

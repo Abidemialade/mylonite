@@ -73,7 +73,9 @@ def config_snippet_for(
         return f"control_config:\n  read_tool_names: [{tool}]"
     if weakness == "W3":
         lines = ["control_config:", f"  egress_tools: [{tool}]"]
-        lines.append(f"  egress_url_param: {url_param or '<the-argument-name-holding-the-destination>'}")
+        lines.append(
+            f"  egress_url_param: {url_param or '<the-argument-name-holding-the-destination>'}"
+        )
         if allowlist:
             lines.append(f"  fetch_allowlist: [{', '.join(allowlist)}]")
         return "\n".join(lines)
@@ -321,7 +323,9 @@ class InformationFlowControl(BoundaryControl):
         would silently downgrade that declaration to a mere hint, letting
         fail-closed override an operator's explicit exemption.
         """
-        applies, reason = classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
+        applies, reason = classify(
+            name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS
+        )
         if applies:
             return True, reason
         return classify(name, declared=self._egress_tools, hints=_EGRESS_HINTS)

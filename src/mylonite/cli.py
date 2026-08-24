@@ -4482,7 +4482,11 @@ def gate(
         gate_target_context = target_context_for(
             custom_spec,
             target_id=(
-                f"mcp:{tf.family}" if tf is not None else target if target is not None else "mcp:custom"
+                f"mcp:{tf.family}"
+                if tf is not None
+                else target
+                if target is not None
+                else "mcp:custom"
             ),
             framework=tf.framework if tf is not None else None,
         )
@@ -5033,7 +5037,9 @@ def check(
         raise typer.Exit(code=EXIT_SUCCESS)
 
     cc = tf.control_config
-    declared_consequential = frozenset(cc.consequential_tools) if cc and cc.consequential_tools else None
+    declared_consequential = (
+        frozenset(cc.consequential_tools) if cc and cc.consequential_tools else None
+    )
     sinks = consequential_tool_names(tools, declared=declared_consequential)
     unapproved_sinks = [
         (name, reason) for name, reason in sinks if not _has_approval_sibling(tools, name)
@@ -5128,5 +5134,3 @@ def check(
     if enforce and findings > 0:
         raise typer.Exit(code=EXIT_FINDINGS)
     raise typer.Exit(code=EXIT_SUCCESS)
-
-

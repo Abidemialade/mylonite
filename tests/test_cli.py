@@ -417,9 +417,7 @@ def test_check_discovers_target_file_from_mylonite_yaml(
     assert "structural finding(s)" in result.output
 
 
-def test_check_does_not_require_authorize(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_check_does_not_require_authorize(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`check` makes no attack and no LLM call, so it must not demand --authorize."""
     _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
     target_file = _write_check_target(tmp_path)

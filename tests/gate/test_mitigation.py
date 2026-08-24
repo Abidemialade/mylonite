@@ -324,8 +324,10 @@ def test_pr_body_server_layer_differential_is_not_captioned_proxy():
         update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
     )
     report = _report().model_copy(
-        update={"notes": "Server-layer-guarded twin (control 'W2'): leaked 0/2, "
-        "contribution +100%. [guarded-twin=server-layer]"}
+        update={
+            "notes": "Server-layer-guarded twin (control 'W2'): leaked 0/2, "
+            "contribution +100%. [guarded-twin=server-layer]"
+        }
     )
     body = build_pr_body(ex, report)
     assert "Boundary-validated control (proxy)" not in body
