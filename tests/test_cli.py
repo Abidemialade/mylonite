@@ -421,6 +421,138 @@ def test_check_does_not_require_authorize(
     assert "--authorize" not in (result.stderr or "")
 
 
+def test_check_unrelated_approval_shaped_tool_does_not_silence_the_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard: `_has_approval_sibling` used to fire on ANY tool
+    matching an approval hint anywhere on the surface, so an unrelated
+    `verify_captcha` validator (nothing to do with `send_email`) silenced the
+    W4 finding target-wide. It must share a name TOKEN with the sink to
+    count as its approval step. (`verify_captcha` is deliberately chosen to
+    match NEITHER _CONSEQUENTIAL_HINTS itself, so the finding it must not
+    silence is unambiguously `send_email`'s alone.)"""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="send_email",
+                    description="Send an email immediately.",
+                    json_schema={"properties": {"to": {"type": "string"}}},
+                ),
+                ToolSpec(
+                    name="verify_captcha",
+                    description="Check a captcha response is valid.",
+                    json_schema={"properties": {"response": {"type": "string"}}},
+                ),
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Rich word-wraps the narrow "Check" column, so "no approval step (W4)"
+    # can be split across two physical lines ("...no" / "approval step
+    # (W4)") -- assert on "Consequential action" instead, a phrase that sits
+    # entirely on the row's first physical line regardless of wrap point,
+    # co-located with the flagged tool name in the table region.
+    table_region = result.output.split("description_pins to add", 1)[0]
+    assert "Consequential action" in table_region
+    assert "send_email" in table_region
+
+
+def test_check_recognises_a_confirm_sibling_that_shares_a_name_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The positive control for the token-pairing fix above: a GENUINE
+    confirm sibling (`confirm_send` shares "send" with `send_email`) must
+    still suppress the finding."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="send_email",
+                    description="Stage an email for sending.",
+                    json_schema={"properties": {"to": {"type": "string"}}},
+                ),
+                ToolSpec(
+                    name="confirm_send",
+                    description="Confirm and dispatch a staged email.",
+                    json_schema={"properties": {}},
+                ),
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "no approval step" not in result.output
+
+
+def test_check_consequential_vocabulary_matches_the_live_confirm_gate_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard: `check` used to classify consequential tools via
+    `tool_roles._SINK_NAME_HINTS`, a DIFFERENT vocabulary from the live
+    `ConfirmGateControl`'s `_CONSEQUENTIAL_HINTS` -- false negatives
+    (`write_file`/`issue_refund`, guarded live but invisible to `check`) and
+    false positives (`publish_report`, flagged by `check` but never touched
+    by the live control) in both directions. `check` must reuse the live
+    control's own vocabulary via `control_shim.consequential_tool_names`."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="write_file",
+                    description="Write content to a file.",
+                    json_schema={"properties": {"path": {"type": "string"}}},
+                ),
+                ToolSpec(
+                    name="publish_report",
+                    description="Publish a read-only report artifact.",
+                    json_schema={"properties": {}},
+                ),
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # Restrict to the Rich TABLE region (before the separately-printed,
+    # unconditional-for-every-tool "description_pins to add" listing) --
+    # Rich word-wraps a narrow "Check" column across physical lines, so
+    # asserting two substrings share one physical LINE is fragile; asserting
+    # presence within the table region alone is not, since neither tool name
+    # appears in that region for any reason other than a W4 table row.
+    table_region = result.output.split("description_pins to add", 1)[0]
+    # write_file: a false negative under the old tool_roles vocabulary (not in
+    # _SINK_NAME_HINTS) -- must now be caught (it IS in _CONSEQUENTIAL_HINTS).
+    assert "write_file" in table_region
+    # publish_report: a false positive under the old tool_roles vocabulary
+    # (matches _SINK_NAME_HINTS's "publish") -- must NOT be flagged as W4,
+    # since the live ConfirmGateControl's _CONSEQUENTIAL_HINTS has no
+    # "publish" entry (it may still legitimately appear in the unrelated
+    # description-pin digest list, outside this region).
+    assert "publish_report" not in table_region
+
+
 def test_scan_scaffold_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

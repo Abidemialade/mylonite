@@ -4888,24 +4888,37 @@ def ablate(
         raise typer.Exit(code=total_failure_exit_code(observed_outcomes))
 
 
-#: Tool-NAME fragments suggesting a consequential-action tool has a paired
-#: confirm/approval step elsewhere on the same target surface. Mirrors the
+#: Tool-NAME fragments suggesting a confirm/approval step. Mirrors the
 #: vocabulary `ConfirmGateControl`'s own confirm-token flow uses (`confirm_send`
 #: in the reference app), broadened for a static, cross-target discovery check.
 _APPROVAL_NAME_HINTS: Final = ("confirm", "approve", "authorize", "authorise", "verify")
 
 
-def _has_approval_sibling(tools: list[Any]) -> bool:
-    """True if ANY tool on the surface looks like a confirm/approval step.
+def _has_approval_sibling(tools: list[Any], sink_name: str) -> bool:
+    """True if some OTHER tool looks like a confirm/approval step FOR `sink_name`
+    specifically — sharing at least one meaningful name TOKEN with it (e.g.
+    `confirm_send` / `send_email` both contain "send"), not just any
+    approval-shaped name anywhere on the surface.
 
-    Coarse and target-wide, not paired to a specific consequential tool: there
-    is no static signal for "which sink does this confirm gate", so `check`
-    reports the surface-level gap (no confirm-shaped tool exists at all) rather
-    than guessing a pairing it cannot verify without a live call.
+    An earlier version silenced the finding target-wide the moment ANY tool
+    matched an approval hint — so an unrelated `verify_email_format` helper
+    (a plain validator, nothing to do with `send_email`) suppressed the
+    finding for every consequential tool on the surface. Token-overlap is a
+    coarse pairing signal (there is no stronger static one — the real
+    pairing is a runtime property `ConfirmGateControl` proves, not a naming
+    convention), but it is a real signal, not none at all: it rejects an
+    approval-shaped tool that shares NOTHING with the sink's own name.
     """
+    from mylonite.scan.tool_roles import _tokens
+
+    sink_tokens = _tokens(sink_name)
     for tool in tools:
-        name = (getattr(tool, "name", "") or "").lower()
-        if any(hint in name for hint in _APPROVAL_NAME_HINTS):
+        name = getattr(tool, "name", "") or ""
+        if not name or name == sink_name:
+            continue
+        if not any(hint in name.lower() for hint in _APPROVAL_NAME_HINTS):
+            continue
+        if _tokens(name) & sink_tokens:
             return True
     return False
 
@@ -4976,6 +4989,7 @@ def check(
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.scan.control_shim import consequential_tool_names
 
     _config_path, rc = _discover_run_config(run_config_path, command="check")
     if target_file is None and rc is not None:
@@ -5019,14 +5033,11 @@ def check(
         raise typer.Exit(code=EXIT_SUCCESS)
 
     cc = tf.control_config
-    declared_consequential = set(cc.consequential_tools) if cc else set()
-    if declared_consequential:
-        sink_tools = sorted(declared_consequential)
-        sink_reason = "declared"
-    else:
-        sink_tools = _classify_tools(tools).sink_tools
-        sink_reason = "name hint"
-    unapproved_sinks = sink_tools if sink_tools and not _has_approval_sibling(tools) else []
+    declared_consequential = frozenset(cc.consequential_tools) if cc and cc.consequential_tools else None
+    sinks = consequential_tool_names(tools, declared=declared_consequential)
+    unapproved_sinks = [
+        (name, reason) for name, reason in sinks if not _has_approval_sibling(tools, name)
+    ]
 
     egress = destination_tools(tools)
     declared_egress = set(cc.egress_tools) if cc else set()
@@ -5046,12 +5057,13 @@ def check(
     table.add_column("Confidence")
 
     if unapproved_sinks:
-        findings += 1
-        table.add_row(
-            "Consequential action, no approval step (W4)",
-            rich_escape(", ".join(unapproved_sinks)),
-            sink_reason,
-        )
+        findings += len(unapproved_sinks)
+        for name, reason in unapproved_sinks:
+            table.add_row(
+                "Consequential action, no approval step (W4)",
+                rich_escape(name),
+                reason,
+            )
     if steering:
         findings += len(steering)
         for name, excerpt in steering:

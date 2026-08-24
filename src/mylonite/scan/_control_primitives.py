@@ -112,13 +112,29 @@ _LOOPBACK_EXEMPT: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 _METADATA_HOSTNAME_ALIASES: frozenset[str] = frozenset({"metadata.google.internal"})
 
 
+def _parse_octet(value: str) -> int:
+    """Parse one already-regex-validated IPv4 octet in decimal, hex (``0x..``),
+    or bare-leading-zero octal (``0..``) — never ``int(value, 0)``, which
+    requires an explicit ``0o``/``0O`` prefix for octal in Python 3 and raises
+    ``ValueError`` on a bare leading-zero string like ``"0251"`` instead of
+    reading it as octal, silently defeating the octal-encoding normalisation
+    this function exists for.
+    """
+    if value[:2].lower() == "0x":
+        return int(value, 16)
+    if len(value) > 1 and value[0] == "0":
+        return int(value, 8)
+    return int(value, 10)
+
+
 def _canonical_host(host: str) -> str:
     """Normalise an alternate IPv4 encoding (decimal, hex/octal per-octet) to
     canonical dotted-quad, so a destination can't dodge the allowlist/
     link-local check by re-encoding the SAME address — e.g. the metadata IP
     169.254.169.254 written as the single decimal integer 2852039166, or as
-    hex-octet ``0xA9.0xFE.0xA9.0xFE``. Returns ``host`` unchanged for a plain
-    hostname or an already-dotted-quad value.
+    hex-octet ``0xA9.0xFE.0xA9.0xFE``, or as octet-octal ``0251.0376.0251.0376``.
+    Returns ``host`` unchanged for a plain hostname or an already-dotted-quad
+    value.
     """
     if re.fullmatch(r"\d+", host):
         try:
@@ -128,7 +144,7 @@ def _canonical_host(host: str) -> str:
     parts = host.split(".")
     if len(parts) == 4 and all(re.fullmatch(r"0[xX][0-9a-fA-F]+|0[0-7]+|[0-9]+", p) for p in parts):
         try:
-            octets = [int(p, 0) for p in parts]
+            octets = [_parse_octet(p) for p in parts]
         except ValueError:
             return host
         if all(0 <= o <= 255 for o in octets):

@@ -31,6 +31,7 @@ Implements the W1-W4 boundary controls (e.g. the W2 untrusted-data envelope).
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -307,15 +308,23 @@ class InformationFlowControl(BoundaryControl):
         """A sink is anything consequential OR egress-classified — the same
         two hint vocabularies ``ConfirmGateControl``/``EgressAllowlistControl``
         already use, so "what counts as a sink" stays one definition even
-        though three different controls each act on it."""
-        if self._consequential_tools is not None and name in self._consequential_tools:
-            return True, "declared"
-        if self._egress_tools is not None and name in self._egress_tools:
-            return True, "declared"
-        applies, reason = classify(name, declared=None, hints=_CONSEQUENTIAL_HINTS)
+        though three different controls each act on it.
+
+        Each axis's OWN declared set (``self._consequential_tools`` /
+        ``self._egress_tools``, independently ``None`` when the operator
+        declared nothing for that axis) is threaded straight into
+        :func:`classify`, exactly as ``ConfirmGateControl``/
+        ``EgressAllowlistControl`` do — NOT collapsed to ``declared=None``
+        here. A declared list is authoritative for its own axis (a name
+        absent from it is definitively NOT a sink via that axis, per
+        ``classify``'s own tier-1 semantics); passing ``None`` unconditionally
+        would silently downgrade that declaration to a mere hint, letting
+        fail-closed override an operator's explicit exemption.
+        """
+        applies, reason = classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
         if applies:
             return True, reason
-        return classify(name, declared=None, hints=_EGRESS_HINTS)
+        return classify(name, declared=self._egress_tools, hints=_EGRESS_HINTS)
 
     def _config_snippet(self, name: str) -> str:
         return config_snippet_for("W2", name)
@@ -609,8 +618,22 @@ class ControlServerShim:
 
     def __init__(self, inner: _ServerLike, controls: list[BoundaryControl]) -> None:
         self._inner = inner
-        self._controls = controls
-        for control in controls:
+        # Deep-copy, never store the caller's instances directly: an adapter
+        # builds its control list ONCE (per `TargetAdapter.__init__`) and
+        # reuses those SAME objects across every `invoke()` for the adapter's
+        # whole lifetime, while `ScanEngine` runs multiple `invoke()` calls
+        # concurrently (`max_concurrent`, default 3). A `ControlServerShim` is
+        # constructed fresh per `invoke()`/session, so if it `reset()`ed the
+        # shared originals in place, one in-flight session's reset could wipe
+        # another concurrently-running session's live taint/violation/pending-
+        # token state out from under it — silently disarming a guard the
+        # differential oracle is relying on to prove the attack was resisted.
+        # Cloning here (cheap: every control field is plain data — frozensets,
+        # dicts, bytes, no locks/handles) gives each session its own isolated
+        # instances, matching the "fresh control per invoke" design every
+        # control's own docstring already assumes.
+        self._controls = [copy.deepcopy(control) for control in controls]
+        for control in self._controls:
             control.reset()
 
     async def list_tools(self) -> list[ToolDescription]:
@@ -684,3 +707,31 @@ def make_control(
     if weakness == "W4":
         return ConfirmGateControl(consequential_tools=consequential_tools)
     raise ValueError(f"no boundary control implemented for weakness {weakness!r}")
+
+
+def consequential_tool_names(
+    tools: Any, *, declared: frozenset[str] | None = None
+) -> list[tuple[str, str]]:
+    """``(tool_name, reason)`` for every tool ``ConfirmGateControl`` would
+    treat as consequential via a DECLARED list or its own name-hint
+    vocabulary — the exact same classification the live W4 control applies,
+    so a static preview (``mylonite check``) can never diverge from what
+    actually gets gated at runtime.
+
+    Deliberately never surfaces the "fail-closed default" tier: this is a
+    discovery report, not a runtime gate. ``ConfirmGateControl`` itself must
+    fail closed on an unrecognised tool (the cost of under-guarding is a
+    scan that reads a vulnerable target as clean), but a report that flagged
+    every unrecognised tool the same way would bury its own real signal —
+    see :func:`mylonite.scan.tool_classifier.destination_tools`'s docstring
+    for the same discovery-vs-gate distinction.
+    """
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        if not name:
+            continue
+        applies, reason = classify(name, declared=declared, hints=_CONSEQUENTIAL_HINTS)
+        if applies and reason != "fail-closed default":
+            out.append((name, reason))
+    return out

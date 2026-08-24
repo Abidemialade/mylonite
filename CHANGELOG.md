@@ -189,6 +189,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target type — a finding only proved the target blocks *that one* literal,
   not the weakness class.
 
+### Security
+
+- **A concurrent scan could silently disarm its own guarded twin.**
+  `ControlServerShim.__init__` called `control.reset()` on the SAME
+  `BoundaryControl` instances an adapter reuses across its whole lifetime,
+  to clear session-scoped state (taint, description-integrity violations,
+  pending confirm-tokens) between SEQUENTIAL invocations — but `ScanEngine`
+  dispatches multiple `invoke()` calls CONCURRENTLY (`max_concurrent`
+  defaults to 3), so a second in-flight session's construction could reset
+  a first session's already-tainted/violated state out from under it,
+  letting a sink call through that should have been refused. Fixed by
+  deep-copying the controls into each `ControlServerShim` instead of
+  mutating the shared originals in place, so each session gets truly
+  isolated state — matching every control's own "fresh instance per
+  invoke" design assumption, which the shared-instance wiring had silently
+  violated. `InformationFlowControl`/`DescriptionIntegrityControl`/
+  `ConfirmGateControl` are all affected controls (W1/W2/W4); the fix is in
+  the shared shim, not per-control.
+
+- **A short, unprefixed credential value under an unambiguous key name
+  (e.g. `{"password": "abc123"}`) rode unmasked into a generated
+  recommendation's PR body / SARIF / JSON bundle.** `gate/recommend.py`'s
+  fallback evidence path (no destination-shaped argument identified) quoted
+  the whole call-arguments dict through the shape-only `redact()`, which
+  only masks a value long/prefixed enough to look secret-shaped on its own
+  — it never checks argument KEY names. Fixed by routing that dict through
+  `redact_value()` (the key-name-aware masker already used for recorded
+  tool-call arguments elsewhere) before quoting.
+
+- **`InformationFlowControl`'s declared `consequential_tools`/
+  `egress_tools` were additive hints, never authoritative exemptions.**
+  `_is_sink_tool` called `classify(name, declared=None, ...)` regardless of
+  whether the operator had actually declared either list, so a tool
+  explicitly scoped OUT of both declared lists still fell through to
+  hint-matching/fail-closed-default and could still be refused as a sink —
+  contradicting `classify()`'s own "a declared list is authoritative" tier
+  and the class's own docstring claim of sharing `ConfirmGateControl`'s
+  vocabulary (which threads its declared set through correctly). Fixed by
+  passing each axis's real declared set straight into `classify()`.
+
+- **Octal-per-octet IP-encoding normalization for the SSRF metadata
+  hard-deny was silently broken.** `_canonical_host` tried `int(p, 0)` on a
+  bare-leading-zero octal octet (e.g. `"0251"`); Python 3's `int(x, 0)`
+  requires an explicit `0o`/`0O` prefix and raises `ValueError` on a bare
+  leading zero instead of parsing it as octal, and the swallowed exception
+  returned the host string unchanged — so `0251.0376.0251.0376` (the
+  metadata IP `169.254.169.254`, octal-encoded) was never recognized as
+  link-local/metadata at all, unlike the already-correct decimal and hex
+  encodings. Fixed with an explicit per-prefix octet parser instead of
+  `int(x, 0)`'s prefix-sniffing.
+
+- **`mylonite check`'s W4 finding used a different tool-name vocabulary
+  from the live `ConfirmGateControl`**, drifting in both directions:
+  `write_file`/`create_invoice`/`issue_refund`-style tools (guarded live)
+  were invisible to `check`, while `publish_report`/`share_document`-style
+  tools (never touched by the live control) were flagged. Fixed by adding
+  `control_shim.consequential_tool_names()` — the exact same
+  `_CONSEQUENTIAL_HINTS` vocabulary and `classify()` call the live control
+  uses — and switching `check` to it. Also, `_has_approval_sibling` used to
+  silence the ENTIRE finding surface-wide the moment ANY tool anywhere
+  matched an approval-shaped name (e.g. an unrelated `verify_captcha`
+  helper suppressed a genuine `send_email`-with-no-confirm-step finding);
+  it now requires the approval-shaped tool to share a meaningful name token
+  with the specific sink it's meant to confirm.
+
 ### Fixed
 
 - **`build_pr_body` no longer captions a genuine SERVER-LAYER differential as
