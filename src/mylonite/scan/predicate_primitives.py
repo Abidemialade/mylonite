@@ -128,24 +128,54 @@ def executed_occurrence_index(
     ``{"tool","args","result","is_error"}`` entries.
 
     Returns ``None`` on malformed JSON or zero matching executed calls.
+
+    Delegates to :func:`executed_calls` for the structural rules (is_error /
+    deferred-markers) so they live in exactly one place; this function's own
+    job is just "the first executed occurrence of THIS name".
+    """
+    for i, tool, _args in executed_calls(effect_trace_blob, deferred_markers=deferred_markers):
+        if tool == name:
+            return i
+    return None
+
+
+def executed_calls(
+    effect_trace_blob: str,
+    *,
+    deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
+) -> list[tuple[int, str, dict[str, Any]]]:
+    """Every trace entry that actually EXECUTED, as ``(index, tool, args)``.
+
+    The plural of :func:`executed_occurrence_index`: that function answers
+    "where did THIS tool execute" for a caller who already knows the tool
+    name. A structural-recommendation caller doesn't know the tool name in
+    advance — it needs "what executed, in what order, with what arguments"
+    across the whole trace. Same is_error / deferred-marker structural rules
+    (see that function's docstring). Returns ``[]`` on malformed JSON or a
+    non-list trace — never raises.
     """
     try:
         trace = json.loads(effect_trace_blob or "[]")
     except json.JSONDecodeError:
-        return None
+        return []
     if not isinstance(trace, list):
-        return None
+        return []
     lowered = tuple(m.lower() for m in deferred_markers)
+    out: list[tuple[int, str, dict[str, Any]]] = []
     for i, entry in enumerate(trace):
-        if not isinstance(entry, dict) or entry.get("tool") != name:
+        if not isinstance(entry, dict) or entry.get("is_error"):
             continue
-        if entry.get("is_error"):
-            continue  # structural refusal — not executed
         result = str(entry.get("result", "")).lower()
         if any(m in result for m in lowered):
-            continue  # deferred/queued — not executed (heuristic last resort)
-        return i
-    return None
+            continue
+        name = entry.get("tool")
+        if not isinstance(name, str):
+            continue
+        args = entry.get("args", {}) or {}
+        if not isinstance(args, dict):
+            args = {}
+        out.append((i, name, args))
+    return out
 
 
 def tool_executed_not_deferred(
