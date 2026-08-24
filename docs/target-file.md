@@ -150,7 +150,7 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 ## The boundary controls fail closed
 
 The four boundary controls the adapter-boundary shim synthesizes (W1 description
-sanitizer, W2 untrusted-data envelope, W3 egress allowlist, W4 confirm-gate) each
+pinning, W2 information-flow control, W3 egress allowlist, W4 confirm-gate) each
 answer one question about a tool call: *does this control apply to this tool?* For
 W2/W3/W4, that answer is decided in this order:
 
@@ -169,11 +169,20 @@ This means a W2/W3/W4 tool your target exposes that doesn't match any hint, and 
 declared, is now guarded by default instead of silently passed through unguarded:
 - W3 — an egress call with no destination Mylonite can identify is **refused**:
   `refused: ... no destination argument could be identified`.
-- W4 — an unhinted consequential call is **deferred**:
-  `deferred: ... requires explicit confirmation`.
-- W2 — an unhinted (or simply undeclared) tool's non-error result is **wrapped** in
-  the `<untrusted>` envelope, same as an obvious read tool. With no `read_tool_names`
-  declared, this means EVERY tool's result gets wrapped, not just retrieval-shaped ones.
+- W4 — an unconfirmed consequential call is **staged, not blocked**: the first
+  attempt is refused with a server-minted, single-use token
+  (`confirmation_required: retry ... with confirm_token=...`), and a retry
+  carrying that exact token is let through — a genuine two-step confirm flow,
+  not a permanent block.
+- W2 — an unhinted (or simply undeclared) tool's non-error result **taints the
+  session** (labelled untrusted), same as an obvious read tool. With no
+  `read_tool_names` declared, this means EVERY tool's result taints the
+  session, not just retrieval-shaped ones. Once tainted, a call to a
+  consequential-or-egress-shaped tool is **refused** —
+  `refused: ... is a sink and untrusted content is in scope this session` —
+  until a fresh session starts; this is information-flow control (labelling
+  data, then gating the sink), not a text-marking envelope the model has to
+  respect on its own.
 
 The first time this fires for a given tool name in a run, Mylonite logs a warning
 (once per tool name) with the exact `control_config` snippet to paste to classify it
