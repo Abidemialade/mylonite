@@ -29,12 +29,11 @@ The PR body is itself a result surface (see [Reading the results](reading-result
   reviewer sees *why the test is trustworthy*, not just that it exists.
 - **Located at** — the exact locus to fix (which tool description / returned content /
   action handler / system-prompt line).
-- **The proven fix** — for your own app (`--target-file`), a target-specific
-  recommendation naming your actual tool and the actual argument that landed the
-  exploit, as a fenced code sketch (never a diff — Mylonite doesn't know your file
-  layout) tiered deterministic/probabilistic/detective; for the bundled reference app,
-  a generic illustrative diff implementing the boundary control the differential proved
-  load-bearing.
+- **The proven fix** — an evidence-anchored recommendation naming the actual tool and
+  argument that landed the exploit (your own tool for a `--target-file` app; the
+  reference app's tool for the bundled `reference:*` targets), as a fenced code sketch
+  (never a diff — Mylonite doesn't assert it knows your file layout) tiered
+  deterministic/probabilistic/detective.
 - **Compliance** — the OWASP-LLM/ASI · MITRE ATLAS · NIST tags.
 - **Inline annotations** — a best-effort GitHub check-run annotation on the offending
   prompt line, when the AI layer is a committed file.

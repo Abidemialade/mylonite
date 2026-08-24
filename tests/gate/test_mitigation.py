@@ -171,36 +171,29 @@ def test_pr_body_surfaces_differential_oracle_evidence():
     assert "W2:indirect-injection-note-body-direct" in body
 
 
-def test_all_fix_diffs_present_and_are_code_blocks():
-    """R3: every weakness class ships a concrete, reviewable fix (a fenced diff),
-    parallel to the prose mitigation snippets."""
-    base = ir.files("mylonite.gate") / "fixes"
-    for name in ("W1", "W2", "W3", "W4", "generic"):
-        text = (base / f"{name}.md").read_text(encoding="utf-8")
-        assert text.strip(), f"fixes/{name}.md is empty"
-        assert "```diff" in text, f"fixes/{name}.md has no diff block"
-
-
-def test_pr_body_includes_proven_fix_diff_for_control_finding():
-    """A control-efficacy finding surfaces the fix as a reviewable diff derived from
-    the proven control — not just prose — and frames it as proven."""
+def test_pr_body_includes_proven_fix_recommendation_for_control_finding():
+    """A control-efficacy finding surfaces the fix as a target-specific, evidence-
+    anchored recommendation (PR11: gate/fixes/*.md's fixed illustrative diff is
+    retired) — not just prose — and frames it as proven."""
     ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
     ex = ex.model_copy(
         update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
     )
     body = build_pr_body(ex, _report())
-    assert "```diff" in body  # rendered as a reviewable diff, not prose
-    assert "<untrusted>" in body  # the W2 envelope fix
+    assert "```" in body  # rendered as a fenced code sketch, never a diff
+    assert "```diff" not in body
+    assert "untrusted" in body.lower()  # the W2 information-flow-control fix
     assert "Proven fix" in body  # framed as proven load-bearing
 
 
-def test_pr_body_fix_diff_matches_weakness_class():
-    """The fix diff is class-specific: a W4 finding shows the confirm-gate patch; a
-    non-control finding still gets a (recommended) fix diff."""
+def test_pr_body_fix_recommendation_matches_weakness_class():
+    """The recommendation is class-specific: a W4 finding shows the confirm-gate
+    sketch; a non-control finding still gets a (recommended) fix."""
     ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
     body = build_pr_body(ex, _report())
-    assert "```diff" in body
-    assert "confirmation_required" in body  # the W4 ConfirmGate fix
+    assert "```" in body
+    assert "```diff" not in body
+    assert "confirmation_required" in body  # the W4 confirm-gate sketch
     assert "Recommended fix" in body  # non-control framing
 
 

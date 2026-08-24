@@ -93,10 +93,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`gate/fixes/*.md`** (the fixed, class-level illustrative diff `build_pr_body`
+  fell back to when no `TargetContext` was supplied — every reference-target
+  finding, before this release) — a deliberate compat event, sequenced last so
+  the target-specific recommendation engine (Workstreams D/D6) existed to
+  replace it first. `build_pr_body` now always calls `gate.recommend`/
+  `render_markdown`, for every target including the bundled reference app:
+  the fix section is now an evidence-anchored, target-specific recommendation
+  (a fenced code sketch, never a diff) instead of a generic illustrative one.
+  `gate/mitigations/*.md` (the prose background context `_snippet` renders)
+  is unaffected and stays.
 - **`mylonite demo`, `mylonite init`, `mylonite doctor`, and `mylonite taxonomy
   list`.** These were the onboarding/diagnostic surface, not the AI-layer
-  security-testing core; removing them shrinks the CLI to `version`, `scan`,
-  `generate`, `validate`, `gate`, `report`, `ablate`. Concretely:
+  security-testing core; removing them shrinks the CLI to `version`, `check`,
+  `scan`, `generate`, `validate`, `gate`, `report`, `ablate`. Concretely:
   - `demo`'s offline vulnerable-vs-guarded playground and its packaged
     fixtures (`src/mylonite/demo/`) are gone; the reference app is exercised
     directly via `mylonite scan reference:vulnerable` / `reference:guarded`

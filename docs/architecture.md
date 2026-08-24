@@ -61,7 +61,8 @@ plus the custom-target legs **stability · effect · consensus**. The honesty in
 - **`report/sarif.py`**, **`report/bundle.py`**, **`report/severity.py`** — the
   [SARIF / JSON](reading-results.md) renderers + shared severity rule.
 - **`gate/orchestrator.py`** — the scan→generate→validate→PR sequence + exit codes.
-- **`gate/mitigation.py`** + **`gate/fixes/`** — the PR body and the **proven-fix diff**.
+- **`gate/mitigation.py`** + **`gate/recommend.py`** — the PR body and the target-specific,
+  evidence-anchored recommendation (a fenced code sketch, never a diff).
 - **`gate/localize.py`** + **`gate/annotate.py`** — pin a finding to its locus and post
   inline PR check-run annotations.
 - **`gate/pr.py`** / **`gate/workflows.py`** — the git/`gh` PR flow and CI workflow templates.

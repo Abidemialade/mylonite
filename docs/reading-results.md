@@ -75,14 +75,12 @@ When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
   instruction, which tool's *returned content* was trusted, which action *handler* fired
   without a guard, or which *system-prompt line* is at fault. Derived deterministically
   from the finding (`mylonite.gate.localize`).
-- **The proven fix** — for your own app (`--target-file`), a target-specific
-  recommendation naming your actual tool and argument, as a fenced **code sketch**
-  (never a diff — Mylonite doesn't know your file layout), tiered
-  deterministic/probabilistic/detective (`mylonite.gate.recommend`); for the bundled
-  reference app, a generic illustrative **code diff** implementing the boundary control
-  the differential proved load-bearing (`mylonite.gate.mitigation`, `gate/fixes/`).
-  Framed as a **Proven fix** for a control-efficacy finding, a **Recommended fix**
-  otherwise.
+- **The proven fix** — an evidence-anchored recommendation naming the actual tool and
+  argument that landed the exploit (your own tool, for a `--target-file` app; the
+  reference app's tool, for the bundled `reference:*` targets), as a fenced **code
+  sketch** (never a diff — Mylonite doesn't assert it knows your file layout), tiered
+  deterministic/probabilistic/detective (`mylonite.gate.recommend`). Framed as a
+  **Proven fix** for a control-efficacy finding, a **Recommended fix** otherwise.
 - **Inline annotations** — with `--open-pr`, a finding that maps to a committed prompt
   line also posts a best-effort GitHub check-run annotation on that line.
 
