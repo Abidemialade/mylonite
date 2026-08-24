@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Release-process enforcement.** A `gate` job now runs *before* anything in
+  `release.yml` is built or uploaded, refusing a tag that disagrees with
+  `src/mylonite/version.py`, `pyproject.toml`, or `CHANGELOG.md`. Previously
+  nothing compared them: `git tag v9.9.9 && git push` would have published
+  `0.7.8` under a `v9.9.9` release, and the only complaint would have arrived
+  after the wrong file was already on PyPI — where a version number, once used,
+  can never be reused. The release also now runs the **full test suite against
+  the tagged commit** (`ci.yml` gained `workflow_call`), so a published artefact
+  is one CI actually verified. Chain: `gate → ci → build → testpypi → pypi →
+  github-release`.
+
+  Backed by `scripts/release_version.py` (pure, standard-library-only helpers)
+  and `scripts/prepare_release.py`, which performs the whole mechanical
+  checklist — bump, roll `[Unreleased]` into a dated section, add the
+  link-reference, refresh `.secrets.baseline` — and offers a `--check` mode that
+  is exactly what the gate runs. It reports every problem at once rather than
+  the first, never writes in `--check` mode, and deliberately does **not** tag
+  or push: that stays a human decision.
+
+- **A `build` job on every PR** (`python -m build` + `twine check`, plus an
+  assertion that the built filenames carry the version `src/mylonite/version.py`
+  declares). Nothing on a PR built a distribution before — packaging breakage
+  was first discovered mid-release, after a tag had already been pushed.
+
+- **`docs/contributing/releasing.md`** — the releasing and versioning policy:
+  the pre-1.0 semver rule, the two independent version axes (package vs
+  `CONTRACT_VERSION`, and why a contract major is the harder break),
+  falsifiable 1.0.0 criteria, the known-untagged history, and the
+  `mcp-kitchen-sink` `mcp<2.0` coordination constraint.
+
 - **`TargetFile.framework`** (optional, free-form, e.g. `langchain`/`crewai`/
   `llamaindex`) — labels a structural recommendation's code sketch with the
   operator's agent framework, alongside the language now INFERRED from the
@@ -140,6 +170,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deprecated (warns) for now.
 
 ### Changed
+
+- **The package version now has a single source of truth.** `pyproject.toml`
+  declares `dynamic = ["version"]` and reads `src/mylonite/version.py` via
+  `[tool.hatch.version]`. It previously lived in both files, reconciled by a
+  test — and updating only one is exactly how 0.7.7 shipped wrong the first
+  time. `mcp-kitchen-sink` gets the same treatment; its two copies had nothing
+  at all enforcing they agreed.
+
+- **Release tag triggers collapse to `v[0-9]+.[0-9]+.[0-9]+`.** The previous
+  globs matched `v1.0.0rc1` (the trailing `*` swallowed `0rc1`), so a prerelease
+  tag would have gone to PyPI as a normal release; they also silently never
+  fired for anything at or below `v0.5.x`. Added `workflow_dispatch` with a
+  `tag` input so a late-stage failure can be retried without inventing a
+  throwaway version.
+
+- `CONTRIBUTING.md`'s 70-line release checklist is now the one-command path plus
+  a link to the policy page. Its post-mortem notes are preserved there — those
+  failures are why the gate exists.
 
 - **`ScanReport.aborted`'s JSON schema is now a constrained `enum`, not a bare
   string** (`scan_report.schema.json`; a `contract-change` per GOVERNANCE.md's
@@ -304,6 +352,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   basis. Corrected to describe what was actually true.
 
 ### Fixed
+
+- **`.secrets.baseline` was stale, and the documented fix for it never worked.**
+  `CONTRIBUTING.md` prescribed piping filenames into
+  `detect_secrets.pre_commit_hook` on stdin, but `filenames` is a *positional*
+  argument — it scanned zero files, wrote nothing, and exited `0`. That silent
+  no-op is why the problem recurred for 0.7.7 *and* 0.7.8 after being written
+  down. Now documents the `xargs` form, the Windows path-separator
+  normalisation (`detect-secrets` keys results with `os.sep`, and a
+  backslash-keyed baseline matches nothing on ubuntu), and the staged-baseline
+  precondition.
+
+- **Seven broken or missing `CHANGELOG.md` link-references.** Four release
+  headers rendered as literal bracketed text, `[Unreleased]` had no definition
+  at all, and two definitions pointed at a `v0.6.0` tag that does not exist. The
+  three versions documented as released but never tagged (0.6.0, 0.7.1, 0.7.2)
+  now say so under their own headers and link to what actually contains them.
+  `tests/test_changelog.py` pins this on every PR — including that the current
+  version has a CHANGELOG section, catching the 0.7.6/0.7.7 failure at PR time
+  rather than at tag time.
+
+- **`github-release` could publish an empty release body.** Its guard used
+  `[ ! -s ]`, which a section containing only newlines passes. It now requires a
+  non-blank line, and is a backstop: the gate rejects that case before
+  publishing rather than after.
+
+- Aligned `release-kitchen-sink.yml`'s pinned publish-action SHA with
+  `release.yml` (v1.14.1 → v1.14.2), and corrected `CONTRIBUTING.md`'s claim
+  that the CHANGELOG is generated from Conventional Commits — it is hand-written.
 
 - **`build_pr_body` no longer captions a genuine SERVER-LAYER differential as
   "(proxy)".** The boundary-shim caveat used to key off `is_control` alone,
