@@ -538,6 +538,36 @@ def test_secret_shaped_argument_value_is_redacted_everywhere():
     assert secret not in dumped
 
 
+def test_short_credential_keyed_argument_is_redacted_in_the_fallback_evidence_path():
+    """A W4 call with no destination-shaped argument falls through to the
+    whole-args-dict evidence path (_evidence_for_tool's no-destination
+    branch). A short, unprefixed credential value (no sk-ant-/aws-key-style
+    shape for the plain redact() shape-check to catch) under an unambiguous
+    KEY NAME (`password`) must still be masked -- via redact_value's key-name
+    check, not just redact()'s shape check, which never flags short values at
+    all regardless of key."""
+    trace = [
+        {
+            "tool": "send_email",
+            "args": {"account": "1234", "password": "abc123"},
+            "result": "sent",
+            "is_error": False,
+        }
+    ]
+    ex = _exploit(
+        pattern_id="w4",
+        weakness="W4",
+        effect_trace=trace,
+        tool_calls=("send_email",),
+        metadata={"consequential_tool": "send_email"},
+    )
+    rec = recommend(ex)
+    rendered = render_markdown(rec)
+    dumped = json.dumps(to_dict(rec))
+    assert "abc123" not in rendered
+    assert "abc123" not in dumped
+
+
 # --- no-LLM boundary ---------------------------------------------------------
 
 

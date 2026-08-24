@@ -214,6 +214,32 @@ async def test_ifc_accepts_untrusted_tool_is_exempt_even_while_tainted() -> None
     assert result.content == "a summary"
 
 
+async def test_ifc_declared_consequential_tools_is_authoritative_not_additive() -> None:
+    """Regression guard: `_is_sink_tool` used to pass `declared=None` straight
+    into `classify()` regardless of whether the operator HAD declared
+    consequential_tools/egress_tools, so a declared list only ever ADDED
+    sinks on top of the hint/fail-closed default -- it could never EXEMPT a
+    tool the operator explicitly scoped out. `get_weather` matches neither
+    _CONSEQUENTIAL_HINTS nor _EGRESS_HINTS, so with BOTH axes declared (and
+    `get_weather` in neither), it must not be refused as a sink."""
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="poisoned"),
+            "get_weather": ToolResult(name="get_weather", content="sunny"),
+        }
+    )
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),
+        egress_tools=frozenset({"web_fetch"}),
+    )
+    shim = ControlServerShim(server, [control])
+    await shim.call_tool("read_note", {"id": "1"})  # taint the session
+    result = await shim.call_tool("get_weather", {})
+    assert result.isError is False
+    assert result.content == "sunny"
+
+
 async def test_ifc_error_result_does_not_taint() -> None:
     """A read tool's ERROR result carries no content the model could act on —
     must not taint the session (mirrors UntrustedEnvelopeControl's same rule)."""
@@ -258,6 +284,43 @@ async def test_ifc_taint_resets_between_sessions() -> None:
     session_two = ControlServerShim(server, [control])
     clean = await session_two.call_tool("send_email", {"to": "x"})
     assert clean.isError is False
+
+
+async def test_ifc_taint_isolated_across_concurrently_active_shims() -> None:
+    """The CONCURRENT counterpart to the sequential reset test above: two
+    ControlServerShims built from the SAME long-lived control instance is
+    exactly the shape ScanEngine's default max_concurrent=3 produces (one
+    adapter, one control list, multiple in-flight invoke() calls). Building
+    session_two (which calls reset()) while session_one is still open must
+    NOT wipe session_one's already-tainted state out from under it, and
+    session_one's taint must not leak into session_two either — each session
+    needs its own isolated control state, not just sequentially-reset shared
+    state. Regression guard: this failed before ControlServerShim started
+    deep-copying its controls instead of resetting the shared originals in
+    place."""
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),
+    )
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="poisoned"),
+            "send_email": ToolResult(name="send_email", content="sent"),
+        }
+    )
+    session_one = ControlServerShim(server, [control])
+    await session_one.call_tool("read_note", {"id": "1"})  # session_one taints
+
+    # A concurrent invoke() builds a second shim from the SAME shared control
+    # list while session_one is still "open" — this must not disturb
+    # session_one's already-tainted state.
+    session_two = ControlServerShim(server, [control])
+
+    refused = await session_one.call_tool("send_email", {"to": "x"})
+    assert refused.isError is True  # session_one's taint must still apply
+
+    clean = await session_two.call_tool("send_email", {"to": "x"})
+    assert clean.isError is False  # session_two never read anything untrusted
 
 
 def test_ifc_config_snippet_matches_envelope_control() -> None:
@@ -474,6 +537,23 @@ def test_host_allowed_normalises_hex_octet_ip_encoding() -> None:
     assert not host_allowed(f"http://{hex_encoded}/", ())
 
 
+def test_host_allowed_normalises_bare_leading_zero_octal_ip_encoding() -> None:
+    """169.254.169.254 written per-octet in bare-leading-zero octal.
+
+    Regression guard: `int(p, 0)` requires an explicit `0o`/`0O` prefix for
+    octal in Python 3 and raises ValueError on a bare `"0251"`-shaped string
+    instead of parsing it as octal 251 (== decimal 169) -- the swallowed
+    exception used to return the host string UNCHANGED, so this encoding
+    silently never matched the link-local/metadata hard-deny at all. Passing
+    the raw octal string itself as the (sole) allowlist entry proves the
+    hard-deny fires even when it coincidentally string-matches an allowlist
+    entry -- the exact case the hard-deny exists for.
+    """
+    octal_encoded = "0251.0376.0251.0376"  # 169.254.169.254 written per-octet in octal
+    assert not host_allowed(f"http://{octal_encoded}/", ())
+    assert not host_allowed(f"http://{octal_encoded}/", (octal_encoded,))
+
+
 def test_host_allowed_private_range_ip_not_blanket_denied() -> None:
     """Only link-local (169.254.0.0/16) is hard-denied -- a general RFC1918
     private address (e.g. an operator's real internal API) stays purely
@@ -625,6 +705,31 @@ async def test_w4_a_guessed_or_stale_token_is_refused() -> None:
     )
     assert forged.isError is True
     assert server.calls == []
+
+
+async def test_w4_genuine_token_from_one_call_does_not_confirm_a_different_call() -> None:
+    """A GENUINE, server-minted token (not a guessed/forged string) is bound
+    to the exact arguments it was minted for -- replaying it against the
+    SAME tool with DIFFERENT arguments must not confirm. This is distinct
+    from `test_w4_a_guessed_or_stale_token_is_refused` above (which uses an
+    arbitrary literal, never a real token at all): the property under test
+    here is that `_sign()` actually folds `arguments` into the HMAC, not
+    just the tool name -- a regression that dropped `arguments` from the
+    signable payload (binding the token only to `name`) would still pass
+    every other W4 test in this file, since none of them replay a REAL
+    token against genuinely different arguments for the SAME tool."""
+    server = _FakeServer(results={"send_email": ToolResult(name="send_email", content="sent")})
+    control = ConfirmGateControl(consequential_tools=frozenset({"send_email"}))
+    shim = ControlServerShim(server, [control])
+    staged = await shim.call_tool("send_email", {"to": "alice@example.com"})
+    assert staged.isError is True
+    token = staged.content.split("confirm_token='")[1].split("'")[0]
+
+    replayed = await shim.call_tool(
+        "send_email", {"to": "attacker@evil.test", "confirm_token": token}
+    )
+    assert replayed.isError is True
+    assert server.calls == []  # the inner tool must never have run
 
 
 async def test_w4_pending_confirmation_does_not_survive_reset() -> None:

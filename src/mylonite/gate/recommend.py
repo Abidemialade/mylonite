@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Final, Literal
 
-from mylonite._redaction import redact
+from mylonite._redaction import redact, redact_value
 from mylonite.contracts._types import ExploitRecord, ValidationReport
 from mylonite.gate.localize import Localization, localize
 from mylonite.scan import control_shim
@@ -274,11 +274,16 @@ def _evidence_for_tool(
                 source="effect_trace",
             )
         # No destination-shaped arg identified; still real evidence that the
-        # tool executed — quote the whole (redacted) arg dict as the shape.
+        # tool executed — quote the whole arg dict as the shape. MUST go
+        # through redact_value() (key-name-aware) first, not straight into
+        # _quote()/redact() (shape-only): redact() only masks a value that is
+        # itself long/prefixed enough to look secret-shaped, so a short
+        # credential under an unambiguous key (`{"password": "abc123"}`) rides
+        # through untouched into the rendered PR body / SARIF / JSON bundle.
         return Evidence(
             tool=tool,
             argument=None,
-            value=_quote(args) if args else None,
+            value=_quote(redact_value(args)) if args else None,
             occurrence=occurrence,
             executed=True,
             source="effect_trace",
