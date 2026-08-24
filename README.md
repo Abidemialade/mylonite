@@ -71,6 +71,11 @@ mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml --scop
 Treat it as a scope check, not a verdict: it reads your tool *surface*, not your tool
 descriptions, and everything it suggests is a hint for you to confirm.
 
+Still free: `mylonite check --target-file app.yaml` connects once (still no API key, still
+no attack) and reports structural exposure — consequential tools with no approval step,
+descriptions that steer the agent, tools taking a network destination, and unpinned
+descriptions. `--enforce` turns it into a CI gate once the surface is clean.
+
 Proving which weaknesses actually land — and which of your controls stops them — is the
 scan itself, and that needs a key:
 
@@ -108,6 +113,8 @@ corporate network, see [docs/enterprise-networking.md](./docs/enterprise-network
 Every command has a backing [verification](./docs/verification.md) number or a committed
 differential proof. The core surface:
 
+- **`mylonite check --target-file <path>`** — static structural pre-check: no LLM, no
+  API key, no spend. `--enforce` turns it into a CI gate; belongs in stage 1, next to lint.
 - **`mylonite gate <target>`** — the end-to-end flow: scan → generate → validate →
   optionally open a gating PR. Writes the regression test and two CI workflow templates.
 - **`mylonite scan <target>`** — the exploit-finding loop against the bundled reference app

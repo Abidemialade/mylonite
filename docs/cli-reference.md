@@ -4,12 +4,36 @@ Every command, its key options, and a worked example. Run `mylonite COMMAND --he
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
-**Exit codes:** `0` ok/kept · `2` config or usage error (incl. an empty scan) · `3`
-LLM-call budget exceeded · `4` provider unreachable · `5` test rejected (not kept) · `6`
-`gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`:
-the validator returned nothing (internal collaborator failure).
+**Exit codes:** `0` ok/kept · `1` `check --enforce`: structural findings present · `2`
+config or usage error (incl. an empty scan) · `3` LLM-call budget exceeded · `4` provider
+unreachable · `5` test rejected (not kept) · `6` `gate`: the test generator returned
+nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing
+(internal collaborator failure).
 
 ---
+
+## `check` — static structural pre-check
+
+Zero-key, zero-spend on-ramp: connects to a target ONCE (`describe()` — no LLM call, no
+attack) and reports structural exposure from the tool schemas alone. Belongs in CI stage
+1, next to lint — cheap enough to run on every push.
+
+Options: `--target-file PATH` (required — or set `target_file:` in `mylonite.yaml`);
+`--enforce` (exit `1` if any finding is present, instead of reporting and exiting `0` —
+the report-then-enforce adoption ramp); `--config mylonite.yaml` (auto-discovered from
+`./mylonite.yaml` when present).
+
+```bash
+mylonite check --target-file app.yaml
+mylonite check --target-file app.yaml --enforce   # CI gate once the surface is clean
+```
+
+Reports: consequential tools with no approval-shaped sibling tool, descriptions that
+steer the agent, tools taking an apparent network destination, content-processing tools
+that could carry an indirect-injection payload, unpinned tool descriptions (paste-ready
+digests for `control_config.description_pins`), and which weakness classes the surface
+suggests. Every finding is a hint to confirm, never a verdict — `scan`/`gate` are what
+prove an attack actually lands.
 
 ## `scan` — find weaknesses
 

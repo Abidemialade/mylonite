@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mylonite check --target-file PATH [--enforce]`** — the new zero-key,
+  zero-spend static on-ramp (replaces `demo`'s role as the free first step,
+  now that `demo` itself is removed — see Removed below). Connects to the
+  target ONCE (`describe()` — no LLM call, no attack, no `--authorize`
+  needed) and reports structural exposure straight from the tool schemas:
+  consequential tools with no approval-shaped sibling tool, descriptions
+  that steer the agent (reusing the same pattern `description_carries_
+  instruction` already detects), tools taking an apparent network
+  destination (new `mylonite.scan.tool_classifier.destination_tools`),
+  content-processing tools that could carry an indirect-injection payload,
+  unpinned tool descriptions (paste-ready `DescriptionIntegrityControl`
+  digests for `control_config.description_pins`), and which weakness
+  classes the surface suggests. `--target-file` also auto-discovers from
+  `mylonite.yaml`'s `target_file:` key, matching `scan`/`gate`/`validate`/
+  `ablate`. Reports and exits `0` by default; `--enforce`
+  exits `1` (new `EXIT_FINDINGS`) if any finding is present — a linter-style
+  report-then-enforce adoption ramp, meant for CI stage 1 next to lint
+  (cheap enough to run on every push, unlike the live stages that spend LLM
+  budget). Every finding is a hint to confirm, never a verdict — `scan`/
+  `gate` are what prove an attack actually lands.
+
 - **`TestGenerator.emit` gained an optional `context: ExecContext | None =
   None` parameter** (`contracts/test_generator.py`, `CONTRACT_VERSION` 0.1.0
   -> 0.2.0 — a `contract-change`, tracked by issue #78, which reserved the

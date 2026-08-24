@@ -40,7 +40,13 @@ from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.layout import Layout, resolve_layout
-from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
+from mylonite.scan.tool_classifier import destination_tools
+from mylonite.scan.tool_roles import (
+    _classify_tools,
+    _ToolRoles,
+    content_processor_tools,
+    instruction_bearing_tools,
+)
 from mylonite.version import __version__
 
 if TYPE_CHECKING:
@@ -72,6 +78,7 @@ app = typer.Typer(
 _console = Console()
 
 EXIT_SUCCESS = 0
+EXIT_FINDINGS = 1
 EXIT_CONFIG = 2
 EXIT_BUDGET = 3
 EXIT_PROVIDER = 4
@@ -4878,5 +4885,217 @@ def ablate(
             "credentials/connectivity, then re-run."
         )
         raise typer.Exit(code=total_failure_exit_code(observed_outcomes))
+
+
+#: Tool-NAME fragments suggesting a consequential-action tool has a paired
+#: confirm/approval step elsewhere on the same target surface. Mirrors the
+#: vocabulary `ConfirmGateControl`'s own confirm-token flow uses (`confirm_send`
+#: in the reference app), broadened for a static, cross-target discovery check.
+_APPROVAL_NAME_HINTS: Final = ("confirm", "approve", "authorize", "authorise", "verify")
+
+
+def _has_approval_sibling(tools: list[Any]) -> bool:
+    """True if ANY tool on the surface looks like a confirm/approval step.
+
+    Coarse and target-wide, not paired to a specific consequential tool: there
+    is no static signal for "which sink does this confirm gate", so `check`
+    reports the surface-level gap (no confirm-shaped tool exists at all) rather
+    than guessing a pairing it cannot verify without a live call.
+    """
+    for tool in tools:
+        name = (getattr(tool, "name", "") or "").lower()
+        if any(hint in name for hint in _APPROVAL_NAME_HINTS):
+            return True
+    return False
+
+
+def _check_description_pins(tools: list[Any], control_config: Any | None) -> list[tuple[str, str]]:
+    """``(tool_name, digest)`` for every tool description NOT already pinned.
+
+    Reuses `DescriptionIntegrityControl.digest` — the exact hash the W1
+    control computes at call time — so a digest reported here can be pasted
+    straight into `control_config.description_pins` and take effect unchanged.
+    """
+    from mylonite.scan.control_shim import DescriptionIntegrityControl
+
+    pins: dict[str, str] = getattr(control_config, "description_pins", None) or {}
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        description = getattr(tool, "description", "") or ""
+        if not name or not description:
+            continue
+        if name not in pins:
+            out.append((name, DescriptionIntegrityControl.digest(description)))
+    return out
+
+
+@app.command()
+def check(
+    target_file: Annotated[
+        Path | None,
+        typer.Option("--target-file", help="Custom-target YAML (required): the app to check."),
+    ] = None,
+    enforce: Annotated[
+        bool,
+        typer.Option(
+            "--enforce",
+            help=(
+                "Exit 1 if any structural exposure is found, instead of reporting and "
+                "exiting 0. Mirrors a linter's report-then-enforce ramp: adopt with "
+                "--enforce off, turn it on once the surface is clean."
+            ),
+        ),
+    ] = False,
+    run_config_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            help=(
+                "A declarative mylonite.yaml run config. Fills --target-file when you "
+                "omit it; auto-discovered from ./mylonite.yaml when present; an explicit "
+                "flag always wins."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.
+
+    Connects to the target ONCE (`describe()` — exactly what `scan --scaffold`
+    already does) and reports structural exposure from the tool schemas alone:
+    consequential tools with no approval-shaped sibling, descriptions that
+    steer the agent, tools taking an apparent network destination, content-
+    processing tools that could carry an indirect-injection payload, unpinned
+    tool descriptions (rug-pull exposure), and which weakness classes the
+    surface suggests. Every finding is a HINT to confirm, never a verdict —
+    the differential oracle (`scan`/`gate`) is what proves an attack actually
+    lands. Belongs in CI stage 1, next to lint: cheap enough to run on every
+    push, unlike the live stages that spend LLM budget.
+    """
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.factory import build_mcp_adapter
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+    _config_path, rc = _discover_run_config(run_config_path, command="check")
+    if target_file is None and rc is not None:
+        target_file = rc.target_file
+
+    if target_file is None:
+        echo_err(
+            "--target-file is required (or set target_file: in mylonite.yaml). "
+            "See `mylonite scan --scaffold` to create one."
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+
+    try:
+        tf = load_target_file(target_file)
+    except Exception as exc:
+        echo_exc(f"could not load {target_file}", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    try:
+        spec = build_target_spec(tf)
+    except Exception as exc:
+        echo_exc("invalid target file", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+    adapter = build_mcp_adapter(
+        family=spec.family, scope=tf.scope, model="claude-haiku-4-5-20251001"
+    )
+
+    echo_err(f"connecting to {target_file} to introspect its tools (no LLM call)…")
+    try:
+        descriptor = asyncio.run(adapter.describe())
+    except Exception as exc:
+        echo_exc("could not connect to / introspect the target", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    tools = list(descriptor.tools)
+    if not tools:
+        echo_err("target exposed no tools — nothing to check.")
+        raise typer.Exit(code=EXIT_SUCCESS)
+
+    cc = tf.control_config
+    declared_consequential = set(cc.consequential_tools) if cc else set()
+    if declared_consequential:
+        sink_tools = sorted(declared_consequential)
+        sink_reason = "declared"
+    else:
+        sink_tools = _classify_tools(tools).sink_tools
+        sink_reason = "name hint"
+    unapproved_sinks = sink_tools if sink_tools and not _has_approval_sibling(tools) else []
+
+    egress = destination_tools(tools)
+    declared_egress = set(cc.egress_tools) if cc else set()
+    egress_names = {name for name, _param, _reason in egress}
+    for name in sorted(declared_egress - egress_names):
+        egress.append((name, "(declared)", "declared"))
+
+    steering = instruction_bearing_tools(tools)
+    processors = content_processor_tools(tools)
+    unpinned = _check_description_pins(tools, cc)
+    suggested = _suggest_weakness_classes(tools)
+
+    findings = 0
+    table = Table(title=f"Structural check — {len(tools)} tools discovered")
+    table.add_column("Check")
+    table.add_column("Detail")
+    table.add_column("Confidence")
+
+    if unapproved_sinks:
+        findings += 1
+        table.add_row(
+            "Consequential action, no approval step (W4)",
+            rich_escape(", ".join(unapproved_sinks)),
+            sink_reason,
+        )
+    if steering:
+        findings += len(steering)
+        for name, excerpt in steering:
+            table.add_row(
+                "Description steers the agent (W1)",
+                rich_escape(f"{name}: {excerpt!r}"),
+                "pattern match",
+            )
+    if egress:
+        findings += len(egress)
+        for name, param, reason in egress:
+            table.add_row(
+                "Tool takes a network destination (W3)",
+                rich_escape(f"{name}({param})"),
+                reason,
+            )
+    if processors:
+        findings += len(processors)
+        for name, param in processors:
+            table.add_row(
+                "Content-processing tool, possible injection sink (W2)",
+                rich_escape(f"{name}({param})"),
+                "name hint",
+            )
+    if unpinned:
+        findings += 1
+        table.add_row(
+            "Unpinned tool descriptions (rug-pull exposure)",
+            rich_escape(f"{len(unpinned)} tool(s) — see below for digests to pin"),
+            "not pinned",
+        )
+
+    if findings == 0:
+        echo("no structural exposure found on this tool surface.")
+    else:
+        console_print(_console, table)
+        if unpinned:
+            echo_err("description_pins to add under control_config:")
+            for name, digest in unpinned:
+                echo_err(f"  {name}: {digest}")
+        echo_err(f"suggested weakness_classes {suggested or '[]'} (hints — confirm/edit).")
+
+    echo(f"{findings} structural finding(s) across {len(tools)} tool(s).")
+    if enforce and findings > 0:
+        raise typer.Exit(code=EXIT_FINDINGS)
+    raise typer.Exit(code=EXIT_SUCCESS)
 
 

@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from mylonite.scan.tool_classifier import classify, looks_like_destination, url_values
+from mylonite.scan.tool_classifier import (
+    classify,
+    destination_tools,
+    looks_like_destination,
+    url_values,
+)
+
+
+class _FakeTool:
+    def __init__(self, name: str, json_schema: dict) -> None:
+        self.name = name
+        self.json_schema = json_schema
 
 # -- looks_like_destination -----------------------------------------------------
 
@@ -101,3 +112,35 @@ def test_classify_fail_closed_default_when_no_hint_matches() -> None:
     matched, reason = classify("visit_page", declared=None, hints=("fetch", "http"))
     assert matched is True
     assert reason == "fail-closed default"
+
+
+# -- destination_tools -----------------------------------------------------------
+
+
+def test_destination_tools_matches_on_schema_default_over_name_hint() -> None:
+    tools = [_FakeTool("notify", {"properties": {"target": {"type": "string", "default": "attacker.example"}}})]
+    found = destination_tools(tools)
+    assert found == [("notify", "target", "schema default")]
+
+
+def test_destination_tools_matches_on_param_name_hint() -> None:
+    tools = [_FakeTool("web_fetch", {"properties": {"url": {"type": "string"}}})]
+    found = destination_tools(tools)
+    assert found == [("web_fetch", "url", "name hint")]
+
+
+def test_destination_tools_matches_on_tool_name_hint_with_no_matching_param() -> None:
+    tools = [_FakeTool("web_fetch", {"properties": {"query": {"type": "string"}}})]
+    found = destination_tools(tools)
+    assert found == [("web_fetch", "(unspecified)", "name hint")]
+
+
+def test_destination_tools_is_silent_for_a_tool_with_no_destination_signal() -> None:
+    """A discovery report, not a fail-closed gate: no signal means no finding."""
+    tools = [_FakeTool("read_note", {"properties": {"note_id": {"type": "string"}}})]
+    assert destination_tools(tools) == []
+
+
+def test_destination_tools_ignores_non_string_params() -> None:
+    tools = [_FakeTool("configure", {"properties": {"url": {"type": "integer"}}})]
+    assert destination_tools(tools) == []
