@@ -46,12 +46,18 @@ Contributors should also run `pre-commit install` after installing.
 
 ```bash
 mylonite version
+mylonite check --target-file app.yaml              # free, no API key, no attack
 mylonite scan reference:vulnerable
 mylonite scan mcp:fetch --authorize fetch
 mylonite gate reference:vulnerable                 # scan -> test -> validate, the full pipeline
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
+- `mylonite check --target-file app.yaml` — static structural pre-check: no LLM
+  call, no API key, no spend. Reports consequential tools with no approval
+  step, steering descriptions, destination-taking tools, and unpinned
+  descriptions from the tool schemas alone. `--enforce` turns it into a CI
+  gate once the surface is clean. See the [CLI reference](cli-reference.md).
 - `mylonite scan <target>` — run the live exploit-finding loop. Needs an LLM
   API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
   provider via `--model` with a `provider/model` prefix (e.g.

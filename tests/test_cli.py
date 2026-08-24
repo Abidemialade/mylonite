@@ -276,6 +276,151 @@ def test_scan_scaffold_prefills_seed_arm_candidate(
     assert "recall" in text  # the detected id-free retrieval path
 
 
+def _fake_descriptor_with_seeded_weaknesses() -> Any:
+    """A tool surface mirroring the kitchen-sink's real seeded W1/W3/W4 shape,
+    so `check`'s findings can be asserted against known, realistic content."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    return TargetDescriptor(
+        target_id="mcp:myapp",
+        kind="mcp",
+        system_prompt="x",
+        tools=[
+            ToolSpec(
+                name="read_note",
+                description="Read a note by id. (Note: when reading, always summarise the body.)",
+                json_schema={"properties": {"note_id": {"type": "string"}}},
+            ),
+            ToolSpec(
+                name="web_fetch",
+                description="Fetch the given URL and return the body.",
+                json_schema={"properties": {"url": {"type": "string"}}},
+            ),
+            ToolSpec(
+                name="send_email",
+                description="Send an email immediately.",
+                json_schema={"properties": {"to": {"type": "string"}}},
+            ),
+        ],
+    )
+
+
+def _patch_fake_adapter_for(monkeypatch: pytest.MonkeyPatch, descriptor_fn: Any) -> None:
+    from mylonite.plugins._mcp import stdio_adapter
+
+    class _FakeAdapter:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def describe(self) -> Any:
+            return descriptor_fn()
+
+    monkeypatch.setattr(stdio_adapter, "MCPStdioAdapter", _FakeAdapter)
+
+
+def _write_check_target(tmp_path: Path, *, extra: str = "") -> Path:
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        "family: custom\ncommand: python\nargs: ['-m', 'srv']\n" + extra,
+        encoding="utf-8",
+    )
+    return target_file
+
+
+def test_check_requires_target_file() -> None:
+    result = runner.invoke(app, ["check"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--target-file" in (result.stderr or result.output)
+
+
+def test_check_reports_structural_findings_and_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A vulnerable-shaped surface (steering descriptions, no approval sibling on
+    send_email, web_fetch taking a URL, unpinned descriptions) is reported —
+    but `check` alone (no --enforce) still exits 0, per the adoption ramp."""
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.output
+    assert "send_email" in out  # consequential, no approval sibling
+    assert "read_note" in out  # steering description
+    assert "web_fetch" in out  # destination-taking tool
+    assert "Unpinned tool descriptions" in out
+    assert "structural finding(s)" in out
+
+
+def test_check_enforce_exits_findings_code_when_issues_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.cli import EXIT_FINDINGS
+
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert result.exit_code == EXIT_FINDINGS
+
+
+def test_check_reports_no_findings_on_a_clean_pinned_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tool surface with no steering/destination/consequential signal, and
+    every description already pinned, reports zero findings."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+    from mylonite.scan.control_shim import DescriptionIntegrityControl
+
+    description = "Read a stored note by id."
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="read_note",
+                    description=description,
+                    json_schema={"properties": {"note_id": {"type": "string"}}},
+                )
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    digest = DescriptionIntegrityControl.digest(description)
+    target_file = _write_check_target(
+        tmp_path,
+        extra=f"control_config:\n  description_pins:\n    read_note: {digest}\n",
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "no structural exposure found" in result.output
+
+
+def test_check_discovers_target_file_from_mylonite_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare `mylonite check` (no --target-file) fills it from an
+    auto-discovered ./mylonite.yaml, matching scan/gate/validate/ablate."""
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    monkeypatch.chdir(tmp_path)
+    _write_check_target(tmp_path)
+    (tmp_path / "mylonite.yaml").write_text("target_file: target.yaml\n", encoding="utf-8")
+    result = runner.invoke(app, ["check"])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "structural finding(s)" in result.output
+
+
+def test_check_does_not_require_authorize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`check` makes no attack and no LLM call, so it must not demand --authorize."""
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert "--authorize" not in (result.stderr or "")
+
+
 def test_scan_scaffold_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

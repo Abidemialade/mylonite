@@ -111,6 +111,80 @@ def url_values(arguments: Mapping[str, Any]) -> list[str]:
     return found
 
 
+#: Tool-NAME fragments that suggest a tool performs outbound network egress —
+#: the same vocabulary ``control_shim.py``'s live ``_EGRESS_HINTS`` uses to
+#: classify a W3 call, duplicated here (rather than imported) so this
+#: discovery-only module has no dependency on the boundary-control module.
+_EGRESS_NAME_HINTS: tuple[str, ...] = ("fetch", "http", "download", "curl", "request", "egress", "web")
+
+#: Parameter-NAME fragments that suggest the argument itself holds a network
+#: destination, independent of the tool's own name (``web_fetch(url=...)`` and
+#: ``notify(webhook=...)`` both match on the parameter, not just the tool).
+_DESTINATION_PARAM_HINTS: tuple[str, ...] = (
+    "url",
+    "host",
+    "endpoint",
+    "uri",
+    "link",
+    "address",
+    "domain",
+    "webhook",
+)
+
+
+def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
+    """``(tool_name, param_name, reason)`` for tools that plausibly egress.
+
+    A DISCOVERY report, not a fail-closed gate: a tool with no destination-shaped
+    signal at all is simply omitted, never flagged by default (unlike
+    :func:`classify`'s runtime "fail-closed default" tier, which is calibrated
+    for a live boundary control refusing an unrecognised call — flagging every
+    unmatched tool here would bury the real signal under noise).
+
+    ``reason`` is one of:
+
+    * ``"schema default"`` — a string parameter's JSON-schema ``default`` or
+      ``example`` value is itself destination-shaped (:func:`looks_like_destination`)
+      — structural evidence, independent of any name.
+    * ``"name hint"`` — the tool's own name matches :data:`_EGRESS_NAME_HINTS`,
+      or the parameter's name matches :data:`_DESTINATION_PARAM_HINTS`.
+
+    Each tool is reported at most once, at its highest-confidence match
+    (schema default over name hint).
+    """
+    found: list[tuple[str, str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        if not name:
+            continue
+        schema = getattr(tool, "json_schema", {}) or {}
+        props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        if not isinstance(props, dict):
+            continue
+        best: tuple[str, str] | None = None
+        for pname, pspec in props.items():
+            if not isinstance(pspec, dict) or pspec.get("type") != "string":
+                continue
+            for sample_key in ("default", "example"):
+                sample = pspec.get(sample_key)
+                if isinstance(sample, str) and looks_like_destination(sample):
+                    best = (pname, "schema default")
+                    break
+            if best is not None:
+                break
+            if pname.lower() in _DESTINATION_PARAM_HINTS:
+                best = best or (pname, "name hint")
+        if best is None and any(hint in name.lower() for hint in _EGRESS_NAME_HINTS):
+            # The tool's own name hints at egress even with no matching param name
+            # (e.g. a single unnamed positional-style "target" argument scored
+            # differently) -- fall back to flagging the tool without a specific
+            # param, so the operator still sees it.
+            best = ("(unspecified)", "name hint")
+        if best is not None:
+            found.append((name, best[0], best[1]))
+    return found
+
+
 def classify(
     name: str,
     *,
