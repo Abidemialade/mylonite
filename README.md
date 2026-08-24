@@ -104,8 +104,9 @@ mylonite gate --target-file app.yaml --authorize my-app --open-pr   # ...and ope
 
 `gate` writes a validated regression test under `.mylonite/gate/` plus two CI workflows (a
 cheap per-PR gate + nightly discovery), then prints (or, with `--open-pr`, opens) a PR
-carrying the finding, its OWASP/ASI/ATLAS/NIST tags, the validation evidence, and a
-human-applied suggested fix. Full guide: [docs/ci-gating.md](./docs/ci-gating.md). Behind a
+carrying the finding, its OWASP/ASI/ATLAS/NIST tags, the validation evidence, and an
+evidence-anchored recommended fix naming the actual tool and argument that landed the
+exploit. Full guide: [docs/ci-gating.md](./docs/ci-gating.md). Behind a
 corporate network, see [docs/enterprise-networking.md](./docs/enterprise-networking.md).
 
 ## What works today
@@ -125,8 +126,9 @@ differential proof. The core surface:
 - **`mylonite validate <dir>`** — proves an emitted test is meaningful via the
   control-efficacy check (the core differentiator); `--fast` skips it for a weaker gate.
 - **`mylonite ablate <target>`** — scores each safeguard as load-bearing vs. security theater.
-- **`mylonite report <dir>`** — a terminal trust panel, **SARIF 2.1.0**, or a JSON bundle,
-  all carrying the differential proof and the compliance tags.
+- **`mylonite report <dir>`** — a terminal trust panel (including the recommended-fix
+  panel), **SARIF 2.1.0**, or a JSON bundle, all carrying the differential proof, the
+  compliance tags, and the same evidence-anchored recommendation.
 - **`mylonite version`** — print the installed version.
 
 Full command details in the [CLI reference](./docs/cli-reference.md). Remote MCP transport

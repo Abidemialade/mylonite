@@ -104,7 +104,11 @@ mylonite validate .mylonite/generated/my-finding --target-file app.yaml --author
 
 ## `gate` — scan → generate → validate → PR (the full pipeline)
 
-The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows.
+The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows. The
+PR body always includes a **Proven fix** (control-efficacy findings) or **Recommended
+fix** (otherwise) — an evidence-anchored recommendation naming the actual tool and
+argument that landed the exploit, as a fenced code sketch. See [Reading the
+results](reading-results.md#the-gating-pr).
 
 Options: `target` or `--target-file`; `--authorize`; `--open-pr` (push a branch + open
 the PR via `gh`); `--config`; `--model` (any LiteLLM provider via a `provider/model`
@@ -113,8 +117,8 @@ prefix); `--out PATH`; `--max-llm-calls`;
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
 `--workflows/--no-workflows`; `--llm-enrich` (append a labelled, unverified LLM fix
-suggestion); `--fast`; `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live
-custom target).
+suggestion, rendered after the structural recommendation above); `--fast`;
+`--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
 
 ```bash
 mylonite gate --target-file app.yaml --authorize my-app --open-pr
@@ -122,12 +126,13 @@ mylonite gate --target-file app.yaml --authorize my-app --open-pr
 
 ## `report` — render findings
 
-Render a saved scan or validation as a terminal trust panel, offline. See [Reading the
+Render a saved scan or validation as a terminal trust panel — including the same
+evidence-anchored recommendation the gating PR carries — offline. See [Reading the
 results](reading-results.md).
 
 Options: `target` (a scan/generated dir or `*_report.json`); `--sarif PATH` (SARIF 2.1.0
 for GitHub code scanning); `--json PATH` (machine-readable finding bundle). Both carry
-the differential proof and the OWASP/ASI/ATLAS/NIST tags.
+the differential proof, the OWASP/ASI/ATLAS/NIST tags, and the same recommendation.
 
 ```bash
 mylonite report .mylonite/generated/my-finding --sarif out.sarif --json finding.json
