@@ -365,6 +365,24 @@ def test_target_context_for_translates_spec_to_pure_data() -> None:
     assert ctx.tools == ()
 
 
+def test_target_file_framework_defaults_to_none_and_round_trips(tmp_path: Path) -> None:
+    """PR10: `framework:` is optional, free-form, and never validated against a
+    fixed enum -- an unrecognised value still round-trips as a plain string."""
+    from mylonite.plugins._mcp.target_file import dump_target_file
+
+    default = _tf()
+    assert default.framework is None
+    assert "framework" not in dump_target_file(default)
+
+    tf = _tf(framework="langchain")
+    dumped = dump_target_file(tf)
+    assert "framework: langchain" in dumped
+    p = tmp_path / "target.yaml"
+    p.write_text(dumped, encoding="utf-8")
+    reloaded = load_target_file(p)
+    assert reloaded.framework == "langchain"
+
+
 def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: Path) -> None:
     """Backward-compat: a target file that declares neither new field round-trips
     unchanged (the optional fields are omitted on dump via exclude_defaults).

@@ -85,6 +85,15 @@ mylonite gate --target-file my-http-agent.yaml --authorize my-http-agent
   **is load-bearing** for this attack on your agent. It's the black-box analogue of
   the untrusted-data envelope; use it to check whether a realistic input guard would
   defend you.
+- **The structural recommendation.** Because a `rest` target has no tool surface to
+  key a fix to, `gate`/`report` prescribe what generalises to any HTTP agent instead:
+  input framing (structured, labelled messages instead of string-concatenating the
+  user's message into the system prompt — the `--prove-input-control` differential
+  above measures exactly this), collapsed authorization (propagate the caller's own
+  identity downstream instead of one shared service credential for the whole agent —
+  the highest-value REST finding), and endpoint-boundary enforcement (an explicit
+  allowlist of upstream endpoints/actions the wrapper may invoke, since there is no
+  tool boundary to attach one to).
 - **Server-side differential.** To toggle a *server-side* guard instead, declare
   `vulnerable_launch` / `control_env` (see [Concepts](concepts.md)) so Mylonite can
   run the endpoint with its guard on and off.

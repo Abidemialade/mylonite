@@ -3005,7 +3005,7 @@ def _target_context_for_artefact_dir(artefact_dir: Path) -> Any | None:
         spec = build_target_spec(tf)
         tools = read_tool_surface(artefact_dir) or ()
         target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
-        return target_context_for(spec, target_id=target_id, tools=tools)
+        return target_context_for(spec, target_id=target_id, tools=tools, framework=tf.framework)
     except Exception as exc:
         echo_exc(f"warning: could not reconstruct target context from {target_yaml}", exc)
         return None
@@ -4484,6 +4484,7 @@ def gate(
             target_id=(
                 f"mcp:{tf.family}" if tf is not None else target if target is not None else "mcp:custom"
             ),
+            framework=tf.framework if tf is not None else None,
         )
 
     with llm_scope(policy=effective_policy):

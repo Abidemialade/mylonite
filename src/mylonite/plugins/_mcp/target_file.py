@@ -99,6 +99,16 @@ class TargetFile(BaseModel):
     control_env: dict[str, dict[str, str]] = {}
     # transport: rest — the plain HTTP agent request shape (endpoint + body template).
     request: RequestSpec | None = None
+    # Operator-declared agent framework (e.g. "langchain", "crewai",
+    # "llamaindex"), free-form and entirely optional. D2 boundary: this is the
+    # ONLY framework signal Mylonite reads — no pyproject.toml/package.json
+    # sniffing (charter risk, low marginal value over a declared field). Used
+    # by gate/recommend.py to name the framework in a structural
+    # recommendation's code sketch, alongside the language already inferred
+    # from `command` (see recommend._infer_language). Never validated against
+    # a fixed enum: an unrecognised value still threads through harmlessly as
+    # a plain string label.
+    framework: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
