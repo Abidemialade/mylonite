@@ -345,7 +345,10 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             print(f"\n{len(problems)} problem(s) -- release {version} is not ready.")
             return 1
-        print(f"release {version} is consistent: tag, version file, pyproject, CHANGELOG.")
+        checked = "tag, version file, pyproject"
+        if not args.no_changelog:
+            checked += ", CHANGELOG"
+        print(f"release {version} is consistent: {checked}.")
         return 0
 
     today = _datetime.date.today().isoformat()

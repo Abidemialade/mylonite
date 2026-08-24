@@ -4,7 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcp-kitchen-sink"
-version = "0.1.0"
+# Read from src/mcp_kitchen_sink/__init__.py — see [tool.hatch.version] below.
+# This package's two version copies had NOTHING enforcing they agreed (the root
+# package at least had a test); making the build read the runtime constant
+# removes the drift rather than detecting it.
+dynamic = ["version"]
 description = "Deliberately-vulnerable, fully mocked (network-less) reference MCP agent — the test target for the Mylonite AI-security scanner. NOT for production use."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -59,6 +63,9 @@ mcp = ["mcp>=1.0,<2.0"]
 dev = [
     "pytest>=8.2",
 ]
+
+[tool.hatch.version]
+path = "src/mcp_kitchen_sink/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_kitchen_sink"]
