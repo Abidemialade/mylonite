@@ -349,6 +349,12 @@ def test_check_reports_structural_findings_and_exits_zero(
     assert "web_fetch" in out  # destination-taking tool
     assert "Unpinned tool descriptions" in out
     assert "structural finding(s)" in out
+    # Regression guard: the unpinned-descriptions row used to count as a flat
+    # "+1" regardless of how many tools it covered, while every other check
+    # counts per-tool -- an inconsistent granularity that made the total an
+    # unreliable trend metric. 3 tools here: 1 W4 (send_email) + 1 W1
+    # (read_note) + 1 W3 (web_fetch) + 3 unpinned (one per tool) == 6.
+    assert "6 structural finding(s) across 3 tool(s)." in out
 
 
 def test_check_enforce_exits_findings_code_when_issues_found(
@@ -551,6 +557,43 @@ def test_check_consequential_vocabulary_matches_the_live_confirm_gate_control(
     # "publish" entry (it may still legitimately appear in the unrelated
     # description-pin digest list, outside this region).
     assert "publish_report" not in table_region
+
+
+def test_check_suggested_weakness_classes_never_contradicts_its_own_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression guard: the "suggested weakness_classes" advisory line used
+    to come from a THIRD, independently-drifted vocabulary
+    (`cli._suggest_weakness_classes`'s own `action_hints`, which includes
+    "update"/"publish"/"commit" -- none of which are in the live
+    `ConfirmGateControl`'s `_CONSEQUENTIAL_HINTS`), so a target could suggest
+    "W4" in the hint line while showing ZERO W4 rows in the table above it.
+    `update_settings` matches the OLD action_hints ("update") but neither
+    `_CONSEQUENTIAL_HINTS` nor any other check -- the suggestion must not
+    claim W4 when nothing in the table found it."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="update_settings",
+                    description="Update a stored settings value.",
+                    json_schema={"properties": {"key": {"type": "string"}}},
+                )
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "'W4'" not in result.output
+    table_region = result.output.split("description_pins to add", 1)[0]
+    assert "Consequential action" not in table_region
 
 
 def test_scan_scaffold_refuses_overwrite_without_force(

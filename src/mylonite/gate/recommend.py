@@ -30,6 +30,7 @@ self-contained and independently testable via its own ``render_markdown``.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Final, Literal
@@ -199,6 +200,25 @@ def _tool_calls_for(effect_trace: str, tool: str) -> list[tuple[int, dict[str, A
     return [(i, args) for i, name, args in executed_calls(effect_trace) if name == tool]
 
 
+def _has_any_trace_entries(blob: str) -> bool:
+    """True iff ``blob`` parses to a NON-EMPTY JSON list — i.e. the trace has
+    at least one entry of any kind (executed, deferred, or errored).
+
+    Deliberately NOT ``bool(blob)``: an empty-but-valid trace (the literal
+    string ``"[]"``) is truthy as a Python string, so a naive truthiness
+    check on the raw metadata value treats "recorded zero entries" the same
+    as "genuinely has entries" — the exact gap that let a finding with no
+    real evidence at all still read as un-degraded confidence. Malformed
+    JSON or a non-list value is treated as "no entries", matching every
+    other trace-parsing helper's fail-quiet contract (never raises).
+    """
+    try:
+        parsed = json.loads(blob or "[]")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(parsed, list) and len(parsed) > 0
+
+
 def _destination_arg(args: dict[str, Any]) -> tuple[str, Any] | None:
     """First ``(arg_name, value)`` whose value looks like a network destination."""
     for key, value in args.items():
@@ -299,17 +319,41 @@ def _evidence_for_tool(
     )
 
 
-def _benign_destinations(exploit: ExploitRecord, tool: str, exclude: str | None) -> list[str]:
+def _benign_destinations(
+    exploit: ExploitRecord, tool: str, *, exclude_occurrence: int | None
+) -> list[str]:
     """Other destinations' HOSTNAMES the SAME tool reached in this run, for
     seeding an allowlist from real traffic rather than a guess (W3's
     differentiator). Returns bare hostnames — the shape ``fetch_allowlist:``
-    and ``host_allowed`` both expect, not full URLs."""
+    and ``host_allowed`` both expect, not full URLs.
+
+    Re-derives the excluded HOSTNAME from the flagged occurrence's own RAW
+    trace argument (looked up by ``exclude_occurrence``'s index), never from
+    the caller's (redacted-and-truncated-to-``_MAX_QUOTE``) ``Evidence.value``
+    — a >120-character attacker destination whose hostname portion itself
+    ran past the truncation point would otherwise fail to string-match its
+    own untruncated occurrence elsewhere in the trace, letting the
+    attacker's own host leak into the "benign" allowlist this function
+    seeds. Excluding by re-derived HOSTNAME (not just the one flagged
+    occurrence's index) also correctly drops every OTHER occurrence of that
+    same attacker host the tool was called with in this run, not only the
+    specific occurrence that happened to be picked as evidence.
+    """
     effect_trace = exploit.response.metadata.get("effect_trace", "")
     if not effect_trace:
         return []
-    exclude_host = _hostname_of(exclude) if exclude else None
+    occurrences = _tool_calls_for(effect_trace, tool)
+    exclude_host: str | None = None
+    if exclude_occurrence is not None:
+        for occurrence, args in occurrences:
+            if occurrence != exclude_occurrence:
+                continue
+            dest = _destination_arg(args)
+            if dest is not None:
+                exclude_host = _hostname_of(str(dest[1]))
+            break
     out: list[str] = []
-    for _, args in _tool_calls_for(effect_trace, tool):
+    for _, args in occurrences:
         dest = _destination_arg(args)
         if dest is None:
             continue
@@ -336,7 +380,7 @@ def _confidence_for_tool(
         reason = "a destination/argument identified structurally in the trace"
     elif evidence.executed:
         base = "medium"
-        reason = "name hint (no explicit control_config declaration)"
+        reason = "the tool executed, but no destination/argument was identified structurally"
     else:
         base = "low"
         reason = "fail-closed default (no declaration, no trace evidence)"
@@ -454,7 +498,7 @@ def _w3_recommendation(
     )
     declared = tuple(getattr(target.control_config, "egress_tools", ()) or ()) if target else ()
     confidence, reason = _confidence_for_tool(target, declared, tool, evidence)
-    allowlist = _benign_destinations(exploit, tool, exclude=evidence.value)
+    allowlist = _benign_destinations(exploit, tool, exclude_occurrence=evidence.occurrence)
     url_param = evidence.argument or "<the-argument-name-holding-the-destination>"
     config_snippet = control_shim.config_snippet_for(
         "W3", tool, url_param=url_param if evidence.argument else None, allowlist=tuple(allowlist)
@@ -679,12 +723,23 @@ def _w1_recommendation(
         source="tool_surface" if description else "payload",
         note=f"steered the planner into calling `{steered_into}`" if steered_into else None,
     )
-    confidence: Confidence = "high" if description else "medium"
-    reason = (
-        "the tool's real description was available and inspected"
-        if description
-        else "inferred from the injected payload body; no live tool inventory available"
-    )
+    confidence: Confidence
+    reason: str
+    if description:
+        confidence = "high"
+        reason = "the tool's real description was available and inspected"
+    elif loc.tool is not None or steered_into is not None:
+        confidence = "medium"
+        reason = "a tool was identified from the trace/metadata; no live tool inventory available"
+    else:
+        # Neither a live description NOR an identified tool name: the evidence
+        # below is bound to the generic "the implicated tool" placeholder,
+        # inferred from nothing but the payload body itself — the weakest
+        # possible basis for a W1 finding, previously mislabelled "medium"
+        # (the formula only ever checked `description`, ignoring whether ANY
+        # real tool identity was known at all).
+        confidence = "low"
+        reason = "no tool identified and no live tool inventory available; inferred from the payload body alone"
     digest = hashlib.sha256((description or "").encode("utf-8")).hexdigest() if description else None
     pin = Prescription(
         control_id="description-fingerprint",
@@ -696,7 +751,7 @@ def _w1_recommendation(
             "load is the only real answer to a 'rug pull' — a description that changes "
             "after a user already approved the tool."
         ),
-        invariant=f"list_tools() refuses `{tool}` if sha256(description) != {digest or '<pin-after-review>'}",
+        invariant=f"{tool}(...) refuses if sha256(description) != {digest or '<pin-after-review>'}",
         config_snippet=(
             f"control_config:\n  description_pins:\n    {tool}: {digest!r}"
             if digest
@@ -949,17 +1004,19 @@ def recommend(
         evidence, prescriptions, confidence, reason = _generic_recommendation(exploit, loc)
 
     # W1's primary evidence is the tool's DESCRIPTION (from a live tool
-    # inventory), not a call trace — a description-sourced W1 finding must
-    # not be penalised for lacking a trace it never needed. Every other
-    # class's evidence is trace-derived, so a missing trace there is a real
-    # degradation.
+    # inventory) or the tool NAME (from the exploit's own metadata/trace via
+    # localize()) — neither needs an `effect_trace`/`mcp_trace_planner`
+    # execution trace to be meaningful, unlike every other class, whose
+    # evidence genuinely IS trace-derived. A W1 finding with NEITHER signal
+    # (evidence bound to the generic "the implicated tool" placeholder) is
+    # correctly trace-degradable — it has nothing else to fall back on.
     evidence_is_trace_derived = not (
-        wc == "W1" and evidence and evidence[0].source == "tool_surface"
+        wc == "W1" and ((evidence and evidence[0].source == "tool_surface") or loc.tool is not None)
     )
     if (
         evidence_is_trace_derived
-        and not exploit.response.metadata.get("effect_trace")
-        and not exploit.response.metadata.get("mcp_trace_planner")
+        and not _has_any_trace_entries(exploit.response.metadata.get("effect_trace", ""))
+        and not _has_any_trace_entries(exploit.response.metadata.get("mcp_trace_planner", ""))
     ):
         degraded.append("no trace metadata recorded")
         confidence = _degrade(confidence)

@@ -254,6 +254,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now requires the approval-shaped tool to share a meaningful name token
   with the specific sink it's meant to confirm.
 
+- **A W1 finding with NEITHER a live tool description NOR an identified tool
+  name (evidence bound to the generic "the implicated tool" placeholder)
+  read as "medium confidence, not degraded"** — the same label as a finding
+  with a real, inspected description. `_w1_recommendation`'s confidence
+  formula only ever checked whether a live description was available,
+  never whether a tool identity was known at all; it's now a real three-tier
+  scale (high: live description; medium: a tool name was identified from
+  metadata/trace with no live description; low: neither). Also fixed the
+  companion bug that let this go undetected: the trace-degradation check
+  compared `effect_trace`/`mcp_trace_planner` for Python string
+  truthiness, so the literal `"[]"` (a validly-recorded but EMPTY trace)
+  counted as "trace metadata was recorded" and suppressed the degrade —
+  it now parses the blob and checks for at least one actual entry.
+
+- **The W3 recommendation's benign-destination allowlist could include an
+  attacker's own hostname** if the attacker's destination URL was long
+  enough (>120 chars) that its hostname portion ran past
+  `Evidence.value`'s redaction-and-truncation point, and that same
+  hostname appeared again elsewhere in the trace: the old exclusion
+  re-matched a hostname parsed from the already-truncated evidence string,
+  which no longer matched the untruncated occurrence. Now re-derives the
+  excluded hostname from the flagged occurrence's own raw trace argument,
+  and correctly excludes every occurrence of that same host, not just the
+  one instance picked as evidence.
+
+- **`mylonite check`'s "suggested weakness_classes" advisory line could
+  contradict its own table** — it came from a THIRD, independently
+  drifted vocabulary (`cli._suggest_weakness_classes`'s own `action_hints`,
+  which includes "update"/"publish"/"commit", none of which are in the
+  live `ConfirmGateControl`'s `_CONSEQUENTIAL_HINTS`), so a target could
+  suggest "W4" as a hint while showing zero W4 rows in the table above it.
+  The suggestion is now derived from the SAME findings already computed
+  for that table, so it can never disagree with it.
+
+- `check`'s printed finding count under-counted the unpinned-descriptions
+  row relative to every other check: it counted as a flat "+1" regardless
+  of how many tools had unpinned descriptions, while every other row
+  counts per-tool. Now counted per-tool for consistency.
+
+- The auto-generated W1 "pin" prescription's `invariant:` text claimed
+  `list_tools()` refuses a rug-pulled tool; enforcement is actually at
+  call time (`intercept_call`) — `list_tools()` still lists it with its
+  live, unpinned-safe description. Corrected the generated text.
+
+- A W3/W4 confidence-reason string said "name hint" for a branch reached
+  purely because the tool executed with no other identifying signal
+  (declared/structural) — not because any actual name-hint match was the
+  basis. Corrected to describe what was actually true.
+
 ### Fixed
 
 - **`build_pr_body` no longer captions a genuine SERVER-LAYER differential as

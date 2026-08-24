@@ -5048,7 +5048,20 @@ def check(
     steering = instruction_bearing_tools(tools)
     processors = content_processor_tools(tools)
     unpinned = _check_description_pins(tools, cc)
-    suggested = _suggest_weakness_classes(tools)
+    # Derived from THIS command's own findings above, not a second,
+    # independently-worded call to _suggest_weakness_classes (scan
+    # --scaffold's own broader onboarding heuristic, a deliberately wider net
+    # over description/schema text — good for "what should I set up a target
+    # file to test", wrong for "what does this report's own table say").
+    # Reusing egress/unapproved_sinks directly means the suggestion line can
+    # never disagree with the table printed above it, unlike a second
+    # heuristic pass with its own separately-drifting hint vocabulary.
+    suggested_set = {"W1", "W2"}  # baseline: any tool-using agent risks smuggling/injection
+    if egress:
+        suggested_set.add("W3")
+    if unapproved_sinks:
+        suggested_set.add("W4")
+    suggested = sorted(suggested_set)
 
     findings = 0
     table = Table(title=f"Structural check — {len(tools)} tools discovered")
@@ -5089,7 +5102,12 @@ def check(
                 "name hint",
             )
     if unpinned:
-        findings += 1
+        # Counted per-tool (len(unpinned)), matching every other check above
+        # -- this row summarises N tools in a single line, but "findings" is
+        # the total number of individual tool-level issues, not the number
+        # of check CATEGORIES that fired; a single "+1" here would silently
+        # undercount relative to a target with many unpinned descriptions.
+        findings += len(unpinned)
         table.add_row(
             "Unpinned tool descriptions (rug-pull exposure)",
             rich_escape(f"{len(unpinned)} tool(s) — see below for digests to pin"),
