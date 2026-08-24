@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-24
+
 ### Added
 
 - **Release-process enforcement.** A `gate` job now runs *before* anything in
@@ -2607,7 +2609,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.8...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Abidemialade/mylonite/compare/v0.7.8...v0.8.0
 [0.7.8]: https://github.com/Abidemialade/mylonite/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/Abidemialade/mylonite/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
