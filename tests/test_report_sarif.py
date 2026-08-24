@@ -114,6 +114,47 @@ def test_to_sarif_localizes_finding_to_a_logical_location() -> None:
     assert "read_note" in res["message"]["text"]
 
 
+def test_to_sarif_recommendation_absent_without_a_target() -> None:
+    """PR6: additive — no `mylonite.recommendation` property key at all when
+    no target is supplied, so every existing (target-less) caller/consumer
+    of a result's properties keeps working unchanged."""
+    from mylonite.report.sarif import to_sarif
+
+    res = to_sarif([(_exploit("W3"), None)])["runs"][0]["results"][0]
+    assert "mylonite.recommendation" not in res["properties"]
+
+
+def test_to_sarif_recommendation_present_with_a_target() -> None:
+    """The SARIF property is the SAME shape the JSON bundle carries — both go
+    through recommend.to_dict, so they cannot describe one finding two
+    different ways."""
+    from mylonite.gate.recommend import TargetContext, recommend, to_dict
+    from mylonite.report.sarif import to_sarif
+
+    ex = _exploit("W2", effect="true")
+    report = _report(kept=True, vuln=5, guard_resisted=5)
+    target = TargetContext(target_id="mcp:myapp")
+    doc = to_sarif([(ex, report)], target=target)
+    res = doc["runs"][0]["results"][0]
+    assert res["properties"]["mylonite.recommendation"] == to_dict(
+        recommend(ex, report, target=target)
+    )
+    json.dumps(doc)  # still fully serialisable with the recommendation present
+
+
+def test_to_sarif_recommendation_never_uses_result_fixes() -> None:
+    """SARIF's result.fixes[].artifactChanges requires a real artifact URI +
+    region to apply a patch against, which a remote MCP tool doesn't have —
+    the recommendation rides in properties only, never fixes."""
+    from mylonite.gate.recommend import TargetContext
+    from mylonite.report.sarif import to_sarif
+
+    res = to_sarif(
+        [(_exploit("W4"), None)], target=TargetContext(target_id="mcp:myapp")
+    )["runs"][0]["results"][0]
+    assert "fixes" not in res
+
+
 def test_to_sarif_empty() -> None:
     from mylonite.report.sarif import to_sarif
 
