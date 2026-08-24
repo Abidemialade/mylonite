@@ -26,7 +26,7 @@ from rich.table import Table
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
-from mylonite.contracts._types import ExploitRecord
+from mylonite.contracts._types import ExploitRecord, ToolSpec
 from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass
 from mylonite.scan.engine import ScanResult
 
@@ -162,7 +162,53 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
             encoding="utf-8",
         )
 
+    # PR7: the tool inventory sidecar. NOT a ScanReport field -- ScanReport is
+    # one of the five Pydantic contracts (contracts/_types.py, `extra="forbid"`),
+    # so a new field there would make an artefact written by this version
+    # unreadable by an older one loading it back. A sidecar costs no schema
+    # event: `mylonite report` degrades gracefully (an enhancement-tier input,
+    # per gate/recommend.py's TargetContext.tools docstring) when it's absent,
+    # e.g. reading an artefact directory from a version that predates this file.
+    if result.descriptor is not None:
+        tool_surface_path = scan_dir / "tool_surface.json"
+        tool_surface_path.write_text(
+            json.dumps(
+                redact_value(
+                    {
+                        "schema_version": "1.0",
+                        "target_id": result.descriptor.target_id,
+                        "tools": [t.model_dump(mode="json") for t in result.descriptor.tools],
+                    }
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
     return scan_dir
+
+
+def read_tool_surface(scan_dir: Path) -> tuple[ToolSpec, ...] | None:
+    """Read the ``tool_surface.json`` sidecar back, if present.
+
+    ``None`` (never an exception) when the sidecar is absent — an artefact
+    directory from a version predating PR7, or a scan whose ``describe()``
+    failed before any tool inventory existed — or malformed. This is
+    strictly an ENHANCEMENT-tier input to the structural recommendation
+    engine (``gate/recommend.py``'s ``TargetContext.tools`` docstring): a
+    scan/validation/report flow must fully function with an empty tuple
+    here, never require this file to exist.
+    """
+    path = Path(scan_dir) / "tool_surface.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return tuple(ToolSpec.model_validate(t) for t in data["tools"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
 
 
 def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str:

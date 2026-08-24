@@ -78,6 +78,57 @@ def test_write_artefacts_emits_report_and_one_exploit_per_finding(tmp_path: Path
     assert len(exploit_files) == 2
 
 
+# --- PR7: tool_surface.json sidecar -----------------------------------------
+
+
+def test_write_artefacts_writes_no_sidecar_without_a_descriptor(tmp_path: Path) -> None:
+    """The common case today: ScanResult.descriptor defaults to None (e.g. a
+    describe_failed abort never got one) -- no sidecar, no error."""
+    scan_dir = write_artefacts(_result(findings=1), tmp_path)
+    assert not (scan_dir / "tool_surface.json").exists()
+
+
+def test_write_artefacts_writes_the_tool_surface_sidecar_when_descriptor_present(
+    tmp_path: Path,
+) -> None:
+    from mylonite.contracts._types import TargetDescriptor, ToolSpec
+    from mylonite.scan.artefacts import read_tool_surface
+
+    base = _result(findings=1)
+    descriptor = TargetDescriptor(
+        target_id="mcp:myapp",
+        kind="mcp",
+        tools=[ToolSpec(name="web_fetch", description="Fetch a URL.")],
+    )
+    result = ScanResult(report=base.report, exploits=base.exploits, descriptor=descriptor)
+    scan_dir = write_artefacts(result, tmp_path)
+    sidecar = scan_dir / "tool_surface.json"
+    assert sidecar.is_file()
+    data = json.loads(sidecar.read_text())
+    assert data["target_id"] == "mcp:myapp"
+    assert data["tools"][0]["name"] == "web_fetch"
+
+    read_back = read_tool_surface(scan_dir)
+    assert read_back is not None
+    assert read_back[0].name == "web_fetch"
+    assert read_back[0].description == "Fetch a URL."
+
+
+def test_read_tool_surface_returns_none_when_sidecar_absent(tmp_path: Path) -> None:
+    scan_dir = write_artefacts(_result(findings=1), tmp_path)  # no descriptor -> no sidecar
+    from mylonite.scan.artefacts import read_tool_surface
+
+    assert read_tool_surface(scan_dir) is None
+
+
+def test_read_tool_surface_returns_none_for_malformed_sidecar(tmp_path: Path) -> None:
+    from mylonite.scan.artefacts import read_tool_surface
+
+    scan_dir = write_artefacts(_result(findings=1), tmp_path)
+    (scan_dir / "tool_surface.json").write_text("not json", encoding="utf-8")
+    assert read_tool_surface(scan_dir) is None
+
+
 # --- G6 schema validation --------------------------------------------------
 
 

