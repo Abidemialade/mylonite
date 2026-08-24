@@ -86,18 +86,6 @@ def _snippet(weakness_class: str) -> str:
     return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
 
 
-def _fix_block(weakness_class: str) -> str:
-    """The concrete, reviewable fix (a fenced diff) for a weakness class (R3).
-
-    Parallel to ``_snippet`` (prose rationale) but actionable: it renders the
-    server-side change that implements the boundary control the differential
-    proved load-bearing, so the PR carries "here's the fix we proved works", not
-    a guess. Class-keyed (W1-W4/generic) — the control name rides in the prose.
-    """
-    base = _ir.files("mylonite.gate") / "fixes"
-    return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
-
-
 def _evidence_lines(report: ValidationReport) -> str:
     rows = [
         f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {o.detail}" for o in report.outcomes
@@ -186,19 +174,17 @@ def build_pr_body(
 
     ``target`` (PR2, Workstream D): an optional
     ``mylonite.gate.recommend.TargetContext``. Typed ``Any`` here rather than
-    imported at module scope to avoid a needless import for the (still
-    common) ``target=None`` caller — ``recommend()`` itself is only imported
-    lazily, below, when a target is actually supplied. When ``None`` (every
-    existing caller, and every reference-target finding), this function's
-    output is BYTE-IDENTICAL to before PR2: the class-level
-    ``gate/fixes/{wc}.md`` diff still renders. When supplied, the class-level
+    imported at module scope to avoid a needless import when a caller has none
+    to pass — ``recommend()`` handles ``target=None`` gracefully by design
+    (degraded evidence, lower confidence, never a crash).
+
+    PR11 (deliberate compat event): the fix section always renders
+    :func:`mylonite.gate.recommend.render_markdown`'s target-specific,
+    evidence-anchored recommendation now, for every target including a
+    reference one — the fixed, illustrative ``gate/fixes/{wc}.md`` diff this
+    used to fall back to on ``target=None`` is retired. The class-level
     ``gate/mitigations/{wc}.md`` background prose (:func:`_snippet`) stays —
-    it is still true and still useful context — but the fixed illustrative
-    diff is replaced by :func:`mylonite.gate.recommend.render_markdown`'s
-    target-specific, evidence-anchored recommendation: the operator's actual
-    tool, the actual argument that landed the exploit, and a prescription
-    tiered ``deterministic``/``probabilistic``/``detective`` rather than
-    presented with uniform confidence.
+    it is still true and still useful context regardless of target.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
@@ -275,23 +261,20 @@ def build_pr_body(
         _snippet(wc),
         "",
     ]
-    if target is not None:
-        from mylonite.gate.recommend import recommend, render_markdown
+    from mylonite.gate.recommend import recommend, render_markdown
 
-        rec = recommend(exploit, report, target=target)
-        sections.append(render_markdown(rec).rstrip())
-    else:
-        sections += [
-            (
-                "**Proven fix** — implement the control the differential verified load-bearing, "
-                "server-side, then re-point the committed test at it:"
-                if is_control
-                else "**Recommended fix** — implement this control server-side, then re-point the "
-                "committed test at your implementation:"
-            ),
-            "",
-            _fix_block(wc),
-        ]
+    rec = recommend(exploit, report, target=target)
+    sections += [
+        (
+            "**Proven fix** — implement the control the differential verified load-bearing, "
+            "server-side, then re-point the committed test at it:"
+            if is_control
+            else "**Recommended fix** — implement this control server-side, then re-point the "
+            "committed test at your implementation:"
+        ),
+        "",
+        render_markdown(rec).rstrip(),
+    ]
     if is_reference:
         sections += [
             "",
