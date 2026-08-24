@@ -13,8 +13,8 @@ an attack actually *landed* (rather than the model just sounding compromised).
 
 | Class  | Weakness | The boundary control that fixes it |
 |--------|----------|-------------------------------------|
-| **W1** | Tool-description instruction smuggling (tool poisoning) | `ToolDescriptionSanitizer` |
-| **W2** | Indirect prompt injection via ingested data | `UntrustedEnvelopeControl` |
+| **W1** | Tool-description instruction smuggling (tool poisoning) | `DescriptionIntegrityControl` |
+| **W2** | Indirect prompt injection via ingested data | `InformationFlowControl` |
 | **W3** | Excessive egress / SSRF | `EgressAllowlistControl` |
 | **W4** | Excessive agency / unconfirmed consequential action | `ConfirmGateControl` |
 
@@ -67,9 +67,18 @@ to?) or `read_note_returned_poisoned_content_acted_on` (did it act on the poison
 content at all?). Both key on the *destination the model emitted* or the *action it
 took* — structured signals from the recorded run — not on the input text.
 
-**The fix (guarded build).** `UntrustedEnvelopeControl` wraps every retrieved/tool
-result in an `<untrusted>…</untrusted>` envelope and instructs the planner that
-envelope contents are data, never commands.
+**The fix (guarded build).** The bundled reference app's own guarded server
+(`server_guarded.py`) wraps every retrieved/tool result in an
+`<untrusted>…</untrusted>` envelope and instructs the planner that envelope
+contents are data, never commands. For a real custom target with no in-repo
+guarded twin, Mylonite instead synthesizes `InformationFlowControl` at the
+adapter boundary: it labels a read tool's result untrusted for the rest of
+the session, then **refuses** (not just labels) a subsequent call to a
+consequential-or-egress-shaped tool while that label is in scope — gating the
+sink in code rather than relying on the model to respect a text marker. The
+demoted `UntrustedEnvelopeControl` (the same envelope-wrapping idea as the
+reference app's own fix) is still available as an explicit, defence-in-depth
+layer.
 
 **Maps to:** OWASP-LLM `LLM01`/`LLM05` · OWASP-ASI `ASI01`/`ASI06` · attack patterns
 `indirect-injection-note-body-{direct,roleplay,tool-chain}`.

@@ -130,7 +130,7 @@ gate.)
 The move is to **hold the model constant and vary only the safeguard**. Mylonite
 synthesizes a *guarded build* of any real target by applying a canonical control
 at the **adapter boundary** — a `ControlServerShim` that wraps the live target
-(W1 tool-description sanitiser, W2 untrusted-data envelope, W3 egress
+(W1 description pinning, W2 information-flow control, W3 egress
 allowlist, W4 confirm-gate). The same model, the same tools, the same target;
 the only thing that changes between the two legs is whether the control is in
 the planner's path. A finding is kept only when the attack **fires on the raw
