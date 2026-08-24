@@ -122,8 +122,7 @@ def run_checks(
     if static is None:
         if "version" not in pyproject_dynamic_fields(root):
             problems.append(
-                "pyproject.toml declares neither [project].version nor "
-                'dynamic = ["version"]'
+                'pyproject.toml declares neither [project].version nor dynamic = ["version"]'
             )
         else:
             hatch_path = hatch_version_path(root)
@@ -224,8 +223,7 @@ def roll_changelog(root: Path, version: str, today: str) -> None:
     # that terminated the old "## [Unreleased]" line).
     match = matches[0]
     text = (
-        f"{text[: match.start()]}## [Unreleased]\n\n"
-        f"## [{version}] - {today}\n{text[match.end() :]}"
+        f"{text[: match.start()]}## [Unreleased]\n\n## [{version}] - {today}\n{text[match.end() :]}"
     )
 
     refs = link_refs(text)

@@ -15,6 +15,7 @@ class _FakeTool:
         self.name = name
         self.json_schema = json_schema
 
+
 # -- looks_like_destination -----------------------------------------------------
 
 
@@ -118,7 +119,11 @@ def test_classify_fail_closed_default_when_no_hint_matches() -> None:
 
 
 def test_destination_tools_matches_on_schema_default_over_name_hint() -> None:
-    tools = [_FakeTool("notify", {"properties": {"target": {"type": "string", "default": "attacker.example"}}})]
+    tools = [
+        _FakeTool(
+            "notify", {"properties": {"target": {"type": "string", "default": "attacker.example"}}}
+        )
+    ]
     found = destination_tools(tools)
     assert found == [("notify", "target", "schema default")]
 

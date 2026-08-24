@@ -494,7 +494,10 @@ def _w3_recommendation(
         else control_shim.DEFAULT_FETCH_ALLOWLIST
     )
     evidence = _evidence_for_tool(
-        exploit, tool, destination_only=True, known_safe=known_safe or control_shim.DEFAULT_FETCH_ALLOWLIST
+        exploit,
+        tool,
+        destination_only=True,
+        known_safe=known_safe or control_shim.DEFAULT_FETCH_ALLOWLIST,
     )
     declared = tuple(getattr(target.control_config, "egress_tools", ()) or ()) if target else ()
     confidence, reason = _confidence_for_tool(target, declared, tool, evidence)
@@ -522,15 +525,15 @@ def _w3_recommendation(
             python=(
                 "def before_tool_call(tool_name, args):\n"
                 f"    if tool_name == {tool!r}:\n"
-                "        host = urlparse(args.get(" + repr(url_param) + ", \"\")).hostname\n"
+                "        host = urlparse(args.get(" + repr(url_param) + ', "")).hostname\n'
                 "        if host not in ALLOWED_HOSTS:\n"
-                "            return Decision.deny(f\"egress to {host!r} is not on the allowlist\")\n"
+                '            return Decision.deny(f"egress to {host!r} is not on the allowlist")\n'
                 "    return Decision.allow()"
             ),
             typescript=(
                 "function beforeToolCall(toolName: string, args: Record<string, unknown>) {\n"
                 f"  if (toolName === {tool!r}) {{\n"
-                f"    const host = new URL(String(args[{url_param!r}] ?? \"\")).hostname;\n"
+                f'    const host = new URL(String(args[{url_param!r}] ?? "")).hostname;\n'
                 "    if (!ALLOWED_HOSTS.includes(host)) {\n"
                 "      return Decision.deny(`egress to ${host} is not on the allowlist`);\n"
                 "    }\n"
@@ -583,13 +586,13 @@ def _w4_recommendation(
             python=(
                 f"def {tool}(..., confirm_token=None):\n"
                 "    if not confirm_token or not verify_token(confirm_token):\n"
-                "        return {\"status\": \"confirmation_required\", \"preview\": {...}}\n"
+                '        return {"status": "confirmation_required", "preview": {...}}\n'
                 "    return dispatch(...)"
             ),
             typescript=(
                 f"function {tool}(...args: unknown[], confirmToken?: string) {{\n"
                 "  if (!confirmToken || !verifyToken(confirmToken)) {\n"
-                "    return { status: \"confirmation_required\", preview: {} };\n"
+                '    return { status: "confirmation_required", preview: {} };\n'
                 "  }\n"
                 "  return dispatch(...args);\n"
                 "}"
@@ -697,8 +700,10 @@ def _w2_recommendation(
         invariant=None,
         config_snippet=None,
         code_sketch=None,
-        residual=("A sufficiently different rephrasing of the injected instruction may "
-                   "still be followed even with the envelope in place.",),
+        residual=(
+            "A sufficiently different rephrasing of the injected instruction may "
+            "still be followed even with the envelope in place.",
+        ),
     )
     return tuple(evidences), (primary, envelope), confidence, reason
 
@@ -740,7 +745,9 @@ def _w1_recommendation(
         # real tool identity was known at all).
         confidence = "low"
         reason = "no tool identified and no live tool inventory available; inferred from the payload body alone"
-    digest = hashlib.sha256((description or "").encode("utf-8")).hexdigest() if description else None
+    digest = (
+        hashlib.sha256((description or "").encode("utf-8")).hexdigest() if description else None
+    )
     pin = Prescription(
         control_id="description-fingerprint",
         tier="detective",
@@ -753,9 +760,7 @@ def _w1_recommendation(
         ),
         invariant=f"{tool}(...) refuses if sha256(description) != {digest or '<pin-after-review>'}",
         config_snippet=(
-            f"control_config:\n  description_pins:\n    {tool}: {digest!r}"
-            if digest
-            else None
+            f"control_config:\n  description_pins:\n    {tool}: {digest!r}" if digest else None
         ),
         code_sketch=None,
         citations=("mcp-spec-2026-07-28-tool-safety",),
@@ -836,7 +841,7 @@ def _rest_recommendation(
             "`system_instructions + user_message` gives the model no structural signal "
             "that the two have different trust levels. Passing them as separate, "
             "labelled fields (e.g. distinct chat-message roles, or an explicit "
-            "`{\"instructions\": ..., \"untrusted_input\": ...}` envelope) is the REST "
+            '`{"instructions": ..., "untrusted_input": ...}` envelope) is the REST '
             "analogue of W2's untrusted-content labelling — it changes what the model "
             "sees, so whether it holds still depends on the model respecting the label."
         ),
@@ -1079,8 +1084,11 @@ def render_markdown(rec: Recommendation) -> str:
         lines.append(f"- {_render_evidence(ev)}")
     lines.append("")
     for i, p in enumerate(rec.prescriptions):
-        tier_label = {"deterministic": "Deterministic", "probabilistic": "Probabilistic",
-                      "detective": "Detective"}[p.tier]
+        tier_label = {
+            "deterministic": "Deterministic",
+            "probabilistic": "Probabilistic",
+            "detective": "Detective",
+        }[p.tier]
         lead = "**Do this" if i == 0 else "**Also consider"
         lines.append(f"{lead} ({tier_label}):** {p.headline}")
         lines.append("")
@@ -1140,8 +1148,11 @@ def to_dict(rec: Recommendation) -> dict[str, Any]:
                 "invariant": p.invariant,
                 "config_snippet": p.config_snippet,
                 "code_sketch": (
-                    {"language": p.code_sketch.language, "framework": p.code_sketch.framework,
-                     "body": p.code_sketch.body}
+                    {
+                        "language": p.code_sketch.language,
+                        "framework": p.code_sketch.framework,
+                        "body": p.code_sketch.body,
+                    }
                     if p.code_sketch
                     else None
                 ),

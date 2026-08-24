@@ -326,9 +326,9 @@ async def test_ifc_taint_isolated_across_concurrently_active_shims() -> None:
 def test_ifc_config_snippet_matches_envelope_control() -> None:
     """Both W2 controls emit the same paste-ready snippet (read_tool_names) —
     config_snippet_for is the single source of truth for both."""
-    assert InformationFlowControl()._config_snippet("read_note") == UntrustedEnvelopeControl()._config_snippet(
+    assert InformationFlowControl()._config_snippet(
         "read_note"
-    )
+    ) == UntrustedEnvelopeControl()._config_snippet("read_note")
 
 
 # -- intercept ordering (W2 now DOES intercept, via InformationFlowControl) ---
@@ -421,7 +421,9 @@ async def test_dic_one_character_change_is_still_caught() -> None:
     control = DescriptionIntegrityControl(
         description_pins={"t": DescriptionIntegrityControl.digest("Search the docs.")}
     )
-    live = ToolDescription(name="t", description="Search the docs!", input_schema={"type": "object"})
+    live = ToolDescription(
+        name="t", description="Search the docs!", input_schema={"type": "object"}
+    )
     server = _FakeServer(tools=[live], results={"t": ToolResult(name="t", content="x")})
     shim = ControlServerShim(server, [control])
     await shim.list_tools()
@@ -447,7 +449,9 @@ async def test_dic_unpinned_tool_is_never_flagged() -> None:
 async def test_dic_violation_resets_between_sessions() -> None:
     poisoned = ToolDescription(name="t", description="evil", input_schema={"type": "object"})
     server = _FakeServer(tools=[poisoned], results={"t": ToolResult(name="t", content="x")})
-    control = DescriptionIntegrityControl(description_pins={"t": DescriptionIntegrityControl.digest("safe")})
+    control = DescriptionIntegrityControl(
+        description_pins={"t": DescriptionIntegrityControl.digest("safe")}
+    )
 
     session_one = ControlServerShim(server, [control])
     await session_one.list_tools()
@@ -690,7 +694,9 @@ async def test_w4_confirmed_retry_with_the_minted_token_executes() -> None:
     confirmed = await shim.call_tool("send_email", {"to": "x", "confirm_token": token})
     assert confirmed.isError is False
     assert confirmed.content == "sent"
-    assert server.calls == [("send_email", {"to": "x"})]  # confirm_token never reached the inner tool
+    assert server.calls == [
+        ("send_email", {"to": "x"})
+    ]  # confirm_token never reached the inner tool
 
 
 async def test_w4_a_guessed_or_stale_token_is_refused() -> None:

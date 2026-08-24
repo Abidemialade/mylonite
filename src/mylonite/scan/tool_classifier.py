@@ -115,7 +115,15 @@ def url_values(arguments: Mapping[str, Any]) -> list[str]:
 #: the same vocabulary ``control_shim.py``'s live ``_EGRESS_HINTS`` uses to
 #: classify a W3 call, duplicated here (rather than imported) so this
 #: discovery-only module has no dependency on the boundary-control module.
-_EGRESS_NAME_HINTS: tuple[str, ...] = ("fetch", "http", "download", "curl", "request", "egress", "web")
+_EGRESS_NAME_HINTS: tuple[str, ...] = (
+    "fetch",
+    "http",
+    "download",
+    "curl",
+    "request",
+    "egress",
+    "web",
+)
 
 #: Parameter-NAME fragments that suggest the argument itself holds a network
 #: destination, independent of the tool's own name (``web_fetch(url=...)`` and
