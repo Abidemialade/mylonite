@@ -3,25 +3,76 @@ name: Release
 on:
   push:
     tags:
-      - "v0.6.0"
-      - "v[1-9]*.*.*"
-      - "v0.[6-9].*"
-      - "v0.[1-9][0-9].*"
+      # One pattern, matching any vX.Y.Z. `+` here is GitHub filter-pattern
+      # syntax ("one or more of the preceding character"), not regex, and `.` is
+      # a literal dot — the same idiom release-kitchen-sink.yml already uses.
+      #
+      # This deliberately excludes prereleases. The previous `v[1-9]*.*.*`
+      # matched `v1.0.0rc1` (the trailing `*` swallowed `0rc1`), which would have
+      # gone straight to PyPI as a normal release. Filter patterns must match the
+      # whole ref, so `v1.0.0rc1` no longer matches anything here.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    # Escape hatch: a tag can only be pushed once, so without this a failure in a
+    # late job (a GitHub outage during github-release, say) could only be retried
+    # by inventing a throwaway version.
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to re-run the release for"
+        required: true
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build sdist + wheel
+  gate:
+    # Runs FIRST, before anything is built or uploaded. Every irreversible step
+    # in this workflow is downstream of it.
+    #
+    # It exists because PyPI uploads cannot be undone and version numbers cannot
+    # be reused. Previously nothing compared the tag to the package version at
+    # all: `git tag v9.9.9 && git push` would have built and published 0.7.8
+    # under a v9.9.9 release, and the only complaint would have come from
+    # github-release afterwards — with the wrong file already on PyPI.
+    #
+    # Standard-library only, so it needs no `pip install` and finishes in seconds.
+    name: Version consistency gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Tag, version.py, pyproject and CHANGELOG all agree
+        run: python scripts/prepare_release.py --check --tag "${{ inputs.tag || github.ref_name }}"
+
+  ci:
+    # The full suite, against the tagged commit. Before this, a tag published a
+    # commit that CI had only ever tested on main — usually the same tree, but
+    # nothing enforced it. `uses:` on a tag ref resolves to THAT TAG's copy of
+    # ci.yml, so a release is verified by the CI definition it shipped with.
+    name: CI on the tagged commit
+    needs: gate
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build sdist + wheel
+    needs: [gate, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
       - name: Build
+        # twine must stay current: 6.2.0 and earlier overwrite packaging's
+        # _VALID_METADATA_VERSIONS with a hardcoded list ending at "2.4" and so
+        # reject the Metadata-Version 2.5 current hatchling emits.
         run: |
           python -m pip install --upgrade pip build twine
           python -m build
@@ -46,6 +97,11 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
+          # Only on the rehearsal leg. A re-run (workflow_dispatch) would
+          # otherwise 409 here on files TestPyPI already has and never reach the
+          # step that actually matters. PyPI below stays strict on purpose: a
+          # duplicate upload THERE means something is genuinely wrong.
+          skip-existing: true
 
   publish-pypi:
     name: Publish to PyPI
@@ -72,11 +128,17 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # On workflow_dispatch, GITHUB_REF_NAME is the branch the run was started
+      # from, not a tag -- so every use of the tag has to go through this.
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Extract this version's CHANGELOG section
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           # The header is "## [X.Y.Z] - YYYY-MM-DD" -- match the "## [X.Y.Z]"
           # prefix, not exact equality (an earlier version of this job used
           # `$0 == ver`, which never matched the dated header and silently
@@ -86,14 +148,18 @@ jobs:
             found && /^## \[/ { exit }
             found { print }
           ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::No CHANGELOG.md section found for $version -- refusing to create a Release with an empty body."
+          # Backstop only -- the `gate` job already rejected a missing or
+          # blank section before anything was published. `grep -q .` rather than
+          # `[ -s ]`: a section of nothing but newlines is non-empty as a file,
+          # so `-s` passed it and produced a Release with a whitespace body.
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::No CHANGELOG.md content for $version -- refusing to create a Release with an empty body."
             exit 1
           fi
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
             --notes-file release-notes.md

@@ -5,11 +5,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Called by release.yml so the TAGGED commit is verified by this exact suite
+  # before anything is published. A `tags:` trigger here would NOT do the same
+  # job: the two workflows would race with no ordering between them, and PyPI
+  # could publish before the test matrix finished — a guarantee in appearance
+  # only. Being called makes CI a hard dependency of the publish chain.
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
+  # NOTE: inside a called workflow, `github.workflow` resolves to the CALLER's
+  # name, so a release run groups as "Release-refs/tags/vX.Y.Z". That is fine
+  # while release.yml declares no top-level `concurrency:` — but do not give it
+  # one using this same expression, or the release would land in this group and
+  # cancel-in-progress would have it cancel its own CI.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
