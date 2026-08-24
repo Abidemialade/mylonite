@@ -5,6 +5,39 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## Deterministic-controls-and-recommendations branch — PR3 skipped (2026-08-24)
+
+The branch's plan called for a FIDES (Microsoft Agent Framework) external
+differential as PR3: toggle `SecureAgentConfig(enable_policy_enforcement=...)`
+on/off as a real, third-party vulnerable/guarded twin. **This does not fit
+Mylonite's adapter model and should not be attempted as scoped.** FIDES is a
+*client-side* Python agent-framework middleware wrapping the model's own
+tool-calling loop; every Mylonite adapter (`plugins/_mcp/`) instead connects to
+and drives a *server-side* MCP target. Wiring FIDES in would require inventing
+a new adapter type that drives an `agent_framework.Agent` object directly —
+architecturally out of scope for this plan and never reviewed as its own
+design.
+
+The good news: `verification/EXTERNAL_DIFFERENTIAL.md` already has a
+better-fitting, previously-designed recipe for the SAME goal (a real,
+non-self-seeded external differential) using Mylonite's existing
+`scan`/`validate`/`ablate` commands against real third-party MCP servers —
+`mcp-server-email` (W4) or the official `server-fetch` (W3, upstream issue
+#2317: doesn't block internal/loopback IPs by default). Zero new adapter code
+needed. It was marked maintainer-run because it needs (a) the target server
+installed and running, (b) a live LLM key, (c) working network/SSL egress.
+
+**Status as of this session:** (b) and (c) are no longer blockers on this
+machine — a live `ANTHROPIC_API_KEY` was present and `pip install` to PyPI
+worked cleanly with no proxy friction. The maintainer declined to spend the
+live key / run a third-party package in this session (reasonable — real API
+cost and third-party code execution under a live credential is a judgment
+call, not something to spend autonomously). *Trigger:* next session with the
+maintainer present and willing to spend a small amount of API cost; follow
+`EXTERNAL_DIFFERENTIAL.md`'s existing recipe verbatim, preferring the
+`server-fetch` (W3) target over `mcp-server-email` (no external side effects
+to sandbox).
+
 ## 0.7.10 deep-code-review — verification-pass follow-ups (docs/reviews/2026-08-07-0.7.10-close-the-loop-review.md)
 
 All 18 findings from this review (2 critical, 2 high, 6 medium, 8 low) were fixed
