@@ -219,8 +219,14 @@ def roll_changelog(root: Path, version: str, today: str) -> None:
     if version in previous:
         raise SystemExit(f"CHANGELOG.md already has a section for {version}")
 
+    # Trailing "\n" so the dated header is followed by a blank line, matching
+    # every existing section (the text after match.end() starts with the newline
+    # that terminated the old "## [Unreleased]" line).
     match = matches[0]
-    text = f"{text[: match.start()]}## [Unreleased]\n\n## [{version}] - {today}{text[match.end() :]}"
+    text = (
+        f"{text[: match.start()]}## [Unreleased]\n\n"
+        f"## [{version}] - {today}\n{text[match.end() :]}"
+    )
 
     refs = link_refs(text)
     new_unreleased = f"[Unreleased]: {unreleased_url(version)}"
