@@ -58,6 +58,7 @@ def run_gate(
     mitigation_model: str = DEFAULT_MITIGATION_MODEL,
     mitigation_completion_fn: Callable[..., Any] | None = None,
     system_prompt: str | None = None,
+    target_context: Any | None = None,
 ) -> GateResult:
     bundle = scan_fn()
     exploits = bundle.exploits
@@ -110,6 +111,7 @@ def run_gate(
         model=mitigation_model,
         completion_fn=mitigation_completion_fn,
         system_prompt=system_prompt,
+        target=target_context,
     )
     pr = open_pr_fn(out_dir=out_dir, exploit=exploit, report=report, body=body, open_pr=open_pr)
     opened = bool(getattr(pr, "opened", False))

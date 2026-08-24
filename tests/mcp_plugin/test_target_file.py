@@ -344,6 +344,27 @@ def test_build_target_spec_carries_server_layer_fields() -> None:
     assert spec.vulnerable_launch.args == ["-m", "srv", "--raw"]
 
 
+def test_target_context_for_translates_spec_to_pure_data() -> None:
+    """PR2: target_context_for is the one-way TargetSpec -> TargetContext
+    translation gate/recommend.py needs but cannot import plugins to build
+    itself (see that function's docstring for why the import direction only
+    goes this way)."""
+    from mylonite.gate.recommend import TargetContext
+    from mylonite.plugins._mcp.target_file import target_context_for
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
+    cfg = ControlConfig(egress_tools=("web_fetch",))
+    spec = build_target_spec(_tf(control_config=cfg))
+    ctx = target_context_for(spec, target_id="mcp:acme", framework="langchain")
+    assert isinstance(ctx, TargetContext)
+    assert ctx.target_id == "mcp:acme"
+    assert ctx.transport == "stdio"
+    assert ctx.launch_command == "python"
+    assert ctx.control_config is cfg
+    assert ctx.framework == "langchain"
+    assert ctx.tools == ()
+
+
 def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: Path) -> None:
     """Backward-compat: a target file that declares neither new field round-trips
     unchanged (the optional fields are omitted on dump via exclude_defaults).

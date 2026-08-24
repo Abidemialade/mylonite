@@ -4637,6 +4637,30 @@ def gate(
 
         gate_system_prompt = resolved_system_prompt(tf)
 
+    # PR2: build the structural-recommendation engine's TargetContext for any
+    # custom target (both the --target-file and mcp:<family> routes set
+    # custom_spec — see its construction above). None for a reference target,
+    # which keeps build_pr_body's output byte-identical to before PR2 (the
+    # differential there is against the in-repo twin, not an operator target
+    # to name tools/arguments FROM). Built with no live tool inventory: gate's
+    # scan_fn and build_pr_body run in the same synchronous call, and
+    # ScanResult.descriptor is only known after scan_fn returns internally to
+    # run_gate — threading it through needs run_gate to resolve target_context
+    # AFTER scan_fn, not before. W2/W3/W4 recommendations don't need a tool
+    # inventory (effect_trace evidence covers them); W1 degrades to
+    # medium-confidence, payload-derived evidence instead of high-confidence,
+    # real-description evidence until that plumbing lands.
+    gate_target_context = None
+    if custom_spec is not None:
+        from mylonite.plugins._mcp.target_file import target_context_for
+
+        gate_target_context = target_context_for(
+            custom_spec,
+            target_id=(
+                f"mcp:{tf.family}" if tf is not None else target if target is not None else "mcp:custom"
+            ),
+        )
+
     with llm_scope(policy=effective_policy):
         result = run_gate(
             out_dir=out,
@@ -4648,6 +4672,7 @@ def gate(
             llm_enrich=llm_enrich,
             mitigation_model=effective_model,
             system_prompt=gate_system_prompt,
+            target_context=gate_target_context,
         )
     raise typer.Exit(code=result.exit_code)
 
