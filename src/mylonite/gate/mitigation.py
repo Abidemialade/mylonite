@@ -164,6 +164,7 @@ def build_pr_body(
     system_prompt: str | None = None,
     model: str = DEFAULT_MITIGATION_MODEL,
     guarded_is_server_layer: bool | None = None,
+    target: Any | None = None,
 ) -> str:
     """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
 
@@ -182,6 +183,22 @@ def build_pr_body(
     even when the differential toggled the target's REAL server-side control
     (a declared ``control_env``), mislabelling the strongest possible result
     as the weakest.
+
+    ``target`` (PR2, Workstream D): an optional
+    ``mylonite.gate.recommend.TargetContext``. Typed ``Any`` here rather than
+    imported at module scope to avoid a needless import for the (still
+    common) ``target=None`` caller — ``recommend()`` itself is only imported
+    lazily, below, when a target is actually supplied. When ``None`` (every
+    existing caller, and every reference-target finding), this function's
+    output is BYTE-IDENTICAL to before PR2: the class-level
+    ``gate/fixes/{wc}.md`` diff still renders. When supplied, the class-level
+    ``gate/mitigations/{wc}.md`` background prose (:func:`_snippet`) stays —
+    it is still true and still useful context — but the fixed illustrative
+    diff is replaced by :func:`mylonite.gate.recommend.render_markdown`'s
+    target-specific, evidence-anchored recommendation: the operator's actual
+    tool, the actual argument that landed the exploit, and a prescription
+    tiered ``deterministic``/``probabilistic``/``detective`` rather than
+    presented with uniform confidence.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
@@ -257,16 +274,24 @@ def build_pr_body(
         "",
         _snippet(wc),
         "",
-        (
-            "**Proven fix** — implement the control the differential verified load-bearing, "
-            "server-side, then re-point the committed test at it:"
-            if is_control
-            else "**Recommended fix** — implement this control server-side, then re-point the "
-            "committed test at your implementation:"
-        ),
-        "",
-        _fix_block(wc),
     ]
+    if target is not None:
+        from mylonite.gate.recommend import recommend, render_markdown
+
+        rec = recommend(exploit, report, target=target)
+        sections.append(render_markdown(rec).rstrip())
+    else:
+        sections += [
+            (
+                "**Proven fix** — implement the control the differential verified load-bearing, "
+                "server-side, then re-point the committed test at it:"
+                if is_control
+                else "**Recommended fix** — implement this control server-side, then re-point the "
+                "committed test at your implementation:"
+            ),
+            "",
+            _fix_block(wc),
+        ]
     if is_reference:
         sections += [
             "",

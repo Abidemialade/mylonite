@@ -225,6 +225,74 @@ def test_run_gate_threads_system_prompt_so_localize_resolves_a_line(tmp_path):
     assert "system prompt, line 2" in pr_calls["body"]
 
 
+def test_run_gate_threads_target_context_into_the_structural_recommendation(tmp_path):
+    """PR2: run_gate's target_context reaches build_pr_body, which renders a
+    target-specific recommendation (not the generic class-level fix diff)
+    when a target is supplied. target_context=None (the default) is covered
+    by test_run_gate_kept_assembles_and_invokes_pr — its body still asserts
+    only the generic "Suggested mitigation" marker, proving that path is
+    unaffected by this parameter existing."""
+    from mylonite.gate.recommend import TargetContext
+
+    ex = ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id="fetch",
+        payload=Payload(
+            pattern_id="fetch",
+            channel="user-message",
+            body="x",
+            metadata={"weakness": "W3"},
+        ),
+        response=AdapterResponse(
+            payload_pattern_id="fetch",
+            raw_response="agent did the thing",
+            tool_calls=["web_fetch"],
+            metadata={
+                "effect_trace": (
+                    '[{"tool": "web_fetch", "args": {"url": "http://attacker.example"}, '
+                    '"result": "ok", "is_error": false}]'
+                )
+            },
+        ),
+        success_reason="r",
+        compliance=ComplianceTags(owasp_asi=["ASI01"]),
+    )
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        kept=True,
+        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        mutation_score=None,
+    )
+    pr_calls = {}
+
+    def fake_scan():
+        return ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex])
+
+    def fake_generate(exploit):
+        return GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="# test\n", exploit=exploit
+        )
+
+    def fake_validate(test):
+        return report
+
+    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
+        pr_calls.update(body=body)
+        return "printed"
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=fake_scan,
+        generate_fn=fake_generate,
+        validate_fn=fake_validate,
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+        target_context=TargetContext(target_id="mcp:custom"),
+    )
+    assert "web_fetch" in pr_calls["body"]
+    assert "Confidence:" in pr_calls["body"]
+
+
 def test_run_gate_threads_a_real_configurable_mitigation_model(tmp_path):
     """T14: gate/mitigation.py used to hardcode
     ``litellm.completion(model="claude-haiku-4-5-20251001", ...)`` with no

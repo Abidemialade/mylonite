@@ -174,6 +174,15 @@ class ScanResult:
 
     report: ScanReport
     exploits: list[ExploitRecord] = field(default_factory=list)
+    #: The target's self-description, when ``adapter.describe()`` succeeded
+    #: (``None`` on a describe_failed abort). NOT part of ScanReport's
+    #: schema — ScanResult is a plain dataclass, not one of the five
+    #: Pydantic contracts, so adding a field here costs no compat event
+    #: (contracts/_types.py's `extra="forbid"` + schema regeneration would
+    #: apply to ScanReport, not this). Lets the structural recommendation
+    #: engine (gate/recommend.py, PR2) see the real tool inventory without
+    #: re-describing the target at prescription time.
+    descriptor: TargetDescriptor | None = None
 
 
 @dataclass
@@ -314,7 +323,12 @@ class ScanEngine:
                     )
                     aborted = AbortReason.NO_PAYLOADS
                 return self._finalize(
-                    attempts, exploits, aborted, time.monotonic() - start, module_ids
+                    attempts,
+                    exploits,
+                    aborted,
+                    time.monotonic() - start,
+                    module_ids,
+                    descriptor=descriptor,
                 )
 
             timeout_s = self._config.wall_clock_timeout_s
@@ -398,6 +412,7 @@ class ScanEngine:
             module_ids,
             inconclusive_attempts=inconclusive_attempts,
             fallback_breakdown=fallback_breakdown,
+            descriptor=descriptor,
         )
 
     def _finalize(
@@ -410,6 +425,7 @@ class ScanEngine:
         *,
         inconclusive_attempts: int = 0,
         fallback_breakdown: dict[str, int] | None = None,
+        descriptor: TargetDescriptor | None = None,
     ) -> ScanResult:
         report = ScanReport(
             target_id=self._config.target_id,
@@ -425,7 +441,9 @@ class ScanEngine:
             single_run=self._config.runs == 1,
             mylonite_version=__version__,
         )
-        return ScanResult(report=report, exploits=self._stamp_exec_context(exploits))
+        return ScanResult(
+            report=report, exploits=self._stamp_exec_context(exploits), descriptor=descriptor
+        )
 
     def _stamp_exec_context(self, exploits: list[ExploitRecord]) -> list[ExploitRecord]:
         """Stamp T12 execution-context metadata onto every finding's payload.

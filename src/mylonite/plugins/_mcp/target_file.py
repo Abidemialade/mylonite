@@ -24,7 +24,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -44,6 +44,9 @@ from mylonite.plugins._mcp.target_registry import (
     SeedArmSpec,
     TargetSpec,
 )
+
+if TYPE_CHECKING:
+    from mylonite.gate.recommend import TargetContext
 
 _WEAKNESS_CLASSES = frozenset({"W1", "W2", "W3", "W4"})
 
@@ -178,6 +181,47 @@ def resolved_system_prompt(tf: TargetFile) -> str:
     if path is not None:
         return path.read_text(encoding="utf-8")
     return _DEFAULT_CUSTOM_PROMPT
+
+
+def target_context_for(
+    spec: TargetSpec,
+    *,
+    target_id: str,
+    tools: tuple[Any, ...] = (),
+    framework: str | None = None,
+) -> TargetContext:
+    """Build the structural-recommendation engine's pure-data view of ``spec``.
+
+    ``gate/recommend.py`` cannot import anything under ``mylonite.plugins``
+    (it must stay pure and target-agnostic — see its module docstring), so
+    this builder lives on the plugin side and does the one-way translation:
+    ``TargetSpec`` (this package's live runtime model, with a scope validator
+    callable, launch env overlays, etc.) down to ``TargetContext`` (a frozen
+    dataclass of plain data the engine can reason over with no knowledge of
+    MCP/stdio/launch mechanics at all).
+
+    ``target_id`` is the caller's resolved id (e.g. ``f"mcp:{spec.family}"``
+    or the custom-target ``report_target_id`` the CLI already computes) —
+    not reconstructed here, since a scoped target's exact id format is a
+    CLI-layer decision this module has no business re-deriving.
+
+    ``tools``/``framework`` are optional ENHANCEMENT-tier inputs (a live tool
+    inventory from ``ScanResult.descriptor.tools``, an operator-declared
+    framework from a future ``TargetFile.framework`` field) — every field on
+    ``TargetContext`` is optional, so a caller with none of this still gets a
+    usable context from the spec alone.
+    """
+    from mylonite.gate.recommend import TargetContext
+
+    return TargetContext(
+        target_id=target_id,
+        transport=spec.transport,
+        launch_command=spec.command or None,
+        control_config=spec.control_config,
+        system_prompt=spec.default_system_prompt,
+        tools=tools,
+        framework=framework,
+    )
 
 
 def build_target_spec(tf: TargetFile) -> TargetSpec:
