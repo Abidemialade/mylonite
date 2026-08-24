@@ -19,7 +19,10 @@ from mylonite.report.severity import severity_for
 from mylonite.version import __version__
 
 #: Bump on any backward-incompatible change to the finding shape.
-SCHEMA_VERSION = "1.0"
+#: 1.1 (PR6): added the optional "recommendation" key (present only when a
+#: TargetContext was supplied to to_bundle) -- additive, but every consumer
+#: of the finding shape should know the version moved.
+SCHEMA_VERSION = "1.1"
 
 
 def _proof(report: Any | None) -> dict[str, Any] | None:
@@ -34,7 +37,21 @@ def _proof(report: Any | None) -> dict[str, Any] | None:
     }
 
 
-def _finding(exploit: Any, report: Any | None) -> dict[str, Any]:
+def _recommendation(exploit: Any, report: Any | None, target: Any | None) -> dict[str, Any] | None:
+    """PR6: the structural recommendation, when a TargetContext is available.
+
+    ``None`` (the key is simply omitted by the caller) when no target was
+    supplied — every existing consumer of a 1.0-shaped bundle keeps working
+    unchanged, since this is purely additive.
+    """
+    if target is None:
+        return None
+    from mylonite.gate.recommend import recommend, to_dict
+
+    return to_dict(recommend(exploit, report, target=target))
+
+
+def _finding(exploit: Any, report: Any | None, target: Any | None = None) -> dict[str, Any]:
     md = getattr(exploit.payload, "metadata", {}) or {}
     weakness = str(md.get("weakness", "")) or weakness_class_for(exploit)
     effect = str(getattr(exploit.response, "metadata", {}).get("effect_confirmed", "unprobed"))
@@ -69,19 +86,31 @@ def _finding(exploit: Any, report: Any | None) -> dict[str, Any]:
         },
         "proof": _proof(report),
         "proven_control": md.get("synthetic_control") or None,
+        "recommendation": _recommendation(exploit, report, target),
     }
 
 
 def to_bundle(
-    findings: list[tuple[Any, Any | None]], *, tool_version: str = __version__
+    findings: list[tuple[Any, Any | None]],
+    *,
+    tool_version: str = __version__,
+    target: Any | None = None,
 ) -> dict[str, Any]:
     """Build the JSON finding bundle from ``(exploit, validation_report | None)`` pairs.
 
     Mirrors ``to_sarif``: a scan dir yields exploits with no report (no proof); a
     validation yields the exploit + its ``ValidationReport`` (the differential proof).
+
+    ``target`` (PR6): an optional ``mylonite.gate.recommend.TargetContext``,
+    shared across every finding in this call (a bundle is built from one
+    scan/validation of one target). When supplied, each finding's
+    ``recommendation`` key carries the same structural, evidence-anchored
+    recommendation ``build_pr_body`` renders — reusing
+    ``recommend.to_dict`` so the bundle and SARIF (``report/sarif.py``)
+    cannot describe the same finding two different ways.
     """
     return {
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "Mylonite", "version": tool_version},
-        "findings": [_finding(exploit, report) for exploit, report in findings],
+        "findings": [_finding(exploit, report, target) for exploit, report in findings],
     }

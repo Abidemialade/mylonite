@@ -53,11 +53,21 @@ def _proof_text(report: Any | None) -> str | None:
 
 
 def _result(
-    exploit: Any, report: Any | None, *, system_prompt: str | None = None
+    exploit: Any,
+    report: Any | None,
+    *,
+    system_prompt: str | None = None,
+    target: Any | None = None,
 ) -> dict[str, Any]:
     weakness = str((getattr(exploit.payload, "metadata", {}) or {}).get("weakness", ""))
     effect = str(getattr(exploit.response, "metadata", {}).get("effect_confirmed", "unprobed"))
     sev = severity_for(weakness, effect)
+    # PR6: fall back to the target's own system prompt so this result's
+    # localize() call agrees with the one recommend() makes internally below
+    # — a caller that passes target= but not system_prompt= must not get two
+    # different line numbers for the same finding across the two calls.
+    if system_prompt is None and target is not None:
+        system_prompt = getattr(target, "system_prompt", None)
     # R4: pin the finding to its locus (the implicated tool/field or prompt line) so
     # GitHub code scanning shows WHERE to fix, not just what.
     loc = localize(exploit, system_prompt=system_prompt)
@@ -93,6 +103,17 @@ def _result(
     }
     if report is not None:
         props["kept"] = bool(getattr(report, "kept", False))
+    # PR6: the structural recommendation, when a TargetContext is available.
+    # Deliberately in `properties`, not SARIF's `result.fixes` -- `fixes[].
+    # artifactChanges` requires a real artifact URI + region to apply a
+    # patch against, and a remote MCP tool has no repo file to point one at
+    # (the same honesty `localize.py`'s docstring is built on). GitHub code
+    # scanning renders `properties` fine; it just isn't a one-click "Apply
+    # fix" the way `fixes` would be, which is the correct level of claim.
+    if target is not None:
+        from mylonite.gate.recommend import recommend, to_dict
+
+        props["mylonite.recommendation"] = to_dict(recommend(exploit, report, target=target))
     # GitHub code scanning dedups alerts across commits by partialFingerprints. Our
     # AI-layer findings have no stable source-line hash (the locus is a tool/field, and
     # a remote MCP tool has no repo file at all), so key the fingerprint on the STABLE
@@ -131,12 +152,21 @@ def _rule(exploit: Any) -> dict[str, Any]:
 
 
 def to_sarif(
-    findings: list[tuple[Any, Any | None]], *, tool_version: str = __version__
+    findings: list[tuple[Any, Any | None]],
+    *,
+    tool_version: str = __version__,
+    target: Any | None = None,
 ) -> dict[str, Any]:
     """Build a SARIF 2.1.0 document from ``(exploit, validation_report | None)`` pairs.
 
     A scan dir yields exploits with no report (no proof); a validation yields the
     exploit + its ``ValidationReport`` (the differential proof). Both render.
+
+    ``target`` (PR6): an optional ``mylonite.gate.recommend.TargetContext``,
+    shared across every finding (mirrors ``report/bundle.to_bundle``). When
+    supplied, each result's ``properties["mylonite.recommendation"]`` carries
+    the same structural recommendation ``build_pr_body``/the JSON bundle
+    render, via the shared ``recommend.to_dict`` serializer.
     """
     rules: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
@@ -144,7 +174,7 @@ def to_sarif(
         pid = str(exploit.pattern_id)
         if pid not in rules:
             rules[pid] = _rule(exploit)
-        results.append(_result(exploit, report))
+        results.append(_result(exploit, report, target=target))
     return {
         "$schema": _SCHEMA,
         "version": "2.1.0",

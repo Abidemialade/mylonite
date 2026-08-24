@@ -80,6 +80,37 @@ def test_bundle_without_report_has_null_proof() -> None:
     assert f["attack_shape"] == "static"  # default when unstamped
 
 
+def test_bundle_recommendation_absent_without_a_target() -> None:
+    """PR6: additive — every existing (target-less) caller keeps getting
+    recommendation: null, not a missing key that would break strict parsers."""
+    from mylonite.report.bundle import to_bundle
+
+    f = to_bundle([(_exploit("W3"), _report())])["findings"][0]
+    assert f["recommendation"] is None
+
+
+def test_bundle_recommendation_present_with_a_target() -> None:
+    """The bundle's recommendation is the SAME shape build_pr_body renders —
+    both go through recommend.to_dict, so they cannot describe one finding
+    two different ways."""
+    from mylonite.gate.recommend import TargetContext, recommend, to_dict
+    from mylonite.report.bundle import to_bundle
+
+    ex = _exploit("W2")
+    report = _report()
+    target = TargetContext(target_id="mcp:myapp")
+    f = to_bundle([(ex, report)], target=target)["findings"][0]
+    assert f["recommendation"] == to_dict(recommend(ex, report, target=target))
+    json.dumps(f)  # still fully serialisable with the recommendation present
+
+
+def test_bundle_schema_version_bumped_for_the_additive_recommendation_key() -> None:
+    from mylonite.report.bundle import SCHEMA_VERSION, to_bundle
+
+    assert SCHEMA_VERSION == "1.1"
+    assert to_bundle([])["schema_version"] == "1.1"
+
+
 def test_bundle_empty() -> None:
     from mylonite.report.bundle import to_bundle
 
