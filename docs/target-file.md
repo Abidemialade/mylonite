@@ -120,6 +120,13 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
   differential against *your own* unguarded build and per-control env toggles, instead of
   the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
   of the server. See [Concepts](concepts.md) and [Security](security.md).
+- **`framework`** — optional, free-form (e.g. `langchain`, `crewai`, `llamaindex`).
+  Entirely a labelling hint: it names your agent framework in a structural
+  recommendation's code sketch alongside the language Mylonite already infers from
+  `command` (`python`/`uv`/`uvx`/`poetry` → Python, `node`/`npx`/`bun`/`tsx` → TypeScript,
+  else generic pseudocode). Never validated against a fixed list, and never used to
+  fabricate that framework's actual hook/decorator syntax — Mylonite points you at where
+  to wire a sketch in, not at invented API details it hasn't verified.
 
 > **Windows SQLite footgun.** If `env` points at a SQLite DB by URL, note that
 > `sqlite:////c/Users/...` (4 slashes) and `sqlite:///C:/Users/...` (3 slashes) open

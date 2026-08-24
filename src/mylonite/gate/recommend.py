@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Literal
+from pathlib import PurePath
+from typing import Any, Final, Literal
 
 from mylonite._redaction import redact
 from mylonite.contracts._types import ExploitRecord, ValidationReport
@@ -344,6 +345,93 @@ def _degrade(base: Confidence) -> Confidence:
     return _DEGRADE_TABLE[base]
 
 
+# --- language / framework (Workstream D6, PR10) ------------------------------
+
+#: D2 boundary: language is inferred ONLY from the launch command a target.yaml
+#: already declares — never from reading pyproject.toml/package.json (charter
+#: risk, low marginal value over a declared field). Matched against the
+#: command's basename (path prefix and extension stripped), so `/usr/bin/uv`,
+#: `uv.exe`, and `uv` all match the same way.
+_PYTHON_COMMAND_NAMES: Final = frozenset({"python", "python3", "uv", "uvx", "poetry"})
+_TYPESCRIPT_COMMAND_NAMES: Final = frozenset({"node", "npx", "bun", "tsx"})
+
+
+def _infer_language(launch_command: str | None) -> Literal["python", "typescript", "pseudocode"]:
+    """Infer a code sketch's language from the target's declared launch command.
+
+    Falls back to ``"pseudocode"`` for an undeclared or unrecognised command —
+    never guesses, since a wrong language label is worse than an honestly
+    generic sketch. ``python3.11``/``python3.12``-style versioned binaries
+    match via the ``python`` prefix.
+
+    ``launch_command`` is ``TargetFile.command`` — documented as the bare
+    executable/path, with arguments living separately in ``args:`` — so this
+    does NOT split on whitespace looking for a first token: a Windows path
+    containing a space (``C:\\Program Files\\nodejs\\node.exe``) would
+    otherwise be cut at the space and misclassified.
+    """
+    if not launch_command or not launch_command.strip():
+        return "pseudocode"
+    # Split on BOTH separators regardless of the host OS running Mylonite —
+    # `PurePath`'s OS-native flavour would silently fail to split a
+    # backslash-separated Windows path when Mylonite itself runs on Linux CI
+    # (a plain PurePosixPath does not treat "\\" as a separator at all).
+    tail = launch_command.strip().replace("\\", "/").rsplit("/", 1)[-1]
+    name = PurePath(tail).stem.lower()
+    if name in _PYTHON_COMMAND_NAMES or name.startswith("python"):
+        return "python"
+    if name in _TYPESCRIPT_COMMAND_NAMES:
+        return "typescript"
+    return "pseudocode"
+
+
+def _framework_note(framework: str | None, *, comment: str = "#") -> str | None:
+    """A one-line pointer at the operator's declared framework, or ``None``.
+
+    Deliberately does NOT fabricate a framework's actual hook/decorator
+    syntax — nine of eleven surveyed agent frameworks expose SOME blocking
+    pre-tool-call hook, but the exact API differs per framework and per
+    version, and an invented-but-wrong snippet is worse than the honest,
+    framework-neutral ``before_tool_call`` shape every sketch already uses.
+    This note only NAMES the declared framework so the operator knows where
+    to wire the sketch in; it is not a substitute for that framework's own
+    middleware/callback documentation.
+    """
+    if not framework:
+        return None
+    return f"{comment} {framework}: wire this into its own pre-tool-call / tool-execution hook."
+
+
+def _code_sketch(
+    target: TargetContext | None,
+    *,
+    python: str,
+    typescript: str,
+    pseudocode: str | None = None,
+) -> CodeSketch:
+    """Build a `CodeSketch` in the target's inferred language, when known.
+
+    ``pseudocode`` defaults to the ``python`` body — that shape (a
+    ``before_tool_call``-style function) already reads as generic pseudocode
+    for an operator in any language, so writing a THIRD near-identical
+    variant would be pure duplication; pass it explicitly only when the
+    python/pseudocode bodies should genuinely differ.
+    """
+    language = _infer_language(target.launch_command if target else None)
+    framework = target.framework if target else None
+    body = {
+        "python": python,
+        "typescript": typescript,
+        "pseudocode": pseudocode if pseudocode is not None else python,
+    }[language]
+    note = _framework_note(framework, comment="//" if language == "typescript" else "#")
+    return CodeSketch(
+        language=language,
+        framework=framework,
+        body=f"{note}\n{body}" if note else body,
+    )
+
+
 # --- per-class recommendation builders --------------------------------------
 
 
@@ -380,16 +468,26 @@ def _w3_recommendation(
         ),
         invariant=f"{tool}(...) refuses unless the destination host is in ALLOWED_HOSTS",
         config_snippet=config_snippet,
-        code_sketch=CodeSketch(
-            language="pseudocode",
-            framework=None,
-            body=(
+        code_sketch=_code_sketch(
+            target,
+            python=(
                 "def before_tool_call(tool_name, args):\n"
                 f"    if tool_name == {tool!r}:\n"
                 "        host = urlparse(args.get(" + repr(url_param) + ", \"\")).hostname\n"
                 "        if host not in ALLOWED_HOSTS:\n"
                 "            return Decision.deny(f\"egress to {host!r} is not on the allowlist\")\n"
                 "    return Decision.allow()"
+            ),
+            typescript=(
+                "function beforeToolCall(toolName: string, args: Record<string, unknown>) {\n"
+                f"  if (toolName === {tool!r}) {{\n"
+                f"    const host = new URL(String(args[{url_param!r}] ?? \"\")).hostname;\n"
+                "    if (!ALLOWED_HOSTS.includes(host)) {\n"
+                "      return Decision.deny(`egress to ${host} is not on the allowlist`);\n"
+                "    }\n"
+                "  }\n"
+                "  return Decision.allow();\n"
+                "}"
             ),
         ),
         residual=(
@@ -431,14 +529,21 @@ def _w4_recommendation(
         ),
         invariant=f"{tool}(...) refuses unless called with a server-issued confirm_token",
         config_snippet=config_snippet,
-        code_sketch=CodeSketch(
-            language="pseudocode",
-            framework=None,
-            body=(
+        code_sketch=_code_sketch(
+            target,
+            python=(
                 f"def {tool}(..., confirm_token=None):\n"
                 "    if not confirm_token or not verify_token(confirm_token):\n"
                 "        return {\"status\": \"confirmation_required\", \"preview\": {...}}\n"
                 "    return dispatch(...)"
+            ),
+            typescript=(
+                f"function {tool}(...args: unknown[], confirmToken?: string) {{\n"
+                "  if (!confirmToken || !verifyToken(confirmToken)) {\n"
+                "    return { status: \"confirmation_required\", preview: {} };\n"
+                "  }\n"
+                "  return dispatch(...args);\n"
+                "}"
             ),
         ),
         citations=("mcp-spec-2026-07-28-consent",),
@@ -510,13 +615,17 @@ def _w2_recommendation(
         ),
         invariant=f"{sink_name}(...) refuses while untrusted content from {read_name} is in scope",
         config_snippet=config_snippet,
-        code_sketch=CodeSketch(
-            language="pseudocode",
-            framework=None,
-            body=(
+        code_sketch=_code_sketch(
+            target,
+            python=(
                 f"# {read_name} output: integrity=untrusted\n"
                 f"# {sink_name}: accepts_untrusted=False\n"
                 "# -> sink refused while untrusted content is in the active context"
+            ),
+            typescript=(
+                f"// {read_name} output: integrity=untrusted\n"
+                f"// {sink_name}: acceptsUntrusted=false\n"
+                "// -> sink refused while untrusted content is in the active context"
             ),
         ),
         citations=("fides-ms-learn",),
@@ -627,6 +736,128 @@ def _w1_recommendation(
     return (evidence,), (pin, attenuation, sanitizer), confidence, reason
 
 
+#: Mirrors ``mylonite.plugins._mcp.twins.INPUT_FRAME_CONTROL`` — duplicated as
+#: a literal (not imported) because this module must not import anything
+#: under ``mylonite.plugins`` (see the module docstring). The two must stay
+#: in sync by convention; ``tests/gate/test_recommend.py`` pins the literal.
+_INPUT_FRAME_WEAKNESS: Final = "input-frame"
+
+
+def _rest_recommendation(
+    exploit: ExploitRecord, target: TargetContext | None, loc: Localization
+) -> tuple[tuple[Evidence, ...], tuple[Prescription, ...], Confidence, str]:
+    """Workstream D6: a ``transport: rest`` target has no ``tools/list``, so the
+    W1-W4 tool-identity-keyed prescriptions above do not apply. Built on what
+    DOES generalise to any HTTP agent, regardless of which pattern fired:
+    collapsed authorization (the highest-value REST finding — most wrapped
+    APIs end up single-principal), input framing (the primary control for the
+    ``input-frame`` differential specifically), and endpoint-boundary
+    enforcement (the REST analogue of a tool allowlist, since there is no
+    tool boundary to attach one to).
+    """
+    evidence = Evidence(
+        tool=loc.tool or "the agent endpoint",
+        argument=None,
+        value=_quote(exploit.payload.body) if exploit.payload.body else None,
+        occurrence=None,
+        executed=bool(exploit.response.tool_calls),
+        source="payload",
+        note="rest transport — no tool identity to key evidence on",
+    )
+    input_framing = Prescription(
+        control_id="rest-input-framing",
+        tier="probabilistic",
+        headline=(
+            "Frame the caller's message as structured, labelled DATA — never string-"
+            "concatenated into the system/instruction prompt."
+        ),
+        rationale=(
+            "A collapsed HTTP wrapper that builds one prompt string from "
+            "`system_instructions + user_message` gives the model no structural signal "
+            "that the two have different trust levels. Passing them as separate, "
+            "labelled fields (e.g. distinct chat-message roles, or an explicit "
+            "`{\"instructions\": ..., \"untrusted_input\": ...}` envelope) is the REST "
+            "analogue of W2's untrusted-content labelling — it changes what the model "
+            "sees, so whether it holds still depends on the model respecting the label."
+        ),
+        invariant=None,
+        config_snippet=None,
+        code_sketch=_code_sketch(
+            target,
+            python=(
+                "messages = [\n"
+                '    {"role": "system", "content": SYSTEM_INSTRUCTIONS},\n'
+                '    {"role": "user", "content": untrusted_user_message},\n'
+                "]  # never: SYSTEM_INSTRUCTIONS + untrusted_user_message"
+            ),
+            typescript=(
+                "const messages = [\n"
+                '  { role: "system", content: SYSTEM_INSTRUCTIONS },\n'
+                '  { role: "user", content: untrustedUserMessage },\n'
+                "]; // never: SYSTEM_INSTRUCTIONS + untrustedUserMessage"
+            ),
+        ),
+        residual=(
+            "Structural framing narrows the attack surface but does not eliminate "
+            "instruction-following: a sufficiently persuasive user-role message can "
+            "still be followed if nothing downstream enforces what the response is "
+            "allowed to do.",
+        ),
+    )
+    collapsed_authz = Prescription(
+        control_id="rest-on-behalf-of-identity",
+        tier="deterministic",
+        headline=(
+            "Propagate the CALLER's identity through to every downstream action, "
+            "instead of one shared service credential for the whole agent."
+        ),
+        rationale=(
+            "The most common REST-agent failure is architectural, not a specific "
+            "prompt: the wrapper holds ONE service token for the API it fronts, so "
+            "every caller effectively acts with the same (often over-broad) "
+            "permissions. An on-behalf-of token (or a per-caller scoped credential, "
+            "resolved server-side from an authenticated session) means a successful "
+            "prompt injection can only reach what THAT caller was already allowed to "
+            "reach — it gates the call in code, not in the prompt."
+        ),
+        invariant="every downstream call is scoped to the authenticated caller's own permissions",
+        config_snippet=None,
+        code_sketch=None,
+        residual=(
+            "Does not by itself stop a caller from misusing their OWN legitimate "
+            "permissions via a successful injection — it bounds the blast radius to "
+            "that caller's scope, not to zero.",
+        ),
+    )
+    endpoint_boundary = Prescription(
+        control_id="rest-endpoint-allowlist",
+        tier="deterministic",
+        headline="Enforce an explicit allowlist of upstream endpoints/actions the wrapper may invoke.",
+        rationale=(
+            "With no MCP tool boundary to attach a control to, the equivalent gate "
+            "lives in the wrapper's own dispatch code: before issuing an upstream "
+            "call on the model's behalf, check the target endpoint/action against an "
+            "explicit allowlist, exactly as `mylonite.scan.control_shim`'s W3 egress "
+            "control does for a tool-identity-keyed target."
+        ),
+        invariant="the dispatcher refuses any upstream call whose endpoint is not on ALLOWED_ENDPOINTS",
+        config_snippet=None,
+        code_sketch=None,
+        residual=(
+            "An allowlisted endpoint that itself accepts attacker-influenced "
+            "parameters (e.g. a generic `/execute?action=...`) still needs its OWN "
+            "parameter-level validation — endpoint allowlisting bounds WHERE, not "
+            "WHAT.",
+        ),
+    )
+    return (
+        (evidence,),
+        (input_framing, collapsed_authz, endpoint_boundary),
+        "medium",
+        "rest transport — declared by the target, not derived from a tool-identity trace",
+    )
+
+
 def _generic_recommendation(
     exploit: ExploitRecord, loc: Localization
 ) -> tuple[tuple[Evidence, ...], tuple[Prescription, ...], Confidence, str]:
@@ -673,7 +904,18 @@ def recommend(
     from mylonite.gate.mitigation import weakness_class_for
 
     degraded: list[str] = []
-    wc = weakness_class_for(exploit)
+    # A rest target's finding is never really "W2"/"generic" — the transport
+    # (when a target is supplied) or the exploit's own stamped `input-frame`
+    # weakness (when it isn't — e.g. a bare report/generate call with no
+    # target_context plumbed through) decides the recommendation shape below,
+    # not weakness_class_for's W1-W4/compliance-tag inference, which is built
+    # for a tool-identity-keyed MCP target and has no "input-frame" case.
+    is_rest_target = (target is not None and target.transport == "rest") or (
+        exploit.payload.metadata.get("weakness") == _INPUT_FRAME_WEAKNESS
+    )
+    # Overriding the LABEL here too keeps it from disagreeing with the
+    # REST-specific prescriptions actually rendered below.
+    wc = "rest" if is_rest_target else weakness_class_for(exploit)
     system_prompt = target.system_prompt if target is not None else None
     try:
         loc = localize(exploit, system_prompt=system_prompt)
@@ -682,7 +924,12 @@ def recommend(
         loc = Localization(kind="tool", label="unknown", tool=None, field=None, line=None, why="")
 
     try:
-        if wc == "W1":
+        if is_rest_target:
+            # D6: a rest target has no tools/list, so the W1-W4 tool-identity-keyed
+            # builders below do not apply regardless of which class weakness_class_for
+            # inferred — the transport itself, not the specific weakness, decides.
+            evidence, prescriptions, confidence, reason = _rest_recommendation(exploit, target, loc)
+        elif wc == "W1":
             evidence, prescriptions, confidence, reason = _w1_recommendation(exploit, target, loc)
         elif wc == "W2":
             evidence, prescriptions, confidence, reason = _w2_recommendation(exploit, target, loc)

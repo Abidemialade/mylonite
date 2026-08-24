@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`TargetFile.framework`** (optional, free-form, e.g. `langchain`/`crewai`/
+  `llamaindex`) — labels a structural recommendation's code sketch with the
+  operator's agent framework, alongside the language now INFERRED from the
+  target's declared `command` (`python`/`uv`/`uvx`/`poetry` → Python,
+  `node`/`npx`/`bun`/`tsx` → TypeScript, else pseudocode; D2 boundary — no
+  `pyproject.toml`/`package.json` sniffing). `gate.recommend`'s W2/W3/W4 code
+  sketches are now genuinely Python- or TypeScript-flavored instead of always
+  Python-shaped pseudocode; a declared framework only NAMES itself in the
+  sketch (never fabricates that framework's actual hook/decorator syntax —
+  an invented-but-wrong snippet is worse than the honest generic
+  `before_tool_call` shape every sketch already used).
+- **REST/HTTP-agent structural recommendations (Workstream D6).** A
+  `transport: rest` target has no `tools/list`, so `gate.recommend`'s W1-W4
+  tool-identity-keyed prescriptions never applied to it — every such finding
+  silently fell through to the unhelpful generic "declare weakness_classes"
+  fallback. Now gated on the target's declared transport (or the exploit's
+  own stamped `input-frame` weakness when no target is available): input
+  framing — structured, labelled messages instead of string-concatenating
+  the caller's message into the system prompt (`probabilistic` — the
+  primary control for `--prove-input-control` findings specifically);
+  collapsed authorization — propagate the caller's own identity downstream
+  instead of one shared service credential (`deterministic`, the
+  highest-value REST finding); endpoint-boundary enforcement — an explicit
+  allowlist of upstream endpoints/actions the wrapper may invoke, since
+  there is no tool boundary to attach one to (`deterministic`).
+
 - **`mylonite check --target-file PATH [--enforce]`** — the new zero-key,
   zero-spend static on-ramp (replaces `demo`'s role as the free first step,
   now that `demo` itself is removed — see Removed below). Connects to the

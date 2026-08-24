@@ -430,7 +430,7 @@ def test_w1_pin_mutation_changes_the_digest():
 # --- degradation: never raises, always says why -----------------------------
 
 
-@pytest.mark.parametrize("weakness", ["W1", "W2", "W3", "W4", "generic"])
+@pytest.mark.parametrize("weakness", ["W1", "W2", "W3", "W4", "generic", "input-frame"])
 def test_never_raises_on_missing_trace(weakness):
     ex = _exploit(pattern_id="p", weakness=weakness)
     rec = recommend(ex)
@@ -627,3 +627,170 @@ def test_to_dict_is_json_serializable():
     )
     rec = recommend(ex)
     json.dumps(to_dict(rec))  # must not raise
+
+
+# --- language inference / framework threading (Workstream D6, PR10) ---------
+
+
+@pytest.mark.parametrize("command", ["python", "python3", "python3.11", "uv", "uvx", "poetry"])
+def test_infer_language_recognises_python_commands(command):
+    from mylonite.gate.recommend import _infer_language
+
+    assert _infer_language(command) == "python"
+
+
+@pytest.mark.parametrize("command", ["node", "npx", "bun", "tsx"])
+def test_infer_language_recognises_typescript_commands(command):
+    from mylonite.gate.recommend import _infer_language
+
+    assert _infer_language(command) == "typescript"
+
+
+@pytest.mark.parametrize("command", [None, "", "  ", "ruby", "go", "java"])
+def test_infer_language_falls_back_to_pseudocode(command):
+    from mylonite.gate.recommend import _infer_language
+
+    assert _infer_language(command) == "pseudocode"
+
+
+def test_infer_language_strips_path_and_extension():
+    from mylonite.gate.recommend import _infer_language
+
+    assert _infer_language("/usr/bin/python3.11") == "python"
+    assert _infer_language(r"C:\Program Files\nodejs\node.exe") == "typescript"
+
+
+def test_infer_language_does_not_split_on_whitespace_in_a_windows_path():
+    """`command:` is the bare executable/path (args live separately in
+    `args:`), so a Windows path containing a space in a directory name must
+    not be cut at the space and misclassified."""
+    from mylonite.gate.recommend import _infer_language
+
+    assert _infer_language(r"C:\Program Files\Python312\python.exe") == "python"
+
+
+def test_w3_code_sketch_uses_typescript_for_a_node_target():
+    ex = _exploit(
+        pattern_id="w3",
+        weakness="W3",
+        effect_trace=[
+            {"tool": "web_fetch", "args": {"url": "http://attacker.example"}, "result": "ok", "is_error": False}
+        ],
+        tool_calls=("web_fetch",),
+    )
+    target = TargetContext(target_id="mcp:custom", launch_command="node")
+    rec = recommend(ex, target=target)
+    sketch = rec.prescriptions[0].code_sketch
+    assert sketch is not None
+    assert sketch.language == "typescript"
+    assert "function beforeToolCall" in sketch.body
+
+
+def test_w4_code_sketch_defaults_to_python_for_an_unset_target():
+    ex = _exploit(
+        pattern_id="w4",
+        weakness="W4",
+        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        tool_calls=("send_email",),
+        metadata={"consequential_tool": "send_email"},
+    )
+    target = TargetContext(target_id="mcp:custom", launch_command="python")
+    rec = recommend(ex, target=target)
+    sketch = rec.prescriptions[0].code_sketch
+    assert sketch is not None
+    assert sketch.language == "python"
+    assert "def send_email" in sketch.body
+
+
+def test_code_sketch_names_the_declared_framework_without_inventing_its_api():
+    ex = _exploit(
+        pattern_id="w3",
+        weakness="W3",
+        effect_trace=[
+            {"tool": "web_fetch", "args": {"url": "http://attacker.example"}, "result": "ok", "is_error": False}
+        ],
+        tool_calls=("web_fetch",),
+    )
+    target = TargetContext(target_id="mcp:custom", launch_command="python", framework="langchain")
+    rec = recommend(ex, target=target)
+    sketch = rec.prescriptions[0].code_sketch
+    assert sketch is not None
+    assert sketch.framework == "langchain"
+    assert "langchain" in sketch.body
+    # Never fabricate a specific decorator/hook name for a framework we did
+    # not verify -- the note only NAMES it, it does not invent an API.
+    assert "@" not in sketch.body.splitlines()[0]
+
+
+def test_code_sketch_no_framework_declared_has_no_note():
+    ex = _exploit(
+        pattern_id="w4",
+        weakness="W4",
+        effect_trace=[{"tool": "send_email", "args": {"to": "x"}, "result": "sent", "is_error": False}],
+        tool_calls=("send_email",),
+        metadata={"consequential_tool": "send_email"},
+    )
+    target = TargetContext(target_id="mcp:custom", launch_command="python")
+    rec = recommend(ex, target=target)
+    sketch = rec.prescriptions[0].code_sketch
+    assert sketch is not None
+    assert sketch.framework is None
+    assert "wire this into" not in sketch.body
+
+
+# --- REST / HTTP-agent templates (Workstream D6, PR10) -----------------------
+
+
+def test_rest_transport_target_gets_rest_prescriptions_not_w1_w4():
+    ex = _exploit(pattern_id="p", weakness="W2", channel="user-message")  # any stamped class
+    target = TargetContext(target_id="mcp:custom", transport="rest")
+    rec = recommend(ex, target=target)
+    assert rec.weakness_class == "rest"
+    control_ids = {p.control_id for p in rec.prescriptions}
+    assert control_ids == {"rest-input-framing", "rest-on-behalf-of-identity", "rest-endpoint-allowlist"}
+
+
+def test_rest_recommendation_fires_from_stamped_weakness_even_without_a_target():
+    """A bare `report`/`generate` call with no target_context plumbed through
+    must still recognise an input-frame finding, not fall through to the
+    unhelpful 'declare weakness_classes' generic fallback."""
+    ex = _exploit(pattern_id="p", weakness="input-frame")
+    rec = recommend(ex)  # target=None
+    assert rec.weakness_class == "rest"
+    assert rec.prescriptions[0].control_id == "rest-input-framing"
+
+
+def test_rest_input_framing_is_probabilistic_not_deterministic():
+    """Honesty check: framing changes what the model sees, it does not gate
+    the call in code -- must not be mislabelled deterministic."""
+    ex = _exploit(pattern_id="p", weakness="input-frame")
+    rec = recommend(ex)
+    framing = next(p for p in rec.prescriptions if p.control_id == "rest-input-framing")
+    assert framing.tier == "probabilistic"
+    assert framing.residual
+
+
+def test_rest_endpoint_allowlist_and_authz_are_deterministic():
+    ex = _exploit(pattern_id="p", weakness="input-frame")
+    rec = recommend(ex)
+    for control_id in ("rest-on-behalf-of-identity", "rest-endpoint-allowlist"):
+        p = next(pr for pr in rec.prescriptions if pr.control_id == control_id)
+        assert p.tier == "deterministic"
+
+
+def test_rest_recommendation_never_raises_with_malformed_trace():
+    ex = ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id="p",
+        payload=Payload(pattern_id="p", channel="user-message", body="x", metadata={"weakness": "input-frame"}),
+        response=AdapterResponse(
+            payload_pattern_id="p",
+            raw_response="x",
+            tool_calls=[],
+            metadata={"effect_trace": "not json"},
+        ),
+        success_reason="r",
+        compliance=ComplianceTags(),
+    )
+    rec = recommend(ex)  # must not raise
+    assert rec.weakness_class == "rest"
