@@ -159,8 +159,10 @@ unfinished, and no tag was ever pushed for either).
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-   The tag must match `release.yml`'s trigger patterns (`v0.[6-9].*`,
-   `v0.[1-9][0-9].*`, or `v[1-9]*.*.*`) or the workflow won't run.
+   The tag must match `release.yml`'s trigger pattern — `v[0-9]+.[0-9]+.[0-9]+`,
+   i.e. any plain `vX.Y.Z` — or the workflow won't run. Prereleases
+   (`v1.0.0rc1`) deliberately do **not** match: this workflow publishes straight
+   to PyPI.
    `release.yml`'s final job creates the GitHub Release automatically (title
    `vX.Y.Z`, notes = the matching `CHANGELOG.md` section) — a pushed tag by
    itself does **not** show up on the repo's Releases page or the
