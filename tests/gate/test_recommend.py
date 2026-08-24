@@ -632,7 +632,7 @@ def test_short_credential_keyed_argument_is_redacted_in_the_fallback_evidence_pa
     trace = [
         {
             "tool": "send_email",
-            "args": {"account": "1234", "password": "abc123"},
+            "args": {"account": "1234", "password": "abc123"},  # pragma: allowlist secret
             "result": "sent",
             "is_error": False,
         }
