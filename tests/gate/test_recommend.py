@@ -286,10 +286,14 @@ def test_w2_primary_is_deterministic_ifc_envelope_is_probabilistic_residual():
     assert envelope.residual  # must carry its own honest caveat
 
 
-def test_w2_config_snippet_round_trips_through_the_real_envelope_control():
-    """W2's config_snippet still targets the boundary control that exists
-    TODAY (UntrustedEnvelopeControl) — PR4 replaces the primary control but
-    the snippet format must keep working until then."""
+def test_w2_config_snippet_round_trips_through_the_real_primary_control():
+    """PR4: W2's primary control is now InformationFlowControl (deterministic
+    — gates the sink call), not UntrustedEnvelopeControl (probabilistic — only
+    wraps text). The oracle: the config_snippet's declared read_tool_names,
+    round-tripped through the REAL boundary control, taints the session on
+    the read and then REFUSES a downstream sink call — the same
+    parse-config-snippet-build-real-control-assert-it-refuses shape as the
+    W3/W4 oracles above, now proven for W2 too."""
     trace = [
         {"tool": "read_note", "args": {"id": "1"}, "result": "poisoned", "is_error": False},
     ]
@@ -303,13 +307,21 @@ def test_w2_config_snippet_round_trips_through_the_real_envelope_control():
     )
     rec = recommend(ex)
     primary = rec.prescriptions[0]
+    assert primary.tier == "deterministic"
     cfg = ControlConfig(**yaml.safe_load(primary.config_snippet)["control_config"])
     control = boundary_control_for(_spec(control_config=cfg), "W2")
+
     from mylonite.scan.llm_types import ToolResult
 
-    wrapped = control.transform_result("read_note", ToolResult(name="read_note", content="poisoned", isError=False))
-    assert "poisoned" in wrapped.content
-    assert wrapped.content != "poisoned"  # actually wrapped, not passed through
+    read_result = control.transform_result(
+        "read_note", ToolResult(name="read_note", content="poisoned", isError=False)
+    )
+    assert read_result.content == "poisoned"  # IFC never mangles the text
+    # "send_email" matches the fail-closed consequential-tool name hint, so
+    # the sink is refused without needing an explicit consequential_tools
+    # declaration in the snippet.
+    refused = control.intercept_call("send_email", {"to": "attacker@evil.test"})
+    assert refused is not None and refused.isError
 
 
 # --- W1: pinning + attenuation, sanitizer demoted ---------------------------

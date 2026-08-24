@@ -95,6 +95,18 @@ class BoundaryControl:
 
     weakness: ClassVar[str] = ""
 
+    def reset(self) -> None:
+        """Clear any session-scoped state before a NEW planner session starts.
+
+        Called once by :class:`ControlServerShim`'s constructor. Most controls
+        are stateless across calls (default no-op); ``InformationFlowControl``
+        (W2, PR4) is the first exception — its taint flag must not leak
+        between two different exploit attempts that happen to share the same
+        long-lived control instance (``TargetAdapter.__init__`` builds the
+        control list once; ``ControlServerShim`` is rebuilt fresh per
+        ``invoke()``/session, but the controls it wraps are not).
+        """
+
     def transform_description(self, tool: ToolDescription) -> ToolDescription:
         """Rewrite a tool description before the planner sees it (W1)."""
         return tool
@@ -236,6 +248,99 @@ _CONSEQUENTIAL_HINTS: tuple[str, ...] = (
     "issue",
     "dispatch",
 )
+
+
+class InformationFlowControl(BoundaryControl):
+    """W2 — deterministic information-flow control (PR4, primary W2 control).
+
+    ``UntrustedEnvelopeControl`` (above) wraps untrusted text in a marker and
+    hopes the model respects it — a PROBABILISTIC control; its own docstring
+    says so ("depends on the target's model and system prompt respecting
+    it"). This control instead LABELS the session as tainted the moment a
+    read/content tool returns a non-error result, and REFUSES a sink call
+    (a consequential or egress-classified tool) while the session is tainted
+    — the model may still read and reason over the untrusted content, it
+    simply cannot drive a sink from within the same session while it does.
+    That is a control that gates the CALL, in code, not the text: the same
+    shape as ``EgressAllowlistControl``/``ConfirmGateControl``, and the
+    pattern Microsoft ships as FIDES (``agent_framework.security``,
+    ``accepts_untrusted``/``max_allowed_confidentiality`` sink annotations).
+
+    Session-scoped: taint is an instance attribute, cleared by
+    :meth:`reset`, which :class:`ControlServerShim` calls once per session
+    (see its constructor and ``BoundaryControl.reset``'s docstring for why a
+    stateful control needs this and the other three don't).
+
+    ``UntrustedEnvelopeControl`` is NOT retired — it is still the correct
+    defence-in-depth layer underneath this one and remains directly usable
+    (``make_control`` still exposes it as a class); this control is only the
+    new PRIMARY answer to "what does `make_control('W2', ...)` return".
+    """
+
+    weakness = "W2"
+
+    def __init__(
+        self,
+        *,
+        read_tool_names: frozenset[str] | None = None,
+        consequential_tools: frozenset[str] | None = None,
+        egress_tools: frozenset[str] | None = None,
+        accepts_untrusted: frozenset[str] | None = None,
+    ) -> None:
+        self._read_tool_names = read_tool_names
+        self._consequential_tools = consequential_tools
+        self._egress_tools = egress_tools
+        self._accepts_untrusted = accepts_untrusted or frozenset()
+        self._tainted = False
+
+    def reset(self) -> None:
+        self._tainted = False
+
+    def _is_read_tool(self, name: str) -> tuple[bool, str]:
+        return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
+
+    def _is_sink_tool(self, name: str) -> tuple[bool, str]:
+        """A sink is anything consequential OR egress-classified — the same
+        two hint vocabularies ``ConfirmGateControl``/``EgressAllowlistControl``
+        already use, so "what counts as a sink" stays one definition even
+        though three different controls each act on it."""
+        if self._consequential_tools is not None and name in self._consequential_tools:
+            return True, "declared"
+        if self._egress_tools is not None and name in self._egress_tools:
+            return True, "declared"
+        applies, reason = classify(name, declared=None, hints=_CONSEQUENTIAL_HINTS)
+        if applies:
+            return True, reason
+        return classify(name, declared=None, hints=_EGRESS_HINTS)
+
+    def _config_snippet(self, name: str) -> str:
+        return config_snippet_for("W2", name)
+
+    def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
+        if name in self._accepts_untrusted:
+            return None
+        if not self._tainted:
+            return None
+        applies, reason = self._is_sink_tool(name)
+        if not applies:
+            return None
+        self._warn_fail_closed_once(name, reason, self._config_snippet(name))
+        return ToolResult(
+            name=name,
+            content=(
+                f"refused: {name!r} is a sink and untrusted content is in scope "
+                "this session (W2 information-flow control)"
+            ),
+            isError=True,
+        )
+
+    def transform_result(self, name: str, result: ToolResult) -> ToolResult:
+        if result.isError:
+            return result
+        applies, _reason = self._is_read_tool(name)
+        if applies:
+            self._tainted = True
+        return result
 
 
 class ToolDescriptionSanitizer(BoundaryControl):
@@ -401,6 +506,8 @@ class ControlServerShim:
     def __init__(self, inner: _ServerLike, controls: list[BoundaryControl]) -> None:
         self._inner = inner
         self._controls = controls
+        for control in controls:
+            control.reset()
 
     async def list_tools(self) -> list[ToolDescription]:
         tools = await self._inner.list_tools()
@@ -434,6 +541,7 @@ def make_control(
     url_param: str | None = None,
     fetch_allowlist: tuple[str, ...] | None = None,
     consequential_tools: frozenset[str] | None = None,
+    accepts_untrusted: frozenset[str] | None = None,
 ) -> BoundaryControl:
     """Build the canonical boundary control for a weakness class (W1-W4).
 
@@ -445,11 +553,21 @@ def make_control(
     an explicitly-empty tuple from a caller (e.g. an unset ``control_config`` hint)
     must not silently replace the sensible default with an allow-nothing
     allowlist (DCR-0009).
+
+    W2 (PR4): returns ``InformationFlowControl``, the primary/deterministic
+    control — NOT ``UntrustedEnvelopeControl`` any more. The envelope control
+    is still exported and directly constructible for a caller that wants the
+    probabilistic defence-in-depth layer explicitly.
     """
     if weakness == "W1":
         return ToolDescriptionSanitizer()
     if weakness == "W2":
-        return UntrustedEnvelopeControl(read_tool_names=read_tool_names)
+        return InformationFlowControl(
+            read_tool_names=read_tool_names,
+            consequential_tools=consequential_tools,
+            egress_tools=egress_tools,
+            accepts_untrusted=accepts_untrusted,
+        )
     if weakness == "W3":
         return EgressAllowlistControl(
             egress_tools=egress_tools,

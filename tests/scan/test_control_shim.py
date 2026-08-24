@@ -12,6 +12,7 @@ from mylonite.scan.control_shim import (
     ConfirmGateControl,
     ControlServerShim,
     EgressAllowlistControl,
+    InformationFlowControl,
     ToolDescriptionSanitizer,
     UntrustedEnvelopeControl,
     make_control,
@@ -157,7 +158,116 @@ async def test_shim_passes_call_through_to_inner() -> None:
     assert server.calls == [("read_note", {"note_id": "42"})]
 
 
-# -- intercept ordering (forward-looking; W2 never intercepts) ----------------
+# -- W2 InformationFlowControl (PR4: primary control, deterministic) ---------
+
+
+async def test_ifc_permits_a_sink_call_before_any_untrusted_read() -> None:
+    """No taint yet — a sink call in an otherwise-clean session must pass."""
+    server = _FakeServer(results={"send_email": ToolResult(name="send_email", content="sent")})
+    shim = ControlServerShim(
+        server, [InformationFlowControl(consequential_tools=frozenset({"send_email"}))]
+    )
+    result = await shim.call_tool("send_email", {"to": "x"})
+    assert result.isError is False
+    assert result.content == "sent"
+
+
+async def test_ifc_refuses_a_sink_call_after_an_untrusted_read_in_the_same_session() -> None:
+    """The propagation + refusal case: a read taints the session; the very
+    next sink call — same ControlServerShim, i.e. the same planner session —
+    is refused before the inner tool ever runs."""
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="poisoned body"),
+            "send_email": ToolResult(name="send_email", content="sent"),
+        }
+    )
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),
+    )
+    shim = ControlServerShim(server, [control])
+    read_result = await shim.call_tool("read_note", {"id": "1"})
+    assert read_result.content == "poisoned body"  # IFC never mangles the text
+    send_result = await shim.call_tool("send_email", {"to": "attacker@evil.test"})
+    assert send_result.isError is True
+    assert "send_email" not in [c[0] for c in server.calls]  # inner never ran
+
+
+async def test_ifc_accepts_untrusted_tool_is_exempt_even_while_tainted() -> None:
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="poisoned"),
+            "summarize": ToolResult(name="summarize", content="a summary"),
+        }
+    )
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"summarize"}),  # would refuse if not exempt
+        accepts_untrusted=frozenset({"summarize"}),
+    )
+    shim = ControlServerShim(server, [control])
+    await shim.call_tool("read_note", {"id": "1"})
+    result = await shim.call_tool("summarize", {})
+    assert result.isError is False
+    assert result.content == "a summary"
+
+
+async def test_ifc_error_result_does_not_taint() -> None:
+    """A read tool's ERROR result carries no content the model could act on —
+    must not taint the session (mirrors UntrustedEnvelopeControl's same rule)."""
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="not found", isError=True),
+            "send_email": ToolResult(name="send_email", content="sent"),
+        }
+    )
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),
+    )
+    shim = ControlServerShim(server, [control])
+    await shim.call_tool("read_note", {"id": "1"})
+    result = await shim.call_tool("send_email", {"to": "x"})
+    assert result.isError is False
+
+
+async def test_ifc_taint_resets_between_sessions() -> None:
+    """BoundaryControl.reset() (called by ControlServerShim.__init__) must
+    clear taint left over from a PRIOR session sharing the same long-lived
+    control instance (adapter __init__ builds the control list once; only
+    ControlServerShim is rebuilt fresh per invoke) — otherwise one exploit
+    attempt's taint would leak into an unrelated, later attempt's session."""
+    control = InformationFlowControl(
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),
+    )
+    server = _FakeServer(
+        results={
+            "read_note": ToolResult(name="read_note", content="poisoned"),
+            "send_email": ToolResult(name="send_email", content="sent"),
+        }
+    )
+    session_one = ControlServerShim(server, [control])
+    await session_one.call_tool("read_note", {"id": "1"})
+    refused = await session_one.call_tool("send_email", {"to": "x"})
+    assert refused.isError is True
+
+    # A NEW session over the SAME control instance — reset() must have run.
+    session_two = ControlServerShim(server, [control])
+    clean = await session_two.call_tool("send_email", {"to": "x"})
+    assert clean.isError is False
+
+
+def test_ifc_config_snippet_matches_envelope_control() -> None:
+    """Both W2 controls emit the same paste-ready snippet (read_tool_names) —
+    config_snippet_for is the single source of truth for both."""
+    assert InformationFlowControl()._config_snippet("read_note") == UntrustedEnvelopeControl()._config_snippet(
+        "read_note"
+    )
+
+
+# -- intercept ordering (W2 now DOES intercept, via InformationFlowControl) ---
 
 
 async def test_intercept_short_circuits_before_inner() -> None:
@@ -180,7 +290,12 @@ async def test_intercept_short_circuits_before_inner() -> None:
 
 def test_make_control_resolves_all_weaknesses() -> None:
     assert isinstance(make_control("W1"), ToolDescriptionSanitizer)
-    assert isinstance(make_control("W2"), UntrustedEnvelopeControl)
+    # PR4: InformationFlowControl is now W2's PRIMARY control (deterministic —
+    # gates the sink call in code); UntrustedEnvelopeControl (probabilistic —
+    # depends on the model respecting a text marker) is demoted to an
+    # explicitly-constructible defence-in-depth layer, not make_control's
+    # default. See InformationFlowControl's docstring.
+    assert isinstance(make_control("W2"), InformationFlowControl)
     assert isinstance(make_control("W3"), EgressAllowlistControl)
     assert isinstance(make_control("W4"), ConfirmGateControl)
 

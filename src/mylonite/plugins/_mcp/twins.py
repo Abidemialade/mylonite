@@ -84,6 +84,7 @@ def boundary_control_for(spec: TargetSpec, weakness: str) -> BoundaryControl:
         url_param=cfg.egress_url_param,
         fetch_allowlist=tuple(cfg.fetch_allowlist) or None,
         consequential_tools=frozenset(cfg.consequential_tools) or None,
+        accepts_untrusted=frozenset(cfg.accepts_untrusted_tools) or None,
     )
 
 
