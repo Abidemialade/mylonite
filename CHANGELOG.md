@@ -1278,6 +1278,10 @@ contract-version bump.
 
 ## [0.7.2] - 2026-06-18
 
+> **Never tagged.** This work shipped, but its commits were squash-merged into the
+> commit `v0.7.3` tags, so no `v0.7.2` tag or PyPI release exists. The `[0.7.2]` link
+> above therefore points at `v0.7.3`, the release that actually contains it.
+
 Depth-first release (no new attack classes or adapters): makes the differential
 oracle's guarantee actually *land* and *gate* on real targets, promotes metamorphic
 robustness to a gating leg so the moat is enforced rather than merely reported, and
@@ -1351,6 +1355,9 @@ scanning, the gating PR). No breaking changes; no contract-version bump.
   `gate/annotate.py`.
 
 ## [0.7.1] - 2026-06-18
+
+> **Never tagged.** As with 0.7.2, this work shipped but was squash-merged into the
+> commit `v0.7.3` tags; no `v0.7.1` tag or PyPI release exists.
 
 Responds to an external v0.7.0 effectiveness assessment: hardens the differential
 oracle's precision, extends the differential machinery to server-layer-controlled
@@ -1554,6 +1561,13 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   with and without). Prints a run-count estimate up front.
 
 ## [0.6.0] - 2026-06-17
+
+> **Never tagged, and largely superseded.** The release commit
+> (`529ff26`, linked above) is on `main`, but no `v0.6.0` tag and no `0.6.0` PyPI
+> release exist. Much of what this section describes — the adaptive attack loop,
+> chain synthesis, `scan --synthesize` / `--adaptive` — was then deliberately
+> **removed** in 0.7.4 after it failed on external targets. Read it as a record of
+> what was built at the time, not as a description of the current tool.
 
 ### Added
 
@@ -2517,12 +2531,17 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.7.8...HEAD
 [0.7.8]: https://github.com/Abidemialade/mylonite/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/Abidemialade/mylonite/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/Abidemialade/mylonite/compare/v0.7.5...v0.7.6
+[0.7.5]: https://github.com/Abidemialade/mylonite/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/Abidemialade/mylonite/compare/v0.7.3...v0.7.4
-[0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.6.0
+[0.7.3]: https://github.com/Abidemialade/mylonite/compare/v0.7.0...v0.7.3
+[0.7.2]: https://github.com/Abidemialade/mylonite/releases/tag/v0.7.3
+[0.7.1]: https://github.com/Abidemialade/mylonite/releases/tag/v0.7.3
+[0.7.0]: https://github.com/Abidemialade/mylonite/compare/v0.5.0...v0.7.0
+[0.6.0]: https://github.com/Abidemialade/mylonite/commit/529ff2694747ceb99d5c5449c3dc27e8ec38caef
 [0.5.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.5.0
 [0.4.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Abidemialade/mylonite/releases/tag/v0.3.0
