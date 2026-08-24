@@ -4,7 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mylonite"
-version = "0.7.8"
+# Read from src/mylonite/version.py — see [tool.hatch.version] below. Declaring it
+# statically here as well would reintroduce the drift this removes: the version
+# lived in two files kept in step by a test, and shipping only one of the two is
+# exactly how 0.7.7 went out wrong the first time.
+dynamic = ["version"]
 description = "Open-source AI-layer security testing — probes your AI agent for weaknesses and writes a validated regression test for each one it finds, gating CI."
 readme = "README.md"
 # Upper bound tracks litellm: litellm>=1.83.8 declares Requires-Python
@@ -159,6 +163,14 @@ reference = "mylonite.plugins._reference.reference_compliance_mapper:ReferenceCo
 mylonite = "mylonite.testkit._pytest_plugin"
 
 # --- Tooling ---------------------------------------------------------------
+
+[tool.hatch.version]
+# The single source of truth for the package version. `mylonite.version` is
+# already what every runtime consumer imports (__init__, cli, report/*, scan/*),
+# and nothing anywhere calls importlib.metadata.version(), so pointing the build
+# at the same file removes the possibility of the two disagreeing rather than
+# merely detecting it after the fact.
+path = "src/mylonite/version.py"
 
 [tool.hatch.build.targets.wheel]
 # Base wheel ships ONLY the tool that scans your app. The deliberately-vulnerable

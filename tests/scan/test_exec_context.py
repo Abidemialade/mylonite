@@ -27,7 +27,7 @@ def test_to_metadata_is_a_closed_allowlist() -> None:
         customiser_model="claude-haiku-4-5",
         judge_model="claude-opus-4-5",
         target_file="target.yaml",
-        mylonite_version="0.7.8",
+        mylonite_version="9.9.9",  # arbitrary fixture input, not the real version
     )
     metadata = ctx.to_metadata()
     assert set(metadata.keys()) == ALLOWED_METADATA_KEYS
@@ -77,7 +77,7 @@ def test_from_metadata_round_trips() -> None:
         provider="anthropic",
         model="claude-sonnet-4-5",
         planner_model="claude-haiku-4-5",
-        mylonite_version="0.7.8",
+        mylonite_version="9.9.9",  # arbitrary fixture input, not the real version
     )
     restored = ExecContext.from_metadata(ctx.to_metadata())
     assert restored == ctx

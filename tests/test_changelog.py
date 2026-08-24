@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from release_version import (  # noqa: I001
+from release_version import (  # noqa: E402
     KNOWN_UNTAGGED,
     changelog_path,
     changelog_versions,

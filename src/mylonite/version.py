@@ -1,7 +1,9 @@
 """Single source of truth for the package version.
 
-Keep this in sync with ``[project] version`` in ``pyproject.toml``. A test in
-``tests/test_version.py`` enforces the match.
+Genuinely single: ``pyproject.toml`` declares ``dynamic = ["version"]`` and points
+``[tool.hatch.version].path`` at this file, so the built distribution's metadata
+and ``mylonite.__version__`` cannot disagree. Bump it here and nowhere else --
+``scripts/prepare_release.py`` does exactly that.
 """
 
 from __future__ import annotations
