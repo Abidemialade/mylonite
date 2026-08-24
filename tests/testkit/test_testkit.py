@@ -287,6 +287,22 @@ def test_missing_meta_raises(tmp_path: Path) -> None:
         assert_guard_holds(_exploit(), fixtures_dir=tmp_path)
 
 
+def test_no_fixtures_dir_and_no_completion_fn_raises_config_error() -> None:
+    """Omitting fixtures_dir (and _completion_fn) → TestkitConfigError, not a
+    silent attempt against the packaged reference fixtures.
+
+    There used to be a ``fixtures_dir=None`` default that fell back to
+    ``packaged_fixture_dir() / "guarded"``. Those packaged fixtures predate the
+    ``format_version`` sidecar field (they only carry ``cache_key_version``),
+    so that fallback always raised ``TestkitFixtureError`` — a confusing,
+    never-working code path. The signature is unchanged (still an optional
+    keyword) but omitting it now fails fast with an explicit, actionable error
+    instead of a fixture-shaped one.
+    """
+    with pytest.raises(testkit.TestkitConfigError, match="needs fixtures_dir"):
+        assert_guard_holds(_exploit())
+
+
 def test_load_exploit_round_trips(tmp_path: Path) -> None:
     """A written exploit_*.json round-trips back to an equal ExploitRecord."""
     exploit = _exploit()

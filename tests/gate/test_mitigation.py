@@ -74,6 +74,26 @@ def test_weakness_class_unknown_pattern_falls_back_to_compliance_then_generic():
     assert weakness_class_for(ex_blank) == "generic"
 
 
+def test_weakness_class_prefers_stamped_metadata_over_seed_catalogue():
+    """A4: report/bundle.py already preferred exploit.payload.metadata["weakness"]
+    over the seed-catalogue/compliance inference; weakness_class_for did not, so
+    the PR body and the JSON bundle could disagree about the same finding's
+    class. A stamped W3 must win even when the pattern_id is a bundled W2 seed."""
+    ex = _exploit_for("indirect-injection-note-body-direct")  # a bundled W2 pattern_id
+    assert weakness_class_for(ex) == "W2"  # unchanged: no stamped override present
+
+    ex_stamped = ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"weakness": "W3"}})}
+    )
+    assert weakness_class_for(ex_stamped) == "W3"
+
+    # An invalid/garbage stamped value must not shadow the catalogue lookup.
+    ex_garbage = ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"weakness": "not-a-class"}})}
+    )
+    assert weakness_class_for(ex_garbage) == "W2"
+
+
 def test_all_mitigation_snippets_present():
     base = ir.files("mylonite.gate") / "mitigations"
     for name in ("W1", "W2", "W3", "W4", "generic"):
@@ -297,3 +317,37 @@ def test_pr_body_control_efficacy_framing():
     assert "with and without control **W2**" in body
     # Mitigation snippet still present (single source of truth).
     assert "## Suggested mitigation" in body
+
+
+def test_pr_body_server_layer_differential_is_not_captioned_proxy():
+    """A3: a genuine SERVER-LAYER differential (the target's real control_env-
+    declared guard, toggled directly) used to be captioned '(proxy)' anyway,
+    because the caption keyed off is_control alone instead of whether the
+    guarded twin was actually server-layer. This is the strongest possible
+    result and it was being mislabelled as the weakest. The validator stamps
+    '[guarded-twin=server-layer]' into report.notes for exactly this case."""
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
+    )
+    report = _report().model_copy(
+        update={"notes": "Server-layer-guarded twin (control 'W2'): leaked 0/2, "
+        "contribution +100%. [guarded-twin=server-layer]"}
+    )
+    body = build_pr_body(ex, report)
+    assert "Boundary-validated control (proxy)" not in body
+    assert "Server-layer control verified" in body
+    assert "REAL server-side control" in body
+
+
+def test_pr_body_explicit_guarded_is_server_layer_wins_over_notes():
+    """A caller with direct TwinPlan access (guarded_is_server_layer=True) is
+    trusted even when report.notes carries no marker at all — the notes
+    parse is the run_gate fallback, not the only signal."""
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
+    )
+    body = build_pr_body(ex, _report(), guarded_is_server_layer=True)
+    assert "Boundary-validated control (proxy)" not in body
+    assert "Server-layer control verified" in body

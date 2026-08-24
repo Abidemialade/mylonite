@@ -97,6 +97,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interrupted-recording fixture directory could silently mis-key a
   tool-bearing call under the old v1 algorithm instead of failing loudly.
 
+- **`mylonite scan` now exposes `--randomize-exfil/--no-randomize-exfil`**,
+  matching the tri-state default `generate`/`validate`/`gate` already had:
+  ON for a live custom-target scan, OFF for `reference:*`/replay targets
+  (which must stay pinned to the recorded fixture literal), an explicit flag
+  always wins. Previously `scan` had no such flag at all, so every
+  custom-target scan minted the same demo exfil address regardless of
+  target type — a finding only proved the target blocks *that one* literal,
+  not the weakness class.
+
+### Fixed
+
+- **`build_pr_body` no longer captions a genuine SERVER-LAYER differential as
+  "(proxy)".** The boundary-shim caveat used to key off `is_control` alone,
+  so a control-efficacy finding that toggled the target's REAL server-side
+  guard (declared via `control_env`) was captioned identically to one that
+  only proved a synthetic adapter-boundary stand-in — mislabelling the
+  strongest possible result as the weakest. It now resolves from an explicit
+  `guarded_is_server_layer` parameter, falling back to the
+  `[guarded-twin=server-layer]` marker `DifferentialValidator` already
+  stamps into `ValidationReport.notes`.
+
+- **`mylonite gate` now threads the target's system prompt into the PR
+  body**, so `localize()` can pin a system-prompt-channel finding to an
+  exact line number. It previously never passed `system_prompt` to
+  `build_pr_body`, so the line was always unresolved and the GitHub
+  check-run inline-annotation path (which only fires for a resolved line)
+  was unreachable for any custom target.
+
+- **`weakness_class_for` now prefers the exploit's own stamped
+  `payload.metadata["weakness"]`** over the bundled seed-catalogue / ASI /
+  LLM-tag inference, matching the precedence `report/bundle.py` already used
+  independently. Previously the PR body and the JSON bundle could disagree
+  about which W1-W4 class the same finding belonged to.
+
+- **`mylonite.testkit.assert_guard_holds(fixtures_dir=None)` no longer
+  silently attempts (and always fails) against the packaged reference
+  fixtures.** Those fixtures predate the `format_version` sidecar field
+  `_read_meta` requires, so the documented default always raised
+  `TestkitFixtureError` — a confusing, never-working code path. Omitting
+  `fixtures_dir` (with no `_completion_fn`) now raises a clear
+  `TestkitConfigError` instead. The signature is unchanged; every emitted
+  test already passes an explicit `fixtures_dir`.
+
 ## [0.7.8] - 2026-08-07
 
 "Correct twins": fixes `gate`'s server-layer differential and consolidates

@@ -42,7 +42,11 @@ provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
 `--allow-no-seed-arm`, `--purpose "…"` (a one-line description of what the app is for;
 tailors the probes to its domain — overrides `purpose` in the target file, and is
-persisted so `generate`/`validate` reuse it). For a custom target: `--command`, `--arg`,
+persisted so `generate`/`validate` reuse it); `--randomize-exfil/--no-randomize-exfil`
+(mint a unique exfil address per run so a finding proves the target leaks to ANY
+attacker destination, not one demo literal — **defaults ON for live custom-target
+scans**, off for the reference/replay path; matches `generate`/`validate`/`gate`).
+For a custom target: `--command`, `--arg`,
 `--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
 
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
