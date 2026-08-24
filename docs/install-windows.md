@@ -54,8 +54,8 @@ The Windows console defaults to the legacy `cp1252` code page, which used to cra
 the non-ASCII glyphs Mylonite prints (✓, │, …). The `mylonite` CLI now forces UTF-8 on
 its own stdout/stderr before any output (`errors="replace"`, so it degrades rather than
 crashes even if a stream still can't encode something) — verified locally against a
-`chcp 1252` console with `PYTHONUTF8` unset: `mylonite demo` renders cleanly. You should
-not need to set anything for `mylonite` commands themselves.
+`chcp 1252` console with `PYTHONUTF8` unset: `mylonite scan reference:vulnerable` renders
+cleanly. You should not need to set anything for `mylonite` commands themselves.
 
 `pytest` run directly (not through the `mylonite` CLI) does **not** get this automatic
 reconfiguration, since it never goes through `cli.py`'s startup path. If you see mangled
@@ -76,6 +76,6 @@ mylonite version
 pytest -q
 ```
 
-A green suite (run from the project root) confirms the install. If a scan reaches
-a provider, `mylonite doctor` classifies any TLS/auth/network failure with a
-concrete remedy.
+A green suite (run from the project root) confirms the install. If a live `scan`/`gate`/
+`validate` run can't reach the configured provider, it classifies the failure as
+auth/TLS/network/rate-limit with a concrete remedy rather than a raw traceback.

@@ -15,8 +15,8 @@ test author happened to have a key for. Doing that in CI on every run would
 mean CI needs six sets of live provider credentials AND burns real money on
 every push — unacceptable. So the round-trip happens exactly ONCE, here, by
 a maintainer, and every fixture it writes is replayed forever after with zero
-network access and zero cost (see ``mylonite.demo._replay.LiteLLMRecorder`` —
-the same record/replay core the offline ``mylonite demo`` uses, promoted in
+network access and zero cost (see ``mylonite._replay.LiteLLMRecorder`` — the
+same record/replay core the testkit and reference validator use, promoted in
 v0.3.0).
 
 This script drives the real production chokepoint
@@ -96,7 +96,7 @@ from tests.integration._provider_matrix_spec import (
     fixture_dir_for,
 )
 
-from mylonite.demo._replay import (
+from mylonite._replay import (
     CACHE_KEY_VERSION,
     CACHE_KEY_VERSION_FIELD,
     LiteLLMRecorder,

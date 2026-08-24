@@ -1,13 +1,12 @@
 """Docs-consistency guard (T17, 0.7.7-honest-results).
 
-`cli.py`'s `--help` epilogs and `demo/render.py`'s printed next-step text are
-copy-paste bait: a reader (or a script) will run the ``mylonite ...`` example
-verbatim. A `cli.py` change that renames/removes a flag or a command doesn't
-by itself touch anything under `docs/`, so it never trips `docs.yml` (which
-only builds on `docs/**` / `mkdocs.yml` changes) -- that is exactly how
-`--runs` (attack-modes.md), `gate-action@v1` (no such tag), and the
-`--prove-control` flags (removed in commit 12cf8e0, see CHANGELOG) went stale
-without CI ever failing.
+`cli.py`'s `--help` epilogs are copy-paste bait: a reader (or a script) will
+run the ``mylonite ...`` example verbatim. A `cli.py` change that
+renames/removes a flag or a command doesn't by itself touch anything under
+`docs/`, so it never trips `docs.yml` (which only builds on `docs/**` /
+`mkdocs.yml` changes) -- that is exactly how `--runs` (attack-modes.md),
+`gate-action@v1` (no such tag), and the `--prove-control` flags (removed in
+commit 12cf8e0, see CHANGELOG) went stale without CI ever failing.
 
 This module makes the EMBEDDED examples the source of truth: it introspects
 the real Typer `app` at runtime (never a copy of the epilog text), extracts
@@ -45,10 +44,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DOCS_DIR = _REPO_ROOT / "docs"
 
 _BACKTICK_MYLONITE_RE = re.compile(r"`(mylonite [^`]+)`")
-#: Loose enough to pull a `mylonite ...` invocation out of plain prose (used
-#: for demo/render.py, which prints next-step hints, not backtick-fenced
-#: markdown) -- stops at an opening paren, an em dash, or end of string.
-_PROSE_MYLONITE_RE = re.compile(r"mylonite\s+[^()—\n]+?(?=\s*\(|\s+—|$)")
 
 
 def _click_command_tree() -> Any:
@@ -85,22 +80,6 @@ def _all_epilog_examples() -> list[tuple[str, str]]:
         location = "mylonite " + " ".join(path) if path else "mylonite (root)"
         for match in _BACKTICK_MYLONITE_RE.finditer(epilog):
             examples.append((location, match.group(1)))
-    return examples
-
-
-def _demo_render_examples() -> list[tuple[str, str]]:
-    """Every ``mylonite ...`` example embedded in ``demo/render.py``'s printed
-    next-step / teaser strings (the text ``mylonite demo`` actually prints).
-    """
-    from mylonite.demo import render as demo_render
-
-    examples: list[tuple[str, str]] = []
-    for attr in ("_TEASER", "_NEXT_STEP"):
-        text = getattr(demo_render, attr, None)
-        if not text:
-            continue
-        for match in _PROSE_MYLONITE_RE.finditer(text):
-            examples.append((f"mylonite.demo.render.{attr}", match.group(0)))
     return examples
 
 
@@ -166,73 +145,6 @@ def test_cli_epilog_examples_were_actually_collected() -> None:
         f"expected at least 10 `mylonite ...` examples across cli.py's epilogs, "
         f"found {len(examples)} -- did the epilogs move?"
     )
-
-
-@pytest.mark.parametrize(
-    "location,example",
-    _demo_render_examples(),
-    ids=lambda v: v if isinstance(v, str) else None,
-)
-def test_demo_render_example_parses(location: str, example: str) -> None:
-    """Every ``mylonite ...`` example printed by ``mylonite demo`` (via
-    `demo/render.py`'s `_TEASER`/`_NEXT_STEP`) must parse against the CURRENT
-    CLI, for the same reason as the epilog examples above.
-    """
-    _assert_example_parses(location, example)
-
-
-def test_demo_render_examples_were_actually_collected() -> None:
-    """Same collection-not-empty guard as the epilog test, for render.py."""
-    examples = _demo_render_examples()
-    assert len(examples) >= 2, (
-        f"expected at least 2 `mylonite ...` examples in demo/render.py's printed "
-        f"text, found {len(examples)} -- did _TEASER/_NEXT_STEP move or get renamed?"
-    )
-
-
-def test_demo_render_next_step_scaffold_then_scan_chain_actually_authorizes() -> None:
-    """`_assert_example_parses` above only proves the two `_NEXT_STEP` commands
-    PARSE individually -- it can't see that they are a two-step CHAIN (scaffold
-    app.yaml, then scan that same app.yaml) where step 2's `--authorize` must
-    match whatever `family`/`scope` step 1's `--scaffold` actually produced.
-    That is exactly how this string went stale: it read `--scaffold app.yaml
-    ... --authorize my-app` with no `--scope` on the scaffold step, so the
-    scaffolded target got `family: custom` while the second command demanded
-    `--authorize my-app` -- `mylonite scan --command python --arg server.py
-    --scaffold app.yaml` (as it read before this fix) then `mylonite scan
-    --target-file app.yaml --authorize my-app` raised `AuthorizationRefused`
-    for real, verified live.
-
-    This test extracts BOTH commands from the live `_NEXT_STEP` string, reads
-    `--scope` off the scaffold command (mirroring exactly what
-    `_scaffold_target_file`/`_target_file_from_flags` does: family is always
-    the literal `"custom"` for the plain MCP scaffold path; scope is whatever
-    `--scope` was passed, or `None`), and `--authorize` off the scan command,
-    then proves the pairing via the same `check_authorization` the CLI itself
-    calls -- so a future edit to `_NEXT_STEP` that reintroduces a mismatch
-    fails here, not just in a live user's terminal.
-    """
-    from mylonite.demo import render as demo_render
-
-    examples = [m.group(0) for m in _PROSE_MYLONITE_RE.finditer(demo_render._NEXT_STEP)]
-    assert len(examples) == 2, (
-        f"expected exactly 2 `mylonite ...` commands in _NEXT_STEP (scaffold, then scan), "
-        f"found {len(examples)}: {examples} -- update this test if _NEXT_STEP's shape changed"
-    )
-    scaffold_cmd, scan_cmd = examples
-    assert "--scaffold" in scaffold_cmd, f"expected the first command to scaffold: {scaffold_cmd!r}"
-    assert "--authorize" in scan_cmd, f"expected the second command to authorize: {scan_cmd!r}"
-
-    scope_match = re.search(r"--scope\s+(\S+)", scaffold_cmd)
-    scope = scope_match.group(1) if scope_match else None
-    authorize_match = re.search(r"--authorize\s+(\S+)", scan_cmd)
-    assert authorize_match, f"no --authorize value found in {scan_cmd!r}"
-    authorize = authorize_match.group(1)
-
-    # `_scaffold_target_file` -> `_target_file_from_flags` always sets
-    # family="custom" for the plain (non --rest-url) MCP scaffold path;
-    # `--scope`, if given, becomes the target's scope.
-    check_authorization(family="custom", scope=scope, authorize=authorize, command="scan")
 
 
 # --------------------------------------------------------------------------

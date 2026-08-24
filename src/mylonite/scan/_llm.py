@@ -81,9 +81,7 @@ def fence(*parts: str) -> str:
     defeating a generic, non-targeted splicing attempt, not withstanding an
     adversary who already has source access to compute it. This also keeps
     the customiser's/judge's ``(model, messages)`` pair reproducible. (Neither
-    is currently part of the recorded `mylonite demo` fixture path at all —
-    the demo runs with ``llm_assist=False``, which disables the customiser's
-    LLM call and the judge's LLM fallback entirely, see
+    is even called at all when a caller sets ``llm_assist=False`` — see
     ``wiring.build_scan`` — but staying deterministic costs nothing and
     avoids relying on that fact.)
     """

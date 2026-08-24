@@ -34,7 +34,7 @@ The phased build plan lives in
 ## Where to go next
 
 - [Quickstart](quickstart.md) — install and run the end-to-end pipeline in a few commands.
-- [Try it — the reference app](quarry.md) — a 60-second offline demo against a deliberately
+- [Try it — the reference app](quarry.md) — run Mylonite against a deliberately
   vulnerable reference agent.
 - [Test your own app](test-your-app.md) — point Mylonite at your MCP server.
 - [Weakness classes](weakness-classes.md) — what's tested and how an attack is proven.

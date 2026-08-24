@@ -13,8 +13,7 @@ The end-to-end pipeline (each command also documented via ``--help``):
 * ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
 * ``mylonite report`` — render a scan/validation as a terminal panel, SARIF, or JSON.
 * ``mylonite ablate`` — score which controls are load-bearing vs. theater.
-* ``mylonite demo`` / ``doctor`` / ``taxonomy`` / ``version`` — the reference-app
-  playground, diagnostics, and supporting utilities.
+* ``mylonite version`` — print the installed version.
 
 See the documentation site for guides and the full reference.
 """
@@ -28,8 +27,7 @@ import inspect
 import logging
 import os
 import sys
-from collections.abc import Callable, Sequence
-from enum import StrEnum
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar
 
@@ -60,7 +58,6 @@ app = typer.Typer(
     ),
     epilog=(
         "Examples:\n\n"
-        "`mylonite demo` -- try it on the bundled vulnerable agent (no setup).\n\n"
         "`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n"
         "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- "
         "scaffold a target.yaml.\n\n"
@@ -71,9 +68,6 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
-
-taxonomy_app = typer.Typer(help="Inspect the bundled threat taxonomy.")
-app.add_typer(taxonomy_app, name="taxonomy")
 
 _console = Console()
 
@@ -172,7 +166,7 @@ def _maybe_enable_truststore() -> None:
 def _configure_stdio_encoding() -> None:
     """Force UTF-8 on stdout/stderr before any Rich/typer output.
 
-    Rich renders the scan/demo tables with non-ASCII glyphs (✓ ✗ ⚠ —). On a
+    Rich renders the scan/report tables with non-ASCII glyphs (✓ ✗ ⚠ —). On a
     Windows console defaulting to cp1252 those raise ``UnicodeEncodeError`` and
     crash the command mid-render. ``errors="replace"`` keeps output alive if a
     stream still can't encode something. No-op where ``reconfigure`` is absent
@@ -192,7 +186,7 @@ def _warn_unsupported_python() -> None:
         echo_err(
             "note: Mylonite supports Python 3.11-3.13. litellm has no 3.14 wheels "
             "yet, so live LLM calls may fail to import on this interpreter - use a "
-            "3.11-3.13 virtualenv for scan/validate/demo --live."
+            "3.11-3.13 virtualenv for scan/validate."
         )
 
 
@@ -349,188 +343,10 @@ def _root(
         _load_api_key_file(api_key_file)
 
 
-class _Framework(StrEnum):
-    OWASP_LLM = "owasp-llm"
-    OWASP_ASI = "owasp-asi"
-    ATLAS = "atlas"
-    NIST = "nist"
-
-
 @app.command()
 def version() -> None:
     """Print the installed Mylonite version."""
     echo(__version__)
-
-
-@app.command()
-def init(
-    output: Annotated[
-        Path, typer.Argument(help="Where to write the target.yaml (default: ./target.yaml).")
-    ] = Path("target.yaml"),
-    transport: Annotated[
-        str | None,
-        typer.Option(
-            "--transport", help="'rest' (HTTP agent) or 'mcp' (stdio server). Prompted if omitted."
-        ),
-    ] = None,
-    url: Annotated[
-        str | None, typer.Option("--url", help="For rest: the agent endpoint URL.")
-    ] = None,
-    command: Annotated[
-        str | None, typer.Option("--command", help="For mcp: the server launch command.")
-    ] = None,
-    arg: Annotated[
-        list[str] | None, typer.Option("--arg", help="For mcp: a launch arg (repeatable).")
-    ] = None,
-    rest_body: Annotated[
-        str | None,
-        typer.Option("--rest-body", help="For rest: request body template containing {prompt}."),
-    ] = None,
-    rest_response_path: Annotated[
-        str | None,
-        typer.Option(
-            "--rest-response-path", help="For rest: dotted path into the JSON reply (e.g. reply)."
-        ),
-    ] = None,
-    force: Annotated[
-        bool, typer.Option("--force", help="Overwrite the output file if it exists.")
-    ] = False,
-) -> None:
-    """Guided setup: write a runnable target.yaml for your app (HTTP agent or MCP server).
-
-    An interactive front-end over ``scan --scaffold``: it prompts for what it needs, then
-    writes a ready-to-scan target file. A plain HTTP agent needs nothing to introspect; an
-    MCP server is launched once to list its tools (no attack, no LLM call). Pass the options
-    to skip the prompts (scriptable); omit them to be guided.
-    """
-    t = (
-        (
-            transport
-            or typer.prompt(
-                "Transport — 'rest' (HTTP agent) or 'mcp' (stdio server)", default="rest"
-            )
-        )
-        .strip()
-        .lower()
-    )
-    if t in ("rest", "http", "http-agent"):
-        endpoint = url or typer.prompt("Agent endpoint URL (e.g. https://my-agent/v1/chat)")
-        _scaffold_rest_target_file(
-            output=output,
-            rest_url=endpoint,
-            rest_body=rest_body,
-            rest_response_path=rest_response_path,
-            force=force,
-        )
-    elif t == "mcp":
-        cmd = command or typer.prompt("MCP server launch command (e.g. python)")
-        _scaffold_target_file(
-            output=output,
-            command=cmd,
-            arg=arg,
-            env=None,
-            scope=None,
-            system_prompt=None,
-            system_prompt_file=None,
-            model=None,
-            force=force,
-        )
-    else:
-        echo_err(f"unknown transport {t!r}; expected 'rest' or 'mcp'.")
-        raise typer.Exit(code=EXIT_CONFIG)
-
-
-@app.command()
-def doctor(
-    model: Annotated[
-        str | None,
-        typer.Option("--model", help="Model id to ping (defaults to claude-sonnet-4-6)."),
-    ] = None,
-    run_config_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--config",
-            help=(
-                "A declarative mylonite.yaml run config. Fills provider/model when "
-                "you omit the flags, so `doctor` pings the SAME model your scan will "
-                "use; auto-discovered from ./mylonite.yaml when present; an explicit "
-                "flag always wins."
-            ),
-        ),
-    ] = None,
-) -> None:
-    """Diagnose provider connectivity before a live scan.
-
-    Makes one tiny (1-token) completion call and classifies any failure as
-    **auth** vs **TLS** vs **network** vs **rate-limit**, each with a concrete
-    remedy — so a corporate-proxy cert failure no longer looks like a bad key.
-    Exit 0 if reachable, 4 on a provider failure.
-    """
-    from mylonite._redaction import looks_like_api_key, redact
-    from mylonite.scan.diagnostics import classify_provider_error
-    from mylonite.scan.providers import env_vars_for
-
-    # Mirror scan/gate/validate/ablate: fill provider/model from mylonite.yaml
-    # (auto-discovered from ./mylonite.yaml when --config is omitted, T14) then
-    # the flat MYLONITE_* env vars, so `doctor` checks the SAME model those
-    # commands will actually use rather than silently falling back to its own
-    # default -- doctor is exactly the command that should show an operator
-    # what config would actually be used. No --provider CLI flag any more
-    # (removed 0.7.10, T13's deprecated alias) -- `provider` can still arrive
-    # via mylonite.yaml's `provider:` key or MYLONITE_PROVIDER, both of which
-    # remain (separately deprecated, but not removed) sources _resolve_model_ref
-    # still warns on.
-    _config_path, rc = _discover_run_config(run_config_path, command="doctor")
-    env_rc = _env_run_config_or_exit()
-    provider: str | None = None
-    # DCR-0012: `is not None` throughout, not `or` -- the exact DCR-0004/0012/
-    # 0015/0005 precedence pattern `_resolve_option`'s own docstring explains
-    # (an explicit-but-falsy value, e.g. `--model ""`, is not the same as
-    # "omitted" and must not be silently replaced by a lower-precedence
-    # source or the hardcoded default). `provider` has no CLI flag of its own
-    # on `doctor` (removed 0.7.10), so only `model`'s chain can actually
-    # observe this in practice, but both are written the same way for the
-    # same reason `_resolve_option` exists: so this can't silently regress
-    # the next time a flag is added here.
-    if rc is not None:
-        provider = provider if provider is not None else rc.provider
-        model = model if model is not None else rc.model
-    provider = provider if provider is not None else env_rc.provider
-    model = model if model is not None else env_rc.model
-
-    base_model = model if model is not None else "claude-sonnet-4-6"
-    _validate_model_string(base_model)
-    ref = _resolve_model_ref(base_model, provider)
-    effective_provider = ref.provider or "unknown"
-    routed = ref.raw
-    resolved_provider = ref.provider
-
-    # Warn (don't fail) if the resolved API key clearly isn't key-shaped — a common
-    # footgun (placeholder, path, truncated paste). Never print the value itself.
-    for var in env_vars_for(resolved_provider):
-        val = os.environ.get(var)
-        if val and not looks_like_api_key(val):
-            echo_err(
-                f"warning: {var} is set but doesn't look like an API key "
-                "(too short / contains spaces or path separators). Check it's the "
-                "real key, not a placeholder or file path."
-            )
-
-    import litellm
-
-    try:
-        litellm.completion(
-            model=routed,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-    except Exception as exc:  # one-shot probe — classify, don't propagate raw
-        diag = classify_provider_error(exc, provider=resolved_provider)
-        echo_err(f"provider check FAILED [{diag.category}] for {routed}")
-        echo_err(f"  detail: {redact(diag.detail)}")
-        echo_err(f"  remedy: {diag.remedy}")
-        raise typer.Exit(code=EXIT_PROVIDER) from exc
-    echo(f"provider OK — {effective_provider}/{base_model} reachable (routed: {routed}).")
 
 
 def _validate_model_string(model: str) -> None:
@@ -567,9 +383,8 @@ def _warn_deprecated_provider_config() -> None:
     itself uses and that promptfoo/garak adopters already know.
 
     The ``--provider`` CLI flag itself was REMOVED in 0.7.10 (it no longer
-    exists on any command but ``demo``, whose ``--provider`` is a different,
-    non-deprecated thing — see that command's help). This warning still
-    fires for the two remaining ways to set a bare ``provider``: a
+    exists on any command). This warning still fires for the two remaining
+    ways to set a bare ``provider``: a
     ``mylonite.yaml`` ``provider:`` key, or a ``MYLONITE_PROVIDER`` env var
     (see :class:`~mylonite.config.RunConfig`). Emits once per command
     invocation: each command reads its own ``provider`` value exactly once,
@@ -767,17 +582,18 @@ def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
     """Map a missing reference target to a friendly EXIT_CONFIG, else return.
 
-    The deliberately-vulnerable reference target is opt-in (not a base dependency):
-    PyPI users get it with ``pip install "mylonite[demo]"``; an editable checkout
-    needs ``pip install -e ./reference_targets/mcp_kitchen_sink``. Without it,
-    ``demo`` / ``scan reference:*`` / ``validate`` raise ``ModuleNotFoundError`` deep
+    The deliberately-vulnerable reference target is a separate package (not a
+    base dependency): PyPI users get it with ``pip install mcp-kitchen-sink``;
+    an editable checkout needs
+    ``pip install -e ./reference_targets/mcp_kitchen_sink``. Without it,
+    ``scan reference:*`` / ``validate`` raise ``ModuleNotFoundError`` deep
     in the adapter. Translate that one cause into a clear message everywhere (instead
     of a raw traceback on the scan path); re-raise anything unrelated by returning.
     """
     if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
         echo_err(
             "the reference app target isn't installed (it's opt-in) — run "
-            '`pip install "mylonite[demo]"`, or from a checkout '
+            "`pip install mcp-kitchen-sink`, or from a checkout "
             "`pip install -e ./reference_targets/mcp_kitchen_sink`."
         )
         raise typer.Exit(code=EXIT_CONFIG) from exc
@@ -1600,7 +1416,7 @@ def scan(
     except (ModuleNotFoundError, ImportError) as exc:
         # `scan reference:*` lazily imports the bundled reference target inside the
         # adapter; on an editable checkout without it this surfaces here. Fail with
-        # the same friendly message `demo` gives, not a raw traceback.
+        # a friendly message, not a raw traceback.
         _exit_if_missing_kitchen_sink(exc)
         raise
 
@@ -1655,120 +1471,6 @@ def scan(
     if outcome.operator_message:
         echo_err(outcome.operator_message)
     raise typer.Exit(code=outcome.exit_code)
-
-
-@app.command()
-def demo(
-    live: Annotated[
-        bool,
-        typer.Option(
-            "--live",
-            help=(
-                "Make real LLM calls instead of replaying recorded fixtures. "
-                "Runs the exploit loop twice (vulnerable + guarded), capped at "
-                "max_llm_calls=100 per variant. Takes roughly a minute and costs "
-                "a few cents on Haiku pricing (well under $0.05). Needs a "
-                "provider configured (ANTHROPIC_API_KEY by default)."
-            ),
-        ),
-    ] = False,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            "--provider",
-            help="LiteLLM provider for --live runs. Ignored in replay mode (pinned to anthropic).",
-        ),
-    ] = None,
-    model: Annotated[
-        str | None,
-        typer.Option(
-            "--model",
-            help=(
-                "Model for --live runs. Ignored in replay mode "
-                "(pinned to claude-haiku-4-5-20251001)."
-            ),
-        ),
-    ] = None,
-) -> None:
-    """Run the zero-config reference-app playground: vulnerable vs guarded differential.
-
-    Default (offline replay) replays recorded fixtures — no network, no API key,
-    deterministic. Pass --live to make real LLM calls against the in-process
-    reference agent. A --live run executes the exploit loop twice (vulnerable +
-    guarded), capped at max_llm_calls=100 per variant; it takes roughly a minute
-    and costs a few cents (approximate, well under $0.05 on Haiku pricing).
-    """
-    from mylonite.demo._replay import CorruptFixtureError, MissingFixtureError
-    from mylonite.demo.render import render_demo
-
-    # The runner import transitively pulls in mcp_kitchen_sink (runner ->
-    # reference_target_adapter -> mcp_kitchen_sink._store), which installs
-    # separately. Map its absence to the same friendly exit-2 message here, at
-    # import time, before any of the import's symbols are referenced below.
-    try:
-        from mylonite.demo.runner import (
-            DEMO_MODEL,
-            DEMO_PROVIDER,
-            DemoFixtureError,
-            run_demo,
-        )
-    except (ModuleNotFoundError, ImportError) as exc:
-        _exit_if_missing_kitchen_sink(exc)
-        raise
-
-    # Replay is pinned to the recorded provider/model — never silently drop the
-    # override flags.
-    if not live and (provider is not None or model is not None):
-        echo_err(
-            "warning: --provider/--model are ignored in replay mode — the demo "
-            f"replays fixtures recorded against {DEMO_PROVIDER}/{DEMO_MODEL} "
-            "(claude-haiku-4-5-20251001). Pass --live to use a different "
-            "provider/model."
-        )
-
-    try:
-        result = asyncio.run(run_demo(live=live, provider=provider, model=model))
-    except (MissingFixtureError, DemoFixtureError) as exc:
-        echo_exc(
-            "demo fixtures missing or stale — reinstall mylonite, or run "
-            "`mylonite demo --live` with a provider configured",
-            exc,
-        )
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-    except CorruptFixtureError as exc:
-        echo_exc("demo", exc)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-    except (ModuleNotFoundError, ImportError) as exc:
-        _exit_if_missing_kitchen_sink(exc)
-        raise
-
-    # Build a fresh Console here (not the module-level _console, which was
-    # constructed at import before the callback reconfigured stdout to UTF-8).
-    render_demo(
-        result.vulnerable,
-        result.guarded,
-        mode=result.mode,
-        elapsed_s=result.elapsed_s,
-        console=Console(),
-    )
-
-    # A --live run can abort cleanly (the engine returns rather than raises);
-    # surface those as distinct exit codes. Replay never aborts this way.
-    for variant in (result.vulnerable, result.guarded):
-        if variant.report.aborted == "provider_unreachable":
-            echo_err(
-                "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider."
-            )
-            raise typer.Exit(code=EXIT_PROVIDER)
-        if variant.report.aborted == "budget_exceeded":
-            echo_err(
-                "demo budget exceeded before both variants completed "
-                "(max_llm_calls=100 per variant)."
-            )
-            raise typer.Exit(code=EXIT_BUDGET)
-
-    raise typer.Exit(code=EXIT_SUCCESS)
 
 
 def _slugify_pattern(pattern_id: str) -> str:
@@ -3038,8 +2740,7 @@ def validate(
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
     # The validator transitively imports mcp_kitchen_sink (via the reference
-    # adapter / wiring). Map its absence to the same friendly exit-2 the demo
-    # command uses.
+    # adapter / wiring). Map its absence to a friendly exit-2.
     try:
         from mylonite.contracts import GeneratedTest
         from mylonite.plugins._reference.reference_validator import (
@@ -4044,7 +3745,7 @@ def _post_gate_annotations(
 @app.command(
     epilog=(
         "Examples:\n\n"
-        "`mylonite gate reference:vulnerable` -- the full pipeline on the demo target.\n\n"
+        "`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n"
         "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes test + workflows).\n\n"
         "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh."
     )
@@ -4590,7 +4291,7 @@ def gate(
             # DCR-0009: same "all but one" reproducibility rule the custom/mcp
             # branch below explicitly sets (vuln_threshold = iterations - 1) --
             # this branch used to fall back to the constructor default instead,
-            # so the reference/demo target's pass/fail reproducibility bar was
+            # so the reference target's pass/fail reproducibility bar was
             # silently looser than every other target type for no stated reason.
             validator = DifferentialValidator(
                 iterations=iterations,
@@ -5179,33 +4880,3 @@ def ablate(
         raise typer.Exit(code=total_failure_exit_code(observed_outcomes))
 
 
-@taxonomy_app.command("list")
-def taxonomy_list(
-    framework: Annotated[
-        _Framework,
-        typer.Option(
-            "--framework",
-            help="Which framework to list (required): owasp-llm | owasp-asi | atlas | nist.",
-        ),
-    ],
-) -> None:
-    """List entries from a bundled threat-taxonomy framework."""
-    # Local import to keep CLI startup fast and to avoid loading YAML at
-    # import time.
-    from mylonite import taxonomy
-
-    loaders: dict[_Framework, Callable[[], Sequence[Any]]] = {
-        _Framework.OWASP_LLM: taxonomy.load_owasp_llm,
-        _Framework.OWASP_ASI: taxonomy.load_owasp_asi,
-        _Framework.ATLAS: taxonomy.load_atlas,
-        _Framework.NIST: taxonomy.load_nist_ai_rmf,
-    }
-    entries = loaders[framework]()
-
-    table = Table(title=f"Framework: {framework.value}")
-    table.add_column("ID", style="bold")
-    table.add_column("Name")
-    table.add_column("Source")
-    for entry in entries:
-        table.add_row(entry.id, entry.name, entry.source_url)
-    console_print(_console, table)

@@ -46,7 +46,7 @@ from tests.integration._provider_matrix_spec import (
     has_recorded_fixture,
 )
 
-from mylonite.demo._replay import (
+from mylonite._replay import (
     CACHE_KEY_VERSION,
     CACHE_KEY_VERSION_FIELD,
     LiteLLMRecorder,

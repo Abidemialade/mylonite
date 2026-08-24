@@ -46,15 +46,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`mylonite demo`, `mylonite init`, `mylonite doctor`, and `mylonite taxonomy
+  list`.** These were the onboarding/diagnostic surface, not the AI-layer
+  security-testing core; removing them shrinks the CLI to `version`, `scan`,
+  `generate`, `validate`, `gate`, `report`, `ablate`. Concretely:
+  - `demo`'s offline vulnerable-vs-guarded playground and its packaged
+    fixtures (`src/mylonite/demo/`) are gone; the reference app is exercised
+    directly via `mylonite scan reference:vulnerable` / `reference:guarded`
+    (needs an LLM API key — this is an acknowledged, deliberate regression in
+    the zero-key on-ramp, to be closed by the new static `mylonite check`).
+    The shared LiteLLM record/replay core (`_replay.py`) was never
+    demo-specific and is relocated to `mylonite._replay` — still used by the
+    testkit, the reference validator, and the provider-fixture recording
+    scripts.
+  - `init`'s guided prompts are gone; use `mylonite scan --scaffold` directly
+    (the same underlying scaffolding it always called).
+  - `doctor`'s standalone connectivity ping is gone; a live `scan`/`gate`/
+    `validate` run now surfaces the same auth/TLS/network/rate-limit
+    classification directly instead of requiring a separate preflight command.
+  - `taxonomy list` is gone; query the bundled taxonomy programmatically via
+    `mylonite.taxonomy.load_owasp_llm()` / `load_owasp_asi()` / `load_atlas()`
+    / `load_nist_ai_rmf()` (unchanged — `mylonite.taxonomy` itself is not
+    removed, only its CLI front-end).
+  - The `mylonite[demo]` pip extra is retired; `mcp-kitchen-sink` is a
+    standalone PyPI package, installed alongside `mylonite` by anyone who
+    wants `scan reference:*` (`pip install mylonite mcp-kitchen-sink`).
 - The deprecated `--provider` CLI flag on `doctor`, `scan`, `validate`,
   `gate`, and `ablate` (deprecated since 0.7.9, T13). Use a
   provider-prefixed `--model` instead (e.g. `--model openai/gpt-4o` rather
   than `--model gpt-4o --provider openai`) — the same LiteLLM convention
-  `route_model`/`ModelRef` already implement. `demo`'s `--provider` is
-  unaffected: it selects the provider for `--live` runs directly (it was
-  never the deprecated alias) and remains. A bare `provider` set via
-  `mylonite.yaml`'s `provider:` key or the `MYLONITE_PROVIDER` env var still
-  works but stays deprecated (warns) for now.
+  `route_model`/`ModelRef` already implement. (`demo`'s own `--provider` —
+  which selected the provider for `--live` runs directly and was never the
+  deprecated alias — is moot: `demo` itself is removed later in this same
+  unreleased version, see below.) A bare `provider` set via `mylonite.yaml`'s
+  `provider:` key or the `MYLONITE_PROVIDER` env var still works but stays
+  deprecated (warns) for now.
 
 ### Changed
 
@@ -87,15 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   should not need any code changes; regenerate/re-validate any hand-built
   `ScanReport` fixtures that used a non-standard `aborted` string.
 
-- `mylonite demo`'s LiteLLM fixture-replay cache-key resolution no longer
+- `LiteLLMRecorder`'s (`mylonite._replay`) cache-key resolution no longer
   falls back to the legacy v1 key algorithm implicitly when a fixtures
-  directory has no `_meta.json` sidecar. The two shipped demo fixture
-  directories (`src/mylonite/demo/fixtures/{vulnerable,guarded}`) now
-  declare `cache_key_version: 1` explicitly via their own `_meta.json`; a
-  sidecar-less directory now resolves the modern `cache_key_version` (v2) in
-  either record or replay mode, closing a latent risk where a hand-placed or
-  interrupted-recording fixture directory could silently mis-key a
-  tool-bearing call under the old v1 algorithm instead of failing loudly.
+  directory has no `_meta.json` sidecar. A directory that genuinely needs v1
+  must now declare `cache_key_version: 1` explicitly via its own
+  `_meta.json`; a sidecar-less directory now resolves the modern
+  `cache_key_version` (v2) in either record or replay mode, closing a latent
+  risk where a hand-placed or interrupted-recording fixture directory could
+  silently mis-key a tool-bearing call under the old v1 algorithm instead of
+  failing loudly.
 
 - **`mylonite scan` now exposes `--randomize-exfil/--no-randomize-exfil`**,
   matching the tri-state default `generate`/`validate`/`gate` already had:

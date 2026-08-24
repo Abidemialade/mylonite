@@ -131,10 +131,10 @@ _API_KEY_SHAPES: Final[tuple[re.Pattern[str], ...]] = (
 def looks_like_api_key(value: str) -> bool:
     """True if ``value`` has the shape of a known provider API key.
 
-    Used by ``mylonite doctor`` to warn when a resolved key clearly isn't one
-    (e.g. a placeholder, a path, or a truncated paste) — WITHOUT printing it.
-    Deliberately permissive: a very long opaque token also passes, so it only
-    flags obviously-wrong values, never a real-but-unrecognised key.
+    Used to warn when a resolved key clearly isn't one (e.g. a placeholder, a
+    path, or a truncated paste) — WITHOUT printing it. Deliberately
+    permissive: a very long opaque token also passes, so it only flags
+    obviously-wrong values, never a real-but-unrecognised key.
     """
     if not isinstance(value, str):
         return False
@@ -439,8 +439,8 @@ def redact_env(env: dict[str, str]) -> dict[str, str]:
     """Replace every credential-shaped ``env`` entry with a ``${VAR}`` reference.
 
     Shared by :func:`redact_target_yaml` (persisted/copied target.yaml files) and
-    the ``scan --scaffold`` / ``mylonite init --transport mcp`` starter renderer
-    (``cli.py``'s ``_render_target_scaffold``) — a FOURTH origination path for the
+    the ``scan --scaffold`` starter renderer (``cli.py``'s
+    ``_render_target_scaffold``) — a FOURTH origination path for the
     same DCR-0006/0010/0016/0019 leak class: a `--env` value (e.g. a live
     ``GITHUB_TOKEN``) that reaches a target.yaml written to disk. Key names and
     non-secret values survive so the file still documents the target. Unlike an

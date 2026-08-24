@@ -132,17 +132,21 @@ The harness lives in [`verification/`](https://github.com/Abidemialade/mylonite/
 (outside the wheel; external data fetched at pinned commits, never vendored — see
 `verification/SOURCE.md`). Three tiers, easiest first:
 
-**1. The core example, offline, no API key.** The differential that the whole product rests on:
-
-```bash
-mylonite demo        # same model, vulnerable build vs guarded build — 2 findings vs 0
-```
-
-**2. The harness wiring, offline, no API key.** Hermetic tests that guard the plumbing
+**1. The harness wiring, offline, no API key.** Hermetic tests that guard the plumbing
 (judge agreement on a committed fixture, the scorers, the vacuous-agreement flag):
 
 ```bash
 pytest tests/verification/ -q
+```
+
+**2. The core example, live (needs an API key).** The differential that the whole product
+rests on, run against the bundled reference app — same model, vulnerable build vs guarded
+build:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+mylonite scan reference:vulnerable   # expect findings
+mylonite scan reference:guarded      # expect none
 ```
 
 **3. The live external numbers (need an API key).** Score Mylonite's judge against

@@ -12,8 +12,7 @@ passes ``tools=`` and no ``system`` message; the customiser/judge calls carry
 their distinctive system prompts. The scripted doubles below switch on that.
 
 These tests are sync ``def`` (not async) so ``assert_guard_holds`` can call
-``asyncio.run`` itself, exactly as the emitted pytest function will — mirroring
-the ``mylonite demo`` CLI test.
+``asyncio.run`` itself, exactly as the emitted pytest function will.
 """
 
 from __future__ import annotations

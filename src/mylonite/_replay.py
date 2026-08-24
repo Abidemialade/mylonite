@@ -1,7 +1,13 @@
-"""LiteLLM record/replay core for the offline ``mylonite demo``.
+"""LiteLLM record/replay core shared by the testkit, the reference validator,
+and the provider-fixture recording scripts.
 
-Promoted from ``tests/integration/_recorder.py`` (v0.2.x) so recorded
-real-LLM fixtures can ship inside the wheel.
+Promoted from ``tests/integration/_recorder.py`` (v0.2.x). Originally lived at
+``mylonite.demo._replay`` to back the offline ``mylonite demo`` on-ramp; that
+command and its packaged fixtures were removed, but this module's record/
+replay core was never demo-specific and is still load-bearing for
+``mylonite.testkit``, ``mylonite.plugins._reference.reference_validator``, and
+the ``scripts/record_*_fixtures.py`` family, so it was relocated here rather
+than deleted.
 
 Cache-key format versions
 --------------------------
@@ -18,8 +24,9 @@ Two cache-key algorithms exist, selected PER ``fixtures_dir`` (see
   Because the tool schema is exactly what used to differ between the
   vulnerable and guarded reference variants, fixtures had to be namespaced
   per variant (``fixtures/vulnerable/``, ``fixtures/guarded/``) to avoid
-  this collision — v1 is kept, byte-for-byte, ONLY so the already-shipped
-  fixture directories (``src/mylonite/demo/fixtures/*``) keep replaying;
+  this collision. v1 is kept, byte-for-byte, purely for historical fixture
+  sets that declared ``cache_key_version: 1`` before v2 existed (the demo's
+  own such fixtures shipped this way and were removed along with it);
   nothing should record NEW fixtures with it.
 * **v2** (:func:`_stable_key_v2`) additionally folds ``tools``,
   ``tool_choice``, ``response_format``, and ``api_base`` into the key —
@@ -38,11 +45,11 @@ so a future bump to either, for its own reason, cannot silently confuse
 dispatch in the other subsystem — see :data:`CACHE_KEY_VERSION_FIELD`. No
 sidecar, OR a legacy sidecar that only carries the unrelated
 ``format_version`` field, means :data:`CACHE_KEY_VERSION` (the best
-available algorithm) in EITHER mode. The two shipped, pre-sidecar fixture
-directories (``src/mylonite/demo/fixtures/vulnerable``, ``.../guarded``) now
-declare ``cache_key_version: 1`` EXPLICITLY via their own ``_meta.json`` —
-there is no longer an implicit "no sidecar means legacy v1" assumption for
-REPLAY. See :func:`_resolve_key_version` for the full dispatch rule.
+available algorithm) in EITHER mode. Historically, pre-sidecar fixture
+directories that needed v1 declared ``cache_key_version: 1`` EXPLICITLY via
+their own ``_meta.json`` — there is no implicit "no sidecar means legacy v1"
+assumption for REPLAY. See :func:`_resolve_key_version` for the full dispatch
+rule.
 
 Replay mode accepts any ``importlib.resources`` Traversable for
 ``fixtures_dir``, so fixtures can be read straight out of an installed
@@ -51,12 +58,11 @@ wheel or zip. Record mode requires a real ``pathlib.Path`` — it has to
 
 Error-surfacing contract: the scan engine's ``_llm.py`` fallback chain and
 the adapter's skip-conversion swallow exceptions raised by
-``completion_fn``, so a demo runner must inspect recorder state after the
-run (``cache_misses``, ``last_error``) rather than rely on exception
-propagation.
+``completion_fn``, so a caller must inspect recorder state after the run
+(``cache_misses``, ``last_error``) rather than rely on exception propagation.
 
-This module must not import from ``mylonite.scan`` (keeps the demo package
-cycle-free).
+This module must not import from ``mylonite.scan`` (keeps this dependency-free
+core usable from the testkit, the validator, and standalone scripts alike).
 """
 
 from __future__ import annotations
@@ -65,16 +71,15 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
-DEMO_RERECORD_HINT = (
-    "Re-record the demo fixtures with scripts/record_demo_fixtures.py "
-    "(requires a live provider key)."
-)
+#: Generic re-record guidance used when a construction site doesn't supply
+#: its own ``missing_fixture_hint`` (e.g. record-mode-only callers, where a
+#: replay-error hint is never actually surfaced).
+GENERIC_RERECORD_HINT = "Re-record this fixture set against a live provider."
 
 
 class FixtureError(RuntimeError):
@@ -96,11 +101,10 @@ class FixtureConflictError(FixtureError):
 def _stable_key_v1(model: str, messages: Sequence[Any]) -> str:
     """Original cache-key algorithm: ``(model, messages)`` ONLY.
 
-    Kept byte-for-byte unchanged — the already-shipped v1 fixture
-    directories (``src/mylonite/demo/fixtures/*``) were recorded with this
-    exact function, and :func:`_resolve_key_version` routes replay against
-    them straight back here. Do not extend this function; add to
-    :func:`_stable_key_v2` instead.
+    Kept byte-for-byte unchanged — any fixture directory that still declares
+    ``cache_key_version: 1`` was recorded with this exact function, and
+    :func:`_resolve_key_version` routes replay against it straight back here.
+    Do not extend this function; add to :func:`_stable_key_v2` instead.
     """
     payload = json.dumps(
         {"model": model, "messages": list(messages)},
@@ -215,14 +219,14 @@ def _resolve_key_version(
 
     This used to be mode-dependent: REPLAY silently defaulted to **v1**
     while RECORD defaulted to :data:`CACHE_KEY_VERSION`. That asymmetry
-    existed ONLY to keep the already-shipped, pre-sidecar fixture
-    directories (``src/mylonite/demo/fixtures/vulnerable``, ``.../guarded``)
-    replaying — "no signal" had to mean "the original algorithm" or every
-    lookup against them would miss. Retiring that implicit fallback (T-close-
-    the-loop): those two directories now declare ``cache_key_version: 1``
-    EXPLICITLY via their own ``_meta.json`` (an explicit sidecar wins
-    outright, per the first paragraph above), so nothing depends on the old
-    mode-dependent guess any more. Collapsing the no-sidecar default to a
+    existed ONLY to keep pre-sidecar fixture directories that were recorded
+    with v1 replaying — "no signal" had to mean "the original algorithm" or
+    every lookup against them would miss. Retiring that implicit fallback
+    (T-close-the-loop): any directory that still needs v1 now declares
+    ``cache_key_version: 1`` EXPLICITLY via its own ``_meta.json`` (an
+    explicit sidecar wins outright, per the first paragraph above), so
+    nothing depends on the old mode-dependent guess any more. Collapsing the
+    no-sidecar default to a
     single, mode-independent answer — the best available algorithm, always,
     unless a directory explicitly opts out — removes the implicit "assume
     legacy v1" behaviour :data:`CACHE_KEY_VERSION_FIELD`'s docstring warns
@@ -350,13 +354,12 @@ class LiteLLMRecorder:
     """JSON-backed record/replay helper for ``litellm.acompletion``.
 
     ``fixtures_dir`` may be any ``importlib.resources`` Traversable in replay
-    mode (e.g. ``packaged_fixture_dir() / "vulnerable"``); record mode
-    requires a real ``pathlib.Path`` because it must ``mkdir`` and write.
+    mode (e.g. reading straight out of an installed wheel or zip); record
+    mode requires a real ``pathlib.Path`` because it must ``mkdir`` and write.
 
     ``missing_fixture_hint`` is appended to the cache-miss error message so
-    each construction site can name its own re-record procedure (the demo
-    names ``scripts/record_demo_fixtures.py``; the test shim names
-    ``MYLONITE_TEST_RECORD=1``).
+    each construction site can name its own re-record procedure (e.g.
+    ``mylonite.testkit`` names ``mylonite generate``).
 
     ``cache_hits`` / ``cache_misses`` / ``last_error`` are runner-inspectable
     state: callers in the scan engine swallow ``completion_fn`` exceptions,
@@ -370,13 +373,14 @@ class LiteLLMRecorder:
     run or call :meth:`reset` between runs (the multi-run flakiness
     filter is the motivating case). The recorder is not thread-safe, and
     ``last_error`` reflects only the most recent failure — under concurrent
-    calls use the counters as the aggregate signal; the demo runner drives
-    this with ``max_concurrent=1``.
+    calls use the counters as the aggregate signal; callers that need a
+    reliable ``last_error`` (the testkit, the ablation runner, the reference
+    validator) drive this with ``max_concurrent=1``.
     """
 
     fixtures_dir: Path | Traversable
     mode: Literal["record", "replay"] = "replay"
-    missing_fixture_hint: str = DEMO_RERECORD_HINT
+    missing_fixture_hint: str = GENERIC_RERECORD_HINT
     cache_hits: int = 0
     cache_misses: int = 0
     last_error: Exception | None = None
@@ -489,24 +493,13 @@ class LiteLLMRecorder:
         return real
 
 
-def packaged_fixture_dir() -> Traversable:
-    """Root of the fixtures shipped inside the wheel (``mylonite/demo/fixtures``).
-
-    Per-variant namespaces live underneath: ``<root>/vulnerable``,
-    ``<root>/guarded``. Returns a Traversable so replay works from a
-    zip/wheel install as well as a source checkout.
-    """
-    return files("mylonite.demo") / "fixtures"
-
-
 __all__ = [
     "CACHE_KEY_VERSION",
     "CACHE_KEY_VERSION_FIELD",
-    "DEMO_RERECORD_HINT",
+    "GENERIC_RERECORD_HINT",
     "CorruptFixtureError",
     "FixtureConflictError",
     "FixtureError",
     "LiteLLMRecorder",
     "MissingFixtureError",
-    "packaged_fixture_dir",
 ]

@@ -100,20 +100,6 @@ def test_configure_stdio_encoding_forces_utf8(monkeypatch: pytest.MonkeyPatch) -
     assert calls == [{"encoding": "utf-8", "errors": "replace"}]
 
 
-def test_taxonomy_list_owasp_llm() -> None:
-    result = runner.invoke(app, ["taxonomy", "list", "--framework", "owasp-llm"])
-    assert result.exit_code == EXIT_SUCCESS
-    for i in range(1, 11):
-        assert f"LLM{i:02d}" in result.stdout
-
-
-def test_taxonomy_list_owasp_asi() -> None:
-    result = runner.invoke(app, ["taxonomy", "list", "--framework", "owasp-asi"])
-    assert result.exit_code == EXIT_SUCCESS
-    for i in range(1, 11):
-        assert f"ASI{i:02d}" in result.stdout
-
-
 def _fake_descriptor_with_tools() -> Any:
     from mylonite.contracts import TargetDescriptor, ToolSpec
 
@@ -512,15 +498,6 @@ def test_env_file_loads_unrelated_api_key_shaped_var_model_ref(
         os.environ.pop("STRIPE_API_KEY", None)
 
 
-def test_doctor_warns_on_non_key_shaped_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    """doctor flags an ANTHROPIC_API_KEY that clearly isn't a key (without printing it)."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "changeme")
-    result = runner.invoke(app, ["doctor"])
-    out = result.stderr or result.output
-    assert "doesn't look like an API key" in out
-    assert "changeme" not in out  # never echo the value
-
-
 def test_scan_refuses_non_reference_without_authorize() -> None:
     result = runner.invoke(app, ["scan", "mcp:filesystem:/tmp/sandbox"])
     assert result.exit_code == EXIT_CONFIG
@@ -709,21 +686,6 @@ def test_route_model_prefixes_only_when_provider_explicit() -> None:
 
 def test_scan_rejects_blank_model() -> None:
     result = runner.invoke(app, ["scan", "reference:vulnerable", "--model", "  ", "--dry-run"])
-    assert result.exit_code == EXIT_CONFIG
-    assert "invalid --model" in (result.stderr or result.output)
-
-
-def test_doctor_rejects_explicit_empty_model_instead_of_silently_defaulting() -> None:
-    """DCR-0012: `base_model = model or "claude-sonnet-4-6"` treated an
-    explicit `--model ""` the same as omitting the flag entirely (`""` is
-    falsy), silently substituting the hardcoded default instead of letting
-    the empty string reach `_validate_model_string` and get rejected --
-    exactly the DCR-0004/0012/0015/0005 "None means omitted, an explicit
-    falsy value is not the same thing" pitfall `_resolve_option`'s own
-    docstring warns about. `--model ""` must be REJECTED with a clear error,
-    not silently defaulted.
-    """
-    result = runner.invoke(app, ["doctor", "--model", ""])
     assert result.exit_code == EXIT_CONFIG
     assert "invalid --model" in (result.stderr or result.output)
 
@@ -957,51 +919,6 @@ def test_scan_rejects_credentialed_api_base_from_env_var(tmp_path: Path, monkeyp
     assert result.exit_code == EXIT_CONFIG, result.output
     out = result.stderr or result.output
     assert "env var" in out
-
-
-def test_doctor_classifies_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    import litellm
-
-    def boom(**_: Any) -> Any:
-        raise RuntimeError("AnthropicException - [SSL: CERTIFICATE_VERIFY_FAILED]")
-
-    monkeypatch.setattr(litellm, "completion", boom)
-    result = runner.invoke(app, ["doctor"])
-    assert result.exit_code == EXIT_PROVIDER
-    out = (result.stderr or "") + result.output
-    assert "[tls]" in out
-    assert "truststore" in out.lower() or "ssl_cert_file" in out.lower()
-
-
-def test_doctor_ok_when_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    import litellm
-
-    monkeypatch.setattr(litellm, "completion", lambda **_: SimpleNamespace())
-    result = runner.invoke(app, ["doctor", "--model", "claude-haiku-4-5"])
-    assert result.exit_code == EXIT_SUCCESS
-    assert "OK" in result.output
-
-
-def test_doctor_config_fills_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """doctor --config pings the SAME model declared in mylonite.yaml rather than
-    silently falling back to the default (regression for the 'set haiku but doctor
-    used sonnet' friction)."""
-    import litellm
-
-    cfg = tmp_path / "mylonite.yaml"
-    cfg.write_text("provider: anthropic\nmodel: claude-haiku-4-5\n", encoding="utf-8")
-
-    captured: dict[str, Any] = {}
-
-    def _capture(**kwargs: Any) -> Any:
-        captured.update(kwargs)
-        return SimpleNamespace()
-
-    monkeypatch.setattr(litellm, "completion", _capture)
-    result = runner.invoke(app, ["doctor", "--config", str(cfg)])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    assert "claude-haiku-4-5" in captured["model"]
-    assert "claude-haiku-4-5" in result.output
 
 
 def test_truststore_enabled_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1273,123 +1190,12 @@ def test_require_llm_configured_or_exit_rederives_provider_from_prefixed_model(
     _require_llm_configured_or_exit("openai/gpt-4o", provider=None)
 
 
-# ---------------------------------------------------------------------------
-# `mylonite demo` — the offline reference-app playground (v0.3.0, PR A, Task A5).
-#
-# These tests MUST be plain `def` (not async): the command body calls
-# asyncio.run() internally, and pytest's asyncio_mode="auto" would otherwise
-# wrap them in a running event loop and raise "cannot be called from a running
-# event loop".
-# ---------------------------------------------------------------------------
-
-
-def test_demo_replay_smoke() -> None:
-    """Default (offline replay) demo renders the differential and exits 0."""
-    result = runner.invoke(app, ["demo"])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    assert "reference app" in result.output
-    assert "0 on guarded" in result.output
-
-
-def test_demo_replay_warns_when_provider_flag_ignored() -> None:
-    """--provider without --live warns (never silently ignores) and still exits 0."""
-    result = runner.invoke(app, ["demo", "--provider", "openai"])
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    out = result.stderr or result.output
-    assert "pinned" in out.lower() or "ignored" in out.lower()
-    assert "claude-haiku-4-5-20251001" in out
-
-
-def test_demo_missing_kitchen_sink_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing mcp_kitchen_sink install → exit 2 with the clone-first command."""
-
-    async def fake_run_demo(**_: Any) -> Any:
-        exc = ModuleNotFoundError("No module named 'mcp_kitchen_sink'")
-        exc.name = "mcp_kitchen_sink"
-        raise exc
-
-    from mylonite.demo import runner as demo_runner
-
-    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
-
-    result = runner.invoke(app, ["demo"])
-    assert result.exit_code == EXIT_CONFIG
-    out = result.stderr or result.output
-    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
-    # Friendly message, not a raw traceback.
-    assert "Traceback" not in out
-
-
-def test_demo_missing_kitchen_sink_via_real_import_maps_to_exit_2(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A mcp_kitchen_sink absence → exit 2, not a raw traceback.
-
-    ``reference_target_adapter`` now imports ``mcp_kitchen_sink`` *lazily*
-    (inside ``describe()``/``invoke()``), so ``import mylonite.testkit`` /
-    ``mylonite generate`` work without the reference package. The reference twin
-    is therefore loaded at *run* time: ``run_demo`` → engine → ``describe()`` →
-    ``from mcp_kitchen_sink._store import NoteStore``. The engine re-raises that
-    ImportError (a missing optional dependency is a config error, not a target
-    failure), so it propagates out of ``run_demo`` and the ``demo`` command's
-    ImportError guard maps it to a friendly exit 2.
-
-    This evicts the cached modules and installs a meta_path finder that makes
-    importing ``mcp_kitchen_sink`` raise ModuleNotFoundError, driving that path.
-    """
-
-    class _BlockKitchenSink(MetaPathFinder):
-        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
-            if fullname == "mcp_kitchen_sink" or fullname.startswith("mcp_kitchen_sink."):
-                raise ModuleNotFoundError(f"No module named '{fullname}'", name="mcp_kitchen_sink")
-            return None
-
-    # Evict cached modules so the command's local import re-runs and hits the
-    # finder. monkeypatch.delitem auto-restores the originals after the test.
-    #
-    # The command's re-import also repoints the PARENT package's submodule
-    # attribute (e.g. ``mylonite.demo.runner``) at the freshly-imported module
-    # object. monkeypatch.delitem only restores ``sys.modules`` — not that parent
-    # attribute — which would leave ``from mylonite.demo import runner`` and
-    # ``from mylonite.demo.runner import ...`` resolving to DIFFERENT objects and
-    # silently break a later test's monkeypatch. Snapshot each parent attribute so
-    # monkeypatch restores it on teardown, keeping the two resolutions in sync.
-    submodule_parents = [
-        ("mylonite.demo", "runner"),
-        ("mylonite.scan", "wiring"),
-        ("mylonite.plugins._reference", "reference_target_adapter"),
-    ]
-    for parent_name, attr in submodule_parents:
-        parent = sys.modules.get(parent_name)
-        if parent is not None and hasattr(parent, attr):
-            monkeypatch.setattr(parent, attr, getattr(parent, attr), raising=False)
-
-    for name in list(sys.modules):
-        if (
-            name == "mcp_kitchen_sink"
-            or name.startswith("mcp_kitchen_sink.")
-            or name == "mylonite.demo.runner"
-            or name == "mylonite.scan.wiring"
-            or name == "mylonite.plugins._reference.reference_target_adapter"
-        ):
-            monkeypatch.delitem(sys.modules, name, raising=False)
-
-    monkeypatch.setattr(sys, "meta_path", [_BlockKitchenSink(), *sys.meta_path])
-
-    result = runner.invoke(app, ["demo"])
-    assert result.exit_code == EXIT_CONFIG, result.output
-    out = result.stderr or result.output
-    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
-    # Friendly message, not a raw traceback.
-    assert "Traceback" not in out
-
-
 def test_scan_reference_missing_kitchen_sink_maps_to_exit_2(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """`scan reference:*` without the reference target → friendly exit 2, not a raw
-    traceback (parity with `demo`). The adapter imports mcp_kitchen_sink lazily in
-    describe(); the engine re-raises and the scan command now maps it like demo."""
+    """`scan reference:*` without the reference target → friendly exit 2, not a
+    raw traceback. The adapter imports mcp_kitchen_sink lazily in describe();
+    the engine re-raises and the scan command maps it to a clear message."""
     # T14: clears the require_llm_configured() pre-flight so the run reaches
     # the actual describe()-time ModuleNotFoundError this test exercises.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -1409,23 +1215,6 @@ def test_scan_reference_missing_kitchen_sink_maps_to_exit_2(
     assert result.exit_code == EXIT_CONFIG, result.output
     out = result.stderr or result.output
     assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
-    assert "Traceback" not in out
-
-
-def test_demo_corrupt_fixture_maps_to_exit_2(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A corrupt fixture surfaces as exit 2 with the underlying message."""
-    from mylonite.demo import runner as demo_runner
-    from mylonite.demo._replay import CorruptFixtureError
-
-    async def fake_run_demo(**_: Any) -> Any:
-        raise CorruptFixtureError("fixture corrupt — reinstall mylonite or re-record")
-
-    monkeypatch.setattr(demo_runner, "run_demo", fake_run_demo)
-
-    result = runner.invoke(app, ["demo"])
-    assert result.exit_code == EXIT_CONFIG
-    out = result.stderr or result.output
-    assert "fixture corrupt" in out
     assert "Traceback" not in out
 
 
@@ -4671,45 +4460,6 @@ def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> 
         app,
         ["scan", "--scaffold", str(out), "--rest-url", "https://x/chat", "--rest-body", "no slot"],
     )
-    assert result.exit_code != EXIT_SUCCESS
-    assert not out.exists()
-
-
-def test_init_rest_scriptable_writes_runnable_target(tmp_path: Path) -> None:
-    """`mylonite init` with flags (no prompts) writes a runnable HTTP-agent target."""
-    from mylonite.plugins._mcp.target_file import load_target_file
-
-    out = tmp_path / "agent.yaml"
-    result = runner.invoke(
-        app,
-        [
-            "init",
-            str(out),
-            "--transport",
-            "rest",
-            "--url",
-            "https://agent.example/chat",
-            "--rest-response-path",
-            "reply",
-        ],
-    )
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    tf = load_target_file(out)
-    assert tf.transport == "rest"
-    assert tf.request is not None and tf.request.url == "https://agent.example/chat"
-
-
-def test_init_rest_prompts_interactively(tmp_path: Path) -> None:
-    """`mylonite init` with no flags prompts for transport + url, then writes the file."""
-    out = tmp_path / "agent.yaml"
-    result = runner.invoke(app, ["init", str(out)], input="rest\nhttps://agent.example/chat\n")
-    assert result.exit_code == EXIT_SUCCESS, result.output
-    assert out.exists()
-
-
-def test_init_unknown_transport_errors(tmp_path: Path) -> None:
-    out = tmp_path / "agent.yaml"
-    result = runner.invoke(app, ["init", str(out), "--transport", "carrier-pigeon"])
     assert result.exit_code != EXIT_SUCCESS
     assert not out.exists()
 

@@ -1,7 +1,8 @@
 name: Release (mcp-kitchen-sink)
 
-# The deliberately-vulnerable reference target ships as its OWN PyPI package so
-# `pip install "mylonite[demo]"` can resolve it. It is released independently of
+# The deliberately-vulnerable reference target ships as its OWN PyPI package
+# (`mcp-kitchen-sink`), installed alongside `mylonite` by anyone who wants to
+# run `scan reference:*` against it. It is released independently of
 # `mylonite` on a separate `ks-v*` tag prefix, so a routine `mylonite` release
 # never republishes the vulnerable agent (and vice versa).
 #

@@ -11,7 +11,7 @@ names. The canonical walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 > Both server variants refuse to bind to non-loopback interfaces by default.
 > See `mylonite/SECURITY.md` for the project's dual-use policy.
 >
-> **DEMO ONLY — the reference app is a deliberately vulnerable in-process reference
+> **The reference app is a deliberately vulnerable in-process reference
 > agent. It never binds to a network. Never point Mylonite at a system you
 > don't own or operate** (see SECURITY.md).
 
@@ -55,14 +55,16 @@ walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 ## Try it
 
 ```bash
-mylonite demo
+export ANTHROPIC_API_KEY="sk-ant-..."
+mylonite scan reference:vulnerable
+mylonite scan reference:guarded
 ```
 
-Runs Mylonite's real scan pipeline against both builds of the reference app —
-offline, no API key — and prints one row per weakness above plus the
-vulnerable-vs-guarded differential headline. See
-[`docs/quarry.md`](../../docs/quarry.md) for the expected output and the
-follow-on `mylonite scan` flows.
+Runs Mylonite's real scan pipeline against both builds of the reference app and
+finds the weaknesses above on the vulnerable build, none on the guarded one —
+that vulnerable-vs-guarded gap is the differential oracle in action. See
+[`docs/quarry.md`](../../docs/quarry.md) for the full walkthrough and the
+follow-on `mylonite scan`/`generate`/`validate` flows.
 
 ## How to run
 
@@ -81,7 +83,7 @@ loopback (`127.0.0.1` / `::1`).
 ## Real MCP stdio server (custom-target on-ramp)
 
 `server_vulnerable.py`/`server_guarded.py` above are in-process server
-*classes* only — programmatic use from tests, or `mylonite demo`'s built-in
+*classes* only — programmatic use from tests, or `mylonite scan`'s built-in
 `reference:vulnerable`/`reference:guarded` targets. To drive this same tool
 surface through mylonite's generic `--target-file` custom-target flow
 (`scan`/`ablate`/`validate`/`gate`) — the same code path a real third-party

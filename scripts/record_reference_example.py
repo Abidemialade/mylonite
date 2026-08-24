@@ -58,7 +58,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from mylonite.demo._replay import LiteLLMRecorder
+from mylonite._replay import LiteLLMRecorder
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.scan.wiring import build_scan, note_id_counter
 from mylonite.testkit import FIXTURE_FORMAT_VERSION
@@ -128,7 +128,7 @@ async def _record_guarded_fixtures(example_dir: Path, pattern_id: str) -> int:
     # locally hardcoded literal) so the sidecar can never drift from what the
     # recorder actually used to key the files just written above. The two
     # fields share this one sidecar file but are independent axes; see
-    # mylonite.demo._replay.CACHE_KEY_VERSION_FIELD's docstring.
+    # mylonite._replay.CACHE_KEY_VERSION_FIELD's docstring.
     meta_path = fixtures_dir / "_meta.json"
     meta_path.write_text(
         json.dumps(

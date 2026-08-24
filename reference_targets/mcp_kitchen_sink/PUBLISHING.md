@@ -1,9 +1,11 @@
 # Publishing `mcp-kitchen-sink` to PyPI (front-door handoff)
 
 > **Status: done.** `mcp-kitchen-sink` v0.1.0 was published to PyPI on 2026-08-05, so
-> `pip install "mylonite[demo]"` resolves from a clean install and `mylonite demo` no
-> longer requires a clone. The base `pip install mylonite` is unaffected and **never**
-> pulls this deliberately-vulnerable agent — that invariant is preserved. This doc is
+> `pip install mylonite mcp-kitchen-sink` resolves both packages from a clean install
+> with no clone needed. The base `pip install mylonite` is unaffected and **never**
+> pulls this deliberately-vulnerable agent — that invariant is preserved. (The
+> `mylonite[demo]` extra that originally wrapped this install has since been retired
+> along with the `mylonite demo` command — see CHANGELOG.md.) This doc is
 > kept as the record of how the release was set up, for future re-releases (`ks-vX.Y.Z`
 > tags) of this package.
 
@@ -17,9 +19,8 @@
   and `CallToolResult.isError` → `is_error`, which this target's server shim uses, and a
   published version's metadata is immutable — an unbounded floor would have baked the
   breakage in permanently.
-- It depends on `mylonite` (on PyPI, latest published 0.7.5), and `mylonite[demo]` depends
-  back on it. This circular *extra* is fine for pip: each resolves independently. Publish
-  order does not matter.
+- It depends on `mylonite` (on PyPI, latest published 0.7.5). Independent packages,
+  each resolves on its own — publish order does not matter.
 - **The release automation is already wired**: `.github/workflows/release-kitchen-sink.yml`
   builds from this directory and publishes TestPyPI → PyPI via Trusted Publishing on a
   `ks-v*` tag. Only the one-time PyPI-side setup below is outstanding.
@@ -86,16 +87,16 @@ python -m twine upload dist_ks/*
 ## Step 3 — verify the front door from a clean venv
 
 ```powershell
-python -m venv /tmp/clean-demo
-/tmp/clean-demo/Scripts/Activate.ps1
-pip install "mylonite[demo]"          # must now resolve mcp-kitchen-sink from PyPI
-mylonite demo                          # 2 exploits on vulnerable, 0 on guarded — no clone
+python -m venv /tmp/clean-verify
+/tmp/clean-verify/Scripts/Activate.ps1
+pip install mylonite mcp-kitchen-sink   # both resolve from PyPI, no clone
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+mylonite scan reference:vulnerable      # finds the seeded weaknesses
+mylonite scan reference:guarded         # comes up clean
 ```
 
-The README, `docs/quickstart.md` and `docs/quarry.md` document `pip install
-"mylonite[demo]"` as the primary path, and that's now true. The root `pyproject.toml`'s
-explanatory comment above `demo = [...]` has been updated to drop the
-not-yet-published caveat accordingly.
+The README, `docs/quickstart.md` and `docs/quarry.md` document `pip install mylonite
+mcp-kitchen-sink` as the primary path for trying the reference app.
 
 ## Caveats specific to this machine
 

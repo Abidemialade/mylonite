@@ -29,11 +29,11 @@ replace it via the plugin entry point.
 
 Auto-generated cross-reference tables (every OWASP LLM entry → matching OWASP ASI /
 MITRE ATLAS / NIST entries) are a planned addition. Today you can hand-query the
-bundled taxonomy via the CLI:
+bundled taxonomy via the loaders in the table above:
 
-```bash
-mylonite taxonomy list --framework owasp-llm
-mylonite taxonomy list --framework owasp-asi
-mylonite taxonomy list --framework atlas
-mylonite taxonomy list --framework nist
+```python
+from mylonite import taxonomy
+
+for entry in taxonomy.load_owasp_llm():
+    print(entry.id, entry.name, entry.source_url)
 ```
