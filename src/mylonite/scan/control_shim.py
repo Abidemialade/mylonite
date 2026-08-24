@@ -48,6 +48,35 @@ logger = logging.getLogger(__name__)
 DEFAULT_FETCH_ALLOWLIST: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
 
 
+def config_snippet_for(
+    weakness: str,
+    tool: str,
+    *,
+    url_param: str | None = None,
+    allowlist: tuple[str, ...] = (),
+) -> str:
+    """The paste-ready ``control_config:`` YAML snippet for a weakness/tool pair.
+
+    The single source of truth for every control's ``_config_snippet`` method
+    (W2/W3/W4 below all delegate here with no extra args, reproducing their
+    prior byte-identical output) AND for the structural recommendation engine
+    (``gate/recommend.py``), which additionally passes ``url_param``/
+    ``allowlist`` when the trace identified them — the fail-closed warning
+    path never has those, so it always gets exactly today's generic template.
+    """
+    if weakness == "W2":
+        return f"control_config:\n  read_tool_names: [{tool}]"
+    if weakness == "W3":
+        lines = ["control_config:", f"  egress_tools: [{tool}]"]
+        lines.append(f"  egress_url_param: {url_param or '<the-argument-name-holding-the-destination>'}")
+        if allowlist:
+            lines.append(f"  fetch_allowlist: [{', '.join(allowlist)}]")
+        return "\n".join(lines)
+    if weakness == "W4":
+        return f"control_config:\n  consequential_tools: [{tool}]"
+    raise ValueError(f"no config snippet available for weakness {weakness!r}")
+
+
 @runtime_checkable
 class _ServerLike(Protocol):
     """The structural surface ``LLMPlanner`` consumes (async list/call)."""
@@ -164,7 +193,7 @@ class UntrustedEnvelopeControl(BoundaryControl):
         return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
 
     def _config_snippet(self, name: str) -> str:
-        return f"control_config:\n  read_tool_names: [{name}]"
+        return config_snippet_for("W2", name)
 
     def transform_result(self, name: str, result: ToolResult) -> ToolResult:
         # Never wrap a guarded refusal (isError) — that would mangle the
@@ -280,11 +309,7 @@ class EgressAllowlistControl(BoundaryControl):
         return applies, reason, destinations
 
     def _config_snippet(self, name: str) -> str:
-        return (
-            "control_config:\n"
-            f"  egress_tools: [{name}]\n"
-            "  egress_url_param: <the-argument-name-holding-the-destination>"
-        )
+        return config_snippet_for("W3", name)
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         applies, reason, destinations = self._classify(name, arguments)
@@ -343,6 +368,9 @@ class ConfirmGateControl(BoundaryControl):
     def _classify(self, name: str) -> tuple[bool, str]:
         return classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
 
+    def _config_snippet(self, name: str) -> str:
+        return config_snippet_for("W4", name)
+
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         applies, reason = self._classify(name)
         if not applies:
@@ -350,7 +378,7 @@ class ConfirmGateControl(BoundaryControl):
         self._warn_fail_closed_once(
             name,
             reason,
-            f"control_config:\n  consequential_tools: [{name}]",
+            self._config_snippet(name),
         )
         return ToolResult(
             name=name,
