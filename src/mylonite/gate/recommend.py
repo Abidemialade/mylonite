@@ -297,9 +297,9 @@ def _evidence_for_tool(
         # tool executed — quote the whole arg dict as the shape. MUST go
         # through redact_value() (key-name-aware) first, not straight into
         # _quote()/redact() (shape-only): redact() only masks a value that is
-        # itself long/prefixed enough to look secret-shaped, so a short
-        # credential under an unambiguous key (`{"password": "abc123"}`) rides
-        # through untouched into the rendered PR body / SARIF / JSON bundle.
+        # itself long/prefixed enough to look secret-shaped. A short credential
+        # under an unambiguous key -- {"password": "abc123"} -- would  # pragma: allowlist secret
+        # otherwise ride through untouched into the PR body / SARIF / JSON bundle.
         return Evidence(
             tool=tool,
             argument=None,

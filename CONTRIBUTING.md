@@ -121,15 +121,35 @@ unfinished, and no tag was ever pushed for either).
    The `## [X.Y.Z]` section body becomes the GitHub Release notes verbatim
    (see step 4), so write it as such.
 
-   Editing `CHANGELOG.md` shifts the line number of the one pre-existing,
-   deliberately-fake credential `detect-secrets` has baselined in it (a
-   test-fixture-shaped string in a changelog entry describing the redaction
-   feature). Regenerate the baseline before pushing, or CI's `precommit` and
-   `security` jobs both fail on it (happened for both 0.7.7 and 0.7.8):
+   Editing `CHANGELOG.md` shifts the line number of the deliberately-fake
+   credentials `detect-secrets` has baselined in it (test-fixture-shaped strings
+   in changelog entries describing the redaction feature). Regenerate the
+   baseline before pushing, or CI's `precommit` and `security` jobs both fail on
+   it (happened for both 0.7.7 and 0.7.8):
    ```bash
-   git ls-files | python -m detect_secrets.pre_commit_hook --baseline .secrets.baseline
+   git ls-files | xargs detect-secrets scan --baseline .secrets.baseline
    git add .secrets.baseline
    ```
+   **`xargs` is load-bearing.** `filenames` is a *positional* argument, so
+   piping straight into the tool passes it zero files: it scans nothing, writes
+   nothing, and exits `0`. That silent no-op is why this kept recurring after it
+   was first written down — the documented command never worked. CI gets it
+   right (`.github/workflows/ci.yml`), so the failure only ever showed up there.
+
+   **On Windows, normalize the path separators afterwards.** `detect-secrets`
+   keys its results with `os.sep`, so a regeneration on Windows rewrites every
+   path with backslashes; CI runs on ubuntu, where nothing then matches and every
+   entry reads as a brand-new secret. Replace `\` with `/` in the `results` keys
+   before committing, and sanity-check the diff — a correct regeneration touches
+   only line numbers plus any genuinely new entry.
+
+   Verify with the hook (the baseline must be **staged** first — an unstaged
+   baseline aborts before the scan even runs):
+   ```bash
+   git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
+   ```
+   Exit `0` means clean and `3` means "baseline updated"; only `1` is a genuinely
+   new secret.
 3. **Land both changes on `main`** (same PR as the release work, or a
    dedicated `release: vX.Y.Z` PR/commit).
 4. **Tag and push** — this is the step that actually triggers the build +
