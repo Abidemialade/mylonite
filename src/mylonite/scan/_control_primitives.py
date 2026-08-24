@@ -16,6 +16,7 @@ across the W1-W4 control set.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from urllib.parse import urlparse
 
@@ -98,6 +99,62 @@ def sanitize_tool_description(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+# Loopback is exempt from the link-local hard-deny below: 127.0.0.1/::1/
+# localhost are the single most common legitimate local-dev allowlist entry
+# (DEFAULT_FETCH_ALLOWLIST itself includes 127.0.0.1), and loopback is not
+# the cloud-metadata SSRF vector link-local addressing is.
+_LOOPBACK_EXEMPT: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# The GCP metadata endpoint's DNS alias — not an IP literal, so it isn't
+# caught by the ipaddress.is_link_local check below and needs naming
+# explicitly. AWS/Azure/GCP's metadata IP (169.254.169.254) IS caught by the
+# link-local check: it falls inside 169.254.0.0/16.
+_METADATA_HOSTNAME_ALIASES: frozenset[str] = frozenset({"metadata.google.internal"})
+
+
+def _canonical_host(host: str) -> str:
+    """Normalise an alternate IPv4 encoding (decimal, hex/octal per-octet) to
+    canonical dotted-quad, so a destination can't dodge the allowlist/
+    link-local check by re-encoding the SAME address — e.g. the metadata IP
+    169.254.169.254 written as the single decimal integer 2852039166, or as
+    hex-octet ``0xA9.0xFE.0xA9.0xFE``. Returns ``host`` unchanged for a plain
+    hostname or an already-dotted-quad value.
+    """
+    if re.fullmatch(r"\d+", host):
+        try:
+            return str(ipaddress.IPv4Address(int(host)))
+        except (ValueError, ipaddress.AddressValueError):
+            return host
+    parts = host.split(".")
+    if len(parts) == 4 and all(re.fullmatch(r"0[xX][0-9a-fA-F]+|0[0-7]+|[0-9]+", p) for p in parts):
+        try:
+            octets = [int(p, 0) for p in parts]
+        except ValueError:
+            return host
+        if all(0 <= o <= 255 for o in octets):
+            return ".".join(str(o) for o in octets)
+    return host
+
+
+def _is_link_local_or_metadata(host: str) -> bool:
+    """True for a link-local IP literal (169.254.0.0/16, fe80::/10 — the
+    cloud-metadata range on every major provider) or a known metadata DNS
+    alias. Never true for loopback (see ``_LOOPBACK_EXEMPT``) or a general
+    hostname/private-range IP the operator may legitimately want to reach —
+    this is deliberately narrow, not a general SSRF filter (redirect
+    interception and DNS-rebinding pinning are out of scope for a static
+    argument check; see the W3 recommendation template's residual risk note).
+    """
+    if host in _LOOPBACK_EXEMPT:
+        return False
+    if host in _METADATA_HOSTNAME_ALIASES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_link_local
+    except ValueError:
+        return False
+
+
 def host_allowed(url: str, allowlist: tuple[str, ...]) -> bool:
     """True iff ``url``'s hostname is in ``allowlist`` (W3 egress gate).
 
@@ -108,10 +165,19 @@ def host_allowed(url: str, allowlist: tuple[str, ...]) -> bool:
     silently comes back ``None``. Without the ``//`` normalisation below, every
     scheme-less destination — including one legitimately on the allowlist —
     would read as host `""`, which is never in the allowlist (DCR-0032).
+
+    A link-local / cloud-metadata destination (PR5) is refused UNCONDITIONALLY,
+    even if it is somehow present in ``allowlist`` (a misconfigured or overly
+    broad ``fetch_allowlist`` in a target file must not be able to open the
+    metadata-credential-theft SSRF vector) — the one exception is loopback,
+    which stays purely allowlist-gated since it is the common local-dev entry.
     """
     try:
         candidate = url if "://" in url else f"//{url}"
         host = urlparse(candidate).hostname or ""
     except ValueError:
+        return False
+    host = _canonical_host(host)
+    if _is_link_local_or_metadata(host):
         return False
     return host in allowlist

@@ -155,6 +155,15 @@ class ControlConfig(BaseModel):
     # genuinely safe to drive from untrusted input (e.g. a pure summarizer
     # with no side effect).
     accepts_untrusted_tools: tuple[str, ...] = ()
+    # W1 (DescriptionIntegrityControl, PR5): tool name -> the sha256 hex
+    # digest of its APPROVED description text (UTF-8 encoded, matching
+    # gate/recommend.py's `_w1_recommendation` digest computation exactly —
+    # the two must agree, or a prescribed pin would never actually match the
+    # control that enforces it). A tool whose LIVE description hash no
+    # longer matches its pin here is refused at call time — the deterministic
+    # answer to a rug-pull (a description that changes after a user already
+    # approved the tool).
+    description_pins: dict[str, str] = {}
     declared: tuple[str, ...] = ()  # controls the app already has (for ablation)
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
 

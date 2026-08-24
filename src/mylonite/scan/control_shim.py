@@ -31,7 +31,11 @@ Implements the W1-W4 boundary controls (e.g. the W2 untrusted-data envelope).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import secrets
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from mylonite.scan._control_primitives import (
@@ -343,12 +347,78 @@ class InformationFlowControl(BoundaryControl):
         return result
 
 
+class DescriptionIntegrityControl(BoundaryControl):
+    """W1 — pin approved tool descriptions; refuse a call to a tool whose LIVE
+    description no longer matches its pinned hash (PR5, primary W1 control).
+
+    ``ToolDescriptionSanitizer`` (below) strips known smuggle FORMS from
+    every description — a denylist filter, and its own docstring already
+    names the gap: "Plain-prose cross-tool steering... is a known gap".
+    Pinning is a strictly different, deterministic property: it doesn't try
+    to recognise WHAT changed, only THAT it changed from what was approved —
+    catching the sanitizer's exact blind spot (a rug-pull rewritten as
+    ordinary prose has nothing for a denylist to match, but it still fails a
+    hash comparison). Digests are computed over the RAW description, so a
+    rug-pull is caught even where sanitizing would have cleaned the new text
+    up and left nothing suspicious-looking behind.
+
+    Architectural note: ``make_control``/``plan_twins`` build exactly ONE
+    boundary control per weakness class per differential run, so this
+    control does not ALSO run the sanitizer's stripping — it is the new
+    single default for "what does ``make_control('W1', ...)`` return",
+    exactly as ``InformationFlowControl`` (PR4) became W2's default while
+    ``UntrustedEnvelopeControl`` stayed available, unchanged, underneath it.
+
+    Refuses at ``intercept_call`` (a call), not by editing ``list_tools``'s
+    output: there is no "drop this tool from the list" contract on
+    ``transform_description`` (it must return SOME ``ToolDescription`` for
+    the name it was given), so a mismatched tool is still LISTED — with its
+    live (unpinned-safe) description — but every attempt to actually CALL it
+    is refused, in code, before the inner tool runs.
+    """
+
+    weakness = "W1"
+
+    def __init__(self, *, description_pins: dict[str, str] | None = None) -> None:
+        self._pins = description_pins or {}
+        self._violations: set[str] = set()
+
+    def reset(self) -> None:
+        self._violations = set()
+
+    @staticmethod
+    def digest(description: str) -> str:
+        return hashlib.sha256(description.encode("utf-8")).hexdigest()
+
+    def transform_description(self, tool: ToolDescription) -> ToolDescription:
+        expected = self._pins.get(tool.name)
+        if expected is not None and self.digest(tool.description) != expected:
+            self._violations.add(tool.name)
+        return tool
+
+    def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
+        if name not in self._violations:
+            return None
+        return ToolResult(
+            name=name,
+            content=(
+                f"refused: {name!r}'s live description does not match its pinned hash "
+                "— possible rug-pull (the description changed after it was approved)"
+            ),
+            isError=True,
+        )
+
+
 class ToolDescriptionSanitizer(BoundaryControl):
     """W1 — sanitize tool descriptions before the planner sees them.
 
     Strips hidden ``<IMPORTANT>`` blocks, parenthetical instruction asides, and
     non-ASCII smuggling (unicode tag chars / confusables). The canonical
     tool-poisoning mitigation, applied to EVERY tool's description.
+
+    PR5: demoted from ``make_control``'s W1 default in favour of
+    ``DescriptionIntegrityControl`` (above) — this remains directly
+    constructible as the probabilistic defence-in-depth layer underneath it.
     """
 
     weakness = "W1"
@@ -446,29 +516,49 @@ class EgressAllowlistControl(BoundaryControl):
 
 
 class ConfirmGateControl(BoundaryControl):
-    """W4 — block unconfirmed consequential actions at the boundary.
+    """W4 — require a server-minted, model-unforgeable token before a
+    consequential action executes (PR5: stage/confirm, not a permanent block).
 
-    Intercepts calls to consequential-shaped tools and returns a deferred
-    ``isError`` "requires confirmation" result instead of executing them, so an
-    unconfirmed consequential action never takes effect (the guarded twin's
-    two-step send/confirm, modelled as a confirm-gate).
+    Intercepts a call to a consequential-shaped tool. Without a valid
+    ``confirm_token`` argument, the call is REFUSED and the refusal MINTS a
+    token (an HMAC over the tool name + its other arguments, keyed by a
+    secret generated fresh per control instance — the model cannot derive or
+    guess it, only receive it from a real staged call). A retry of the SAME
+    call carrying that exact token is allowed through, with the synthetic
+    ``confirm_token`` key stripped before the inner tool ever sees it. This
+    models the guarded twin's real two-step send/confirm shape, rather than
+    the permanent block the previous version used as a stand-in for it — the
+    token cannot be authored by a description, a prompt, or the model itself,
+    only replayed back after the control already issued it.
 
     Classification is declared list -> name hint -> fail-closed default
     (DCR-0034); there is no structural-evidence tier here — unlike W3's URL
     check, "is this action consequential?" has no shape in the call arguments,
-    only in what the tool DOES, so name classification is all there is short of
-    an explicit declaration.
+    only in what the tool DOES, so name classification is all there is short
+    of an explicit declaration.
 
-    Fidelity note: this BLOCKS the action rather than allowing it after a real
-    confirmation step. For the differential — "did the unconfirmed action take
-    effect?" — blocking is the correct signal; it is a low-fidelity stand-in for
-    a true human-in-the-loop confirm flow (surfaced in the report/PR).
+    Fidelity note, still real: the minted token rides through to the REAL
+    inner tool's call as an ordinary argument (stripped only on the
+    CONFIRMED path, per the ``arguments.pop`` below) — a third-party tool
+    with an ``additionalProperties: false`` JSON-Schema could reject the
+    intermediate confirm_token if that path were ever reached, though it
+    never is, since the key is removed before the pass-through call. Session-
+    scoped: a pending confirmation does not survive :meth:`reset`, so it
+    cannot be replayed across two different exploit attempts sharing this
+    control instance.
     """
 
     weakness = "W4"
+    _TOKEN_ARG = "confirm_token"  # noqa: S105 -- an argument KEY name, not a credential
 
     def __init__(self, *, consequential_tools: frozenset[str] | None = None) -> None:
         self._consequential_tools = consequential_tools
+        self._secret = secrets.token_bytes(32)
+        #: tool name -> the one token currently valid for confirming it.
+        self._pending: dict[str, str] = {}
+
+    def reset(self) -> None:
+        self._pending = {}
 
     def _classify(self, name: str) -> tuple[bool, str]:
         return classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
@@ -476,20 +566,34 @@ class ConfirmGateControl(BoundaryControl):
     def _config_snippet(self, name: str) -> str:
         return config_snippet_for("W4", name)
 
+    def _sign(self, name: str, arguments: dict[str, Any]) -> str:
+        payload = {k: v for k, v in arguments.items() if k != self._TOKEN_ARG}
+        signable = f"{name}:{json.dumps(payload, sort_keys=True, default=str)}"
+        return hmac.new(self._secret, signable.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         applies, reason = self._classify(name)
         if not applies:
             return None
-        self._warn_fail_closed_once(
-            name,
-            reason,
-            self._config_snippet(name),
-        )
+        expected = self._sign(name, arguments)
+        supplied = arguments.get(self._TOKEN_ARG)
+        if supplied is not None and supplied == expected and self._pending.get(name) == expected:
+            # Confirmed: strip the synthetic key (arguments is the same dict
+            # object ControlServerShim.call_tool passes to the inner tool —
+            # mutating it here is how a control can alter the pass-through
+            # call, since intercept_call's contract is refuse-or-pass-through
+            # unchanged, not refuse-or-rewrite) and let the real call happen.
+            arguments.pop(self._TOKEN_ARG, None)
+            del self._pending[name]
+            return None
+        self._warn_fail_closed_once(name, reason, self._config_snippet(name))
+        self._pending[name] = expected
         return ToolResult(
             name=name,
             content=(
-                f"deferred: {name!r} requires explicit confirmation "
-                "(blocked by boundary confirm-gate)"
+                f"confirmation_required: retry {name!r} with "
+                f"{self._TOKEN_ARG}={expected!r} to confirm this consequential action "
+                "(server-minted, single-use for this exact call)"
             ),
             isError=True,
         )
@@ -542,6 +646,7 @@ def make_control(
     fetch_allowlist: tuple[str, ...] | None = None,
     consequential_tools: frozenset[str] | None = None,
     accepts_untrusted: frozenset[str] | None = None,
+    description_pins: dict[str, str] | None = None,
 ) -> BoundaryControl:
     """Build the canonical boundary control for a weakness class (W1-W4).
 
@@ -554,13 +659,15 @@ def make_control(
     must not silently replace the sensible default with an allow-nothing
     allowlist (DCR-0009).
 
-    W2 (PR4): returns ``InformationFlowControl``, the primary/deterministic
-    control — NOT ``UntrustedEnvelopeControl`` any more. The envelope control
-    is still exported and directly constructible for a caller that wants the
+    W1 (PR5): returns ``DescriptionIntegrityControl`` — a change-detection
+    pin, not ``ToolDescriptionSanitizer``'s denylist filter. W2 (PR4): returns
+    ``InformationFlowControl``, the primary/deterministic control — NOT
+    ``UntrustedEnvelopeControl`` any more. Both demoted controls are still
+    exported and directly constructible for a caller that wants the
     probabilistic defence-in-depth layer explicitly.
     """
     if weakness == "W1":
-        return ToolDescriptionSanitizer()
+        return DescriptionIntegrityControl(description_pins=description_pins)
     if weakness == "W2":
         return InformationFlowControl(
             read_tool_names=read_tool_names,
