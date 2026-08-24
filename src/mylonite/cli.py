@@ -2723,6 +2723,63 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
 
 
+def _render_recommendation_panel(rec: Any, console: Console | None = None) -> None:
+    """Render a structural recommendation (PR7) as a Rich table.
+
+    Every attacker-influenced cell — a tool NAME, an argument VALUE, and a
+    prescription HEADLINE (which interpolates evidence values directly, e.g.
+    W3's "reached an off-allowlist destination (`<the attacker's URL>`)") —
+    is redact()-ed AND rich_escape()'d before add_row. This is NOT redundant
+    with console_print's own markup=False: that only helps a bare STRING
+    renderable printed directly; a Table's cells parse Rich markup at
+    construction time regardless of how the table is later printed (see
+    console_print's own docstring, and _render_validation_report's identical
+    handling of outcome.detail above) — so a value shaped like `[/bold]`
+    would otherwise raise rich.errors.MarkupError, and a value containing a
+    style tag could otherwise inject formatting into a terminal a developer
+    is about to screenshot.
+    """
+    from mylonite._redaction import redact
+
+    if console is None:
+        console = Console()
+
+    def _safe(text: str) -> str:
+        return rich_escape(redact(text))
+
+    header = Table.grid(padding=(0, 1))
+    header.add_column(style="bold")
+    header.add_column()
+    header.add_row("recommendation for:", _safe(rec.weakness_class))
+    header.add_row("confidence:", _safe(f"{rec.confidence} ({rec.confidence_reason})"))
+    header.add_row("proven:", _safe(f"{rec.proven} (layer: {rec.proven_layer})"))
+    if rec.degraded:
+        header.add_row("degraded:", _safe("; ".join(rec.degraded)))
+    console_print(console, header)
+
+    if rec.evidence:
+        ev_table = Table(title="evidence", title_justify="left", show_lines=False)
+        ev_table.add_column("tool", no_wrap=True)
+        ev_table.add_column("argument", no_wrap=True)
+        ev_table.add_column("value")
+        ev_table.add_column("executed", no_wrap=True)
+        for ev in rec.evidence:
+            ev_table.add_row(
+                _safe(ev.tool),
+                _safe(ev.argument or "-"),
+                _safe(ev.value or "-"),
+                "yes" if ev.executed else "no",
+            )
+        console_print(console, ev_table)
+
+    ctl_table = Table(title="recommended controls", title_justify="left", show_lines=True)
+    ctl_table.add_column("tier", no_wrap=True)
+    ctl_table.add_column("control")
+    for p in rec.prescriptions:
+        ctl_table.add_row(p.tier, _safe(p.headline))
+    console_print(console, ctl_table)
+
+
 def _provider_preflight(
     provider: str, model: str, *, timeout_s: float = _DEFAULT_ITERATION_TIMEOUT_S
 ) -> bool:
@@ -3211,6 +3268,41 @@ def _locate_report_artefact(target: Path) -> tuple[str, Path]:
     raise typer.Exit(code=EXIT_CONFIG)
 
 
+def _target_context_for_artefact_dir(artefact_dir: Path) -> Any | None:
+    """PR7: reconstruct a TargetContext from an already-completed run's saved
+    directory, for `mylonite report` — the offline counterpart to gate's own
+    live target_context wiring (PR2).
+
+    Reads the co-located, REDACTED `target.yaml` (written by `scan`/`gate` for
+    a custom target) purely as DATA — `build_target_spec` constructs a
+    TargetSpec without launching anything, so redacted credential fields
+    (env/headers replaced with `${VAR}` refs) are harmless: none of them
+    factor into a TargetContext. Enriches with the `tool_surface.json`
+    sidecar (PR7) when present. Returns `None` (never raises) for a reference
+    target, a directory with no co-located target.yaml, or any load failure —
+    every caller must degrade to the class-level fix, not crash `report`.
+    """
+    target_yaml = artefact_dir / "target.yaml"
+    if not target_yaml.is_file():
+        return None
+    try:
+        from mylonite.plugins._mcp.target_file import (
+            build_target_spec,
+            load_target_file,
+            target_context_for,
+        )
+        from mylonite.scan.artefacts import read_tool_surface
+
+        tf = load_target_file(target_yaml)
+        spec = build_target_spec(tf)
+        tools = read_tool_surface(artefact_dir) or ()
+        target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
+        return target_context_for(spec, target_id=target_id, tools=tools)
+    except Exception as exc:
+        echo_exc(f"warning: could not reconstruct target context from {target_yaml}", exc)
+        return None
+
+
 @app.command(
     epilog=(
         "Examples:\n\n"
@@ -3266,6 +3358,13 @@ def report(
     kind, path = _locate_report_artefact(target)
     console = _Console()
 
+    # PR7: reconstruct a TargetContext from this artefact dir's co-located
+    # target.yaml + tool_surface.json sidecar (both optional — a reference
+    # target, or a directory from before PR7, simply gets None here and every
+    # consumer below degrades to the class-level fix, exactly as build_pr_body
+    # already does for target=None).
+    target_context = _target_context_for_artefact_dir(path.parent)
+
     # Captured for the machine-readable exports below (SARIF / JSON bundle),
     # enriched so NIST is present everywhere.
     vreport: Any = None
@@ -3312,6 +3411,13 @@ def report(
                     f"target: {dashboard_exploit.target_id}  "
                     f"pattern: {dashboard_exploit.pattern_id}",
                 )
+                if target_context is not None:
+                    from mylonite.gate.recommend import recommend as _recommend
+
+                    _render_recommendation_panel(
+                        _recommend(dashboard_exploit, vreport, target=target_context),
+                        console=console,
+                    )
             except (FileNotFoundError, ValueError) as exc:
                 # DCR-0003: don't silently degrade to an empty --sarif/--json
                 # bundle. `dashboard_exploit` stays None below, which zeroes
@@ -3390,6 +3496,13 @@ def report(
         if tags:
             console_print(console, f"compliance: {', '.join(sorted(tags))}")
         console_print(console, f"target: {target_id}  artefacts: {path.parent}")
+        if target_context is not None and dashboard_exploits:
+            from mylonite.gate.recommend import recommend as _recommend
+
+            for exploit in dashboard_exploits:
+                _render_recommendation_panel(
+                    _recommend(exploit, None, target=target_context), console=console
+                )
 
     if sarif is not None or json_bundle is not None:
         import json as _json
@@ -3404,13 +3517,17 @@ def report(
         if sarif is not None:
             from mylonite.report import to_sarif
 
-            sarif.write_text(_json.dumps(to_sarif(findings), indent=2) + "\n", encoding="utf-8")
+            sarif.write_text(
+                _json.dumps(to_sarif(findings, target=target_context), indent=2) + "\n",
+                encoding="utf-8",
+            )
             echo(f"Wrote SARIF (GitHub code scanning): {sarif}")
         if json_bundle is not None:
             from mylonite.report import to_bundle
 
             json_bundle.write_text(
-                _json.dumps(to_bundle(findings), indent=2) + "\n", encoding="utf-8"
+                _json.dumps(to_bundle(findings, target=target_context), indent=2) + "\n",
+                encoding="utf-8",
             )
             echo(f"Wrote JSON finding bundle: {json_bundle}")
     raise typer.Exit(code=exit_code)
