@@ -86,8 +86,9 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
 
 - **Conventional Commits.** Titles follow `type(scope): summary` — e.g.
   `feat(contracts): add async target adapter variant` or
-  `fix(taxonomy): correct LLM06 cross-reference`. The CHANGELOG is generated
-  from these.
+  `fix(taxonomy): correct LLM06 cross-reference`. The CHANGELOG is **not**
+  generated from these — it is hand-written, which is why the changelog entry is
+  its own item below rather than a side effect of the title.
 - **DCO sign-off.** Every commit must be signed off (`git commit -s`),
   asserting the contribution complies with the
   [Developer Certificate of Origin](https://developercertificate.org/).
@@ -101,73 +102,23 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
 
 ## Cutting a release
 
-A release PR title alone (e.g. "0.7.7: ...") does **not** ship anything —
-`.github/workflows/release.yml` only fires on a pushed `vX.Y.Z` tag, and
-`pyproject.toml`'s `version` field doesn't move on its own. Every release
-needs all four steps, in order, or the version string on `main` silently
-drifts from what's tagged/published (this happened for 0.7.6 and 0.7.7: both
-merged with the version bump and CHANGELOG update either missing or
-unfinished, and no tag was ever pushed for either).
+```bash
+python scripts/prepare_release.py X.Y.Z   # bump + roll the CHANGELOG + refresh the baseline
+git diff                                  # review
+# commit, PR, merge to main
+git tag vX.Y.Z && git push origin vX.Y.Z  # this is what publishes
+```
 
-1. **Bump the version in both places.** Update `[project].version` in
-   `pyproject.toml` *and* `__version__` in `src/mylonite/version.py` — they
-   must match (`tests/test_version.py::test_version_matches_pyproject`
-   enforces it in CI). It's easy to update only one; that's exactly what
-   happened for 0.7.7 the first time around.
-2. **Update `CHANGELOG.md`.** Rename the `## [Unreleased]` section header to
-   `## [X.Y.Z] - YYYY-MM-DD`, then add a fresh empty `## [Unreleased]` header
-   above it for the next round of changes. Add a compare link at the bottom:
-   `[X.Y.Z]: https://github.com/Abidemialade/mylonite/compare/vPREV...vX.Y.Z`.
-   The `## [X.Y.Z]` section body becomes the GitHub Release notes verbatim
-   (see step 4), so write it as such.
+Pushing the tag is the only irreversible step, and the only one not automated.
+Before it, `python scripts/prepare_release.py --check X.Y.Z` runs exactly the
+check the release gate will run.
 
-   Editing `CHANGELOG.md` shifts the line number of the deliberately-fake
-   credentials `detect-secrets` has baselined in it (test-fixture-shaped strings
-   in changelog entries describing the redaction feature). Regenerate the
-   baseline before pushing, or CI's `precommit` and `security` jobs both fail on
-   it (happened for both 0.7.7 and 0.7.8):
-   ```bash
-   git ls-files | xargs detect-secrets scan --baseline .secrets.baseline
-   git add .secrets.baseline
-   ```
-   **`xargs` is load-bearing.** `filenames` is a *positional* argument, so
-   piping straight into the tool passes it zero files: it scans nothing, writes
-   nothing, and exits `0`. That silent no-op is why this kept recurring after it
-   was first written down — the documented command never worked. CI gets it
-   right (`.github/workflows/ci.yml`), so the failure only ever showed up there.
-
-   **On Windows, normalize the path separators afterwards.** `detect-secrets`
-   keys its results with `os.sep`, so a regeneration on Windows rewrites every
-   path with backslashes; CI runs on ubuntu, where nothing then matches and every
-   entry reads as a brand-new secret. Replace `\` with `/` in the `results` keys
-   before committing, and sanity-check the diff — a correct regeneration touches
-   only line numbers plus any genuinely new entry.
-
-   Verify with the hook (the baseline must be **staged** first — an unstaged
-   baseline aborts before the scan even runs):
-   ```bash
-   git ls-files | xargs detect-secrets-hook --baseline .secrets.baseline
-   ```
-   Exit `0` means clean and `3` means "baseline updated"; only `1` is a genuinely
-   new secret.
-3. **Land both changes on `main`** (same PR as the release work, or a
-   dedicated `release: vX.Y.Z` PR/commit).
-4. **Tag and push** — this is the step that actually triggers the build +
-   TestPyPI + PyPI publish + GitHub Release workflow, so do it deliberately,
-   from `main`, once 1–3 are merged:
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-   The tag must match `release.yml`'s trigger pattern — `v[0-9]+.[0-9]+.[0-9]+`,
-   i.e. any plain `vX.Y.Z` — or the workflow won't run. Prereleases
-   (`v1.0.0rc1`) deliberately do **not** match: this workflow publishes straight
-   to PyPI.
-   `release.yml`'s final job creates the GitHub Release automatically (title
-   `vX.Y.Z`, notes = the matching `CHANGELOG.md` section) — a pushed tag by
-   itself does **not** show up on the repo's Releases page or the
-   `/releases/latest` API; without this job that page silently goes stale
-   even though PyPI is current (this happened from v0.7.0 through v0.7.6).
+You no longer have to remember the bump/CHANGELOG/tag choreography: the `gate`
+job refuses to publish a tag that disagrees with `version.py`, `pyproject.toml`
+or `CHANGELOG.md`, and the release now runs the full suite against the tagged
+commit before building. Full policy — semver rules, the `CONTRACT_VERSION` axis,
+1.0.0 criteria, the `.secrets.baseline` step, kitchen-sink releases — is in
+[docs/contributing/releasing.md](./docs/contributing/releasing.md).
 
 ## Running live e2e tests before a release
 

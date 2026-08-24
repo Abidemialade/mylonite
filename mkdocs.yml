@@ -36,6 +36,7 @@ exclude_docs: |
 # listed here so `--strict` doesn't flag it as orphaned.
 not_in_nav: |
   /contributing/live-e2e-tests.md
+  /contributing/releasing.md
 
 nav:
   - Home: index.md

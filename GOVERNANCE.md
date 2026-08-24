@@ -32,7 +32,12 @@ more than one maintainer.
 - **Contract changes** (any change to the five extension-point Protocols or
   their JSON schemas): require an issue tagged `contract-change`, at least
   one week of public comment, and a CHANGELOG entry explaining the migration
-  path. Major-version bumps require a deprecation cycle.
+  path. Major-version bumps require a deprecation cycle. Note that a contract
+  major bump is a *harder* break than a package major bump — the plugin registry
+  refuses to load a plugin whose contract major differs, so every third-party
+  plugin built against it stops working immediately. What the version numbers
+  mean, on both axes, is in
+  [docs/contributing/releasing.md](docs/contributing/releasing.md).
 - **Security-sensitive changes** (anything touching the responsible-use
   rules in `SECURITY.md`, or the loopback default for vulnerable reference
   targets): require explicit maintainer approval and may not be merged by
