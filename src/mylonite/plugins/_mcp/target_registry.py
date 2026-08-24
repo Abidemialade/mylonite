@@ -148,6 +148,13 @@ class ControlConfig(BaseModel):
     fetch_allowlist: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
     consequential_tools: tuple[str, ...] = ()
     read_tool_names: tuple[str, ...] = ()  # W2: narrows which results get quarantined
+    # W2 (InformationFlowControl, PR4): tools explicitly exempted from the
+    # untrusted-content sink refusal — the FIDES `accepts_untrusted=True`
+    # equivalent. A tool named here is never refused for acting on untrusted
+    # content, regardless of taint state; declare it only for a sink that is
+    # genuinely safe to drive from untrusted input (e.g. a pure summarizer
+    # with no side effect).
+    accepts_untrusted_tools: tuple[str, ...] = ()
     declared: tuple[str, ...] = ()  # controls the app already has (for ablation)
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
 
