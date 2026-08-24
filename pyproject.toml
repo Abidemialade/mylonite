@@ -95,7 +95,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.1",
+    "ruff==0.16.4",
     "mypy>=1.10",
     # pytest itself is now a BASE dependency (see above) — kept out of this
     # list to avoid a duplicate/drift-prone pin.
