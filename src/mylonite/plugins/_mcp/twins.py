@@ -85,6 +85,7 @@ def boundary_control_for(spec: TargetSpec, weakness: str) -> BoundaryControl:
         fetch_allowlist=tuple(cfg.fetch_allowlist) or None,
         consequential_tools=frozenset(cfg.consequential_tools) or None,
         accepts_untrusted=frozenset(cfg.accepts_untrusted_tools) or None,
+        description_pins=dict(cfg.description_pins) or None,
     )
 
 
