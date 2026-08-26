@@ -178,7 +178,7 @@ path = "src/mylonite/version.py"
 # package (`mcp-kitchen-sink`), installed alongside `mylonite` when a user wants
 # to run `scan reference:*` against it.
 packages = ["src/mylonite"]
-# The gate package's data files (mitigations/*.md, templates/*.yml) are shipped
+# Package data files (mitigations/*.md, gate/templates/*.yml) are shipped
 # by the default package selection above — hatchling includes all files under a
 # selected package. (A force-include here would double-add them and the wheel
 # build fails with "a second file is being added".)

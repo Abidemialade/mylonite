@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mylonite.gate.mitigation import _snippet
+from mylonite.mitigations import snippet
 from mylonite.plugins._mcp.factory import LaunchIntent
 from mylonite.plugins._mcp.target_registry import TargetSpec
 from mylonite.scan.control_shim import BoundaryControl, make_control
@@ -327,7 +327,7 @@ def plan_twins(
         guarded=guarded,
         control_weakness=weakness,
         guarded_is_server_layer=False,
-        control_context=f"Control {weakness}: {_snippet(weakness)}",
+        control_context=f"Control {weakness}: {snippet(weakness)}",
         banner=banner,
     )
 
