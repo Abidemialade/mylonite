@@ -14,13 +14,14 @@ from typing import Any
 
 from mylonite._cli_io import echo
 from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
+from mylonite.exit_codes import (
+    EXIT_GENERATE_FAILED,
+    EXIT_NOT_KEPT,
+    EXIT_SUCCESS,
+    EXIT_VALIDATE_FAILED,
+)
 from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_pr_body
 from mylonite.scan.coverage import ScanOutcome
-
-EXIT_SUCCESS = 0
-EXIT_NOT_KEPT = 5
-EXIT_GENERATE_FAILED = 6
-EXIT_VALIDATE_FAILED = 7
 
 
 @dataclass

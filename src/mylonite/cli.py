@@ -39,6 +39,13 @@ from rich.table import Table
 from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
 from mylonite.contracts.exec_context import ExecContext
+from mylonite.exit_codes import (
+    EXIT_CONFIG,
+    EXIT_FINDINGS,
+    EXIT_NOT_KEPT,
+    EXIT_PROVIDER,
+    EXIT_SUCCESS,
+)
 from mylonite.layout import Layout, resolve_layout
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import (
@@ -77,12 +84,8 @@ app = typer.Typer(
 
 _console = Console()
 
-EXIT_SUCCESS = 0
-EXIT_FINDINGS = 1
-EXIT_CONFIG = 2
-EXIT_BUDGET = 3
-EXIT_PROVIDER = 4
-EXIT_NOT_KEPT = 5
+# Exit codes: defined once in mylonite.exit_codes (imported at the top of this
+# module and re-exported), so `from mylonite.cli import EXIT_SUCCESS` still works.
 
 _V0_2_ATTACK_FAMILIES = frozenset({"prompt-injection-family", "excessive-agency-family"})
 

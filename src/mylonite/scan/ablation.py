@@ -28,6 +28,7 @@ from enum import Enum, auto
 from typing import Any, Final, Literal
 
 from mylonite._concurrency import gather_bounded
+from mylonite.exit_codes import EXIT_PROVIDER
 from mylonite.scan.coverage import ScanOutcome
 
 #: One representative kitchen-sink seed per weakness class. Reused on a custom
@@ -384,11 +385,10 @@ def all_inconclusive(results: list[ControlContribution]) -> bool:
     return bool(results) and all(r.status == "inconclusive" for r in results)
 
 
-#: Duplicated from cli.py's EXIT_PROVIDER (same convention as coverage.py's
-#: own duplicated EXIT_* ints -- this module must stay free of CLI/typer
-#: concerns). Used ONLY as total_failure_exit_code's conservative fallback
-#: when it's called with no observed outcomes at all -- see its docstring.
-_EXIT_PROVIDER_FALLBACK: Final = 4
+#: Conservative non-zero fallback for total_failure_exit_code when it is called
+#: with no observed outcomes at all -- see its docstring. The value is the single
+#: source's EXIT_PROVIDER.
+_EXIT_PROVIDER_FALLBACK: Final = EXIT_PROVIDER
 
 
 def total_failure_exit_code(observed_outcomes: list[ScanOutcome]) -> int:
