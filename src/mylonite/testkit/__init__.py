@@ -279,6 +279,19 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
             "blocking delivery, or the seed_arm/drive needs tuning so the poison is "
             "surfaced. Resistance was NOT confirmed, so the gate refuses to pass."
         )
+    # A capability-mismatch is a config error with a precise, actionable cause —
+    # naming it beats the generic "likely a replay/fixture problem" hint, which
+    # would send the reader hunting for a fixture bug that isn't there.
+    if matching and all(a.outcome == "not_applicable" for a in matching):
+        detail = next((a.not_applicable_reason for a in matching if a.not_applicable_reason), "")
+        raise TestkitFixtureError(
+            f"not applicable: the attack {pattern_id!r} targets a capability this "
+            f"target does not expose{f' ({detail})' if detail else ''}. Nothing was "
+            "exercised, so resistance was NOT confirmed and the gate refuses to "
+            "pass. Point this test at a seed matching the target's real tool "
+            "surface, or declare the tool in the target file if it exists under a "
+            "different name."
+        )
     raise TestkitFixtureError(
         f"inconclusive: no conclusive attempt for {pattern_id!r} against the "
         f"guarded twin (outcomes seen: {outcomes}). The guard's resistance could "

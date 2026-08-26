@@ -257,6 +257,49 @@ def test_boundary_control_for_unimplemented_weakness_raises() -> None:
         boundary_control_for(spec, "W9")
 
 
+def test_boundary_control_for_threads_mode_approval_and_private_markers() -> None:
+    """The four knobs previously dropped here — enforcement_mode,
+    approval_policy, private_markers — now reach the control from a target file,
+    so the documented approve-mode and confidentiality canary are reachable from
+    the CLI."""
+    from mylonite.scan.labels import ApproveWhenTrusted
+
+    tf = TargetFile(
+        family="conf-app",
+        command="python",
+        args=["-m", "srv"],
+        weakness_classes=["W4"],
+        control_config={
+            "consequential_tools": ["send_email"],
+            "enforcement_mode": "approve",
+            "approval_policy": "approve_when_trusted",
+            "private_markers": ["INTERNAL-SECRET-"],
+        },
+    )
+    spec = build_target_spec(tf)
+    control = boundary_control_for(spec, "W4")
+    assert control.weakness == "W4"
+    assert control._mode == "approve"
+    assert isinstance(control._approval_policy, ApproveWhenTrusted)
+
+    w2 = boundary_control_for(spec, "W2")
+    assert w2._private_markers == ("INTERNAL-SECRET-",)
+
+
+def test_boundary_control_for_unknown_mode_degrades_to_safe_default() -> None:
+    """A typo'd enforcement_mode must degrade to the control's safe default
+    (block), never raise mid-run."""
+    tf = TargetFile(
+        family="typo-app",
+        command="python",
+        args=["-m", "srv"],
+        weakness_classes=["W4"],
+        control_config={"consequential_tools": ["send_email"], "enforcement_mode": "bloc"},
+    )
+    control = boundary_control_for(build_target_spec(tf), "W4")
+    assert control._mode == "block"
+
+
 # ---------------------------------------------------------------------------
 # TwinPlan is a plain, comparable, frozen dataclass -- pure data.
 # ---------------------------------------------------------------------------

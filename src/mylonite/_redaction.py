@@ -302,6 +302,14 @@ def redact_exception(exc: BaseException) -> str:
     messages only. Anything else is ``str()``-ed and passed through
     :func:`redact`.
     """
+    # An anyio/asyncio ExceptionGroup (raised by the MCP SDK's SSE/HTTP transport
+    # task groups) str()s to only "unhandled errors in a TaskGroup (N sub-
+    # exception)" — hiding the real cause (e.g. an HTTP 401). Recurse into the
+    # sub-exceptions so the actual error (status, message) reaches the operator.
+    subs = getattr(exc, "exceptions", None)
+    if subs:
+        rendered = "; ".join(redact_exception(sub) for sub in subs)
+        return f"{type(exc).__name__}: {rendered}"
     errors = getattr(exc, "errors", None)
     if callable(errors):
         try:

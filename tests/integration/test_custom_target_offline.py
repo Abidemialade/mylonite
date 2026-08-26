@@ -297,12 +297,18 @@ async def test_scan_cycle_against_real_stdio_subprocess(
 
     assert result.report.aborted is None, result.report
     weaknesses_attempted = {a.seed_id for a in result.report.attempts}
-    # 3 synth-W1 (one per instruction-bearing tool, capped) + 3 catalogue W2
-    # (family == "kitchen-sink" exact match -> the hand-tuned kitchen-sink
-    # seeds apply, not the generic direct_content synth path).
-    assert len(result.report.attempts) == 6, weaknesses_attempted
+    # 3 synth-W1 tool-description (one per instruction-bearing tool, capped)
+    # + 1 synth-W1 rug-pull probe + 3 catalogue W2 (family ==
+    # "kitchen-sink" exact match -> the hand-tuned kitchen-sink seeds apply).
+    assert len(result.report.attempts) == 7, weaknesses_attempted
+    assert "synth-w1-rug-pull" in weaknesses_attempted
     findings = [a for a in result.report.attempts if a.outcome == "finding"]
-    # The scripted planner always complies (calls the tool / follows the
-    # injected instruction) and the scripted judge always returns success --
-    # every attempt should land as a finding, proving the full loop closed.
+    # The scripted planner always complies and the scripted judge always returns
+    # success, so every attack-shaped attempt lands as a finding. The rug-pull
+    # probe is the exception: this offline target does NOT mutate its surface, so
+    # its deterministic predicate correctly reports a clean non-finding — proving
+    # the loop closed AND that rug-pull detection doesn't false-positive on a
+    # stable surface.
     assert len(findings) == 6, result.report
+    rug = next(a for a in result.report.attempts if a.seed_id == "synth-w1-rug-pull")
+    assert rug.outcome != "finding", rug

@@ -44,8 +44,27 @@ from mylonite.scan._control_primitives import (
     quarantine,
     sanitize_tool_description,
 )
+from mylonite.scan.labels import (
+    ApprovalPolicy,
+    ApprovalRequest,
+    ConfidentialityLabel,
+    ContentLabel,
+    DenyAll,
+    EnforcementMode,
+    SinkPolicy,
+    combine_labels,
+)
 from mylonite.scan.llm_types import ToolDescription, ToolResult
-from mylonite.scan.tool_classifier import classify, looks_like_destination, url_values
+from mylonite.scan.tool_classifier import (
+    _hint,
+    annotation_is_egress,
+    annotation_is_read,
+    annotation_is_sink,
+    classify,
+    hint_matches,
+    looks_like_destination,
+    url_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +78,7 @@ def config_snippet_for(
     *,
     url_param: str | None = None,
     allowlist: tuple[str, ...] = (),
+    role: str = "source",
 ) -> str:
     """The paste-ready ``control_config:`` YAML snippet for a weakness/tool pair.
 
@@ -70,7 +90,21 @@ def config_snippet_for(
     path never has those, so it always gets exactly today's generic template.
     """
     if weakness == "W2":
-        return f"control_config:\n  read_tool_names: [{tool}]"
+        if role == "sink":
+            # The tool being REFUSED. Telling the operator to declare a sink as
+            # a `read_tool_names` entry (what this used to emit for both roles)
+            # is not just unhelpful, it is wrong — it would label the sink's own
+            # OUTPUT untrusted rather than exempt it. The actionable knob for a
+            # sink you believe is safe to drive from untrusted input is the
+            # exemption.
+            return f"control_config:\n  accepts_untrusted_tools: [{tool}]"
+        # The tool that READ the content. `read_tool_names` alone marks results
+        # untrusted, which on its own gates only destructive sinks — so a
+        # recommendation that stops there would not actually block the
+        # exfiltration it was generated from. `private_tools` is the axis that
+        # does: it raises the session to `private`, and a public-facing sink
+        # then refuses.
+        return f"control_config:\n  read_tool_names: [{tool}]\n  private_tools: [{tool}]"
     if weakness == "W3":
         lines = ["control_config:", f"  egress_tools: [{tool}]"]
         lines.append(
@@ -112,6 +146,58 @@ class BoundaryControl:
         long-lived control instance (``TargetAdapter.__init__`` builds the
         control list once; ``ControlServerShim`` is rebuilt fresh per
         ``invoke()``/session, but the controls it wraps are not).
+        """
+
+    def observe_description(self, tool: ToolDescription) -> None:
+        """Record a tool's MCP annotations before any transform runs.
+
+        Deliberately separate from :meth:`transform_description`, and always
+        called by :class:`ControlServerShim.list_tools` for every control: two
+        controls already OVERRIDE ``transform_description`` (W1's pin check and
+        the sanitizer), so capturing here would silently depend on each of them
+        remembering to call ``super()``. A missed ``super()`` would degrade a
+        control back to name-guessing with no visible failure — precisely the
+        class of silent regression this whole effort exists to remove.
+
+        Populated lazily (same idiom as ``_warn_fail_closed_once``) so no
+        subclass needs an ``__init__`` it does not otherwise want.
+        """
+        if not tool.annotations:
+            return
+        store: dict[str, dict[str, Any]] | None = getattr(self, "_seen_annotations", None)
+        if store is None:
+            store = {}
+            self._seen_annotations = store
+        store[tool.name] = dict(tool.annotations)
+
+    def annotations_for(self, name: str) -> dict[str, Any] | None:
+        """The MCP annotations this control saw for ``name``, if any.
+
+        ``None`` means the server declared none OR ``list_tools`` has not run
+        yet — both correctly leave the caller on the name-hint / fail-closed
+        tiers, so an unpopulated store can never accidentally clear a tool.
+        """
+        store: dict[str, dict[str, Any]] = getattr(self, "_seen_annotations", {})
+        return store.get(name)
+
+    def rebind_after_clone(
+        self, original: BoundaryControl, clone_of: dict[int, BoundaryControl]
+    ) -> None:
+        """Restore references that must NOT survive as deep copies.
+
+        :class:`ControlServerShim` deep-copies its controls so concurrent
+        sessions cannot reset each other's state. That is right for per-session
+        STATE and wrong for two other things:
+
+        * a **collaborator** the caller supplied (an approval policy may wrap a
+          UI handle, a queue, or a network client — none of which deep-copy
+          meaningfully, or at all);
+        * a reference to a **sibling control** in the same session, which must
+          point at that sibling's clone or it reads a label frozen at
+          construction and never updates.
+
+        ``clone_of`` maps ``id(original_control)`` to this session's clone.
+        Default is a no-op; only controls holding such references override it.
         """
 
     def transform_description(self, tool: ToolDescription) -> ToolDescription:
@@ -178,6 +264,26 @@ _READ_HINTS: tuple[str, ...] = (
     "view",
     "load",
     "lookup",
+)
+
+
+#: Sinks whose effect is destructive or irreversible — an injection-driven call
+#: is damage in itself, so these refuse untrusted context rather than relying on
+#: the confidentiality cap. Mirrors what a FIDES user marks
+#: ``accepts_untrusted=False``, and MCP's own ``destructiveHint``.
+_DESTRUCTIVE_HINTS: tuple[str, ...] = (
+    "delete",
+    "remove",
+    "destroy",
+    "drop",
+    "purge",
+    "truncate",
+    "overwrite",
+    "execute",
+    "transfer",
+    "pay",
+    "purchase",
+    "revoke",
 )
 
 
@@ -263,15 +369,33 @@ class InformationFlowControl(BoundaryControl):
     ``UntrustedEnvelopeControl`` (above) wraps untrusted text in a marker and
     hopes the model respects it — a PROBABILISTIC control; its own docstring
     says so ("depends on the target's model and system prompt respecting
-    it"). This control instead LABELS the session as tainted the moment a
-    read/content tool returns a non-error result, and REFUSES a sink call
-    (a consequential or egress-classified tool) while the session is tainted
-    — the model may still read and reason over the untrusted content, it
-    simply cannot drive a sink from within the same session while it does.
-    That is a control that gates the CALL, in code, not the text: the same
-    shape as ``EgressAllowlistControl``/``ConfirmGateControl``, and the
-    pattern Microsoft ships as FIDES (``agent_framework.security``,
-    ``accepts_untrusted``/``max_allowed_confidentiality`` sink annotations).
+    it"). This control instead LABELS content as it is read and gates the sink
+    CALL in code, not the text: the same shape as
+    ``EgressAllowlistControl``/``ConfirmGateControl``.
+
+    Follows FIDES (``agent_framework.security``; Costa et al.,
+    https://arxiv.org/abs/2505.23643) on the parts that matter for the gate:
+    two independent axes (``integrity``/``confidentiality``), most-restrictive
+    -wins propagation, per-sink ``accepts_untrusted`` /
+    ``max_allowed_confidentiality`` policies, and its three enforcement modes.
+
+    Where it deliberately DIFFERS from FIDES, so this docstring stays honest:
+
+    * FIDES labels each ``Content`` item and propagates per item; this tracks a
+      single accumulated SESSION label. Coarser, and FIDES documents the same
+      conservatism as its own limitation #2.
+    * FIDES gets labels from developer annotations on their own tools. Mylonite
+      scans apps nobody annotated, so labels come from MCP ``ToolAnnotations``,
+      the operator's ``control_config``, and (for confidentiality) markers the
+      harness itself planted.
+    * FIDES's variable indirection / ``quarantined_llm`` — keeping raw untrusted
+      bytes away from the main model entirely — is NOT implemented here. That is
+      defence-in-depth beyond what gating the call requires.
+
+    An earlier version of this docstring claimed the FIDES pattern while
+    implementing a single session-wide boolean with no confidentiality axis and
+    no declassification. That was measurably not the same thing: it refused
+    every read-then-act workflow, benign or not.
 
     Session-scoped: taint is an instance attribute, cleared by
     :meth:`reset`, which :class:`ControlServerShim` calls once per session
@@ -293,18 +417,87 @@ class InformationFlowControl(BoundaryControl):
         consequential_tools: frozenset[str] | None = None,
         egress_tools: frozenset[str] | None = None,
         accepts_untrusted: frozenset[str] | None = None,
+        private_tools: frozenset[str] | None = None,
+        private_markers: tuple[str, ...] = (),
+        destructive_tools: frozenset[str] | None = None,
+        mode: EnforcementMode = "block",
     ) -> None:
         self._read_tool_names = read_tool_names
         self._consequential_tools = consequential_tools
         self._egress_tools = egress_tools
         self._accepts_untrusted = accepts_untrusted or frozenset()
-        self._tainted = False
+        #: Tools whose results carry SENSITIVE data (FIDES `confidentiality`).
+        self._private_tools = private_tools or frozenset()
+        #: Substrings that make a result sensitive regardless of which tool
+        #: returned it. A scan's own planted canary is private by construction,
+        #: which is what gives the differential a real confidentiality signal on
+        #: a third-party app nobody has annotated — and it is the case
+        #: tool-level labelling cannot express, because the attack and the
+        #: benign probe often read through the SAME tool (P3 read both the
+        #: in-scope note and the out-of-scope secret via `read_text_file`).
+        self._private_markers = private_markers
+        #: Sinks where an injection-driven call is damage in itself, so
+        #: untrusted context is refused outright (FIDES `accepts_untrusted=False`).
+        self._destructive_tools = destructive_tools or frozenset()
+        self._mode: EnforcementMode = mode
+        self._context = ContentLabel()
+        #: Violations that WOULD have been refused in `observe` mode.
+        self.observed_violations: list[dict[str, str]] = []
 
     def reset(self) -> None:
-        self._tainted = False
+        self._context = ContentLabel()
+        self.observed_violations = []
+
+    @property
+    def context_label(self) -> ContentLabel:
+        """The accumulated label of everything read this session."""
+        return self._context
+
+    def _is_destructive(self, name: str) -> bool:
+        """Does acting on untrusted input through this tool cause real damage?"""
+        if name in self._destructive_tools:
+            return True
+        if _hint(self.annotations_for(name), "destructiveHint") is True:
+            return True
+        return hint_matches(name, _DESTRUCTIVE_HINTS)
+
+    def _sink_policy(self, name: str) -> SinkPolicy:
+        """This tool's willingness to run in a labelled context.
+
+        The INTEGRITY default is permissive, and that is deliberate — it is the
+        single change that stops this control denying all legitimate work.
+
+        FIDES does the same: in its canonical example ``post_comment`` declares
+        only ``max_allowed_confidentiality``, so untrusted content may drive it,
+        while ``write_file`` opts IN to integrity protection with
+        ``accepts_untrusted=False``. Defaulting every sink to
+        ``accepts_untrusted=False`` (what this control used to do, implicitly,
+        by refusing any sink once tainted) means the first read poisons the rest
+        of the session for every tool — measured as `benign_retention = 0.00`
+        on every W2/W3/W4 cell in the verification scorecard.
+
+        So integrity blocking is reserved for sinks where an injection-driven
+        call is damage in itself (destructive/irreversible), while
+        CONFIDENTIALITY is capped for every sink — that axis is what catches
+        exfiltration, and it does so without touching benign work.
+
+        "Should an injection be able to trigger a non-destructive consequential
+        action at all?" is a real question, and it is W4's: it needs an approval
+        decision, not a flow label. Keeping it there is why the two classes are
+        separate.
+        """
+        return SinkPolicy(
+            accepts_untrusted=(name in self._accepts_untrusted or not self._is_destructive(name)),
+            max_allowed_confidentiality="public",
+        )
 
     def _is_read_tool(self, name: str) -> tuple[bool, str]:
-        return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
+        return classify(
+            name,
+            declared=self._read_tool_names,
+            hints=_READ_HINTS,
+            annotation_says=annotation_is_read(self.annotations_for(name)),
+        )
 
     def _is_sink_tool(self, name: str) -> tuple[bool, str]:
         """A sink is anything consequential OR egress-classified — the same
@@ -323,41 +516,83 @@ class InformationFlowControl(BoundaryControl):
         would silently downgrade that declaration to a mere hint, letting
         fail-closed override an operator's explicit exemption.
         """
+        annotations = self.annotations_for(name)
         applies, reason = classify(
-            name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS
+            name,
+            declared=self._consequential_tools,
+            hints=_CONSEQUENTIAL_HINTS,
+            annotation_says=annotation_is_sink(annotations),
         )
         if applies:
             return True, reason
-        return classify(name, declared=self._egress_tools, hints=_EGRESS_HINTS)
+        return classify(
+            name,
+            declared=self._egress_tools,
+            hints=_EGRESS_HINTS,
+            annotation_says=annotation_is_egress(annotations),
+        )
 
     def _config_snippet(self, name: str) -> str:
-        return config_snippet_for("W2", name)
+        # This warning fires from `intercept_call`, so `name` is the SINK
+        # being refused, not the tool that read the untrusted content.
+        return config_snippet_for("W2", name, role="sink")
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
-        if name in self._accepts_untrusted:
-            return None
-        if not self._tainted:
+        # A clean context can drive anything — this is the case the old
+        # single-axis control could never reach once ANY read had happened.
+        violation = self._sink_policy(name).violated_by(self._context)
+        if violation is None:
             return None
         applies, reason = self._is_sink_tool(name)
         if not applies:
-            return None
+            # Footgun: a DESTRUCTIVE tool must be gated regardless of whether
+            # it is in the declared consequential/egress sink list. Acting on
+            # untrusted content through a delete/overwrite/transfer is damage in
+            # itself, so declaring `consequential_tools` (which makes every name
+            # outside that list "not a sink" per classify's tier-1 semantics) must
+            # NOT silently disable `destructive_tools`. The two axes are
+            # independent — a violation on a destructive tool stands on its own.
+            if not self._is_destructive(name):
+                return None
+            reason = "destructive sink (declared or destructiveHint)"
         self._warn_fail_closed_once(name, reason, self._config_snippet(name))
-        return ToolResult(
-            name=name,
-            content=(
-                f"refused: {name!r} is a sink and untrusted content is in scope "
-                "this session (W2 information-flow control)"
-            ),
-            isError=True,
-        )
+        if self._mode == "observe":
+            # Record, never refuse: the measurement instrument, and the "show me
+            # what would break before I turn this on" mode.
+            self.observed_violations.append({"tool": name, "reason": violation})
+            return None
+        return ToolResult(name=name, content=f"refused: {name!r} — {violation}", isError=True)
 
     def transform_result(self, name: str, result: ToolResult) -> ToolResult:
+        """Label what came back, then fold it into the session context.
+
+        Both axes are derived here, independently:
+
+        * INTEGRITY — a read/retrieval tool's result is untrusted (it is content
+          the target did not author). Matches FIDES's secure-by-default
+          ``default_integrity=UNTRUSTED`` for unlabelled tool output.
+        * CONFIDENTIALITY — sensitive when the operator declared this tool
+          sensitive, or when the result carries a marker declared sensitive.
+        """
         if result.isError:
             return result
         applies, _reason = self._is_read_tool(name)
-        if applies:
-            self._tainted = True
+        if not applies:
+            return result
+        confidentiality: ConfidentialityLabel = "public"
+        if name in self._private_tools or self._result_carries_private_marker(result):
+            confidentiality = "private"
+        self._context = combine_labels(
+            self._context,
+            ContentLabel(integrity="untrusted", confidentiality=confidentiality),
+        )
         return result
+
+    def _result_carries_private_marker(self, result: ToolResult) -> bool:
+        if not self._private_markers:
+            return False
+        content = result.content or ""
+        return any(marker and marker in content for marker in self._private_markers)
 
 
 class DescriptionIntegrityControl(BoundaryControl):
@@ -404,10 +639,25 @@ class DescriptionIntegrityControl(BoundaryControl):
         return hashlib.sha256(description.encode("utf-8")).hexdigest()
 
     def transform_description(self, tool: ToolDescription) -> ToolDescription:
+        # Change-detection is computed over the RAW description (the rug-pull
+        # signal: THAT it changed from the approved hash, whatever the change).
         expected = self._pins.get(tool.name)
         if expected is not None and self.digest(tool.description) != expected:
             self._violations.add(tool.name)
-        return tool
+        # …AND the planner is shown the SANITIZED description, so a STATIC
+        # tool-description poison (an <IMPORTANT> block / instruction aside the
+        # agent would otherwise read as authoritative) is neutralised even when
+        # no pin is declared. This is what gives W1 a real DIFFERENTIAL: the
+        # guarded twin strips the smuggle the raw twin passes through, so a
+        # vulnerable planner fires on raw and resists on guarded. Sanitising a
+        # clean description is a no-op, so pinned/unpinned change-detection is
+        # unaffected. The two mechanisms are complementary — sanitise catches the
+        # static smuggle FORM; the pin catches ANY change (the sanitiser's
+        # documented plain-prose gap).
+        cleaned = sanitize_tool_description(tool.description)
+        if cleaned == tool.description:
+            return tool
+        return ToolDescription(name=tool.name, description=cleaned, input_schema=tool.input_schema)
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         if name not in self._violations:
@@ -493,7 +743,12 @@ class EgressAllowlistControl(BoundaryControl):
             return name in self._egress_tools, "declared", destinations
         if destinations:
             return True, "a destination-shaped argument", destinations
-        applies, reason = classify(name, declared=None, hints=_EGRESS_HINTS)
+        applies, reason = classify(
+            name,
+            declared=None,
+            hints=_EGRESS_HINTS,
+            annotation_says=annotation_is_egress(self.annotations_for(name)),
+        )
         return applies, reason, destinations
 
     def _config_snippet(self, name: str) -> str:
@@ -564,17 +819,71 @@ class ConfirmGateControl(BoundaryControl):
     weakness = "W4"
     _TOKEN_ARG = "confirm_token"  # noqa: S105 -- an argument KEY name, not a credential
 
-    def __init__(self, *, consequential_tools: frozenset[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        consequential_tools: frozenset[str] | None = None,
+        approval_policy: ApprovalPolicy | None = None,
+        mode: EnforcementMode = "approve",
+        context_source: InformationFlowControl | None = None,
+    ) -> None:
         self._consequential_tools = consequential_tools
         self._secret = secrets.token_bytes(32)
         #: tool name -> the one token currently valid for confirming it.
         self._pending: dict[str, str] = {}
+        #: Who answers "may this consequential action proceed?", out of band.
+        #: Defaults to DenyAll — the safe posture when nobody is available.
+        self._approval_policy: ApprovalPolicy = approval_policy or DenyAll()
+        self._mode: EnforcementMode = mode
+        #: Optional W2 control to read the session's label from, so an approval
+        #: decision can depend on whether untrusted content is in scope. Absent,
+        #: the context is the trusted/public default and a policy keyed on taint
+        #: simply approves — which is right: with no information-flow control
+        #: running, there is no taint signal to gate on.
+        self._context_source = context_source
+        self.approvals: list[dict[str, str]] = []
 
     def reset(self) -> None:
         self._pending = {}
+        self.approvals = []
+
+    def rebind_after_clone(
+        self, original: BoundaryControl, clone_of: dict[int, BoundaryControl]
+    ) -> None:
+        if not isinstance(original, ConfirmGateControl):  # pragma: no cover - defensive
+            return
+        self._approval_policy = original._approval_policy
+        source = original._context_source
+        if source is not None:
+            sibling = clone_of.get(id(source))
+            self._context_source = (
+                sibling if isinstance(sibling, InformationFlowControl) else source
+            )
+
+    def _context(self) -> ContentLabel:
+        source = self._context_source
+        return source.context_label if source is not None else ContentLabel()
+
+    def pending_token(self, name: str) -> str | None:
+        """The confirm token currently valid for ``name``, for a PROGRAMMATIC
+        confirmer (the harness, a replay fixture, a test).
+
+        Deliberately an attribute rather than text in the refusal: the token used
+        to be printed into the tool result, which put it in the model's context
+        and implicitly asked the model to re-supply it as a ``confirm_token``
+        argument the advertised schema never declared. Keeping it out of the
+        model's view entirely means there is no protocol step for the model to
+        fail at — approval is now somebody else's job.
+        """
+        return self._pending.get(name)
 
     def _classify(self, name: str) -> tuple[bool, str]:
-        return classify(name, declared=self._consequential_tools, hints=_CONSEQUENTIAL_HINTS)
+        return classify(
+            name,
+            declared=self._consequential_tools,
+            hints=_CONSEQUENTIAL_HINTS,
+            annotation_says=annotation_is_sink(self.annotations_for(name)),
+        )
 
     def _config_snippet(self, name: str) -> str:
         return config_snippet_for("W4", name)
@@ -588,25 +897,44 @@ class ConfirmGateControl(BoundaryControl):
         applies, reason = self._classify(name)
         if not applies:
             return None
+        # An in-band token supplied by a caller that already knows the protocol
+        # (the harness, a replay fixture) is still honoured, so existing
+        # programmatic flows keep working. The MODEL is never asked to produce
+        # one — see ApprovalRequest for why that never worked.
         expected = self._sign(name, arguments)
         supplied = arguments.get(self._TOKEN_ARG)
         if supplied is not None and supplied == expected and self._pending.get(name) == expected:
-            # Confirmed: strip the synthetic key (arguments is the same dict
-            # object ControlServerShim.call_tool passes to the inner tool —
-            # mutating it here is how a control can alter the pass-through
-            # call, since intercept_call's contract is refuse-or-pass-through
-            # unchanged, not refuse-or-rewrite) and let the real call happen.
             arguments.pop(self._TOKEN_ARG, None)
             del self._pending[name]
             return None
         self._warn_fail_closed_once(name, reason, self._config_snippet(name))
+
+        context = self._context()
+        request = ApprovalRequest(
+            tool=name,
+            arguments=dict(arguments),
+            context=context,
+            reason=f"{name!r} is a consequential action requiring approval",
+        )
+        if self._mode == "observe":
+            self.approvals.append({"tool": name, "decision": "observed"})
+            return None
+        decision = "deny" if self._mode == "block" else self._approval_policy.decide(request)
+        self.approvals.append({"tool": name, "decision": decision})
+        if decision == "approve":
+            # Approved out of band, exactly as a user clicking "approve" would:
+            # the call proceeds unchanged and the model needs to do nothing.
+            return None
+        # Denied. The token is still minted so a PROGRAMMATIC confirm path
+        # exists, but the refusal no longer instructs the model to thread it —
+        # asking the model to re-supply a schema-forbidden argument produced 0/6
+        # completions across two frontier models.
         self._pending[name] = expected
         return ToolResult(
             name=name,
             content=(
-                f"confirmation_required: retry {name!r} with "
-                f"{self._TOKEN_ARG}={expected!r} to confirm this consequential action "
-                "(server-minted, single-use for this exact call)"
+                f"refused: {name!r} is a consequential action and approval was not "
+                "granted (it requires out-of-band confirmation, not a retry)"
             ),
             isError=True,
         )
@@ -637,13 +965,38 @@ class ControlServerShim:
         # instances, matching the "fresh control per invoke" design every
         # control's own docstring already assumes.
         self._controls = [copy.deepcopy(control) for control in controls]
-        for control in self._controls:
-            control.reset()
+        # Maps each ORIGINAL control to this session's clone, so a control that
+        # references a sibling (W4 reading W2's context label) can rebind to the
+        # sibling's clone rather than a frozen deep copy of it.
+        clone_of = {
+            id(original): clone for original, clone in zip(controls, self._controls, strict=True)
+        }
+        for original, clone in zip(controls, self._controls, strict=True):
+            clone.rebind_after_clone(original, clone_of)
+            clone.reset()
+
+    @property
+    def controls(self) -> list[BoundaryControl]:
+        """This session's control instances.
+
+        The shim deep-copies the controls it was handed (so concurrent sessions
+        cannot reset each other's state), which means the caller's original
+        objects never see this session's decisions. A harness that needs to read
+        what happened — observed violations, approval decisions, a pending
+        confirm token — must read them from HERE, not from the instances it
+        constructed.
+        """
+        return list(self._controls)
 
     async def list_tools(self) -> list[ToolDescription]:
         tools = await self._inner.list_tools()
         out: list[ToolDescription] = []
         for tool in tools:
+            # Observe FIRST, on the untransformed tool: a control that rewrites a
+            # description must not be able to change what another control learns
+            # about the tool's declared risk annotations.
+            for control in self._controls:
+                control.observe_description(tool)
             transformed = tool
             for control in self._controls:
                 transformed = control.transform_description(transformed)
@@ -674,6 +1027,12 @@ def make_control(
     consequential_tools: frozenset[str] | None = None,
     accepts_untrusted: frozenset[str] | None = None,
     description_pins: dict[str, str] | None = None,
+    private_tools: frozenset[str] | None = None,
+    destructive_tools: frozenset[str] | None = None,
+    private_markers: tuple[str, ...] = (),
+    mode: EnforcementMode | None = None,
+    approval_policy: ApprovalPolicy | None = None,
+    context_source: InformationFlowControl | None = None,
 ) -> BoundaryControl:
     """Build the canonical boundary control for a weakness class (W1-W4).
 
@@ -701,6 +1060,10 @@ def make_control(
             consequential_tools=consequential_tools,
             egress_tools=egress_tools,
             accepts_untrusted=accepts_untrusted,
+            private_tools=private_tools,
+            private_markers=private_markers,
+            destructive_tools=destructive_tools,
+            mode=mode or "block",
         )
     if weakness == "W3":
         return EgressAllowlistControl(
@@ -709,7 +1072,16 @@ def make_control(
             allowlist=fetch_allowlist if fetch_allowlist is not None else DEFAULT_FETCH_ALLOWLIST,
         )
     if weakness == "W4":
-        return ConfirmGateControl(consequential_tools=consequential_tools)
+        return ConfirmGateControl(
+            consequential_tools=consequential_tools,
+            approval_policy=approval_policy,
+            # `block` (refuse every consequential action) remains the default so
+            # an existing caller that passes no policy keeps today's semantics
+            # exactly. A caller that wants the differential to MEAN something
+            # supplies a policy and asks for `approve`.
+            mode=mode or "block",
+            context_source=context_source,
+        )
     raise ValueError(f"no boundary control implemented for weakness {weakness!r}")
 
 
@@ -735,7 +1107,14 @@ def consequential_tool_names(
         name = getattr(tool, "name", "") or ""
         if not name:
             continue
-        applies, reason = classify(name, declared=declared, hints=_CONSEQUENTIAL_HINTS)
+        applies, reason = classify(
+            name,
+            declared=declared,
+            hints=_CONSEQUENTIAL_HINTS,
+            # A static preview reads annotations straight off the ToolSpec —
+            # there is no live session here to have observed them through.
+            annotation_says=annotation_is_sink(getattr(tool, "annotations", None)),
+        )
         if applies and reason != "fail-closed default":
             out.append((name, reason))
     return out

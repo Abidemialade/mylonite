@@ -571,11 +571,13 @@ class DifferentialValidator(ValidatorBase):
         else:
             effect = ValidationOutcome(
                 stage="effect",
-                passed=True,
+                passed=False,
+                report_only=True,
                 detail=(
                     "no effect_probe declared on the target — effect leg is "
-                    "report-only; declare an effect_probe in the target file for "
-                    "end-to-end damage confirmation"
+                    "REPORT-ONLY and does NOT contribute to kept (end-to-end "
+                    "damage was NOT confirmed). Declare an effect_probe in the "
+                    "target file for a KEPT test backed by real damage confirmation."
                 ),
                 metric=None,
             )
@@ -603,8 +605,14 @@ class DifferentialValidator(ValidatorBase):
             self._build_skip_outcome() if not self._run_build else self._collect_only_outcome(test)
         )
         outcomes = [build, stability, effect, consensus]
-        legs = ["build", "stability", "effect", "consensus"]
-        kept = build.passed and stability.passed and effect.passed and consensus.passed
+        # A report-only leg (e.g. the effect leg when no effect_probe is declared)
+        # is EXCLUDED from the kept conjunction AND from the gating formula — it
+        # must not silently pass as a ✓ nor block. kept therefore rests on the
+        # legs that actually confirmed something. When an effect_probe IS declared,
+        # `effect.report_only` is False and it contributes as before.
+        gating = [o for o in outcomes if not o.report_only]
+        legs: list[str] = [str(o.stage) for o in gating]
+        kept = all(o.passed for o in gating)
         repro = ReproducibilityEvidence(iterations=n, vuln_fired=fired, guard_resisted=None)
         notes_tail = ""
 

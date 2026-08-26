@@ -155,6 +155,18 @@ class ControlConfig(BaseModel):
     # genuinely safe to drive from untrusted input (e.g. a pure summarizer
     # with no side effect).
     accepts_untrusted_tools: tuple[str, ...] = ()
+    # W2 (InformationFlowControl): tools whose results carry SENSITIVE data —
+    # the FIDES `confidentiality` axis. Reading one of these raises the session
+    # to `private`, and a public-facing sink then refuses to run. This is the
+    # knob that catches EXFILTRATION without blocking ordinary read-then-act
+    # work; declaring only `read_tool_names` marks content untrusted, which on
+    # its own gates nothing but destructive sinks.
+    private_tools: tuple[str, ...] = ()
+    # W2: sinks where an injection-driven call is damage in itself (delete,
+    # overwrite, transfer). These refuse UNTRUSTED context outright, the FIDES
+    # `accepts_untrusted=False` equivalent. Inferred from MCP's `destructiveHint`
+    # and name hints when not declared.
+    destructive_tools: tuple[str, ...] = ()
     # W1 (DescriptionIntegrityControl, PR5): tool name -> the sha256 hex
     # digest of its APPROVED description text (UTF-8 encoded, matching
     # gate/recommend.py's `_w1_recommendation` digest computation exactly —
@@ -166,6 +178,23 @@ class ControlConfig(BaseModel):
     description_pins: dict[str, str] = {}
     declared: tuple[str, ...] = ()  # controls the app already has (for ablation)
     synthetic: tuple[str, ...] = ()  # controls Mylonite should synthesize/test
+    # W2/W4 enforcement mode: "block" (default — refuse the violation outright),
+    # "approve" (defer to approval_policy — makes the benign leg of a W4/confirm
+    # differential complete THROUGH the approval flow so benign_retention is
+    # meaningful), or "observe" (record what would be refused, refuse nothing).
+    # Empty string -> the control's own default (block).
+    enforcement_mode: str = ""
+    # Which approval policy to apply in "approve" mode: "deny_all" (refuse every
+    # consequential action) or "approve_when_trusted" (approve only when NO
+    # untrusted content is in scope — the deterministic "did the USER ask for
+    # this, or did ingested content?" reading). Empty -> deny_all.
+    approval_policy: str = ""
+    # W2 confidentiality canaries: literal strings whose presence in a tool
+    # RESULT marks that result as private/sensitive, so a later public sink is
+    # refused. Use when you cannot enumerate the private TOOL up front but can
+    # name a marker your private data carries (e.g. an internal token prefix).
+    # Complements private_tools; both feed the confidentiality axis.
+    private_markers: tuple[str, ...] = ()
 
 
 class LaunchOverride(BaseModel):
@@ -443,7 +472,18 @@ def resolve_target(family: str, scope: str | None) -> TargetSpec:
     """
     spec = BUNDLED_TARGETS.get(family) or _RUNTIME_TARGETS.get(family)
     if spec is None:
-        msg = f"unknown MCP target family {family!r}. Known families: {known_families()}."
+        # Name the built-in families for the `mcp:<family>` positional form, but
+        # do NOT present them as a menu of choices for a CUSTOM target: those
+        # names are RESERVED and rejected as a target-file `family:` (the old
+        # wording read as "pick one of these"). Point the custom path at
+        # --target-file instead.
+        builtins = sorted(BUNDLED_TARGETS)
+        msg = (
+            f"unknown MCP target family {family!r}. Built-in families (for the "
+            f"`mcp:<family>` form): {builtins}. For your OWN server, use "
+            f"`--target-file app.yaml` with a family name that is NOT one of the "
+            f"built-ins (they are reserved)."
+        )
         raise UnknownTargetFamily(msg)
     spec.scope_validator(scope)
     return spec

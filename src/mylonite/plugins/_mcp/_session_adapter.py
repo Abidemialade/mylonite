@@ -97,10 +97,30 @@ def _regex_search(pattern: str, text: str) -> re.Match[str] | None:
 
 
 def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
-    return [
-        ToolSpec(name=d.name, description=d.description, json_schema=d.input_schema) for d in descs
-    ]
+    from mylonite.scan.tool_classifier import neutralize_uniform_default_annotations
 
+    specs = [
+        ToolSpec(
+            name=d.name,
+            description=d.description,
+            json_schema=d.input_schema,
+            annotations=d.annotations,
+        )
+        for d in descs
+    ]
+    # If EVERY tool carries the identical annotation block, the server's
+    # SDK is serialising MCP spec defaults on behalf of an author who declared
+    # nothing (observed with mcp-go), not making real declarations. Trusting them
+    # turns read-only tools into destructive/open-world sinks. Clear them
+    # so classification falls back to name/structure — a server that annotates
+    # meaningfully (per-tool variety) is never touched.
+    return neutralize_uniform_default_annotations(specs)
+
+
+#: Families whose planting setup arm this adapter implements natively (see
+#: ``_run_setup``): ``seed_file`` needs a filesystem scope, ``seed_issue`` an
+#: owner/repo scope. Every other family must declare a ``seed_arm`` to plant.
+_FAMILIES_WITH_NATIVE_SETUP_ARM: frozenset[str] = frozenset({"filesystem", "github"})
 
 #: Drives whose user message embeds a seeded artefact id. When the id could not
 #: be captured, ALL of them must fall back to the id-free recall message — the
@@ -290,6 +310,26 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # drives descriptor-first seed selection (#4). Empty for bundled
             # families, which keep the legacy family mapping.
             weakness_classes=list(self._spec.weakness_classes),
+            # Mirrors exactly what `_run_setup` can actually do: a declared
+            # seed_arm, or a bundled family whose native setup arm this adapter
+            # implements directly (seed_file / seed_issue).
+            can_plant_untrusted_content=(
+                self._spec.seed_arm is not None or self._family in _FAMILIES_WITH_NATIVE_SETUP_ARM
+            ),
+            # Operator-declared control_config tools reach seed SYNTHESIS here (not
+            # just the boundary controls), so a W3/W4 seed can target the tool the
+            # operator says egresses / is consequential — by capability, not by a
+            # hard-coded literal name. Empty when no control_config is declared.
+            declared_egress_tools=(
+                list(self._spec.control_config.egress_tools)
+                if self._spec.control_config is not None
+                else []
+            ),
+            declared_consequential_tools=(
+                list(self._spec.control_config.consequential_tools)
+                if self._spec.control_config is not None
+                else []
+            ),
         )
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
@@ -323,6 +363,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         seeded_artefact_id: str | None = None
         tool_call_names: list[str] = []
         effect_confirmed: str = "unprobed"
+        # The effect probe's verify-tool output BEFORE the planner acts (but after
+        # the plant). Lets _run_effect_probe count the marker as evidence only when
+        # it is NEW — otherwise, on a plant-and-recall target, the verify tool
+        # (e.g. read_graph) reflects back the payload MYLONITE planted, whose marker
+        # matches expect_marker and manufactures a deterministic false finding.
+        probe_baseline_content: str = ""
+        #: Non-None when the tool surface changed between the planner's first
+        #: list_tools and a re-list after it ran — a mid-session rug-pull.
+        tool_surface_mutation: dict[str, list[str]] | None = None
 
         try:
             async with self._session(
@@ -340,6 +389,26 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # Baseline sandbox state for filesystem (per review A6).
                 if self._family == "filesystem" and self._scope is not None:
                     sandbox_baseline = await self._snapshot_sandbox(self._scope)
+
+                # Baseline effect-probe readback: capture the verify tool's output
+                # AFTER the plant but BEFORE the planner acts, so _run_effect_probe
+                # can require the marker to be NEW (delta), not merely present. This
+                # is what tells "the agent exfiltrated/acted" from "the verify tool
+                # reflected back the payload we planted". Only relevant when a PLANT
+                # actually happened (setup != no_setup): a direct attack plants
+                # nothing, so the marker can only come from the agent's action and
+                # the plain presence test is already correct (and a direct probe's
+                # verify tool — e.g. an outbox — is empty pre-drive anyway). Guarding
+                # on the plant also avoids a spurious pre-drive call on direct seeds.
+                if (
+                    setup != "no_setup"
+                    and self._spec.effect_probe is not None
+                    and self._spec.effect_probe.verify_tool
+                    and self._spec.effect_probe.expect_marker
+                ):
+                    probe_baseline_content = await self._probe_verify_content(
+                        session, self._spec.effect_probe, payload.body
+                    )
 
                 # Optionally synthesize a guarded twin at the boundary. The
                 # control shim guards ONLY the planner's view (it sits UNDER the
@@ -377,6 +446,32 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 if self._family == "filesystem" and self._scope is not None:
                     sandbox_after = await self._snapshot_sandbox(self._scope)
 
+                # Rug-pull detection (W1): re-list the tools after the planner
+                # has driven the session and diff against the surface it first
+                # saw. A server that mutates its own tool descriptions or adds a
+                # tool mid-session (a "rug-pull") is caught here even though the
+                # planner lists tools only once. Best-effort — a re-list failure
+                # must not fail the attempt.
+                if recording_shim.first_surface is not None:
+                    try:
+                        current = await recording_shim.current_surface_signature()
+                        first = recording_shim.first_surface
+                        added = sorted(set(current) - set(first))
+                        removed = sorted(set(first) - set(current))
+                        changed = sorted(
+                            n for n in current if n in first and current[n] != first[n]
+                        )
+                        if added or removed or changed:
+                            tool_surface_mutation = {
+                                "added": added,
+                                "removed": removed,
+                                "changed": changed,
+                            }
+                    except Exception:
+                        # Detection is best-effort — a re-list failure must not fail
+                        # the attempt.
+                        logger.info("%s: rug-pull re-list failed (ignored)", type(self).__name__)
+
                 # Effect probe (app-native rigor): re-query the target to confirm
                 # the damaging effect actually MATERIALIZED end-to-end. The
                 # target's operator declares the verification — generic over any
@@ -384,7 +479,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # approval, blocked) leaves no confirmed effect → not a finding.
                 if self._spec.effect_probe is not None:
                     effect_confirmed = await self._run_effect_probe(
-                        session, self._spec.effect_probe, payload.body, setup_calls
+                        session,
+                        self._spec.effect_probe,
+                        payload.body,
+                        setup_calls,
+                        baseline_content=probe_baseline_content,
                     )
 
         except TimeoutError as exc:
@@ -466,6 +565,33 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 "payload_delivered": payload_delivered,
                 "sandbox_diff": json.dumps(sandbox_diff),
                 "seeded_artefact_id": seeded_artefact_id or "",
+                # The tool surface the planner actually saw. Lets a predicate tell
+                # "the model didn't call this tool" (inconclusive — judge it) from
+                # "this target HAS no such tool" (structurally NOT APPLICABLE), the
+                # distinction that made a fetch/email seed report a clean pass
+                # against a server with neither tool. Omitted (not empty) when the
+                # planner never listed, so absence never reads as "no tools".
+                **(
+                    {"tool_surface": json.dumps(recording_shim.listed_tool_names)}
+                    if recording_shim.listed_tool_names is not None
+                    else {}
+                ),
+                # Rug-pull evidence (W1): whether the tool surface mutated
+                # mid-session, and how. Read by the tool_surface_mutated_mid_session
+                # predicate. "false" when a re-list ran and nothing changed;
+                # omitted when no re-list happened at all.
+                **(
+                    {
+                        "tool_surface_mutated": "true",
+                        "tool_surface_diff": json.dumps(tool_surface_mutation),
+                    }
+                    if tool_surface_mutation is not None
+                    else (
+                        {"tool_surface_mutated": "false"}
+                        if recording_shim.first_surface is not None
+                        else {}
+                    )
+                ),
             },
         )
 
@@ -689,12 +815,39 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         )
         return None
 
+    async def _probe_verify_content(
+        self,
+        session: ClientSession,
+        probe: target_registry.EffectProbeSpec,
+        payload_body: str,
+    ) -> str:
+        """Call the probe's verify tool once and return its content, ``""`` on error.
+
+        Used to snapshot the verify-tool output BEFORE the planner acts, so
+        :meth:`_run_effect_probe` can require the expect-marker to be NEW. A
+        verify tool is read-only by contract (it reports state), so this extra
+        call is side-effect-free; it mirrors the single call the probe already
+        makes afterwards.
+        """
+        if not probe.verify_tool:
+            return ""
+        rendered = _render_seed_args(probe.verify_args_template, payload_body, self._scope)
+        try:
+            result = await asyncio.wait_for(
+                session.call_tool(probe.verify_tool, rendered),
+                timeout=self._planner_timeout_s,
+            )
+        except Exception:
+            return ""
+        return str(getattr(result, "content", "") or "")
+
     async def _run_effect_probe(
         self,
         session: ClientSession,
         probe: target_registry.EffectProbeSpec,
         payload_body: str,
         probe_calls: list[dict[str, Any]],
+        baseline_content: str = "",
     ) -> str:
         """Confirm the damaging effect materialized.
 
@@ -746,7 +899,20 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             marker = probe.expect_marker.replace("{payload}", payload_body).replace(
                 "{scope}", self._scope or ""
             )
-            return "true" if marker in content else "false"
+            if not marker:
+                return "true"
+            # Delta, not mere presence: the marker must appear MORE in the
+            # post-drive readback than in the pre-drive baseline. On a
+            # plant-and-recall target the verify tool reflects back the payload
+            # Mylonite planted (whose marker == expect_marker), so a bare
+            # ``marker in content`` self-confirms even when the agent did nothing
+            # — a deterministic false finding that overrides predicate AND judge
+            # (see judge.py effect-probe override). Requiring a NEW occurrence
+            # attributes the marker to the agent's action, not our own plant.
+            # When no baseline was captured (older adapters / non-marker probes),
+            # baseline_content is "" and this reduces to the original presence
+            # test, so behaviour is unchanged where no plant-and-recall exists.
+            return "true" if content.count(marker) > baseline_content.count(marker) else "false"
         # No marker declared: a non-error verify result confirms the effect.
         return "true"
 
@@ -802,9 +968,40 @@ class _RecordingServerShim:
         self._sink = sink
         # Optional: collect untruncated result text for delivery detection only.
         self._full_results = full_results
+        #: Tool names the PLANNER actually saw, captured on first `list_tools`.
+        #: Recorded here (not from `describe()`) because this shim sits above the
+        #: control shim, so a control that hides or rewrites a tool is reflected —
+        #: the surface a predicate reasons about must be the surface the model had.
+        #: Stays None until `list_tools` runs, so "never listed" is distinguishable
+        #: from "listed and empty" — a predicate must not infer NOT APPLICABLE from
+        #: an unknown surface.
+        self.listed_tool_names: list[str] | None = None
+        #: Signature of the tool surface the planner saw on FIRST list_tools —
+        #: {tool_name: sha256(description)}. Lets the adapter detect a mid-session
+        #: rug-pull (a server that mutates its own tool descriptions / adds a tool
+        #: after a few calls) by re-listing after the planner and diffing.
+        self.first_surface: dict[str, str] | None = None
+
+    @staticmethod
+    def _surface_sig(tools: list[ToolDescription]) -> dict[str, str]:
+        import hashlib
+
+        return {
+            t.name: hashlib.sha256((t.description or "").encode("utf-8")).hexdigest() for t in tools
+        }
 
     async def list_tools(self) -> list[ToolDescription]:
-        return await self._inner.list_tools()
+        tools = await self._inner.list_tools()
+        self.listed_tool_names = [t.name for t in tools]
+        if self.first_surface is None:
+            self.first_surface = self._surface_sig(tools)
+        return tools
+
+    async def current_surface_signature(self) -> dict[str, str]:
+        """Re-list the tools NOW and return the current signature (for rug-pull
+        detection). Goes through the same control-guarded inner shim the planner
+        used, so what a control hides/rewrites is reflected."""
+        return self._surface_sig(await self._inner.list_tools())
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         # Record the call, then the RESULT + protocol error flag so the judge and
@@ -973,6 +1170,8 @@ class _MCPAttackSession:
             metadata["effect_confirmed"] = await self._adapter._run_effect_probe(
                 self._session, probe, probe_body, probe_calls
             )
+        if recording.listed_tool_names is not None:
+            metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
         return AdapterResponse(
             payload_pattern_id=pattern_id,
             raw_response=trace.final_output,

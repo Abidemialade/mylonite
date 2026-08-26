@@ -62,6 +62,17 @@ class ToolSpec(BaseModel):
         default_factory=dict,
         description="JSON Schema for the tool's input.",
     )
+    annotations: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "The tool's MCP ToolAnnotations verbatim (readOnlyHint, "
+            "destructiveHint, idempotentHint, openWorldHint), or None when the "
+            "server declared none. The protocol's own risk vocabulary — a "
+            "stronger classification signal than the tool's name. Per the MCP "
+            "spec these are untrusted hints, so they inform classification but "
+            "never override an operator declaration."
+        ),
+    )
 
 
 class TargetDescriptor(BaseModel):
@@ -88,6 +99,39 @@ class TargetDescriptor(BaseModel):
             "of the legacy family mapping derived from target_id. Empty = use "
             "the family mapping (the bundled reference/filesystem/fetch/github "
             "targets leave it empty and are unaffected)."
+        ),
+    )
+    can_plant_untrusted_content: bool = Field(
+        default=False,
+        description=(
+            "Whether this target has a working way to PLANT untrusted content "
+            "for an indirect-injection (W2) seed — a declared seed_arm, or a "
+            "bundled family with a native setup arm. Seed selection needs the "
+            "CAPABILITY, and previously had only the target's family NAME to go "
+            "on: a custom target with a fully-declared seed_arm was refused "
+            "every planting seed because its family was not in the bundled "
+            "seed's applicable_targets list. Adapters set this; it is never "
+            "inferred from target_id."
+        ),
+    )
+    declared_egress_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Egress/fetch tools the OPERATOR declared for this target "
+            "(control_config.egress_tools). Lets W3 synthesis target the tool the "
+            "operator says reaches the network — by capability, not by the literal "
+            "name 'web_fetch'. Adapters copy this from the target file; empty "
+            "leaves synthesis to the tool-surface classifier."
+        ),
+    )
+    declared_consequential_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Consequential/sink tools the OPERATOR declared "
+            "(control_config.consequential_tools). Lets W4 synthesis target the "
+            "action tool the operator says is consequential (e.g. execute_sql) "
+            "even when it is not named 'send_email'. Adapters copy this from the "
+            "target file; empty leaves synthesis to the classifier."
         ),
     )
 
@@ -267,6 +311,16 @@ class ValidationOutcome(BaseModel):
             "rate."
         ),
     )
+    report_only: bool = Field(
+        default=False,
+        description=(
+            "When True this leg is INFORMATIONAL and does NOT contribute to the "
+            "kept decision — it neither helps nor blocks. Used for the effect leg "
+            "when no effect_probe is declared: end-to-end damage was not "
+            "confirmed, so the leg must not read as a passing ✓ that inflates a "
+            "custom-target KEPT. The renderer shows it distinctly."
+        ),
+    )
 
 
 class ValidationReport(BaseModel):
@@ -351,6 +405,13 @@ class AbortReason(StrEnum):
 ScanAttemptOutcome = Literal[
     "finding",
     "no_finding",
+    # The seed attacks a capability this target does not expose (e.g. an
+    # unconfirmed-send_email seed against a server with no email tool). The
+    # attempt ran but could never have landed, so it is NOT evidence the target
+    # is defended. Kept distinct from `no_finding` because collapsing them let a
+    # structurally-impossible attack render as a clean pass — see
+    # `not_applicable_reason` on ScanAttempt for the specific missing capability.
+    "not_applicable",
     "skipped_invalid_metadata",
     "skipped_unknown_seed",
     "skipped_planner_failure",
@@ -392,6 +453,14 @@ class ScanAttempt(BaseModel):
     judge_evidence: dict[str, str] = Field(
         default_factory=dict,
         description="Verdict.evidence flattened to strings (recipients, markers, confidence).",
+    )
+    not_applicable_reason: str | None = Field(
+        default=None,
+        description=(
+            "On outcome=not_applicable, the capability this seed needed and the "
+            "target did not expose (e.g. \"target exposes no 'send_email' tool\"). "
+            "None for every other outcome."
+        ),
     )
 
 

@@ -11,7 +11,7 @@ an attack actually *landed* (rather than the model just sounding compromised).
 
 ## The four classes
 
-| Class  | Weakness | The boundary control that fixes it |
+| Class  | Weakness | The boundary control Mylonite tests it against |
 |--------|----------|-------------------------------------|
 | **W1** | Tool-description instruction smuggling (tool poisoning) | `DescriptionIntegrityControl` |
 | **W2** | Indirect prompt injection via ingested data | `InformationFlowControl` |
@@ -21,6 +21,39 @@ an attack actually *landed* (rather than the model just sounding compromised).
 Each class has a **guarded build** in the bundled reference agent ([the reference app](quarry.md))
 that implements the control on the right — that build is the ground truth the
 [validation oracle](validation.md) proves findings against.
+
+!!! note "What a boundary control is — and is not"
+
+    These controls are the **guarded half of a differential**, not a drop-in
+    patch for your app. Mylonite synthesizes one at the adapter boundary so it
+    can ask a single question: *does this attack still land when a canonical
+    safeguard is in the way?* A finding is kept only when the attack fires
+    without the control and is resisted with it.
+
+    They are modelled on real, published designs — `InformationFlowControl`
+    follows [FIDES](https://arxiv.org/abs/2505.23643), the information-flow
+    control Microsoft ships in Agent Framework — so the shape of the fix they
+    imply is a shape you can actually adopt. But adopting it means implementing
+    the control in **your** app, at your own trust boundaries. Mylonite's copy
+    only ever sees what the planner sees.
+
+    Each control runs in one of three modes, mirroring FIDES:
+
+    | Mode | What it does | Use it for |
+    |---|---|---|
+    | `observe` | Propagates labels, records what *would* be refused, refuses nothing | Measuring; seeing what a control would break before you adopt it |
+    | `approve` | Defers a violation to an out-of-band approval decision | Human-in-the-loop, and the differential's benign leg |
+    | `block` | Refuses outright | A hard gate |
+
+    All three are reachable from a target file: set `control_config.enforcement_mode`
+    to `observe` / `approve` / `block` (default `block`). In `approve` mode,
+    `control_config.approval_policy` picks the decision — `deny_all`, or
+    `approve_when_trusted` (approve only when no untrusted content is in scope, so a
+    W4 confirm-gate differential's *benign* leg completes through the approval flow
+    and `benign_retention` means something). The confidentiality axis takes
+    `private_tools` (tools that return sensitive data) and/or `private_markers`
+    (literals whose presence in a result marks it private) — both refuse a later
+    public sink.
 
 ---
 
@@ -43,7 +76,23 @@ the discriminating signal that the tool description, not the user, was in contro
 is deterministic: it inspects the recorded tool calls and response, no second LLM
 needed.
 
-**Maps to:** OWASP-LLM `LLM01` · OWASP-ASI `ASI02` · attack pattern `tool-description-summary-smuggle`.
+**The two W1 shapes, and the control for each.** W1 comes in a *static* and a
+*dynamic* form, and Mylonite tests both:
+
+- **Static poison** — the smuggle sits in the description from the start. The guarded
+  twin's control **sanitizes** every description before the planner sees it (strips
+  `<IMPORTANT>` blocks, instruction asides, unicode smuggling), so a vulnerable planner
+  fires on the raw description and resists on the sanitized one — a real differential.
+  (A change-detection *pin* alone cannot produce this differential: it would pin the
+  already-poisoned text and match it. So `make_control("W1")` sanitizes **and** pins.)
+- **Rug-pull (dynamic)** — the server serves benign descriptions, then mutates them (or
+  adds a tool) after a few calls. The planner lists tools once, so Mylonite **re-lists
+  after the planner runs** and diffs the surface; `tool_surface_mutated_mid_session`
+  fires deterministically on any change. The mutation itself is the finding — a
+  supply-chain attack on the agent — and the pin refuses the mutated tool.
+
+**Maps to:** OWASP-LLM `LLM01` · OWASP-ASI `ASI02` · attack patterns
+`tool-description-summary-smuggle`, `synth-w1-tool-description-*`, `synth-w1-rug-pull`.
 
 ---
 
@@ -67,16 +116,32 @@ to?) or `read_note_returned_poisoned_content_acted_on` (did it act on the poison
 content at all?). Both key on the *destination the model emitted* or the *action it
 took* — structured signals from the recorded run — not on the input text.
 
-**The fix (guarded build).** The bundled reference app's own guarded server
-(`server_guarded.py`) wraps every retrieved/tool result in an
+**The control it is tested against (guarded build).** The bundled reference app's
+own guarded server (`server_guarded.py`) wraps every retrieved/tool result in an
 `<untrusted>…</untrusted>` envelope and instructs the planner that envelope
 contents are data, never commands. For a real custom target with no in-repo
 guarded twin, Mylonite instead synthesizes `InformationFlowControl` at the
-adapter boundary: it labels a read tool's result untrusted for the rest of
-the session, then **refuses** (not just labels) a subsequent call to a
-consequential-or-egress-shaped tool while that label is in scope — gating the
-sink in code rather than relying on the model to respect a text marker. The
-demoted `UntrustedEnvelopeControl` (the same envelope-wrapping idea as the
+adapter boundary, following [FIDES](https://arxiv.org/abs/2505.23643): content
+read into the session carries **two independent labels** — `integrity`
+(trusted / untrusted) and `confidentiality` (public / private / user_identity) —
+combined most-restrictive-wins, and each sink declares what context it will run
+in. Gating the call in code, not relying on the model to respect a text marker.
+
+The confidentiality axis is what makes this discriminate rather than deny:
+reading an ordinary document and then emailing a summary is *allowed*, while
+reading a **secret** and emailing it is refused, because a public-facing sink
+will not run in a private context. That is the same mechanism that catches
+exfiltration in FIDES's own worked example, and it is why "the guard resisted"
+means something here — an earlier single-axis version refused *every*
+read-then-act workflow, so resistance was true by construction.
+
+Integrity blocking is reserved for **destructive** sinks (delete, overwrite,
+transfer — or anything the server marks `destructiveHint`), where an
+injection-driven call is damage in itself. "Should injected content be able to
+trigger a non-destructive consequential action at all?" is W4's question, and it
+is answered by an approval decision, not a flow label.
+
+The demoted `UntrustedEnvelopeControl` (the same envelope-wrapping idea as the
 reference app's own fix) is still available as an explicit, defence-in-depth
 layer.
 
@@ -165,6 +230,27 @@ regression test** is decided by Layer 2 — the [validation oracle](validation.m
 > The bundled families ([filesystem / fetch / github](test-your-app.md#bundled-targets))
 > carry their own W1–W4 attack patterns (e.g. `github-indirect-injection-poisoned-issue-then-act`)
 > so the same four classes apply to real MCP servers, not just the reference agent.
+
+### Attacks resolve the target's own tool names, not literals
+
+W3 and W4 do **not** require your tool to be literally named `web_fetch` or
+`send_email`. For a custom `--target-file` target, Mylonite **synthesises** a W3
+(egress) and W4 (consequential-action) seed against the tool *your* surface
+actually exposes — resolved by capability. The resolved tool comes from, in
+order of authority:
+
+1. an **operator declaration** — `control_config.egress_tools` /
+   `control_config.consequential_tools` in your target file (authoritative; use
+   this to attack a tool the classifier would miss, e.g. a database
+   `execute_sql`);
+2. otherwise the same tool-surface classifiers `mylonite check` uses
+   (`destination_tools` for egress, the consequential-action name/annotation
+   vocabulary for W4).
+
+The resolved name is threaded into the predicate, so a W4 finding fires on
+`execute_sql` / `create_issue` and a W3 finding on `fetch` / `retrieve`, just as
+it does on the kitchen-sink's `send_email` / `web_fetch`. The bundled
+literal-named seeds still run on targets that do use those names.
 
 ### The predicate evidence contract
 

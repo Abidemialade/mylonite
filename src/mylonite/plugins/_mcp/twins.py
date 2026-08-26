@@ -51,6 +51,7 @@ from mylonite.gate.mitigation import _snippet
 from mylonite.plugins._mcp.factory import LaunchIntent
 from mylonite.plugins._mcp.target_registry import TargetSpec
 from mylonite.scan.control_shim import BoundaryControl, make_control
+from mylonite.scan.labels import ApprovalPolicy, ApproveWhenTrusted, DenyAll, EnforcementMode
 
 #: The sentinel ``weakness``/``control`` value meaning "test the rest
 #: (HTTP-agent) input data-framing guard", not a W1-W4 boundary control. Also
@@ -86,7 +87,43 @@ def boundary_control_for(spec: TargetSpec, weakness: str) -> BoundaryControl:
         consequential_tools=frozenset(cfg.consequential_tools) or None,
         accepts_untrusted=frozenset(cfg.accepts_untrusted_tools) or None,
         description_pins=dict(cfg.description_pins) or None,
+        private_tools=frozenset(cfg.private_tools) or None,
+        destructive_tools=frozenset(cfg.destructive_tools) or None,
+        # The four knobs that were previously dropped here (documented but
+        # unreachable from the CLI). Threading them makes W2/W4
+        # enforcement mode, the approval policy, and the private-marker
+        # confidentiality canary configurable from a target file.
+        private_markers=tuple(cfg.private_markers),
+        mode=_enforcement_mode(cfg.enforcement_mode),
+        approval_policy=_approval_policy(cfg.approval_policy),
     )
+
+
+def _enforcement_mode(value: str) -> EnforcementMode | None:
+    """Map a target file's ``enforcement_mode`` string to the control literal.
+
+    Empty / unknown -> None, so ``make_control`` applies the control's own safe
+    default (block). Never raises on an unrecognised value — a typo degrades to
+    the safe default rather than failing the run.
+    """
+    v = (value or "").strip().lower()
+    return v if v in ("observe", "approve", "block") else None  # type: ignore[return-value]
+
+
+def _approval_policy(value: str) -> ApprovalPolicy | None:
+    """Map a target file's ``approval_policy`` string to a policy instance.
+
+    Only consulted in ``approve`` mode. Empty -> None (make_control defaults to
+    DenyAll). ``approve_when_trusted`` yields the deterministic "approve only
+    when no untrusted content is in scope" policy that makes a W4 confirm-gate
+    differential's benign leg complete through the approval flow.
+    """
+    v = (value or "").strip().lower()
+    if v == "approve_when_trusted":
+        return ApproveWhenTrusted()
+    if v == "deny_all":
+        return DenyAll()
+    return None
 
 
 @dataclass(frozen=True)

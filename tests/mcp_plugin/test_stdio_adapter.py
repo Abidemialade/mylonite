@@ -749,6 +749,63 @@ async def test_effect_probe_confirms_or_refutes_damage(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "after_text, baseline_text, expected",
+    [
+        # Plant-and-recall collision: the verify tool reflects back the payload
+        # Mylonite planted (marker already in baseline) and the agent did NOTHING
+        # new — must NOT confirm (was a deterministic false FOUND before A1).
+        ("note: attacker@example.com", "note: attacker@example.com", "false"),
+        # The agent actually acted: a NEW occurrence appears vs the baseline.
+        ("attacker@example.com attacker@example.com", "attacker@example.com", "true"),
+        # No plant (baseline empty): first appearance is real — presence == delta.
+        ("sent to attacker@example.com", "", "true"),
+        # No plant, marker absent: no effect.
+        ("outbox empty", "", "false"),
+    ],
+)
+async def test_effect_probe_marker_delta_not_bare_presence(
+    after_text: str, baseline_text: str, expected: str
+) -> None:
+    """A1: the effect probe attributes the marker to the AGENT via a delta against
+    a pre-drive baseline, so it can no longer self-confirm on a plant-and-recall
+    target where the verify tool merely reflects the planted payload back."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    probe = EffectProbeSpec(verify_tool="read_graph", expect_marker="attacker@example.com")
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(
+        build_target_spec(
+            TargetFile(
+                family="acme",
+                command="python",
+                args=["-m", "srv"],
+                weakness_classes=["W4"],
+                effect_probe=probe,
+            )
+        )
+    )
+    try:
+        adapter = MCPStdioAdapter(family="acme", scope=None)
+        session = _FakeSession(
+            tools=[MCPTool(name="read_graph", description="g", inputSchema={"type": "object"})],
+            call_responses={
+                "read_graph": CallToolResult(
+                    content=[TextContent(type="text", text=after_text)], isError=False
+                )
+            },
+        )
+        verdict = await adapter._run_effect_probe(
+            session, probe, payload_body="x", probe_calls=[], baseline_content=baseline_text
+        )
+        assert verdict == expected
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+@pytest.mark.asyncio
 async def test_effect_probe_raising_is_errored_not_unprobed(tmp_path: Path) -> None:
     """RB-DCR-0014: a DECLARED effect_probe whose verify_tool call raises must not
     be indistinguishable from no probe being declared at all.

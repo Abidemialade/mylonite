@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from mylonite.contracts._types import Payload, TargetDescriptor
 from mylonite.scan._llm import fence as _fence
 from mylonite.scan._llm import litellm_json_call_async, pop_fallback_cause
-from mylonite.scan.seeds import SeedPattern, required_markers
+from mylonite.scan.seeds import SeedPattern, required_markers, resolved_tool_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +118,7 @@ class PayloadCustomiser:
             "setup": seed.setup,
             "drive": seed.drive,
         }
+        metadata.update(resolved_tool_metadata(seed))
         # W1 attribution guard: if the TARGET's own system prompt mandates summaries,
         # a summary is baseline behaviour — the W1 marker cannot be attributed to the
         # tool-description smuggle. Flag it so the predicate stays inconclusive and

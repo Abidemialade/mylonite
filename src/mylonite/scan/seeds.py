@@ -143,6 +143,26 @@ class SeedPattern(BaseModel):
         ...,
         description="OWASP LLM / ASI / MITRE ATLAS / NIST tags for this attack shape.",
     )
+    consequential_tool: str = Field(
+        default="",
+        description=(
+            "The consequential/sink tool THIS target exposes that the seed's W4 "
+            "predicate should key on, resolved by capability (a classifier or an "
+            "operator declaration) rather than a hard-coded literal. Empty for "
+            "catalogue seeds, which fall back to the literal ('send_email'). "
+            "Flows to Payload.metadata['consequential_tool'], which the "
+            "predicates already read — this is the channel that was missing."
+        ),
+    )
+    egress_tool: str = Field(
+        default="",
+        description=(
+            "The egress/fetch tool THIS target exposes that the seed's W3 "
+            "predicate should key on, resolved by capability. Empty for catalogue "
+            "seeds, which fall back to the literal ('web_fetch'). Flows to "
+            "Payload.metadata['egress_tool']."
+        ),
+    )
 
 
 # --- W1 catalogue ------------------------------------------------------------
@@ -527,6 +547,22 @@ yields the W3+W4 subset filtered by applicable_targets. The tuple is the
 public catalogue contract."""
 
 
+def resolved_tool_metadata(seed: SeedPattern) -> dict[str, str]:
+    """The resolved-tool keys a seed contributes to ``Payload.metadata``.
+
+    Only non-empty values are emitted, so a catalogue seed (which resolves no
+    tool) adds nothing and the predicates keep their literal fallback. Every
+    ``Payload`` producer (both attack modules and the customiser) merges this so
+    the metadata channel the W3/W4 predicates read is populated consistently.
+    """
+    out: dict[str, str] = {}
+    if seed.consequential_tool:
+        out["consequential_tool"] = seed.consequential_tool
+    if seed.egress_tool:
+        out["egress_tool"] = seed.egress_tool
+    return out
+
+
 def required_markers(seed: SeedPattern) -> tuple[str, ...]:
     """Literals in ``seed.seed_body`` that this seed's predicate matches on.
 
@@ -563,6 +599,21 @@ def target_family(target_id: str) -> str:
     return "unknown"
 
 
+def _can_plant_content(descriptor: Any) -> bool:
+    """True when this target has a working way to plant untrusted content.
+
+    Reads the adapter-set ``can_plant_untrusted_content`` flag — an ASSERTION by
+    the adapter that ``_run_setup`` will find something to plant with, not a
+    guess from the tool surface. That distinction is load-bearing: admitting a
+    planting seed on the strength of an *inferable* plant+recall pair, when the
+    target file declares no ``seed_arm``, would trade a loud "no seeds
+    applicable" abort for a per-attempt ``skipped_no_seed_arm`` — different
+    noise, same inability to test W2. The flag tracks what the setup arm can
+    actually execute.
+    """
+    return bool(getattr(descriptor, "can_plant_untrusted_content", False))
+
+
 def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
     """Resolve the seeds applicable to a target, descriptor-first.
 
@@ -588,13 +639,27 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
         from mylonite.scan import seed_synth
 
         synthesized = seed_synth.synthesize_seeds(descriptor)
-        covered = {s.weakness for s in synthesized}
+        # W1/W2 synthesis rides an ALTERNATIVE channel (tool-description /
+        # direct-content) to the kitchen-sink store->recall shape, so a synthesised
+        # W1/W2 seed SUPPRESSES the redundant kitchen seed for that class. W3/W4
+        # synthesis is instead a GENERALISATION of the same direct attack — it
+        # targets the real tool name (execute_sql, fetch) where the kitchen seed
+        # is hard-keyed to a literal (send_email, web_fetch). The two are
+        # complementary: on a literal-named target the kitchen seed is canonical
+        # (and the one `validate` re-drives by pattern_id); on a differently-named
+        # target the synth seed is the only one that applies. So W3/W4 synthesis
+        # must NOT suppress the kitchen W3/W4 seeds.
+        covered = {s.weakness for s in synthesized if s.weakness in {"W1", "W2"}}
         family = target_family(descriptor.target_id)
         # Fall back only to seeds this target can actually RUN. Selecting on the
         # literal "kitchen-sink" tag handed an arbitrary custom target a seed
         # whose setup='seed_note' pre-action seeds the kitchen-sink's in-process
         # note store, which that target has no equivalent for — the seed then
         # silently failed instead of honestly reporting NOT TESTED (DCR-0031).
+        # Can this target PLANT content at all? A declared seed_arm (operator) or
+        # an inferable one (auto-wire) is the capability a setup!='no_setup' seed
+        # needs — regardless of what the target's family is CALLED.
+        can_plant = _can_plant_content(descriptor)
         kitchen = [
             s
             for s in SEED_CATALOGUE
@@ -606,10 +671,20 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
                 # message, so it always runs on any target (worst case, the target
                 # has no matching tool and the planner simply doesn't call it).
                 # Only a seed that must PLANT content (setup != "no_setup", e.g.
-                # 'seed_note') depends on kitchen-sink-specific infrastructure this
-                # arbitrary custom target has no equivalent for — restrict THOSE to
-                # a genuine family match (DCR-0031).
-                s.setup == "no_setup" or family in s.applicable_targets
+                # 'seed_note') depends on infrastructure an arbitrary custom
+                # target may have no equivalent for (DCR-0031).
+                #
+                # That gate used to be `family in s.applicable_targets` — target
+                # IDENTITY, not capability. A custom family is never in a bundled
+                # seed's applicable_targets, so a custom target with a perfectly
+                # good plant+recall pair (write_file/read_file) got ZERO W2 seeds:
+                # `seed_synth` skips synthesising when a plant/recall pair exists
+                # (deferring to "the kitchen-sink W2 seeds"), and this clause then
+                # refused to hand them over. Two individually-correct paths, each
+                # assuming the other covered it. Asking about CAPABILITY instead
+                # closes the gap without weakening DCR-0031: a target that cannot
+                # plant still never receives a planting seed.
+                s.setup == "no_setup" or family in s.applicable_targets or can_plant
             )
         ]
         uncovered = sorted(classes - covered - {s.weakness for s in kitchen})

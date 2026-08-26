@@ -24,9 +24,10 @@ The core differentiator is the **control-efficacy check**. It holds the model co
 toggles only the safeguard, keeping a finding only when the attack *fires* on your app and
 is *resisted* once the control is applied, across a repeat-run filter that absorbs LLM
 randomness. That proves the *control* carries the security, not the model's current good
-behavior, and it works on a single real app with no second build required. Every headline
-claim is backed by an independent [verification harness](./docs/verification.md) that scores
-Mylonite against external ground truth it did not author.
+behavior, and it works on a single real app with no second build required. Mylonite also
+maintains an independent [verification harness](./docs/verification.md) that scores it
+against external ground truth it did not author — runnable vulnerable MCP servers and
+published academic benchmarks.
 
 Mylonite deliberately does *not* test the surrounding traditional code; that work belongs to
 SAST/DAST tools.
@@ -74,7 +75,10 @@ descriptions, and everything it suggests is a hint for you to confirm.
 Still free: `mylonite check --target-file app.yaml` connects once (still no API key, still
 no attack) and reports structural exposure — consequential tools with no approval step,
 descriptions that steer the agent, tools taking a network destination, and unpinned
-descriptions. `--enforce` turns it into a CI gate once the surface is clean.
+descriptions. `--enforce` turns it into a CI gate: it exits non-zero on the substantive
+W1–W4 structural findings, and treats the "unpinned descriptions" advisory (which fires on
+every tool of every server on first contact) as a suggestion, not a gate — so it is
+adoptable from day one.
 
 Proving which weaknesses actually land — and which of your controls stops them — is the
 scan itself, and that needs a key:

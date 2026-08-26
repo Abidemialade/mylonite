@@ -42,7 +42,22 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 # id onto the returned ``AdapterResponse`` (replacing the ``"session-drive"``
 # sentinel) and findings retain provenance. Defaulted, so existing callers and
 # implementations are unaffected. Backward-compatible; minor bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.5.0"
+# 0.5.0 -> 0.6.0: additive, four related fields that let an attempt say "this
+# could never have landed here" instead of "this did not land":
+#   * ``ScanAttemptOutcome`` gained ``"not_applicable"`` — the seed attacks a
+#     capability the target does not expose. Classified NOT_TESTED, never
+#     EXERCISED_RESISTED. Report readers switching exhaustively on the outcome
+#     see one new value (same shape as the 0.2.0 -> 0.3.0 bump above).
+#   * ``ScanAttempt.not_applicable_reason`` — which capability was missing.
+#   * ``ToolSpec.annotations`` — the tool's MCP ``ToolAnnotations`` verbatim, so
+#     classification can read the protocol's own risk vocabulary rather than
+#     guess from the tool's name.
+#   * ``TargetDescriptor.can_plant_untrusted_content`` — whether the adapter can
+#     actually plant for an indirect-injection seed. Seed selection needs the
+#     capability; it previously had only the target's family NAME to go on.
+# All optional with defaults preserving current behaviour; adapters that set
+# none are unaffected. Backward-compatible; minor bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.6.0"
 
 
 @runtime_checkable

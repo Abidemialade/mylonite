@@ -69,6 +69,12 @@ class AttemptClass(Enum):
 ATTEMPT_CLASS: Final[dict[str, AttemptClass]] = {
     "finding": AttemptClass.EXERCISED_FIRED,
     "no_finding": AttemptClass.EXERCISED_RESISTED,
+    # The seed attacks a capability this target does not expose, so the attempt
+    # ran but could never have landed. NOT_TESTED, emphatically not
+    # EXERCISED_RESISTED: classifying it as "resisted" is precisely how a
+    # fetch/email seed came to read as a clean pass against a server with
+    # neither tool.
+    "not_applicable": AttemptClass.NOT_TESTED,
     # Structural skips: the seed's payload metadata was invalid, so the attack
     # was never customised or invoked for this seed.
     "skipped_invalid_metadata": AttemptClass.NOT_TESTED,

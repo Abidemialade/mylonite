@@ -90,10 +90,19 @@ replay is honest about its own evidence.
 Every validation reports three headline figures.
 
 - **`kept`** — the gating verdict.
+  For a bundled reference target:
   `kept = build ∧ differential ∧ flakiness ∧ metamorphic`. The test built and
   collected under pytest, showed the differential at all, showed it reliably across
   the flakiness filter, *and* survived a majority of metamorphic rewrites. Only a kept
   test is worth committing.
+  For a custom target (no in-repo guarded twin):
+  `kept = build ∧ stability ∧ consensus [∧ effect] [∧ differential]`. The **effect**
+  leg contributes only when an `effect_probe` is declared; without one it is shown as
+  **· report-only** and is EXCLUDED from `kept` — end-to-end damage was not confirmed,
+  so it must not read as a passing ✓ that inflates the verdict. Declare an
+  `effect_probe` for a KEPT test backed by real damage confirmation. The **differential**
+  leg contributes only when a guarded twin is inferable (a server-layer control or a
+  synthesised boundary shim).
 - **Reproducibility fraction** — the flakiness-stage metric,
   `min(vulnerable fires, guarded resists) / iterations`. How dependably the
   test discriminates run-to-run; `1.0` means it fired and resisted on every

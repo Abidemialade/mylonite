@@ -741,6 +741,30 @@ class ScanEngine:
                 customiser_fallback=customiser_fallback,
                 run_disagreement=run_disagreement,
             )
+        # An attempt whose seed attacks a capability this target does not expose is
+        # NOT evidence the target is defended — it never got the chance to fail.
+        # Reported as its own outcome so it can never be counted as a clean pass.
+        # Requires EVERY pass to agree: one applicable pass means the capability
+        # was reachable at least once, and a partly-applicable attempt is an
+        # ordinary no_finding, not a structural skip.
+        if all(not p.verdict.applicable for p in (*success_passes, *fail_passes)):
+            return _PerPayloadOutcome(
+                attempt=ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=payload.pattern_id,
+                    outcome="not_applicable",
+                    verdict_mechanism=verdict.mechanism,
+                    verdict_reason=verdict.reason,
+                    not_applicable_reason=verdict.reason,
+                    error_detail=None,
+                    tool_call_trace=tool_call_trace,
+                    judge_evidence=judge_evidence,
+                ),
+                exploit=None,
+                judge_fallback_cause=verdict.fallback_cause,
+                customiser_fallback=customiser_fallback,
+                run_disagreement=run_disagreement,
+            )
         return _PerPayloadOutcome(
             attempt=ScanAttempt(
                 seed_id=seed_id,

@@ -578,3 +578,38 @@ def test_predicate_decorator_rejects_duplicate_registration() -> None:
         def _dup(payload: Payload, response: AdapterResponse) -> Verdict | None:
             del payload, response
             return None
+
+
+def test_tool_surface_mutated_predicate_fires_on_mutation() -> None:
+    """A mid-session tool-surface mutation (rug-pull) is a deterministic
+    W1 finding; a stable surface is a confident non-finding; absent evidence is
+    inconclusive."""
+    from mylonite.contracts._types import AdapterResponse, Payload
+    from mylonite.scan.predicates import lookup_predicate
+
+    fn = lookup_predicate("tool_surface_mutated_mid_session")
+    payload = Payload(pattern_id="synth-w1-rug-pull", channel="user-message", body="x")
+
+    mutated = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="",
+        tool_calls=["get_weather"],
+        metadata={
+            "tool_surface_mutated": "true",
+            "tool_surface_diff": '{"added": ["send_verification"]}',
+        },
+    )
+    v = fn(payload, mutated)
+    assert v is not None and v.success is True and v.mechanism == "predicate"
+
+    stable = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="",
+        tool_calls=[],
+        metadata={"tool_surface_mutated": "false"},
+    )
+    v2 = fn(payload, stable)
+    assert v2 is not None and v2.success is False
+
+    unknown = AdapterResponse(payload_pattern_id="x", raw_response="", tool_calls=[], metadata={})
+    assert fn(payload, unknown) is None
