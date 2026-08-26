@@ -34,6 +34,7 @@ from typing import Final, get_args
 
 from mylonite.contracts._types import AbortReason as AbortReason
 from mylonite.contracts._types import ScanAttemptOutcome, ScanReport
+from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SUCCESS
 
 # --- Abort reasons -------------------------------------------------------------
 #
@@ -129,24 +130,15 @@ class Coverage(Enum):
 
 # --- Exit-code / message mapping ------------------------------------------------
 #
-# Mirrors cli.py's existing 5-way `scan` command mapping (search `EXIT_BUDGET`,
-# `EXIT_PROVIDER`, `EXIT_CONFIG`, `EXIT_SUCCESS` there) exactly — extracted,
-# not reinterpreted. Duplicated as plain ints here (rather than importing
-# cli.py) because this module must stay free of CLI/typer concerns; if the
-# cli.py constants ever change, keep this mapping in sync.
-_EXIT_SUCCESS: Final = 0
-_EXIT_CONFIG: Final = 2
-_EXIT_BUDGET: Final = 3
-_EXIT_PROVIDER: Final = 4
-
+# Exit codes come from the single source (mylonite.exit_codes). This maps each
+# abort reason to one of them; budget/provider get their own, the rest are
+# config errors.
 _EXIT_CODE_BY_ABORT: Final[dict[AbortReason, int]] = {
-    AbortReason.BUDGET_EXCEEDED: _EXIT_BUDGET,
-    AbortReason.PROVIDER_UNREACHABLE: _EXIT_PROVIDER,
-    # These three all map to EXIT_CONFIG in cli.py today — distinct reasons,
-    # same exit code (only budget/provider get their own).
-    AbortReason.NO_PAYLOADS: _EXIT_CONFIG,
-    AbortReason.DESCRIBE_FAILED: _EXIT_CONFIG,
-    AbortReason.WALL_CLOCK_TIMEOUT: _EXIT_CONFIG,
+    AbortReason.BUDGET_EXCEEDED: EXIT_BUDGET,
+    AbortReason.PROVIDER_UNREACHABLE: EXIT_PROVIDER,
+    AbortReason.NO_PAYLOADS: EXIT_CONFIG,
+    AbortReason.DESCRIBE_FAILED: EXIT_CONFIG,
+    AbortReason.WALL_CLOCK_TIMEOUT: EXIT_CONFIG,
 }
 
 # Verbatim (or near-verbatim) copies of the stderr lines cli.py's `scan`
@@ -194,7 +186,7 @@ _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
 # `aborted` drives a non-zero exit there; finding something is not, by
 # itself, treated as failure — see cli.py's `scan` command and
 # `test_findings_still_exit_success_at_this_layer`).
-_EXIT_INCOMPLETE_NO_ABORT: Final = _EXIT_CONFIG
+_EXIT_INCOMPLETE_NO_ABORT: Final = EXIT_CONFIG
 
 _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE: Final = (
     "error: coverage was incomplete or absent and nothing was found, but the scan "
@@ -323,7 +315,7 @@ class ScanOutcome:
             exit_code = _EXIT_INCOMPLETE_NO_ABORT
             operator_message = _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE
         else:
-            exit_code = _EXIT_SUCCESS
+            exit_code = EXIT_SUCCESS
             operator_message = None
 
         return cls(

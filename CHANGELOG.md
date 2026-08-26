@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the enum or a full key-set re-listing is reintroduced. No wire-format or CLI
   change. (#93)
 
+- **The process exit-code contract now has a single definition
+  (`mylonite.exit_codes`).** The codes were previously defined three times
+  (`cli.py`, `gate/orchestrator.py`, `scan/coverage.py` — the last a hand-kept
+  mirror), plus a fourth partial copy in `scan/ablation.py`. Every site now
+  imports from `mylonite.exit_codes`; a regression test fails if any module
+  re-defines a code as a literal. The documented codes and their values are
+  unchanged. (#94)
+
 ## [0.8.1] - 2026-08-25
 
 ### Fixed (developer experience & documentation)
