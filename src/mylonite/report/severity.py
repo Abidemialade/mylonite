@@ -7,6 +7,16 @@ GitHub code scanning, the JSON finding bundle) agrees on a finding's severity.
 
 from __future__ import annotations
 
+from mylonite.scan.weakness import WeaknessClass
+
+#: Severity partition over the weakness classes. Kept as an explicit partition so
+#: adding a class (e.g. W5) without classifying it fails
+#: ``test_weakness_single_source`` rather than silently defaulting to Medium.
+_HIGH_BASE_SEVERITY: frozenset[str] = frozenset(
+    {WeaknessClass.W2, WeaknessClass.W3, WeaknessClass.W4}
+)
+_MEDIUM_BASE_SEVERITY: frozenset[str] = frozenset({WeaknessClass.W1})
+
 
 def severity_for(
     weakness: str, effect_confirmed: str = "unprobed", *, situational: bool = False
@@ -24,8 +34,8 @@ def severity_for(
         return "Low"
     if effect_confirmed == "true":
         return "High"
-    if weakness in {"W2", "W3", "W4"}:
+    if weakness in _HIGH_BASE_SEVERITY:
         return "High"
-    if weakness == "W1":
+    if weakness in _MEDIUM_BASE_SEVERITY:
         return "Medium"
     return "Medium"

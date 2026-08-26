@@ -16,6 +16,7 @@ from mylonite._redaction import redact
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
 from mylonite.report.severity import severity_for
+from mylonite.scan.weakness import WEAKNESS_CLASSES
 from mylonite.version import __version__
 
 #: Bump on any backward-incompatible change to the finding shape.
@@ -61,9 +62,7 @@ def _finding(exploit: Any, report: Any | None, target: Any | None = None) -> dic
         "target_id": str(exploit.target_id),
         # Prefer the payload's stamped weakness (W1-W4); fall back to the
         # seed-catalogue / compliance inference for un-stamped findings.
-        "weakness_class": weakness
-        if weakness in {"W1", "W2", "W3", "W4"}
-        else weakness_class_for(exploit),
+        "weakness_class": weakness if weakness in WEAKNESS_CLASSES else weakness_class_for(exploit),
         "severity": severity_for(weakness, effect),
         # static / obfuscated / ... (attack tier or shape metadata, generic)
         "attack_shape": str(md.get("attack_shape") or md.get("attack_tier") or "static"),

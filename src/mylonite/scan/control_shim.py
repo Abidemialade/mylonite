@@ -65,6 +65,7 @@ from mylonite.scan.tool_classifier import (
     looks_like_destination,
     url_values,
 )
+from mylonite.scan.weakness import WeaknessClass
 
 logger = logging.getLogger(__name__)
 
@@ -1052,9 +1053,9 @@ def make_control(
     exported and directly constructible for a caller that wants the
     probabilistic defence-in-depth layer explicitly.
     """
-    if weakness == "W1":
+    if weakness == WeaknessClass.W1:
         return DescriptionIntegrityControl(description_pins=description_pins)
-    if weakness == "W2":
+    if weakness == WeaknessClass.W2:
         return InformationFlowControl(
             read_tool_names=read_tool_names,
             consequential_tools=consequential_tools,
@@ -1065,13 +1066,13 @@ def make_control(
             destructive_tools=destructive_tools,
             mode=mode or "block",
         )
-    if weakness == "W3":
+    if weakness == WeaknessClass.W3:
         return EgressAllowlistControl(
             egress_tools=egress_tools,
             url_param=url_param,
             allowlist=fetch_allowlist if fetch_allowlist is not None else DEFAULT_FETCH_ALLOWLIST,
         )
-    if weakness == "W4":
+    if weakness == WeaknessClass.W4:
         return ConfirmGateControl(
             consequential_tools=consequential_tools,
             approval_policy=approval_policy,

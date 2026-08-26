@@ -9,6 +9,7 @@ from typing import Any
 from mylonite.contracts._types import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.scan.seeds import SEED_CATALOGUE
+from mylonite.scan.weakness import WEAKNESS_CLASSES
 
 _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
 
@@ -46,7 +47,7 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
     JSON bundle about which weakness class the same finding belongs to.
     """
     stamped = exploit.payload.metadata.get("weakness")
-    if stamped in {"W1", "W2", "W3", "W4"}:
+    if stamped in WEAKNESS_CLASSES:
         return stamped
     if exploit.pattern_id in _PATTERN_TO_WEAKNESS:
         return _PATTERN_TO_WEAKNESS[exploit.pattern_id]

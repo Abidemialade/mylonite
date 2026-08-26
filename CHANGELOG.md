@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The W1-W4 weakness taxonomy now has a single definition
+  (`mylonite.scan.weakness.WeaknessClass`).** The four classes were previously
+  re-listed independently across seed typing, target-file validation, report
+  rendering, gate mitigation and the attack modules; those key-set duplications
+  now import a shared `WeaknessClass` (a `StrEnum`) / `WEAKNESS_CLASSES`
+  frozenset. A regression test fails if the `Weakness` type alias drifts from
+  the enum or a full key-set re-listing is reintroduced. No wire-format or CLI
+  change. (#93)
+
 ## [0.8.1] - 2026-08-25
 
 ### Fixed (developer experience & documentation)

@@ -29,8 +29,9 @@ from mylonite.contracts import (
 from mylonite.contracts.attack_module import CONTRACT_VERSION
 from mylonite.scan import seeds
 from mylonite.scan.seeds import SeedPattern
+from mylonite.scan.weakness import WeaknessClass
 
-_W1_W2 = frozenset({"W1", "W2"})
+_W1_W2 = frozenset({WeaknessClass.W1, WeaknessClass.W2})
 
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
