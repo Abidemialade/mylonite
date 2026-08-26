@@ -26,7 +26,6 @@ import logging
 import re
 import secrets
 import sys
-from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from pathlib import Path
@@ -50,7 +49,7 @@ from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
-from mylonite.scan.llm_types import ToolDescription
+from mylonite.scan.llm_types import CompletionFn, ToolDescription
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +231,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         family: str,
         scope: str | None,
         model: str = DEFAULT_MODEL,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
         controls: list[BoundaryControl] | None = None,
         launch_env: dict[str, str] | None = None,

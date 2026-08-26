@@ -97,6 +97,7 @@ from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
 from mylonite.scan.pytest_runner import run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
@@ -294,7 +295,7 @@ class DifferentialValidator(ValidatorBase):
         planner_model: str | None = None,
         customiser_model: str | None = None,
         judge_model: str | None = None,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
         metamorphic_strategies: list[str] | None = None,

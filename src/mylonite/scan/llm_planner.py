@@ -23,11 +23,11 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
 from typing import Any, Protocol
 
 from mylonite.scan._llm import _try_repair, litellm_tool_call_async
 from mylonite.scan.llm_types import (
+    CompletionFn,
     PlannerStep,
     PlannerTrace,
     ToolCall,
@@ -98,7 +98,7 @@ class LLMPlanner:
         model: str,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         iteration_cap: int = DEFAULT_ITERATION_CAP,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         completion_timeout_s: float | None = None,
     ) -> None:
         self._server = server

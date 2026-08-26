@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The LLM transport seam has a single named type
+  (`mylonite.scan.llm_types.CompletionFn` / `AsyncCompletionFn`).** The injected
+  completion callable was an anonymous `Callable[..., Any]` repeated across ~27
+  signatures in five subpackages. It is now one named, documented, greppable
+  alias (its arguments stay `**kwargs`-shaped because that mirrors litellm's own
+  `completion`/`acompletion` interface, which the call sites forward via
+  `fn(**call_kwargs)`). A regression test fails if a `completion_fn` parameter
+  reverts to a bare `Callable[...]`. No runtime change. (#95)
+
 - **The public `mylonite.contracts` facade is now complete.** `ScanReport`,
   `ScanAttempt`, `AbortReason` and `ScanAttemptOutcome` were part of the contract
   surface (published JSON schemas) but absent from `contracts.__all__`, so

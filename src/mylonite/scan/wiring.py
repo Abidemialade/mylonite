@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from itertools import count
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
 from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
@@ -16,9 +16,10 @@ from mylonite.plugins._reference.reference_target_adapter import InProcessRefere
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.engine import ScanConfig, ScanEngine
 from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.llm_types import AsyncCompletionFn
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable
+    pass
 
 
 def note_id_counter() -> Callable[[], str]:
@@ -40,7 +41,7 @@ def note_id_counter() -> Callable[[], str]:
 def build_scan(
     variant: Literal["vulnerable", "guarded"],
     *,
-    completion_fn: Callable[..., Awaitable[Any]] | None,
+    completion_fn: AsyncCompletionFn | None,
     note_id_factory: Callable[[], str] | None,
     provider: str,
     model: str,

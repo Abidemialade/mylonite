@@ -18,9 +18,8 @@ context manager guarantees subprocess cleanup.
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -50,6 +49,7 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _truncate_result,
     _user_message_for_drive,
 )
+from mylonite.scan.llm_types import CompletionFn
 
 #: Parent-environment variables a spawned MCP server may inherit. Everything
 #: else — provider API keys, GITHUB_TOKEN, cloud credentials — is withheld: we
@@ -232,7 +232,7 @@ class FilesystemMCPAdapter(MCPStdioAdapter):
         *,
         scope: str = "",
         model: str = DEFAULT_MODEL,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:
         super().__init__(
@@ -252,7 +252,7 @@ class FetchMCPAdapter(MCPStdioAdapter):
         *,
         scope: str | None = None,
         model: str = DEFAULT_MODEL,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:
         super().__init__(
@@ -277,7 +277,7 @@ class GitHubMCPAdapter(MCPStdioAdapter):
         *,
         scope: str = "",
         model: str = DEFAULT_MODEL,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:
         super().__init__(

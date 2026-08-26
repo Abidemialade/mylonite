@@ -10,9 +10,23 @@ compatibility with the existing in-tree call sites.
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+#: The LLM transport seam: a litellm-compatible completion callable injected in
+#: place of a live model call (tests pass a stub; production passes
+#: ``litellm.completion``/``acompletion``). Its arguments are untyped because that
+#: mirrors litellm's own ``**kwargs`` interface -- the call sites forward a
+#: ``dict[str, Any]`` of policy + request kwargs via ``fn(**call_kwargs)``. The
+#: value of the alias is a single named, greppable type for a seam that was an
+#: anonymous ``Callable[..., Any]`` in ~27 signatures across five subpackages.
+CompletionFn = Callable[..., Any]
+
+#: The async form of :data:`CompletionFn` (``litellm.acompletion``), for the
+#: transport paths that ``await`` the result.
+AsyncCompletionFn = Callable[..., Awaitable[Any]]
 
 
 class ToolDescription(BaseModel):
