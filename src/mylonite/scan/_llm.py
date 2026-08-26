@@ -33,7 +33,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -44,6 +44,7 @@ from pydantic import BaseModel
 
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
 from mylonite.scan.llm_policy import LLMPolicy
+from mylonite.scan.llm_types import AsyncCompletionFn, CompletionFn
 from mylonite.scan.model_ref import ModelRef
 from mylonite.scan.providers import provider_from_model
 from mylonite.scan.schema_sanitise import SchemaDialect, dialect_for, sanitise_tool_schema
@@ -658,7 +659,7 @@ def litellm_json_call(
     fallback: Mapping[str, Any],
     caller: str,
     system: str | None = None,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
     schema_model: type[BaseModel] | None = None,
     timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -715,7 +716,7 @@ async def litellm_json_call_async(
     fallback: Mapping[str, Any],
     caller: str,
     system: str | None = None,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: AsyncCompletionFn | None = None,
     schema_model: type[BaseModel] | None = None,
     timeout_s: float = DEFAULT_LLM_CALL_TIMEOUT_S,
 ) -> dict[str, Any]:
@@ -756,7 +757,7 @@ async def litellm_tool_call_async(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | None = None,
     caller: str = "planner",
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: AsyncCompletionFn | None = None,
     timeout_s: float | None = None,
 ) -> Any:
     """The planner's chokepoint (H2/T14): owns budget-counting (``_bump`` +
@@ -822,7 +823,7 @@ def litellm_text_call(
     prompt: str,
     caller: str,
     system: str | None = None,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
     timeout_s: float | None = None,
 ) -> str | None:
     """A free-text (not JSON) completion through the SAME chokepoint as

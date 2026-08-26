@@ -22,6 +22,7 @@ from mylonite.exit_codes import (
 )
 from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_pr_body
 from mylonite.scan.coverage import ScanOutcome
+from mylonite.scan.llm_types import CompletionFn
 
 
 @dataclass
@@ -57,7 +58,7 @@ def run_gate(
     open_pr: bool,
     llm_enrich: bool = False,
     mitigation_model: str = DEFAULT_MITIGATION_MODEL,
-    mitigation_completion_fn: Callable[..., Any] | None = None,
+    mitigation_completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
     target_context: Any | None = None,
 ) -> GateResult:

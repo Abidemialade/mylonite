@@ -9,14 +9,13 @@ body unchanged (caught by the ``litellm_json_call_async`` helper).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import Any
 
 from pydantic import BaseModel
 
 from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.scan._llm import fence as _fence
 from mylonite.scan._llm import litellm_json_call_async, pop_fallback_cause
+from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.seeds import SeedPattern, required_markers, resolved_tool_metadata
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ class PayloadCustomiser:
         self,
         *,
         model: str,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         purpose: str | None = None,
     ) -> None:
         self._model = model

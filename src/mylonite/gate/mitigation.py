@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import importlib.resources as _ir
-from collections.abc import Callable
 from typing import Any
 
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
+from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.weakness import WEAKNESS_CLASSES
 
@@ -149,7 +149,7 @@ def build_pr_body(
     report: ValidationReport,
     *,
     llm_enrich: bool = False,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
     model: str = DEFAULT_MITIGATION_MODEL,
     guarded_is_server_layer: bool | None = None,
@@ -309,7 +309,7 @@ def build_pr_body(
 def _llm_suggestion(
     exploit: ExploitRecord,
     *,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
     model: str = DEFAULT_MITIGATION_MODEL,
 ) -> str | None:
     """A short, app-specific remediation idea. Best-effort; labelled unverified.

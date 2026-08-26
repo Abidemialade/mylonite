@@ -56,7 +56,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +66,7 @@ from mylonite._replay import (
 from mylonite.contracts import ExploitRecord
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
+from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.wiring import build_scan, note_id_counter
 
 #: On-disk format version for a ``fixtures_dir`` sidecar (``_meta.json``). Bumped
@@ -394,7 +394,7 @@ def _run_target_scan(
     model: str,
     provider: str,
     controls: list[Any] | None,
-    completion_fn: Callable[..., Any] | None,
+    completion_fn: CompletionFn | None,
     disable_controls: tuple[str, ...] = (),
     input_frame: bool = False,
 ) -> ScanResult:
@@ -471,7 +471,7 @@ def _run_target_scan(
 async def _run_guarded_scan(
     exploit: ExploitRecord,
     *,
-    completion_fn: Callable[..., Any],
+    completion_fn: CompletionFn,
     provider: str,
     model: str,
 ) -> ScanResult:
@@ -502,7 +502,7 @@ def assert_guard_holds(
     exploit: ExploitRecord,
     *,
     fixtures_dir: str | os.PathLike[str] | None = None,
-    _completion_fn: Callable[..., Any] | None = None,
+    _completion_fn: CompletionFn | None = None,
 ) -> None:
     """Assert the GUARDED twin resists ``exploit`` — the offline regression gate.
 
@@ -598,7 +598,7 @@ def assert_target_resists(
     target_file: str | os.PathLike[str],
     model: str | None = None,
     provider: str | None = None,
-    _completion_fn: Callable[..., Any] | None = None,
+    _completion_fn: CompletionFn | None = None,
 ) -> None:
     """Assert the REAL declared target still RESISTS ``exploit`` — fails on regression.
 
@@ -673,7 +673,7 @@ def assert_control_holds(
     control: str,
     model: str | None = None,
     provider: str | None = None,
-    _completion_fn: Callable[..., Any] | None = None,
+    _completion_fn: CompletionFn | None = None,
 ) -> None:
     """Assert a boundary CONTROL is load-bearing for ``exploit`` on the real target.
 

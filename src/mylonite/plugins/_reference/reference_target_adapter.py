@@ -47,7 +47,7 @@ from mylonite.contracts import (
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
-from mylonite.scan.llm_types import ToolDescription, ToolResult
+from mylonite.scan.llm_types import CompletionFn, ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class _InProcessAttackSession:
         *,
         variant: Variant,
         model: str,
-        completion_fn: Callable[..., Any] | None,
+        completion_fn: CompletionFn | None,
     ) -> None:
         from mcp_kitchen_sink._store import NoteStore
 
@@ -207,7 +207,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         *,
         variant: Variant = "vulnerable",
         model: str = DEFAULT_MODEL,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         note_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self._variant: Variant = variant

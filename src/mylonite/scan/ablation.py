@@ -30,6 +30,7 @@ from typing import Any, Final, Literal
 from mylonite._concurrency import gather_bounded
 from mylonite.exit_codes import EXIT_PROVIDER
 from mylonite.scan.coverage import ScanOutcome
+from mylonite.scan.llm_types import CompletionFn
 
 #: One representative kitchen-sink seed per weakness class. Reused on a custom
 #: target via ``pattern_id_filter`` (the same mechanism the custom differential
@@ -432,7 +433,7 @@ def scan_target_fires(
     model: str,
     customiser_model: str,
     judge_model: str,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
     randomize_exfil: bool = False,
     on_outcome: Callable[[ScanOutcome], None] | None = None,
 ) -> FireOutcome:

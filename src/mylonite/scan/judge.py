@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -24,6 +22,7 @@ from mylonite.scan._llm import (
 )
 from mylonite.scan._llm import fence as _fence
 from mylonite.scan._types import Verdict
+from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.predicates import PredicateNotFound, lookup_predicate
 
 logger = logging.getLogger(__name__)
@@ -179,7 +178,7 @@ class SuccessJudge:
         self,
         *,
         model: str,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         confidence_floor: float = _LLM_JUDGE_CONFIDENCE_FLOOR,
         llm_fallback: bool = True,
     ) -> None:

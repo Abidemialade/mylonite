@@ -20,7 +20,6 @@ probe a black box can't provide.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -28,6 +27,7 @@ import httpx
 from mylonite.contracts import AdapterResponse, Payload, TargetDescriptor
 from mylonite.contracts.target_adapter import AsyncTargetAdapterBase
 from mylonite.plugins._mcp import target_registry
+from mylonite.scan.llm_types import CompletionFn
 
 #: Cap on a black-box HTTP agent's reply body (DCR-0013). An agent's reply is
 #: prose, not a bulk transfer; a misconfigured or malicious endpoint returning
@@ -289,7 +289,7 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         # replayed differential and misspells a kwarg here now fails loudly
         # instead of the "offline" run silently doing something else.
         model: str | None = None,
-        completion_fn: Callable[..., Any] | None = None,
+        completion_fn: CompletionFn | None = None,
         planner_timeout_s: float | None = None,
         controls: list[Any] | None = None,
         launch_env: dict[str, str] | None = None,

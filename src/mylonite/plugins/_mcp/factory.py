@@ -34,13 +34,13 @@ should prefer this one.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from mylonite.contracts.target_adapter import AsyncTargetAdapterBase
 from mylonite.plugins._mcp import target_registry
 from mylonite.scan.control_shim import BoundaryControl
+from mylonite.scan.llm_types import CompletionFn
 
 
 def build_mcp_adapter(*, family: str, scope: str | None, **kwargs: Any) -> AsyncTargetAdapterBase:
@@ -112,7 +112,7 @@ def build_adapter_for_spec(
     scope: str | None,
     model: str,
     intent: LaunchIntent | None = None,
-    completion_fn: Callable[..., Any] | None = None,
+    completion_fn: CompletionFn | None = None,
 ) -> AsyncTargetAdapterBase:
     """Build the transport-matched adapter for an already-resolved ``spec``.
 
