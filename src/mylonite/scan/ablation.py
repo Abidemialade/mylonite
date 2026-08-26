@@ -467,16 +467,9 @@ def scan_target_fires(
     directly, so it's safe to call from the worker thread each scoped scan
     runs on (see ``_run_pair``/``_run_triple``).
     """
-    from mylonite.plugins.registry import discover
-    from mylonite.scan.customiser import PayloadCustomiser
-    from mylonite.scan.engine import ScanConfig, ScanEngine
-    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.assembly import build_scan_engine
+    from mylonite.scan.engine import ScanConfig
 
-    modules = [
-        m
-        for m in discover("mylonite.attack_modules")
-        if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
-    ]
     config = ScanConfig(
         target_id="mcp:custom",
         provider=provider,
@@ -487,12 +480,12 @@ def scan_target_fires(
         pattern_id_filter=pattern_id,
         randomize_exfil=randomize_exfil,
     )
-    engine = ScanEngine(
-        config=config,
-        adapter=adapter,
-        attack_modules=modules,
-        customiser=PayloadCustomiser(model=customiser_model, completion_fn=completion_fn),
-        judge=SuccessJudge(model=judge_model, completion_fn=completion_fn),
+    engine = build_scan_engine(
+        config,
+        adapter,
+        completion_fn=completion_fn,
+        customiser_model=customiser_model,
+        judge_model=judge_model,
     )
     result = asyncio.run(engine.run())
     if result.exploits:

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The scan-pipeline composition lives in one place
+  (`mylonite.scan.assembly.build_scan_engine`).** The assembly — discover attack
+  modules, filter to the supported families, build a `ScanEngine` with a
+  `PayloadCustomiser` and a `SuccessJudge` — was duplicated across the `scan`
+  command, the gate, the custom-target re-drive, ablation and the emitted-test
+  runtime, and the attack-family allowlist was spelled five times. All six sites
+  now route through one builder, and the families are named once in
+  `ATTACK_FAMILIES`. A regression test fails if a `ScanEngine` is constructed, or
+  the allowlist re-spelled, anywhere else in `src/`. No behaviour change. (#92)
+
 - **The LLM chokepoint has a public name and is structurally enforced.** Every
   model call routes through the LiteLLM transport wrapper that owns call-budget
   counting and the active policy, but that wrapper lived only in the private

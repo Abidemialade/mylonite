@@ -421,10 +421,8 @@ def _run_target_scan(
     which a hardcoded ``MCPStdioAdapter`` would silently mis-drive.
     """
     from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
-    from mylonite.plugins.registry import discover
-    from mylonite.scan.customiser import PayloadCustomiser
-    from mylonite.scan.engine import ScanConfig, ScanEngine
-    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.assembly import build_scan_engine
+    from mylonite.scan.engine import ScanConfig
 
     # DCR-0002: every discovered attack module is passed through, not just the
     # two bundled families — this re-drive is scoped to ONE already-known
@@ -439,7 +437,6 @@ def _run_target_scan(
     # replay/fixture problem" rather than the real cause. `discover()` already
     # instantiates every registered module regardless of any filtering
     # applied afterwards, so passing them all through costs nothing extra.
-    modules = discover("mylonite.attack_modules")
     adapter = build_adapter_for_spec(
         spec,
         scope=scope,
@@ -458,12 +455,10 @@ def _run_target_scan(
         max_concurrent=1,
         pattern_id_filter=pattern_id,
     )
-    engine = ScanEngine(
-        config=config,
-        adapter=adapter,
-        attack_modules=modules,
-        customiser=PayloadCustomiser(model=model, completion_fn=completion_fn),
-        judge=SuccessJudge(model=model, completion_fn=completion_fn),
+    # restrict_to_families=False: pass every discovered attack module through (see
+    # the DCR-0002 note above), not just the two bundled families.
+    engine = build_scan_engine(
+        config, adapter, completion_fn=completion_fn, restrict_to_families=False
     )
     return asyncio.run(engine.run())
 

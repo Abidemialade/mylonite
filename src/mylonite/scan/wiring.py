@@ -13,13 +13,12 @@ from typing import TYPE_CHECKING, Literal
 from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
 from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan.customiser import PayloadCustomiser
-from mylonite.scan.engine import ScanConfig, ScanEngine
-from mylonite.scan.judge import SuccessJudge
+from mylonite.scan.assembly import build_scan_engine
+from mylonite.scan.engine import ScanConfig
 from mylonite.scan.llm_types import AsyncCompletionFn
 
 if TYPE_CHECKING:
-    pass
+    from mylonite.scan.engine import ScanEngine
 
 
 def note_id_counter() -> Callable[[], str]:
@@ -81,10 +80,6 @@ def build_scan(
         completion_fn=completion_fn,
         note_id_factory=note_id_factory,
     )
-    customiser = PayloadCustomiser(model=resolved_customiser, completion_fn=completion_fn)
-    judge = SuccessJudge(model=resolved_judge, completion_fn=completion_fn, llm_fallback=llm_assist)
-    prompt_injection = PromptInjectionAttackModule()
-    excessive_agency = ExcessiveAgencyAttackModule()
     config = ScanConfig(
         target_id=f"reference:{variant}",
         provider=provider,
@@ -97,12 +92,17 @@ def build_scan(
         pattern_id_filter=pattern_id_filter,
         customise=llm_assist,
     )
-    return ScanEngine(
-        config=config,
-        adapter=adapter,
-        attack_modules=[prompt_injection, excessive_agency],
-        customiser=customiser,
-        judge=judge,
+    # Delegate engine assembly to the single builder, passing the reference
+    # attack modules explicitly (deterministic — no entry-point discovery) so
+    # the demo/replay wiring stays reproducible.
+    return build_scan_engine(
+        config,
+        adapter,
+        completion_fn=completion_fn,
+        customiser_model=resolved_customiser,
+        judge_model=resolved_judge,
+        llm_fallback=llm_assist,
+        attack_modules=[PromptInjectionAttackModule(), ExcessiveAgencyAttackModule()],
     )
 
 

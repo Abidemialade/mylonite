@@ -47,6 +47,7 @@ from mylonite.exit_codes import (
     EXIT_SUCCESS,
 )
 from mylonite.layout import Layout, resolve_layout
+from mylonite.scan.assembly import ATTACK_FAMILIES, build_scan_engine
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import (
     _classify_tools,
@@ -86,8 +87,6 @@ _console = Console()
 
 # Exit codes: defined once in mylonite.exit_codes (imported at the top of this
 # module and re-exported), so `from mylonite.cli import EXIT_SUCCESS` still works.
-
-_V0_2_ATTACK_FAMILIES = frozenset({"prompt-injection-family", "excessive-agency-family"})
 
 #: The built-in --max-llm-calls default. A Typer option default of ``50`` is
 #: indistinguishable from an explicit ``--max-llm-calls 50`` — comparing the
@@ -1163,9 +1162,7 @@ def scan(
         return
 
     from mylonite.plugins.registry import discover
-    from mylonite.scan.customiser import PayloadCustomiser
-    from mylonite.scan.engine import ScanConfig, ScanEngine
-    from mylonite.scan.judge import SuccessJudge
+    from mylonite.scan.engine import ScanConfig
 
     # A named positional target (e.g. 'reference:vulnerable', 'mcp:filesystem')
     # combined with --target-file is never meaningful — --target-file already
@@ -1365,11 +1362,10 @@ def scan(
     # v0.2 attack modules: filter to the real prompt-injection family. The
     # reference_example stub is shipped for plugin authors but isn't useful
     # for a real scan.
-    attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
+    attack_modules = [m for m in all_modules if m.attack_metadata().id in ATTACK_FAMILIES]
     if not attack_modules:
         echo_err(
-            "no usable attack modules discovered "
-            "(looking for 'prompt-injection-family' or 'excessive-agency-family')"
+            f"no usable attack modules discovered (looking for one of {sorted(ATTACK_FAMILIES)})"
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
@@ -1387,9 +1383,6 @@ def scan(
             effective_judge_model,
             provider=provider,
         )
-
-    customiser = PayloadCustomiser(model=effective_customiser_model, purpose=effective_purpose)
-    judge = SuccessJudge(model=effective_judge_model)
 
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
     # finding proves the target leaks to ANY attacker address, not the one demo literal
@@ -1414,12 +1407,13 @@ def scan(
         randomize_exfil=randomize_exfil,
     )
 
-    engine = ScanEngine(
-        config=config,
-        adapter=adapter,
+    engine = build_scan_engine(
+        config,
+        adapter,
+        customiser_model=effective_customiser_model,
+        judge_model=effective_judge_model,
+        purpose=effective_purpose,
         attack_modules=attack_modules,
-        customiser=customiser,
-        judge=judge,
     )
 
     from mylonite.scan._llm import llm_scope
@@ -4254,9 +4248,7 @@ def gate(
         from mylonite.plugins.registry import discover
         from mylonite.scan._llm import llm_scope
         from mylonite.scan.coverage import ScanOutcome
-        from mylonite.scan.customiser import PayloadCustomiser
-        from mylonite.scan.engine import ScanConfig, ScanEngine
-        from mylonite.scan.judge import SuccessJudge
+        from mylonite.scan.engine import ScanConfig
 
         try:
             all_modules: list[Any] = discover("mylonite.attack_modules")
@@ -4264,11 +4256,11 @@ def gate(
             echo_exc("plugin discovery failed", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
-        attack_modules = [m for m in all_modules if m.attack_metadata().id in _V0_2_ATTACK_FAMILIES]
+        attack_modules = [m for m in all_modules if m.attack_metadata().id in ATTACK_FAMILIES]
         if not attack_modules:
             echo_err(
                 "no usable attack modules discovered "
-                "(looking for 'prompt-injection-family' or 'excessive-agency-family')"
+                f"(looking for one of {sorted(ATTACK_FAMILIES)})"
             )
             raise typer.Exit(code=EXIT_CONFIG)
 
@@ -4301,14 +4293,13 @@ def gate(
             judge_model=effective_judge_model if judge_model else None,
             max_llm_calls=max_llm_calls,
         )
-        engine = ScanEngine(
-            config=config,
-            adapter=adapter,
+        engine = build_scan_engine(
+            config,
+            adapter,
+            customiser_model=effective_customiser_model,
+            judge_model=effective_judge_model,
+            purpose=purpose or (tf.purpose if tf else None),
             attack_modules=attack_modules,
-            customiser=PayloadCustomiser(
-                model=effective_customiser_model, purpose=purpose or (tf.purpose if tf else None)
-            ),
-            judge=SuccessJudge(model=effective_judge_model),
         )
         with llm_scope(policy=effective_policy):
             result = asyncio.run(engine.run())
