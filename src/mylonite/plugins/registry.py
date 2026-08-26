@@ -111,7 +111,11 @@ def discover(group: PluginGroup) -> list[Any]:
         cls = ep.load()
         try:
             instance = cls()
-        except Exception:
+        except TypeError:
+            # A missing required __init__ argument is the precise no-arg-contract
+            # violation. Catch only TypeError so a genuine bug in a plugin's
+            # __init__ (NameError, a config-load failure, ...) still surfaces
+            # loudly instead of being silently skipped.
             logger.warning(
                 "skipping plugin %r in group %s: not instantiable with no arguments "
                 "(discovery requires config to flow via the contract's methods, not "
