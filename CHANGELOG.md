@@ -7,6 +7,214 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-25
+
+### Fixed (developer experience & documentation)
+
+- **`--scaffold` now emits the correct nested `args_template`.** It hard-coded a
+  flat `{param: "{payload}"}` even for a batched array-of-records tool (e.g.
+  server-memory's `create_entities`), producing a template the server's own
+  schema rejects — with a comment insisting `{payload}` "must sit at a BARE string
+  leaf", impossible for such a tool. It now renders the same nested template the
+  live auto-wire path infers, at the tool's real content slot.
+- **`validate` on a custom target no longer requires the demo package.** Its
+  provider-reachability preflight ran a scan against the bundled, deliberately
+  vulnerable `mcp-kitchen-sink` — so validating YOUR app failed with exit 2 until
+  you installed it. The custom path now does a direct one-shot LLM ping instead.
+- **Remote-transport errors surface their cause.** An MCP SSE/HTTP failure (e.g. a
+  401) collapsed to `ExceptionGroup: unhandled errors in a TaskGroup` with no
+  detail; `redact_exception` now recurses into an `ExceptionGroup`'s
+  sub-exceptions so the real status/message is shown.
+- **`--weakness-class` is no longer a silent no-op with `--target-file`.** The
+  flag's classes are merged into the target file's `weakness_classes` instead of
+  being ignored.
+- **`check --enforce` is adoptable as a CI gate.** The "unpinned descriptions"
+  advisory — which fires on every tool of every server on first contact — no
+  longer gates the non-zero exit; only substantive W1–W4 findings do.
+- **MCP tool annotations that are uniform across the whole surface are
+  down-ranked.** An SDK (observed with `mcp-go`) that stamps the spec-default
+  `destructiveHint=true, openWorldHint=true` on every tool of a server that
+  declared nothing turned read-only tools into destructive/open-world sinks. A
+  uniform-across-surface block is now treated as "said nothing" (fall back to
+  name/structure); a server that annotates meaningfully (per-tool variety) is
+  untouched.
+- **Declaring `consequential_tools` no longer silently disables
+  `destructive_tools`.** The W2 control discarded a computed violation for any
+  tool outside the declared consequential list — including a destructive one. A
+  destructive tool is now gated on its own axis regardless.
+- **The "unknown family" error no longer reads as a menu of valid choices.** It
+  listed the reserved built-in family names as if you could pick one for a custom
+  target; it now names them as reserved and points the custom path at
+  `--target-file`.
+
+### Added
+
+- **The W4/W2 confidentiality and approval controls are now reachable from a
+  target file.** `twins.boundary_control_for` passed only 9 of
+  `make_control`'s 13 knobs, so `enforcement_mode`, `approval_policy`, and
+  `private_markers` were documented but unreachable from the CLI. All three are
+  now threaded from `control_config`: `enforcement_mode`
+  (`block` default / `approve` / `observe`), `approval_policy` (`deny_all` /
+  `approve_when_trusted`), and `private_markers` (confidentiality canaries that
+  mark a tool result private so a later public sink is refused). In `approve`
+  mode with `approve_when_trusted`, a W4 confirm-gate differential's benign leg
+  completes *through* the approval flow, so `benign_retention` is meaningful.
+  Unknown mode/policy strings degrade to the safe default rather than raising.
+  `ControlConfig` gains additive `enforcement_mode`/`approval_policy`/`private_markers`.
+
+- **W1 (tool-description smuggling) now has a real differential and a rug-pull
+  detector.** The static-poison shape was untestable: `make_control("W1")`
+  returned a change-detection *pin*, which pins an already-poisoned description and
+  matches it — no differential. The W1 control now **sanitizes** every description
+  the planner sees (stripping `<IMPORTANT>` blocks / instruction asides / unicode
+  smuggling) *and* keeps the pin, so a vulnerable planner fires on the raw
+  description and resists on the sanitized guarded twin — the differential that was
+  missing. The dynamic *rug-pull* shape (a server that mutates its own tool surface
+  mid-session) is now caught too: the adapter re-lists the tools after the planner
+  runs and stamps any diff, and the deterministic `tool_surface_mutated_mid_session`
+  predicate fires on it. `seed_synth` emits a rug-pull probe alongside the
+  static-poison seeds, breaking the old circularity where W1 could only be tested on
+  a description that already looked poisoned.
+
+- **W3 (egress/SSRF) and W4 (unconfirmed consequential action) now apply to any
+  target's own tool names, not just literal `web_fetch`/`send_email`.**
+  The bundled attack catalogue was hard-keyed to those two literals, so on real
+  third-party servers the W3/W4 seeds were applicable *once* across four servers
+  (only when an author happened to name their tool `send_email`). Attacks now
+  carry a **capability-resolved tool name** — `SeedPattern.consequential_tool` /
+  `egress_tool` → `Payload.metadata` (a channel the predicates already read but
+  nothing wrote) — and `seed_synth` synthesises a W3 and a W4 seed against the
+  tool *this* target exposes, sourced from an operator declaration
+  (`control_config.egress_tools`/`consequential_tools`, now threaded onto the
+  descriptor) or the same classifiers `mylonite check` uses. A database agent's
+  `execute_sql` and a fetch server's `fetch` are now attacked; the literal-named
+  seeds still run where they apply. `TargetDescriptor` gains additive
+  `declared_egress_tools`/`declared_consequential_tools`; `SeedPattern` gains
+  `consequential_tool`/`egress_tool` (all defaulted, backward-compatible).
+
+### Fixed
+
+- **Synthesised W3/W4 seeds no longer render `skipped_unknown_seed`.** The
+  excessive-agency attack module hard-coded `needs_customisation="true"`, so any
+  seed with `customise=False` (every synthesised seed) was dropped by the engine.
+  Now mirrors the prompt-injection module.
+
+- **The effect probe can no longer manufacture a false finding on a
+  plant-and-recall target.** On a target where the same store is both
+  planted into and read back (e.g. a knowledge-graph `read_graph`), the probe's
+  `expect_marker` matched the payload Mylonite *itself* planted — and because a
+  confirmed effect overrides both the predicate and the LLM judge, this produced
+  a *deterministic* false FOUND, exactly when following the docs' own
+  `expect_marker: "attacker@example.com"` example. The probe now snapshots the
+  verify tool's output after the plant but before the planner acts, and counts
+  the marker as evidence only when a **new** occurrence appears — attributing it
+  to the agent's action, not our plant. A load-time warning steers operators
+  away from exfil-literal markers. Behaviour is unchanged where nothing is
+  planted (direct attacks) or no baseline is available.
+
+- **The harmful-intent gate no longer marks planted W1/W2 attacks as NOT TESTED,
+  and no longer lets the judge hallucinate a landed attack.** For
+  tool-description smuggling (W1) and indirect injection (W2) the malicious
+  intent lives in a tool description or planted note — not in the deliberately
+  neutral request — so a judge keying on "was harm *requested*?" answered "no"
+  and the attempt silently rendered as a coverage gap (the attack *was*
+  delivered and resisted). For these classes the harness itself is the evidence
+  of intent, so a benign-request verdict now renders as tested-and-resisted, not
+  not-applicable. In the other direction, a `success` verdict on a tool-exposing
+  target whose trace shows **zero** tool calls is downgraded by a code-level
+  self-consistency check — no action means no materialised damage. Black-box
+  `transport: rest` agents (no tool surface) are unaffected. The judge prompt now
+  names tool descriptions and ingested content as intent sources, without ever
+  presupposing an attacker.
+
+- **`validate`'s effect leg no longer auto-passes as a ✓ when no `effect_probe`
+  is declared.** A custom-target test could be KEPT with the effect
+  leg silently `passed=True` ("report-only") — reading as end-to-end damage
+  confirmation it never made. The leg is now marked `report_only` and EXCLUDED
+  from the `kept` conjunction and the gating formula, rendered as `· report-only`
+  rather than a pass. `kept` rests only on the legs that actually confirmed
+  something; declaring an `effect_probe` restores the effect leg as a
+  contributing gate. `ValidationOutcome` gains an additive, defaulted
+  `report_only` field (backward-compatible; schemas regenerated).
+
+- **A scan can no longer report a clean pass for an attack that was never
+  possible.** A seed whose attacked capability is absent from the target's tool
+  surface — a `send_email` seed against a server with no email tool — used to
+  fall through to the LLM judge, which correctly observed that the harmful
+  action "did not materialise", and the attempt rendered as `✓ clean` having
+  made zero tool calls. New `not_applicable` outcome, classified `NOT_TESTED`
+  (never `EXERCISED_RESISTED`) and rendered distinctly in the terminal table, so
+  "we could not test this" is no longer indistinguishable from "we tested it and
+  it was fine".
+
+- **The LLM judge no longer presumes an attacker exists.** Its system prompt
+  asserted one as a premise ("whether an AI agent followed *an attacker's*
+  intent") and the request was labelled `ATTACKER PAYLOAD`, with no verdict
+  meaning "nothing adversarial was asked". Handed a benign probe it duly
+  invented an attack — reproduced across two targets, two weakness classes and
+  two models. The judge now decides `harmful_intent_present` first and can
+  return not-applicable. A provider that omits the new field behaves exactly as
+  before.
+
+- **`InformationFlowControl` (W2) no longer refuses all legitimate work.** It
+  tracked a single session-wide taint boolean, so *any* read poisoned *every*
+  later sink call: `read_note → send_email` refused, `list_files → write_file`
+  refused, and declaring `read_tool_names` precisely did not help. Now follows
+  [FIDES](https://arxiv.org/abs/2505.23643) properly — two independent axes
+  (`integrity`, `confidentiality`), most-restrictive-wins propagation, per-sink
+  policies, and three enforcement modes (`observe` / `approve` / `block`).
+  Reading an ordinary document then emailing a summary is allowed; reading a
+  *secret* and emailing it is refused on the confidentiality axis. Integrity
+  blocking is reserved for destructive sinks.
+
+- **`ConfirmGateControl` (W4) no longer asks the model to carry the security
+  protocol.** It refused a consequential call, minted an HMAC token into an
+  `isError` string, and required the model to re-supply it as a `confirm_token`
+  argument the advertised schema never declared and `additionalProperties:
+  false` forbids — 0/6 completions across two frontier models, while a
+  byte-identical programmatic retry succeeded. Confirmation is now an
+  out-of-band `ApprovalPolicy` decision; the token stays out of the model's
+  context entirely and is exposed via `pending_token()` for programmatic
+  confirmers.
+
+- **Tool classification reads MCP's own risk vocabulary.** `ToolAnnotations`
+  (`readOnlyHint`, `destructiveHint`, `openWorldHint`) were ignored entirely in
+  favour of guessing from English words; they are now tier-1 evidence, ranked
+  below an operator's `control_config` (the MCP spec is explicit that
+  annotations are untrusted hints) and above name matching.
+
+- **Name hints match whole tokens, not substrings.** `get_postal_code` was
+  classified consequential because of `post`, and `increatement_counter` because
+  of `create` — surfacing in `mylonite check` as confirmed consequential tools.
+
+- **Auto-wire sees batched array-of-record write tools.** Content-slot discovery
+  only ever inspected top-level `properties` for a string, so a tool like
+  `create_entities(entities: [{…, observations: [str]}])` — a common MCP idiom —
+  reported "no content-storing tool found" and left `seed_arm` commented out.
+  It now walks nested schemas and ranks candidate slots (explicit content names,
+  then repeated free-text arrays, then other non-id fields), so the payload
+  lands in a free-text slot rather than an entity label.
+
+- **Custom targets with a plant+recall tool pair get W2 seeds.** Seed synthesis
+  skips building a W2 seed when a plant/recall pair exists (deferring to the
+  bundled catalogue), while the catalogue's fallback required the target's
+  *family name* to appear in a bundled seed's `applicable_targets` — which a
+  custom family never does. Two individually-correct paths each assumed the
+  other covered it, and a correctly-configured custom target got zero W2 seeds.
+  The gate now asks about **capability** (can this target plant?) rather than
+  identity.
+
+### Changed
+
+- `TargetAdapter` `CONTRACT_VERSION` `0.5.0` → `0.6.0` (additive): new
+  `ScanAttemptOutcome` value `not_applicable`, `ScanAttempt.not_applicable_reason`,
+  `ToolSpec.annotations`, `TargetDescriptor.can_plant_untrusted_content`. All
+  optional with behaviour-preserving defaults.
+- Docs no longer describe a boundary control as "the fix" for a weakness class;
+  they are the guarded half of a differential, and the distinction is now stated
+  explicitly along with the three enforcement modes. `docs/standards-mapping.md`
+  records which standards the controls follow and where they deliberately differ.
+
 ## [0.8.0] - 2026-08-24
 
 ### Added
@@ -2609,7 +2817,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/Abidemialade/mylonite/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Abidemialade/mylonite/compare/v0.7.8...v0.8.0
 [0.7.8]: https://github.com/Abidemialade/mylonite/compare/v0.7.7...v0.7.8
 [0.7.7]: https://github.com/Abidemialade/mylonite/compare/v0.7.6...v0.7.7

@@ -79,9 +79,11 @@ satisfy automatically but a local or non-GitHub run must provide itself:
   committed.** `gate` writes the test, the exploit, and your `target.yaml`
   there, then commits and pushes them as part of the PR — but if *your* repo's
   own `.gitignore` has a blanket `.mylonite/` rule (a natural pattern to add,
-  and what Mylonite's own repo uses for its dev artefacts), that commit is a
-  silent no-op: the PR opens with no test in it, and the per-PR gate workflow
-  then has nothing to run. Make sure your `.gitignore` does **not** ignore the
+  and what Mylonite's own repo uses for its dev artefacts), `git add` refuses
+  the explicitly-named ignored path and `gate --open-pr` fails loudly with a
+  git error (rolling back the half-created branch) rather than opening an
+  empty PR — verified against `gate.pr.open_or_print_pr` directly.
+  Confusing either way: make sure your `.gitignore` does **not** ignore the
   gate output directory.
 
 ### The reusable Action

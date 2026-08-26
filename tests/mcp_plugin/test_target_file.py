@@ -232,14 +232,31 @@ def test_effect_probe_warning_for_side_effecting_weakness_without_probe() -> Non
 
 
 def test_effect_probe_warning_silent_when_probe_declared() -> None:
-    """With an effect_probe declared, the effect is confirmable — no warning."""
+    """With an effect_probe declared, the effect is confirmable — no missing-probe
+    warning. Uses a marker the agent must PRODUCE (not one Mylonite plants), so the
+    exfil-literal collision advisory stays silent too."""
     from mylonite.plugins._mcp.target_registry import EffectProbeSpec
 
     tf = _tf(
         weakness_classes=["W4"],
-        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="attacker@example.com"),
+        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="forwarded-by-agent"),
     )
     assert effect_probe_warnings(tf) == []
+
+
+def test_effect_probe_warns_when_marker_is_a_planted_exfil_literal() -> None:
+    """An expect_marker containing an exfil literal Mylonite itself plants is a
+    collision hazard on a plant-and-recall target — warn, and name the marker."""
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    tf = _tf(
+        weakness_classes=["W4"],
+        effect_probe=EffectProbeSpec(
+            verify_tool="read_graph", expect_marker="attacker@example.com"
+        ),
+    )
+    warnings = effect_probe_warnings(tf)
+    assert any("attacker@example.com" in w and "reflects" in w for w in warnings), warnings
 
 
 def test_effect_probe_warning_silent_for_non_effecting_weakness() -> None:

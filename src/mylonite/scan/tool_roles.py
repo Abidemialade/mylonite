@@ -34,6 +34,13 @@ class _ToolRoles(NamedTuple):
     retrieve_tool: str | None  # surfaces stored content WITHOUT needing an id (the recall path)
     verify_tool: str | None  # reports a side effect (good effect_probe verify_tool)
     sink_tools: list[str]  # consequential-action tools (W4 candidates)
+    #: A ready-to-use ``args_template`` for ``seed_arm_tool`` with ``{payload}``
+    #: at the content slot — nested when the slot is nested. ``None`` when no
+    #: slot was found. ``seed_arm_param`` stays the TOP-LEVEL property name (so
+    #: existing callers and printed hints are unchanged); this carries the full
+    #: shape for the batched-record tools that a flat ``{param: "{payload}"}``
+    #: cannot express.
+    seed_arm_args_template: dict[str, Any] | None = None
 
 
 def _words(spec: str) -> tuple[str, ...]:
@@ -135,6 +142,123 @@ def _genuine_content_param(tool: Any) -> str | None:
     return non_id[0] if non_id else None
 
 
+#: Classifier/label fields — they name or categorise a record rather than carry
+#: its free text. Tried LAST as a content slot. Without this, server-memory's
+#: ``{name, entityType, observations[]}`` yielded ``name`` (an entity label,
+#: usually short and often echoed back verbatim) over ``observations`` (the
+#: free-text body an indirect-injection payload actually needs to ride in).
+_LABEL_PARAM_HINTS = _words("name type kind status state role label slug")
+
+
+def _rank_content_fields(sub: dict[str, Any]) -> list[str]:
+    """Object fields ordered by how likely each is to hold free text.
+
+    1. An explicitly content-shaped NAME (``body``/``content``/``text``/…).
+    2. An ARRAY-of-strings — a repeated free-text field (``observations``,
+       ``contents``, ``messages``) is content by shape even when its name
+       matches no hint. This is the tier that makes batched-record schemas work
+       without hardcoding any particular server's vocabulary.
+    3. Any other non-id, non-label field.
+    4. Label/classifier fields, last — better than failing, but a poor slot.
+
+    Id-shaped fields are excluded entirely: a handle is not a content slot.
+    """
+
+    def is_string_array(spec: Any) -> bool:
+        return (
+            isinstance(spec, dict)
+            and spec.get("type") == "array"
+            and _is_string_param(spec.get("items"))
+        )
+
+    candidates = [n for n in sub if not _hints_match(n, _ID_PARAM_HINTS)]
+    tier1 = [n for n in candidates if _hints_match(n, _CONTENT_PARAM_HINTS)]
+    tier2 = [n for n in candidates if n not in tier1 and is_string_array(sub[n])]
+    rest = [n for n in candidates if n not in tier1 and n not in tier2]
+    tier3 = [n for n in rest if not _hints_match(n, _LABEL_PARAM_HINTS)]
+    tier4 = [n for n in rest if n not in tier3]
+    return [*tier1, *tier2, *tier3, *tier4]
+
+
+#: How deep to descend looking for a content slot. Real MCP batch-write schemas
+#: nest at most `param -> items -> field` (2) or `param -> items -> field ->
+#: items` (3); the cap stops a pathological/recursive schema from spinning.
+_MAX_CONTENT_DEPTH = 4
+
+
+def _content_slot_template(tool: Any) -> tuple[str, dict[str, Any]] | None:
+    """A ready ``args_template`` with ``{payload}`` at this tool's content slot.
+
+    Returns ``(top_level_param_name, args_template)`` or ``None``.
+
+    ``_content_param`` only ever inspected TOP-LEVEL ``properties`` for a
+    ``type == "string"``, so it was structurally blind to the batched
+    array-of-records write that is a common MCP idiom — e.g. server-memory's
+    ``create_entities(entities: [{name, entityType, observations: [str]}])``,
+    whose only top-level property is an array. Auto-wire reported "no obvious
+    content-storing tool found" for the entire class of such tools.
+
+    This walks the schema instead, and because ``args_template`` already
+    supports nested literals (docs/target-file.md: ``{payload}`` at a bare
+    string leaf), the nested slot needs no new plumbing to be usable — a minimal
+    envelope is synthesised around it. Objects fill only what they must: any
+    sibling REQUIRED string gets a neutral placeholder so the call validates,
+    while optional siblings are left out.
+    """
+    props = _schema_props(tool)
+    if not props:
+        return None
+    # Prefer a flat string param when one exists — the higher-fidelity shape,
+    # and what every existing target file and test already expects.
+    flat = _genuine_content_param(tool)
+    if flat is not None:
+        return flat, {flat: "{payload}"}
+    # Same ranking as nested objects, so a top-level id/label param is excluded
+    # here too. Without this the fallback happily planted the payload into
+    # `create_link(target_id=...)` — an id is a handle, not a content slot, the
+    # exact trap `_genuine_content_param` exists to avoid.
+    for top_name in _rank_content_fields(props):
+        built = _build_payload_value(props[top_name], depth=0)
+        if built is not None:
+            return top_name, {top_name: built}
+    return None
+
+
+def _build_payload_value(spec: Any, *, depth: int) -> Any | None:
+    """A minimal literal for ``spec`` containing ``{payload}``, or None.
+
+    ``None`` means "no free-text slot reachable inside this subschema" — never
+    an empty/placeholder value, so a caller can distinguish "nothing here" from
+    "here, and it is blank".
+    """
+    if depth > _MAX_CONTENT_DEPTH or not isinstance(spec, dict):
+        return None
+    kind = spec.get("type")
+    if kind == "string":
+        # An id-shaped leaf is a handle, not a free-text slot (DCR-0015).
+        return "{payload}"
+    if kind == "array":
+        inner = _build_payload_value(spec.get("items"), depth=depth + 1)
+        return None if inner is None else [inner]
+    if kind == "object" or "properties" in spec:
+        sub = spec.get("properties")
+        if not isinstance(sub, dict) or not sub:
+            return None
+        required = spec.get("required")
+        required_names = {str(r) for r in required} if isinstance(required, list) else set()
+        for field in _rank_content_fields(sub):
+            built = _build_payload_value(sub[field], depth=depth + 1)
+            if built is None:
+                continue
+            obj: dict[str, Any] = {field: built}
+            # Fill sibling REQUIRED strings so the synthesised call validates.
+            for other in required_names - {field}:
+                if _is_string_param(sub.get(other)):
+                    obj[other] = "mylonite-probe"
+            return obj
+    return None
+
+
 def _id_param(tool: Any) -> str | None:
     """The id-shaped param name of ``tool`` (required params first).
 
@@ -169,6 +293,7 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
     """
     seed_arm_tool: str | None = None
     seed_arm_param: str | None = None
+    seed_arm_args_template: dict[str, Any] | None = None
     retrieve_tool: str | None = None
     verify_tool: str | None = None
     sink_tools: list[str] = []
@@ -176,9 +301,11 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
     for tool in tools:
         name = getattr(tool, "name", "") or ""
         low = name.lower()
-        param = _content_param(tool)
-        if seed_arm_tool is None and param is not None and any(h in low for h in _STORE_NAME_HINTS):
-            seed_arm_tool, seed_arm_param = name, param
+        # Walks nested array/object schemas, not just top-level string props, so
+        # a batched-record write tool is no longer invisible to auto-wire.
+        slot = _content_slot_template(tool)
+        if seed_arm_tool is None and slot is not None and any(h in low for h in _STORE_NAME_HINTS):
+            seed_arm_tool, (seed_arm_param, seed_arm_args_template) = name, slot
         if (
             retrieve_tool is None
             and any(h in low for h in _RETRIEVE_NAME_HINTS)
@@ -200,6 +327,7 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
         retrieve_tool=retrieve_tool,
         verify_tool=verify_tool,
         sink_tools=sink_tools,
+        seed_arm_args_template=seed_arm_args_template,
     )
 
 

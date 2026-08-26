@@ -11,6 +11,13 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=500"]
       - id: detect-private-key
+      # `main` is protected on GitHub (PR required, enforce_admins on), so a
+      # direct push is rejected — but nothing stopped a direct COMMIT locally,
+      # and work accumulated on `main` that could never be pushed and had to be
+      # untangled afterwards. This moves the failure to the first commit, where
+      # it costs one `git switch -c`, instead of the first push.
+      - id: no-commit-to-branch
+        args: ["--branch", "main", "--branch", "master"]
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0

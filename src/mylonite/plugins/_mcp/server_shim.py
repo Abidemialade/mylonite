@@ -24,11 +24,26 @@ from mylonite.scan.llm_types import ToolDescription, ToolResult
 
 
 def _tool_to_description(t: MCPTool) -> ToolDescription:
-    """Convert one MCP SDK Tool entry to mylonite's ToolDescription."""
+    """Convert one MCP SDK Tool entry to mylonite's ToolDescription.
+
+    ``annotations`` is dumped rather than typed so a server that ships fields
+    newer than the pinned SDK still round-trips them; ``exclude_none`` keeps an
+    undeclared hint absent instead of an explicit null, which matters because
+    "the server said nothing" and "the server said false" are different signals
+    to ``tool_classifier.classify``.
+    """
+    annotations: dict[str, object] | None = None
+    raw = getattr(t, "annotations", None)
+    if raw is not None:
+        dump = getattr(raw, "model_dump", None)
+        annotations = dump(exclude_none=True) if callable(dump) else None
+        if not annotations:
+            annotations = None
     return ToolDescription(
         name=t.name,
         description=t.description or "",
         input_schema=t.inputSchema or {"type": "object", "properties": {}},
+        annotations=annotations,
     )
 
 

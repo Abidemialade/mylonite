@@ -149,3 +149,43 @@ def test_destination_tools_is_silent_for_a_tool_with_no_destination_signal() -> 
 def test_destination_tools_ignores_non_string_params() -> None:
     tools = [_FakeTool("configure", {"properties": {"url": {"type": "integer"}}})]
     assert destination_tools(tools) == []
+
+
+def test_uniform_default_annotations_detected_and_neutralized() -> None:
+    """An SDK that stamps the SAME default annotation block on every
+    tool (mcp-go's destructiveHint=true/openWorldHint=true) is not making
+    declarations. Detect the uniform block and clear it so classification falls
+    back to name/structure rather than flagging read-only tools as sinks."""
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.tool_classifier import (
+        neutralize_uniform_default_annotations,
+        uniform_default_annotations,
+    )
+
+    default = {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True}
+    go_tools = [
+        ToolSpec(name="read_analytics", description="read", annotations=dict(default)),
+        ToolSpec(name="list_notes", description="list", annotations=dict(default)),
+        ToolSpec(name="get_weather", description="weather", annotations=dict(default)),
+    ]
+    assert uniform_default_annotations(go_tools) is True
+    cleared = neutralize_uniform_default_annotations(go_tools)
+    assert all(t.annotations is None for t in cleared)
+
+
+def test_meaningful_per_tool_annotations_are_untouched() -> None:
+    """A server that annotates meaningfully (per-tool variety) must NOT be
+    neutralized — the TypeScript case."""
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.tool_classifier import (
+        neutralize_uniform_default_annotations,
+        uniform_default_annotations,
+    )
+
+    ts_tools = [
+        ToolSpec(name="read_file", description="r", annotations={"readOnlyHint": True}),
+        ToolSpec(name="write_file", description="w", annotations={"destructiveHint": True}),
+    ]
+    assert uniform_default_annotations(ts_tools) is False
+    kept = neutralize_uniform_default_annotations(ts_tools)
+    assert kept[0].annotations == {"readOnlyHint": True}

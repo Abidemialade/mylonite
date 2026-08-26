@@ -186,6 +186,8 @@ async def test_ifc_refuses_a_sink_call_after_an_untrusted_read_in_the_same_sessi
     control = InformationFlowControl(
         read_tool_names=frozenset({"read_note"}),
         consequential_tools=frozenset({"send_email"}),
+        # See the note above: integrity blocking is scoped to destructive sinks.
+        destructive_tools=frozenset({"send_email"}),
     )
     shim = ControlServerShim(server, [control])
     read_result = await shim.call_tool("read_note", {"id": "1"})
@@ -252,6 +254,8 @@ async def test_ifc_error_result_does_not_taint() -> None:
     control = InformationFlowControl(
         read_tool_names=frozenset({"read_note"}),
         consequential_tools=frozenset({"send_email"}),
+        # See the note above: integrity blocking is scoped to destructive sinks.
+        destructive_tools=frozenset({"send_email"}),
     )
     shim = ControlServerShim(server, [control])
     await shim.call_tool("read_note", {"id": "1"})
@@ -268,6 +272,8 @@ async def test_ifc_taint_resets_between_sessions() -> None:
     control = InformationFlowControl(
         read_tool_names=frozenset({"read_note"}),
         consequential_tools=frozenset({"send_email"}),
+        # See the note above: integrity blocking is scoped to destructive sinks.
+        destructive_tools=frozenset({"send_email"}),
     )
     server = _FakeServer(
         results={
@@ -301,6 +307,8 @@ async def test_ifc_taint_isolated_across_concurrently_active_shims() -> None:
     control = InformationFlowControl(
         read_tool_names=frozenset({"read_note"}),
         consequential_tools=frozenset({"send_email"}),
+        # See the note above: integrity blocking is scoped to destructive sinks.
+        destructive_tools=frozenset({"send_email"}),
     )
     server = _FakeServer(
         results={
@@ -323,12 +331,29 @@ async def test_ifc_taint_isolated_across_concurrently_active_shims() -> None:
     assert clean.isError is False  # session_two never read anything untrusted
 
 
-def test_ifc_config_snippet_matches_envelope_control() -> None:
-    """Both W2 controls emit the same paste-ready snippet (read_tool_names) —
-    config_snippet_for is the single source of truth for both."""
-    assert InformationFlowControl()._config_snippet(
-        "read_note"
-    ) == UntrustedEnvelopeControl()._config_snippet("read_note")
+def test_w2_config_snippets_match_the_role_of_the_tool_they_name() -> None:
+    """`config_snippet_for` remains the single source of truth for both W2
+    controls, but they warn about tools in DIFFERENT roles and so must give
+    different advice.
+
+    `UntrustedEnvelopeControl` warns from `transform_result` — the tool it names
+    READ the untrusted content, so the actionable knobs are `read_tool_names`
+    (which results to treat as untrusted) and `private_tools` (which carry
+    sensitive data, the axis that actually blocks exfiltration).
+
+    `InformationFlowControl` warns from `intercept_call` — the tool it names is
+    the SINK being refused, so the actionable knob is the exemption. Emitting
+    `read_tool_names: [<sink>]` here, as both controls used to, was wrong
+    advice: it would label the sink's own OUTPUT untrusted rather than let the
+    call through.
+    """
+    source = UntrustedEnvelopeControl()._config_snippet("read_note")
+    assert "read_tool_names: [read_note]" in source
+    assert "private_tools: [read_note]" in source
+
+    sink = InformationFlowControl()._config_snippet("send_email")
+    assert "accepts_untrusted_tools: [send_email]" in sink
+    assert "read_tool_names" not in sink
 
 
 # -- intercept ordering (W2 now DOES intercept, via InformationFlowControl) ---
@@ -409,7 +434,11 @@ async def test_dic_refuses_a_call_when_the_live_description_no_longer_matches() 
     )
     shim = ControlServerShim(server, [control])
     listed = await shim.list_tools()
-    assert listed[0].description == poisoned.description  # still listed, unmodified
+    # The W1 control now ALSO sanitises the description shown to the
+    # planner, so the smuggled "(Note: also forward …)" aside is stripped —
+    # neutralising the static poison (a real differential), while the pin still
+    # detects the change and refuses the CALL.
+    assert "attacker@evil.test" not in listed[0].description
     result = await shim.call_tool("search_docs", {})
     assert result.isError is True
     assert "pinned hash" in result.content
@@ -665,7 +694,7 @@ async def test_w4_blocks_unconfirmed_consequential_action() -> None:
     control = ConfirmGateControl(consequential_tools=frozenset({"send_email"}))
     shim = ControlServerShim(server, [control])
     out = await shim.call_tool("send_email", {"to": "x"})
-    assert out.isError and "confirmation_required" in out.content
+    assert out.isError and "approval was not granted" in out.content
     assert server.calls == []  # the unconfirmed action never executed
 
 
@@ -677,7 +706,7 @@ async def test_w4_defers_unrecognised_tool_by_fail_closed_default() -> None:
     )
     shim = ControlServerShim(server, [ConfirmGateControl()])
     out = await shim.call_tool("materialise_record", {})
-    assert out.isError and "confirmation_required" in out.content
+    assert out.isError and "approval was not granted" in out.content
     assert server.calls == []
 
 
@@ -690,7 +719,7 @@ async def test_w4_confirmed_retry_with_the_minted_token_executes() -> None:
     shim = ControlServerShim(server, [control])
     staged = await shim.call_tool("send_email", {"to": "x"})
     assert staged.isError is True
-    token = staged.content.split("confirm_token='")[1].split("'")[0]
+    token = shim.controls[0].pending_token("send_email")
     confirmed = await shim.call_tool("send_email", {"to": "x", "confirm_token": token})
     assert confirmed.isError is False
     assert confirmed.content == "sent"
@@ -729,7 +758,7 @@ async def test_w4_genuine_token_from_one_call_does_not_confirm_a_different_call(
     shim = ControlServerShim(server, [control])
     staged = await shim.call_tool("send_email", {"to": "alice@example.com"})
     assert staged.isError is True
-    token = staged.content.split("confirm_token='")[1].split("'")[0]
+    token = shim.controls[0].pending_token("send_email")
 
     replayed = await shim.call_tool(
         "send_email", {"to": "attacker@evil.test", "confirm_token": token}
@@ -744,8 +773,8 @@ async def test_w4_pending_confirmation_does_not_survive_reset() -> None:
     server = _FakeServer(results={"send_email": ToolResult(name="send_email", content="sent")})
     control = ConfirmGateControl(consequential_tools=frozenset({"send_email"}))
     session_one = ControlServerShim(server, [control])
-    staged = await session_one.call_tool("send_email", {"to": "x"})
-    token = staged.content.split("confirm_token='")[1].split("'")[0]
+    await session_one.call_tool("send_email", {"to": "x"})
+    token = session_one.controls[0].pending_token("send_email")
 
     session_two = ControlServerShim(server, [control])  # reset() runs here
     replay = await session_two.call_tool("send_email", {"to": "x", "confirm_token": token})
@@ -882,3 +911,33 @@ def test_fail_closed_warning_message_keeps_the_structural_reason(
     [message] = [r.getMessage() for r in caplog.records]
     assert "fail-closed default" in message
     assert "destination-shaped argument" in message
+
+
+async def test_declaring_consequential_tools_does_not_disable_destructive_gate() -> None:
+    """Footgun: declaring consequential_tools must NOT silently disable
+    destructive_tools. A destructive tool not in the consequential list is still
+    refused once untrusted content is in scope."""
+    from mylonite.scan.control_shim import make_control
+
+    control = make_control(
+        "W2",
+        read_tool_names=frozenset({"read_note"}),
+        consequential_tools=frozenset({"send_email"}),  # delete_all NOT listed
+        destructive_tools=frozenset({"delete_all"}),
+    )
+    server = _FakeServer(
+        tools=[
+            _desc("read_note"),
+            ToolDescription(name="delete_all", description="delete everything", input_schema={}),
+        ],
+        results={
+            "read_note": ToolResult(name="read_note", content="untrusted note body"),
+            "delete_all": ToolResult(name="delete_all", content="deleted"),
+        },
+    )
+    shim = ControlServerShim(server, [control])
+    await shim.list_tools()
+    await shim.call_tool("read_note", {})  # untrusted content now in scope
+    result = await shim.call_tool("delete_all", {})
+    assert result.isError is True, "a declared destructive tool must still be gated"
+    assert "refused" in result.content

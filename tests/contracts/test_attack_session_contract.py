@@ -15,10 +15,12 @@ from mylonite.contracts.target_adapter import (
 )
 
 
-def test_contract_version_bumped_to_0_5_0() -> None:
+def test_contract_version_bumped_to_0_6_0() -> None:
     # 0.3.0 -> 0.4.0: additive AttackSession / SupportsAttackSession capability.
     # 0.4.0 -> 0.5.0: additive drive_planner(pattern_id=...) provenance kwarg.
-    assert target_adapter.CONTRACT_VERSION == "0.5.0"
+    # 0.5.0 -> 0.6.0: additive `not_applicable` outcome + its reason field,
+    # ToolSpec.annotations, TargetDescriptor.can_plant_untrusted_content.
+    assert target_adapter.CONTRACT_VERSION == "0.6.0"
 
 
 def test_tool_call_outcome_round_trips_and_defaults() -> None:

@@ -1207,6 +1207,17 @@ def scan(
             except Exception as exc:  # YAML / validation errors → exit 2
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
+            # --weakness-class used to be a silent no-op alongside
+            # --target-file (only the YAML's weakness_classes were honoured).
+            # Merge the flag's classes into the file's, order-stable and deduped,
+            # so a documented, accepted flag actually does something.
+            if weakness_class:
+                merged = list(tf.weakness_classes)
+                for w in weakness_class:
+                    if w not in merged:
+                        merged.append(w)
+                if merged != list(tf.weakness_classes):
+                    tf = tf.model_copy(update={"weakness_classes": merged})
         else:
             tf = _target_file_from_flags(
                 command=command,
@@ -2111,17 +2122,13 @@ def _validate_custom(
     # DCR-0008: fail fast on an unreachable provider with a distinct exit 4 —
     # otherwise the full N-iteration live loop against the REAL target would
     # just run to a misleading non-discriminating REJECTED. Always AFTER the
-    # authorize check above: authorization gates every live-driving action,
-    # and this preflight (a scan against the bundled reference twin, never the
-    # operator's real target) must not fire before an unauthorized request is
-    # rejected.
-    try:
-        reachable = _provider_preflight(
-            provider, model, timeout_s=iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S
-        )
-    except (ModuleNotFoundError, ImportError) as exc:
-        _exit_if_missing_kitchen_sink(exc)
-        raise
+    # authorize check above: authorization gates every live-driving action.
+    # The CUSTOM path uses a DIRECT LLM ping, not a reference scan, so it
+    # does not require the deliberately-vulnerable mcp_kitchen_sink demo package
+    # to be installed just to check "is my provider reachable".
+    reachable = _provider_preflight_direct(
+        provider, model, timeout_s=iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S
+    )
     if not reachable:
         echo_err(
             "no provider reachable — set ANTHROPIC_API_KEY, or pass "
@@ -2297,7 +2304,13 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     table.add_column("detail")
 
     for outcome in report.outcomes:
-        mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
+        if outcome.report_only:
+            # Informational leg (e.g. effect with no probe declared): not a pass,
+            # not a fail — it does not contribute to kept. Show it as such so the
+            # table can't read as a confirmation it never made.
+            mark = "· report-only"
+        else:
+            mark = f"{_mark(outcome.passed)} {'pass' if outcome.passed else 'FAIL'}"
         metric = f"{outcome.metric:.2f}" if outcome.metric is not None else "-"
         # outcome.detail is free text from the validation pipeline (e.g. an
         # exception message, or a third-party ValidatorBase plugin's own
@@ -2489,6 +2502,43 @@ def _render_recommendation_panel(rec: Any, console: Console | None = None) -> No
     console_print(console, ctl_table)
 
 
+def _provider_preflight_direct(provider: str, model: str, *, timeout_s: float) -> bool:
+    """Reachability probe that does NOT route through the bundled reference target.
+
+    A custom-target validate has no reason to touch ``mcp_kitchen_sink`` — its
+    re-drive uses the operator's own target. But the reference-scan preflight
+    (below) imports and RUNS ``InProcessReferenceAdapter``, so a user validating
+    THEIR app was forced to `pip install mcp-kitchen-sink` (a deliberately
+    vulnerable demo) just to run an "is my provider reachable" check, and hit a
+    hard exit 2 without it. This does the same reachability check with a single
+    minimal LLM completion instead. Returns True iff the provider answered.
+    """
+    from mylonite.scan._llm import litellm_tool_call_async
+
+    _ = provider  # provider routing is carried by the model string / active policy
+
+    async def _ping() -> bool:
+        try:
+            # Uses the "planner" caller label: this IS a minimal planner-shaped
+            # completion (a user message + empty tools), and it routes through the
+            # same chokepoint so it inherits budget-counting and the active policy.
+            await litellm_tool_call_async(
+                model=model,
+                messages=[{"role": "user", "content": "reply with the single word: ok"}],
+                tools=[],
+                caller="planner",
+                timeout_s=timeout_s,
+            )
+        except Exception:
+            return False
+        return True
+
+    try:
+        return asyncio.run(_ping())
+    except Exception:
+        return False
+
+
 def _provider_preflight(
     provider: str, model: str, *, timeout_s: float = _DEFAULT_ITERATION_TIMEOUT_S
 ) -> bool:
@@ -2498,6 +2548,9 @@ def _provider_preflight(
     the validator's N-iteration loop would too — so we fail fast with a distinct
     exit 4 rather than burning iterations and reporting a misleading non-discrim
     result. Returns True iff the provider is reachable.
+
+    For a CUSTOM target use :func:`_provider_preflight_direct` instead — it does
+    not pull in the bundled reference target (see its docstring).
 
     DCR-0008: bounded by ``timeout_s`` (defaults to the same
     ``_DEFAULT_ITERATION_TIMEOUT_S`` the sibling ``DifferentialValidator``
@@ -3631,6 +3684,23 @@ def _render_target_scaffold(
         sa_status = (
             "# (no content-storing tool auto-detected — fill in the tool that ingests content)"
         )
+    # The args_template to suggest: the NESTED template the auto-wire path
+    # (tool_roles._content_slot_template) computes for a batched array-of-records
+    # write, else the flat single-string form. The scaffold used to hard-code the
+    # flat `{param: "{payload}"}` even for a tool whose content slot is nested
+    # (server-memory's create_entities), producing a template the server's own
+    # schema rejects — and a comment insisting on a "BARE string leaf" that is
+    # impossible for such a tool. Reuse exactly what the live scan would infer.
+    import yaml as _yaml
+
+    _template = getattr(roles, "seed_arm_args_template", None) or {sa_param: "{payload}"}
+    _nested = _template != {sa_param: "{payload}"}
+    sa_args_block = "\n".join(
+        f"#     {line}" for line in _yaml.safe_dump(_template, sort_keys=False).splitlines()
+    )
+    sa_placement_note = "# args_template below places {payload} at this tool's content slot " + (
+        "(a nested array-of-records slot, auto-detected)." if _nested else "(a bare string leaf)."
+    )
     verify_tool = roles.verify_tool or "<tool that reports the side effect>"
     ep_status = (
         f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}."
@@ -3659,11 +3729,16 @@ primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
 weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else "[]"}
 
 # How to plant untrusted content for indirect-injection (W2) seeds. {{payload}}
-# is replaced per attempt and must sit at a BARE string leaf (not nested JSON).
+# is replaced per attempt with a natural-language payload. It goes at the tool's
+# free-text content slot — a bare string leaf for a simple tool, or a nested
+# array/object slot for a batched-record tool (shown below, matching the tool's
+# own schema; do NOT flatten it to a string).
 {sa_status}
+{sa_placement_note}
 # seed_arm:
 #   tool: {sa_tool}
-#   args_template: {{ {sa_param}: "{{payload}}" }}
+#   args_template:
+{sa_args_block}
 #   id_key: id           # the field in the store tool's RESULT holding the new record's
 #                        # handle (look for: id, uuid, note_id, key, _id). ONLY needed when
 #                        # recall requires that id; a list/search-style recall does not.
@@ -4959,9 +5034,10 @@ def check(
         typer.Option(
             "--enforce",
             help=(
-                "Exit 1 if any structural exposure is found, instead of reporting and "
-                "exiting 0. Mirrors a linter's report-then-enforce ramp: adopt with "
-                "--enforce off, turn it on once the surface is clean."
+                "Exit 1 on substantive W1-W4 structural findings, instead of reporting "
+                "and exiting 0. The 'unpinned descriptions' advisory (which fires on "
+                "every tool of every server on first contact) does NOT gate, so this is "
+                "adoptable as a CI stage from day one."
             ),
         ),
     ] = False,
@@ -5131,6 +5207,13 @@ def check(
         echo_err(f"suggested weakness_classes {suggested or '[]'} (hints — confirm/edit).")
 
     echo(f"{findings} structural finding(s) across {len(tools)} tool(s).")
-    if enforce and findings > 0:
+    # The "Unpinned tool descriptions" row fires on EVERY tool of EVERY
+    # target on first contact (nothing is pinned yet), so counting it toward the
+    # --enforce exit made `check --enforce` red for everyone — unusable as the
+    # documented CI stage-1. It is advisory (a suggestion to pin, not a defect),
+    # so it is EXCLUDED from the enforce gate while still shown in the table.
+    # --enforce fails only on substantive W1-W4 structural findings.
+    gating_findings = findings - len(unpinned)
+    if enforce and gating_findings > 0:
         raise typer.Exit(code=EXIT_FINDINGS)
     raise typer.Exit(code=EXIT_SUCCESS)

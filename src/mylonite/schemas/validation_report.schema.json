@@ -129,6 +129,12 @@
           "title": "Passed",
           "type": "boolean"
         },
+        "report_only": {
+          "default": false,
+          "description": "When True this leg is INFORMATIONAL and does NOT contribute to the kept decision \u2014 it neither helps nor blocks. Used for the effect leg when no effect_probe is declared: end-to-end damage was not confirmed, so the leg must not read as a passing \u2713 that inflates a custom-target KEPT. The renderer shows it distinctly.",
+          "title": "Report Only",
+          "type": "boolean"
+        },
         "stage": {
           "enum": [
             "build",

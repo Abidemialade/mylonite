@@ -558,6 +558,27 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
             "(see docs/target-file; `mylonite scan --scaffold` suggests one) for end-to-end "
             "damage confirmation."
         )
+    # An expect_marker that is one of Mylonite's OWN planted exfil literals collides
+    # with the payload on a plant-and-recall target: the verify tool reflects the
+    # payload back, whose marker matches. The scan now delta-checks the marker
+    # (present-after AND newly-so vs a pre-drive baseline), so this can no longer
+    # manufacture a false finding — but the marker is still a poor choice because a
+    # genuine effect that merely re-surfaces the planted text (not a NEW occurrence)
+    # would read as no-effect. Steer operators to a marker the AGENT must emit.
+    probe = tf.effect_probe
+    if probe is not None and probe.expect_marker:
+        from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
+
+        planted_literals = {DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST}
+        if any(lit and lit in probe.expect_marker for lit in planted_literals):
+            warnings.append(
+                f"effect_probe.expect_marker {probe.expect_marker!r} contains an exfil "
+                "literal Mylonite itself plants into the payload. On a plant-and-recall "
+                "target the verify tool reflects that payload back, so the marker is not "
+                "evidence the agent acted. The scan delta-checks it (only a NEW occurrence "
+                "counts), but prefer a marker the agent must PRODUCE by acting (e.g. the "
+                "recipient of a forwarded message, a row it wrote) for a sharper signal."
+            )
     return warnings
 
 
@@ -581,13 +602,16 @@ def infer_seed_arm(tools: list[Any]) -> tuple[SeedArmSpec | None, str]:
 
     roles = _classify_tools(tools)
     if roles.seed_arm_tool and roles.seed_arm_param and roles.retrieve_tool:
-        spec = SeedArmSpec(
-            tool=roles.seed_arm_tool,
-            args_template={roles.seed_arm_param: "{payload}"},
-        )
+        # The nested template when the content slot is nested (a batched
+        # array-of-records write), else the flat one it has always produced.
+        template = roles.seed_arm_args_template or {roles.seed_arm_param: "{payload}"}
+        spec = SeedArmSpec(tool=roles.seed_arm_tool, args_template=template)
+        nested = template != {roles.seed_arm_param: "{payload}"}
+        shape = f" (nested payload slot: {template!r})" if nested else ""
         note = (
-            f"inferred seed_arm: {roles.seed_arm_tool}({roles.seed_arm_param}='{{payload}}') "
-            f"with recall via {roles.retrieve_tool!r} — override in the target file if wrong."
+            f"inferred seed_arm: {roles.seed_arm_tool}({roles.seed_arm_param}='{{payload}}')"
+            f"{shape} with recall via {roles.retrieve_tool!r} — override in the target "
+            "file if wrong."
         )
         return spec, note
     if roles.seed_arm_tool:

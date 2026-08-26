@@ -272,7 +272,10 @@ def test_scan_scaffold_prefills_seed_arm_candidate(
     assert result.exit_code == 0, result.output
     text = out.read_text(encoding="utf-8")
     assert "tool: remember" in text
-    assert 'content: "{payload}"' in text
+    # The scaffold now emits the args_template as a YAML block matching the
+    # tool's content slot (nested where the schema is nested). For this simple
+    # string param it renders as `content: '{payload}'`.
+    assert "content:" in text and "{payload}" in text
     assert "recall" in text  # the detected id-free retrieval path
 
 
@@ -3868,6 +3871,8 @@ def test_validate_custom_runs_differential_by_default(
     # OTHER live calls, so the preflight (the one live-call-making piece not
     # already stubbed) needs stubbing too.
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+    # The CUSTOM validate path now uses a direct LLM ping (no kitchen-sink).
+    monkeypatch.setattr("mylonite.cli._provider_preflight_direct", lambda *_a, **_k: True)
     # T14: require_llm_configured() pre-flight runs before _provider_preflight
     # (both check against the "anthropic" provider passed explicitly below).
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -3920,6 +3925,8 @@ def test_validate_custom_threads_role_models_and_policy(
         "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
     )
     monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+    # The CUSTOM validate path now uses a direct LLM ping (no kitchen-sink).
+    monkeypatch.setattr("mylonite.cli._provider_preflight_direct", lambda *_a, **_k: True)
     # T14: require_llm_configured() pre-flight checks all three role models
     # against the explicit "anthropic" provider hint passed to _validate_custom
     # below.
@@ -4488,6 +4495,8 @@ def test_gate_and_validate_produce_identical_twin_plans(
 
         # --- validate's own code path (_validate_custom) ---
         monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_a, **_k: True)
+        # The CUSTOM validate path now uses a direct LLM ping (no kitchen-sink).
+        monkeypatch.setattr("mylonite.cli._provider_preflight_direct", lambda *_a, **_k: True)
         validate_captured = _stub_differential_validator(
             monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
         )

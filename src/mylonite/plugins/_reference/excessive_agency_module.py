@@ -31,18 +31,26 @@ _W3_W4 = frozenset({"W3", "W4"})
 
 
 def _payload_from_seed(seed: SeedPattern) -> Payload:
+    metadata = {
+        "seed_id": seed.pattern_id,
+        "weakness": seed.weakness,
+        "predicate": seed.predicate,
+        "setup": seed.setup,
+        "drive": seed.drive,
+        # A synthesized W3/W4 seed sets customise=False (its body is already
+        # target-shaped and it is not in SEED_CATALOGUE, so the engine cannot
+        # build a customiser prompt for it). Hard-coding "true" made every such
+        # seed render skipped_unknown_seed. Mirror the prompt-injection module.
+        "needs_customisation": "true" if seed.customise else "false",
+    }
+    metadata.update(seeds.resolved_tool_metadata(seed))
+    if seed.judge_context:
+        metadata["judge_context"] = seed.judge_context
     return Payload(
         pattern_id=seed.pattern_id,
         channel=seed.channel,
         body=seed.seed_body,
-        metadata={
-            "seed_id": seed.pattern_id,
-            "weakness": seed.weakness,
-            "predicate": seed.predicate,
-            "setup": seed.setup,
-            "drive": seed.drive,
-            "needs_customisation": "true",
-        },
+        metadata=metadata,
     )
 
 

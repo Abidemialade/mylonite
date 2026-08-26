@@ -193,13 +193,151 @@ def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
     return found
 
 
+def _hint(annotations: Mapping[str, Any] | None, key: str) -> bool | None:
+    """One MCP annotation hint as a tri-state: True / False / not declared."""
+    if not annotations:
+        return None
+    value = annotations.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def annotation_is_sink(annotations: Mapping[str, Any] | None) -> bool | None:
+    """Does the server say this tool MODIFIES its environment?
+
+    ``readOnlyHint`` is MCP's own answer to the question W2/W4 ask by guessing
+    from a name. Per the spec ``readOnlyHint=true`` means "the tool does not
+    modify its environment", so it is the one annotation that can positively
+    clear a tool. ``destructiveHint`` is meaningful "only when readOnlyHint is
+    false", so a destructive tool is a sink regardless.
+
+    Returns ``None`` when the server declared nothing, leaving the caller on the
+    name-hint / fail-closed tiers exactly as before.
+    """
+    read_only = _hint(annotations, "readOnlyHint")
+    if read_only is True:
+        return False
+    if _hint(annotations, "destructiveHint") is True:
+        return True
+    if read_only is False:
+        return True
+    return None
+
+
+def annotation_is_egress(annotations: Mapping[str, Any] | None) -> bool | None:
+    """Does the server say this tool reaches an OPEN WORLD of external entities?
+
+    That is MCP's framing of exactly what W3 gates. The spec's own example is
+    the distinction this needs: "the world of a web search tool is open, whereas
+    that of a memory tool is not".
+    """
+    return _hint(annotations, "openWorldHint")
+
+
+def annotation_is_read(annotations: Mapping[str, Any] | None) -> bool | None:
+    """Does the server say this tool only READS? (the W2 taint-source question)"""
+    return _hint(annotations, "readOnlyHint")
+
+
+def uniform_default_annotations(tools: Sequence[Any]) -> bool:
+    """True when EVERY tool carries the IDENTICAL, non-empty annotation block.
+
+    This is the signature of an SDK that serialises the MCP spec's conservative
+    defaults on behalf of an author who declared nothing — observed with
+    ``mcp-go``, which stamps ``destructiveHint=true, openWorldHint=true`` on every
+    tool of a server whose source sets no annotations at all. Trusting those as
+    tier-2 evidence turns every read-only tool into a destructive, open-world
+    sink. A server that annotates MEANINGFULLY
+    varies its annotations per tool (read_file readOnly vs write_file
+    destructive), so a uniform block across the whole surface is the tell that
+    the annotations are defaults, not declarations.
+    """
+    blocks = []
+    for t in tools:
+        ann = getattr(t, "annotations", None)
+        if not ann:
+            return False  # a tool with no annotation -> not the uniform-default shape
+        blocks.append(tuple(sorted((k, str(v)) for k, v in dict(ann).items() if k != "title")))
+    return len(blocks) > 1 and len(set(blocks)) == 1
+
+
+def neutralize_uniform_default_annotations(tools: Sequence[Any]) -> list[Any]:
+    """Return ``tools`` with annotations CLEARED when they are uniform-default.
+
+    A no-op (returns the input unchanged) unless :func:`uniform_default_annotations`
+    is true, so a server that annotates meaningfully is never touched. When it
+    fires, the tools are treated as if the server said nothing — falling back to
+    name-hint / structural / fail-closed classification, which is the honest
+    handling of an SDK default.
+    """
+    if not uniform_default_annotations(tools):
+        return list(tools)
+    out = []
+    for t in tools:
+        try:
+            out.append(t.model_copy(update={"annotations": None}))
+        except Exception:
+            out.append(t)
+    return out
+
+
+def annotation_behaviour_mismatch(
+    annotations: Mapping[str, Any] | None, *, observed_write: bool
+) -> str | None:
+    """A human-readable mismatch between a tool's annotation and its behaviour.
+
+    The MCP spec is explicit that annotations "are not guaranteed to provide a
+    faithful description of tool behavior" and that clients "should never make
+    tool use decisions based on ToolAnnotations received from untrusted
+    servers". A server that annotates a tool ``readOnlyHint=true`` and then
+    observably writes is therefore not a classification bug to work around — it
+    is a defect in the target worth reporting, and one only a system that
+    actually executes the tool (as Mylonite does) is positioned to catch.
+    """
+    if observed_write and _hint(annotations, "readOnlyHint") is True:
+        return (
+            "tool is annotated readOnlyHint=true but was observed modifying state — "
+            "the annotation misrepresents the tool's behaviour, so any client "
+            "trusting it (to skip an approval prompt, say) is misled"
+        )
+    return None
+
+
+#: Splits on any non-alphanumeric run AND on a camelCase boundary, so
+#: ``"send_email"`` -> {"send", "email"} and ``"sendEmail"`` -> {"send", "email"}.
+#: Mirrors ``tool_roles._TOKEN_SPLIT_RE`` — the two modules answer the same
+#: question ("does this hint describe this tool?") and must not disagree.
+_TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def name_tokens(name: str) -> set[str]:
+    """Lowercase word tokens of a tool name."""
+    with_boundaries = _CAMEL_BOUNDARY_RE.sub("_", name)
+    return {t for t in _TOKEN_SPLIT_RE.split(with_boundaries.lower()) if t}
+
+
+def hint_matches(name: str, hints: tuple[str, ...]) -> bool:
+    """True when a hint is a whole TOKEN of ``name`` — never a substring.
+
+    Substring matching classified ``get_postal_code`` as consequential (``post``)
+    and ``increatement_counter`` likewise (``create``). Because every control
+    fails closed, the *decision* was unchanged — but ``reason`` was not, and
+    ``reason`` is what ``consequential_tool_names`` filters on to build the
+    ``mylonite check`` report, so a name-hint false positive surfaced to the user
+    as a confirmed consequential tool. ``tool_roles`` already tokenised; this is
+    the same rule, applied in the module the live controls actually call.
+    """
+    return bool(name_tokens(name) & set(hints))
+
+
 def classify(
     name: str,
     *,
     declared: frozenset[str] | None,
     hints: tuple[str, ...],
+    annotation_says: bool | None = None,
 ) -> tuple[bool, str]:
-    """Three-tier name classification: declared list, then hint, then fail-closed.
+    """Four-tier classification: declared, MCP annotation, name token, fail-closed.
 
     Returns ``(applies, reason)``. ``reason`` is ``"declared"`` when an explicit
     ``ControlConfig`` list decided the answer — the operator said so, and a
@@ -209,10 +347,27 @@ def classify(
     the decision itself, which is the whole point of failing closed
     (DCR-0033/0034/0035): an unrecognised name is guarded exactly like a
     recognised one, not silently passed through.
+
+    ``annotation_says`` carries a verdict derived from the target's own MCP
+    ``ToolAnnotations`` (``readOnlyHint``/``destructiveHint``/``openWorldHint``)
+    — the protocol's own risk vocabulary, which Mylonite previously ignored
+    entirely in favour of guessing from English words. It outranks the name
+    hints because it is a statement by the server about its own tool, and is
+    outranked by ``declared`` because the MCP spec is explicit that annotations
+    are untrusted hints: "Clients should never make tool use decisions based on
+    ToolAnnotations received from untrusted servers." So it informs
+    classification, and an operator declaration still overrides it.
+
+    ``annotation_says=False`` is load-bearing, not merely the absence of
+    evidence: a server stating a tool is read-only is the one signal that can
+    stop the fail-closed default from guarding a tool. That is also why the
+    mismatch is worth reporting separately — a tool annotated read-only that
+    observably writes is a finding about the target, not a classification bug.
     """
     if declared is not None:
         return name in declared, "declared"
-    lowered = name.lower()
-    if any(hint in lowered for hint in hints):
+    if annotation_says is not None:
+        return annotation_says, "mcp tool annotation"
+    if hint_matches(name, hints):
         return True, "name hint"
     return True, "fail-closed default"

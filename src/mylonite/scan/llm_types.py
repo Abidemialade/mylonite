@@ -23,6 +23,19 @@ class ToolDescription(BaseModel):
     name: str
     description: str
     input_schema: dict[str, object]
+    annotations: dict[str, object] | None = None
+    """The tool's MCP ``ToolAnnotations``, verbatim, or None if it declared none.
+
+    MCP standardises a risk vocabulary here — ``readOnlyHint``,
+    ``destructiveHint``, ``idempotentHint``, ``openWorldHint`` — which is a far
+    better classification signal than guessing from English words in the tool's
+    name. Carried untyped (a plain dict) so a server may add fields the SDK does
+    not model without this shim dropping them.
+
+    Per the MCP spec these are HINTS from a possibly-untrusted server, so they
+    inform classification but never override an operator's own declaration —
+    see ``tool_classifier.classify``.
+    """
 
 
 class ToolCall(BaseModel):

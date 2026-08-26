@@ -51,6 +51,12 @@ NOT_TESTED_OUTCOMES: Final[frozenset[str]] = frozenset(
 OUTCOME_MARKS: Final[dict[str, str]] = {
     "finding": "✗ FOUND",
     "no_finding": "✓ clean",
+    # Rendered distinctly from "✓ clean" ON PURPOSE. A cold-start user reported
+    # shipping a scan as "this server passed the W2 check" when in fact both
+    # attempts made zero tool calls, because the attacked capability did not
+    # exist on that server — a distinction only visible by opening the raw JSON.
+    # It is now visible in the table.
+    "not_applicable": "⚠ N/A (no such capability)",
     "skipped_invalid_metadata": "⚠ skipped",
     "skipped_unknown_seed": "⚠ skipped",
     "skipped_planner_failure": "⚠ skipped",
@@ -65,6 +71,7 @@ OUTCOME_MARKS: Final[dict[str, str]] = {
 OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "finding": "FOUND",
     "no_finding": "clean",
+    "not_applicable": "N/A-no-capability",
     "skipped_invalid_metadata": "skip",
     "skipped_unknown_seed": "skip",
     "skipped_planner_failure": "skip",

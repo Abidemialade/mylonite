@@ -37,10 +37,24 @@
           "title": "Judge Evidence",
           "type": "object"
         },
+        "not_applicable_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "On outcome=not_applicable, the capability this seed needed and the target did not expose (e.g. \"target exposes no 'send_email' tool\"). None for every other outcome.",
+          "title": "Not Applicable Reason"
+        },
         "outcome": {
           "enum": [
             "finding",
             "no_finding",
+            "not_applicable",
             "skipped_invalid_metadata",
             "skipped_unknown_seed",
             "skipped_planner_failure",

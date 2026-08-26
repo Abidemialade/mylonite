@@ -994,6 +994,58 @@ def test_validate_custom_target_rejects_when_effect_not_confirmed() -> None:
     assert report.kept is False
 
 
+def test_validate_custom_target_effect_leg_is_report_only_when_unprobed() -> None:
+    """A3: with NO effect_probe declared, the effect leg is REPORT-ONLY — it must
+    not read as a passing ✓ nor contribute to `kept`. A custom-target KEPT then
+    rests only on the legs that actually confirmed something (build/stability/
+    consensus), and the effect leg is honestly labelled as unconfirmed rather
+    than silently inflating the verdict."""
+
+    # An adapter with NO effect_probe (effect_confirmed="unprobed") but whose
+    # trace shows the attack landed via the predicate — the mailer shape: KEPT is
+    # reachable, and the effect leg must be report-only rather than a false ✓.
+    class _NoProbeButFiring:
+        async def describe(self) -> Any:
+            from mylonite.contracts import TargetDescriptor, ToolSpec
+
+            return TargetDescriptor(
+                target_id="mcp:custom",
+                kind="mcp",
+                weakness_classes=["W4"],
+                tools=[ToolSpec(name="send_email", description="send", json_schema={})],
+            )
+
+        async def invoke(self, payload: Any) -> AdapterResponse:
+            return AdapterResponse(
+                payload_pattern_id=payload.pattern_id,
+                raw_response="sent",
+                tool_calls=["send_email"],
+                metadata={
+                    "effect_confirmed": "unprobed",
+                    "effect_trace": '[{"tool": "send_email", "is_error": false}]',
+                },
+            )
+
+        async def close(self) -> None:
+            return None
+
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+    )
+    report = validator.validate(test, _NoProbeButFiring(), ReferenceVulnerableOracle())
+    effect = next(o for o in report.outcomes if o.stage == "effect")
+    assert effect.report_only is True
+    assert effect.passed is False, "an unconfirmed effect must not present as a passing leg"
+    # It is excluded from the gating formula, so it neither helps nor blocks kept.
+    assert "effect" not in report.gating_legs
+    # The invariant: kept is decided SOLELY by the contributing (non-report-only)
+    # legs — the report-only effect leg neither inflates nor drags the verdict.
+    contributing = [o for o in report.outcomes if not o.report_only]
+    assert report.kept == all(o.passed for o in contributing)
+
+
 def test_validate_custom_target_rejects_when_effect_probe_errored() -> None:
     """RB-DCR-0014: a DECLARED effect_probe whose verify call fails on every run
     ("errored") must FAIL the effect leg — not be silently treated the same as

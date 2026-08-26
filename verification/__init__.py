@@ -5,8 +5,10 @@ NOT author. Unlike ``mylonite.corpus`` (which scores the in-repo kitchen-sink
 builds — ground truth we wrote), this harness scores Mylonite against external,
 independently-published sources:
 
-- **Layer 1** — runnable vulnerable targets (DVAA, ...): point Mylonite's full
+- **Layer 1** — runnable vulnerable targets (DVMCP, ...): point Mylonite's full
   pipeline at apps we didn't write and score recall vs their published checks.
+  (DVAA was evaluated and rejected 2026-06-22 — A2A-only, no MCP endpoint, no
+  LICENSE file; see ``SOURCE.md``.)
 - **Layer 2** — academic benchmarks (InjecAgent, AgentDojo): verify Mylonite's
   success-judge against the benchmark's OWN success rule, on transcripts from a
   real model run (record -> score), and report an ASR comparable to their public

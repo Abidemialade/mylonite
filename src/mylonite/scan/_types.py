@@ -77,6 +77,18 @@ class Verdict(BaseModel):
         ...,
         description="Which judging mechanism produced this verdict.",
     )
+    applicable: bool = Field(
+        default=True,
+        description=(
+            "False when this seed could never have landed on this target — the "
+            "capability it attacks is absent from the tool surface the planner "
+            "saw. Distinct from success=False, which means the attack WAS "
+            "possible and did not land. Collapsing the two is what let a "
+            "fetch/email seed report a clean pass against a server with neither "
+            "tool: 'we could not test this' must never render as 'we tested it "
+            "and it was fine'."
+        ),
+    )
     fallback_cause: str | None = Field(
         default=None,
         description=(

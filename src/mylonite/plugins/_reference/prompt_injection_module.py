@@ -42,6 +42,7 @@ def _payload_from_seed(seed: SeedPattern) -> Payload:
         "drive": seed.drive,
         "needs_customisation": "true" if seed.customise else "false",
     }
+    metadata.update(seeds.resolved_tool_metadata(seed))
     # Evaluator-only context (W1 tool-description seeds) — passed to the judge,
     # never to the planner-under-test.
     if seed.judge_context:

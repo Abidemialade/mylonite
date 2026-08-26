@@ -231,6 +231,8 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
                 "transport. Two variants share the same tool "
                 f"surface; this is the {self._variant} one."
             ),
+            # The in-process note store IS the plant mechanism for seed_note.
+            can_plant_untrusted_content=True,
         )
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
