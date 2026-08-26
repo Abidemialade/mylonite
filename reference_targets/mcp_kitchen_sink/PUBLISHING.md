@@ -90,7 +90,7 @@ python -m twine upload dist_ks/*
 python -m venv /tmp/clean-verify
 /tmp/clean-verify/Scripts/Activate.ps1
 pip install mylonite mcp-kitchen-sink   # both resolve from PyPI, no clone
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:ANTHROPIC_API_KEY = "sk-ant-..."  # pragma: allowlist secret (placeholder)
 mylonite scan reference:vulnerable      # finds the seeded weaknesses
 mylonite scan reference:guarded         # comes up clean
 ```
