@@ -55,7 +55,7 @@ walkthrough is [`docs/quarry.md`](../../docs/quarry.md).
 ## Try it
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+export ANTHROPIC_API_KEY="sk-ant-..."  # pragma: allowlist secret (placeholder)
 mylonite scan reference:vulnerable
 mylonite scan reference:guarded
 ```
