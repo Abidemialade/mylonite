@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
+# The typed form of the weakness-class taxonomy. The canonical enumeration lives
+# in ``mylonite.scan.weakness.WeaknessClass``; this Literal is the Pydantic field
+# type and is kept in sync by ``tests/scan/test_weakness_single_source.py``.
 Weakness = Literal["W1", "W2", "W3", "W4"]
 SeedChannel = Literal[
     "user-message",

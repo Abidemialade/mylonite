@@ -44,11 +44,12 @@ from mylonite.plugins._mcp.target_registry import (
     SeedArmSpec,
     TargetSpec,
 )
+from mylonite.scan.weakness import WEAKNESS_CLASSES
 
 if TYPE_CHECKING:
     from mylonite.gate.recommend import TargetContext
 
-_WEAKNESS_CLASSES = frozenset({"W1", "W2", "W3", "W4"})
+_WEAKNESS_CLASSES = WEAKNESS_CLASSES
 
 _DEFAULT_CUSTOM_PROMPT = (
     "You are a helpful assistant with access to the connected tools. Use them "
