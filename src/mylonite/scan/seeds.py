@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mylonite.contracts._types import ComplianceTags
+from mylonite.contracts import ComplianceTags
 
 logger = logging.getLogger(__name__)
 

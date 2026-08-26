@@ -3198,7 +3198,7 @@ def report(
         console_print(console, f"artefacts: {path.parent}")
     else:
         from mylonite import testkit
-        from mylonite.contracts._types import ScanReport
+        from mylonite.contracts import ScanReport
         from mylonite.scan.artefacts import render_summary
         from mylonite.scan.engine import ScanResult
 

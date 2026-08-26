@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from mylonite.contracts._types import AdapterResponse, Payload
+from mylonite.contracts import AdapterResponse, Payload
 from mylonite.scan._llm import (
     FALLBACK_CALL_RAISED,
     litellm_json_call_async,

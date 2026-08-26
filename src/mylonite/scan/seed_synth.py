@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from mylonite._paths import safe_slug
-from mylonite.contracts._types import ComplianceTags
+from mylonite.contracts import ComplianceTags
 from mylonite.scan import tool_roles
 from mylonite.scan.seeds import SeedPattern
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import secrets
 
-from mylonite.contracts._types import Payload
+from mylonite.contracts import Payload
 
 #: Historical demo destinations. Kept as the defaults so randomization-off is a
 #: no-op and the recorded-fixture replay path is unaffected.

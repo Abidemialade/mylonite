@@ -83,11 +83,13 @@ from mylonite._replay import LiteLLMRecorder
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
+    Payload,
+    ReproducibilityEvidence,
+    SeedKill,
     ValidationOutcome,
     ValidationReport,
     ValidatorBase,
 )
-from mylonite.contracts._types import Payload, ReproducibilityEvidence, SeedKill
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter

@@ -36,7 +36,7 @@ from pathlib import PurePath
 from typing import Any, Final, Literal
 
 from mylonite._redaction import redact, redact_value
-from mylonite.contracts._types import ExploitRecord, ValidationReport
+from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import Localization, localize
 from mylonite.scan import control_shim
 from mylonite.scan._control_primitives import host_allowed

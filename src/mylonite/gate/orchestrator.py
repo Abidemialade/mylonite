@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from mylonite._cli_io import echo
-from mylonite.contracts._types import ExploitRecord, GeneratedTest, ValidationReport
+from mylonite.contracts import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.exit_codes import (
     EXIT_GENERATE_FAILED,
     EXIT_NOT_KEPT,

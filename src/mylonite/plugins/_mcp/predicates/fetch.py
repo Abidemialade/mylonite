@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from mylonite.contracts._types import AdapterResponse, Payload
+from mylonite.contracts import AdapterResponse, Payload
 from mylonite.scan._types import Verdict
 from mylonite.scan.predicate_primitives import (
     tool_was_called,

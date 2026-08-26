@@ -7,6 +7,7 @@ and ``GOVERNANCE.md`` for the contract-change process.
 from __future__ import annotations
 
 from mylonite.contracts._types import (
+    AbortReason,
     AdapterResponse,
     AttackPattern,
     ComplianceTags,
@@ -14,6 +15,9 @@ from mylonite.contracts._types import (
     GeneratedTest,
     Payload,
     ReproducibilityEvidence,
+    ScanAttempt,
+    ScanAttemptOutcome,
+    ScanReport,
     SeedKill,
     TargetDescriptor,
     ToolSpec,
@@ -49,6 +53,7 @@ from mylonite.contracts.validator import (
 __all__ = [
     "ALLOWED_METADATA_KEYS",
     "METADATA_PREFIX",
+    "AbortReason",
     "AdapterResponse",
     "AsyncTargetAdapter",
     "AsyncTargetAdapterBase",
@@ -64,6 +69,9 @@ __all__ = [
     "GeneratedTest",
     "Payload",
     "ReproducibilityEvidence",
+    "ScanAttempt",
+    "ScanAttemptOutcome",
+    "ScanReport",
     "SeedKill",
     "SupportsAttackSession",
     "TargetAdapter",

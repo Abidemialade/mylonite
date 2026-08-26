@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The public `mylonite.contracts` facade is now complete.** `ScanReport`,
+  `ScanAttempt`, `AbortReason` and `ScanAttemptOutcome` were part of the contract
+  surface (published JSON schemas) but absent from `contracts.__all__`, so
+  consumers imported the private `contracts._types` module. They are now exported
+  from the facade, and every module outside the `contracts` package imports from
+  `mylonite.contracts` rather than `mylonite.contracts._types`. A regression test
+  fails if a previously-exported type leaves the facade or if an external module
+  reaches into `_types` again. No wire-format or API change — purely the
+  documented import path. (#89)
+
 - **The W1-W4 weakness taxonomy now has a single definition
   (`mylonite.scan.weakness.WeaknessClass`).** The four classes were previously
   re-listed independently across seed typing, target-file validation, report
