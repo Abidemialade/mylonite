@@ -5,6 +5,17 @@ Protocol + a runtime-checkable ABC under
 [`src/mylonite/contracts/`](https://github.com/Abidemialade/mylonite/tree/main/src/mylonite/contracts).
 Plugins register via standard PyPI entry points and are discovered by
 [`mylonite.plugins.registry.discover`](https://github.com/Abidemialade/mylonite/blob/main/src/mylonite/plugins/registry.py).
+Run `mylonite plugins` to list every registered plugin across all five groups
+(which also runs the version-compatibility check below).
+
+**What runs today.** *Attack modules* are discovered **and run** on every
+`scan`/`gate` — install one and it contributes payloads immediately. The other
+four contracts (target adapter, test generator, validator, compliance mapper)
+are discovered and version-checked, but Mylonite uses its bundled **reference
+implementation** for each; selecting a third-party implementation of those four
+on the CLI is not yet exposed (a roadmap item). Custom target adapters today
+are reached through the target-file / `mcp:` family mechanism rather than the
+entry-point registry.
 
 ## Versioning rules
 

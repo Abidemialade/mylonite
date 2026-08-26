@@ -358,6 +358,37 @@ def version() -> None:
     echo(__version__)
 
 
+@app.command()
+def plugins() -> None:
+    """List installed extension plugins across all five contract groups.
+
+    Discovers every registered plugin via its PyPI entry point, which also runs
+    the contract-version compatibility check (a major mismatch is refused here
+    rather than failing silently mid-run). Attack modules are additionally *run*
+    by ``scan``/``gate``; for the target-adapter, test-generator, validator and
+    compliance-mapper contracts Mylonite uses its bundled reference
+    implementation, and selecting a third-party one for those is not yet exposed
+    on the CLI (see docs/plugin-authoring.md).
+    """
+    from mylonite.plugins.registry import VersionIncompatibleError, discover_all
+
+    try:
+        discovered = discover_all()
+    except VersionIncompatibleError as exc:
+        echo_err(f"a registered plugin is incompatible with this Mylonite: {exc}")
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    for group, instances in discovered.items():
+        echo(f"{group}:")
+        if not instances:
+            echo("  (none registered)")
+            continue
+        for inst in instances:
+            name = type(inst).__name__
+            ver = getattr(inst, "contract_version", "?")
+            echo(f"  - {name} (contract {ver})")
+
+
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():

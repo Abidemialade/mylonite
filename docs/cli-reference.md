@@ -165,6 +165,20 @@ mylonite version
 
 ---
 
+## `plugins`
+
+List installed [extension plugins](plugin-authoring.md) across all five contract
+groups, with each plugin's declared contract version. Discovery here also runs
+the version-compatibility check, so a major-mismatched plugin is reported rather
+than failing silently mid-run. Attack modules are the group that is also *run*
+by `scan`/`gate`; the other four use the bundled reference implementation.
+
+```bash
+mylonite plugins
+```
+
+---
+
 ### Run config (`mylonite.yaml`)
 
 `scan` and `gate` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)

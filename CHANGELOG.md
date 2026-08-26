@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`mylonite plugins` lists installed extension plugins across all five
+  contract groups.** Four of the five extension contracts (target adapters, test
+  generators, validators, compliance mappers) were never discovered at runtime —
+  `discover_all()` was dead code and the docs' "discovered by discover" /
+  "enforced at discovery time" claims held only for attack modules. The new
+  command exercises `discover_all()`, so registration and the version-compat
+  check now run for every group. `docs/plugin-authoring.md` and
+  `docs/cli-reference.md` now state exactly what is discovered, what is *run*,
+  and where the reference implementation is the default. (#90)
+
+### Fixed
+
+- **Plugin discovery is resilient to a plugin that isn't no-arg instantiable.**
+  `registry.discover` now skips such a plugin with a WARNING instead of crashing
+  the whole group — one misregistered plugin can no longer take out an unrelated
+  one. (Surfaced by wiring `discover_all()` into `mylonite plugins`: several
+  target-adapter entry points expect a `family` argument because they are
+  reached through the factory, not the no-arg registry.) (#90)
+
 ### Changed
 
 - **The scan-pipeline composition lives in one place

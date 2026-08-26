@@ -92,6 +92,13 @@ def discover(group: PluginGroup) -> list[Any]:
     class itself); the registry instantiates them with no arguments. Plugins
     that need configuration should accept it lazily via the contract's
     methods, not via ``__init__``, to keep discovery side-effect free.
+
+    A plugin that cannot be instantiated with no arguments (i.e. does not meet
+    that contract) is **skipped with a WARNING** rather than crashing discovery
+    -- one misregistered plugin must not take out an unrelated group. This is
+    how ``mylonite plugins`` can enumerate every group even though some target
+    adapters are reached through the target-file / factory path and expect
+    construction arguments, not the no-arg registry.
     """
     if group not in _GROUP_VERSIONS:
         valid = ", ".join(sorted(_GROUP_VERSIONS))
@@ -102,7 +109,25 @@ def discover(group: PluginGroup) -> list[Any]:
     loaded: list[Any] = []
     for ep in eps:
         cls = ep.load()
-        instance = cls()
+        try:
+            instance = cls()
+        except Exception:
+            # Best-effort discovery: a plugin that needs construction config
+            # signals it in varied ways -- a missing required argument raises
+            # TypeError (`http_agent`), while an adapter that needs a scope raises
+            # its own error (`InvalidTargetScope` for `mcp_filesystem`/`github`).
+            # Catch broadly and skip with a WARNING so one such plugin can't take
+            # out an unrelated group. This does not hide a genuine bug: a plugin
+            # that fails here is still constructed (with its real arguments) on
+            # the path that actually uses it, where the same error surfaces.
+            logger.warning(
+                "skipping plugin %r in group %s: not instantiable with no arguments "
+                "(discovery requires config to flow via the contract's methods, not "
+                "__init__)",
+                ep.name,
+                group,
+            )
+            continue
         _check_compat(group, host_version, instance, ep.name)
         loaded.append(instance)
     return loaded
