@@ -34,6 +34,23 @@ def test_literal_alias_stays_in_sync_with_the_enum() -> None:
     assert set(get_args(Weakness)) == {w.value for w in WeaknessClass}
 
 
+def test_make_control_handles_every_weakness_class() -> None:
+    # make_control raises for an unknown class, so this fails the moment a class
+    # is added to the enum without a dispatch branch in control_shim.
+    from mylonite.scan.control_shim import make_control
+
+    for w in WeaknessClass:
+        assert make_control(w) is not None, w
+
+
+def test_severity_partition_covers_every_weakness_class() -> None:
+    # Adding a class without classifying its base severity leaves it out of the
+    # partition — a checkable error rather than a silent Medium default.
+    from mylonite.report.severity import _HIGH_BASE_SEVERITY, _MEDIUM_BASE_SEVERITY
+
+    assert (_HIGH_BASE_SEVERITY | _MEDIUM_BASE_SEVERITY) == WEAKNESS_CLASSES
+
+
 def test_no_module_re_lists_the_full_key_set() -> None:
     offenders: list[str] = []
     for path in _SRC.rglob("*.py"):
