@@ -92,6 +92,13 @@ def discover(group: PluginGroup) -> list[Any]:
     class itself); the registry instantiates them with no arguments. Plugins
     that need configuration should accept it lazily via the contract's
     methods, not via ``__init__``, to keep discovery side-effect free.
+
+    A plugin that cannot be instantiated with no arguments (i.e. does not meet
+    that contract) is **skipped with a WARNING** rather than crashing discovery
+    -- one misregistered plugin must not take out an unrelated group. This is
+    how ``mylonite plugins`` can enumerate every group even though some target
+    adapters are reached through the target-file / factory path and expect
+    construction arguments, not the no-arg registry.
     """
     if group not in _GROUP_VERSIONS:
         valid = ", ".join(sorted(_GROUP_VERSIONS))
@@ -102,7 +109,17 @@ def discover(group: PluginGroup) -> list[Any]:
     loaded: list[Any] = []
     for ep in eps:
         cls = ep.load()
-        instance = cls()
+        try:
+            instance = cls()
+        except Exception:
+            logger.warning(
+                "skipping plugin %r in group %s: not instantiable with no arguments "
+                "(discovery requires config to flow via the contract's methods, not "
+                "__init__)",
+                ep.name,
+                group,
+            )
+            continue
         _check_compat(group, host_version, instance, ep.name)
         loaded.append(instance)
     return loaded
