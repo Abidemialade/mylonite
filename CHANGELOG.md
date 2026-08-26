@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The model-output parsing layer is a separately-testable module
+  (`mylonite.scan.llm_parse`).** The eight functions that turn nondeterministic
+  model text into a deterministic value (`_extract_json_object`,
+  `_first_balanced_object`, `_try_repair`, …) were private to `scan/_llm.py` and
+  reachable only through a live-call transport path. They now live in their own
+  module with direct unit tests (`tests/scan/test_llm_parse.py`); `_llm` imports
+  them, and `scan.llm_planner` imports `_try_repair` from there instead of
+  reaching into the private `_llm`. Pure code move, no behaviour change. (#98)
+
 - **The LLM transport seam has a single named type
   (`mylonite.scan.llm_types.CompletionFn` / `AsyncCompletionFn`).** The injected
   completion callable was an anonymous `Callable[..., Any]` repeated across ~27

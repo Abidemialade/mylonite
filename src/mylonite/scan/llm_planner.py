@@ -25,7 +25,8 @@ import json
 import logging
 from typing import Any, Protocol
 
-from mylonite.scan._llm import _try_repair, litellm_tool_call_async
+from mylonite.scan._llm import litellm_tool_call_async
+from mylonite.scan.llm_parse import _try_repair
 from mylonite.scan.llm_types import (
     CompletionFn,
     PlannerStep,
