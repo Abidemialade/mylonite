@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`cli.py` is being decomposed from a fat controller toward a thin composition
+  root.** The terminal renderers (validation report, control-ablation matrix)
+  moved to `mylonite.report.render`, and the target-file scaffolding moved to
+  `mylonite.plugins._mcp.scaffold` — domain logic now lives in its domain
+  package, and `cli.py` dropped ~610 LOC (5,244 → 4,634). A regression test
+  (`tests/test_cli_size.py`) caps `cli.py` so new domain logic is extracted
+  rather than inlined. `cli` re-exports the moved helpers, so imports are
+  unchanged. No behaviour change. (#91)
+
 - **Package layering direction is now enforced.** The intended direction
   (`contracts <- scan/plugins <- gate/report <- cli`) was stated in prose and
   enforced nowhere. The one module-level inversion — `plugins/_mcp/twins.py`
