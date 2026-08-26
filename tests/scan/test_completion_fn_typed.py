@@ -16,9 +16,10 @@ from mylonite.scan.llm_types import AsyncCompletionFn, CompletionFn
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "mylonite"
 
-# A `*completion_fn` parameter/attribute annotated as a bare Callable, e.g.
-# `completion_fn: Callable[..., Any]` or `mitigation_completion_fn: Callable[...`.
-_BARE_CALLABLE_SEAM = re.compile(r"completion_fn:\s*Callable\[")
+# A `*completion_fn` parameter/attribute annotated as a bare Callable, matching
+# the `completion_fn`, `_completion_fn` and `mitigation_completion_fn` variants
+# explicitly, e.g. `completion_fn: Callable[..., Any]`.
+_BARE_CALLABLE_SEAM = re.compile(r"\w*completion_fn:\s*Callable\[")
 
 
 def test_aliases_exist() -> None:
