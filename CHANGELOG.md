@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The LLM chokepoint has a public name and is structurally enforced.** Every
+  model call routes through the LiteLLM transport wrapper that owns call-budget
+  counting and the active policy, but that wrapper lived only in the private
+  `scan._llm`, so "all LLM access flows through here" was a convention. A public
+  `mylonite.scan.llm` now re-exports the chokepoint, and an AST test
+  (`tests/test_llm_chokepoint_boundary.py`) fails if any module calls
+  `litellm.completion`/`acompletion` directly outside it — the bypass that would
+  skip budget counting and the policy. No runtime change. (#96)
+
 - **The model-output parsing layer is a separately-testable module
   (`mylonite.scan.llm_parse`).** The eight functions that turn nondeterministic
   model text into a deterministic value (`_extract_json_object`,
