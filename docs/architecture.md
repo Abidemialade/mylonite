@@ -60,6 +60,10 @@ plus the custom-target legs **stability · effect · consensus**. The honesty in
 ### Outputs — `mylonite.report` & `mylonite.gate`
 - **`report/sarif.py`**, **`report/bundle.py`**, **`report/severity.py`** — the
   [SARIF / JSON](reading-results.md) renderers + shared severity rule.
+- **`report/render.py`** — the terminal renderers for a validation report and the
+  control-ablation matrix (kept out of `cli.py`, which stays a thin composition
+  root). Target-file scaffolding lives in **`plugins/_mcp/scaffold.py`** for the
+  same reason.
 - **`gate/orchestrator.py`** — the scan→generate→validate→PR sequence + exit codes.
 - **`gate/mitigation.py`** + **`gate/recommend.py`** — the PR body and the target-specific,
   evidence-anchored recommendation (a fenced code sketch, never a diff).
