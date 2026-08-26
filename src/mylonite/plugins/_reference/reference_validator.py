@@ -739,18 +739,11 @@ class DifferentialValidator(ValidatorBase):
         ``factory`` overrides the adapter source for this run (e.g. the
         boundary-guarded twin factory); it defaults to the raw target factory.
         """
-        from mylonite.plugins.registry import discover
-        from mylonite.scan.customiser import PayloadCustomiser
-        from mylonite.scan.engine import ScanConfig, ScanEngine
-        from mylonite.scan.judge import SuccessJudge
+        from mylonite.scan.assembly import build_scan_engine
+        from mylonite.scan.engine import ScanConfig
 
         chosen_factory = factory or self._target_adapter_factory
         adapter = chosen_factory() if chosen_factory else target
-        modules = [
-            m
-            for m in discover("mylonite.attack_modules")
-            if m.attack_metadata().id in {"prompt-injection-family", "excessive-agency-family"}
-        ]
         config = ScanConfig(
             target_id="mcp:custom",  # report id; seed selection uses the descriptor
             provider=self._provider,
@@ -762,15 +755,12 @@ class DifferentialValidator(ValidatorBase):
             wall_clock_timeout_s=self._iteration_timeout_s,
             randomize_exfil=self._randomize_exfil,
         )
-        judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
-        engine = ScanEngine(
-            config=config,
-            adapter=adapter,
-            attack_modules=modules,
-            customiser=PayloadCustomiser(
-                model=self._customiser_model, completion_fn=self._completion_fn
-            ),
-            judge=judge,
+        engine = build_scan_engine(
+            config,
+            adapter,
+            completion_fn=self._completion_fn,
+            customiser_model=self._customiser_model,
+            judge_model=self._judge_model,
         )
         result = asyncio.run(engine.run())
         if result.exploits:
