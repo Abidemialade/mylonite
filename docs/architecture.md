@@ -91,7 +91,11 @@ an API change — see [Plugin authoring](plugin-authoring.md).
 
 - **All LLM access flows through LiteLLM** — no provider SDKs imported directly; there's
   no default provider (you must configure one). This is what makes the
-  [model roles](attack-modes.md#composing-the-model-roles) possible.
+  [model roles](attack-modes.md#composing-the-model-roles) possible. Every model call
+  routes through one chokepoint — the transport wrapper that owns call-budget counting
+  and the active policy, whose public name is `mylonite.scan.llm`. A direct
+  `litellm.completion`/`acompletion` call anywhere else is a bypass and fails the build
+  (`tests/test_llm_chokepoint_boundary.py`).
 - **The reference app is ground truth.** The bundled `mcp_kitchen_sink` vulnerable/guarded
   pair is *intentionally* (un)guarded; the differential is proven against it.
 - **Scope discipline.** Only the AI attack surface — no general SAST/DAST, no non-AI test
