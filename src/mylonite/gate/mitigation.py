@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import importlib.resources as _ir
 from typing import Any
 
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
+from mylonite.mitigations import snippet as _snippet
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.weakness import WEAKNESS_CLASSES
@@ -80,11 +80,6 @@ def _guarded_is_server_layer(
         return guarded_is_server_layer
     notes = getattr(report, "notes", "") or ""
     return "guarded-twin=server-layer" in notes
-
-
-def _snippet(weakness_class: str) -> str:
-    base = _ir.files("mylonite.gate") / "mitigations"
-    return (base / f"{weakness_class}.md").read_text(encoding="utf-8").strip()
 
 
 def _evidence_lines(report: ValidationReport) -> str:
@@ -184,8 +179,9 @@ def build_pr_body(
     evidence-anchored recommendation now, for every target including a
     reference one — the fixed, illustrative ``gate/fixes/{wc}.md`` diff this
     used to fall back to on ``target=None`` is retired. The class-level
-    ``gate/mitigations/{wc}.md`` background prose (:func:`_snippet`) stays —
-    it is still true and still useful context regardless of target.
+    ``mitigations/{wc}.md`` background prose (:func:`_snippet`, now
+    ``mylonite.mitigations.snippet``) stays — it is still true and still useful
+    context regardless of target.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")

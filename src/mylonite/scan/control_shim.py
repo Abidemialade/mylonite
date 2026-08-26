@@ -1015,7 +1015,7 @@ class ControlServerShim:
         return result
 
 
-# Registry keyed by weakness class, mirroring gate/mitigations/{W*}.md. A factory
+# Registry keyed by weakness class, mirroring mitigations/{W*}.md. A factory
 # so each invoke gets a fresh control instance (controls may hold per-run state in
 # the boundary control set).
 def make_control(

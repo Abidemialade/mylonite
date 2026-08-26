@@ -1,5 +1,3 @@
-import importlib.resources as ir
-
 from mylonite.contracts._types import (
     AdapterResponse,
     ComplianceTags,
@@ -95,10 +93,10 @@ def test_weakness_class_prefers_stamped_metadata_over_seed_catalogue():
 
 
 def test_all_mitigation_snippets_present():
-    base = ir.files("mylonite.gate") / "mitigations"
+    from mylonite.mitigations import snippet
+
     for name in ("W1", "W2", "W3", "W4", "generic"):
-        text = (base / f"{name}.md").read_text(encoding="utf-8")
-        assert text.strip(), f"{name}.md is empty"
+        assert snippet(name).strip(), f"{name}.md is empty"
 
 
 def _report(kept=True):

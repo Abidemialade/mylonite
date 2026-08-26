@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Package layering direction is now enforced.** The intended direction
+  (`contracts <- scan/plugins <- gate/report <- cli`) was stated in prose and
+  enforced nowhere. The one module-level inversion — `plugins/_mcp/twins.py`
+  reaching up into `gate.mitigation._snippet` — is removed by moving the
+  mitigation-guidance snippets to a new dependency-free leaf package
+  (`mylonite.mitigations`) that both `gate` and `plugins` import. A new AST test
+  (`tests/test_layering.py`) fails if any module-level import runs against the
+  layering. (`TYPE_CHECKING` and deliberate function-local deferred imports are
+  out of scope, matching how the codebase uses them.) No behaviour change. (#97)
+
 - **The scan-pipeline composition lives in one place
   (`mylonite.scan.assembly.build_scan_engine`).** The assembly — discover attack
   modules, filter to the supported families, build a `ScanEngine` with a
