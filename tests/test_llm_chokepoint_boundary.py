@@ -32,7 +32,13 @@ _CHOKEPOINT_METHODS = {"completion", "acompletion"}
 
 
 def _is_litellm_call(node: ast.AST) -> bool:
-    """True if ``node`` is a ``litellm.completion(...)`` / ``.acompletion(...)`` call."""
+    """True if ``node`` is a ``litellm.completion(...)`` / ``.acompletion(...)`` call.
+
+    Matches the attribute-call form the codebase always uses. A `from litellm
+    import completion; completion(...)` aliased import would not be caught (the
+    func is a bare Name, not an Attribute) — acceptable because that form is
+    never used here; if it ever is, extend this matcher to track the alias.
+    """
     if not isinstance(node, ast.Call):
         return False
     func = node.func
