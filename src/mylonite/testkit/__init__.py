@@ -64,7 +64,7 @@ from mylonite._replay import (
     FixtureError,
     LiteLLMRecorder,
 )
-from mylonite.contracts._types import ExploitRecord
+from mylonite.contracts import ExploitRecord
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.wiring import build_scan, note_id_counter

@@ -6,7 +6,7 @@ import importlib.resources as _ir
 from collections.abc import Callable
 from typing import Any
 
-from mylonite.contracts._types import ExploitRecord, ValidationReport
+from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.weakness import WEAKNESS_CLASSES

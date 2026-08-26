@@ -37,8 +37,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 if TYPE_CHECKING:
     from mcp_kitchen_sink._store import NoteStore
 
-from mylonite.contracts import AdapterResponse, AsyncTargetAdapterBase, Payload, TargetDescriptor
-from mylonite.contracts._types import ToolSpec
+from mylonite.contracts import (
+    AdapterResponse,
+    AsyncTargetAdapterBase,
+    Payload,
+    TargetDescriptor,
+    ToolSpec,
+)
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner

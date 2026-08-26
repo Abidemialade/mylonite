@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mylonite.contracts._types import ExploitRecord
+from mylonite.contracts import ExploitRecord
 
 # channel -> (locus kind, the field within that locus)
 _CHANNEL: dict[str, tuple[str, str | None]] = {

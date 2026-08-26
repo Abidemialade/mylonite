@@ -7,7 +7,7 @@ NIST tagging to drift). Used by the reference compliance mapper.
 
 from __future__ import annotations
 
-from mylonite.contracts._types import ComplianceTags
+from mylonite.contracts import ComplianceTags
 from mylonite.taxonomy.loader import load_nist_ai_rmf
 
 

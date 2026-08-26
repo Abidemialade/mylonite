@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from mylonite.contracts._types import Payload, TargetDescriptor
+from mylonite.contracts import Payload, TargetDescriptor
 from mylonite.scan._llm import fence as _fence
 from mylonite.scan._llm import litellm_json_call_async, pop_fallback_cause
 from mylonite.scan.seeds import SeedPattern, required_markers, resolved_tool_metadata

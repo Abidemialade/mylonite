@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from mylonite.contracts._types import AdapterResponse, Payload
+from mylonite.contracts import AdapterResponse, Payload
 from mylonite.scan._types import Verdict
 from mylonite.scan.exfil import email_present, host_present
 from mylonite.scan.predicate_primitives import executed_occurrence_index, tool_executed_not_deferred

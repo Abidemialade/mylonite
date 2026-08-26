@@ -24,8 +24,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite._redaction import redact
-from mylonite.contracts import Payload, TargetDescriptor
-from mylonite.contracts._types import ExploitRecord, ScanAttempt, ScanReport
+from mylonite.contracts import ExploitRecord, Payload, ScanAttempt, ScanReport, TargetDescriptor
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import AbortReason

@@ -26,7 +26,7 @@ from rich.table import Table
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
-from mylonite.contracts._types import ExploitRecord, ToolSpec
+from mylonite.contracts import ExploitRecord, ToolSpec
 from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass
 from mylonite.scan.engine import ScanResult
 

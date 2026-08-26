@@ -42,8 +42,8 @@ from mylonite.contracts import (
     AsyncTargetAdapterBase,
     Payload,
     TargetDescriptor,
+    ToolSpec,
 )
-from mylonite.contracts._types import ToolSpec
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike

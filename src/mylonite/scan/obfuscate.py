@@ -29,7 +29,7 @@ import base64
 import re
 from collections.abc import Callable
 
-from mylonite.contracts._types import Payload
+from mylonite.contracts import Payload
 from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
 
 _ZWSP = "​"  # zero-width space: invisible, but LLMs read through it

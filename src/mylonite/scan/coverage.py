@@ -32,8 +32,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Final, get_args
 
-from mylonite.contracts._types import AbortReason as AbortReason
-from mylonite.contracts._types import ScanAttemptOutcome, ScanReport
+from mylonite.contracts import AbortReason as AbortReason
+from mylonite.contracts import ScanAttemptOutcome, ScanReport
 from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SUCCESS
 
 # --- Abort reasons -------------------------------------------------------------

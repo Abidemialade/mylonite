@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
+from mylonite.contracts import AdapterResponse, Payload, TargetDescriptor
 from mylonite.contracts.target_adapter import AsyncTargetAdapterBase
 from mylonite.plugins._mcp import target_registry
 
