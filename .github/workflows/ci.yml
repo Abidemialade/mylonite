@@ -178,6 +178,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pre-commit
       - name: Run pre-commit
+        # `no-commit-to-branch` is a LOCAL guard (block direct commits to main on
+        # a dev machine). In CI it fires whenever the job runs on the `main`
+        # branch itself (every push to main), which is not a real failure — skip
+        # it here so main's CI reflects the actual checks.
+        env:
+          SKIP: no-commit-to-branch
         run: pre-commit run --all-files --show-diff-on-failure
 
   security:
