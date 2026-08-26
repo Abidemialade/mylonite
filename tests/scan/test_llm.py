@@ -18,7 +18,6 @@ from mylonite.scan._llm import (
     BudgetExceededError,
     LiteLLMCallCounter,
     NonRecoverableProviderError,
-    _extract_json_object,
     active_counter,
     active_policy,
     litellm_json_call,
@@ -28,6 +27,7 @@ from mylonite.scan._llm import (
     llm_scope,
     pop_fallback_cause,
 )
+from mylonite.scan.llm_parse import _extract_json_object
 from mylonite.scan.llm_policy import LLMPolicy
 
 
