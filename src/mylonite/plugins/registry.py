@@ -111,11 +111,15 @@ def discover(group: PluginGroup) -> list[Any]:
         cls = ep.load()
         try:
             instance = cls()
-        except TypeError:
-            # A missing required __init__ argument is the precise no-arg-contract
-            # violation. Catch only TypeError so a genuine bug in a plugin's
-            # __init__ (NameError, a config-load failure, ...) still surfaces
-            # loudly instead of being silently skipped.
+        except Exception:
+            # Best-effort discovery: a plugin that needs construction config
+            # signals it in varied ways -- a missing required argument raises
+            # TypeError (`http_agent`), while an adapter that needs a scope raises
+            # its own error (`InvalidTargetScope` for `mcp_filesystem`/`github`).
+            # Catch broadly and skip with a WARNING so one such plugin can't take
+            # out an unrelated group. This does not hide a genuine bug: a plugin
+            # that fails here is still constructed (with its real arguments) on
+            # the path that actually uses it, where the same error surfaces.
             logger.warning(
                 "skipping plugin %r in group %s: not instantiable with no arguments "
                 "(discovery requires config to flow via the contract's methods, not "
