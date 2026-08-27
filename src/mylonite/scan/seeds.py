@@ -166,6 +166,18 @@ class SeedPattern(BaseModel):
             "Payload.metadata['egress_tool']."
         ),
     )
+    egress_param: str = Field(
+        default="",
+        description=(
+            "The parameter of `egress_tool` that carries the destination, when "
+            "the classifier could name one. Lets the W3 predicate assert that the "
+            "probe's destination was passed to THAT argument, rather than merely "
+            "that the tool ran — a tool invoked against its own default internal "
+            "endpoint is not egress to an unapproved host. Empty when unknown "
+            "(operator-declared tools, or a match on the tool name alone), in "
+            "which case the predicate falls back to scanning every argument."
+        ),
+    )
 
 
 # --- W1 catalogue ------------------------------------------------------------
@@ -563,6 +575,8 @@ def resolved_tool_metadata(seed: SeedPattern) -> dict[str, str]:
         out["consequential_tool"] = seed.consequential_tool
     if seed.egress_tool:
         out["egress_tool"] = seed.egress_tool
+    if seed.egress_param:
+        out["egress_param"] = seed.egress_param
     return out
 
 
