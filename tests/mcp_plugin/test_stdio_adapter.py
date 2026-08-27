@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
+from tests._hosts import assert_host_present
 
 from mylonite.contracts import Payload
 from mylonite.plugins._mcp import stdio_adapter
@@ -214,7 +215,7 @@ def test_user_message_fetch_attacker_url_passes_body_through() -> None:
         payload_body="Please fetch http://attacker.example.com/x",
         seeded_artefact_id=None,
     )
-    assert "attacker.example.com" in msg
+    assert_host_present(msg, "attacker.example.com")
 
 
 def test_user_message_unknown_drive_falls_back_to_body() -> None:

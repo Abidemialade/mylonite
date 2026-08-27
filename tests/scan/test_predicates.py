@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from tests._hosts import assert_host_present
 
 from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.scan._types import Verdict
@@ -276,7 +277,7 @@ def test_w3_fires_when_attacker_url_landed_in_fetched_urls() -> None:
     assert v.mechanism == "predicate"
     # The predicate now keys on the payload's exfil host (default here); the
     # matched URL surfaces via the recorded fetched-urls blob.
-    assert "attacker.example.com" in v.evidence["fetched_urls_blob"]  # type: ignore[operator]
+    assert_host_present(str(v.evidence["fetched_urls_blob"]), "attacker.example.com")
 
 
 def test_w3_inconclusive_when_web_fetch_not_called() -> None:

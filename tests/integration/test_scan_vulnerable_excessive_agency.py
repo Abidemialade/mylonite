@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests._hosts import hosts_in
 
 from mylonite.plugins._reference.excessive_agency_module import (
     ExcessiveAgencyAttackModule,
@@ -98,7 +99,7 @@ class _AdapterPlannerStub:
                     (m.get("content", "") for m in reversed(messages) if m.get("role") == "tool"),
                     "",
                 )
-                if "web_fetch" in last_tool or "attacker.example.com" in last_tool:
+                if "web_fetch" in last_tool or "attacker.example.com" in hosts_in(last_tool):
                     return _tool_response(
                         [
                             _tool_call(
