@@ -174,8 +174,46 @@ class LiteLLMCallCounter:
     #: can see how often a STRICT-dialect provider needed the rewrite.
     tool_schema_sanitised: int = 0
 
+    #: Calls attributed to each seed, and the floor each seed may spend even
+    #: once the shared pool is gone. Both empty until ``reserve_for`` runs, so a
+    #: caller that never sets up reservations behaves exactly as before.
+    by_seed: dict[str, int] = field(default_factory=dict)
+    per_seed_floor: int = 0
+
+    def reserve_for(self, seed_count: int, *, minimum: int = 2) -> None:
+        """Guarantee every seed a floor of the budget before sharing the rest.
+
+        Without this the counter is first-come-first-served, and payload tasks
+        are all created up front: whichever seeds happen to start first drain the
+        pool and the rest never make a single call. That was survivable while
+        every probe was one call. It is not now that a probe can be a CHAIN of
+        two or three -- a ~14-tool server can synthesise enough seeds to exhaust
+        the default 50 before a single bundled seed runs.
+
+        It also silently manufactures false cleans: a chain cut off after step
+        one has called a tool but never reached the tool under test, which is
+        exactly the shape ``judge.never_exercised_tool_under_test`` exists to
+        catch. Starvation must be deterministic, not a race on provider latency.
+
+        The floor is deliberately small. It buys each seed enough to be
+        *attempted*; it does not promise completion, and the honest-coverage
+        machinery reports the difference.
+        """
+        if seed_count <= 0:
+            return
+        self.per_seed_floor = max(minimum, self.cap // seed_count) if self.cap else 0
+
+    def _may_spend(self, seed: str) -> bool:
+        """True when ``seed`` still has room, either shared or reserved."""
+        if self.count + 1 <= self.cap:
+            return True
+        if not seed or self.per_seed_floor <= 0:
+            return False
+        return self.by_seed.get(seed, 0) < self.per_seed_floor
+
     def record(self, caller: str) -> None:
-        if self.count + 1 > self.cap:
+        seed = _ACTIVE_SEED.get() or ""
+        if not self._may_spend(seed):
             msg = (
                 f"--max-llm-calls budget of {self.cap} exhausted "
                 f"(by caller breakdown: {self.by_caller})"
@@ -183,6 +221,8 @@ class LiteLLMCallCounter:
             raise BudgetExceededError(msg)
         self.count += 1
         self.by_caller[caller] = self.by_caller.get(caller, 0) + 1
+        if seed:
+            self.by_seed[seed] = self.by_seed.get(seed, 0) + 1
 
     def record_schema_sanitised(self) -> None:
         """Bump :attr:`tool_schema_sanitised`. Deliberately NOT routed through
@@ -209,6 +249,25 @@ class LiteLLMCallCounter:
 _ACTIVE_COUNTER: contextvars.ContextVar[LiteLLMCallCounter | None] = contextvars.ContextVar(
     "mylonite_active_call_counter", default=None
 )
+
+#: The seed whose work the current task is doing, so the counter can attribute a
+#: call without every call site having to thread an id down to it. A contextvar
+#: rather than an argument for the same reason the counter itself is one: the
+#: chokepoints are several layers below the engine, and `asyncio` tasks each get
+#: their own copy of the context, so concurrent payloads cannot cross-attribute.
+_ACTIVE_SEED: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mylonite_active_seed", default=None
+)
+
+
+@contextmanager
+def seed_scope(seed_id: str) -> Iterator[None]:
+    """Attribute every LLM call made inside this block to ``seed_id``."""
+    token = _ACTIVE_SEED.set(seed_id)
+    try:
+        yield
+    finally:
+        _ACTIVE_SEED.reset(token)
 
 
 def active_counter() -> LiteLLMCallCounter | None:
