@@ -54,6 +54,19 @@ scaffolded workflows:
   for you (see [The validation engine](validation.md)) — without that
   variable the committed test for a custom target is *skipped*, not run, and
   `pytest` still exits `0`.
+
+    The re-drive carries a **hard call budget and a wall-clock timeout**. It is
+    scoped to the single already-known pattern, so a healthy run is a customiser
+    call, a few planner turns and a judge call; overrunning the bound means
+    something is wrong — a hung MCP server, a stalled provider — not that the
+    work was large. Without those bounds the only backstop is your CI platform's
+    job cap, which on GitHub-hosted runners is **six hours**.
+
+    Two things worth knowing before you make this a required check. It calls a
+    live model, so it is **not bit-for-bit deterministic** the way a unit test
+    is — budget for the occasional re-run rather than treating a single red as
+    proof of regression. And it is the one path in the product that spends money
+    on every PR; the nightly discovery job is where the expensive work belongs.
 - **`mylonite-discovery.yml`** runs nightly or on demand. It does the expensive
   full discovery and opens a fresh gating PR when it finds a new exploit. It
   also needs a repository **variable** — `vars.MYLONITE_AUTHORIZE` — set to

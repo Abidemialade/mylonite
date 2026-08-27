@@ -19,9 +19,11 @@ attack) and reports structural exposure from the tool schemas alone. Belongs in 
 1, next to lint — cheap enough to run on every push.
 
 Options: `--target-file PATH` (required — or set `target_file:` in `mylonite.yaml`);
-`--enforce` (exit `1` if any finding is present, instead of reporting and exiting `0` —
-the report-then-enforce adoption ramp); `--config mylonite.yaml` (auto-discovered from
-`./mylonite.yaml` when present).
+`--enforce` (exit `1` on the substantive W1–W4 structural findings instead of reporting and
+exiting `0` — the report-then-enforce adoption ramp). The "unpinned descriptions" advisory
+is **shown but does not gate**: it fires on every tool of every server on first contact, so
+gating on it would make `--enforce` red for everyone and unusable as a CI stage.
+`--config mylonite.yaml` (auto-discovered from `./mylonite.yaml` when present).
 
 ```bash
 mylonite check --target-file app.yaml
@@ -130,12 +132,13 @@ Render a saved scan or validation as a terminal trust panel — including the sa
 evidence-anchored recommendation the gating PR carries — offline. See [Reading the
 results](reading-results.md).
 
-Options: `target` (a scan/generated dir or `*_report.json`); `--sarif PATH` (SARIF 2.1.0
+Options: `target` (a scan dir, a `generate`-emitted dir **once `validate` has run**, or a
+`*_report.json`); `--sarif PATH` (SARIF 2.1.0
 for GitHub code scanning); `--json PATH` (machine-readable finding bundle). Both carry
 the differential proof, the OWASP/ASI/ATLAS/NIST tags, and the same recommendation.
 
 ```bash
-mylonite report .mylonite/generated/my-finding --sarif out.sarif --json finding.json
+mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
 ## `ablate` — score the safeguards
@@ -143,7 +146,8 @@ mylonite report .mylonite/generated/my-finding --sarif out.sarif --json finding.
 Toggle each AI safeguard and report which are **load-bearing**, **security theater**, or
 **redundant**. See [the control-efficacy check](validation.md#the-control-efficacy-check).
 
-Options: `--target-file PATH` (required); `--authorize`; `--controls W2,W3,W4`;
+Options: `--target-file PATH` (**required** — there is no positional target form, and the
+bundled `reference:*` targets are not accepted); `--authorize`; `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
 `--max-seeds N`; `--model` (any LiteLLM provider via a `provider/model` prefix).
 

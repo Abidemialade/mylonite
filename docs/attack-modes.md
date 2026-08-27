@@ -25,6 +25,45 @@ mylonite scan reference:vulnerable
 
 ---
 
+## Why the probes look innocuous
+
+A synthesised payload is written to read as a **routine operation**, not as an attack.
+The W3 egress probe asks the agent to fetch a plausible third-party endpoint; the W4
+probe is a plain operational request; the black-box W2 document embeds its instruction
+in an ordinary-looking retention note.
+
+That is deliberate, and it is the difference between measuring your target and measuring
+the planner's content filter. A payload that names `attacker.example.com/exfil` or opens
+with `IMPORTANT SYSTEM INSTRUCTION` is declined by an aligned model on sight — which
+tells you nothing about whether your server enforces anything. Published tool-poisoning
+research reports substantial attack-success rates against production agents on live MCP
+servers precisely because the malicious action is dressed as legitimate tool use.
+
+Two things are deliberately *not* softened:
+
+- **The judge's context still names the attack plainly.** Only the payload needs to look
+  routine; blunting the judge would trade one false-negative source for another.
+- **Probe destinations are RFC 2606 reserved** (`.example.net` / `.example.com`) and
+  therefore non-routable, so a probe can never leave your lab. Being outside any sane
+  allowlist is what makes the egress probe valid; looking innocuous is what stops it
+  being refused before your server is ever asked.
+
+The bundled reference seeds keep their historical literals — those are load-bearing for
+the committed replay fixtures the offline gate uses.
+
+## How many probes you get
+
+Synthesis is bounded per weakness class, and the ceiling **scales with the number of
+tools your target exposes**. Every probe costs roughly a customiser call, a few planner
+turns and a judge call, all drawn from one scan-wide `--max-llm-calls` budget, so an
+unbounded fan-out on a large surface would exhaust the budget and starve later seeds.
+
+If the ceiling drops any candidates, the scan says so and names the tools it did not
+probe. Raise `--max-llm-calls` and re-run, or name the tools that matter in the target
+file's `control_config`, to cover them. A capped run never reads as a fully-probed one.
+
+---
+
 ## Composing the model roles
 
 The scan honours Mylonite's **three model roles** — set them independently to make

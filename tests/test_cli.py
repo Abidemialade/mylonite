@@ -4965,3 +4965,36 @@ def test_dispatch_emit_real_reference_generator_receives_context() -> None:
     assert generated.framework == "pytest"
     assert "model='gpt-4.1-mini'" in generated.source
     assert "provider='openai'" in generated.source
+
+
+# --- the default model must be the same on every command ----------------------
+
+
+def test_every_command_shares_one_default_model() -> None:
+    """`scan` drifted onto a different default from every sibling command.
+
+    `validate`, `gate`, `ablate` and `check` all defaulted to Haiku; `scan`
+    defaulted to Sonnet. That is roughly 3x the token cost, and because the
+    default model is also the PLANNER -- the agent under test -- the more
+    injection-resistant model made the same target yield fewer findings under
+    `scan` than the project's own published scorecard measured. A user budgeting
+    from the quickstart under-budgeted, on the one command meant to find things.
+
+    Pinning it here because the drift is invisible: nothing failed, the numbers
+    were just quietly different.
+    """
+    import re
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "src" / "mylonite" / "cli.py"
+    defaults = set(
+        re.findall(r'base_model = model or "([^"]+)"', source.read_text(encoding="utf-8"))
+    )
+    assert len(defaults) == 1, (
+        f"commands disagree on the default model: {sorted(defaults)}. "
+        "Every command's default must match, and must match the documented one."
+    )
+    assert "haiku" in defaults.pop().lower(), (
+        "the documented default is Haiku (docs/quickstart.md, docs/validation.md); "
+        "changing it means changing those pages and the published cost guidance too"
+    )

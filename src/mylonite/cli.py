@@ -1111,7 +1111,15 @@ def scan(
 
     # Resolve provider + model with sensible defaults so dry-run doesn't require
     # a live LLM provider configured.
-    base_model = model or "claude-sonnet-4-6"
+    #
+    # Haiku, matching `validate`/`gate`/`ablate`/`check` and the documented
+    # default. `scan` was the sole outlier on Sonnet, which is roughly 3x the
+    # token cost and -- because the default model is also the PLANNER, the agent
+    # under test -- resists injection harder, so the same target yielded fewer
+    # findings under `scan` than the published scorecard measured. A user
+    # budgeting from the quickstart under-budgeted, and a weakness the
+    # scorecard reports could go unreported on the very command meant to find it.
+    base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
