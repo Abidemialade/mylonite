@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests._hosts import assert_host_present
 
 from mylonite.contracts import AsyncTargetAdapter, Payload
 from mylonite.plugins._reference.reference_target_adapter import (
@@ -231,7 +232,7 @@ async def test_invoke_w3_fetch_url_direct_against_vulnerable() -> None:
     adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
     response = await adapter.invoke(_w3_payload())
     assert "web_fetch" in response.tool_calls
-    assert "attacker.example.com" in response.metadata["store_fetched_urls"]
+    assert_host_present(response.metadata["store_fetched_urls"], "attacker.example.com")
     assert response.metadata["drive"] == "fetch_url_direct"
 
 
