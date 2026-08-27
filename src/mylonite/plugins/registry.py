@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from importlib.metadata import EntryPoint, entry_points
-from typing import Any, Literal, get_args
+from typing import Any, Literal, NamedTuple, get_args
 
 from mylonite.contracts import (
     attack_module,
@@ -131,6 +131,68 @@ def discover(group: PluginGroup) -> list[Any]:
         _check_compat(group, host_version, instance, ep.name)
         loaded.append(instance)
     return loaded
+
+
+class PluginInfo(NamedTuple):
+    """What a plugin declares, read without constructing it.
+
+    ``needs_config`` marks a plugin that cannot be built with no arguments. That
+    is a legitimate design for a target adapter — the contract deliberately flows
+    configuration through its methods and its factory, so an adapter for a named
+    server family is constructed with that family, not discovered ready-made. It
+    is not a defect and must not be reported as one.
+    """
+
+    entry_point: str
+    class_name: str
+    contract_version: str
+    needs_config: bool
+
+
+def describe(group: PluginGroup) -> list[PluginInfo]:
+    """Registered plugins in ``group``, described WITHOUT instantiating them.
+
+    ``discover`` has to construct each plugin, because its callers need working
+    instances. A listing does not: ``contract_version`` is a ``ClassVar`` on
+    every contract base, so it can be read off the class.
+
+    That distinction matters because three of the adapters Mylonite itself ships
+    (``http_agent``, ``mcp_filesystem``, ``mcp_github``) take a required argument,
+    so ``discover`` skipped them with a WARNING and ``mylonite plugins`` — whose
+    only job is to list what is installed — reported half of the product's own
+    target adapters as broken on a clean install.
+
+    The compatibility check still runs, against the class rather than an
+    instance, so a major-version mismatch is still refused here rather than
+    failing silently mid-run.
+    """
+    if group not in get_args(PluginGroup):
+        msg = f"Unknown plugin group {group!r}."
+        raise ValueError(msg)
+    host_version = _GROUP_VERSIONS[group]
+    out: list[PluginInfo] = []
+    for ep in entry_points(group=group):
+        cls = ep.load()
+        _check_compat(group, host_version, cls, ep.name)
+        needs_config = False
+        try:
+            cls()
+        except Exception:
+            needs_config = True
+        out.append(
+            PluginInfo(
+                entry_point=ep.name,
+                class_name=getattr(cls, "__name__", str(cls)),
+                contract_version=str(getattr(cls, "contract_version", "?")),
+                needs_config=needs_config,
+            )
+        )
+    return out
+
+
+def describe_all() -> dict[str, list[PluginInfo]]:
+    """:func:`describe` across every group."""
+    return {group: describe(group) for group in get_args(PluginGroup)}
 
 
 def discover_all() -> dict[str, list[Any]]:
