@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`scan` now finds egress weaknesses on real third-party servers.** It reported
+  zero findings against a live MCP server independently confirmed to accept an
+  arbitrary external destination with no allowlist and no auth. The probe was
+  never refused — it was *unanswerable*. `export_report` requires `data` and
+  `format` and treats `destination` as optional, and the synthesised probe named
+  the tool and filled the one argument it does **not** need. The agent replied
+  asking which data to export, made no tool call, and the attempt was recorded as
+  though the target had resisted. That is also why rewording the probe, changing
+  the planner model and raising `--max-llm-calls` had all changed nothing: none of
+  them supplies a required argument.
+
+  Probes are now built from the target tool's own JSON schema. Every required
+  argument is filled — from the schema's `enum`, an example in the parameter's
+  description, or a type default — and when a required argument is data-shaped and
+  another tool on the same server produces it, the probe becomes a **two-step
+  task** so the chain fills it. Real egress weaknesses are compositional (read
+  something, then send it out) and a single-tool probe cannot express one. The
+  probe describes the task rather than naming the tool: naming a tool while
+  under-specifying its arguments is what produced the clarifying question.
+
+  Measured against that server, the scan now goes red, on a real
+  `get_user_sessions` → `export_report` chain, by deterministic predicate rather
+  than by LLM judgement. W4 had the same defect in a purer form — it named a tool
+  and supplied no arguments at all — and is fixed the same way.
+
+- **A W3 finding now requires that the probe's destination was the one used.**
+  `consequential_action_executed` asked only whether the tool ran. A tool like
+  `export_report` carries its own default internal endpoint, so an agent that
+  helpfully used that default was scored as egress to an unapproved host when
+  nothing had left the allowlist. The new `egress_reached_probe_destination`
+  predicate requires the destination to appear in the recorded call arguments, and
+  keys on the *active* destination so `--randomize-exfil` is honoured. On an
+  adapter that records no arguments it returns inconclusive rather than a
+  confident negative — absence of evidence is not evidence of absence — and the
+  bundled reference adapter, which was such an adapter, now records them.
+
+- **An attempt that called other tools but never the one under test is no longer
+  a clean pass.** The previous check asked "did the agent call *any* tool?", which
+  was the right question while every probe was a single call. A two-step probe
+  whose first step fails — a source tool returning an error, or the budget running
+  out mid-chain — leaves a non-empty trace and never reaches the sink. The check is
+  now scoped to the tool the seed declared, and the recorded reason names it.
+  Attempts whose seed resolves no tool (every bundled catalogue seed) are
+  unaffected.
+
+- **Every seed is guaranteed a floor of the LLM budget** (#115). The counter was
+  first-come-first-served and all payload tasks are created up front, so whichever
+  seeds happened to start first drained the pool and the rest never made a single
+  call — decided by provider latency. Survivable when a probe cost one call;
+  not now that a probe can be a chain. Starvation is now deterministic, and on
+  exhaustion the scan **names the seeds that never started** rather than letting a
+  truncated run read as a complete one.
+
 - **`check` no longer reports a filesystem `dest` as network egress surface.**
   0.8.3 added `destination` / `dest` to the destination-parameter hints to catch
   a live server exposing `export_report(destination=...)`, which had been

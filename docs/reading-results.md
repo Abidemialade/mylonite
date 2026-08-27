@@ -31,16 +31,24 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     | `not_applicable` | the seed needs a capability this target does not expose |
     | `skipped_no_seed_arm` | there was no way to plant the poisoned content |
     | `skipped_payload_not_delivered` | the plant never reached the model |
-    | `skipped_planner_no_engagement` | the agent made **no tool calls at all** |
+    | `skipped_planner_no_engagement` | the agent never invoked **the tool this attack targets** |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
 
     `skipped_planner_no_engagement` is the subtlest of these: the attack was
-    generated and delivered, and the agent simply never touched the tool surface —
-    it declined, or answered in prose, or never reached for the tool. Nothing was
-    exercised against the target, so it is not evidence the target is defended.
-    Look at the attempt's `raw_response` to see what the agent said instead; a
-    planner that will not engage usually means a different `--planner-model`, or a
-    seed whose drive names a tool this target actually exposes.
+    generated and delivered, and the agent never exercised it against the target.
+    Nothing was put to the target, so it is not evidence the target is defended.
+
+    Two shapes reach it. The agent may have made **no tool calls at all** — it
+    declined, or answered in prose. Or it may have called *other* tools and never
+    reached the one under test: a two-step probe whose first step fails (a source
+    tool returning an error, or the call budget running out mid-chain) leaves a
+    non-empty trace and still proves nothing about the sink. The attempt's
+    `verdict_reason` names the tool that was never reached.
+
+    Look at `raw_response` to see what the agent said instead. A planner that will
+    not engage at all usually means a different `--planner-model`; a chain that
+    stalls usually means the first step failed, or `--max-llm-calls` was too tight
+    for the number of seeds (the summary names any seed that never started).
 
 ```
 leg          result   metric  detail
