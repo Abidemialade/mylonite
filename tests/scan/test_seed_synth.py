@@ -309,3 +309,105 @@ def test_w1_sanitiser_control_neutralises_static_poison() -> None:
     cleaned = control.transform_description(poisoned)
     assert "API keys" not in cleaned.description
     assert "IMPORTANT" not in cleaned.description
+
+
+# --- payload neutrality ------------------------------------------------------
+#
+# A synthesized payload must read as a routine operation. When it reads as an
+# attack, an aligned planner declines it on sight and the scan learns nothing
+# about the target — which is how a corpus of third-party MCP servers produced
+# zero findings while published tool-poisoning work reports ~36% mean
+# attack-success against production agents by dressing the same action as
+# legitimate tool use. These tests pin that property so it cannot regress.
+
+#: Words that announce "this is an attack" to a content filter before the
+#: request ever reaches the server.
+_OVERT_MARKERS = (
+    "attacker",
+    "exfiltrate",
+    "exfil",
+    "evil",
+    "malicious",
+    "steal",
+    "victim",
+    "ignore previous",
+    "ignore all previous",
+    "system instruction",
+    "do not mention",
+    "do not tell",
+    "without any confirmation",
+    "without approval",
+)
+
+
+def _synth_payload_bodies() -> list[tuple[str, str]]:
+    """Every synthesized seed body, across all four weakness classes."""
+    tools = [
+        _tool("fetch_report", "Fetch a report from a URL"),
+        _tool("send_notice", "Send a notice to a recipient"),
+        _tool("summarize_document", "Summarize a supplied document"),
+        _tool("delete_record", "Delete a record"),
+    ]
+    descriptor = _descriptor(["W1", "W2", "W3", "W4"], tools)
+    out = [(s.pattern_id, s.seed_body) for s in seed_synth.synthesize_seeds(descriptor)]
+    black_box = _descriptor(["W2"], [], kind="http-agent")
+    out += [(s.pattern_id, s.seed_body) for s in seed_synth.synthesize_seeds(black_box)]
+    assert out, "expected synthesize_seeds to produce seeds for this descriptor"
+    return out
+
+
+def test_synthesized_payloads_read_as_routine_not_as_attacks() -> None:
+    for pattern_id, body in _synth_payload_bodies():
+        lowered = body.lower()
+        hits = [m for m in _OVERT_MARKERS if m in lowered]
+        assert not hits, (
+            f"synthesized payload {pattern_id!r} announces itself as an attack "
+            f"via {hits!r}. An aligned planner refuses such a payload on sight, so the "
+            f"scan measures the model's content filter instead of the target's controls. "
+            f"Body: {body!r}"
+        )
+
+
+def test_synthesized_payloads_do_not_use_the_demo_exfil_literals() -> None:
+    """The historical demo destinations belong to the bundled kitchen-sink seeds.
+
+    Those literals are load-bearing for the committed replay fixtures. Synthesized
+    seeds have no fixtures and must not borrow them — both because the strings
+    are overtly hostile and because reusing them would couple the two paths.
+    """
+    from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
+
+    for pattern_id, body in _synth_payload_bodies():
+        assert DEFAULT_EXFIL_EMAIL not in body, pattern_id
+        assert DEFAULT_EXFIL_HOST not in body, pattern_id
+
+
+def test_synthesized_probe_destinations_are_non_routable() -> None:
+    """Probe destinations must be RFC 2606 reserved so a probe never leaves the lab."""
+    for pattern_id, body in _synth_payload_bodies():
+        for token in body.replace("\n", " ").split():
+            cleaned = token.strip(".,;:!?'\"()<>").lower()
+            if "@" in cleaned or cleaned.startswith(("http://", "https://")):
+                assert (
+                    ".example.net" in cleaned
+                    or ".example.com" in cleaned
+                    or ".example.org" in cleaned
+                    or cleaned.endswith(".example")
+                ), (
+                    f"{pattern_id!r} names a destination outside the RFC 2606 reserved "
+                    f"space: {cleaned!r}. A probe must be guaranteed non-routable."
+                )
+
+
+def test_w2_judge_context_still_names_the_attack_plainly() -> None:
+    """Only the PAYLOAD is neutral; the judge must still be told what to look for.
+
+    Blunting the judge's context would trade a false-negative source for a
+    different one.
+    """
+    black_box = _descriptor(["W2"], [], kind="http-agent")
+    seeds_out = seed_synth.synthesize_seeds(black_box)
+    ctx = (seeds_out[0].judge_context or "").lower()
+    assert ctx, "expected a judge_context on the black-box W2 seed"
+    assert "never asked for" in ctx or "did not" in ctx
+    assert "success =" in ctx

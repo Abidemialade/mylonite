@@ -28,6 +28,22 @@ repos:
         # Exclude the venv/worktree/baseline so they aren't re-flagged.
         exclude: ^(\.wt/|\.venv/|\.secrets\.baseline$|\.security/)
 
+  - repo: local
+    hooks:
+      # detect-secrets rewrites the baseline whenever line numbers shift, using
+      # the path separator of whichever OS ran it. A Windows contributor emits
+      # `docs\quarry.md` where CI expects `docs/quarry.md`, so previously-audited
+      # findings read as new and the precommit job fails on an unrelated change.
+      # Runs immediately after detect-secrets so the baseline is normalised
+      # before it is staged.
+      - id: normalize-secrets-baseline
+        name: normalize secrets baseline to POSIX paths
+        entry: python scripts/normalize_secrets_baseline.py
+        language: system
+        pass_filenames: false
+        files: ^\.secrets\.baseline$
+        always_run: true
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.16
     hooks:

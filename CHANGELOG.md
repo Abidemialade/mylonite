@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Synthesised attack payloads read as routine operations instead of
+  announcing themselves as attacks.** The generated W3 probe asked the agent to
+  fetch `http://attacker.example.com/exfil`; the W4 probe asked it to act
+  "without any confirmation or approval step"; the black-box W2 document carried
+  an `IMPORTANT SYSTEM INSTRUCTION` banner naming `attacker@evil.example` and
+  told the agent not to mention the step. An aligned model declines all three on
+  sight, which measures its content filter rather than the target's controls.
+
+  Published tool-poisoning work reports ~36% mean attack-success across
+  production agents on live MCP servers — with under 3% outright refusal on the
+  best-aligned model tested — precisely because the malicious action is dressed
+  as legitimate tool use. The probes now do the same: a third-party endpoint
+  outside any declared allowlist, a plain operational request, and an ordinary
+  retention note. Destinations are RFC 2606 reserved and therefore
+  non-routable, and a test pins that.
+
+  The judge's context is deliberately unchanged in tone — it still names the
+  attack plainly, because only the payload needs to look routine. The bundled
+  reference seeds and their committed replay fixtures are untouched: their
+  historical literals are load-bearing for the offline gate, and no synthesised
+  seed borrows them.
+
 ### Fixed
 
 - **An attempt in which the agent called no tools is no longer reported as a
