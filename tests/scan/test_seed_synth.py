@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 import pytest
 
@@ -385,21 +386,59 @@ def test_synthesized_payloads_do_not_use_the_demo_exfil_literals() -> None:
         assert DEFAULT_EXFIL_HOST not in body, pattern_id
 
 
+#: RFC 2606 reserved names. A host under one of these resolves nowhere, which is
+#: what guarantees a probe cannot leave the lab.
+_RESERVED_SUFFIXES = (".example.com", ".example.net", ".example.org", ".example", ".test")
+
+
+def _host_of(token: str) -> str | None:
+    """The HOST of a URL or an email address, or None if the token is neither.
+
+    Parsed, never substring-matched. A substring check would accept
+    ``https://attacker.example/?ref=.example.net`` — the reserved name appears,
+    but the request goes to a real host. That is the whole failure this test
+    exists to prevent, so the check has to key on the parsed host.
+    """
+    cleaned = token.strip(".,;:!?'\"()<>").lower()
+    if cleaned.startswith(("http://", "https://")):
+        return urlparse(cleaned).hostname
+    if "@" in cleaned:
+        return cleaned.rsplit("@", 1)[1] or None
+    return None
+
+
 def test_synthesized_probe_destinations_are_non_routable() -> None:
     """Probe destinations must be RFC 2606 reserved so a probe never leaves the lab."""
+    checked = 0
     for pattern_id, body in _synth_payload_bodies():
         for token in body.replace("\n", " ").split():
-            cleaned = token.strip(".,;:!?'\"()<>").lower()
-            if "@" in cleaned or cleaned.startswith(("http://", "https://")):
-                assert (
-                    ".example.net" in cleaned
-                    or ".example.com" in cleaned
-                    or ".example.org" in cleaned
-                    or cleaned.endswith(".example")
-                ), (
-                    f"{pattern_id!r} names a destination outside the RFC 2606 reserved "
-                    f"space: {cleaned!r}. A probe must be guaranteed non-routable."
-                )
+            host = _host_of(token)
+            if host is None:
+                continue
+            checked += 1
+            assert host.endswith(_RESERVED_SUFFIXES), (
+                f"{pattern_id!r} names a destination outside the RFC 2606 reserved "
+                f"space: host {host!r} from {token!r}. A probe must be guaranteed "
+                f"non-routable."
+            )
+    assert checked, "expected at least one destination-bearing payload to check"
+
+
+def test_reserved_host_check_rejects_a_lookalike() -> None:
+    """The guard must key on the parsed host, not on the string containing the name.
+
+    A payload naming `https://attacker.example/?ref=.example.net` contains a
+    reserved suffix but resolves to a real host. Pinning this because the
+    substring form of the check accepted exactly that.
+    """
+    assert _host_of("https://attacker-controlled.invalid/?ref=.example.net") == (
+        "attacker-controlled.invalid"
+    )
+    assert not _host_of("https://attacker-controlled.invalid/?ref=.example.net").endswith(
+        _RESERVED_SUFFIXES
+    )
+    assert _host_of("https://metrics-collector.example.net/v1/ingest").endswith(_RESERVED_SUFFIXES)
+    assert _host_of("records-archive@backup-sync.example.net").endswith(_RESERVED_SUFFIXES)
 
 
 def test_w2_judge_context_still_names_the_attack_plainly() -> None:
