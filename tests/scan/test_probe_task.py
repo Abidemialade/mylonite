@@ -311,3 +311,82 @@ def test_unknown_dest_param_still_excludes_the_destination_argument() -> None:
 def test_empty_enum_does_not_produce_an_empty_literal() -> None:
     """`enum: [""]` would otherwise defeat the never-empty guarantee."""
     assert probe_task.literal_for("x", {"type": "string", "enum": [""]}).strip()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "get_and_flush_cache",
+        "fetch_and_expire_session",
+        "list_and_prune_backups",
+        "query_and_lock_record",
+        "get_and_restart_worker",
+    ],
+)
+def test_second_round_destructive_compounds_are_excluded(name: str) -> None:
+    """None of these carried a vetoed token in the first cut, and each passes a
+    whole-token source verb — so each was still selected."""
+    tool = _tool(name, "Does something.", {"id": {"type": "string"}}, ["id"])
+    sink = _analytics_surface()[1]
+    assert probe_task.source_tool_for([tool, sink], "export_report") is None
+
+
+def test_a_destructive_description_disqualifies_a_read_shaped_name() -> None:
+    """Most real MCP servers set no annotations, so the name is otherwise the
+    only signal — and the harm can live entirely in the description."""
+    tool = _tool(
+        "get_report",
+        "Generates the report and deletes the source file after reading.",
+        {"id": {"type": "string"}},
+        ["id"],
+    )
+    sink = _analytics_surface()[1]
+    assert probe_task.source_tool_for([tool, sink], "export_report") is None
+
+
+@pytest.mark.parametrize("param", ["to", "recipient", "target", "channel", "sink"])
+def test_common_destination_names_are_not_fabricated(param: str) -> None:
+    """`notify(to, message)` and `post_message(channel, text)` are everywhere,
+    and an operator-declared egress tool always arrives with no named param."""
+    sink = _tool(
+        "notify",
+        "Notify someone.",
+        {param: {"type": "string"}, "message": {"type": "string"}},
+        [param, "message"],
+    )
+    task = probe_task.egress_task(sink, "", [sink], URL)
+    assert URL in task
+    assert f"{param} quarterly summary" not in task
+    assert "message" in task
+
+
+def test_a_url_is_never_used_as_a_fabricated_literal() -> None:
+    """It would be truncated by the example parser AND would put a second
+    destination into the probe body."""
+    spec = {
+        "type": "string",
+        "description": "Template reference, e.g. https://schemas.example.org/v1/tpl",
+    }
+    assert "://" not in probe_task.literal_for("template_ref", spec)
+
+
+def test_a_truncated_example_falls_back_to_a_type_correct_literal() -> None:
+    """`_EXAMPLE_RE`'s character class stops at the first `.` or `)`, so
+    "Priority level: 1 (low) to 5 (high)" captures "1 (low" -- not a value any
+    server declaring the param `integer` will accept. A typed param should get
+    the clean, type-correct fallback instead of the mangled example."""
+    spec = {"type": "integer", "description": "Priority level: 1 (low) to 5 (high)"}
+    assert probe_task.literal_for("priority", spec) == "1"
+
+
+def test_an_unparseable_boolean_example_falls_back_too() -> None:
+    spec = {"type": "boolean", "description": "Enable retries: yes please"}
+    assert probe_task.literal_for("retry", spec) == "true"
+
+
+def test_a_string_param_keeps_the_looser_example_bar() -> None:
+    """Only typed (integer/number/boolean) params get the stricter parse check --
+    a string param has no type to validate a candidate against, so the existing
+    non-empty/short/non-URL bar is unchanged."""
+    spec = {"type": "string", "description": "Priority level: low to high"}
+    assert probe_task.literal_for("priority", spec) == "low to high"

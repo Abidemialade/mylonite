@@ -120,7 +120,62 @@ _DESTRUCTIVE_TOKENS: frozenset[str] = frozenset(
         "pay",
         "charge",
         "refund",
+        # Added after review: none of these need to co-occur with a listed token,
+        # and `get_and_flush_cache` / `fetch_and_expire_session` /
+        # `list_and_prune_backups` / `query_and_lock_record` are all realistic
+        # names that otherwise pass every gate.
+        "flush",
+        "expire",
+        "prune",
+        "lock",
+        "evict",
+        "freeze",
+        "suspend",
+        "invalidate",
+        "restart",
+        "shutdown",
+        "stop",
+        "start",
+        "trigger",
+        "submit",
+        "approve",
+        "reject",
+        "assign",
+        "unassign",
+        "install",
+        "uninstall",
+        "deploy",
+        "rollback",
+        "restore",
+        "import",
+        "export",
+        "sync",
+        "migrate",
     }
+)
+
+#: Phrases in a tool DESCRIPTION that say it changes state, whatever its name
+#: says. Most real MCP servers set no annotations at all, so without this the
+#: annotation gate almost never fires and the name is the only signal --
+#: `get_report` documented as "generates and deletes the source file after
+#: reading" would sail through.
+_DESTRUCTIVE_PHRASES: tuple[str, ...] = (
+    "delete",
+    "deletes",
+    "remove",
+    "removes",
+    "purge",
+    "purges",
+    "destroy",
+    "destroys",
+    "overwrite",
+    "overwrites",
+    "modif",
+    "mutat",
+    "irreversible",
+    "cannot be undone",
+    "permanently",
+    "side effect",
 )
 
 #: Pulls a worked example out of a property description. MCP servers document
@@ -141,10 +196,63 @@ _TYPE_LITERALS: dict[str, str] = {
 }
 
 
+def _parses_as_int(candidate: str) -> bool:
+    try:
+        int(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+def _parses_as_number(candidate: str) -> bool:
+    try:
+        float(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+def _parses_as_bool(candidate: str) -> bool:
+    return candidate.strip().lower() in {"true", "false"}
+
+
+#: For a param whose schema declares one of these types, a description-derived
+#: candidate is only accepted if it actually parses as that type -- otherwise
+#: `_EXAMPLE_RE`'s truncation (it stops at the first `.` or `)`) can hand an
+#: integer/number/boolean param a mangled string ("1 (low" out of "Priority
+#: level: 1 (low) to 5 (high)") instead of falling through to the clean,
+#: type-correct literal in `_TYPE_LITERALS`.
+_TYPE_PARSERS: dict[str, Any] = {
+    "integer": _parses_as_int,
+    "number": _parses_as_number,
+    "boolean": _parses_as_bool,
+}
+
+
 def _tokens(name: str) -> set[str]:
     """Lowercase word tokens of a parameter name (``webhookUrl`` -> {webhook, url})."""
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
     return {t for t in re.split(r"[^A-Za-z0-9]+", spaced.lower()) if t}
+
+
+def _usable_literal(candidate: str) -> bool:
+    """Reject a fabricated literal that is itself a URL.
+
+    Two reasons, and the second is the important one.
+
+    A URL pulled out of a description is usually TRUNCATED: ``_EXAMPLE_RE``'s
+    character class stops at the first ``.``, so *"Report template reference,
+    e.g. https://schemas.example.org/v1/report-template"* yields
+    ``"https://schemas"`` — a value no server will accept.
+
+    More seriously, ANY url-shaped literal ends up in the rendered probe body,
+    where it becomes a second destination the probe appears to have asked for.
+    The only destination a W3 probe should ever name is the one under test;
+    anything else invites a fabricated finding when the target echoes it back.
+    The destination itself is never a fabricated literal — it is named in prose
+    and excluded from the required set — so nothing legitimate is lost here.
+    """
+    return "://" not in candidate
 
 
 def literal_for(pname: str, pspec: Any) -> str:
@@ -175,6 +283,9 @@ def literal_for(pname: str, pspec: Any) -> str:
             if rendered:
                 return rendered
 
+    declared = pspec.get("type")
+    declared = declared if isinstance(declared, str) else ""
+
     description = pspec.get("description")
     if isinstance(description, str):
         match = _EXAMPLE_RE.search(description)
@@ -186,8 +297,20 @@ def literal_for(pname: str, pspec: Any) -> str:
             # is invisible unless you read the generated text.
             for chunk in match.group(1).split(","):
                 candidate = chunk.strip().strip("'\"`")
-                if candidate and len(candidate) <= 48:
-                    return candidate
+                # `_EXAMPLE_RE`'s character class stops at the first `.` or `)`,
+                # so a description like "Priority level: 1 (low) to 5 (high)"
+                # yields "1 (low" for a param the schema declares `integer`. That
+                # is worse than useless: `_TYPE_LITERALS` already has a clean "1"
+                # for this case, and the mangled string would otherwise pre-empt
+                # it. So a typed param only accepts a candidate that actually
+                # PARSES as its declared type; a string param keeps the looser
+                # "non-empty, reasonably short, not URL-shaped" bar.
+                if not (candidate and len(candidate) <= 48 and _usable_literal(candidate)):
+                    continue
+                parses = _TYPE_PARSERS.get(declared)
+                if parses is not None and not parses(candidate):
+                    continue
+                return candidate
 
     for key in ("default", "example"):
         sample = pspec.get(key)
@@ -196,8 +319,7 @@ def literal_for(pname: str, pspec: Any) -> str:
         if isinstance(sample, (int, float, bool)):
             return str(sample)
 
-    declared = pspec.get("type")
-    return _TYPE_LITERALS.get(declared if isinstance(declared, str) else "", _FALLBACK_LITERAL)
+    return _TYPE_LITERALS.get(declared, _FALLBACK_LITERAL)
 
 
 def _satisfiable(tool: Any) -> bool:
@@ -221,7 +343,28 @@ def _satisfiable(tool: Any) -> bool:
 #: itself is always named in prose so the planner binds it wherever the schema
 #: says it belongs.
 _DEST_TOKENS: frozenset[str] = frozenset(
-    {"url", "uri", "endpoint", "webhook", "callback", "destination", "dest", "host", "address"}
+    {
+        "url",
+        "uri",
+        "endpoint",
+        "webhook",
+        "callback",
+        "destination",
+        "dest",
+        "host",
+        "address",
+        # Added after review: `notify(to, message)` and `post_message(channel,
+        # text)` are extremely common shapes, and an operator-declared egress
+        # tool always arrives with no classifier-named parameter -- so without
+        # these the destination gets a fabricated literal and the probe's real
+        # destination is left unbound in prose.
+        "to",
+        "recipient",
+        "recipients",
+        "target",
+        "sink",
+        "channel",
+    }
 )
 
 
@@ -267,6 +410,11 @@ def _is_safe_source(tool: Any) -> bool:
     tokens = _tokens(name)
     if tokens & _DESTRUCTIVE_TOKENS:
         return False
+
+    description = (getattr(tool, "description", "") or "").lower()
+    if any(phrase in description for phrase in _DESTRUCTIVE_PHRASES):
+        return False
+
     return bool(tokens & set(_SOURCE_VERBS))
 
 
