@@ -19,6 +19,13 @@ minutes and API spend rather than seconds.
     started** — those proved nothing and are reported as NOT TESTED, never as
     clean.
 
+    **`--max-llm-calls` is therefore a floor-adjusted budget, not a hard ceiling.**
+    Worst case is `cap + (seeds - 1) × max(2, cap ÷ seeds)` — with `--max-llm-calls
+    50` against a surface that synthesises 100 seeds, up to roughly 250 calls. That
+    is deliberate: the alternative is that the seeds which happen to start last
+    make no call at all, and a probe that never ran is indistinguishable from a
+    target that resisted. Size CI spend against the worst case, not the flag value.
+
 ```bash
 # against the bundled reference agent
 mylonite gate reference:vulnerable
