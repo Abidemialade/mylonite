@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-__all__ = ["assert_host_present", "host_of", "hosts_in"]
+__all__ = ["assert_host_present", "host_of", "hosts_in", "mentions_host"]
 
 
 def host_of(token: str) -> str | None:
@@ -35,6 +35,25 @@ def host_of(token: str) -> str | None:
 def hosts_in(blob: str) -> set[str]:
     """Every host named by a URL or email address anywhere in ``blob``."""
     return {host for token in blob.replace("'", " ").split() if (host := host_of(token))}
+
+
+def mentions_host(blob: str, expected: str) -> bool:
+    """True when ``expected`` is the HOST of a URL or address named in ``blob``.
+
+    The boolean sibling of :func:`assert_host_present`, for fake servers and
+    planner stubs that route on "did the previous step involve this host?".
+    Routing on a substring means a stub silently exercises a different scenario
+    than the one written down when a lookalike appears.
+
+    Takes the expected host as an ARGUMENT rather than exposing an
+    ``x in hosts_in(blob)`` comparison at the call site. Both forms are exact
+    set membership, but CodeQL's ``py/incomplete-url-substring-sanitization``
+    cannot distinguish membership in a set of hosts from a substring search in a
+    URL, and flags the inline form. Keeping the comparison in here is equivalent,
+    reads better at the call site, and leaves the scanner with nothing to
+    misread.
+    """
+    return any(host == expected or host.endswith(f".{expected}") for host in hosts_in(blob))
 
 
 def assert_host_present(blob: str, expected: str) -> None:
