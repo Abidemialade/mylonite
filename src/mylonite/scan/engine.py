@@ -25,7 +25,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite._redaction import redact
 from mylonite.contracts import ExploitRecord, Payload, ScanAttempt, ScanReport, TargetDescriptor
-from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
+from mylonite.scan._llm import (
+    BudgetExceededError,
+    LiteLLMCallCounter,
+    llm_scope,
+    seed_scope,
+)
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
@@ -277,6 +282,7 @@ class ScanEngine:
             # per-module weakness filters — #5). Dedup is debug-logged, not a
             # contract outcome, so it never masks a genuine double-emit in review.
             seen_pattern_ids: set[str] = set()
+            all_payloads: list[Payload] = []
 
             for module in self._attack_modules:
                 module_id = module.attack_metadata().id
@@ -294,6 +300,7 @@ class ScanEngine:
                         )
                         continue
                     seen_pattern_ids.add(payload.pattern_id)
+                    all_payloads.append(payload)
                     tasks.append(
                         asyncio.create_task(
                             self._process_one(
@@ -305,6 +312,14 @@ class ScanEngine:
                             )
                         )
                     )
+
+            # Give every seed a floor of the budget before the rest is shared.
+            # Payload tasks are all created up front, so a first-come-first-served
+            # counter lets whichever seeds start first drain the pool -- and a
+            # chain probe cut off after step one has called a tool without ever
+            # reaching the tool under test, which reads as a clean pass unless the
+            # honest-coverage check catches it. Starvation must be deterministic.
+            counter.reserve_for(len(tasks))
 
             if not tasks:
                 # Nothing ran. A pattern_id filter that matched nothing is an
@@ -349,6 +364,20 @@ class ScanEngine:
                     break
                 except BudgetExceededError:
                     aborted = AbortReason.BUDGET_EXCEEDED
+                    # Name what never ran. A truncated scan that does not say
+                    # which seeds it dropped reads downstream as a scan that
+                    # covered everything -- the same silence the synthesis cap
+                    # warning exists to break.
+                    starved = sorted({p.pattern_id for p in all_payloads} - set(counter.by_seed))
+                    if starved:
+                        logger.warning(
+                            "budget exhausted after %d call(s): %d seed(s) never started "
+                            "and proved NOTHING about this target: %s. Raise "
+                            "--max-llm-calls or narrow the scan with --weakness-class.",
+                            counter.count,
+                            len(starved),
+                            ", ".join(starved),
+                        )
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -527,14 +556,20 @@ class ScanEngine:
         # the payload's entire lifetime. See `_run_payload`'s docstring for
         # why holding it here caused effective concurrency to scale to
         # `max_concurrent ** 2` under `runs > 1`.
-        return await self._run_payload(
-            payload=payload,
-            module_id=module_id,
-            descriptor=descriptor,
-            compliance=compliance,
-            seed_id=seed_id,
-            semaphore=semaphore,
-        )
+        # Every LLM call made below is attributed to this pattern, so the counter
+        # can honour a per-seed floor and afterwards name the seeds that never
+        # started. Keyed on pattern_id rather than seed_id: it is what the
+        # starved-seed report and `--pattern-id` both speak, and several
+        # synthesised patterns can share one seed_id.
+        with seed_scope(payload.pattern_id):
+            return await self._run_payload(
+                payload=payload,
+                module_id=module_id,
+                descriptor=descriptor,
+                compliance=compliance,
+                seed_id=seed_id,
+                semaphore=semaphore,
+            )
 
     async def _run_payload(
         self,
