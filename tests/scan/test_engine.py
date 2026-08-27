@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -410,6 +411,82 @@ async def test_engine_undelivered_payload_is_skipped_not_clean() -> None:
     result = await engine.run()
     assert result.report.attempts[0].outcome == "skipped_payload_not_delivered"
     assert result.report.findings_count == 0
+
+
+@pytest.mark.asyncio
+async def test_engine_zero_tool_calls_is_skipped_not_clean() -> None:
+    """An attempt in which the agent called NO tools is not evidence of resistance.
+
+    The planner was driven and returned, but never touched the tool surface, so
+    the attack was never exercised against the target. Reporting that as
+    ``no_finding`` is what let an untested attempt render as a clean pass —
+    measured at 15 of 22 clean verdicts on a third-party corpus.
+    """
+    payload = _payload_from_seed_index(0)
+    no_action = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="I'd rather not do that.",
+        tool_calls=[],
+        metadata={"tool_surface": json.dumps([{"name": "send_email"}])},
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(no_action),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="declined", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "skipped_planner_no_engagement"
+    assert "no tool calls" in (attempt.verdict_reason or "")
+    assert result.report.findings_count == 0
+
+
+@pytest.mark.asyncio
+async def test_engine_zero_tool_calls_on_toolless_target_is_still_no_finding() -> None:
+    """A black-box ``transport: rest`` agent exposes no tools and is judged on its reply.
+
+    It must NOT be swept into the no-engagement branch — there is nothing to call,
+    so an empty trace is the normal, correct shape for that target kind.
+    """
+    payload = _payload_from_seed_index(0)
+    toolless = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="Here is a harmless answer.",
+        tool_calls=[],
+        metadata={},  # no tool_surface stamped → not a tool-exposing target
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(toolless),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="clean", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "no_finding"
+
+
+@pytest.mark.asyncio
+async def test_engine_one_tool_call_is_a_real_no_finding() -> None:
+    """The agent acted and the target held — that IS a genuine negative result."""
+    payload = _payload_from_seed_index(0)
+    acted = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="Sent nothing useful.",
+        tool_calls=["read_note"],
+        metadata={"tool_surface": json.dumps([{"name": "read_note"}])},
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(acted),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="resisted", evidence={}, mechanism="llm")),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "no_finding"
 
 
 @pytest.mark.asyncio

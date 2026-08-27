@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An attempt in which the agent called no tools is no longer reported as a
+  clean pass.** `no_finding` was the engine's fall-through branch, with no
+  precondition of its own, and the existing delivery check (`payload_delivered`)
+  only applies to seeds that plant through a declared `seed_arm` — every
+  synthesised seed sets `setup="no_setup"`, so the check was skipped and an
+  attempt the planner never acted on fell straight through to "clean". The
+  engine now reports `skipped_planner_no_engagement` when every pass shows an
+  empty tool-call trace on a target that exposes tools, and `coverage.py`
+  classifies it `NOT_TESTED`, so the existing "this is NOT a clean result"
+  banner fires and the scan no longer exits 0 on it.
+
+  The invariant was already stated in `scan/judge.py` — *"a landed W1-W4 attack
+  requires the agent to have DONE something"* — but applied in one direction
+  only, to downgrade a hallucinated success. It is now applied symmetrically:
+  the same empty trace that cannot prove an attack landed cannot prove the
+  target resisted either. Measured against a corpus of third-party MCP servers,
+  15 of 22 clean verdicts had an empty trace, so reported coverage overstated
+  real coverage roughly threefold.
+
+  Scoped by a known, non-empty tool surface, so a black-box `transport: rest`
+  agent — which has no tools to call and is judged on its reply text — is
+  unaffected.
+
+- **`testkit.assert_target_resists` refuses to pass a re-drive in which the
+  agent never acted.** It previously accepted one as resistance. It now raises
+  with a cause naming the planner rather than pointing at fixtures, since the
+  usual remedy is a different `--planner-model` or a drive naming a tool the
+  target actually exposes.
+
+- Unclosed-socket `ResourceWarning`s from the async/subprocess stack no longer
+  fail the suite intermittently. They surfaced as `PytestUnraisableExceptionWarning`
+  against whichever test was running when the socket was collected, so a
+  different test failed on each run while every one passed in isolation. Filtered
+  by exact message shape, so a genuine unclosed resource still fails the build.
+
+### Changed
+
+- `TargetAdapter` `CONTRACT_VERSION` `0.6.0` → `0.7.0` (additive): new
+  `ScanAttemptOutcome` value `skipped_planner_no_engagement`. Adapters need no
+  change — the engine derives it from the `AdapterResponse` an adapter already
+  returns. Only a consumer that exhaustively matches every outcome value is
+  affected.
+
 ## [0.8.2] - 2026-08-26
 
 ### Added

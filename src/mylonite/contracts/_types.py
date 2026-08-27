@@ -412,6 +412,16 @@ ScanAttemptOutcome = Literal[
     # structurally-impossible attack render as a clean pass — see
     # `not_applicable_reason` on ScanAttempt for the specific missing capability.
     "not_applicable",
+    # The planner made ZERO tool calls on a target that exposes tools: the
+    # attack was generated and delivered, but the agent never engaged with the
+    # tool surface at all. NOT evidence the target is defended — nothing was
+    # exercised against it. Kept distinct from `no_finding` because collapsing
+    # them let an attempt in which the agent did nothing render as a clean pass,
+    # which inflated measured coverage roughly 3x on a third-party corpus.
+    # Distinct from `skipped_planner_failure` (the planner errored) and from
+    # `skipped_payload_not_delivered` (the plant never reached the planner):
+    # here delivery and planning both succeeded and the agent simply did not act.
+    "skipped_planner_no_engagement",
     "skipped_invalid_metadata",
     "skipped_unknown_seed",
     "skipped_planner_failure",
