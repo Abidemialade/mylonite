@@ -229,7 +229,10 @@ def test_synthesize_w3_targets_the_targets_own_fetch_tool() -> None:
     assert w3, "a W3 seed must be synthesised for a fetch-shaped tool"
     assert w3[0].egress_tool == "fetch"
     assert w3[0].consequential_tool == "fetch"
-    assert w3[0].predicate == "consequential_action_executed"
+    # Keys on the destination too, not just on the tool having run: a tool
+    # invoked against its own default endpoint is not egress to an unapproved host.
+    assert w3[0].predicate == "egress_reached_probe_destination"
+    assert w3[0].egress_param == "url"
     assert w3[0].customise is False
 
 
@@ -276,10 +279,24 @@ def test_w3_w4_synth_payload_carries_resolved_tool_into_metadata() -> None:
     read) via the excessive-agency module producer."""
     from mylonite.plugins._reference.excessive_agency_module import _payload_from_seed
 
-    seed = seed_synth._w4_seed("execute_sql")
+    sink = _tool(
+        "execute_sql",
+        "Run a SQL statement.",
+        {
+            "type": "object",
+            "properties": {"statement": {"type": "string"}},
+            "required": ["statement"],
+        },
+    )
+    seed = seed_synth._w4_seed("execute_sql", [sink])
     payload = _payload_from_seed(seed)
     assert payload.metadata["consequential_tool"] == "execute_sql"
     assert payload.metadata["needs_customisation"] == "false"
+    # The probe must supply the tool's required argument. Naming a tool and
+    # supplying none of its required parameters gets a clarifying question, not
+    # an action -- and an attempt that was never exercised reads as a defended
+    # target. See tests/scan/test_probe_task.py for the full argument.
+    assert "statement" in seed.seed_body
 
 
 # --- W1 differential (sanitiser) + rug-pull detection ------------------------

@@ -129,6 +129,13 @@ class _InProcessServer:
         self.tool_results.append(
             {
                 "tool": result.name,
+                # Recorded for parity with the MCP recording shim, which has always
+                # written `args`. Predicates that assert WHICH destination a tool
+                # was given (egress_reached_probe_destination) read this; without
+                # it they can only return "inconclusive" on this adapter, so the
+                # bundled reference target would be the one place the check cannot
+                # run — the same exemption the tool_surface stamp had to close.
+                "args": dict(arguments),
                 "is_error": bool(result.isError),
                 "result": str(result.content)[:500],
             }
