@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The live re-drive an emitted test performs is now bounded.** It is the only
+  path in the product that makes real provider calls from inside a blocking PR
+  check, and it carried neither a call budget nor a wall-clock limit: the
+  scan-wide defaults applied (50 LLM calls, no timeout at all), leaving the CI
+  platform's job cap — six hours on GitHub-hosted runners — as the sole backstop
+  against a hung MCP server or a stalled provider, against a widely-cited
+  ten-minute expectation for a PR check. The re-drive is scoped to one pattern,
+  so it now carries bounds sized for that: exceeding them means something is
+  wrong rather than that the work was large.
+
+- **Synthesis caps scale with the tool surface, and no longer drop candidates
+  silently.** The per-class ceilings were fixed literals — three probes for W1,
+  two each for W2/W3/W4 — so a server exposing forty tools was probed exactly as
+  thoroughly as one exposing four. Measured on a fourteen-tool server, five tools
+  received a probe and the remaining nine were never the *subject* of any attack
+  at any budget, because no seed existed to spend the budget on; raising
+  `--max-llm-calls` could not help. Ceilings now scale with the number of tools,
+  and anything still dropped is named in a warning rather than silently
+  discarded, so a capped run cannot read as a fully-probed one.
+
+  Still bounded on purpose: every probe draws from one scan-wide call counter,
+  and an unbounded fan-out would exhaust it and starve later seeds — trading a
+  coverage gap for a worse one.
+
 - **Egress detection now matches destination parameters by token, and no longer
   reads a filename as a hostname.** `destination_tools` compared a parameter's
   whole name against each hint for equality, so `webhook_url` matched neither
