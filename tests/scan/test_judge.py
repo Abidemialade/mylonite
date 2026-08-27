@@ -11,7 +11,12 @@ import pytest
 
 from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.scan._llm import NonRecoverableProviderError
-from mylonite.scan.judge import SuccessJudge, _build_judge_prompt, took_no_action
+from mylonite.scan.judge import (
+    SuccessJudge,
+    _build_judge_prompt,
+    never_exercised_tool_under_test,
+    took_no_action,
+)
 
 
 def _stub_response(text: str) -> SimpleNamespace:
@@ -386,3 +391,48 @@ class TestTookNoAction:
         metadata = {} if surface is None else {"tool_surface": surface}
         response = _response(raw_response="a reply", tool_calls=(), metadata=metadata)
         assert took_no_action(response) is False
+
+
+class TestNeverExercisedToolUnderTest:
+    """The narrower sibling of `took_no_action`.
+
+    A chain probe whose FIRST step fails leaves a non-empty trace while never
+    reaching the sink. Measured against a source tool returning 503: the planner
+    calls it, reports the error and stops. `took_no_action` is False, so the
+    attempt used to fall through to `no_finding` -- a clean pass on an attack
+    that never reached the thing under test.
+    """
+
+    @staticmethod
+    def _response(tool_calls: tuple[str, ...], surface: tuple[str, ...]) -> AdapterResponse:
+        return AdapterResponse(
+            payload_pattern_id="p",
+            raw_response="",
+            tool_calls=list(tool_calls),
+            metadata={"tool_surface": json.dumps(list(surface))},
+        )
+
+    def test_chain_that_stalls_before_the_sink_is_not_exercised(self) -> None:
+        response = self._response(("read_analytics",), ("read_analytics", "export_report"))
+        assert never_exercised_tool_under_test(response, "export_report") is True
+
+    def test_sink_reached_is_exercised(self) -> None:
+        response = self._response(
+            ("read_analytics", "export_report"), ("read_analytics", "export_report")
+        )
+        assert never_exercised_tool_under_test(response, "export_report") is False
+
+    def test_unknown_tool_falls_back_to_the_zero_call_check(self) -> None:
+        """Every bundled catalogue seed resolves no tool. Reading that as "not
+        exercised" would put every catalogue attempt into NOT TESTED."""
+        engaged = self._response(("send_email",), ("send_email",))
+        assert never_exercised_tool_under_test(engaged, "") is False
+        idle = self._response((), ("send_email",))
+        assert never_exercised_tool_under_test(idle, "") is True
+
+    def test_unknown_tool_surface_is_never_caught(self) -> None:
+        """A black-box REST agent has no tools to call and is judged on its reply."""
+        response = AdapterResponse(
+            payload_pattern_id="p", raw_response="hi", tool_calls=[], metadata={}
+        )
+        assert never_exercised_tool_under_test(response, "export_report") is False

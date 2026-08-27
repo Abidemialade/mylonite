@@ -1499,3 +1499,88 @@ def test_scan_config_rejects_non_positive_provider_failure_threshold(bad_value: 
             provider_failure_threshold=bad_value,
             output_dir=Path(".mylonite/scans"),
         )
+
+
+@pytest.mark.asyncio
+async def test_engine_chain_that_never_reaches_the_sink_is_not_clean() -> None:
+    """A chain probe whose FIRST step fails is not evidence of resistance.
+
+    Measured: with the source tool returning 503, the planner calls it, reports
+    the error and stops. The trace is NOT empty, so the zero-call check does not
+    fire, and the attempt fell straight through to ``no_finding`` — a clean pass
+    on an attack that never reached the tool it targets. This is the same
+    false-clean class as the zero-call case, one level down, and it only became
+    reachable once probes became chains.
+    """
+    base = _payload_from_seed_index(0)
+    # A synthesised seed sets customise=False, so the customiser never runs and
+    # the resolved-tool metadata reaches the engine intact -- which is exactly
+    # the path this branch serves.
+    payload = base.model_copy(
+        update={
+            "metadata": {
+                **base.metadata,
+                "needs_customisation": "false",
+                "egress_tool": "export_report",
+            }
+        }
+    )
+    stalled = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="The analytics store is unavailable (503), so I stopped.",
+        tool_calls=["read_analytics"],
+        metadata={"tool_surface": json.dumps(["read_analytics", "export_report"])},
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(stalled),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(
+            Verdict(success=False, reason="nothing sent", evidence={}, mechanism="llm")
+        ),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "skipped_planner_no_engagement"
+    assert "export_report" in (attempt.verdict_reason or ""), (
+        "the reason must name the tool that was never reached, or the operator "
+        "cannot tell this from a target that simply declined"
+    )
+    assert result.report.findings_count == 0
+
+
+@pytest.mark.asyncio
+async def test_engine_sink_reached_still_produces_a_real_verdict() -> None:
+    """The narrowing must not swallow a genuine negative.
+
+    The sink WAS invoked and the attack still did not land — that is real
+    evidence of resistance and must stay ``no_finding``.
+    """
+    base = _payload_from_seed_index(0)
+    payload = base.model_copy(
+        update={
+            "metadata": {
+                **base.metadata,
+                "needs_customisation": "false",
+                "egress_tool": "export_report",
+            }
+        }
+    )
+    exercised = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="Exported to the approved endpoint.",
+        tool_calls=["read_analytics", "export_report"],
+        metadata={"tool_surface": json.dumps(["read_analytics", "export_report"])},
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(exercised),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(
+            Verdict(success=False, reason="allowlist held", evidence={}, mechanism="llm")
+        ),
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "no_finding"
