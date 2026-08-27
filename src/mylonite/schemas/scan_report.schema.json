@@ -55,6 +55,7 @@
             "finding",
             "no_finding",
             "not_applicable",
+            "skipped_planner_no_engagement",
             "skipped_invalid_metadata",
             "skipped_unknown_seed",
             "skipped_planner_failure",

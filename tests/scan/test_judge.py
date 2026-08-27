@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from types import SimpleNamespace
 from typing import Any
@@ -10,7 +11,7 @@ import pytest
 
 from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.scan._llm import NonRecoverableProviderError
-from mylonite.scan.judge import SuccessJudge, _build_judge_prompt
+from mylonite.scan.judge import SuccessJudge, _build_judge_prompt, took_no_action
 
 
 def _stub_response(text: str) -> SimpleNamespace:
@@ -337,3 +338,51 @@ def test_build_judge_prompt_fence_is_deterministic_not_random() -> None:
     p1 = _build_judge_prompt(payload, response)
     p2 = _build_judge_prompt(payload, response)
     assert p1 == p2
+
+
+# --- took_no_action: the symmetric no-engagement invariant -------------------
+
+
+class TestTookNoAction:
+    """``took_no_action`` decides whether the agent engaged the tool surface.
+
+    Both directions matter: a *success* with an empty trace is a hallucinated
+    finding (already downgraded), and a *failure* with an empty trace is an
+    unexercised attempt that must not read as resistance.
+    """
+
+    def test_true_when_tool_surface_present_and_no_calls(self) -> None:
+        response = _response(
+            raw_response="I won't do that.",
+            tool_calls=(),
+            metadata={"tool_surface": json.dumps([{"name": "send_email"}])},
+        )
+        assert took_no_action(response) is True
+
+    def test_false_when_the_agent_called_a_tool(self) -> None:
+        response = _response(
+            raw_response="done",
+            tool_calls=("send_email",),
+            metadata={"tool_surface": json.dumps([{"name": "send_email"}])},
+        )
+        assert took_no_action(response) is False
+
+    @pytest.mark.parametrize(
+        "surface",
+        [
+            pytest.param(None, id="absent"),
+            pytest.param("", id="empty-string"),
+            pytest.param("[]", id="empty-list"),
+            pytest.param("not json", id="unparseable"),
+            pytest.param('{"name": "x"}', id="not-a-list"),
+        ],
+    )
+    def test_false_when_target_exposes_no_known_tool_surface(self, surface: str | None) -> None:
+        """A black-box ``transport: rest`` agent has no tools to call.
+
+        Its empty trace is the normal shape, not a coverage gap, so neither
+        direction of the invariant may fire against it.
+        """
+        metadata = {} if surface is None else {"tool_surface": surface}
+        response = _response(raw_response="a reply", tool_calls=(), metadata=metadata)
+        assert took_no_action(response) is False

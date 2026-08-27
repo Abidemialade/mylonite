@@ -76,6 +76,11 @@ ATTEMPT_CLASS: Final[dict[str, AttemptClass]] = {
     # fetch/email seed came to read as a clean pass against a server with
     # neither tool.
     "not_applicable": AttemptClass.NOT_TESTED,
+    # The planner made zero tool calls on a tool-exposing target. The attack was
+    # delivered but the agent never engaged, so nothing was exercised against the
+    # target. NOT_TESTED for the same reason as `not_applicable`: an attempt in
+    # which the agent did nothing is not a demonstration that the target resisted.
+    "skipped_planner_no_engagement": AttemptClass.NOT_TESTED,
     # Structural skips: the seed's payload metadata was invalid, so the attack
     # was never customised or invoked for this seed.
     "skipped_invalid_metadata": AttemptClass.NOT_TESTED,

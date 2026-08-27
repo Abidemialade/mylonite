@@ -57,7 +57,15 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 #     capability; it previously had only the target's family NAME to go on.
 # All optional with defaults preserving current behaviour; adapters that set
 # none are unaffected. Backward-compatible; minor bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.6.0"
+#
+# 0.6.0 -> 0.7.0 (additive): new ``ScanAttemptOutcome`` value
+# ``skipped_planner_no_engagement``, reported when the planner made no tool calls
+# on a target that exposes tools. An adapter needs no change to benefit — the
+# engine derives it from the ``AdapterResponse`` an adapter already returns
+# (empty ``tool_calls`` plus a non-empty ``tool_surface`` in metadata). Only a
+# consumer that exhaustively matches every outcome value needs updating, which
+# is why this is a minor rather than a patch bump per GOVERNANCE.md.
+CONTRACT_VERSION: str = "0.7.0"
 
 
 @runtime_checkable

@@ -142,6 +142,41 @@ class TestFromReportExitCodes:
         assert outcome.exit_code != EXIT_SUCCESS
         assert outcome.exit_code == EXIT_CONFIG
 
+    def test_all_no_engagement_is_not_a_trustworthy_clean(self) -> None:
+        """A scan where the agent never called a tool proved nothing.
+
+        Previously these attempts were recorded as ``no_finding`` and therefore
+        classified EXERCISED_RESISTED, so a scan in which the agent did nothing
+        at all reported full coverage and exited 0 — the single largest source of
+        inflated coverage measured on a third-party corpus (15 of 22 clean
+        verdicts). They are NOT_TESTED, exactly like ``not_applicable``.
+        """
+        report = _report(
+            attempts=[
+                _attempt("skipped_planner_no_engagement"),
+                _attempt("skipped_planner_no_engagement", seed_id="s2"),
+            ],
+            findings_count=0,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.coverage is Coverage.NOT_EXERCISED
+        assert outcome.trustworthy_clean is False
+        assert outcome.exit_code != EXIT_SUCCESS
+
+    def test_no_engagement_mixed_with_a_real_clean_is_partial(self) -> None:
+        """One genuine negative alongside an unexercised attempt is PARTIAL, not clean."""
+        report = _report(
+            attempts=[
+                _attempt("no_finding"),
+                _attempt("skipped_planner_no_engagement", seed_id="s2"),
+            ],
+            findings_count=0,
+        )
+        outcome = ScanOutcome.from_report(report)
+        assert outcome.coverage is Coverage.PARTIAL
+        assert outcome.trustworthy_clean is False
+        assert outcome.exit_code != EXIT_SUCCESS
+
     def test_partial_coverage_with_a_real_finding_still_exits_success(self) -> None:
         # The exclusion that keeps the fix from over-firing: a real finding
         # (findings_count > 0) is still worth EXIT_SUCCESS at this layer even

@@ -245,6 +245,26 @@ python_files = ["test_*.py"]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:litellm.*",
+    # Unclosed-socket ResourceWarning from the third-party async/subprocess stack.
+    #
+    # Symptom: an intermittent, order-dependent failure in which whichever test
+    # happens to be running when the garbage collector reclaims the socket fails
+    # with PytestUnraisableExceptionWarning. Every affected test passes in
+    # isolation; a different test fails on each run; it reproduces on `main`
+    # independently of any change here. The socket is always a localhost pair
+    # (`laddr`/`raddr` both 127.0.0.1 on adjacent ports) — an event-loop wakeup
+    # socketpair, which Python emulates over TCP on Windows, not an application
+    # connection.
+    #
+    # It is not ours to close: `src/` creates no sockets (`grep -rn "socket"
+    # src/` is empty) and the leak does not reproduce in any single test
+    # subsystem run on its own — only in a full-suite run, where the async
+    # stack has been started and torn down many times.
+    #
+    # Scoped to the exact message shape rather than the whole category, so a
+    # genuine unclosed resource introduced by this project still fails the build.
+    "ignore:unclosed <socket:ResourceWarning",
+    "ignore:unclosed event loop:ResourceWarning",
 ]
 
 [tool.coverage.run]
