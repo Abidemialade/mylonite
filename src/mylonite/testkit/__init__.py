@@ -89,6 +89,21 @@ TESTKIT_RERECORD_HINT = (
     "recorded attack replays against the current guarded twin."
 )
 
+#: Bounds for the LIVE re-drive an emitted test performs against a custom target.
+#:
+#: This is the only path in the product that makes real provider calls from
+#: inside a blocking PR check, and it previously carried neither bound: the
+#: scan-wide defaults applied (50 LLM calls, no wall-clock limit at all), leaving
+#: the CI platform's job cap -- six hours on GitHub-hosted runners -- as the sole
+#: backstop against a hung MCP server or a stalled provider.
+#:
+#: The re-drive is scoped to ONE pattern by ``pattern_id_filter``, so a healthy
+#: run costs roughly a customiser call, a few planner turns and a judge call.
+#: These bounds sit above that and well under the ten-minute expectation for a PR
+#: check, so exceeding them means something is wrong rather than merely large.
+TESTKIT_REDRIVE_MAX_LLM_CALLS = 12
+TESTKIT_REDRIVE_TIMEOUT_S = 180.0
+
 
 class TestkitFixtureError(FixtureError):
     """Raised when the offline gate cannot trust its replay fixtures.
@@ -468,6 +483,20 @@ def _run_target_scan(
         model=model,
         max_concurrent=1,
         pattern_id_filter=pattern_id,
+        # This runs as a BLOCKING PR check. It re-drives one already-known
+        # pattern against a live target and a live provider, so without an
+        # explicit bound the only backstop is the CI platform's job cap -- six
+        # hours on GitHub-hosted runners, against a widely-cited ten-minute
+        # expectation for a PR check. A hung MCP server or a stalled provider
+        # would sit there for the whole window.
+        #
+        # `pattern_id_filter` already narrows this to a single seed, so the
+        # generous scan-wide default of 50 calls has no purpose here: one seed
+        # costs roughly a customiser call, a handful of planner turns and a
+        # judge call. The bound is deliberately snug enough that overrunning it
+        # means something is wrong, not that the work was large.
+        max_llm_calls=TESTKIT_REDRIVE_MAX_LLM_CALLS,
+        wall_clock_timeout_s=TESTKIT_REDRIVE_TIMEOUT_S,
     )
     # restrict_to_families=False: pass every discovered attack module through (see
     # the DCR-0002 note above), not just the two bundled families.

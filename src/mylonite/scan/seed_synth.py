@@ -22,12 +22,15 @@ channel); synthesis only fills the gap.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from mylonite._paths import safe_slug
 from mylonite.contracts import ComplianceTags
 from mylonite.scan import tool_roles
 from mylonite.scan.seeds import SeedPattern
+
+logger = logging.getLogger(__name__)
 
 _W1_COMPLIANCE = ComplianceTags(owasp_llm=["LLM01"], owasp_asi=["ASI02"], mitre_atlas=["AML.T0051"])
 _W2_COMPLIANCE = ComplianceTags(
@@ -252,6 +255,56 @@ def _w2_direct_injection_seed() -> SeedPattern:
     )
 
 
+#: Per-weakness-class ceiling on synthesised probes, as a function of how many
+#: tools the target actually exposes.
+#:
+#: The previous ceilings were fixed literals -- 3 for W1 and 2 each for W2/W3/W4
+#: -- which meant a server exposing 40 tools was probed exactly as thoroughly as
+#: one exposing 4. Measured on a 14-tool filesystem server: 3 tools received a
+#: W1 probe and 2 a W4 probe, and the remaining nine were never the SUBJECT of
+#: any attack at any LLM-call budget, because no seed existed to spend the budget
+#: on. Raising ``--max-llm-calls`` could not help.
+#:
+#: Still bounded, and deliberately: every synthesised seed costs roughly a
+#: customiser call, several planner turns and a judge call, all drawn from one
+#: scan-wide counter. An unbounded fan-out on a large surface would exhaust that
+#: budget and starve later seeds -- trading a coverage gap for a worse one.
+#: Whatever the ceiling drops is now reported rather than silently discarded.
+_SYNTH_CAP_FLOOR = 3
+_SYNTH_CAP_CEILING = 8
+
+
+def _cap_for(n_tools: int) -> int:
+    """Per-class probe ceiling for a target exposing ``n_tools`` tools."""
+    return max(_SYNTH_CAP_FLOOR, min(_SYNTH_CAP_CEILING, n_tools))
+
+
+def _capped(candidates: list[Any], cap: int, *, weakness: str, target_id: str) -> list[Any]:
+    """Take at most ``cap`` candidates, reporting anything dropped.
+
+    A cap that silently truncates reads downstream as "this surface was fully
+    probed". Naming the shortfall is what lets an operator tell a clean result
+    from an unexamined one, and points at the lever (a larger budget, or an
+    explicit ``control_config`` naming the tools that matter).
+    """
+    if len(candidates) <= cap:
+        return candidates
+    dropped = [
+        getattr(c, "name", c) if not isinstance(c, tuple) else c[0] for c in candidates[cap:]
+    ]
+    logger.warning(
+        "%s: %s synthesis capped at %d of %d candidate tool(s); not probed: %s. "
+        "Raise --max-llm-calls and re-run, or name the tools that matter in the "
+        "target file's control_config, to cover them.",
+        target_id,
+        weakness,
+        cap,
+        len(candidates),
+        ", ".join(str(d) for d in dropped),
+    )
+    return candidates[:cap]
+
+
 def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
     """Build channel-appropriate seeds from a target's declared classes + tool surface."""
     classes = set(getattr(descriptor, "weakness_classes", None) or [])
@@ -272,6 +325,8 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         return []
 
     out: list[SeedPattern] = []
+    cap = _cap_for(len(tools))
+    target_id = str(getattr(descriptor, "target_id", "target"))
 
     if "W1" in classes:
         # One probe per instruction-bearing tool (cap to keep the scan bounded) —
@@ -279,7 +334,9 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         # control). PLUS one rug-pull probe for the DYNAMIC shape (a server that
         # mutates its surface mid-session), whose finding is the mutation itself,
         # so it does not need a description that already looks poisoned.
-        for name, excerpt in tool_roles.instruction_bearing_tools(tools)[:3]:
+        for name, excerpt in _capped(
+            tool_roles.instruction_bearing_tools(tools), cap, weakness="W1", target_id=target_id
+        ):
             out.append(_w1_seed(name, excerpt))
         out.append(_w1_rugpull_seed())
 
@@ -290,7 +347,12 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         roles = tool_roles._classify_tools(tools)
         has_plant_recall = bool(roles.seed_arm_tool and roles.retrieve_tool)
         if not has_plant_recall:
-            for name, _param in tool_roles.content_processor_tools(tools)[:2]:
+            for name, _param in _capped(
+                tool_roles.content_processor_tools(tools),
+                cap,
+                weakness="W2",
+                target_id=target_id,
+            ):
                 out.append(_w2_seed(name))
 
     if "W3" in classes:
@@ -299,14 +361,18 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         # onto the descriptor) is authoritative; otherwise fall back to the same
         # tool_classifier.destination_tools() the `check` W3 row uses, so a
         # static preview never diverges from what scan attacks.
-        for name in _egress_candidates(descriptor, tools)[:2]:
+        for name in _capped(
+            _egress_candidates(descriptor, tools), cap, weakness="W3", target_id=target_id
+        ):
             out.append(_w3_seed(name))
 
     if "W4" in classes:
         # Unconfirmed consequential action against the sink tools THIS target
         # exposes. Operator declaration first, then control_shim's own
         # consequential classifier — the same one the live W4 control applies.
-        for name in _consequential_candidates(descriptor, tools)[:2]:
+        for name in _capped(
+            _consequential_candidates(descriptor, tools), cap, weakness="W4", target_id=target_id
+        ):
             out.append(_w4_seed(name))
 
     return out
