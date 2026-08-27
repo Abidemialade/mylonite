@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Egress detection now matches destination parameters by token, and no longer
+  reads a filename as a hostname.** `destination_tools` compared a parameter's
+  whole name against each hint for equality, so `webhook_url` matched neither
+  `webhook` nor `url`, and `destination` was not in the hint list at all. A live
+  MCP server exposing `export_report(destination=...)` and
+  `schedule_report(webhook_url=...)` was therefore reported by `mylonite check`
+  as having no network surface — and because `seed_synth._egress_candidates`
+  delegates to the same function, **no W3 seed was synthesised for it either**,
+  so the scan never probed the weakness. That server was independently confirmed
+  to accept an arbitrary external destination with no allowlist and no auth.
+
+  Matching now uses `hint_matches`, the whole-token matcher `classify` already
+  used for the same question, and `destination` / `dest` / `callback` join the
+  hint list.
+
+  The mirror-image false positive is fixed with it: `_HOSTNAME_RE` matches any
+  dotted alphanumeric string, so a schema default of `README.md.gz` was reported
+  as a network destination. That calibration is correct for the live refusal path
+  — where a false positive costs a refusable call and a false negative costs a
+  silent SSRF — and wrong for a static report, where a false positive costs
+  operator trust. The report path now ignores filename-shaped defaults while
+  still reporting any explicit scheme or IP literal.
+
 ### Changed
 
 - **Synthesised attack payloads read as routine operations instead of

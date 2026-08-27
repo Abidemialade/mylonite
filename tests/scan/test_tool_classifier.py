@@ -189,3 +189,103 @@ def test_meaningful_per_tool_annotations_are_untouched() -> None:
     assert uniform_default_annotations(ts_tools) is False
     kept = neutralize_uniform_default_annotations(ts_tools)
     assert kept[0].annotations == {"readOnlyHint": True}
+
+
+# -- destination_tools: the shapes measured on real servers ----------------------
+#
+# These are not hypotheticals. The first two are the exact tool signatures of a
+# live MCP server whose `export_report` tool was independently proven to accept
+# an arbitrary external destination with no allowlist and no auth; `check`
+# reported no network surface for it, and because `seed_synth._egress_candidates`
+# delegates here, no W3 seed was synthesised either. The third is the
+# mirror-image false positive observed on the reference "everything" server.
+
+
+def test_destination_tools_matches_a_param_named_destination() -> None:
+    """`destination` is not in the hint list at all, so exact equality missed it."""
+    tools = [
+        _FakeTool(
+            "export_report",
+            {
+                "properties": {
+                    "data": {"type": "string"},
+                    "destination": {"type": "string", "description": "Destination URL"},
+                    "format": {"type": "string"},
+                }
+            },
+        )
+    ]
+    assert destination_tools(tools) == [("export_report", "destination", "name hint")]
+
+
+def test_destination_tools_matches_a_compound_param_name() -> None:
+    """`webhook_url` equals neither "webhook" nor "url"; it tokenises to both."""
+    tools = [
+        _FakeTool(
+            "schedule_report",
+            {
+                "properties": {
+                    "frequency": {"type": "string"},
+                    "metric": {"type": "string"},
+                    "webhook_url": {"type": "string"},
+                }
+            },
+        )
+    ]
+    assert destination_tools(tools) == [("schedule_report", "webhook_url", "name hint")]
+
+
+def test_destination_tools_matches_camel_case_param_name() -> None:
+    tools = [_FakeTool("notify", {"properties": {"callbackUrl": {"type": "string"}}})]
+    assert destination_tools(tools) == [("notify", "callbackUrl", "name hint")]
+
+
+def test_destination_tools_does_not_report_a_filename_as_a_host() -> None:
+    """A dotted filename in a schema default is not a network destination.
+
+    `_HOSTNAME_RE` matches any dotted alphanumeric string, which is the right
+    calibration for the live refusal path and the wrong one for a static report.
+    """
+    tools = [
+        _FakeTool(
+            "gzip_file",
+            {
+                "properties": {
+                    "name": {"type": "string", "default": "README.md.gz"},
+                    "outputType": {"type": "string", "default": "resourceLink"},
+                }
+            },
+        )
+    ]
+    assert destination_tools(tools) == []
+
+
+def test_destination_tools_still_reports_a_real_url_default() -> None:
+    """The filename guard must not suppress a genuine destination."""
+    tools = [
+        _FakeTool(
+            "gzip_file",
+            {
+                "properties": {
+                    "name": {"type": "string", "default": "README.md.gz"},
+                    "data": {
+                        "type": "string",
+                        "default": "https://raw.example.com/main/README.md",
+                    },
+                }
+            },
+        )
+    ]
+    assert destination_tools(tools) == [("gzip_file", "data", "schema default")]
+
+
+def test_destination_tools_reports_an_ip_literal_default() -> None:
+    tools = [
+        _FakeTool("ping", {"properties": {"target": {"type": "string", "default": "10.0.0.5"}}})
+    ]
+    assert destination_tools(tools) == [("ping", "target", "schema default")]
+
+
+def test_destination_tools_does_not_regress_on_an_unrelated_dotted_id() -> None:
+    tools = [_FakeTool("get_record", {"properties": {"record_id": {"type": "string"}}})]
+    assert destination_tools(tools) == []
