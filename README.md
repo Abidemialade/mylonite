@@ -129,7 +129,8 @@ differential proof. The core surface:
   exploit (run for you as a stage of `gate`).
 - **`mylonite validate <dir>`** — proves an emitted test is meaningful via the
   control-efficacy check (the core differentiator); `--fast` skips it for a weaker gate.
-- **`mylonite ablate <target>`** — scores each safeguard as load-bearing vs. security theater.
+- **`mylonite ablate --target-file <path>`** — scores each safeguard as load-bearing vs.
+  security theater. Requires a target file; the bundled reference targets are not accepted.
 - **`mylonite report <dir>`** — a terminal trust panel (including the recommended-fix
   panel), **SARIF 2.1.0**, or a JSON bundle, all carrying the differential proof, the
   compliance tags, and the same evidence-anchored recommendation.

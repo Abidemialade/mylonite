@@ -109,7 +109,7 @@ mylonite validate .mylonite\generated\indirect-injection-note-body-direct
   dir instead if you prefer.
 - `mylonite validate <dir>` — runs the `DifferentialValidator` (the
   [validation engine](validation.md)). **Live** — it makes real LLM calls
-  (Haiku by default), so it needs an API key and discloses cost/latency up
+  (Haiku by default — `claude-haiku-4-5`), so it needs an API key and discloses cost/latency up
   front. It runs the full attack scan against *both* reference builds across a
   5-run flakiness filter and reports `kept` plus the mutation score. Exits `0`
   when the test is kept and `5` when it is cleanly rejected.

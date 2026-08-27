@@ -6,7 +6,7 @@ panel to GitHub code scanning to a machine-readable bundle — all from the same
 underlying data, all offline (no LLM, no network).
 
 The one command for all of it is `mylonite report`, pointed at a scan dir, a
-`generate`-emitted dir (before or after `validate` — both write into the same
+`generate`-emitted dir once `validate` has run (both write into the same
 dir), or a `*_report.json`.
 
 ```bash
@@ -20,6 +20,27 @@ mylonite report <dir> --json finding.json             # dashboards / SIEM / bots
 The default. For a scan it shows the findings, coverage per weakness class, and any
 **NOT TESTED** gap (an attack pattern that couldn't be delivered — surfaced loudly, never silently
 counted as clean). For a validation it shows the verdict and the evidence behind it:
+
+!!! note "What counts as NOT TESTED"
+
+    An attempt is only a clean result when the attack was actually exercised. These
+    are all reported as NOT TESTED, never as a pass:
+
+    | Outcome | What happened |
+    |---|---|
+    | `not_applicable` | the seed needs a capability this target does not expose |
+    | `skipped_no_seed_arm` | there was no way to plant the poisoned content |
+    | `skipped_payload_not_delivered` | the plant never reached the model |
+    | `skipped_planner_no_engagement` | the agent made **no tool calls at all** |
+    | `skipped_planner_failure` / `error` | the run broke before a verdict |
+
+    `skipped_planner_no_engagement` is the subtlest of these: the attack was
+    generated and delivered, and the agent simply never touched the tool surface —
+    it declined, or answered in prose, or never reached for the tool. Nothing was
+    exercised against the target, so it is not evidence the target is defended.
+    Look at the attempt's `raw_response` to see what the agent said instead; a
+    planner that will not engage usually means a different `--planner-model`, or a
+    seed whose drive names a tool this target actually exposes.
 
 ```
 leg          result   metric  detail

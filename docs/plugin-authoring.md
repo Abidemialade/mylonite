@@ -55,6 +55,20 @@ The class must:
 - be instantiable with no arguments (config flows via the contract's methods),
 - implement the methods in the Protocol.
 
+!!! note "Target adapters may take construction arguments"
+
+    The no-argument rule is what lets `discover()` hand back ready-to-use
+    instances, and attack modules — the group that is actually *run* — must
+    follow it.
+
+    Target adapters are the exception by design: an adapter for a named server
+    family is built by the target-file factory *with* that family, not
+    discovered ready-made. Several of the adapters Mylonite itself ships work
+    this way. `mylonite plugins` lists them normally and annotates them
+    **configured per target**; it reads `contract_version` off the class rather
+    than constructing anything, so needing configuration is never reported as a
+    fault. `discover()` still skips them, because its callers need instances.
+
 ## Worked examples
 
 Each reference plugin in

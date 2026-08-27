@@ -64,7 +64,9 @@ mylonite check --target-file app.yaml
 Every finding is a hint to confirm, never a verdict — the differential oracle (`scan`/
 `gate`) is what proves an attack actually lands. Cheap enough to run on every push: add
 `mylonite check --target-file app.yaml --enforce` to CI stage 1, next to lint, once the
-surface is clean (`--enforce` exits `1` on any finding instead of reporting and exiting `0`).
+surface is clean (`--enforce` exits `1` on the substantive W1-W4 structural findings; the
+"unpinned descriptions" advisory is shown but does not gate, so this is adoptable on a
+server you have not pinned yet).
 
 ## 3. Scan it
 

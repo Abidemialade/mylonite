@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`scan` now uses the same default model as every other command.** `validate`,
+  `gate`, `ablate` and `check` all defaulted to Haiku — the documented default —
+  while `scan` alone defaulted to Sonnet. That is roughly 3× the token cost, so
+  a user budgeting from the quickstart under-budgeted. It also changed results:
+  the default model is the **planner**, the agent under test, and the more
+  injection-resistant model made the same target yield fewer findings under
+  `scan` than the project's own published scorecard measured. A test now pins
+  every command to one default, because the drift was invisible — nothing
+  failed, the numbers were quietly different.
+
+- **Documentation corrected where it did not match behaviour.** `check
+  --enforce` gates on the substantive W1–W4 findings and deliberately does *not*
+  gate on the "unpinned descriptions" advisory, which fires on every tool of
+  every server on first contact; two pages said it exits `1` on any finding.
+  `report` accepts a `generate`-emitted directory once `validate` has run, not
+  before. `ablate` takes `--target-file` only and does not accept a positional
+  or bundled reference target.
+
 - **`mylonite plugins` no longer reports the product's own adapters as broken.**
   On a clean install it emitted three warnings — `http_agent`,
   `mcp_filesystem`, `mcp_github` are *"not instantiable with no arguments"* —
