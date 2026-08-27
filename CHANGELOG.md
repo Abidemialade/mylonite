@@ -42,8 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   predicate requires the destination to appear in the recorded call arguments, and
   keys on the *active* destination so `--randomize-exfil` is honoured. On an
   adapter that records no arguments it returns inconclusive rather than a
-  confident negative — absence of evidence is not evidence of absence — and the
-  bundled reference adapter, which was such an adapter, now records them.
+  confident negative — absence of evidence is not evidence of absence. The
+  bundled reference adapter now records call arguments too, on the session path
+  that surfaces an effect trace; its single-shot path stamps no effect trace at
+  all and continues to be judged as before.
 
 - **An attempt that called other tools but never the one under test is no longer
   a clean pass.** The previous check asked "did the agent call *any* tool?", which

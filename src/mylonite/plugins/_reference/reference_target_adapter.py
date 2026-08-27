@@ -131,10 +131,19 @@ class _InProcessServer:
                 "tool": result.name,
                 # Recorded for parity with the MCP recording shim, which has always
                 # written `args`. Predicates that assert WHICH destination a tool
-                # was given (egress_reached_probe_destination) read this; without
-                # it they can only return "inconclusive" on this adapter, so the
-                # bundled reference target would be the one place the check cannot
-                # run — the same exemption the tool_surface stamp had to close.
+                # was given (egress_reached_probe_destination) read this.
+                #
+                # Reachable today only through `_InProcessAttackSession.drive_planner`,
+                # which is what surfaces `tool_results` as `metadata["effect_trace"]`.
+                # `InProcessReferenceAdapter.invoke()` stamps no effect trace at all,
+                # so on the single-shot path every trace-reading predicate is
+                # inconclusive here and the LLM judge decides. That predates this
+                # change and is not altered by it: the reference target's own seeds
+                # key on the `store_*` blobs instead, and no synthesised seed (which
+                # is what needs the args) is applicable to it. Giving `invoke()` a
+                # real effect trace would move those verdicts from the judge to the
+                # predicates — a change to the differential oracle's ground truth,
+                # which does not belong in the same release as the probe rewrite.
                 "args": dict(arguments),
                 "is_error": bool(result.isError),
                 "result": str(result.content)[:500],
