@@ -9,6 +9,16 @@ CI on it.
 Against your own app this drives a real agent and makes real model calls, so budget
 minutes and API spend rather than seconds.
 
+!!! tip "Sizing `--max-llm-calls`"
+
+    Every seed is guaranteed a floor of the budget before the rest is shared, so a
+    large tool surface cannot let the first few seeds drain the pool and leave the
+    others untried. Probes that chain two tools cost two or three calls each, so a
+    server with many egress or action tools wants a larger budget than the default
+    of 50. If the budget runs out, the summary **names the seeds that never
+    started** — those proved nothing and are reported as NOT TESTED, never as
+    clean.
+
 ```bash
 # against the bundled reference agent
 mylonite gate reference:vulnerable

@@ -28,9 +28,17 @@ mylonite scan reference:vulnerable
 ## Why the probes look innocuous
 
 A synthesised payload is written to read as a **routine operation**, not as an attack.
-The W3 egress probe asks the agent to fetch a plausible third-party endpoint; the W4
-probe is a plain operational request; the black-box W2 document embeds its instruction
-in an ordinary-looking retention note.
+The W3 egress probe asks the agent to send something to a plausible third-party
+endpoint; the W4 probe is a plain operational request; the black-box W2 document embeds
+its instruction in an ordinary-looking retention note.
+
+They are also written to be **answerable**. The W3 and W4 probes are built from the
+target tool's own JSON schema, so every required argument is supplied — from the
+schema's `enum`, an example in the parameter's description, or a type default — and
+when a required argument is data-shaped and another tool produces it, the probe becomes
+a two-step task and lets the chain fill it. A probe that names a tool and leaves its
+required arguments empty gets a clarifying question rather than an action, and an
+attempt that was never exercised is indistinguishable from a target that resisted.
 
 That is deliberate, and it is the difference between measuring your target and measuring
 the planner's content filter. A payload that names `attacker.example.com/exfil` or opens
