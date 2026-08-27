@@ -141,11 +141,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent — which has no tools to call and is judged on its reply text — is
   unaffected.
 
+- **The bundled reference target now stamps its tool surface**, so the check
+  above applies to it. It is the differential oracle's ground truth — the target
+  the guarded-vs-vulnerable comparison is measured against — and it was the one
+  target exempt from the check that validates it: a prose-only reply from the
+  planner still read as a clean pass. `mylonite gate reference:vulnerable` no
+  longer exits 0 on a run in which the agent never touched the tool surface.
+
 - **`testkit.assert_target_resists` refuses to pass a re-drive in which the
   agent never acted.** It previously accepted one as resistance. It now raises
   with a cause naming the planner rather than pointing at fixtures, since the
   usual remedy is a different `--planner-model` or a drive naming a tool the
   target actually exposes.
+
+- **A re-drive that hits its new budget or timeout says so.** The engine records
+  a budget/timeout kill on `report.aborted` without re-raising, so an aborted run
+  reached the gate's verdict logic with no attempts at all and fell through to
+  the generic "likely a replay/fixture problem" message — which points the reader
+  at `mylonite generate` on a live path that has no fixtures to re-record. In a
+  blocking PR check in someone else's repository, that sends them after a bug
+  that does not exist. It now raises `TestkitRedriveAborted` (a
+  `TestkitFixtureError` subclass, so existing `except` clauses keep working)
+  naming the bound that was hit and the fact that this is a liveness problem, not
+  a fixture one. It still fails: an unfinished re-drive is not evidence of
+  resistance.
+
+- **Destination randomisation covers the synthesised probes again.** Rewriting
+  the synthesised payloads to read as routine operations moved them off the
+  historical `attacker.*` literals, but the substitution list did not move with
+  them, so `randomize_exfil` — which defaults on for every non-reference target —
+  silently no-opped on all of them. A generalisation probe with a fixed literal
+  is one a target can hardcode a block against, which is the exact overfitting
+  the feature exists to detect. Both literal families are now substituted, each
+  minting a destination in its own register so a synthesised probe does not
+  acquire an overt attack marker on the way. The probe destinations now live in
+  `scan/exfil` beside the substitution that consumes them, so the two cannot
+  drift apart again.
+
+- `skipped_planner_no_engagement` renders as `⚠ NOT TESTED` in the scan summary
+  table, matching its sibling not-tested outcomes, instead of printing the raw
+  enum value.
 
 - Unclosed-socket `ResourceWarning`s from the async/subprocess stack no longer
   fail the suite intermittently. They surfaced as `PytestUnraisableExceptionWarning`
@@ -156,9 +191,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `TargetAdapter` `CONTRACT_VERSION` `0.6.0` → `0.7.0` (additive): new
-  `ScanAttemptOutcome` value `skipped_planner_no_engagement`. Adapters need no
-  change — the engine derives it from the `AdapterResponse` an adapter already
-  returns. Only a consumer that exhaustively matches every outcome value is
+  `ScanAttemptOutcome` value `skipped_planner_no_engagement`. The engine derives
+  it from the `AdapterResponse` an adapter already returns, so no signature
+  changes — but the derivation needs `metadata["tool_surface"]`, a JSON list of
+  the tool names the target exposes. **A third-party adapter that does not stamp
+  it keeps the old behaviour**: its zero-tool-call attempts still read as clean.
+  That is deliberate — it is what keeps a black-box `transport: rest` agent, with
+  no tools to call, out of the check — but it means an adapter for a tool-using
+  target must stamp the surface to benefit. Every adapter Mylonite ships does.
+  Only a consumer that exhaustively matches every outcome value is otherwise
   affected.
 
 ## [0.8.2] - 2026-08-26

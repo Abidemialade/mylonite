@@ -60,11 +60,21 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 #
 # 0.6.0 -> 0.7.0 (additive): new ``ScanAttemptOutcome`` value
 # ``skipped_planner_no_engagement``, reported when the planner made no tool calls
-# on a target that exposes tools. An adapter needs no change to benefit — the
-# engine derives it from the ``AdapterResponse`` an adapter already returns
-# (empty ``tool_calls`` plus a non-empty ``tool_surface`` in metadata). Only a
-# consumer that exhaustively matches every outcome value needs updating, which
-# is why this is a minor rather than a patch bump per GOVERNANCE.md.
+# on a target that exposes tools. The engine derives it from the
+# ``AdapterResponse`` an adapter already returns: empty ``tool_calls`` plus a
+# non-empty ``tool_surface`` in ``metadata``.
+#
+# ADAPTER AUTHORS: the ``tool_surface`` half is a precondition, not an
+# inference. An adapter that does not stamp ``metadata["tool_surface"]`` (a JSON
+# list of the tool names the target exposes) is read as "this target may expose
+# no tools at all" — deliberately, so a black-box ``transport: rest`` agent
+# judged on its reply text is never caught by the check — and its zero-tool-call
+# attempts continue to fall through to ``no_finding``. If your target exposes
+# tools, stamp the surface; otherwise you keep the false-clean this outcome
+# exists to close. Every adapter Mylonite ships now stamps it.
+#
+# Only a consumer that exhaustively matches every outcome value needs updating,
+# which is why this is a minor rather than a patch bump per GOVERNANCE.md.
 CONTRACT_VERSION: str = "0.7.0"
 
 

@@ -9,9 +9,13 @@ not meet the no-arg instantiation contract.
 
 from __future__ import annotations
 
+from typing import Any
+
+import pytest
 from typer.testing import CliRunner
 
 from mylonite.cli import app
+from mylonite.plugins import registry
 from mylonite.plugins.registry import discover
 
 runner = CliRunner()
@@ -100,3 +104,71 @@ def test_describe_all_covers_every_group() -> None:
     described = describe_all()
     assert set(described) == set(_ALL_GROUPS)
     assert described["mylonite.validators"], "expected the bundled validators"
+
+
+# ---------------------------------------------------------------------------
+# One incompatible plugin must not take out the whole listing.
+#
+# `describe()` used to run the compat check as a raising call, so a single
+# third-party plugin declaring a mismatched major version made `mylonite
+# plugins` exit with nothing printed -- while `scan`, which goes through
+# `discover()`, only warned and carried on. The user sees a listing command
+# claim total breakage about a working install.
+# ---------------------------------------------------------------------------
+
+
+class _MismatchedAttackModule:
+    contract_version = "99.0.0"
+
+
+def _fake_entry_points(monkeypatch: pytest.MonkeyPatch, group_name: str, name: str) -> None:
+    real = registry.entry_points
+
+    class _EP:
+        def __init__(self) -> None:
+            self.name = name
+
+        def load(self) -> type:
+            return _MismatchedAttackModule
+
+    def _patched(*, group: str) -> list[Any]:
+        existing = list(real(group=group))
+        return [*existing, _EP()] if group == group_name else existing
+
+    monkeypatch.setattr(registry, "entry_points", _patched)
+
+
+def test_describe_reports_an_incompatible_plugin_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fake_entry_points(monkeypatch, "mylonite.attack_modules", "wrong_major")
+
+    infos = registry.describe("mylonite.attack_modules")
+
+    bad = [i for i in infos if i.entry_point == "wrong_major"]
+    assert len(bad) == 1, "the incompatible plugin must still be listed"
+    assert bad[0].incompatible, "it must be marked, not silently listed as healthy"
+    assert "99.0.0" in bad[0].incompatible
+    # The point of the change: the compatible plugins are still there.
+    assert [i for i in infos if not i.incompatible], "the rest of the group must survive"
+
+
+def test_plugins_command_lists_everything_then_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both halves of the contract, in one command.
+
+    The listing is the product of the command and must be printed; the non-zero
+    exit is the signal that something needs attention. Aborting before printing
+    gave the signal and destroyed the product.
+    """
+    _fake_entry_points(monkeypatch, "mylonite.attack_modules", "wrong_major")
+
+    result = CliRunner().invoke(app, ["plugins"])
+
+    assert result.exit_code != 0
+    assert "INCOMPATIBLE" in result.output
+    assert "_MismatchedAttackModule" in result.output
+    # ...and the healthy plugins were still listed alongside it.
+    assert "mylonite.target_adapters:" in result.output
+    assert result.output.count("  - ") > 1

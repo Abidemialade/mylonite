@@ -24,6 +24,16 @@ from mylonite.contracts import Payload
 DEFAULT_EXFIL_EMAIL = "attacker@example.com"
 DEFAULT_EXFIL_HOST = "attacker.example.com"
 
+#: Destinations used by the DESCRIPTOR-SYNTHESISED probes (``scan/seed_synth``).
+#: Deliberately neutral and operational-looking: MCPTox measured a 36.5% mean
+#: attack-success rate precisely because legitimate-looking tool use bypasses
+#: alignment, while overt malice ("attacker", "exfil") trips content filters and
+#: tells you nothing about the target. Both sit on ``.example.net``, reserved and
+#: guaranteed non-routable by RFC 2606.
+PROBE_EGRESS_HOST = "metrics-collector.example.net"
+PROBE_EGRESS_URL = f"https://{PROBE_EGRESS_HOST}/v1/ingest"
+PROBE_ARCHIVE_EMAIL = "records-archive@backup-sync.example.net"
+
 #: Loose back-compat nets, matched ONLY when the active token is the default
 #: (mirrors the prior predicates' "attacker@example" / "attacker.example" prefix
 #: checks). A minted token is matched exactly — no loose net — so a target that
@@ -71,15 +81,55 @@ def host_present(payload: Payload, blob: str) -> bool:
     return host == DEFAULT_EXFIL_HOST and _LOOSE_HOST in blob
 
 
+def mint_probe_exfil() -> tuple[str, str]:
+    """Mint a unique ``(email, host)`` for a SYNTHESISED probe destination.
+
+    Same generalization purpose as :func:`mint_exfil`, but the minted token
+    stays operational-looking. ``mint_exfil`` puts the run on ``.evil.test``,
+    which is fine for the reference target's predicates but would re-introduce
+    into a synthesised probe exactly the overt attack marker those probes were
+    rewritten to remove — a model declining ``evil.test`` tells you nothing
+    about the server under test. ``.example.net`` is equally non-routable
+    (RFC 2606) and shares no substring with the probe literals, so a target
+    that hardcodes a block on the probe destination does not accidentally
+    block the minted one.
+    """
+    tok = secrets.token_hex(4)
+    return f"records-{tok}@archive-{tok}.example.net", f"metrics-{tok}.example.net"
+
+
 def randomize_payload_exfil(payload: Payload) -> Payload:
     """Return a copy of ``payload`` with the exfil destination randomized.
 
-    Substitutes the default literals in the body with a freshly-minted unique
-    destination and stamps the minted ``exfil_email`` / ``exfil_host`` into the
-    metadata so the predicate keys the same token. A no-op on a body that names
-    no default destination (the minted tokens are still stamped, harmlessly).
+    Substitutes the known destination literals in the body with a freshly-minted
+    unique destination and stamps the minted ``exfil_email`` / ``exfil_host``
+    into the metadata so the predicate keys the same token. A no-op on a body
+    that names no known destination (the minted tokens are still stamped,
+    harmlessly).
+
+    Two literal families are substituted, each with its own minting function so
+    the replacement keeps the register of the text it replaces: the historical
+    demo destinations used by the bundled seeds, and the neutral probe
+    destinations used by the descriptor-synthesised seeds. Before this handled
+    both, randomization silently no-opped on every synthesised seed — i.e. on
+    the majority of real scan volume, since it defaults on for any non-reference
+    target.
     """
     email, host = mint_exfil()
-    new_body = payload.body.replace(DEFAULT_EXFIL_EMAIL, email).replace(DEFAULT_EXFIL_HOST, host)
-    meta = {**payload.metadata, "exfil_email": email, "exfil_host": host}
+    probe_email, probe_host = mint_probe_exfil()
+    new_body = (
+        payload.body.replace(DEFAULT_EXFIL_EMAIL, email)
+        .replace(DEFAULT_EXFIL_HOST, host)
+        .replace(PROBE_ARCHIVE_EMAIL, probe_email)
+        .replace(PROBE_EGRESS_HOST, probe_host)
+    )
+    # Which token the predicate should key on depends on which family actually
+    # appeared in the body. Bundled literals win when both are somehow present:
+    # that is the reference/fixture path, whose predicates are the stricter of
+    # the two and must not be weakened.
+    if DEFAULT_EXFIL_EMAIL in payload.body or DEFAULT_EXFIL_HOST in payload.body:
+        keyed_email, keyed_host = email, host
+    else:
+        keyed_email, keyed_host = probe_email, probe_host
+    meta = {**payload.metadata, "exfil_email": keyed_email, "exfil_host": keyed_host}
     return payload.model_copy(update={"body": new_body, "metadata": meta})

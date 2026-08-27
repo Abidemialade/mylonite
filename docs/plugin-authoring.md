@@ -69,6 +69,33 @@ The class must:
     than constructing anything, so needing configuration is never reported as a
     fault. `discover()` still skips them, because its callers need instances.
 
+## Target adapters: stamp your tool surface
+
+If your target exposes tools, every `AdapterResponse` you return should carry
+the tool names in `metadata["tool_surface"]`, as a JSON list of strings:
+
+```python
+return AdapterResponse(
+    payload_pattern_id=payload.pattern_id,
+    raw_response=reply_text,
+    tool_calls=called_tool_names,
+    metadata={"tool_surface": json.dumps([t.name for t in my_tools])},
+)
+```
+
+This is what lets the engine tell **"the agent refused"** apart from **"the
+agent never acted"**. An attempt with an empty `tool_calls` trace against a
+known, non-empty tool surface is reported as `skipped_planner_no_engagement`
+(NOT TESTED): the attack was delivered but never exercised, so it is not
+evidence the target is defended. See
+[Reading results](reading-results.md#the-terminal-trust-panel).
+
+Omit the key and the check does not apply — your zero-tool-call attempts are
+reported as clean passes. That default is deliberate: a black-box
+`transport: rest` agent has no tools to call and is judged on its reply text,
+so it must never be caught by this. But it means an adapter for a tool-using
+target has to stamp the surface to get the honest reading.
+
 ## Worked examples
 
 Each reference plugin in

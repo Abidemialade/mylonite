@@ -34,6 +34,7 @@ from typer.testing import CliRunner
 from mylonite import testkit
 from mylonite.cli import EXIT_SUCCESS, app
 from mylonite.contracts._types import (
+    AbortReason,
     AdapterResponse,
     ComplianceTags,
     ExploitRecord,
@@ -526,3 +527,151 @@ def test_generate_backfills_scan_report_into_real_cli_layout(
 
     assert result is None, "assert_target_resists must return None when target resists"
     target_registry.clear_runtime_targets()
+
+
+# ---------------------------------------------------------------------------
+# The bound itself: what happens when the re-drive actually hits it.
+#
+# The bound is only half a feature. `ScanEngine` records a budget/timeout kill
+# on `report.aborted` and does NOT re-raise the informative message the budget
+# counter built, so an aborted run reaches `_assert_from_result` with an empty
+# attempt list. Before these tests, that fell through every named branch to the
+# generic catch-all, which tells the reader they have "likely a replay/fixture
+# problem" and points them at `mylonite generate` -- on a LIVE path that has no
+# fixtures to re-record. A consumer whose PR is blocked follows that advice,
+# gets nowhere, and concludes either Mylonite is broken or their app regressed.
+# ---------------------------------------------------------------------------
+
+
+def _report(*, aborted: AbortReason | None, attempts: list[ScanAttempt]) -> ScanReport:
+    return ScanReport(
+        target_id="mcp:acme",
+        attack_modules=["mylonite.excessive-agency"],
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
+        elapsed_seconds=0.1,
+        attempts=attempts,
+        findings_count=sum(1 for a in attempts if a.outcome == "finding"),
+        aborted=aborted,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+
+
+def _attempt(exploit: ExploitRecord, outcome: str) -> ScanAttempt:
+    return ScanAttempt(
+        seed_id=exploit.pattern_id,
+        pattern_id=exploit.pattern_id,
+        outcome=outcome,  # type: ignore[arg-type]
+        verdict_mechanism="predicate",
+        verdict_reason="x",
+        error_detail=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected_phrase"),
+    [
+        (AbortReason.BUDGET_EXCEEDED, f"{testkit.TESTKIT_REDRIVE_MAX_LLM_CALLS}-call LLM budget"),
+        (AbortReason.WALL_CLOCK_TIMEOUT, "180s wall-clock limit"),
+    ],
+)
+def test_aborted_redrive_names_the_bound_not_a_fixture_problem(
+    reason: AbortReason, expected_phrase: str
+) -> None:
+    """Hitting the bound must be reported as a budget/liveness problem.
+
+    The wrong-subsystem message is the failure mode under test: a blocking CI
+    check that misdiagnoses its own abort is worse than one that simply says
+    "inconclusive", because it sends the reader after a fixture bug that does
+    not exist.
+    """
+    exploit = _exploit()
+    result = ScanResult(report=_report(aborted=reason, attempts=[]), exploits=[])
+
+    with pytest.raises(testkit.TestkitRedriveAborted) as excinfo:
+        testkit._assert_from_result(result, exploit)
+
+    msg = str(excinfo.value)
+    assert expected_phrase in msg
+    # The precise defect: it must NOT route the reader to the fixture recorder.
+    assert "replay/fixture problem" not in msg
+    assert testkit.TESTKIT_RERECORD_HINT not in msg
+    assert "mylonite generate" not in msg
+    # ...and it must still be a hard fail. An unfinished re-drive is not
+    # evidence of resistance.
+    assert isinstance(excinfo.value, testkit.TestkitFixtureError)
+
+
+def test_abort_does_not_mask_a_real_guard_regression() -> None:
+    """A finding recorded before the abort still fails as a guard regression.
+
+    Ordering matters: the abort branch must sit BELOW the exploit-fired check,
+    or a target that gets exploited and then stalls would be downgraded from
+    "your guard broke" to "your CI ran out of budget".
+    """
+    exploit = _exploit()
+    result = ScanResult(
+        report=_report(
+            aborted=AbortReason.WALL_CLOCK_TIMEOUT, attempts=[_attempt(exploit, "finding")]
+        ),
+        exploits=[exploit],
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        testkit._assert_from_result(result, exploit)
+    assert "guard did not hold" in str(excinfo.value)
+
+
+def test_abort_after_a_conclusive_resist_still_passes() -> None:
+    """Conclusive evidence wins over the abort.
+
+    If the pattern under gate already reached a `no_finding`, resistance IS
+    confirmed for it; the budget running out afterwards (on other work) must
+    not turn a genuine pass into a failure. The abort branch is for the case
+    where no verdict was reached at all.
+    """
+    exploit = _exploit()
+    result = ScanResult(
+        report=_report(
+            aborted=AbortReason.BUDGET_EXCEEDED, attempts=[_attempt(exploit, "no_finding")]
+        ),
+        exploits=[],
+    )
+
+    testkit._assert_from_result(result, exploit)  # must not raise
+
+
+def test_redrive_bounds_reach_the_scan_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The constants are actually threaded into `ScanConfig`.
+
+    Pins the wiring, not just the values: a bound that is declared but never
+    passed leaves the CI platform's six-hour job cap as the only backstop.
+    """
+    from mylonite.scan.engine import ScanConfig
+
+    seen: dict[str, Any] = {}
+    real_init = ScanConfig.__init__
+
+    def _capture(self: Any, *args: Any, **kwargs: Any) -> None:
+        seen.update(kwargs)
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(ScanConfig, "__init__", _capture)
+
+    cfg = ScanConfig(
+        target_id="mcp:acme",
+        provider="anthropic",
+        model="m",
+        max_concurrent=1,
+        pattern_id_filter="p",
+        max_llm_calls=testkit.TESTKIT_REDRIVE_MAX_LLM_CALLS,
+        wall_clock_timeout_s=testkit.TESTKIT_REDRIVE_TIMEOUT_S,
+    )
+    assert cfg.max_llm_calls == 12
+    assert cfg.wall_clock_timeout_s == 180.0
+    # And the source `_run_target_scan` reads is the module constant, not a
+    # second literal that could drift from it.
+    src = Path(testkit.__file__).read_text(encoding="utf-8")
+    assert "max_llm_calls=TESTKIT_REDRIVE_MAX_LLM_CALLS," in src
+    assert "wall_clock_timeout_s=TESTKIT_REDRIVE_TIMEOUT_S," in src

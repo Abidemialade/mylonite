@@ -62,6 +62,7 @@ OUTCOME_MARKS: Final[dict[str, str]] = {
     "skipped_planner_failure": "⚠ skipped",
     "skipped_no_seed_arm": "⚠ NOT TESTED",
     "skipped_payload_not_delivered": "⚠ NOT TESTED",
+    "skipped_planner_no_engagement": "⚠ NOT TESTED",
     "skipped_dry_run": "· dry-run",
     "error": "✗ error",
 }
@@ -77,6 +78,7 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "skipped_planner_failure": "skip",
     "skipped_no_seed_arm": "NOT-TESTED",
     "skipped_payload_not_delivered": "NOT-TESTED",
+    "skipped_planner_no_engagement": "NOT-TESTED",
     "skipped_dry_run": "dry-run",
     "error": "error",
 }
