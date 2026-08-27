@@ -368,7 +368,19 @@ class ScanEngine:
                     # which seeds it dropped reads downstream as a scan that
                     # covered everything -- the same silence the synthesis cap
                     # warning exists to break.
-                    starved = sorted({p.pattern_id for p in all_payloads} - set(counter.by_seed))
+                    #
+                    # `counter.by_seed` alone under-covers "started": a seed
+                    # judged entirely by a deterministic predicate (no LLM call
+                    # needed) can complete -- and already be sitting in
+                    # `attempts` -- while spending zero calls, which put it in
+                    # `starved` even though it fully ran and proved something.
+                    # Excluding pattern_ids already recorded in `attempts`
+                    # closes that: `by_seed` still catches a seed that spent
+                    # budget but got cancelled mid-flight before completing.
+                    completed = {a.pattern_id for a in attempts}
+                    starved = sorted(
+                        {p.pattern_id for p in all_payloads} - set(counter.by_seed) - completed
+                    )
                     if starved:
                         logger.warning(
                             "budget exhausted after %d call(s): %d seed(s) never started "
@@ -822,8 +834,23 @@ class ScanEngine:
             "consequential_tool", ""
         )
         all_passes = (*success_passes, *fail_passes)
-        if all_passes and all(
-            never_exercised_tool_under_test(p.response, tool_under_test) for p in all_passes
+        # `success_passes` non-empty here means a MINORITY success (is_finding
+        # already returned above for a majority): with runs>1, some pass's
+        # verdict fired. Success and this check are independent mechanisms — a
+        # fuzzy-judge success is decided from the reply text/effect trace as a
+        # whole, not by re-checking that `tool_under_test` literally appears in
+        # THAT pass's `response.tool_calls` — so a genuinely landing pass can
+        # still satisfy `never_exercised_tool_under_test` for its own response
+        # (e.g. seed metadata names a slightly stale tool name). Requiring
+        # `not success_passes` means any real engagement, in any pass, rules out
+        # "the attack was never put to the target" — that framing is only true
+        # when NOTHING fired across every run.
+        if (
+            not success_passes
+            and all_passes
+            and all(
+                never_exercised_tool_under_test(p.response, tool_under_test) for p in all_passes
+            )
         ):
             unexercised_reason = (
                 (

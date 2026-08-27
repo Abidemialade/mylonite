@@ -931,6 +931,83 @@ async def test_engine_budget_aborts_on_exhaustion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_starved_report_excludes_a_seed_that_already_completed_with_zero_llm_calls(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A seed judged entirely by a deterministic predicate (no LLM call needed)
+    can complete -- and already be sitting in `attempts` -- while spending ZERO
+    LLM calls. Before the fix, the starved-seed warning was computed purely from
+    `counter.by_seed`, so a seed like this was reported as having "never
+    started" and having "proved NOTHING", even though it fully ran and produced
+    a recorded outcome -- just because a LATER seed exhausted the budget.
+    """
+    safe_seed_id = SEED_CATALOGUE[0].pattern_id
+    boom_seed_id = SEED_CATALOGUE[1].pattern_id
+    starved_seed_id = SEED_CATALOGUE[2].pattern_id
+
+    def _mk(seed_id: str) -> Payload:
+        return Payload(
+            pattern_id=seed_id,
+            channel="tool-result",
+            body="x",
+            metadata={
+                "seed_id": seed_id,
+                "weakness": "W1",
+                "predicate": "x",
+                "setup": "no_setup",
+                "drive": "verbatim",
+            },
+        )
+
+    safe_payload = _mk(safe_seed_id)
+    boom_payload = _mk(boom_seed_id)
+    starved_payload = _mk(starved_seed_id)
+
+    class _MixedAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            if payload.pattern_id == boom_seed_id:
+                # Yield first so `safe_payload` (no await before its adapter
+                # response) completes and is appended to `attempts` before this
+                # one raises.
+                await asyncio.sleep(0.02)
+                counter = active_counter()
+                if counter is not None:
+                    counter.record("adapter")
+                raise BudgetExceededError("test budget exhausted")
+            if payload.pattern_id == starved_seed_id:
+                # Long enough that `run()`'s cancel-and-break (triggered by
+                # `boom_payload`'s exception) fires first -- this one never
+                # gets a chance to prove anything.
+                await asyncio.sleep(5)
+                return _ok_response()
+            return _ok_response()
+
+        async def close(self) -> None:
+            return None
+
+    engine = ScanEngine(
+        config=_config(max_llm_calls=1, customise=False),
+        adapter=_MixedAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([safe_payload, boom_payload, starved_payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("WARNING", logger="mylonite.scan.engine"):
+        result = await engine.run()
+
+    assert result.report.aborted == "budget_exceeded"
+    assert any(a.pattern_id == safe_seed_id for a in result.report.attempts)
+    warning_text = "\n".join(caplog.messages)
+    assert safe_seed_id not in warning_text, "an already-completed seed must not read as starved"
+    assert starved_seed_id in warning_text, "a seed that never got to run must still be named"
+
+
+@pytest.mark.asyncio
 async def test_customiser_non_recoverable_error_degrades_to_error_outcome_not_crash() -> None:
     """T4 follow-up (reviewer-flagged gap): a NonRecoverableProviderError (auth/
     tls/context_window — see ``_llm.py``) raised by the customiser must NOT escape
@@ -1269,6 +1346,64 @@ async def test_engine_nrun_minority_fire_is_rejected_as_flaky() -> None:
     assert result.report.findings_count == 0
     assert result.report.attempts[0].outcome == "no_finding"
     assert result.report.fallback_breakdown.get("nrun_disagreement") == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_nrun_minority_success_is_not_reported_as_no_engagement() -> None:
+    """A minority success must never be reclassified as "the planner never
+    engaged the tool under test".
+
+    `never_exercised_tool_under_test` and the judge's success verdict are
+    INDEPENDENT mechanisms: a fuzzy-judge success is decided from the reply
+    text/effect trace as a whole, not by re-checking that `tool_under_test`
+    literally appears in THAT pass's `response.tool_calls`. So a genuinely
+    landing pass (however minority) can still satisfy
+    `never_exercised_tool_under_test` for its own response -- e.g. seed
+    metadata names a slightly stale tool name relative to what the adapter's
+    trace recorded. Before the fix, `all(never_exercised_tool_under_test(...)
+    for p in all_passes)` did not exclude `success_passes`, so a minority
+    success on a response whose `tool_calls` never happens to name
+    `tool_under_test` was misreported as `skipped_planner_no_engagement` --
+    "the attack was never put to the target" -- when in fact it landed once.
+    """
+    judge = _JudgeSequence([_yes(), _no(), _no()])
+    payload = Payload(
+        pattern_id="synth-w3-egress-export_report",
+        channel="user-message",
+        body="x",
+        metadata={
+            "seed_id": "synth-w3-egress-export_report",
+            "weakness": "W3",
+            "predicate": "x",
+            "setup": "no_setup",
+            "drive": "verbatim",
+            # Not in the response's `tool_calls` (`read_note`, `send_email`), so
+            # every pass's response fails the "tool was exercised" check --
+            # independent of what the judge decided about that pass.
+            "egress_tool": "export_report",
+        },
+    )
+    # `never_exercised_tool_under_test` only evaluates `tool not in
+    # response.tool_calls` when `_target_has_tool_surface` is True, which needs
+    # a non-empty `tool_surface` in metadata -- `_ok_response()` has none, which
+    # would make this a no-op test of the fix (the branch is never entered
+    # either way). A real synthesised-seed target always stamps `tool_surface`.
+    response = AdapterResponse(
+        payload_pattern_id="x",
+        raw_response="ok",
+        tool_calls=["read_note", "send_email"],
+        metadata={"tool_surface": json.dumps([{"name": "read_note"}, {"name": "send_email"}])},
+    )
+    engine = ScanEngine(
+        config=_config(runs=3),
+        adapter=_AdapterStub(response),
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=judge,
+    )
+    result = await engine.run()
+    assert result.report.attempts[0].outcome == "no_finding"
+    assert result.report.attempts[0].outcome != "skipped_planner_no_engagement"
 
 
 @pytest.mark.asyncio
