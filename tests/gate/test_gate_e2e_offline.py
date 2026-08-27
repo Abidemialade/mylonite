@@ -19,6 +19,7 @@ import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -75,22 +76,56 @@ async def _benign_acompletion(*args: object, **kwargs: object) -> SimpleNamespac
 # ---------------------------------------------------------------------------
 
 
+def _benign_tool_call_response() -> SimpleNamespace:
+    """One harmless `read_note` call — a planner's opening turn."""
+    call = SimpleNamespace(
+        id="c1",
+        function=SimpleNamespace(name="read_note", arguments=json.dumps({"note_id": "n_absent"})),
+    )
+    message = SimpleNamespace(content="", tool_calls=[call])
+    choice = SimpleNamespace(message=message)
+    usage = SimpleNamespace(prompt_tokens=0, completion_tokens=1, total_tokens=1)
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
+def _engaging_acompletion() -> Any:
+    """Calls one benign tool per planner conversation, then terminates.
+
+    Keyed off the request shape rather than a call counter: a scan runs many
+    attempts through the same patched function, so a counter would engage the
+    tool surface on the first attempt only.
+    """
+
+    async def _acompletion(*_args: object, **kwargs: object) -> SimpleNamespace:
+        if not kwargs.get("tools"):
+            return _benign_response()
+        messages = kwargs.get("messages") or []
+        if any(isinstance(m, dict) and m.get("role") == "tool" for m in messages):  # type: ignore[union-attr]
+            return _benign_response()
+        return _benign_tool_call_response()
+
+    return _acompletion
+
+
 def test_gate_reference_no_finding_exits_zero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gate with a benign LLM stub: scan produces 0 findings → exit 0, no PR.
+    """Gate with an engaging-but-benign LLM stub: 0 findings → exit 0, no PR.
 
-    The benign acompletion stub causes:
-    1. The planner to see no tool calls → PlannerTrace with just a text step.
-    2. The adapter to return an AdapterResponse with empty tool_calls.
-    3. The deterministic judge predicates (tool-call-based) to return no-finding.
-    4. The LLM judge fallback (also via acompletion) to return success=False.
-    So scan_fn returns [], run_gate short-circuits before generate/validate,
+    The stub makes ONE harmless tool call per attempt, then terminates. So the
+    attack is genuinely delivered and exercised against the target, and genuinely
+    does not land: the deterministic predicates see a tool-call trace with no
+    consequential action, and the LLM judge fallback returns success=False.
+    `scan_fn` returns [], `run_gate` short-circuits before generate/validate,
     prints "no exploit found — nothing to gate", and exits 0.
+
+    The tool call is what makes this a real clean result rather than a vacuous
+    one; see `test_gate_exits_nonzero_when_the_planner_never_engages` below for
+    the other half of the contract.
     """
     import litellm
 
-    monkeypatch.setattr(litellm, "acompletion", _benign_acompletion)
+    monkeypatch.setattr(litellm, "acompletion", _engaging_acompletion())
     # Also patch the sync path (used by doctor / litellm_json_call sync) in
     # case any branch under test uses it; the gate path is async-only but be safe.
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_response())
@@ -114,6 +149,38 @@ def test_gate_reference_no_finding_exits_zero(
     assert not out_dir.exists() or not list(out_dir.glob("exploit_*.json")), (
         "No exploit JSON should be written when the scan found nothing."
     )
+
+
+def test_gate_exits_nonzero_when_the_planner_never_engages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate must not go green on a run in which nothing was exercised.
+
+    This is the false-clean the `skipped_planner_no_engagement` outcome exists
+    to close, pinned at the level a user actually experiences it. The stub never
+    calls a tool, so every attempt is delivered but never exercised. That is not
+    evidence the target is defended -- it is an absence of evidence -- and the
+    gate must refuse to pass on it rather than report "no exploit found".
+
+    Before, this exact stub produced exit 0 and the reassuring "nothing to gate"
+    message: the attack surface was never touched and the tool said so was fine.
+    """
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", _benign_acompletion)
+    monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_response())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    monkeypatch.chdir(tmp_path)
+    out_dir = tmp_path / ".mylonite" / "gate"
+    res = runner.invoke(app, ["gate", "reference:vulnerable", "--out", str(out_dir)])
+
+    assert res.exit_code != 0, (
+        "A scan in which the planner never touched the tool surface must not "
+        f"pass the gate.\nOutput:\n{res.output}"
+    )
+    assert "not a clean result" in res.output.lower(), res.output
+    assert not out_dir.exists() or not list(out_dir.glob("exploit_*.json"))
 
 
 # ---------------------------------------------------------------------------

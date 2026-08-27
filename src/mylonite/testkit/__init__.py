@@ -63,7 +63,7 @@ from mylonite._replay import (
     FixtureError,
     LiteLLMRecorder,
 )
-from mylonite.contracts import ExploitRecord
+from mylonite.contracts import AbortReason, ExploitRecord
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.llm_types import CompletionFn
@@ -120,6 +120,21 @@ class TestkitFixtureError(FixtureError):
 
     The message always names the re-record path so the gate stays honest rather
     than silently green.
+    """
+
+
+class TestkitRedriveAborted(TestkitFixtureError):
+    """Raised when a LIVE re-drive is cut short by its own budget/timeout bound.
+
+    A subclass of :class:`TestkitFixtureError` so existing ``except`` clauses
+    keep working, but distinct so a consumer can tell "the gate ran out of
+    room" apart from "the gate could not trust its fixtures". The two have
+    nothing in common operationally: a fixture error is fixed by re-recording,
+    while this one means the target hung, the provider stalled, or the bound is
+    genuinely too tight for the target — and there is nothing to re-record,
+    because the live path uses no fixtures at all.
+
+    Both still FAIL. An unfinished re-drive is not evidence of resistance.
     """
 
 
@@ -280,6 +295,33 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
 
     if any(a.outcome == "no_finding" for a in matching):
         return
+
+    # The re-drive hit its own bound (TESTKIT_REDRIVE_MAX_LLM_CALLS /
+    # TESTKIT_REDRIVE_TIMEOUT_S) before reaching a verdict. The engine records
+    # this on report.aborted and does NOT re-raise the informative message the
+    # budget counter built, so without this branch an aborted run falls all the
+    # way to the generic catch-all below and tells a consumer whose PR is
+    # blocked that they have "likely a replay/fixture problem" — on a path that
+    # has no fixtures at all, and with a re-record hint that cannot help. Named
+    # here because the actionable fix (a hung target, a stalled provider, or a
+    # genuinely too-tight bound) is a different subsystem entirely.
+    if result.report.aborted is not None:
+        _limits = {
+            AbortReason.BUDGET_EXCEEDED: (
+                f"the {TESTKIT_REDRIVE_MAX_LLM_CALLS}-call LLM budget was exhausted"
+            ),
+            AbortReason.WALL_CLOCK_TIMEOUT: (
+                f"the {TESTKIT_REDRIVE_TIMEOUT_S:.0f}s wall-clock limit was reached"
+            ),
+        }
+        cause = _limits.get(result.report.aborted, f"the scan aborted ({result.report.aborted})")
+        raise TestkitRedriveAborted(
+            f"inconclusive: the live re-drive of {pattern_id!r} was cut short because "
+            f"{cause}. No verdict was reached, so resistance was NOT confirmed and the "
+            "gate refuses to pass. This is a budget/liveness problem, not a fixture or "
+            "target problem: check that the target is responding and the LLM provider "
+            "is healthy. There is nothing to re-record."
+        )
 
     outcomes: list[str] = sorted({str(a.outcome) for a in matching}) or ["<no attempt>"]
     # An undelivered indirect payload is a distinct, common cause on a LIVE custom
@@ -861,6 +903,7 @@ def assert_control_holds(
 __all__ = [
     "TestkitConfigError",
     "TestkitFixtureError",
+    "TestkitRedriveAborted",
     "assert_control_holds",
     "assert_guard_holds",
     "assert_target_resists",

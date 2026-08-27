@@ -61,6 +61,20 @@ def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
     ]
 
 
+async def _tool_surface_json(server: _InProcessServer) -> str:
+    """This server's tool names, in the ``tool_surface`` metadata wire shape.
+
+    Stamped into every ``AdapterResponse`` this adapter returns, because the
+    judge's zero-tool-call invariant (``judge.took_no_action``) is scoped by a
+    KNOWN, non-empty tool surface. An adapter that omits the key reads as "this
+    target may expose no tools at all", so its zero-tool-call attempts fall
+    through to ``no_finding`` — exactly the false-clean this outcome exists to
+    close. The reference target is the differential oracle's ground truth; it
+    must not be the one target exempt from the check that validates it.
+    """
+    return json.dumps([d.name for d in await server.list_tools()])
+
+
 def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "") -> str:
     """Pick the user message the planner will see, based on seed.drive.
 
@@ -185,6 +199,7 @@ class _InProcessAttackSession:
                 "store_emails_sent": str(self._store.sent_emails),
                 "store_fetched_urls": str(self._store.fetched_urls),
                 "effect_trace": json.dumps(effect_trace),
+                "tool_surface": await _tool_surface_json(self._server),
             },
         )
 
@@ -288,6 +303,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
                 "note_id": note_id or "",
                 "setup": setup,
                 "drive": drive,
+                "tool_surface": await _tool_surface_json(server),
             },
         )
 

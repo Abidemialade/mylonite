@@ -147,14 +147,21 @@ class PluginInfo(NamedTuple):
     class_name: str
     contract_version: str
     needs_config: bool
+    #: Set when the compatibility check refused this plugin. Reported as a row
+    #: rather than raised, so one incompatible plugin cannot stop the listing —
+    #: which is precisely when a user most needs to see what is installed.
+    incompatible: str | None = None
 
 
 def describe(group: PluginGroup) -> list[PluginInfo]:
     """Registered plugins in ``group``, described WITHOUT instantiating them.
 
-    ``discover`` has to construct each plugin, because its callers need working
-    instances. A listing does not: ``contract_version`` is a ``ClassVar`` on
-    every contract base, so it can be read off the class.
+    ``discover`` has to hand back working instances, so a plugin it cannot
+    construct is dropped from its result. A listing must still show that plugin:
+    ``contract_version`` is a ``ClassVar`` on every contract base, so the fields
+    reported here are read off the CLASS and no successful construction is
+    required. (Construction is still *attempted*, once, purely to determine
+    ``needs_config`` — the failure is the answer, not an error.)
 
     That distinction matters because three of the adapters Mylonite itself ships
     (``http_agent``, ``mcp_filesystem``, ``mcp_github``) take a required argument,
@@ -163,8 +170,12 @@ def describe(group: PluginGroup) -> list[PluginInfo]:
     target adapters as broken on a clean install.
 
     The compatibility check still runs, against the class rather than an
-    instance, so a major-version mismatch is still refused here rather than
-    failing silently mid-run.
+    instance, so a major-version mismatch is still surfaced here rather than
+    failing silently mid-run — but it is REPORTED, not raised. Raising would
+    make one incompatible third-party plugin abort the whole listing and print
+    nothing, in the exact situation where a user most needs to see what is
+    installed; and it would diverge from ``discover``, which only warns, so
+    ``scan`` would keep working while ``plugins`` claimed everything was broken.
     """
     if group not in get_args(PluginGroup):
         msg = f"Unknown plugin group {group!r}."
@@ -173,7 +184,11 @@ def describe(group: PluginGroup) -> list[PluginInfo]:
     out: list[PluginInfo] = []
     for ep in entry_points(group=group):
         cls = ep.load()
-        _check_compat(group, host_version, cls, ep.name)
+        incompatible: str | None = None
+        try:
+            _check_compat(group, host_version, cls, ep.name)
+        except VersionIncompatibleError as exc:
+            incompatible = str(exc)
         needs_config = False
         try:
             cls()
@@ -185,6 +200,7 @@ def describe(group: PluginGroup) -> list[PluginInfo]:
                 class_name=getattr(cls, "__name__", str(cls)),
                 contract_version=str(getattr(cls, "contract_version", "?")),
                 needs_config=needs_config,
+                incompatible=incompatible,
             )
         )
     return out

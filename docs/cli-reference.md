@@ -181,6 +181,16 @@ by `scan`/`gate`; the other four use the bundled reference implementation.
 mylonite plugins
 ```
 
+An adapter marked *"configured per target"* is not broken: the target-adapter
+contract flows configuration through the target-file factory, so an adapter for
+a named server family is built with that family rather than discovered
+ready-made.
+
+A plugin marked *"INCOMPATIBLE"* declares a contract major version this Mylonite
+cannot load, and will be skipped at run time. The full listing still prints —
+that is the point of the command — and the exit code is non-zero so a scripted
+check still catches it.
+
 ---
 
 ### Run config (`mylonite.yaml`)

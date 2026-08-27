@@ -18,6 +18,7 @@ import importlib.resources as ir
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -178,15 +179,62 @@ def _write_exploit_json(path: Path) -> None:
 
 
 def _benign_acompletion_response() -> SimpleNamespace:
-    """A tool-call-free, non-success LLM response: the planner terminates
-    immediately (no attack lands), so `scan` runs fast and offline-safe while
-    still exercising the real write path (write_artefacts under --output-dir).
+    """A tool-call-free, non-success LLM response — the terminating turn.
+
+    Also serves as the judge's reply (`success: false`).
     """
     content = json.dumps({"success": False, "confidence": 0.0, "reason": "benign stub"})
     message = SimpleNamespace(content=content, tool_calls=None)
     choice = SimpleNamespace(message=message)
     usage = SimpleNamespace(prompt_tokens=0, completion_tokens=1, total_tokens=1)
     return SimpleNamespace(choices=[choice], usage=usage)
+
+
+def _benign_tool_call_response() -> SimpleNamespace:
+    """One harmless `read_note` call — the planner's first turn.
+
+    These tests exercise the artefact WRITE path, so what they need from the
+    scan is a conclusive verdict, cheaply. A planner that never calls a tool no
+    longer produces one: it is reported as `skipped_planner_no_engagement`
+    (NOT TESTED), and `scan` then exits non-zero because a run in which nothing
+    was exercised is not a clean result. So the stub makes a single benign call,
+    which exercises the tool surface without tripping any predicate — the attack
+    genuinely does not land, and the outcome is a real `no_finding`.
+    """
+    call = SimpleNamespace(
+        id="c1",
+        function=SimpleNamespace(name="read_note", arguments=json.dumps({"note_id": "n_absent"})),
+    )
+    message = SimpleNamespace(content="", tool_calls=[call])
+    choice = SimpleNamespace(message=message)
+    usage = SimpleNamespace(prompt_tokens=0, completion_tokens=1, total_tokens=1)
+    return SimpleNamespace(choices=[choice], usage=usage)
+
+
+def _engaging_acompletion() -> Any:
+    """A stub that calls one tool per planner conversation, then terminates.
+
+    Keyed off the request rather than a call counter, because a scan runs many
+    attempts through the same patched function: a counter would engage the tool
+    surface on the first attempt only and leave every other one reported as
+    NOT TESTED. A request carrying no `tools` is the judge (answer in JSON); a
+    request whose history already holds a tool result is a planner turn that has
+    engaged (terminate); anything else is a planner's opening turn (call once).
+    """
+
+    async def _acompletion(*_args: object, **kwargs: object) -> SimpleNamespace:
+        if not kwargs.get("tools"):
+            return _benign_acompletion_response()
+        messages = kwargs.get("messages") or []
+        already_called = any(
+            isinstance(m, dict) and m.get("role") == "tool"
+            for m in messages  # type: ignore[union-attr]
+        )
+        if already_called:
+            return _benign_acompletion_response()
+        return _benign_tool_call_response()
+
+    return _acompletion
 
 
 def test_generate_latest_honours_custom_output_dir(
@@ -206,10 +254,7 @@ def test_generate_latest_honours_custom_output_dir(
     """
     import litellm
 
-    async def _acompletion(*args: object, **kwargs: object) -> SimpleNamespace:
-        return _benign_acompletion_response()
-
-    monkeypatch.setattr(litellm, "acompletion", _acompletion)
+    monkeypatch.setattr(litellm, "acompletion", _engaging_acompletion())
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
     # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
     # above, so a fake key just needs to be PRESENT, never actually used.
@@ -255,10 +300,7 @@ def test_generate_latest_honours_mylonite_yaml_root(
     """
     import litellm
 
-    async def _acompletion(*args: object, **kwargs: object) -> SimpleNamespace:
-        return _benign_acompletion_response()
-
-    monkeypatch.setattr(litellm, "acompletion", _acompletion)
+    monkeypatch.setattr(litellm, "acompletion", _engaging_acompletion())
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
     # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
     # above, so a fake key just needs to be PRESENT, never actually used.
@@ -330,10 +372,7 @@ def test_scan_output_dir_flag_wins_over_config_root_and_env(
     """
     import litellm
 
-    async def _acompletion(*args: object, **kwargs: object) -> SimpleNamespace:
-        return _benign_acompletion_response()
-
-    monkeypatch.setattr(litellm, "acompletion", _acompletion)
+    monkeypatch.setattr(litellm, "acompletion", _engaging_acompletion())
     monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_acompletion_response())
     # T14: require_llm_configured() pre-flight; litellm itself is fully stubbed
     # above, so a fake key just needs to be PRESENT, never actually used.

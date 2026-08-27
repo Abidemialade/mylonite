@@ -332,6 +332,7 @@ def test_public_surface() -> None:
     assert testkit.__all__ == [
         "TestkitConfigError",
         "TestkitFixtureError",
+        "TestkitRedriveAborted",
         "assert_control_holds",
         "assert_guard_holds",
         "assert_target_resists",

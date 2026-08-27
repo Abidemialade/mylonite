@@ -377,20 +377,17 @@ def plugins() -> None:
     implementation, and selecting a third-party one for those is not yet exposed
     on the CLI (see docs/plugin-authoring.md).
     """
-    from mylonite.plugins.registry import VersionIncompatibleError, describe_all
+    from mylonite.plugins.registry import describe_all
 
-    try:
-        # `describe_all`, not `discover_all`: listing what is installed does not
-        # require constructing it. Three of the target adapters Mylonite itself
-        # ships take a required argument (they are built by the target-file
-        # factory for a named server family), so constructing them here reported
-        # half the product's own adapters as broken on a clean install. The
-        # contract-version compatibility check still runs.
-        described = describe_all()
-    except VersionIncompatibleError as exc:
-        echo_err(f"a registered plugin is incompatible with this Mylonite: {exc}")
-        raise typer.Exit(code=EXIT_CONFIG) from exc
+    # `describe_all`, not `discover_all`: listing what is installed does not
+    # require constructing it. Three of the target adapters Mylonite itself
+    # ships take a required argument (they are built by the target-file
+    # factory for a named server family), so constructing them here reported
+    # half the product's own adapters as broken on a clean install. The
+    # contract-version compatibility check still runs, and reports per plugin.
+    described = describe_all()
 
+    incompatible = False
     for group, infos in described.items():
         echo(f"{group}:")
         if not infos:
@@ -401,7 +398,21 @@ def plugins() -> None:
             # an adapter for a named server family is constructed with that
             # family rather than discovered ready-made.
             suffix = " — configured per target" if info.needs_config else ""
+            if info.incompatible:
+                # Reported inline rather than aborting the listing: an
+                # incompatible third-party plugin is exactly when the user needs
+                # to see the rest of what is installed.
+                incompatible = True
+                suffix += " — INCOMPATIBLE, will not be loaded"
             echo(f"  - {info.class_name} (contract {info.contract_version}){suffix}")
+
+    if incompatible:
+        echo_err(
+            "one or more registered plugins declare a contract version this "
+            "Mylonite cannot load; they are listed above and will be skipped at "
+            "run time. Upgrade the plugin, or Mylonite, to match."
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
 
 
 def _validate_model_string(model: str) -> None:
