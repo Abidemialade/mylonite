@@ -93,10 +93,57 @@ def _hints_match(name: str, hints: tuple[str, ...]) -> bool:
     return any(h in tokens for h in hints)
 
 
+def _resolve_local_ref(schema: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    """Resolve a LOCAL JSON-Schema ``$ref`` (``#/$defs/X`` or ``#/definitions/X``)
+    against this tool's own schema.
+
+    No external/remote refs — MCP ``inputSchema`` documents are self-contained,
+    and resolving anything else would mean fetching an arbitrary URI named by a
+    customer's server.
+    """
+    if not ref.startswith("#/"):
+        return None
+    node: Any = schema
+    for part in ref[2:].split("/"):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node if isinstance(node, dict) else None
+
+
+def _resolve_prop(schema: dict[str, Any], spec: Any, *, depth: int = 0) -> Any:
+    """Follow a property's own ``$ref`` to the schema it names.
+
+    A required param declared only as ``{"$ref": "#/$defs/Metric"}`` has no
+    inline ``"type"``, so every caller that reads ``spec.get("type")`` directly
+    (``_satisfiable``, ``literal_for``) saw it as typeless and either rejected a
+    perfectly usable chain source or fell back to the bland default literal —
+    degrading a probe back toward the unanswerable shape this module exists to
+    avoid, never a false verdict, but a real loss of chain-probe coverage on any
+    server whose SDK factors shared param types out into ``$defs``.
+    """
+    if not isinstance(spec, dict) or depth > 4:
+        return spec
+    ref = spec.get("$ref")
+    if not isinstance(ref, str):
+        return spec
+    target = _resolve_local_ref(schema, ref)
+    if target is None:
+        return spec
+    # Sibling keys (e.g. a property-level `description` alongside the `$ref`)
+    # win over the resolved schema's own, so a caller adding a more specific
+    # description to a shared type isn't overridden by it.
+    merged = {**target, **{k: v for k, v in spec.items() if k != "$ref"}}
+    return _resolve_prop(schema, merged, depth=depth + 1)
+
+
 def _schema_props(tool: Any) -> dict[str, Any]:
     schema = getattr(tool, "json_schema", {}) or {}
-    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
-    return props if isinstance(props, dict) else {}
+    if not isinstance(schema, dict):
+        return {}
+    props = schema.get("properties", {})
+    props = props if isinstance(props, dict) else {}
+    return {name: _resolve_prop(schema, spec) for name, spec in props.items()}
 
 
 def _schema_required(tool: Any) -> list[str]:

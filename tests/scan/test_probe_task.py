@@ -189,6 +189,30 @@ def test_the_sink_is_never_its_own_source() -> None:
     assert probe_task.source_tool_for([sink], "export_report") is None
 
 
+def test_a_ref_typed_required_param_is_still_satisfiable() -> None:
+    """A required param declared only as ``{"$ref": "#/$defs/Metric"}`` has no
+    inline `type`, so before schema resolution it read as typeless and the
+    source was wrongly rejected — costing chain-probe coverage on any server
+    whose SDK factors shared param types into `$defs` (a common pattern), even
+    though the referenced schema is a plain scalar string."""
+    source = ToolSpec(
+        name="get_metric",
+        description="Fetch a metric value.",
+        json_schema={
+            "type": "object",
+            "properties": {"metric": {"$ref": "#/$defs/MetricName"}},
+            "required": ["metric"],
+            "$defs": {"MetricName": {"type": "string", "description": "e.g., page_views"}},
+        },
+    )
+    sink = _analytics_surface()[1]
+    picked = probe_task.source_tool_for([source, sink], "export_report")
+    assert picked is not None and picked.name == "get_metric"
+    task = probe_task.egress_task(sink, "destination", [source, sink], URL)
+    assert "get metric" in task
+    assert "page_views" in task
+
+
 # --- W4 -----------------------------------------------------------------------
 
 
