@@ -147,12 +147,21 @@ _EXIT_CODE_BY_ABORT: Final[dict[AbortReason, int]] = {
 }
 
 # Verbatim (or near-verbatim) copies of the stderr lines cli.py's `scan`
-# command prints via `echo_err` for each abort reason. budget_exceeded and
-# provider_unreachable have no dedicated `echo_err` message in cli.py today —
-# they rely on render_summary's generic "aborted: <reason>" line — so those
-# map to `None` here to match current behaviour exactly.
+# command prints via `echo_err` for each abort reason. `provider_unreachable`
+# has no dedicated `echo_err` message in cli.py today — it relies on
+# render_summary's generic "aborted: <reason>" line — so it maps to `None`.
+#
+# `budget_exceeded` used to as well, which read as an anticlimax: the run
+# stopped, the exit code was right (EXIT_BUDGET), and the only explanation was
+# the bare words "aborted: budget_exceeded". It is the abort an operator is most
+# likely to hit and the easiest to act on, so it says what to do — matching the
+# treatment `wall_clock_timeout`, its exact sibling, already had.
 _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
-    AbortReason.BUDGET_EXCEEDED: None,
+    AbortReason.BUDGET_EXCEEDED: (
+        "error: scan exhausted its LLM call budget and stopped early; coverage is "
+        "incomplete and the seeds that had not started were cancelled. Raise "
+        "--max-llm-calls, or narrow the scan with --weakness-class, then re-run."
+    ),
     AbortReason.PROVIDER_UNREACHABLE: None,
     AbortReason.NO_PAYLOADS: (
         "error: no seeds were applicable to this target, so nothing was scanned. "

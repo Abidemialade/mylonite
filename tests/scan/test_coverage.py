@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from mylonite.contracts._types import ScanAttempt, ScanAttemptOutcome, ScanReport
 from mylonite.scan.coverage import (
+    _OPERATOR_MESSAGE_BY_ABORT,
     ATTEMPT_CLASS,
     AbortReason,
     AttemptClass,
@@ -394,3 +395,17 @@ class TestUnknownAbortReason:
             ScanOutcome.from_report(report)
         assert "AbortReason" in str(excinfo.value)
         assert "budget_exceeded" in str(excinfo.value)
+
+
+def test_budget_exceeded_has_an_actionable_operator_message() -> None:
+    """The most likely abort should not be the least explained.
+
+    `budget_exceeded` used to map to `None`, so the whole explanation an
+    operator got was the bare words "aborted: budget_exceeded" from the generic
+    summary line — for the one abort with an obvious remedy, and the exact
+    sibling of `wall_clock_timeout`, which had a real message all along.
+    """
+    message = _OPERATOR_MESSAGE_BY_ABORT[AbortReason.BUDGET_EXCEEDED]
+    assert message is not None
+    assert "--max-llm-calls" in message, "it must name the flag that fixes it"
+    assert "incomplete" in message, "and be explicit that this is not a clean result"

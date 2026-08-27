@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`check` no longer reports a filesystem `dest` as network egress surface.**
+  0.8.3 added `destination` / `dest` to the destination-parameter hints to catch
+  a live server exposing `export_report(destination=...)`, which had been
+  reported as having no network surface at all. It does catch it — and it also
+  caught `copy_file(dest=...)` and `move_file(destination=...)`, the single most
+  common signature on a filesystem server, where the destination is a path. That
+  put a W3 row on servers that cannot egress and, because
+  `seed_synth._egress_candidates` delegates to the same function, spent scan
+  budget synthesising probes with nowhere to send anything.
+
+  The hints are now two tiers. Unambiguous ones (`url`, `endpoint`, `webhook`,
+  `callback`, …) still match on the parameter name alone. The ambiguous ones
+  (`destination`, `dest`) match only with corroboration: a JSON-schema
+  `format: uri`, a send- or fetch-shaped tool name, or a description naming a
+  scheme or network noun. `export_report` is corroborated twice over, so the
+  true positive that motivated the widening survives. A parameter carrying an
+  `id` token is never a destination — `destination_id` is a key into an address
+  book, not an address.
+
+- **`check` no longer suppresses `.md` / `.py` / `.zip` hostnames as filenames.**
+  0.8.3 added a filename-suffix list so a schema default of `README.md.gz` would
+  stop reading as a hostname. Three entries on that list are real TLDs — Moldova,
+  Paraguay, and a Google gTLD — so a genuine destination like `notify.md` was
+  dropped from the report as though it were a document: a false negative on the
+  discovery path, which is the worse direction for a tool whose job is finding
+  egress surface. Those three are removed; `README.md.gz` still suppresses, on
+  `.gz`, which is not a TLD. A test now fails on any future entry that collides
+  with a known TLD.
+
+- **The LLM judge is told about the attack that actually ran.** `judge_context`
+  embeds the destination literal at synthesis time, before per-run randomisation
+  substitutes it, and randomisation only ever rewrote the payload body. Under
+  `--randomize-exfil` the judge was therefore told the injected document named
+  the fixed probe address while the target had actually seen a minted one — the
+  judge reasoning about a different attack than the one delivered. Body and
+  judge context now name the same destination. No deterministic predicate keys
+  on these strings, which is why this went unnoticed; it cost accuracy only on
+  the fuzzy-judge path, and only on the runs where randomisation was doing its
+  job.
+
+- **A scan that exhausts its LLM budget explains itself.** `budget_exceeded` had
+  no operator message, so the entire explanation was the generic summary's
+  `aborted: budget_exceeded` — for the abort an operator is most likely to hit
+  and the easiest to act on, and the exact sibling of `wall_clock_timeout`, which
+  has had a real message all along. It now names `--max-llm-calls`, says coverage
+  is incomplete, and notes that seeds which had not started were cancelled. The
+  exit code (`EXIT_BUDGET`) is unchanged — this was never a silent pass.
+
 ## [0.8.3] - 2026-08-27
 
 ### Fixed
