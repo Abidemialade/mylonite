@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-27
+
 ### Fixed
 
 - **`scan` now uses the same default model as every other command.** `validate`,
@@ -3077,7 +3079,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/Abidemialade/mylonite/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Abidemialade/mylonite/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Abidemialade/mylonite/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Abidemialade/mylonite/compare/v0.7.8...v0.8.0
