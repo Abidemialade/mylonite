@@ -226,3 +226,88 @@ def test_data_param_detection_uses_tokens_not_substrings() -> None:
 
 def test_tools_without_a_name_are_skipped() -> None:
     assert probe_task.source_tool_for([SimpleNamespace(name="")], "sink") is None
+
+
+# --- source-tool safety -------------------------------------------------------
+#
+# The source step is not part of the attack. It exists only to produce data for
+# the sink, and Mylonite drives it against a LIVE customer target. A wrong pick
+# is not a bad measurement — it is damage we caused.
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "get_and_purge_cache",  # "get" is a substring of a destructive compound
+        "delete_thread",  # contains "read"
+        "upload_backup",  # contains "load"
+        "blacklist_user",  # contains "list"
+        "delist_product",  # contains "list"
+        "reset_password",  # contains "set"… and is destructive outright
+    ],
+)
+def test_destructive_tools_are_never_chosen_as_a_source(name: str) -> None:
+    """Substring matching selected every one of these. A compliant planner would
+    then have executed them for us on the customer's server."""
+    destructive = _tool(name, "Does something consequential.", {"id": {"type": "string"}}, ["id"])
+    sink = _analytics_surface()[1]
+    assert probe_task.source_tool_for([destructive, sink], "export_report") is None
+
+
+def test_a_tool_the_server_marks_destructive_is_not_a_source() -> None:
+    """MCP annotations are a stronger signal than any name."""
+    tool = ToolSpec(
+        name="get_records",
+        description="Get records.",
+        json_schema={"type": "object", "properties": {}, "required": []},
+        annotations={"destructiveHint": True},
+    )
+    sink = _analytics_surface()[1]
+    assert probe_task.source_tool_for([tool, sink], "export_report") is None
+
+
+def test_an_unrecognised_verb_is_not_a_source() -> None:
+    """Unknown means unknown. Declining to chain costs a weaker probe; guessing
+    wrong costs the customer their data."""
+    tool = _tool("frobnicate", "Does a thing.", {"x": {"type": "string"}}, ["x"])
+    sink = _analytics_surface()[1]
+    assert probe_task.source_tool_for([tool, sink], "export_report") is None
+
+
+def test_a_genuine_reader_is_still_chosen() -> None:
+    tools = _analytics_surface()
+    picked = probe_task.source_tool_for(tools, "export_report")
+    assert picked is not None and picked.name == "read_analytics"
+
+
+# --- the destination is never fabricated as a literal -------------------------
+
+
+def test_unknown_dest_param_still_excludes_the_destination_argument() -> None:
+    """`dest_param` is empty for an operator-declared egress tool, or when the
+    classifier matched on the tool name alone.
+
+    Excluding only the *named* parameter then excludes nothing, so the real
+    destination argument gets a fabricated literal while the probe's URL sits in
+    the prose beside it. A planner that binds the parameter to the literal sends
+    nothing anywhere, and the run reports clean.
+    """
+    sink = _tool(
+        "publish_feed",
+        "Publish a feed.",
+        {
+            "payload": {"type": "string"},
+            "webhook_url": {"type": "string", "description": "Where to deliver"},
+        },
+        ["payload", "webhook_url"],
+    )
+    task = probe_task.egress_task(sink, "", [sink], URL)
+
+    assert URL in task
+    assert "webhook_url quarterly summary" not in task, "the destination must not be fabricated"
+    assert "payload" in task, "genuinely required non-destination arguments still supplied"
+
+
+def test_empty_enum_does_not_produce_an_empty_literal() -> None:
+    """`enum: [""]` would otherwise defeat the never-empty guarantee."""
+    assert probe_task.literal_for("x", {"type": "string", "enum": [""]}).strip()

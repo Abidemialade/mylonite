@@ -41,6 +41,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mylonite.scan.tool_classifier import annotation_is_sink
 from mylonite.scan.tool_roles import _schema_props, _schema_required
 
 #: Parameter-name tokens meaning "this argument carries the payload". When one of
@@ -51,6 +52,13 @@ _DATA_TOKENS: frozenset[str] = frozenset(
 
 #: Verbs marking a tool as a plausible SOURCE — one that returns something the
 #: sink could then send. Deliberately read-shaped: a source must be safe to call.
+#:
+#: Matched as whole TOKENS, never substrings. Mylonite drives the source step
+#: against a REAL customer server, so a wrong pick here is not a bad measurement,
+#: it is damage we caused. Substring matching selects `get_and_purge_cache` on
+#: "get", `delete_thread` on "read", `upload_backup` on "load" and
+#: `blacklist_user` on "list" — every one of which a compliant planner would then
+#: execute for us.
 _SOURCE_VERBS: tuple[str, ...] = (
     "read",
     "get",
@@ -62,6 +70,57 @@ _SOURCE_VERBS: tuple[str, ...] = (
     "load",
     "show",
     "describe",
+)
+
+#: Tokens that disqualify a tool from being a source no matter what else its
+#: name says. A compound name like `get_and_purge_cache` carries both.
+_DESTRUCTIVE_TOKENS: frozenset[str] = frozenset(
+    {
+        "delete",
+        "remove",
+        "purge",
+        "drop",
+        "destroy",
+        "truncate",
+        "wipe",
+        "erase",
+        "clear",
+        "revoke",
+        "disable",
+        "deactivate",
+        "terminate",
+        "kill",
+        "reset",
+        "rotate",
+        "overwrite",
+        "replace",
+        "write",
+        "update",
+        "modify",
+        "patch",
+        "create",
+        "insert",
+        "upload",
+        "publish",
+        "send",
+        "post",
+        "execute",
+        "run",
+        "invoke",
+        "apply",
+        "merge",
+        "close",
+        "cancel",
+        "archive",
+        "blacklist",
+        "delist",
+        "ban",
+        "grant",
+        "transfer",
+        "pay",
+        "charge",
+        "refund",
+    }
 )
 
 #: Pulls a worked example out of a property description. MCP servers document
@@ -106,8 +165,15 @@ def literal_for(pname: str, pspec: Any) -> str:
         return _FALLBACK_LITERAL
 
     enum = pspec.get("enum")
-    if isinstance(enum, list) and enum:
-        return str(enum[0])
+    if isinstance(enum, list):
+        # First NON-EMPTY member. A schema declaring `enum: [""]` (or listing the
+        # empty string first, which some servers do to mean "unset") would
+        # otherwise defeat the never-empty guarantee below and put a missing
+        # argument back into the prose.
+        for choice in enum:
+            rendered = str(choice).strip()
+            if rendered:
+                return rendered
 
     description = pspec.get("description")
     if isinstance(description, str):
@@ -150,6 +216,20 @@ def _satisfiable(tool: Any) -> bool:
     return True
 
 
+#: Parameter-name tokens that mean "this argument holds where the data goes".
+#: Only used to decide what NOT to fabricate a literal for; the destination
+#: itself is always named in prose so the planner binds it wherever the schema
+#: says it belongs.
+_DEST_TOKENS: frozenset[str] = frozenset(
+    {"url", "uri", "endpoint", "webhook", "callback", "destination", "dest", "host", "address"}
+)
+
+
+def _destination_params(tool: Any) -> set[str]:
+    """Parameters of ``tool`` that look like they carry a destination."""
+    return {name for name in _schema_props(tool) if _tokens(name) & _DEST_TOKENS}
+
+
 def data_param_of(tool: Any) -> str | None:
     """The required parameter of ``tool`` that carries the payload, if any."""
     props = _schema_props(tool)
@@ -159,18 +239,49 @@ def data_param_of(tool: Any) -> str | None:
     return None
 
 
+def _is_safe_source(tool: Any) -> bool:
+    """Is this tool safe for MYLONITE to ask a real server to run?
+
+    The source step is not part of the attack — it exists only to produce data
+    for the sink. Mylonite drives it against a live customer target, so the bar
+    is "provably read-only", not "probably fine". Three gates, cheapest first:
+
+    1. the server's own MCP annotations, which the contract calls a stronger
+       signal than any name (``readOnlyHint`` clears it, ``destructiveHint``
+       disqualifies it);
+    2. no destructive token anywhere in the name — this is what catches a
+       compound like ``get_and_purge_cache``, which reads as a getter;
+    3. a read-shaped verb as a whole token.
+
+    An unrecognised tool is NOT a source. Declining to chain costs a slightly
+    weaker probe; guessing wrong costs the customer their data.
+    """
+    name = getattr(tool, "name", "") or ""
+    if not name:
+        return False
+
+    annotations = getattr(tool, "annotations", None)
+    if annotation_is_sink(annotations) is True:
+        return False
+
+    tokens = _tokens(name)
+    if tokens & _DESTRUCTIVE_TOKENS:
+        return False
+    return bool(tokens & set(_SOURCE_VERBS))
+
+
 def source_tool_for(tools: list[Any], sink_name: str) -> Any | None:
     """A tool that plausibly PRODUCES what ``sink_name`` sends, or ``None``.
 
-    Deliberately conservative — a read-shaped verb, not the sink itself, and
-    satisfiable on its own terms. A wrong guess costs a wasted probe; the
-    one-step form is always available as the fallback.
+    Deliberately conservative — provably read-shaped (see :func:`_is_safe_source`),
+    not the sink itself, and satisfiable on its own terms. A wrong guess is not a
+    wasted probe: this step runs against the real target, so it is damage we
+    caused. The one-step form is always available as the fallback.
     """
     for tool in tools:
-        name = getattr(tool, "name", "") or ""
-        if not name or name == sink_name:
+        if getattr(tool, "name", "") == sink_name:
             continue
-        if not any(verb in name.lower() for verb in _SOURCE_VERBS):
+        if not _is_safe_source(tool):
             continue
         if not _satisfiable(tool):
             continue
@@ -197,7 +308,15 @@ def egress_task(sink: Any, dest_param: str, tools: list[Any], destination: str) 
     whichever parameter the schema says carries it.
     """
     sink_name = getattr(sink, "name", "") or ""
-    required = [n for n in _schema_required(sink) if n != dest_param]
+    # `dest_param` is empty whenever the classifier could not name the
+    # destination parameter -- an operator-declared egress tool, or a match on
+    # the tool's name alone. Excluding only the named one would then exclude
+    # NOTHING, so the real destination parameter would be handed a fabricated
+    # literal ("destination quarterly summary") while the probe's actual URL sat
+    # in the prose beside it. A planner that binds the parameter to the literal
+    # sends nothing anywhere, and the run reports clean.
+    dest_like = {dest_param} if dest_param else _destination_params(sink)
+    required = [n for n in _schema_required(sink) if n not in dest_like]
     data_param = data_param_of(sink)
     source = source_tool_for(tools, sink_name) if data_param else None
 
