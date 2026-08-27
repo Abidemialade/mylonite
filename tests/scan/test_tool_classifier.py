@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
 from mylonite.scan.tool_classifier import (
+    _FILENAME_SUFFIXES,
+    _is_reportable_destination,
     classify,
     destination_tools,
     looks_like_destination,
@@ -289,3 +296,113 @@ def test_destination_tools_reports_an_ip_literal_default() -> None:
 def test_destination_tools_does_not_regress_on_an_unrelated_dotted_id() -> None:
     tools = [_FakeTool("get_record", {"properties": {"record_id": {"type": "string"}}})]
     assert destination_tools(tools) == []
+
+
+# ---------------------------------------------------------------------------
+# Regressions introduced by 0.8.3's egress-detection widening.
+#
+# 0.8.3 switched `destination_tools` to token matching and added
+# `destination`/`dest`/`callback` to the hint list, which fixed a real false
+# negative (a live server exposing `export_report(destination=...)` reported no
+# network surface at all). It also created two new false-positive classes on the
+# report path, both of them common shapes rather than exotic ones.
+# ---------------------------------------------------------------------------
+
+
+def _tool(name: str, description: str, props: dict[str, Any]) -> SimpleNamespace:
+    return SimpleNamespace(name=name, description=description, json_schema={"properties": props})
+
+
+def test_filesystem_dest_is_not_reported_as_a_network_destination() -> None:
+    """`copy_file(src, dest)` is the commonest signature on a filesystem server.
+
+    `dest` there is a PATH. Reporting it as egress surface puts a W3 row on a
+    server that cannot egress, and — because `seed_synth._egress_candidates`
+    delegates here — spends the scan budget synthesising a probe with nowhere
+    to send anything.
+    """
+    tool = _tool(
+        "copy_file",
+        "Copy a file to a new location on disk.",
+        {"src": {"type": "string"}, "dest": {"type": "string"}},
+    )
+    assert destination_tools([tool]) == []
+
+
+def test_move_file_destination_is_not_reported() -> None:
+    tool = _tool(
+        "move_file",
+        "Move or rename a file.",
+        {"source": {"type": "string"}, "destination": {"type": "string"}},
+    )
+    assert destination_tools([tool]) == []
+
+
+def test_reference_shaped_param_is_not_a_destination() -> None:
+    """`destination_id` is a key into an address book, not an address."""
+    tool = _tool("send_message", "Send a message.", {"destination_id": {"type": "string"}})
+    assert destination_tools([tool]) == []
+
+
+def test_export_report_destination_is_still_reported() -> None:
+    """The true positive the 0.8.3 widening existed for must survive the fix.
+
+    Confirmed live: this tool accepts an arbitrary external destination with no
+    allowlist and no auth. Corroborated twice over — the verb exports, and the
+    description names an https default.
+    """
+    tool = _tool(
+        "export_report",
+        "Export a report to a destination. Default destination: "
+        "https://analytics-collector.internal/api/v2/ingest",
+        {"data": {"type": "string"}, "destination": {"type": "string"}},
+    )
+    assert destination_tools([tool]) == [("export_report", "destination", "name hint")]
+
+
+def test_weak_hint_corroborated_by_schema_format_alone() -> None:
+    """A tool with a neutral name still reports when the schema says `format: uri`."""
+    tool = _tool(
+        "store_record",
+        "Store a record.",
+        {"destination": {"type": "string", "format": "uri"}},
+    )
+    assert destination_tools([tool]) == [("store_record", "destination", "name hint")]
+
+
+def test_strong_hints_still_match_on_the_name_alone() -> None:
+    """`webhook_url` needs no corroboration — it is unambiguous."""
+    tool = _tool("schedule_report", "Schedule a report.", {"webhook_url": {"type": "string"}})
+    assert destination_tools([tool]) == [("schedule_report", "webhook_url", "name hint")]
+
+
+@pytest.mark.parametrize("host", ["notify.md", "deploy.py", "assets.zip"])
+def test_cctld_lookalikes_are_not_suppressed_as_filenames(host: str) -> None:
+    """`.md`, `.py` and `.zip` are real TLDs (Moldova, Paraguay, a Google gTLD).
+
+    Suppressing them treated a genuine destination as a document and dropped it
+    from the report entirely — a false negative on the discovery path, which is
+    the worse direction for a tool whose job is to find egress surface.
+    """
+    assert _is_reportable_destination(host) is True
+
+
+@pytest.mark.parametrize("sample", ["README.md.gz", "config.json", "report.log", "notes.txt"])
+def test_genuine_filenames_are_still_suppressed(sample: str) -> None:
+    """The case the suffix list was added for still holds.
+
+    `README.md.gz` suppresses on `.gz`, which is not a TLD — so dropping the
+    TLD-colliding entries did not reintroduce the false positive.
+    """
+    assert _is_reportable_destination(sample) is False
+
+
+def test_every_filename_suffix_avoids_a_known_tld_collision() -> None:
+    """Guards the rule itself, not just today's list.
+
+    Any future addition to `_FILENAME_SUFFIXES` that is also a TLD silently
+    reintroduces this class of false negative, and nothing else would catch it.
+    """
+    known_tlds = {".md", ".py", ".zip", ".sh", ".app", ".dev", ".pl", ".it", ".ai", ".io"}
+    collisions = sorted(set(_FILENAME_SUFFIXES) & known_tlds)
+    assert not collisions, f"these suffixes are real TLDs: {collisions}"

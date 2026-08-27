@@ -117,12 +117,16 @@ def randomize_payload_exfil(payload: Payload) -> Payload:
     """
     email, host = mint_exfil()
     probe_email, probe_host = mint_probe_exfil()
-    new_body = (
-        payload.body.replace(DEFAULT_EXFIL_EMAIL, email)
-        .replace(DEFAULT_EXFIL_HOST, host)
-        .replace(PROBE_ARCHIVE_EMAIL, probe_email)
-        .replace(PROBE_EGRESS_HOST, probe_host)
-    )
+
+    def _substitute(text: str) -> str:
+        return (
+            text.replace(DEFAULT_EXFIL_EMAIL, email)
+            .replace(DEFAULT_EXFIL_HOST, host)
+            .replace(PROBE_ARCHIVE_EMAIL, probe_email)
+            .replace(PROBE_EGRESS_HOST, probe_host)
+        )
+
+    new_body = _substitute(payload.body)
     # Which token the predicate should key on depends on which family actually
     # appeared in the body. Bundled literals win when both are somehow present:
     # that is the reference/fixture path, whose predicates are the stricter of
@@ -132,4 +136,15 @@ def randomize_payload_exfil(payload: Payload) -> Payload:
     else:
         keyed_email, keyed_host = probe_email, probe_host
     meta = {**payload.metadata, "exfil_email": keyed_email, "exfil_host": keyed_host}
+    # `judge_context` describes to the LLM judge what the injected document told
+    # the agent to do, and it embeds the destination literal verbatim at
+    # SYNTHESIS time -- before this function runs. Left unsubstituted, the judge
+    # is told the document named the fixed address while the target actually saw
+    # a minted one, so the judge is reasoning about a different attack than the
+    # one that ran. It is only the fuzzy-judge path (no deterministic predicate
+    # keys on these strings), which is why it went unnoticed, but it costs judge
+    # accuracy on exactly the runs where randomization is doing its job.
+    context = meta.get("judge_context")
+    if isinstance(context, str) and context:
+        meta["judge_context"] = _substitute(context)
     return payload.model_copy(update={"body": new_body, "metadata": meta})

@@ -130,12 +130,9 @@ _EGRESS_NAME_HINTS: tuple[str, ...] = (
 #: ``notify(webhook=...)`` both match on the parameter, not just the tool).
 #:
 #: Matched as whole TOKENS (see :func:`hint_matches`), so ``webhook_url`` and
-#: ``callbackUrl`` both hit. ``destination``/``dest``/``callback`` were absent
-#: entirely: a server exposing ``export_report(destination=...)`` and
-#: ``schedule_report(webhook_url=...)`` reported no network surface at all, and
-#: no W3 seed was synthesised for it, while the tool was in fact accepting
-#: arbitrary external destinations with no allowlist.
-_DESTINATION_PARAM_HINTS: tuple[str, ...] = (
+#: ``callbackUrl`` both hit. These are the UNAMBIGUOUS ones: a parameter carrying
+#: any of these tokens is network-shaped whatever the surrounding tool does.
+_DESTINATION_PARAM_HINTS_STRONG: tuple[str, ...] = (
     "url",
     "host",
     "endpoint",
@@ -144,27 +141,59 @@ _DESTINATION_PARAM_HINTS: tuple[str, ...] = (
     "address",
     "domain",
     "webhook",
-    "destination",
-    "dest",
     "callback",
 )
+
+#: Fragments that name a destination WITHOUT saying what kind. `destination` and
+#: `dest` were added in 0.8.3 to catch a live server exposing
+#: ``export_report(destination=...)``, which had been reported as having no
+#: network surface at all. They do catch it — and they also catch
+#: ``copy_file(dest=...)`` and ``move_file(destination=...)``, the single most
+#: common signature on a filesystem server, where the destination is a PATH.
+#:
+#: So they are matched only with corroboration (see :func:`_weak_hint_corroborated`):
+#: something else about the tool has to say "network". That keeps the true
+#: positive that motivated adding them while dropping the filesystem false ones.
+_DESTINATION_PARAM_HINTS_WEAK: tuple[str, ...] = (
+    "destination",
+    "dest",
+)
+
+#: Back-compat alias: the union, for any caller that imported the old name.
+_DESTINATION_PARAM_HINTS: tuple[str, ...] = (
+    *_DESTINATION_PARAM_HINTS_STRONG,
+    *_DESTINATION_PARAM_HINTS_WEAK,
+)
+
+#: Tokens that make a WEAK-hint parameter a reference to a thing rather than the
+#: thing: ``destination_id`` is a key into someone's address book, not an address.
+#: Deliberately not applied to the strong hints — ``host_name`` and ``url_key``
+#: are still destinations, and a veto list that swallowed them would trade a rare
+#: false positive for a common false negative.
+_REFERENCE_TOKENS: frozenset[str] = frozenset({"id", "ids"})
 
 
 #: Suffixes that make a dotted string a FILENAME rather than a hostname. Only
 #: consulted on the discovery-report path — see :func:`_is_reportable_destination`.
+#:
+#: **Every entry here must be a file extension that is NOT also a real TLD.**
+#: ``.md``, ``.py`` and ``.zip`` were originally in this list and have been
+#: removed: they are the ccTLDs for Moldova and Paraguay and a Google gTLD, so a
+#: genuine destination like ``notify.md`` was being suppressed from the report as
+#: though it were a document. The case that motivated the list — a schema default
+#: of ``README.md.gz`` — still suppresses, on ``.gz``, which is not a TLD.
+#: Check https://data.iana.org/TLD/tlds-alpha-by-domain.txt before adding one.
 _FILENAME_SUFFIXES: tuple[str, ...] = (
     ".json",
     ".yaml",
     ".yml",
     ".txt",
-    ".md",
     ".csv",
     ".xml",
     ".html",
     ".htm",
     ".log",
     ".gz",
-    ".zip",
     ".tar",
     ".pdf",
     ".png",
@@ -173,7 +202,6 @@ _FILENAME_SUFFIXES: tuple[str, ...] = (
     ".svg",
     ".js",
     ".ts",
-    ".py",
     ".toml",
     ".ini",
     ".cfg",
@@ -210,6 +238,63 @@ def _is_reportable_destination(sample: str) -> bool:
     if host.endswith(_FILENAME_SUFFIXES):
         return False
     return looks_like_destination(candidate)
+
+
+def _weak_hint_corroborated(tool_name: str, pspec: Mapping[str, Any], blurb: str) -> bool:
+    """Does anything besides the parameter's name say this destination is a URL?
+
+    ``destination`` and ``dest`` name a destination without saying what kind, and
+    the commonest tool in the MCP ecosystem carrying them — ``copy_file(dest)``,
+    ``move_file(destination)`` — means a filesystem path. Corroboration is any of:
+
+    * the JSON-schema ``format`` is ``uri``/``url`` — the schema itself says so;
+    * the tool's own name is egress-shaped (``_EGRESS_NAME_HINTS``, plus the
+      send-shaped verbs that move data OUT without fetching anything);
+    * the tool or parameter description names a scheme or a network noun.
+
+    The live server that motivated adding these hints, ``export_report``, is
+    caught by the last two: the verb exports, and the description reads *"Export
+    a report to a destination. Default destination: https://..."*.
+    """
+    fmt = pspec.get("format")
+    if isinstance(fmt, str) and fmt.lower() in {"uri", "url", "iri"}:
+        return True
+    lowered_name = tool_name.lower()
+    if any(hint in lowered_name for hint in (*_EGRESS_NAME_HINTS, *_SEND_NAME_HINTS)):
+        return True
+    text = blurb.lower()
+    if "://" in text:
+        return True
+    return any(word in text for word in _NETWORK_WORDS)
+
+
+#: Verbs that move data OUT to somewhere. `_EGRESS_NAME_HINTS` is fetch-shaped
+#: (it describes pulling something in); these are the mirror image, and a
+#: `destination` on one of them is a place data is sent, not a file path.
+_SEND_NAME_HINTS: tuple[str, ...] = (
+    "export",
+    "upload",
+    "publish",
+    "post",
+    "send",
+    "notify",
+    "forward",
+    "sync",
+    "webhook",
+)
+
+#: Network nouns in a description, used only to corroborate a weak name hint.
+_NETWORK_WORDS: tuple[str, ...] = (
+    "url",
+    "endpoint",
+    "webhook",
+    "http",
+    "https",
+    "api",
+    "server",
+    "remote",
+    "hostname",
+)
 
 
 def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
@@ -261,8 +346,17 @@ def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
             # `seed_synth._egress_candidates` delegates here, no W3 seed was ever
             # synthesised for it either. `hint_matches` is the same tokeniser
             # `classify` already uses for exactly this question.
-            if hint_matches(pname, _DESTINATION_PARAM_HINTS):
+            if hint_matches(pname, _DESTINATION_PARAM_HINTS_STRONG):
                 best = best or (pname, "name hint")
+            elif hint_matches(pname, _DESTINATION_PARAM_HINTS_WEAK) and not (
+                name_tokens(pname) & _REFERENCE_TOKENS
+            ):
+                # Ambiguous on its own -- `dest` is as likely to be a filesystem
+                # path as a URL. Report only when something else about the tool
+                # says network; see `_weak_hint_corroborated`.
+                blurb = f"{getattr(tool, 'description', '') or ''} {pspec.get('description') or ''}"
+                if _weak_hint_corroborated(name, pspec, blurb):
+                    best = best or (pname, "name hint")
         if best is None and any(hint in name.lower() for hint in _EGRESS_NAME_HINTS):
             # The tool's own name hints at egress even with no matching param name
             # (e.g. a single unnamed positional-style "target" argument scored
