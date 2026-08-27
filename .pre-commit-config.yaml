@@ -44,8 +44,12 @@ repos:
         files: ^\.secrets\.baseline$
         always_run: true
 
+  # Keep in lockstep with the `ruff==` pin in pyproject's [dev] extra. CI runs
+  # both paths -- the `lint` job installs ruff from that pin, the `precommit`
+  # job runs this hook -- so a drift between them lets one job pass while the
+  # other fails on the same file.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
+    rev: v0.16.4
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]

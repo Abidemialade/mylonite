@@ -128,6 +128,13 @@ _EGRESS_NAME_HINTS: tuple[str, ...] = (
 #: Parameter-NAME fragments that suggest the argument itself holds a network
 #: destination, independent of the tool's own name (``web_fetch(url=...)`` and
 #: ``notify(webhook=...)`` both match on the parameter, not just the tool).
+#:
+#: Matched as whole TOKENS (see :func:`hint_matches`), so ``webhook_url`` and
+#: ``callbackUrl`` both hit. ``destination``/``dest``/``callback`` were absent
+#: entirely: a server exposing ``export_report(destination=...)`` and
+#: ``schedule_report(webhook_url=...)`` reported no network surface at all, and
+#: no W3 seed was synthesised for it, while the tool was in fact accepting
+#: arbitrary external destinations with no allowlist.
 _DESTINATION_PARAM_HINTS: tuple[str, ...] = (
     "url",
     "host",
@@ -137,7 +144,72 @@ _DESTINATION_PARAM_HINTS: tuple[str, ...] = (
     "address",
     "domain",
     "webhook",
+    "destination",
+    "dest",
+    "callback",
 )
+
+
+#: Suffixes that make a dotted string a FILENAME rather than a hostname. Only
+#: consulted on the discovery-report path — see :func:`_is_reportable_destination`.
+_FILENAME_SUFFIXES: tuple[str, ...] = (
+    ".json",
+    ".yaml",
+    ".yml",
+    ".txt",
+    ".md",
+    ".csv",
+    ".xml",
+    ".html",
+    ".htm",
+    ".log",
+    ".gz",
+    ".zip",
+    ".tar",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".svg",
+    ".js",
+    ".ts",
+    ".py",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".sql",
+    ".db",
+    ".sqlite",
+)
+
+
+def _is_reportable_destination(sample: str) -> bool:
+    """:func:`looks_like_destination`, recalibrated for a static REPORT.
+
+    The permissive form is right for the live boundary control, where the cost
+    of a false positive is a refusable call and the cost of a false negative is
+    a silent SSRF. It is wrong here: ``_HOSTNAME_RE`` matches any dotted
+    alphanumeric string, so a schema default of ``"README.md.gz"`` reads as a
+    hostname and ``mylonite check`` reports the tool as taking a network
+    destination. On a static report a false positive costs operator trust, which
+    is the scarcer resource -- so a bare dotted string that looks like a filename
+    is not reported.
+
+    An explicit scheme or an IP literal is always reportable: those are
+    unambiguous, whatever the rest of the string looks like.
+    """
+    candidate = sample.strip()
+    if "://" in candidate:
+        return True
+    host = candidate.split("/", 1)[0].lower()
+    if host.count(":") == 1:
+        head, _, tail = host.partition(":")
+        if tail.isdigit():
+            host = head
+    if host.endswith(_FILENAME_SUFFIXES):
+        return False
+    return looks_like_destination(candidate)
 
 
 def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
@@ -175,12 +247,21 @@ def destination_tools(tools: Sequence[Any]) -> list[tuple[str, str, str]]:
                 continue
             for sample_key in ("default", "example"):
                 sample = pspec.get(sample_key)
-                if isinstance(sample, str) and looks_like_destination(sample):
+                if isinstance(sample, str) and _is_reportable_destination(sample):
                     best = (pname, "schema default")
                     break
             if best is not None:
                 break
-            if pname.lower() in _DESTINATION_PARAM_HINTS:
+            # Token match, not exact equality. `pname.lower() in _DESTINATION_PARAM_HINTS`
+            # compared the WHOLE parameter name against each hint, so `webhook_url`
+            # matched neither "webhook" nor "url" and `destination` matched nothing
+            # at all. A live server whose only egress tools were
+            # `export_report(destination=...)` and `schedule_report(webhook_url=...)`
+            # was therefore reported as having no network surface -- and, because
+            # `seed_synth._egress_candidates` delegates here, no W3 seed was ever
+            # synthesised for it either. `hint_matches` is the same tokeniser
+            # `classify` already uses for exactly this question.
+            if hint_matches(pname, _DESTINATION_PARAM_HINTS):
                 best = best or (pname, "name hint")
         if best is None and any(hint in name.lower() for hint in _EGRESS_NAME_HINTS):
             # The tool's own name hints at egress even with no matching param name

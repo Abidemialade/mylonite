@@ -411,3 +411,53 @@ def test_w2_judge_context_still_names_the_attack_plainly() -> None:
     assert ctx, "expected a judge_context on the black-box W2 seed"
     assert "never asked for" in ctx or "did not" in ctx
     assert "success =" in ctx
+
+
+def test_w3_seeds_are_synthesised_for_destination_shaped_params_without_declaration() -> None:
+    """Auto-detection alone must reach a server whose egress params aren't named `url`.
+
+    This is the end-to-end regression. A live MCP server exposing
+    `export_report(destination=...)` and `schedule_report(webhook_url=...)` was
+    independently proven to accept an arbitrary external destination with no
+    allowlist and no auth. `mylonite check` reported no network surface, and
+    because `_egress_candidates` delegates to `destination_tools`, no W3 seed was
+    synthesised either -- so the scan never probed the weakness. Declaring
+    `control_config.egress_tools` by hand produced the seeds; nothing else did.
+
+    Both tool names must be reached with no operator declaration at all.
+    """
+    tools = [
+        _tool("export_report", "Export a report to a destination."),
+        _tool("schedule_report", "Schedule a recurring report."),
+    ]
+    tools[0] = ToolSpec(
+        name="export_report",
+        description="Export a report to a destination.",
+        json_schema={
+            "type": "object",
+            "properties": {
+                "data": {"type": "string"},
+                "destination": {"type": "string"},
+                "format": {"type": "string"},
+            },
+        },
+    )
+    tools[1] = ToolSpec(
+        name="schedule_report",
+        description="Schedule a recurring report.",
+        json_schema={
+            "type": "object",
+            "properties": {
+                "frequency": {"type": "string"},
+                "metric": {"type": "string"},
+                "webhook_url": {"type": "string"},
+            },
+        },
+    )
+    out = seed_synth.synthesize_seeds(_descriptor(["W3"], tools))
+    assert sorted(s.pattern_id for s in out) == [
+        "synth-w3-egress-export_report",
+        "synth-w3-egress-schedule_report",
+    ]
+    # The resolved tool name is what the predicate keys on, not the destination.
+    assert {s.egress_tool for s in out} == {"export_report", "schedule_report"}
