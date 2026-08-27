@@ -377,23 +377,31 @@ def plugins() -> None:
     implementation, and selecting a third-party one for those is not yet exposed
     on the CLI (see docs/plugin-authoring.md).
     """
-    from mylonite.plugins.registry import VersionIncompatibleError, discover_all
+    from mylonite.plugins.registry import VersionIncompatibleError, describe_all
 
     try:
-        discovered = discover_all()
+        # `describe_all`, not `discover_all`: listing what is installed does not
+        # require constructing it. Three of the target adapters Mylonite itself
+        # ships take a required argument (they are built by the target-file
+        # factory for a named server family), so constructing them here reported
+        # half the product's own adapters as broken on a clean install. The
+        # contract-version compatibility check still runs.
+        described = describe_all()
     except VersionIncompatibleError as exc:
         echo_err(f"a registered plugin is incompatible with this Mylonite: {exc}")
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    for group, instances in discovered.items():
+    for group, infos in described.items():
         echo(f"{group}:")
-        if not instances:
+        if not infos:
             echo("  (none registered)")
             continue
-        for inst in instances:
-            name = type(inst).__name__
-            ver = getattr(inst, "contract_version", "?")
-            echo(f"  - {name} (contract {ver})")
+        for info in infos:
+            # "configured per target" is a property of the contract, not a fault:
+            # an adapter for a named server family is constructed with that
+            # family rather than discovered ready-made.
+            suffix = " — configured per target" if info.needs_config else ""
+            echo(f"  - {info.class_name} (contract {info.contract_version}){suffix}")
 
 
 def _validate_model_string(model: str) -> None:

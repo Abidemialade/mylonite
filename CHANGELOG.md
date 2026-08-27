@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mylonite plugins` no longer reports the product's own adapters as broken.**
+  On a clean install it emitted three warnings — `http_agent`,
+  `mcp_filesystem`, `mcp_github` are *"not instantiable with no arguments"* —
+  covering half the shipped target adapters, because the listing went through
+  `discover_all()`, which constructs every plugin. Needing construction
+  configuration is a property of the target-adapter contract, not a fault: an
+  adapter for a named server family is built by the target-file factory with
+  that family, not discovered ready-made.
+
+  Listing now uses a new `registry.describe()` / `describe_all()`, which reads
+  `contract_version` off the class — it is a `ClassVar` on every contract base —
+  and never constructs. Those adapters are listed and annotated *"configured per
+  target"*. The compatibility check still runs, so a major-version mismatch is
+  still refused here rather than failing silently mid-run. `discover()` is
+  unchanged for callers that genuinely need instances.
+
 - **The live re-drive an emitted test performs is now bounded.** It is the only
   path in the product that makes real provider calls from inside a blocking PR
   check, and it carried neither a call budget nor a wall-clock limit: the
