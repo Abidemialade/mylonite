@@ -18,7 +18,19 @@ import litellm
 
 from mylonite.scan.providers import env_vars_for
 
-DiagnosisCategory = Literal["tls", "auth", "rate_limit", "network", "context_window", "unknown"]
+DiagnosisCategory = Literal[
+    "tls",
+    "auth",
+    "rate_limit",
+    "network",
+    "context_window",
+    # The provider rejected the request itself (unknown model id, unsupported
+    # response_format). Deterministic, so it is non-recoverable -- see
+    # `_llm._NON_RECOVERABLE_CATEGORIES`. Previously filed under "unknown",
+    # which is retried.
+    "bad_request",
+    "unknown",
+]
 
 
 @dataclass(frozen=True)
@@ -71,6 +83,15 @@ _NETWORK_TOKENS = (
     "temporary failure in name resolution",
     "network is unreachable",
     "dns",
+)
+#: Deliberately narrow: only unambiguous markers of "the provider rejected THIS
+#: request". No bare "400" — that digit string turns up in unrelated detail text
+#: (ids, sizes, timings) and would misfile a recoverable error as terminal.
+_BAD_REQUEST_TOKENS = ("badrequesterror", "bad request", "llm provider not provided")
+
+_BAD_REQUEST_REMEDY = (
+    "The provider rejected the request — often an unknown model id or a "
+    "response_format the provider doesn't support. Check --model."
 )
 
 _RATE_REMEDY = (
@@ -126,12 +147,12 @@ def classify_provider_error(
             "size, or pick a model with a larger context window.",
         )
     if _isinstance_litellm(exc, "BadRequestError"):
-        return Diagnosis(
-            "unknown",
-            detail,
-            "The provider rejected the request — often an unknown model id or a "
-            "response_format the provider doesn't support. Check --model.",
-        )
+        # Its own category, and a NON-RECOVERABLE one: the provider rejected the
+        # request itself, so the identical request will be rejected identically
+        # on every retry. Filed under "unknown" this was the one error whose
+        # remedy names the fix ("Check --model") while still being retried for
+        # every caller of every seed.
+        return Diagnosis("bad_request", detail, _BAD_REQUEST_REMEDY)
 
     # 3. Substring fallback for non-LiteLLM exceptions (raw ssl/httpx, stubs) or
     #    a future LiteLLM type rename.
@@ -141,6 +162,8 @@ def classify_provider_error(
         return Diagnosis("rate_limit", detail, _RATE_REMEDY)
     if any(t in low for t in _NETWORK_TOKENS):
         return Diagnosis("network", detail, _NETWORK_REMEDY)
+    if any(t in low for t in _BAD_REQUEST_TOKENS):
+        return Diagnosis("bad_request", detail, _BAD_REQUEST_REMEDY)
     return Diagnosis(
         "unknown",
         detail,
