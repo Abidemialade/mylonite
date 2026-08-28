@@ -138,6 +138,11 @@ out-fooling frontier alignment. The product surface is scoped to exactly that.
 
 **Available today (the proven core):**
 
+- A zero-key on-ramp: `pip install "mylonite[demo]"` then `mylonite demo` replays a
+  recorded scan against the bundled reference app's vulnerable and guarded builds and
+  prints the differential, with no API key and no configuration. It labels itself as a
+  replay and names the model and date it was recorded against, because a canned result
+  presented as a fresh measurement would undercut the thing this project is for.
 - Ingestion of MCP/tool-using agents over in-process, stdio, and remote
   SSE / streamable-HTTP transports — any app that speaks MCP.
 - The four weakness classes — W1 tool-description smuggling, W2 indirect injection,
@@ -164,9 +169,22 @@ a real external need re-justifies it. Every shipped feature now runs on an MCP a
 did not author and is on a path to third-party proof.
 
 **Direction.** Near-term work strengthens and externally *proves* the core rather than
-widening it: land a real external differential (a non-self-seeded finding that fires
-unguarded, is resisted with the control, and survives the flakiness gate, on a real OSS
-MCP app), and triage judge precision against independent labels. Longer-term themes
+widening it:
+
+- **Land a real external differential** — a non-self-seeded finding that fires
+  unguarded, is resisted with the control, and survives the flakiness gate, on a real
+  OSS MCP app. This is the single highest-value open item.
+- **Triage judge precision against independent labels.** The published
+  LLM-judge agreement F1 of 0.41 is the weakest number on the scorecard and it is
+  published rather than hidden; improving it needs labels the project did not author.
+- **Make the extension contracts usable end to end, not just published.** They are
+  versioned public API, but no third party has built against them yet. The concrete gap
+  is that a contributor writing a genuinely new detector needs a new *predicate* and
+  there is no supported way to ship one — a `contract-change` tracked in
+  [`TODOS.md`](./TODOS.md). Until it lands, contributed detectors compose existing
+  predicates.
+
+Longer-term themes
 include additional target adapters (RAG, custom HTTP agents), a second test-output
 language, more attack classes across the OWASP ASI Top 10, a contributable
 attack-pattern registry, and — demand permitting — hosted CI, dashboards, and

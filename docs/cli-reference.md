@@ -15,6 +15,38 @@ Budget exhaustion always exits `3`, whichever layer of the run observes it first
 
 ---
 
+## `demo` — the reference-app playground
+
+Zero-config, zero-key: runs the vulnerable-vs-guarded differential on the bundled
+reference agent. This is the fastest way to see what the tool actually does. Needs
+`pip install "mylonite[demo]"` (the extra pulls the reference app).
+
+```bash
+mylonite demo            # offline replay, instant, no API key
+mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
+```
+
+Options: `--live`; `--provider`, `--model` (both `--live` only — replay is pinned to the
+provider/model the fixtures were recorded against, and the command says so rather than
+silently ignoring the flags).
+
+**What the default mode is, precisely.** It replays LLM responses recorded against the
+bundled targets, so it makes no network call and is byte-for-byte deterministic. The
+scan, the adapters, the predicates and the differential are the real ones; only the model
+responses are canned. The output labels itself `mode: replay (offline)` and carries the
+model and date the fixtures were recorded — do not read a replayed number as a fresh
+measurement of today's model. `--live` is the fresh measurement.
+
+One deliberate difference from `scan`: the demo runs with the per-seed LLM customiser and
+the LLM-judge fallback **off**, so it drives raw seed bodies judged by deterministic
+predicates only. That is what makes the recording reproducible. A `--live` `scan` exercises
+both of those stages and can legitimately reach a different result.
+
+If fixtures are missing or stale the command **fails** with exit `2` and tells you to
+re-record. It does not fall back to a live call, and it does not render a clean result —
+a stale fixture would otherwise make the vulnerable side look guarded. See
+[the reference app](quarry.md).
+
 ## `check` — static structural pre-check
 
 Zero-key, zero-spend on-ramp: connects to a target ONCE (`describe()` — no LLM call, no

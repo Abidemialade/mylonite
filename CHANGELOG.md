@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`mylonite demo` is back, and the zero-key on-ramp with it.** Read this if you
+  ever tried to show someone what Mylonite does without handing over an API key.
+
+  `mylonite demo` and the `[demo]` extra existed through 0.7.8 and were removed in
+  0.8.0 on the reasoning that `mylonite check` would replace them. That was wrong:
+  `check` reports structural hints and never shows the vulnerable-vs-guarded
+  differential, which is the product. Between 0.8.0 and now, the first command in
+  the README required a credential, so a stranger hit a wall before seeing a single
+  result. The removal commit had booked the debt explicitly and it went unpaid.
+
+  ```bash
+  pip install "mylonite[demo]"
+  mylonite demo          # offline, deterministic, no API key
+  ```
+
+  It replays LLM responses recorded against the bundled targets: the scan, adapters,
+  predicates and differential are real, only the model replies are canned. The output
+  names the model and date it was recorded against, so a replayed number is never
+  presented as a fresh measurement. `--live` is the fresh measurement.
+
+  The restored code keeps the piece that matters most. A missing or stale fixture
+  does **not** raise on its own — `_llm`'s fallback chain and the adapter's
+  skip-conversion swallow `completion_fn` exceptions — so it would otherwise degrade
+  the *vulnerable* scan to a clean result and the demo would lie. The runner inspects
+  recorder state after each variant instead, and CI runs the demo unskipped with a
+  step that hides a fixture and asserts the command refuses.
+
+- **`mylonite check` accepts `reference:vulnerable` / `reference:guarded`.** It
+  previously required `--target-file`, so the free static pre-check was unreachable
+  until you had written YAML for a server. The no-key path is now a sequence a
+  newcomer can walk: `demo`, then `check`, then point `check` at their own app.
+
+- **Third-party attack modules can actually run.** `MYLONITE_ATTACK_MODULES` takes a
+  comma-separated list of `attack_metadata().id` values to run alongside the shipped
+  families. Before this, an out-of-tree `AttackModule` installed cleanly, appeared in
+  `mylonite plugins`, and was then silently dropped from every scan by a hardcoded
+  allowlist — the extension point was versioned public API that nothing external
+  could use.
+
+  Opt-in by id rather than "run everything discovered", deliberately: which code
+  drives an attack against your app should be a decision you made. The empty-selection
+  error now names the variable, since that is the message a blocked plugin author
+  sees. **Known limitation, documented rather than hidden:** there is still no
+  `mylonite.predicates` entry-point group, so a contributed module must compose an
+  existing predicate. Tracked in `TODOS.md` as contract-change work.
+
+### Changed
+
+- **The README, quickstart and CLI reference lead with the zero-key path.** They now
+  match what the published package actually does, which was the point: the install
+  line, the first command, and the shipped extra had drifted apart.
+
+- **`cli.py` stayed under its fat-controller ceiling.** The restored command's body
+  lives in `mylonite.demo.cli_entry`, not inlined — `tests/test_cli_size.py` says
+  plainly that being over the cap is "the signal to extract, not to raise the
+  number", so it was extracted. `ROADMAP.md`'s direction section is refreshed, and
+  `TODOS.md` no longer lists the demo as retired.
+
 ### Fixed
 
 - **Committing no longer fails once on an unrelated change to `.secrets.baseline`.**
@@ -26,6 +86,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   baseline-update branch is reached, verified against a planted credential.
   `tests/test_secrets_baseline_normalizer.py` fails if a regenerated baseline
   reintroduces real line numbers.
+
+### Security
+
+- **Committed prose no longer describes the maintainer's local environment.** Eight files
+  carried session narration that, read together, profiled the one person holding
+  commit and PyPI publishing rights: the endpoint-protection product running on
+  their box, that a live cloud API key was sitting in their shell, and that their
+  TLS is intercepted. Nothing was a credential, so `detect-secrets` had no reason
+  to flag it, and an earlier instance of the same class had already required a
+  force-push to remove.
+
+  The passages are rewritten in environment-neutral terms ("needs a provider key
+  and working TLS egress"; "a TLS-inspecting proxy or local AV CA may require
+  `SSL_CERT_FILE`"). `maintainer` as a **role** is untouched — `GOVERNANCE.md`, the
+  maintainer-run recipes, and the README's honest "single maintainer" all stay.
+
+  A new `no-local-context` pre-commit hook (`scripts/check_no_local_context.py`)
+  stops the next one. It scans tracked Markdown only: `control_shim.py` and
+  `labels.py` legitimately say "this session" about an MCP scan session, and a check
+  that cried wolf on those would just teach people to bypass it. Placeholder paths
+  like `/home/alice/` are allowed by name so documentation examples stay writable.
+  CI already runs `pre-commit run --all-files`, so it is enforced there too.
 
 ## [0.8.6] - 2026-08-28
 

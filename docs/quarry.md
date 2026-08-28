@@ -38,12 +38,22 @@ if it FAILS on the vulnerable build and PASSES on the guarded one. See
 
 ## Try it
 
-Requires **Python 3.11–3.13** and an LLM API key (`ANTHROPIC_API_KEY` for the
-default provider). Install the CLI plus the reference target as two packages,
-no cloning required:
+Requires **Python 3.11–3.13**. No cloning, and the first two steps need no API key:
 
 ```bash
-pip install mylonite mcp-kitchen-sink
+pip install "mylonite[demo]"
+mylonite demo                         # the differential, replayed offline
+mylonite check reference:vulnerable   # its structural report, no LLM call
+```
+
+`demo` replays committed fixtures: real scan, real predicates, real differential,
+canned model replies. It names the model and date they were recorded against, and
+it fails loudly rather than showing a clean result if a fixture is missing. Add
+`--live` to re-run the attacks for real.
+
+To drive the attacks live against this app, add a key:
+
+```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 mylonite scan reference:vulnerable
 ```

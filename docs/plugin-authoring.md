@@ -69,6 +69,39 @@ The class must:
     than constructing anything, so needing configuration is never reported as a
     fault. `discover()` still skips them, because its callers need instances.
 
+## Attack modules: opting yours into a scan
+
+Registering an attack module makes it **discoverable**, not **active**. A scan runs
+the families Mylonite ships plus anything you name explicitly:
+
+```bash
+export MYLONITE_ATTACK_MODULES=my-attack-id      # attack_metadata().id, comma-separated
+mylonite scan reference:vulnerable
+```
+
+`mylonite plugins` lists what is installed and their ids. If selection comes back
+empty the error names this variable, because "no usable attack modules" is exactly
+what an author sees when their module is installed but not enabled.
+
+This is opt-in by id rather than "run everything discovered", deliberately. Mylonite
+drives real attacks against a real app, so which code gets to do that should be a
+decision you made, not a consequence of what happens to be in the environment.
+
+!!! warning "Your module must reuse an existing predicate — for now"
+
+    Reaching the scan is necessary but not sufficient. `ScanEngine` discards any
+    payload whose `metadata` lacks `seed_id`, `weakness`, `predicate`, `setup` and
+    `drive`, and the `predicate` value must resolve in Mylonite's predicate
+    registry or the judge reports it as not-registered.
+
+    **There is no `mylonite.predicates` entry-point group yet**, so a module cannot
+    ship a new deterministic oracle of its own. Until that contract change lands,
+    compose an existing predicate. `mylonite.scan.predicates.registered_names()`
+    returns the current set. Tracked in
+    [`TODOS.md`](https://github.com/Abidemialade/mylonite/blob/main/TODOS.md); a
+    test in `tests/plugins/test_third_party_attack_module.py` fails if the gap
+    closes so the docs get updated with it.
+
 ## Target adapters: stamp your tool surface
 
 If your target exposes tools, every `AdapterResponse` you return should carry

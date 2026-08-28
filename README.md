@@ -91,26 +91,48 @@ If you are weighing this as a dependency in a security pipeline, pin a version �
 ## Install
 
 ```bash
-pip install mylonite                    # the CLI, from PyPI
-pip install mylonite mcp-kitchen-sink   # ...plus the bundled reference app
+pip install mylonite            # the CLI, from PyPI
+pip install "mylonite[demo]"    # ...plus the bundled reference app, for `mylonite demo`
 ```
 
 Python 3.11–3.13. (3.14 is not yet supported: `litellm` has no wheels for it.) Scanning
-needs an LLM API key; `check`, `--scaffold` and `report` do not.
+needs an LLM API key; `demo`, `check`, `--scaffold` and `report` do not.
 
 ## Try it
 
-Start with the bundled reference app. It is deliberately vulnerable, it runs in-process and
-binds to nothing, and it is the fastest way to watch the differential actually fire — same
-attacks, two builds, opposite results:
+**No API key, one command:**
+
+```bash
+mylonite demo
+```
+
+That runs the differential against the bundled reference app — deliberately vulnerable,
+in-process, binds to nothing — and prints weaknesses on the unguarded build and a clean
+result on the guarded one. Same attacks, two builds, opposite results. **That contrast *is*
+the product.**
+
+`demo` replays LLM responses recorded against those bundled targets, so it is offline and
+deterministic. The scan, the adapters, the predicates and the differential are the real
+ones; only the model replies are canned, and the output tells you which model and date they
+came from. Treat the numbers as a demonstration of the machinery, not as a fresh
+measurement of today's model — `mylonite demo --live` is the fresh measurement. If a
+fixture is ever missing or stale the command fails and says so rather than showing you a
+clean result it did not earn.
+
+The second free step needs no key either, and works against your own server too:
+
+```bash
+mylonite check reference:vulnerable   # static structural report, no LLM call
+```
+
+Then, with a key, the real thing:
 
 ```bash
 mylonite scan reference:vulnerable   # finds seeded weaknesses
 mylonite scan reference:guarded      # same attacks, comes up clean
 ```
 
-That contrast *is* the product. See [the reference app](./docs/quarry.md) for what is seeded
-in it and why. (Both commands call a model, so they need an API key.)
+See [the reference app](./docs/quarry.md) for what is seeded in it and why.
 
 ### Then point it at your own app
 
@@ -172,7 +194,8 @@ see [docs/enterprise-networking.md](./docs/enterprise-networking.md).
 
 | Command | What it does | Needs a key? |
 |---|---|---|
-| `mylonite check` | Static structural pre-check of a tool surface. `--enforce` makes it a CI gate. | No |
+| `mylonite demo` | Offline replay of the vulnerable-vs-guarded differential on the bundled reference app. `--live` re-runs it for real. | No |
+| `mylonite check` | Static structural pre-check of a tool surface. Takes `reference:vulnerable` or `--target-file`. `--enforce` makes it a CI gate. | No |
 | `mylonite scan` | The exploit-finding loop. `--scaffold` introspects a server and writes a starter `target.yaml`. | Yes (except `--scaffold`) |
 | `mylonite generate` | Emits the `pytest` regression test from a confirmed exploit. | No |
 | `mylonite validate` | Proves an emitted test is meaningful via the control-efficacy check. `--fast` skips it for a weaker gate. | Yes |
