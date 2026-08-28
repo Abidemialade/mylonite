@@ -129,6 +129,47 @@ def _write_exploit_json(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# check -- the zero-key surface: must SUCCEED without a credential
+# ---------------------------------------------------------------------------
+
+
+def test_check_reference_vulnerable_no_key_succeeds() -> None:
+    """`check reference:vulnerable` is the second step of the zero-key path.
+
+    Every other test in this file asserts a command FAILS cleanly without a
+    credential. This one asserts the opposite, and it is the more fragile
+    direction: `check` makes no LLM call by design, so if a credential
+    pre-flight ever creeps into its path the zero-key on-ramp breaks silently
+    for anyone who has not set a key -- which is exactly the reader this command
+    exists for.
+
+    Before the reference route existed, `check` demanded --target-file, so a
+    newcomer had to write YAML for a server before they could run it at all.
+    """
+    result = runner.invoke(app, ["check", "reference:vulnerable"])
+
+    out = (result.output or "") + (result.stderr or "")
+    assert result.exit_code == EXIT_SUCCESS, (
+        f"expected EXIT_SUCCESS (0), got {result.exit_code}.\nOutput:\n{out}"
+    )
+    assert "no LLM credential configured" not in out
+    # A real structural report, not an empty success: the reference app is
+    # deliberately vulnerable and its surface exposes all four weakness classes.
+    assert "reference:vulnerable" in out, "the progress line must name what it connected to"
+    assert "weakness_classes" in out
+
+
+def test_check_without_target_or_file_names_both_routes() -> None:
+    """The usage error must mention the reference route, not just --target-file."""
+    result = runner.invoke(app, ["check"])
+
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "reference:vulnerable" in out
+    assert "--target-file" in out
+
+
+# ---------------------------------------------------------------------------
 # scan -- EXIT_CONFIG (2), as of T14
 # ---------------------------------------------------------------------------
 

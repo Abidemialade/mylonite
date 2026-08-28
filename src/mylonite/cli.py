@@ -57,7 +57,11 @@ from mylonite.plugins._mcp.scaffold import (
     _target_file_from_flags,
 )
 from mylonite.report.render import _render_ablation_matrix, _render_validation_report
-from mylonite.scan.assembly import ATTACK_FAMILIES, build_scan_engine
+from mylonite.scan.assembly import (
+    build_scan_engine,
+    no_usable_modules_message,
+    select_attack_modules,
+)
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import _classify_tools as _classify_tools  # re-export (tests)
 from mylonite.scan.tool_roles import (
@@ -1407,14 +1411,12 @@ def scan(
         echo_exc("plugin discovery failed", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    # v0.2 attack modules: filter to the real prompt-injection family. The
-    # reference_example stub is shipped for plugin authors but isn't useful
-    # for a real scan.
-    attack_modules = [m for m in all_modules if m.attack_metadata().id in ATTACK_FAMILIES]
+    # Shipped families, plus anything the operator opted into via
+    # MYLONITE_ATTACK_MODULES. The reference_example stub is shipped for plugin
+    # authors and stays out unless explicitly named.
+    attack_modules = select_attack_modules(all_modules)
     if not attack_modules:
-        echo_err(
-            f"no usable attack modules discovered (looking for one of {sorted(ATTACK_FAMILIES)})"
-        )
+        echo_err(no_usable_modules_message())
         raise typer.Exit(code=EXIT_CONFIG)
 
     # T14/H3: the "no default provider, fail loudly" invariant, enforced
@@ -1534,6 +1536,35 @@ def scan(
     if outcome.operator_message:
         echo_err(outcome.operator_message)
     raise typer.Exit(code=outcome.exit_code)
+
+
+@app.command()
+def demo(
+    live: Annotated[
+        bool,
+        typer.Option("--live", help="Make real LLM calls instead of replaying recorded fixtures."),
+    ] = False,
+    provider: Annotated[
+        str | None,
+        typer.Option("--provider", help="LiteLLM provider. --live only; replay is pinned."),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Model. --live only; replay is pinned to the recorded one."),
+    ] = None,
+) -> None:
+    """Run the zero-config reference-app playground: vulnerable vs guarded differential.
+
+    Default is offline replay of recorded fixtures - no network, no API key,
+    deterministic. `--live` makes real calls against the in-process reference
+    agent (two variants, ~a minute, a few cents on Haiku pricing).
+
+    Body lives in `mylonite.demo.cli_entry`, which documents the replay
+    invariant that keeps this command independent of the environment.
+    """
+    from mylonite.demo.cli_entry import run_demo_command
+
+    run_demo_command(live=live, provider=provider, model=model)
 
 
 def _slugify_pattern(pattern_id: str) -> str:
@@ -3788,12 +3819,9 @@ def gate(
             echo_exc("plugin discovery failed", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
-        attack_modules = [m for m in all_modules if m.attack_metadata().id in ATTACK_FAMILIES]
+        attack_modules = select_attack_modules(all_modules)
         if not attack_modules:
-            echo_err(
-                "no usable attack modules discovered "
-                f"(looking for one of {sorted(ATTACK_FAMILIES)})"
-            )
+            echo_err(no_usable_modules_message())
             raise typer.Exit(code=EXIT_CONFIG)
 
         config = ScanConfig(
@@ -4519,9 +4547,13 @@ def _check_description_pins(tools: list[Any], control_config: Any | None) -> lis
 
 @app.command()
 def check(
+    target: Annotated[
+        str | None,
+        typer.Argument(help="`reference:vulnerable` / `reference:guarded`, or use --target-file."),
+    ] = None,
     target_file: Annotated[
         Path | None,
-        typer.Option("--target-file", help="Custom-target YAML (required): the app to check."),
+        typer.Option("--target-file", help="Custom-target YAML: the app to check."),
     ] = None,
     enforce: Annotated[
         bool,
@@ -4569,32 +4601,32 @@ def check(
     if target_file is None and rc is not None:
         target_file = rc.target_file
 
-    if target_file is None:
-        echo_err(
-            "--target-file is required (or set target_file: in mylonite.yaml). "
-            "See `mylonite scan --scaffold` to create one."
+    # The bundled reference app needs no target file, so `check` is runnable with
+    # nothing configured and no key -- the second step of the zero-key path after
+    # `mylonite demo`, and the one a reader points at their own server next.
+    tf = None
+    if target is not None and target.startswith("reference:"):
+        adapter = _build_adapter_for_reference(target, "claude-haiku-4-5-20251001")
+    else:
+        if target_file is None:
+            echo_err(
+                "pass `reference:vulnerable`, or --target-file (or set target_file: in "
+                "mylonite.yaml). See `mylonite scan --scaffold` to create one."
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
+        try:
+            tf = load_target_file(target_file)
+            spec = build_target_spec(tf)
+        except Exception as exc:
+            echo_exc(f"could not load {target_file}", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+        adapter = build_mcp_adapter(
+            family=spec.family, scope=tf.scope, model="claude-haiku-4-5-20251001"
         )
-        raise typer.Exit(code=EXIT_CONFIG)
 
-    try:
-        tf = load_target_file(target_file)
-    except Exception as exc:
-        echo_exc(f"could not load {target_file}", exc)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-    try:
-        spec = build_target_spec(tf)
-    except Exception as exc:
-        echo_exc("invalid target file", exc)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-    target_registry.clear_runtime_targets()
-    target_registry.register_target(spec)
-    adapter = build_mcp_adapter(
-        family=spec.family, scope=tf.scope, model="claude-haiku-4-5-20251001"
-    )
-
-    echo_err(f"connecting to {target_file} to introspect its tools (no LLM call)…")
+    echo_err(f"connecting to {target_file or target} to introspect its tools (no LLM call)…")
     try:
         descriptor = asyncio.run(adapter.describe())
     except Exception as exc:
@@ -4606,7 +4638,9 @@ def check(
         echo_err("target exposed no tools — nothing to check.")
         raise typer.Exit(code=EXIT_SUCCESS)
 
-    cc = tf.control_config
+    # None on the reference route (no target file): every `cc`-derived value
+    # below already treats a missing control_config as "nothing declared".
+    cc = tf.control_config if tf is not None else None
     declared_consequential = (
         frozenset(cc.consequential_tools) if cc and cc.consequential_tools else None
     )

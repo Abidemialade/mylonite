@@ -1,10 +1,16 @@
 name: Release (mcp-kitchen-sink)
 
 # The deliberately-vulnerable reference target ships as its OWN PyPI package
-# (`mcp-kitchen-sink`), installed alongside `mylonite` by anyone who wants to
-# run `scan reference:*` against it. It is released independently of
-# `mylonite` on a separate `ks-v*` tag prefix, so a routine `mylonite` release
-# never republishes the vulnerable agent (and vice versa).
+# (`mcp-kitchen-sink`), so `pip install "mylonite[demo]"` can resolve it. It is
+# released independently of `mylonite` on a separate `ks-v*` tag prefix, so a
+# routine `mylonite` release never republishes the vulnerable agent (and vice
+# versa).
+#
+# Releasing this package is NOT routine: `mylonite`'s `[demo]` extra pins it
+# with `==`, and the demo's recorded fixtures are keyed on this package's tool
+# schemas. A release that changes a tool name or description invalidates those
+# fixtures, so it must be paired with a fixture re-record and a matching bump of
+# the pin in `mylonite`'s pyproject.toml. See scripts/record_demo_fixtures.py.
 #
 # Setup required once on PyPI/TestPyPI before the first run — see
 # reference_targets/mcp_kitchen_sink/PUBLISHING.md.
