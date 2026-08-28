@@ -95,8 +95,19 @@ mylonite scan reference:vulnerable      # finds the seeded weaknesses
 mylonite scan reference:guarded         # comes up clean
 ```
 
-The README, `docs/quickstart.md` and `docs/quarry.md` document `pip install mylonite
-mcp-kitchen-sink` as the primary path for trying the reference app.
+The README, `docs/quickstart.md` and `docs/quarry.md` document
+`pip install "mylonite[demo]"` as the primary path for trying the reference app;
+`pip install mylonite mcp-kitchen-sink` still works and installs the same two
+packages.
+
+**Releasing this package is not routine.** `mylonite`'s `[demo]` extra pins it with
+`==`, and the offline demo's recorded fixtures are keyed on this package's tool
+schemas (the v2 replay cache key folds in `tools`). A release that renames a tool or
+edits a description invalidates those fixtures inside every `mylonite` wheel already
+on PyPI, and a fixture miss is not loud — it is caught by the demo runner's
+post-run recorder inspection, which a user experiences as the demo refusing to run.
+Pair any such release with a fixture re-record (`scripts/record_demo_fixtures.py`)
+and a matching bump of the pin in `mylonite`'s `pyproject.toml`.
 
 ## Environment caveats
 
