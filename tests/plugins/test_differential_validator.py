@@ -1210,6 +1210,66 @@ def test_custom_differential_leg_rejects_when_control_is_theater() -> None:
     assert "[guarded-twin=synthetic-boundary]" in (report.notes or "")
 
 
+def test_a_synthetic_twin_PASS_does_not_claim_the_users_control_carries_it() -> None:
+    """The pass branch must be as honest as the reject branch already is.
+
+    A rejection distinguishes the server-layer twin from the synthetic one and
+    explains exactly what each does and does not prove. The PASS branch printed
+    one string either way: "the safeguard - not the model - carries the
+    security". On a synthetic twin the guarded side is Mylonite's own canonical
+    shim, so that sentence claims something about the operator's implementation
+    that the run never measured -- and it is the sentence attached to the green,
+    test-emitting, CI-gating outcome.
+    """
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: _FakeCustomAdapter("true"),  # raw fires
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("false"),  # shim resists
+        control_weakness="W2",
+        # default: guarded_is_server_layer=False -> the SYNTHETIC boundary twin
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    differential = _outcome(report, "differential")
+    assert differential.passed is True
+    # The finding is still KEPT -- the attack is real and a control class closes
+    # it. Only the CLAIM narrows.
+    assert report.kept is True
+    assert "synthetic boundary twin" in differential.detail
+    assert "the safeguard - not the model - carries the security" not in differential.detail
+    # ...and it says what the operator must do to earn the stronger claim.
+    assert "control_env" in differential.detail
+
+
+def test_a_server_layer_PASS_still_makes_the_strong_claim() -> None:
+    """When the guarded side IS the operator's real control, the strong claim is
+    earned and must still be made."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: _FakeCustomAdapter("true"),  # guard disabled -> fires
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("false"),  # real guard resists
+        control_weakness="W2",
+        guarded_is_server_layer=True,
+    )
+    report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    differential = _outcome(report, "differential")
+    assert differential.passed is True
+    assert "server-layer twin" in differential.detail
+    assert "carries the security" in differential.detail
+    assert "synthetic" not in differential.detail.lower()
+
+
 def test_custom_differential_server_layer_reject_reads_honestly() -> None:
     """When the guarded side IS the real server-layer twin (control_env), a reject
     is honest about the real control not discriminating — not a synthetic caveat."""

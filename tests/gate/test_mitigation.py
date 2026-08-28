@@ -308,6 +308,12 @@ def test_pr_body_control_efficacy_framing():
     assert "with and without control **W2**" in body
     # Mitigation snippet still present (single source of truth).
     assert "## Suggested mitigation" in body
+    # The HEADLINE claim must match the twin. On a synthetic boundary twin the
+    # guarded side is Mylonite's own canonical shim, so the PR must not open by
+    # telling the reviewer their safeguard carries the security and only qualify
+    # it two lines down, where nobody reads it.
+    assert "This proves the **safeguard** - not the model - carries the security." not in body
+    assert "does **not** yet prove your own implementation" in body
 
 
 def test_pr_body_server_layer_differential_is_not_captioned_proxy():

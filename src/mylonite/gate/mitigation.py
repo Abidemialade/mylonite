@@ -221,11 +221,26 @@ def build_pr_body(
                 "fix (see the mitigation below), then re-point the committed test at your real "
                 "implementation."
             )
+        # The claim must match the twin that produced it. On a synthetic boundary
+        # twin the guarded side is Mylonite's canonical shim, so the run measured
+        # the control CLASS, not the operator's implementation -- stating the
+        # strong claim here and qualifying it two lines later put the overclaim
+        # in the headline, where it is what actually gets read.
+        claim = (
+            "This proves the **safeguard** - not the model - carries the security."
+            if server_layer
+            else (
+                "This proves the attack is **real** and that a canonical "
+                f"**{control}** control closes it, with your model held constant. "
+                "It does **not** yet prove your own implementation carries the "
+                "security - see below."
+            )
+        )
         head = [
             "## Control efficacy verified",
             stat,
             "",
-            "This proves the **safeguard** - not the model - carries the security.",
+            claim,
             "",
             layer_caveat,
             "",

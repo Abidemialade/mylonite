@@ -647,15 +647,30 @@ class DifferentialValidator(ValidatorBase):
             passed = decision.differential_passed and decision.flakiness_passed
             control = self._control_weakness or "boundary control"
             rate_gap = ((fired - guard_fired) / n) if n else 0.0
-            twin = "server-layer twin" if self._guarded_is_server_layer else "boundary twin"
             counts = (
                 f"raw fired {fired}/{n}, guarded leaked {guard_fired}/{n}, "
                 f"success-rate gap {rate_gap:.2f}"
             )
-            if passed:
+            if passed and self._guarded_is_server_layer:
                 detail = (
-                    f"control {control!r} ({twin}): {counts} (need >= {self._min_rate_gap}); "
-                    "the safeguard - not the model - carries the security"
+                    f"control {control!r} (server-layer twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); the safeguard - not the model - "
+                    "carries the security"
+                )
+            elif passed:
+                # The guarded side was Mylonite's own canonical shim, so this run
+                # measured the CONTROL CLASS, never the operator's implementation
+                # of it. The reject branch below has always drawn this distinction;
+                # the pass branch printed the strong claim either way -- and it is
+                # the branch attached to the green, test-emitting, gating outcome.
+                detail = (
+                    f"control {control!r} (synthetic boundary twin): {counts} "
+                    f"(need >= {self._min_rate_gap}); a canonical {control} control "
+                    "stops this attack with your model held constant - the attack is "
+                    "real and this control CLASS closes it. The guarded side was "
+                    "Mylonite's boundary shim, not your implementation, so this does "
+                    "not establish that YOUR control carries the security. Declare "
+                    "control_env in the target file to prove that."
                 )
             elif self._guarded_is_server_layer:
                 detail = (
