@@ -8,12 +8,24 @@ on PyPI:
 
 ```bash
 pip install mylonite                 # the CLI that scans your app
-pip install mcp-kitchen-sink         # + the reference target for `scan reference:*`
+pip install "mylonite[demo]"         # + the reference app, for `mylonite demo`
 ```
 
-`mcp-kitchen-sink` is a separate package: a plain `pip install mylonite` never pulls
-the deliberately-vulnerable reference agent. Install it alongside `mylonite` only if
-you want to run the [reference-app walkthrough](quarry.md).
+Then, with no API key and nothing to configure:
+
+```bash
+mylonite demo
+```
+
+That replays a recorded scan against the bundled reference app's vulnerable and guarded
+builds and prints the differential — weaknesses on one side, clean on the other. It is
+the fastest way to see what the tool does. See [`demo`](cli-reference.md) for exactly
+what "replay" means and how it differs from a live `scan`.
+
+The `[demo]` extra adds the reference target (`mcp-kitchen-sink`), which is a separate
+package: a plain `pip install mylonite` never pulls the deliberately-vulnerable reference
+agent. The extra pins it exactly, because the demo's recorded fixtures are keyed on that
+package's tool schemas.
 
 To hack on Mylonite or the reference target, use a development checkout with **two**
 editable installs (the `mylonite` package, then the reference target):

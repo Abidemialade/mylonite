@@ -60,16 +60,16 @@ non-self-seeded external differential) using Mylonite's existing
 needed. It was marked maintainer-run because it needs (a) the target server
 installed and running, (b) a live LLM key, (c) working network/SSL egress.
 
-**Status as of this session:** (b) and (c) are no longer blockers on this
-machine — a live `ANTHROPIC_API_KEY` was present and `pip install` to PyPI
-worked cleanly with no proxy friction. The maintainer declined to spend the
-live key / run a third-party package in this session (reasonable — real API
-cost and third-party code execution under a live credential is a judgment
-call, not something to spend autonomously). *Trigger:* next session with the
-maintainer present and willing to spend a small amount of API cost; follow
-`EXTERNAL_DIFFERENTIAL.md`'s existing recipe verbatim, preferring the
-`server-fetch` (W3) target over `mcp-server-email` (no external side effects
-to sandbox).
+**Status:** (b) and (c) are ordinary environment setup rather than open
+questions — a provider key and working TLS egress to that provider, both
+covered in `docs/enterprise-networking.md`. The substantive remaining
+requirement is (a), the third-party target server itself, plus a decision to
+execute third-party code under a live credential and spend real API budget.
+That is a judgment call, so it stays an explicit step rather than something a
+run takes autonomously. *Trigger:* a session with a provider key available and
+a small API budget; follow `EXTERNAL_DIFFERENTIAL.md`'s existing recipe
+verbatim, preferring the `server-fetch` (W3) target over `mcp-server-email`
+(no external side effects to sandbox).
 
 ## 0.7.10 deep-code-review — verification-pass follow-ups (docs/reviews/2026-08-07-0.7.10-close-the-loop-review.md)
 
@@ -182,8 +182,8 @@ follow-up commit for the full trace. What's left:
 
 The pre-Phase-4 readiness work (flow, verification legibility, correctness
 safeguards, trust panel, precision/recall corpus, eval/CI export + declarative
-config) has landed. The remaining launch items need a maintainer because they
-depend on the local SSL/cert environment or on tagging a release:
+config) has landed. The remaining launch items are maintainer steps because they
+need a provider key with budget, or the authority to tag a release:
 
 - **PyPI first publish.** ✅ done — `mylonite` published to PyPI with **v0.7.0**
   (2026-06-18) via the Trusted-Publishing workflow
@@ -191,9 +191,8 @@ depend on the local SSL/cert environment or on tagging a release:
   TestPyPI → PyPI); the TestPyPI + PyPI trusted publishers are registered.
   `mcp-kitchen-sink` (the reference app target) is also published (v0.1.0,
   2026-08-05) — the `mylonite demo` walkthrough no longer requires a clone.
-- **Demo GIF + reference-validation example.** See the two items below — both are
-  blocked on the live SSL/cert environment (Norton HTTPS inspection /
-  `SSL_CERT_FILE`) and are maintainer-run.
+- **Reference-validation example.** See the item below — it needs a provider key
+  with a small budget and is a maintainer step.
 - **Precision/recall corpus is wired into CI** ([`ci.yml`] runs
   `scripts/measure_precision_recall.py` and uploads `corpus_report.json`); the
   asserted numbers live in `tests/corpus`. ✅ done.
@@ -207,21 +206,58 @@ depend on the local SSL/cert environment or on tagging a release:
   [`scripts/record_reference_example.py`](./scripts/record_reference_example.py)
   with `ANTHROPIC_API_KEY` to produce `examples/reference_validation/` — the live
   W2 `exploit_*.json`, the recorded guarded `fixtures/` + `_meta.json`, and the
-  emitted test. **Blocked on the live SSL/cert environment issue** (LiteLLM's
-  HTTPS calls fail `CERTIFICATE_VERIFY_FAILED` on this machine): needs a Norton
-  HTTPS-inspection exclusion, or `SSL_CERT_FILE` pointed at certifi's bundle,
-  before the run will reach the provider. Once recorded, the example replays
-  **offline** forever (the same `_replay.LiteLLMRecorder` mechanism the testkit
-  uses), and a committed offline test asserting it passes can be added. Human step.
+  emitted test. **Needs a valid provider key with a small budget** — the run
+  makes live calls. If the provider is unreachable rather than unauthenticated,
+  see [`docs/enterprise-networking.md`](./docs/enterprise-networking.md): a
+  TLS-inspecting proxy or a local AV CA can require `SSL_CERT_FILE`, and the CLI
+  auto-enables `truststore` for exactly that case. Once recorded, the example
+  replays **offline** forever (the same `_replay.LiteLLMRecorder` mechanism the
+  testkit uses), and a committed offline test asserting it passes can be added.
+  Maintainer step.
+
+## Third-party plugins cannot register a predicate (contract-change)
+
+Making a third-party `AttackModule` *run* in a scan is not the whole extension
+story, and the remaining half is invisible until you try it.
+
+`pyproject.toml`'s `[project.entry-points]` declares five groups (attack_modules,
+target_adapters, test_generators, validators, compliance_mappers). There is **no
+`mylonite.predicates` group.** But `scan/engine.py` drops any payload whose
+metadata lacks `{seed_id, weakness, predicate, setup, drive}`, and the
+`predicate` value has to resolve inside `mylonite.scan.predicates._REGISTRY` or
+the judge returns not-registered. A contributor writing a genuinely new detector
+needs a new predicate and has no supported way to ship one.
+
+Consequence today: **good-first-issues for new detectors must be scoped to reuse
+an existing predicate.** Say so in the issue text rather than letting a
+contributor discover it.
+
+A full fix is not just a sixth entry-point group. `setup` and `drive` are
+reference-target vocabulary (`plugins/_mcp/_session_adapter.py`), so opening the
+predicate surface means deciding what that vocabulary means for a target the
+project did not write. There is also a real trust question: the predicate is the
+deterministic oracle, and letting third-party code define one is a different
+security posture than letting it define an attack.
+
+*Effort:* M (human) / S (with CC). *Priority:* P2. *Depends on:* the extensible
+attack-family filter landing first. *Trigger:* batch with the next
+`contract-change` issue and `CONTRACT_VERSION` bump per `GOVERNANCE.md`,
+alongside the queued `ScanAttemptOutcome` enum item above — one comment clock,
+not two.
 
 ## Rejected (recorded so they aren't re-raised)
 
-- **`mylonite demo` GIF / recording script / `--save`-`--out` artefact flag /
-  Codespaces one-click demo** — all retired along with the `mylonite demo`
-  command itself (see the deterministic-controls-and-recommendations wipe,
-  below); `docs/assets/recording-script.md` and the GIF plan are gone with it.
-  The reference app is still exercised directly via `mylonite scan
-  reference:vulnerable` (see [the reference app](docs/quarry.md)).
+- **`mylonite demo` GIF / `--save`-`--out` artefact flag / Codespaces one-click
+  demo** — still rejected. `docs/assets/recording-script.md` and the GIF plan are
+  gone and are not coming back; a GIF is a marketing artefact that goes stale
+  silently, which is the opposite of what this project claims about evidence.
+
+  **The `mylonite demo` command itself is NOT rejected — it was restored.** It was
+  removed in 0.8.0 (commit `03fc35c`) on the reasoning that `mylonite check` would
+  replace the zero-key on-ramp. That turned out to be wrong: `check` reports
+  structural hints and never shows the vulnerable-vs-guarded differential, so
+  between 0.8.0 and its restoration there was no way to see what the tool does
+  without a provider key. `scripts/record_demo_fixtures.py` came back with it.
 - **Fresh-venv wheel-install CI job** — `ci.yml` stayed frozen for v0.3.0;
   packaged-fixture loading is proven by the recorded e2e plus a one-off
   wheel-content check.
