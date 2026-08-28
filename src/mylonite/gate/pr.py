@@ -1,7 +1,11 @@
 """Branch + commit + PR for the gating artifacts. The only outward/git module.
 
-Isolated behind ``--open-pr``: by default it commits to a branch and PRINTS the
-exact command; only ``open_pr=True`` pushes and opens the PR via ``gh``.
+Every git subprocess in here is gated on ``open_pr``. With ``open_pr=False``
+NOTHING runs: the caller's repository is untouched and the full command sequence
+(checkout / add / commit / push / gh) is printed for the operator to run by
+hand. With ``open_pr=True`` the branch is created, the artifacts committed, and
+the PR opened via ``gh`` -- degrading to printing the last two commands when
+``gh`` is missing or unauthenticated.
 """
 
 from __future__ import annotations
