@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.mitigations import snippet as _snippet
@@ -63,23 +64,14 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
 def _guarded_is_server_layer(
     report: ValidationReport, guarded_is_server_layer: bool | None
 ) -> bool:
-    """Resolve whether the guarded twin was the REAL server-side control.
+    """Whether the guarded twin was the REAL server-side control.
 
-    An explicit ``guarded_is_server_layer`` (from a caller with direct access to
-    ``TwinPlan.guarded_is_server_layer``) always wins. Otherwise fall back to the
-    machine-readable ``[guarded-twin=server-layer|synthetic-boundary]`` marker
-    ``DifferentialValidator`` stamps into ``report.notes`` (the same marker
-    ``cli.py``'s REJECT-path remediation already parses) — this is how
-    ``run_gate`` gets an honest answer without any new plumbing through the
-    orchestrator, since it only ever holds a ``ValidationReport``, never the
-    ``TwinPlan`` that produced it. Absent either signal, default to ``False``
-    (proxy): a differential must not be captioned "server-layer verified"
-    without positive evidence.
+    A thin bool-returning adapter over the shared resolver in
+    ``mylonite._twin_fidelity``, which owns the marker literal and the
+    default-to-boundary rule. Kept because this module's callers pass and read a
+    plain bool.
     """
-    if guarded_is_server_layer is not None:
-        return guarded_is_server_layer
-    notes = getattr(report, "notes", "") or ""
-    return "guarded-twin=server-layer" in notes
+    return guarded_twin_layer(report, guarded_is_server_layer) == "server"
 
 
 def _evidence_lines(report: ValidationReport) -> str:
@@ -227,7 +219,7 @@ def build_pr_body(
         # strong claim here and qualifying it two lines later put the overclaim
         # in the headline, where it is what actually gets read.
         claim = (
-            "This proves the **safeguard** - not the model - carries the security."
+            f"This proves that {PROOF_CLAIM_SERVER}."
             if server_layer
             else (
                 "This proves the attack is **real** and that a canonical "

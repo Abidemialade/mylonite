@@ -12,6 +12,11 @@ This page is the honest scorecard. The numbers are from live runs in June 2026 w
 machine), small samples, cost-bounded. Read the caveats — several numbers mean less (or
 more) than they look.
 
+The single-model evidence base is the biggest caveat on this page, and its direction is not
+the one you might assume: a KEPT proof gets *easier* on a weaker model, so these figures are
+the conservative case. That is spelled out, along with every other known gap, in
+[Known limitations](limitations.md).
+
 ## The one-line result
 
 **Model robustness ≠ app security.** A frontier model resisted *generic* injection

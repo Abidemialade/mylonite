@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mylonite._twin_fidelity import proof_claim
 from mylonite.mitigations import snippet
 from mylonite.plugins._mcp.factory import LaunchIntent
 from mylonite.plugins._mcp.target_registry import TargetSpec
@@ -216,10 +217,18 @@ def _no_control_banner(weakness: str) -> str:
     )
 
 
-def _diff_on_banner(weakness: str) -> str:
+def _diff_on_banner(weakness: str, *, server_layer: bool) -> str:
+    """The pre-run banner for a differential that will gate ``kept``.
+
+    It used to state the server-layer claim unconditionally — and the only plan
+    that called it was the SYNTHETIC boundary one (``_server_layer_plan`` prints
+    ``_guard_disabled_banner`` instead), so the strong claim was shown on exactly
+    the path that does not earn it and withheld on the path that does. The banner
+    now says what the run about to happen can actually establish.
+    """
     return (
         f"differential ON (default): proving control {weakness} is load-bearing — "
-        "the differential gates `kept` (the safeguard, not the model, carries the security)."
+        f"the differential gates `kept` ({proof_claim('server' if server_layer else 'boundary')})."
     )
 
 
@@ -240,7 +249,12 @@ def _server_layer_plan(spec: TargetSpec, weakness: str) -> TwinPlan:
         control_weakness=weakness,
         guarded_is_server_layer=True,
         control_context=f"Control {weakness}: real server-layer guard (control_env)",
-        banner=_guard_disabled_banner(spec, weakness),
+        # This is the path that EARNS the strong claim (the guarded side is the
+        # operator's own control), so it is the path that should state it.
+        banner=(
+            f"{_diff_on_banner(weakness, server_layer=True)}\n"
+            f"{_guard_disabled_banner(spec, weakness)}"
+        ),
     )
 
 
@@ -319,7 +333,7 @@ def plan_twins(
 
     raw = LaunchIntent(vulnerable=spec.vulnerable_launch is not None)
     guarded = LaunchIntent(boundary_controls=(boundary,))
-    banner = _diff_on_banner(weakness)
+    banner = _diff_on_banner(weakness, server_layer=False)
     if spec.vulnerable_launch is not None:
         banner = f"{banner}\n{_guard_disabled_banner(spec, weakness)}"
     return TwinPlan(

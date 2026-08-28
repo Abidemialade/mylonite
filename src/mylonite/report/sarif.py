@@ -14,6 +14,7 @@ import hashlib
 from typing import Any
 
 from mylonite._redaction import redact
+from mylonite._twin_fidelity import guarded_twin_layer, proof_claim
 from mylonite.gate.localize import localize
 from mylonite.report.severity import severity_for
 from mylonite.version import __version__
@@ -37,6 +38,15 @@ def _tags(compliance: Any) -> list[str]:
 
 
 def _proof_text(report: Any | None) -> str | None:
+    """The differential proof, claimed only as strongly as the guarded twin allows.
+
+    This artefact is uploaded to GitHub code scanning, where it persists in the
+    Security tab and gets quoted back months later — so it is the worst surface on
+    which to overstate what a run proved. It used to print the server-layer claim
+    for ANY differential, including one whose guarded side was Mylonite's own
+    boundary shim, while the validator that produced the report carefully refused
+    that claim. Both now resolve the fidelity the same way.
+    """
     repro = getattr(report, "reproducibility", None) if report is not None else None
     if repro is None or not getattr(repro, "iterations", 0):
         return None
@@ -47,8 +57,8 @@ def _proof_text(report: Any | None) -> str | None:
         return f"Reproducible: the attack fired {vf}/{it} times on the target (no guarded twin)."
     return (
         f"Differential proof: the attack fired {vf}/{it} on the vulnerable target and was "
-        f"resisted {gr}/{it} with the control applied — the safeguard, not the model, "
-        "carries the security."
+        f"resisted {gr}/{it} with the control applied — "
+        f"{proof_claim(guarded_twin_layer(report))}."
     )
 
 
@@ -103,6 +113,10 @@ def _result(
     }
     if report is not None:
         props["kept"] = bool(getattr(report, "kept", False))
+        # Machine-readable alongside the prose claim, so a consumer triaging SARIF
+        # programmatically can tell a server-layer proof from a boundary proxy
+        # without parsing the message text.
+        props["guardedTwinLayer"] = guarded_twin_layer(report)
     # PR6: the structural recommendation, when a TargetContext is available.
     # Deliberately in `properties`, not SARIF's `result.fixes` -- `fixes[].
     # artifactChanges` requires a real artifact URI + region to apply a

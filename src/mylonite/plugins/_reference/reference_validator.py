@@ -80,6 +80,7 @@ from typing import Any, ClassVar, Literal
 
 from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._replay import LiteLLMRecorder
+from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -485,7 +486,13 @@ class DifferentialValidator(ValidatorBase):
             f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
             f"(need >= {self._metamorphic_threshold:.0%}, gates kept); "
             f"{'KEPT' if kept else 'REJECTED'} "
-            "(kept = build ∧ differential ∧ flakiness ∧ metamorphic)."
+            "(kept = build ∧ differential ∧ flakiness ∧ metamorphic). "
+            # The reference twins ARE a server-layer pair: the guarded side is the
+            # real `server_guarded.py`, not a boundary shim, so this differential
+            # earns the strong claim. Stamping it is not cosmetic -- every reader
+            # defaults to "boundary" when the marker is absent, so without this the
+            # reference app (the demo everyone runs first) would UNDER-claim.
+            + format_marker(server_layer=True)
         )
 
         return ValidationReport(
@@ -654,8 +661,7 @@ class DifferentialValidator(ValidatorBase):
             if passed and self._guarded_is_server_layer:
                 detail = (
                     f"control {control!r} (server-layer twin): {counts} "
-                    f"(need >= {self._min_rate_gap}); the safeguard - not the model - "
-                    "carries the security"
+                    f"(need >= {self._min_rate_gap}); {PROOF_CLAIM_SERVER}"
                 )
             elif passed:
                 # The guarded side was Mylonite's own canonical shim, so this run
@@ -710,12 +716,12 @@ class DifferentialValidator(ValidatorBase):
                 if self._guarded_is_server_layer
                 else "Synthetic boundary-guarded twin"
             )
-            # Machine-readable marker (parsed by the CLI to pick an honest remediation
-            # line on REJECT). Kept terse and ASCII; notes is serialized to JSON.
-            marker = "server-layer" if self._guarded_is_server_layer else "synthetic-boundary"
+            # Machine-readable marker (parsed by every surface that renders a verdict,
+            # via `_twin_fidelity.guarded_twin_layer`) so the claim matches the twin.
             notes_tail = (
                 f" {twin_label} (control {control!r}): leaked "
-                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}. [guarded-twin={marker}]"
+                f"{guard_fired}/{n}, contribution {rate_gap:+.0%}. "
+                + format_marker(server_layer=self._guarded_is_server_layer)
             )
 
         twin_note = (

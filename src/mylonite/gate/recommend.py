@@ -36,6 +36,7 @@ from pathlib import PurePath
 from typing import Any, Final, Literal
 
 from mylonite._redaction import redact, redact_value
+from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import Localization, localize
 from mylonite.scan import control_shim
@@ -1035,9 +1036,13 @@ def recommend(
     proven_layer: Literal["server", "boundary", "none"] = "none"
     if report is not None:
         notes = getattr(report, "notes", "") or ""
-        if "guarded-twin=server-layer" in notes:
+        # "none" is distinct from "boundary" here: a report with NO marker at all
+        # never ran a differential, which is not the same as having run one against
+        # the boundary shim. So this keys on the markers directly rather than on
+        # `guarded_twin_layer`, whose two-valued result folds those cases together.
+        if MARKER_SERVER_LAYER in notes:
             proven_layer = "server"
-        elif "guarded-twin=synthetic-boundary" in notes:
+        elif MARKER_SYNTHETIC in notes:
             proven_layer = "boundary"
 
     return Recommendation(

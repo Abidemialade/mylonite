@@ -54,6 +54,7 @@ nav:
       - Attack modes: attack-modes.md
       - The validation engine: validation.md
       - Independent verification: verification.md
+      - Known limitations: limitations.md
       - Concepts: concepts.md
       - Standards mapping: standards-mapping.md
   - Reference:
