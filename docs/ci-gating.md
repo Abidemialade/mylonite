@@ -35,10 +35,28 @@ mylonite scan --command "python" --arg "-m" --arg "your.server" --scaffold targe
 mylonite gate --target-file target.yaml --authorize custom --open-pr
 ```
 
-Without `--open-pr`, `gate` writes `.mylonite/gate/` (the test, the exploit,
-your `target.yaml`) and the `.github/workflows/` templates, commits them to a
-branch, and prints the exact `gh pr create` command. With `--open-pr` it opens
-the PR via `gh`.
+### What `gate` touches
+
+**By default, nothing outside its own output directory.** `gate` writes
+`.mylonite/gate/` — the generated test, the exploit JSON, the validation report,
+your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
+commands to commit and open the PR yourself. Your repository is not modified:
+no branch, no commit, no workflow files.
+
+Two flags opt in to the rest:
+
+- **`--open-pr`** creates the branch, commits the gate directory, pushes, and
+  opens the PR via `gh`. If `gh` is missing or unauthenticated it still commits
+  and prints the remaining two commands.
+- **`--workflows`** additionally scaffolds the two `.github/workflows/`
+  templates described below.
+
+Both are off by default. Writing into someone's repository is an action you ask
+for, not one you opt out of.
+
+> **Changed in 0.8.5.** `gate` previously created a branch and a commit on every
+> run, and scaffolded the workflow templates unless you passed `--no-workflows`.
+> If you relied on that, add `--open-pr` and `--workflows` explicitly.
 
 The PR body is itself a result surface (see [Reading the results](reading-results.md#the-gating-pr)):
 
@@ -115,6 +133,12 @@ satisfy automatically but a local or non-GitHub run must provide itself:
   empty PR — verified against `gate.pr.open_or_print_pr` directly.
   Confusing either way: make sure your `.gitignore` does **not** ignore the
   gate output directory.
+
+A failure in any of these is reported as a named error on **exit code 8**, not
+a traceback, and the findings, the generated test and the validation report are
+all written to `--out` *before* any git command runs — so a git failure costs
+you no evidence. Re-run the printed `git`/`gh` commands by hand once the
+precondition is fixed.
 
 ### The reusable Action
 

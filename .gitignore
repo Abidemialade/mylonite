@@ -57,6 +57,11 @@ CLAUDE.md
 # - MYLONITE_*.md: local-only review / readiness / run-feedback working notes
 #   (competitive analysis, investigation write-ups). Never publish.
 MYLONITE_*.md
+# - consumer-review-*.md / *-review-*.md: outside-in review reports run against
+#   a local checkout. They quote local paths and machine details.
+consumer-review-*.md
+# - *.docx: planning documents exported from Word. Working artefacts, not docs.
+*.docx
 
 # Editors / OS
 .idea/

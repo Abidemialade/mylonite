@@ -73,8 +73,9 @@ each result carries:
 
 - a **severity** (`security-severity` + level) GitHub uses to bucket the finding,
 - the **compliance tags** (OWASP-LLM/ASI · MITRE ATLAS · NIST),
-- the **differential proof** in the message ("fired N/N on the vulnerable target,
-  resisted M/M with the control — the safeguard, not the model, carries the security"),
+- the **differential proof** in the message (fired N/N on the raw target, resisted M/M
+  with the control — worded to match the twin that produced it; see
+  [Which claim you earned](#which-claim-you-earned) below),
 - a **location** — a `logicalLocation` pinning the implicated tool/field (a remote MCP
   tool has no source line, so the honest unit is the tool + field), plus a real
   prompt-file line when the AI layer is a committed file.
@@ -113,6 +114,26 @@ When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 - **Inline annotations** — with `--open-pr`, a finding that maps to a committed prompt
   line also posts a best-effort GitHub check-run annotation on that line.
 
+## Which claim you earned
+
+A KEPT verdict is not one claim, it is two — and the difference is which guarded side ran.
+Mylonite words every surface (the trust panel, SARIF, the JSON bundle, the PR body) to
+match, and never prints the stronger sentence for the weaker run.
+
+| Guarded side | Wording you get | What it means |
+|---|---|---|
+| **Server-layer twin** — your own control, toggled via `control_env` | *"the safeguard — not the model — carries the security"* | Disabling **your** control let the attack through and re-enabling it stopped it. Your implementation is load-bearing. |
+| **Synthetic boundary twin** — Mylonite's canonical control at the adapter boundary (the default) | *"a canonical control stops this attack ... this does not establish that YOUR control carries the security"* | The attack is real and this class of control closes it. The guarded side was Mylonite's shim, so your implementation was never measured. |
+
+Both are KEPT: the attack fired, a control stopped it, and the emitted regression test is
+worth gating on either way. To upgrade a synthetic result to the strong claim, declare
+`control_env` in your `target.yaml` so Mylonite can toggle your real control — see
+[target.yaml](target-file.md).
+
+A **rejection** on a synthetic twin is likewise not evidence your control is ineffective:
+the boundary shim cannot see a guard enforced inside your server. The reject message says
+so explicitly.
+
 ## Compliance metadata (everywhere)
 
 Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
@@ -130,6 +151,13 @@ This is near-free at generation time and is the foundation of audit/compliance r
 | 3 | LLM-call budget exceeded |
 | 4 | provider unreachable |
 | 5 | the generated test was rejected (not kept) |
+| 6 | `gate`: the test generator returned nothing |
+| 7 | `gate`: the validator returned nothing |
+| 8 | `gate`: the git/gh step failed (findings and report still written to `--out`) |
 
 A clean exit `0` means the run actually happened — an aborted or empty scan exits
 non-zero so a misconfiguration can never masquerade as "all clear".
+
+Exit `0` with findings can still carry a coverage caveat: if some seeds were never
+exercised, the run reports that alongside the findings rather than letting a partial scan
+read as a complete one. Finding something does not make an incomplete scan complete.

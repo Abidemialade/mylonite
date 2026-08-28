@@ -36,7 +36,7 @@ requires_scope: false          # set true to require a non-empty scope
 system_prompt: |               # the target's system prompt (inline)...
   You are a helpful assistant with access to the connected tools.
 # system_prompt_file: prompts/system.txt   # ...or read it from a file (one or the other)
-primary_tools: []              # optional: narrow attack pattern selection to these tools
+primary_tools: []              # optional: documentation only — see the note below
 weakness_classes: [W1, W2, W3, W4]   # which classes to test
 
 # --- how to plant poisoned content (required for indirect-injection W2) ----
@@ -117,6 +117,12 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 - **AI layer** (`system_prompt` / `system_prompt_file`, `primary_tools`,
   `weakness_classes`) — what the agent is and what to test. Set at most one of the two
   prompt fields.
+
+    !!! note "`primary_tools` is currently documentation only"
+        It is accepted, validated and round-tripped, but **nothing reads it** — it does
+        not narrow seed selection today, despite what earlier versions of this page
+        claimed. Use `weakness_classes` to control what gets tested. Wiring it as a real
+        filter is tracked in `TODOS.md`.
 - **`seed_arm`** (`SeedArmSpec`) — how to plant untrusted content. `{payload}` must sit
   at a **bare string leaf** (e.g. `body: "{payload}"`), not nested inside serialized
   JSON. The `id_key`/`id_pattern`/`id_from` tell Mylonite how to capture the new

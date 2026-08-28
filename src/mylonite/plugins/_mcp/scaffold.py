@@ -238,7 +238,8 @@ command: {tf.command}
 args: {args_line}
 {env_block}{scope_line}{prompt_line}
 # Discovered tools: {", ".join(tool_names) or "(none)"}.
-# primary_tools narrows seed selection to your consequential tools (optional).
+# primary_tools: recorded for documentation; nothing reads it yet (see docs/target-file.md).
+# Use weakness_classes to control what gets tested.
 primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
 
 # Weakness classes this target exposes (SUGGESTED — confirm/edit):

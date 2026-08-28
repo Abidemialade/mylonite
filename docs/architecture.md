@@ -108,3 +108,14 @@ an API change — see [Plugin authoring](plugin-authoring.md).
   published goes through `mylonite._cli_io.echo`/`_redaction.redact*`; every path sourced
   from `target.yaml` resolves through `mylonite._paths.resolve_contained` before it reaches
   `open()` or an argv — no direct `typer.echo` calls or unchecked paths remain in `cli.py`.
+- **A decision is not a fault.** The adapter's `invoke()` collapses exceptions into a
+  skipped attempt, which is right for a *fault* (a crashed subprocess, a protocol error)
+  and wrong for a *decision* (the LLM budget is gone, stop the run). The re-raise tuple in
+  `plugins/_mcp/_session_adapter.py` is the control-flow allowlist: an exception that means
+  "stop", not "this seed failed", must be listed there. It isn't decoration — omitting
+  `BudgetExceededError` from it is what let one budget exhaustion produce three different
+  exit codes depending on which layer noticed first.
+- **Side effects gate on the flag that requests them.** `gate` writes only to its own
+  output directory unless `--open-pr` (branch/commit/push/PR) or `--workflows`
+  (`.github/workflows/` templates) is passed. Both default to off. Evidence is written to
+  disk before any git command runs, so a git failure costs no findings.
