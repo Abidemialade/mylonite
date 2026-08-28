@@ -165,6 +165,62 @@ jobs:
       - name: Pytest
         run: pytest
 
+  # The zero-key on-ramp, exercised unskipped on every PR.
+  #
+  # This job exists because the demo's failure mode is SILENT. A stale or missing
+  # fixture does not raise on its own: `_llm`'s fallback chain and the adapter's
+  # skip-conversion swallow exceptions from `completion_fn` (see the
+  # `mylonite._replay` module docstring), so a miss degrades the VULNERABLE scan
+  # to a clean result and the demo cheerfully reports that the deliberately
+  # vulnerable app is fine. `demo/runner.py` catches this by inspecting recorder
+  # state after each variant; this job is what makes sure that check actually
+  # runs against the fixtures we ship.
+  #
+  # `tests/integration/test_demo_recorded.py` SKIPS when fixtures are absent, so
+  # a green pytest run does not cover this. Do not "fix" a red demo job by
+  # widening that skip - re-record instead:
+  #   python scripts/record_demo_fixtures.py     (needs a provider key)
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: Run the offline demo (no API key set)
+        # No provider key in the environment on purpose: if replay ever fell
+        # through to a live call, this step must fail rather than quietly spend.
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+        run: mylonite demo
+      - name: A missing fixture must fail loudly, not render a clean result
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: |
+          python - <<'EOF'
+          import pathlib, random, sys
+          root = pathlib.Path("src/mylonite/demo/fixtures/vulnerable")
+          picks = sorted(p for p in root.glob("*.json") if p.name != "_meta.json")
+          if not picks:
+              sys.exit("no vulnerable fixtures found - nothing to test staleness against")
+          victim = picks[0]
+          victim.rename(victim.with_suffix(".json.hidden"))
+          print(f"hid {victim.name}")
+          EOF
+          if mylonite demo; then
+            echo "::error::demo SUCCEEDED with a missing fixture - the staleness guard is broken."
+            echo "A miss must surface via the runner's recorder-state inspection, not render clean."
+            exit 1
+          fi
+          echo "demo correctly refused to run with a missing fixture"
+
   precommit:
     runs-on: ubuntu-latest
     steps:

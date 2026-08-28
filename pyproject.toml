@@ -110,6 +110,23 @@ dev = [
 # it is onboarding/test scaffolding, not something a user needs to scan their own app.
 # The full test suite imports it, so an editable checkout also needs:
 #   pip install -e ".[dev]" && pip install -e ./reference_targets/mcp_kitchen_sink
+#
+# `pip install "mylonite[demo]"` is the zero-key on-ramp: it pulls the reference app
+# so `mylonite demo` can replay the recorded vulnerable-vs-guarded differential with
+# no API key.
+#
+# THE `==` PIN IS LOAD-BEARING, NOT STYLE. The demo replays recorded LiteLLM
+# fixtures whose v2 cache key folds in `tools` (see `mylonite._replay
+# ._KEY_V2_IDENTITY_KWARGS`), and those tool schemas come from THIS package. A
+# kitchen-sink release that renames a tool or edits a description therefore
+# invalidates every fixture inside every mylonite wheel already on PyPI — silently,
+# because a fixture miss does not raise (it is caught by the runner's post-run
+# recorder inspection, which a user only sees as the demo refusing to run). A range
+# specifier would let that happen on an install of an unchanged mylonite. Bump this
+# pin only together with a fixture re-record.
+demo = [
+    "mcp-kitchen-sink==0.1.0",
+]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
@@ -123,6 +140,7 @@ enterprise = [
 ]
 [project.urls]
 Homepage = "https://github.com/Abidemialade/mylonite"
+Documentation = "https://abidemialade.github.io/mylonite/"
 Source = "https://github.com/Abidemialade/mylonite"
 Issues = "https://github.com/Abidemialade/mylonite/issues"
 Changelog = "https://github.com/Abidemialade/mylonite/blob/main/CHANGELOG.md"

@@ -1,12 +1,21 @@
 """Reference attack module — canned indirect-injection payload.
 
 **Example only.** This is a minimal worked example for plugin authors and for
-the discovery tests; it is NOT a live attack. ``discover()`` returns it
-alongside the two real families, but the ``scan``/``demo`` paths filter it out
-(only ``prompt-injection-family`` and ``excessive-agency-family`` run), so
-enumerating ``mylonite.attack_modules`` shows three modules while a scan uses
-two — that gap is intentional (Issue #16). Copy this module as a starting point
-for a real ``AttackModule``.
+the discovery tests; it is NOT a live attack. Copy it as a starting point for a
+real ``AttackModule``.
+
+``discover()`` returns it alongside the two real families, but a scan runs only
+``mylonite.scan.assembly.ATTACK_FAMILIES`` plus whatever the operator names in
+``MYLONITE_ATTACK_MODULES``. So enumerating ``mylonite.attack_modules`` shows
+three modules while a scan uses two, and that gap is intentional: a stub probe
+should not join a real scan just because it happens to be installed.
+
+The same opt-in is how a genuine third-party module gets in — see
+``docs/plugin-authoring.md``. Note the payload below carries only
+``target_kind``: a real module must also supply ``seed_id``/``weakness``/
+``predicate``/``setup``/``drive`` or ``ScanEngine`` drops it as invalid
+metadata. ``tests/plugins/test_third_party_attack_module.py`` shows a
+correctly-shaped one.
 """
 
 from __future__ import annotations
