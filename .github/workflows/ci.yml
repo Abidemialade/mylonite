@@ -193,13 +193,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
           pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: The [demo] extra must resolve
+        # README and quickstart put `pip install "mylonite[demo]"` first, and the
+        # mcp-kitchen-sink `==` pin inside it is load-bearing (the replay cache key
+        # folds in that package's tool schemas). Resolve the extra for real, from
+        # the local project, so a broken or unsatisfiable pin fails here rather
+        # than for the first stranger who follows the README.
+        run: pip install --dry-run --ignore-installed ".[demo]"
       - name: Run the offline demo (no API key set)
         # No provider key in the environment on purpose: if replay ever fell
         # through to a live call, this step must fail rather than quietly spend.
+        #
+        # `pipefail` is load-bearing: without it `mylonite demo | tee` reports
+        # tee's exit status, so a demo that FAILED would be recorded as passing
+        # and this whole job would become decorative.
+        #
+        # COLUMNS is load-bearing too: Rich wraps to the terminal width, and the
+        # headline the next step greps for ("N exploits on vulnerable, M on
+        # guarded") is long enough to be split across lines at the default width.
         env:
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
-        run: mylonite demo
+          COLUMNS: "200"
+        run: |
+          set -o pipefail
+          mylonite demo | tee demo-output.txt
+      - name: The vulnerable twin must actually find something
+        # Exit code alone is not enough. The staleness guard detects fixture
+        # MISSES, not SILENCE: if drift ever made the vulnerable variant issue
+        # zero LLM calls (every seed skipped, or an adapter short-circuit),
+        # cache_misses stays 0, nothing raises, and the demo renders the
+        # deliberately vulnerable app as clean. That is the exact failure this
+        # whole subsystem exists to prevent, so assert the differential is real
+        # rather than trusting a zero exit code.
+        run: |
+          if ! grep -Eq '[1-9][0-9]* exploits on vulnerable' demo-output.txt; then
+            echo "::error::demo did not report a non-zero finding count on the VULNERABLE twin."
+            echo "Either the fixtures are stale in a way that produces silence rather than a"
+            echo "miss, or the headline line changed shape. Both need a human."
+            sed -n '1,40p' demo-output.txt
+            exit 1
+          fi
+          if ! grep -q "mode: replay" demo-output.txt; then
+            echo "::error::demo did not report replay mode; it may have attempted a live call."
+            exit 1
+          fi
       - name: A missing fixture must fail loudly, not render a clean result
         env:
           ANTHROPIC_API_KEY: ""
