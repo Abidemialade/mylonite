@@ -5,6 +5,39 @@ in the local plan/review files. Each item notes its rationale and the phase or
 trigger where it should land. This is a tracking doc, not a roadmap — see
 [ROADMAP.md](./ROADMAP.md) for the phase plan.
 
+## Deferred by the 0.8.5 pre-launch correctness pass (2026-08-28)
+
+Twelve defects were fixed for 0.8.5 (see `CHANGELOG.md`). Four related items were
+deliberately left out, each because it is a **new capability or a contract change**
+rather than a fix, and the release was scoped to fixes only.
+
+- **A `launch_failure` value on `ScanAttemptOutcome`.** A launch that never started is
+  now classified and reported as `launch_failure` in the attempt's reason, but the
+  `outcome` literal is still `skipped_planner_failure` — the honest value would be a new
+  enum member, and `ScanAttemptOutcome` lives in `contracts/_types.py`. *Trigger:* the
+  next contract-change issue and `CONTRACT_VERSION` bump per `GOVERNANCE.md`; batch it
+  with any other queued contract work rather than bumping for one enum value.
+- **`primary_tools` as a real seed filter.** It is accepted, validated and round-tripped
+  but has **zero readers** in `src/`. The false "narrows seed selection" claim has been
+  removed from `docs/target-file.md` and the scaffold comment; the field itself is kept
+  because operators already have it in their target files. *Trigger:* wire it in
+  `seeds_for_descriptor` — which also relieves budget pressure on large tool surfaces,
+  since a wide surface is what synthesises seed counts above the call cap. Two problems,
+  one fix.
+- **A shim-free guarded leg (`BUILD_LAYER` fidelity).** 0.8.5 made the *wording* honest:
+  a synthetic-twin pass no longer claims the operator's own control carries the security.
+  It did not make the strong claim newly *achievable* on a single-build app — that needs
+  a guarded leg built without the boundary shim. *Trigger:* first confirm a third-party
+  MCP server exists with a genuine, code-enforced, toggleable control to validate it
+  against; the recipe in `verification/EXTERNAL_DIFFERENTIAL.md` currently drives both of
+  its candidates through the shim. Do not build the path before that target is found.
+- **A coverage ratio and `--min-coverage`.** 0.8.5 stopped incomplete coverage from being
+  *silenced* when a scan found something, but coverage is still the all-or-nothing
+  `Coverage.EXERCISED` enum, and there is no threshold flag to gate on. *Trigger:* only
+  once someone wants to gate CI on coverage; a ratio needs a defined value at 0/0 (a scan
+  that synthesised no seeds, or one where every attempt was not-applicable) before it can
+  safely drive an exit code.
+
 ## Deterministic-controls-and-recommendations branch — PR3 skipped (2026-08-24)
 
 The branch's plan called for a FIDES (Microsoft Agent Framework) external

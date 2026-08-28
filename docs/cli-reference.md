@@ -8,7 +8,10 @@ CLI itself). Global options `--api-key-file` and `--env-file` work before any co
 config or usage error (incl. an empty scan) · `3` LLM-call budget exceeded · `4` provider
 unreachable · `5` test rejected (not kept) · `6` `gate`: the test generator returned
 nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing
-(internal collaborator failure).
+(internal collaborator failure) · `8` `gate`: the git/gh step failed (your findings and
+validation report are still in `--out`).
+
+Budget exhaustion always exits `3`, whichever layer of the run observes it first.
 
 ---
 
@@ -106,19 +109,25 @@ mylonite validate .mylonite/generated/my-finding --target-file app.yaml --author
 
 ## `gate` — scan → generate → validate → PR (the full pipeline)
 
-The whole pipeline; only a kept test makes it through. Scaffolds the CI workflows. The
-PR body always includes a **Proven fix** (control-efficacy findings) or **Recommended
-fix** (otherwise) — an evidence-anchored recommendation naming the actual tool and
-argument that landed the exploit, as a fenced code sketch. See [Reading the
+The whole pipeline; only a kept test makes it through. The PR body always includes a
+**Proven fix** (control-efficacy findings) or **Recommended fix** (otherwise) — an
+evidence-anchored recommendation naming the actual tool and argument that landed the
+exploit, as a fenced code sketch. See [Reading the
 results](reading-results.md#the-gating-pr).
 
-Options: `target` or `--target-file`; `--authorize`; `--open-pr` (push a branch + open
-the PR via `gh`); `--config`; `--model` (any LiteLLM provider via a `provider/model`
-prefix); `--out PATH`; `--max-llm-calls`;
+**`gate` does not modify your repository unless you ask it to.** By default it writes
+only to `--out` (normally `.mylonite/gate/`) and prints the `git`/`gh` commands to
+commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
+`--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
+where `--workflows` defaulted on and the branch and commit happened on every run.
+
+Options: `target` or `--target-file`; `--authorize`; `--open-pr` (create the branch,
+commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
+a `provider/model` prefix); `--out PATH`; `--max-llm-calls`;
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
-`--workflows/--no-workflows`; `--llm-enrich` (append a labelled, unverified LLM fix
+`--workflows/--no-workflows` (**default off**); `--llm-enrich` (append a labelled, unverified LLM fix
 suggestion, rendered after the structural recommendation above); `--fast`;
 `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
 

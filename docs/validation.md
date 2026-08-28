@@ -153,10 +153,16 @@ Two honesty properties make this trustworthy:
   on the raw session and the effect probe reads the raw session; only the
   *planner's view* is guarded. So the control is measured against an undiluted
   attack, never a hobbled one.
-- **It is a boundary proxy, stated as one.** Mylonite enforces the control at
-  the adapter boundary, not inside your server. The emitted test and the gating
-  PR say so explicitly and point you at a server-side fix — the test is a
-  load-bearing-control regression gate, with the proxy caveat on the label.
+- **It is a boundary proxy, stated as one — on the pass as well as the fail.**
+  Mylonite enforces the control at the adapter boundary, not inside your server.
+  A KEPT verdict from a synthetic twin therefore says a *canonical* control of
+  that class stops the attack with your model held constant; it does **not** say
+  your own implementation carries the security, and the wording does not claim
+  otherwise. Only a server-layer twin (`control_env`, where Mylonite toggles your
+  real control) earns that sentence. The reject side has always drawn this
+  distinction; as of 0.8.5 the pass side does too, on the validator detail, the
+  SARIF message and the gating PR headline alike. See
+  [Which claim you earned](reading-results.md#which-claim-you-earned).
 
 `mylonite ablate` generalises this across a target's whole control set: it
 toggles each safeguard and reports which are **load-bearing**, which are
