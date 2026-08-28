@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SARIF no longer claims your control carries the security when it did not measure it.**
+  Read this if you upload Mylonite's SARIF to GitHub code scanning.
+
+  0.8.5 made every verdict surface distinguish a *server-layer* twin (your own control,
+  toggled via `control_env`) from a *synthetic boundary* twin (Mylonite's canonical shim).
+  Two surfaces were missed. `report --sarif` printed *"the safeguard, not the model, carries
+  the security"* for any differential, including a synthetic one — on the artefact that
+  lands in the Security tab and persists across commits. And the `validate` run banner made
+  the strong claim on the synthetic path while withholding it from the server-layer path
+  that earns it, exactly inverted.
+
+  Both now resolve fidelity the same way every other surface does. SARIF results also carry
+  a machine-readable `properties.guardedTwinLayer` (`"server"` or `"boundary"`), so a
+  consumer can triage the distinction without parsing prose.
+
+- **The reference targets now stamp their guarded-twin fidelity.** The validator wrote the
+  `[guarded-twin=…]` marker only on the custom-target path, and every reader correctly
+  defaults to the weaker claim when it is absent — so `scan reference:vulnerable`, whose
+  guarded side is the real `server_guarded.py`, was about to start *under*-claiming once
+  the SARIF fix landed. The reference differential is a genuine server-layer pair and now
+  says so.
+
+### Changed
+
+- **The README leads with the reference app.** The quickstart opened with `--scaffold`
+  against your own server, where the most likely first result is correctly *nothing* — a
+  bad first five minutes for a reader who has not yet reached the section explaining why.
+  The two-command reference demo (`scan reference:vulnerable` finds them,
+  `scan reference:guarded` comes up clean) now opens `Try it`; pointing it at your own app
+  follows.
+
+- **Known limitations are collected on one page.** `docs/limitations.md` consolidates what
+  was scattered across `TODOS.md`, `docs/verification.md` and the verification harness: the
+  unavailable strong claim on a single-build app, the single-model evidence base and which
+  way that cuts, the published negatives, the deferred capabilities, and the project's
+  beta/single-maintainer status.
+
+### Internal
+
+- The guarded-twin marker and its two claim strings now have a single definition in
+  `mylonite._twin_fidelity`, replacing five inline re-spellings.
+  `tests/test_twin_fidelity_single_source.py` fails if a literal is reintroduced, or if any
+  verdict surface renders the strong claim without resolving fidelity first.
+
 ## [0.8.5] - 2026-08-28
 
 A correctness pass over the places Mylonite mishandled the operator's repository,

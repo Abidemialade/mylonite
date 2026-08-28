@@ -32,12 +32,24 @@ def _exploit(weakness: str, *, effect: str = "unprobed") -> Any:
     )
 
 
-def _report(*, kept: bool, vuln: int, guard_resisted: int | None, iters: int = 5) -> Any:
+def _report(
+    *,
+    kept: bool,
+    vuln: int,
+    guard_resisted: int | None,
+    iters: int = 5,
+    server_layer: bool | None = None,
+) -> Any:
+    """A ValidationReport. ``server_layer`` stamps the guarded-twin fidelity marker;
+    ``None`` leaves notes unmarked (an older artefact, or a report from a path that
+    never ran a differential)."""
+    from mylonite._twin_fidelity import format_marker
     from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
 
     return ValidationReport(
         test_filename="test_security_finding.py",
         kept=kept,
+        notes=(None if server_layer is None else format_marker(server_layer=server_layer)),
         reproducibility=ReproducibilityEvidence(
             iterations=iters,
             vuln_fired=vuln,
@@ -51,9 +63,17 @@ def _report(*, kept: bool, vuln: int, guard_resisted: int | None, iters: int = 5
 
 
 def test_to_sarif_structure_and_differential_proof() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
     from mylonite.report.sarif import to_sarif
 
-    doc = to_sarif([(_exploit("W2", effect="true"), _report(kept=True, vuln=5, guard_resisted=5))])
+    doc = to_sarif(
+        [
+            (
+                _exploit("W2", effect="true"),
+                _report(kept=True, vuln=5, guard_resisted=5, server_layer=True),
+            )
+        ]
+    )
     assert doc["version"] == "2.1.0"
     assert "sarif-2.1.0" in doc["$schema"]
     run = doc["runs"][0]
@@ -64,14 +84,54 @@ def test_to_sarif_structure_and_differential_proof() -> None:
     assert res["level"] == "error"  # W2 + effect → High → error
     # R2: the differential proof is surfaced in the message.
     assert "5/5" in res["message"]["text"]
-    assert "safeguard" in res["message"]["text"].lower()
+    assert PROOF_CLAIM_SERVER in res["message"]["text"]
     assert res["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
     # GitHub code scanning dedups alerts across commits via partialFingerprints.
     assert res["partialFingerprints"]["mylonitePatternLocus/v1"]
     props = res["properties"]
     assert props["security-severity"] == "8.0"  # GitHub numeric severity for High
     assert "LLM01" in props["tags"] and "MEASURE-2.7" in props["tags"]
+    assert props["guardedTwinLayer"] == "server"
     json.dumps(doc)  # fully serialisable / self-contained
+
+
+def test_sarif_proof_narrows_the_claim_on_a_synthetic_boundary_twin() -> None:
+    """SARIF is uploaded to GitHub code scanning, where it persists and gets quoted.
+
+    It used to print the server-layer claim for ANY differential — including one
+    whose guarded side was Mylonite's own boundary shim — while the validator that
+    produced the very same report carefully refused that claim. This was the last
+    surface making the strong claim unconditionally.
+    """
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+    from mylonite.report.sarif import to_sarif
+
+    res = to_sarif(
+        [
+            (
+                _exploit("W2", effect="true"),
+                _report(kept=True, vuln=5, guard_resisted=5, server_layer=False),
+            )
+        ]
+    )["runs"][0]["results"][0]
+    text = res["message"]["text"]
+    # The counts are still reported — the finding is real and still KEPT.
+    assert "5/5" in text
+    assert PROOF_CLAIM_SERVER not in text
+    assert "boundary shim" in text and "does not establish" in text
+    assert res["properties"]["guardedTwinLayer"] == "boundary"
+
+
+def test_sarif_proof_defaults_to_the_weaker_claim_without_a_marker() -> None:
+    """An unmarked report (an older artefact) must under-claim, never over-claim."""
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+    from mylonite.report.sarif import to_sarif
+
+    res = to_sarif([(_exploit("W2"), _report(kept=True, vuln=5, guard_resisted=5))])["runs"][0][
+        "results"
+    ][0]
+    assert PROOF_CLAIM_SERVER not in res["message"]["text"]
+    assert res["properties"]["guardedTwinLayer"] == "boundary"
 
 
 def test_partial_fingerprint_is_stable_and_distinct() -> None:

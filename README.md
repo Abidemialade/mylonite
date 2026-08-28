@@ -68,8 +68,9 @@ failing. A KEPT control-efficacy proof needs a weakness that actually lands, whi
 practice means an app-design flaw (a consequential action with no approval step, an
 unrestricted egress path) or an app configured to act autonomously.
 
-If you want to watch it fire before pointing it at your own code, use the bundled reference
-app below. It is deliberately vulnerable and finds weaknesses every time.
+This is why [Try it](#try-it) starts with the bundled reference app rather than your code:
+it is deliberately vulnerable and finds weaknesses every time, so you can see the machinery
+work before you point it somewhere the honest answer may be "nothing".
 
 ## Where this sits
 
@@ -78,6 +79,14 @@ left to judge which flags matter. Model-eval harnesses swap models and score whi
 behaves best. Mylonite does neither. It runs the attack against your app, then holds the
 model constant and toggles only your safeguard — so the finding you get back is evidence
 about *your control*, not about how a description reads or how a model scored today.
+
+## Project status
+
+**Beta, single maintainer.** As of v0.8.5 that is 241 commits from one contributor, with a
+1,900-test suite and CI (ruff, mypy, pytest, pre-commit) enforced on every PR. The extension
+contracts are versioned public API, but no third party has built a plugin against them yet.
+If you are weighing this as a dependency in a security pipeline, pin a version — and read
+[Known limitations](./docs/limitations.md) first.
 
 ## Install
 
@@ -90,6 +99,20 @@ Python 3.11–3.13. (3.14 is not yet supported: `litellm` has no wheels for it.)
 needs an LLM API key; `check`, `--scaffold` and `report` do not.
 
 ## Try it
+
+Start with the bundled reference app. It is deliberately vulnerable, it runs in-process and
+binds to nothing, and it is the fastest way to watch the differential actually fire — same
+attacks, two builds, opposite results:
+
+```bash
+mylonite scan reference:vulnerable   # finds seeded weaknesses
+mylonite scan reference:guarded      # same attacks, comes up clean
+```
+
+That contrast *is* the product. See [the reference app](./docs/quarry.md) for what is seeded
+in it and why. (Both commands call a model, so they need an API key.)
+
+### Then point it at your own app
 
 **The first two steps are free** — no API key, no model call, no spend.
 
@@ -120,13 +143,9 @@ itself. That needs a key:
 mylonite scan --target-file app.yaml --authorize my-app
 ```
 
-No app handy? Run the same loop against the bundled, deliberately-vulnerable reference app
-(see [the reference app](./docs/quarry.md)):
-
-```bash
-mylonite scan reference:vulnerable   # finds seeded weaknesses
-mylonite scan reference:guarded      # same attacks, comes up clean
-```
+Expect this to find less than the reference app did — often nothing. See
+[A clean result is a result](#a-clean-result-is-a-result) above, and
+[docs/limitations.md](./docs/limitations.md) for where the tool's reach genuinely ends.
 
 ## From scan to a gating PR
 
@@ -186,6 +205,7 @@ catalogue your auditors already use. See [docs/standards-mapping.md](./docs/stan
 - [Weakness classes](./docs/weakness-classes.md) · [Attack modes](./docs/attack-modes.md) — what's tested and how attacks work.
 - [The validation engine](./docs/validation.md) — the control-efficacy check and the differential.
 - [Independent verification](./docs/verification.md) — the honest scorecard against ground truth Mylonite didn't author.
+- [Known limitations](./docs/limitations.md) — where the tool's reach ends, in one place.
 - [Reading the results](./docs/reading-results.md) · [CLI reference](./docs/cli-reference.md) · [target.yaml](./docs/target-file.md).
 - [CI gating](./docs/ci-gating.md) · [Architecture](./docs/architecture.md) · [Plugin authoring](./docs/plugin-authoring.md).
 - [ROADMAP.md](./ROADMAP.md) · [CONTRIBUTING.md](./CONTRIBUTING.md) · [GOVERNANCE.md](./GOVERNANCE.md) · [SECURITY.md](./SECURITY.md).

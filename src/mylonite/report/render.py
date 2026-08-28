@@ -15,6 +15,7 @@ from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from mylonite._cli_io import console_print
+from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
 
 
 def _render_validation_report(report: Any, console: Console | None = None) -> None:
@@ -159,7 +160,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         # of being theater when the guarded side was only the SYNTHETIC boundary shim.
         # The validator stamps a [guarded-twin=...] marker into notes; key off it.
         notes = getattr(report, "notes", "") or ""
-        if "guarded-twin=synthetic-boundary" in notes:
+        if MARKER_SYNTHETIC in notes:
             diff_remediation = (
                 "differential fail: the SYNTHETIC boundary twin did not block the attack. "
                 "If your real control is server-layer (an approval gate / allowlist enforced "
@@ -167,7 +168,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 "so the differential measures it - the boundary twin cannot see server-side "
                 "guards, so this is NOT evidence your control is ineffective."
             )
-        elif "guarded-twin=server-layer" in notes:
+        elif MARKER_SERVER_LAYER in notes:
             diff_remediation = (
                 "differential fail: the server-layer control did not discriminate (raw and "
                 "guarded behaved alike) - the control as configured did not stop this attack."
