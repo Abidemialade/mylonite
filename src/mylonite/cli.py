@@ -40,6 +40,7 @@ from mylonite._cli_io import console_print, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.exit_codes import (
+    EXIT_BUDGET,
     EXIT_CONFIG,
     EXIT_FINDINGS,
     EXIT_NOT_KEPT,
@@ -4066,6 +4067,8 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
+    from mylonite.scan._llm import BudgetExceededError
+
     try:
         with llm_scope(policy=effective_policy):
             result = run_gate(
@@ -4080,6 +4083,13 @@ def gate(
                 system_prompt=gate_system_prompt,
                 target_context=gate_target_context,
             )
+    except BudgetExceededError as exc:
+        # One decision, one exit code. Raised inside the validator this used to
+        # escape uncaught and exit 1, while the same exhaustion seen first by
+        # the engine exits EXIT_BUDGET. Both now report the same way.
+        echo_err(f"\nerror: LLM call budget exhausted: {exc}")
+        echo_err("Raise --max-llm-calls, or narrow the scan with --weakness-classes.")
+        raise typer.Exit(code=EXIT_BUDGET) from exc
     except pr_mod.GatePrError as exc:
         # The git/gh step is the LAST thing gate does, so by the time it fails
         # the scan, generation and validation have all been paid for and their
