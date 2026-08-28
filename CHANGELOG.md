@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way that cuts, the published negatives, the deferred capabilities, and the project's
   beta/single-maintainer status.
 
+- **A second model was measured, and it corrected an assumption.** The docs previously
+  reasoned that a weaker model makes a KEPT proof strictly easier, so the published
+  Haiku-only figures were the conservative case. A local run against the bundled targets
+  (`llama3.2:3b` planner, `qwen2.5-coder:7b` judge, via Ollama, zero API cost) shows recall
+  is **not** monotonic in model weakness: both models find two weaknesses on
+  `reference:vulnerable`, but W3 fires only on the weak planner while W1 fires only on
+  Haiku — a model too weak to execute a smuggled instruction suppresses that finding rather
+  than falling for it. W4, the pure app-design flaw, fires on both. Recorded in
+  `verification/FINDINGS.md` and as Lesson 8 in `verification/CAPABILITY_MATRIX.md`; every
+  *external* number remains single-model.
+
 ### Internal
 
 - The guarded-twin marker and its two claim strings now have a single definition in
