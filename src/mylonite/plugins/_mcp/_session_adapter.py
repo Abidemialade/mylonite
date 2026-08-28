@@ -513,8 +513,24 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # scan_report.json. attempt_metadata["exception"] below already
             # carries the exception TYPE name unredacted; only the free-text
             # repr needs masking.
+            # Name the CLASSIFICATION in the reason, not just in metadata. The
+            # computed `reason` was written to attempt_metadata["reason"] and
+            # nothing read it -- ScanEngine persists only ["exception"] -- so
+            # classifying a failure correctly changed nothing the operator saw.
+            # For a launch failure also name the command that could not be
+            # started: _describe_data_sources() already formats exactly that
+            # string, and "which command?" is the operator's first question.
+            where = ""
+            if reason == "launch_failure":
+                # Broad by design: this is diagnostic decoration on an error path
+                # that is already failing. A fault while describing the target
+                # must never replace or mask the real error being reported.
+                try:
+                    where = f" [{'; '.join(self._describe_data_sources())}]"
+                except Exception:
+                    where = ""
             raise AdapterInvocationSkipped(
-                f"adapter failure on {payload.pattern_id}: {redact(repr(exc))}",
+                f"{reason} on {payload.pattern_id}{where}: {redact(repr(exc))}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
@@ -937,6 +953,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         name = type(exc).__name__
         if "Timeout" in name:
             return "timeout"
+        # The target's launch command does not exist (a typo in `command:`, a
+        # binary not on PATH, an uninstalled npx/uvx package). Nothing about the
+        # planner is involved -- the server never started. This used to fall
+        # through to "planner_exception" and tell the operator their planner had
+        # broken, which sent them looking in entirely the wrong place.
+        if name in {"FileNotFoundError", "NotADirectoryError", "PermissionError"}:
+            return "launch_failure"
         if name in {"ProcessLookupError", "BrokenPipeError", "ConnectionResetError"}:
             return "subprocess_crash"
         if name in {"ProtocolError", "JSONRPCError", "McpError"}:
