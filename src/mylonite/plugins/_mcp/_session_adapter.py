@@ -535,7 +535,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # that is already failing. A fault while describing the target
                 # must never replace or mask the real error being reported.
                 try:
-                    where = f" [{'; '.join(self._describe_data_sources())}]"
+                    # REDACT. The stdio adapter's _describe_data_sources returns
+                    # the command and its rendered args verbatim, and a target's
+                    # args routinely carry a secret as a CLI flag (`npx server
+                    # --api-key=...`) -- which is why the gate redacts target.yaml
+                    # before committing it (DCR-0019) and why the remote adapter's
+                    # own override is deliberately host-only. This string lands in
+                    # ScanAttempt.verdict_reason, so it reaches scan_report.json
+                    # and a committed gate branch.
+                    where = f" [{redact('; '.join(self._describe_data_sources()))}]"
                 except Exception:
                     where = ""
             raise AdapterInvocationSkipped(

@@ -64,3 +64,36 @@ async def test_launch_failure_reason_names_the_cause_and_the_command(
     assert adapter._spec.command in reason
     # the classification is also carried in the metadata the engine persists
     assert excinfo.value.attempt_metadata["reason"] == "launch_failure"
+
+
+@pytest.mark.asyncio
+async def test_launch_failure_does_not_leak_a_credential_from_the_launch_args(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming the command must not print the operator's credentials.
+
+    A target's `args:` routinely carry a secret as a CLI flag (the common MCP
+    shape `npx some-server --api-key=...`), which is why the gate redacts
+    target.yaml before committing it (DCR-0019). The remote adapter's own
+    `_describe_data_sources` is deliberately host-only for the same reason --
+    "never the full URL with query/credentials/userinfo". The stdio one returns
+    the command and args verbatim, so the string must be redacted before it is
+    spliced into a message that lands in ScanAttempt.verdict_reason and, from
+    there, in scan_report.json and a committed gate branch.
+    """
+    secret = "sk-ant-" + "f" * 40  # pragma: allowlist secret — a fake, all-f test fixture
+    adapter = MCPStdioAdapter(family="fetch", scope=None)
+    monkeypatch.setattr(adapter, "_session", lambda **_: _MissingBinarySessionCM())
+    monkeypatch.setattr(
+        adapter,
+        "_describe_data_sources",
+        lambda: [f"MCP stdio: npx some-mcp-server --api-key={secret}"],
+    )
+
+    with pytest.raises(AdapterInvocationSkipped) as excinfo:
+        await adapter.invoke(Payload(pattern_id="p", channel="tool-result", body="x"))
+
+    reason = excinfo.value.reason
+    assert secret not in reason
+    # ...while the part that answers "which command?" survives.
+    assert "npx some-mcp-server" in reason
