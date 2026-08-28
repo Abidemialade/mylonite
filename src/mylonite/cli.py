@@ -208,6 +208,28 @@ def _warn_unsupported_python() -> None:
         )
 
 
+def _mylonite_env_var_names() -> frozenset[str]:
+    """The ``MYLONITE_*`` env vars this tool actually reads — a closed allowlist.
+
+    Derived from :class:`~mylonite.config._EnvRunConfig`, the typed settings
+    object that DEFINES which flat ``MYLONITE_*`` vars mean anything, so the
+    env-file loader and the consumer cannot drift apart. ``--env-file`` used to
+    reject all of them, including ``MYLONITE_MODEL`` — which ``.env.example``
+    itself marks required — so an operator following the project's own example
+    file was told their variables were unrecognised.
+
+    Deliberately NOT a ``MYLONITE_*`` prefix match. ``MYLONITE_API_BASE`` was
+    the SSRF / key-exfiltration vector in DCR-0002 (0.7.9); a prefix rule would
+    admit every future network-reaching variable automatically. Membership here
+    only means "this name is loadable" — ``api_base``'s own hard validation
+    (``validate_api_base``, which rejects a credentialed value) still applies at
+    the point of use.
+    """
+    from mylonite.config import _EnvRunConfig
+
+    return frozenset(f"MYLONITE_{name.upper()}" for name in _EnvRunConfig.model_fields)
+
+
 def _load_env_file(path: Path) -> None:
     """Load recognised provider credential/config vars from a dotenv file —
     never blanket.
@@ -229,6 +251,9 @@ def _load_env_file(path: Path) -> None:
     """
     from mylonite.scan.providers import looks_like_provider_env_var
 
+    def _recognised(key: str) -> bool:
+        return looks_like_provider_env_var(key) or key in _mylonite_env_var_names()
+
     if not path.exists():
         echo_err(f"env file {path} not found.")
         raise typer.Exit(code=EXIT_CONFIG)
@@ -245,7 +270,7 @@ def _load_env_file(path: Path) -> None:
         # not every quote char, which would corrupt a value ending in a quote.
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
-        if not looks_like_provider_env_var(key):
+        if not _recognised(key):
             dropped.append(key)
             continue
         if key in os.environ and os.environ[key] != value:
