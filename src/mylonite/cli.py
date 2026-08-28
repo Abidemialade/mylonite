@@ -3447,9 +3447,12 @@ def gate(
         bool,
         typer.Option(
             "--workflows/--no-workflows",
-            help="Scaffold .github/workflows/ gate + discovery templates.",
+            help=(
+                "Scaffold .github/workflows/ gate + discovery templates into the "
+                "repository. Off by default — this writes files you did not ask for."
+            ),
         ),
-    ] = True,
+    ] = False,
     llm_enrich: Annotated[
         bool,
         typer.Option(

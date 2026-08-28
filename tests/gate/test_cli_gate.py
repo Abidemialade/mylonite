@@ -46,6 +46,25 @@ def test_gate_exposes_runs_on_and_workflows_flags():
     assert "--workflows" in names or "--no-workflows" in names
 
 
+def _gate_param(name: str) -> click.Parameter:
+    command = typer.main.get_command(app)
+    ctx = click.Context(command)
+    gate_cmd = command.get_command(ctx, "gate")  # type: ignore[attr-defined]
+    param = next((p for p in gate_cmd.params if p.name == name), None)
+    assert param is not None, f"`gate` has no parameter named {name!r}"
+    return param
+
+
+def test_gate_does_not_scaffold_workflows_by_default():
+    """Writing into someone's .github/workflows/ is opt-in, not opt-out.
+
+    `--workflows` used to default True, so a plain `mylonite gate` dropped
+    mylonite-gate.yml and mylonite-discovery.yml into the operator's repository
+    alongside the branch and commit it also made uninvited.
+    """
+    assert _gate_param("workflows").default is False
+
+
 def test_gate_help_renders_without_crashing():
     # The real render-health check: help renders and exits 0 (no traceback).
     res = runner.invoke(app, ["gate", "--help"])
