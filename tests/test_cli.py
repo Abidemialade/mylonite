@@ -4108,6 +4108,66 @@ def test_gate_reports_a_pr_failure_gracefully(
     assert "not a git repository" in result.output
 
 
+def test_gate_maps_budget_exhaustion_to_exit_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Budget exhaustion is one decision and must produce one exit code.
+
+    It used to produce three: 3 from the engine, 2 or 0 when the adapter's
+    catch-all downgraded it to a skipped attempt, and 1 as an uncaught traceback
+    when raised inside the validator. The adapter half is fixed in
+    _session_adapter's re-raise allowlist; this is the CLI half.
+    """
+    from mylonite.exit_codes import EXIT_BUDGET
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan._llm import BudgetExceededError
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    class _BudgetExhaustedValidator:
+        def __init__(self, *_a: Any, **_k: Any) -> None: ...
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            raise BudgetExceededError("LLM call budget exhausted (12/12)")
+
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator",
+        _BudgetExhaustedValidator,
+    )
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+            ],
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert result.exit_code == EXIT_BUDGET, result.output
+    assert "budget" in result.output.lower()
+
+
 def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """T11 / finding E: for a target with a SERVER-LAYER control_env toggle,
     gate's raw side must genuinely launch with that guard DISABLED — not be a

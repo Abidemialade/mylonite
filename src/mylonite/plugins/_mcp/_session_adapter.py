@@ -46,6 +46,7 @@ from mylonite.contracts import (
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
+from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
@@ -496,7 +497,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     "exception": "TimeoutError",
                 },
             ) from exc
-        except (AdapterInvocationSkipped, SeedArmUnavailable):
+        # THE CONTROL-FLOW ALLOWLIST. Everything below collapses into a skipped
+        # attempt, which is right for a FAULT and wrong for a DECISION. An
+        # exception that means "stop the run" must be listed here or the
+        # catch-all silently downgrades it to "we tried that seed and moved on".
+        # BudgetExceededError was not listed, so budget exhaustion reached the
+        # operator as skipped_planner_failure and the process exited 2 (or 0) --
+        # while the same exhaustion seen first by the engine exited 3. Adding an
+        # exception here is how you keep a decision a decision.
+        except (AdapterInvocationSkipped, SeedArmUnavailable, BudgetExceededError):
             raise
         except Exception as exc:
             reason = self._classify_failure(exc)
