@@ -92,6 +92,31 @@ class TestFromReportExitCodes:
         assert outcome.exit_code == EXIT_SUCCESS
         assert outcome.abort is None
 
+    def test_incomplete_coverage_is_reported_even_when_something_was_found(self) -> None:
+        """Finding something does not make the coverage gap go away.
+
+        `operator_message` was gated on `findings_count == 0`, so the run that
+        most needs the caveat -- one finding plus a heavy not-tested share --
+        was the one that reported nothing. The console line in artefacts.py
+        already fires regardless of findings; the structured outcome did not, so
+        `gate` and every JSON consumer saw silence.
+
+        The exit code deliberately stays EXIT_SUCCESS here: "ran and found
+        something" is scan's documented convention (see the sibling test), and
+        changing it is a separate decision.
+        """
+        report = _report(
+            attempts=[_attempt("finding"), _attempt("skipped_no_seed_arm")],
+            findings_count=1,
+        )
+        outcome = ScanOutcome.from_report(report)
+
+        assert outcome.not_tested == 1
+        assert outcome.coverage is not Coverage.EXERCISED
+        assert outcome.operator_message is not None
+        assert "coverage" in outcome.operator_message.lower()
+        assert outcome.exit_code == EXIT_SUCCESS  # convention unchanged
+
     def test_findings_still_exit_success_at_this_layer(self) -> None:
         # EXIT_NOT_KEPT (gate's verdict) is a downstream concern (T2) — scan's
         # own exit-code convention treats "ran and found something" as success,

@@ -210,6 +210,18 @@ _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE: Final = (
     "provider credentials), then re-run."
 )
 
+#: The same coverage gap, but the scan DID find something. Not an error — the
+#: finding is real evidence and the exit code stays 0 — so this is a caveat, not
+#: a failure. It exists because gating the message on `findings_count == 0` left
+#: the most misleading run of all (a finding plus untested seeds) reporting
+#: nothing at all through the structured outcome.
+_INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE: Final = (
+    "warning: the findings below are real, but coverage was incomplete — some "
+    "seeds were never exercised, so this scan does NOT establish that the rest "
+    "of the target is clean. Check each attempt's verdict_reason/error_detail "
+    "for the untested seeds, then re-run to close the gap."
+)
+
 
 @dataclass(frozen=True)
 class ScanOutcome:
@@ -314,14 +326,17 @@ class ScanOutcome:
             and not_tested == 0
         )
 
+        # The coverage gap and the exit code are TWO decisions, and they used to
+        # share one branch. Finding something does not make an incomplete scan
+        # complete, so the caveat is reported whenever coverage is incomplete --
+        # including the case that most needs it, a finding alongside untested
+        # seeds. The exit code keeps its narrower, deliberate rule below.
+        incomplete = coverage is not Coverage.EXERCISED and not is_dry_run_shaped
+
         if abort is not None:
             exit_code = _EXIT_CODE_BY_ABORT[abort]
             operator_message = _OPERATOR_MESSAGE_BY_ABORT[abort]
-        elif (
-            coverage is not Coverage.EXERCISED
-            and report.findings_count == 0
-            and not is_dry_run_shaped
-        ):
+        elif incomplete and report.findings_count == 0:
             # No formal AbortReason was recorded, yet coverage never reached
             # EXERCISED (PARTIAL or NOT_EXERCISED) and nothing was found. Must
             # not be indistinguishable from a genuine clean pass — see the
@@ -329,8 +344,13 @@ class ScanOutcome:
             exit_code = _EXIT_INCOMPLETE_NO_ABORT
             operator_message = _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE
         else:
+            # `findings_count > 0` still exits 0 — scan's documented convention
+            # is that finding something is not, by itself, a failure (see
+            # `_EXIT_INCOMPLETE_NO_ABORT`'s note and
+            # `test_findings_still_exit_success_at_this_layer`). But it no
+            # longer silences the coverage caveat.
             exit_code = EXIT_SUCCESS
-            operator_message = None
+            operator_message = _INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE if incomplete else None
 
         return cls(
             coverage=coverage,
