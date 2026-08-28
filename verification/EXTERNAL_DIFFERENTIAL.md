@@ -15,9 +15,13 @@
 > demonstrable regardless of model. Target **real OSS MCP servers with a known app-design
 > flaw** (below), not CTF challenges.
 
-> **Why it isn't done in-session.** It needs (a) the target server installed + *running*,
-> (b) a live LLM key, and (c) network/SSL access (this machine: corporate-proxy TLS +
-> Norton friction). So this is a maintainer-run step. Everything below is the exact recipe.
+> **Why it is a separate, deliberate step.** It needs (a) the target server installed +
+> *running*, (b) a provider key with budget, and (c) network egress to that provider. It
+> also means executing third-party code under a live credential, which is a judgment call
+> rather than something a run should take autonomously. So this is a maintainer-run step.
+> If the provider is unreachable rather than unauthenticated, see
+> [`docs/enterprise-networking.md`](../docs/enterprise-networking.md) — a TLS-inspecting
+> proxy or a local AV CA can require `SSL_CERT_FILE`. Everything below is the exact recipe.
 
 ## Chosen targets (the approved external-proof path)
 

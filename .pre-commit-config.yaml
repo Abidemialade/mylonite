@@ -54,6 +54,22 @@ repos:
         files: ^\.secrets\.baseline$
         always_run: true
 
+      # `detect-secrets` above catches credentials. This catches the other thing
+      # that has twice escaped into public files: prose describing the
+      # maintainer's own machine (antivirus product, that a live API key was in
+      # their shell, that their TLS is intercepted). For a security tool those
+      # lines profile the person holding commit and publishing rights, and the
+      # first occurrence had to be removed with a force-push after the fact.
+      #
+      # Markdown only, deliberately: `control_shim.py` and `labels.py` say "this
+      # session" about an MCP scan session. Flagging those would train people to
+      # bypass the hook. See the script's docstring.
+      - id: no-local-context
+        name: no local-machine context in committed prose
+        entry: python scripts/check_no_local_context.py
+        language: system
+        types: [markdown]
+
   # Keep in lockstep with the `ruff==` pin in pyproject's [dev] extra. CI runs
   # both paths -- the `lint` job installs ruff from that pin, the `precommit`
   # job runs this hook -- so a drift between them lets one job pass while the

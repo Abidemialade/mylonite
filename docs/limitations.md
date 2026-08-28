@@ -32,9 +32,8 @@ cannot be verified. Tracked in [`TODOS.md`](https://github.com/Abidemialade/mylo
 ## 2. The external evidence base is essentially one model
 
 Every number in [Independent verification](verification.md) comes from **Claude Haiku 4.5** —
-the single hosted provider keyed on the maintainer's machine — at small sample sizes,
-cost-bounded, run in June–July 2026. Those remain the only *external* (third-party target)
-results.
+the single hosted provider these runs used — at small sample sizes, cost-bounded, run in
+June–July 2026. Those remain the only *external* (third-party target) results.
 
 ### What a second model actually showed
 

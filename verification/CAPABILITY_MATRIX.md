@@ -242,6 +242,6 @@ nothing left the machine).
 
 Live phases need the targets running + an LLM key + network (see
 `verification/EXTERNAL_DIFFERENTIAL.md`
-for the SSL/Norton/authorization caveats). The recall/precision scorers are
+for the network, TLS and authorization caveats). The recall/precision scorers are
 `python -m verification.runner layer1 score …` and `layer3 score …`. The control-efficacy
 leg is the supported `validate`/`ablate` CLI pointed at the MCPSecBench defense toggle.

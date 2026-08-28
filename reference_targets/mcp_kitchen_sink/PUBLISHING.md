@@ -98,10 +98,11 @@ mylonite scan reference:guarded         # comes up clean
 The README, `docs/quickstart.md` and `docs/quarry.md` document `pip install mylonite
 mcp-kitchen-sink` as the primary path for trying the reference app.
 
-## Caveats specific to this machine
+## Environment caveats
 
-- TLS to PyPI/TestPyPI can fail cert verification behind the corporate proxy — `truststore`
-  is now a base dependency of `mylonite` and auto-enables the OS trust store, but `twine`
-  itself may still need `SSL_CERT_FILE` set or `--cert`. See `docs/enterprise-networking.md`.
-- Local AV (Norton) has interfered with build/upload steps before — if a step stalls, retry
-  outside an AV scan window.
+- TLS to PyPI/TestPyPI can fail cert verification behind a TLS-inspecting proxy —
+  `truststore` is now a base dependency of `mylonite` and auto-enables the OS trust store,
+  but `twine` itself may still need `SSL_CERT_FILE` set or `--cert`. See
+  `docs/enterprise-networking.md`.
+- Endpoint-protection software can interfere with build/upload steps — if a step stalls,
+  retry outside a scan window.
