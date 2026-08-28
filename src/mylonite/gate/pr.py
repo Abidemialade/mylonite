@@ -124,6 +124,36 @@ def open_or_print_pr(
     except ValueError as exc:
         raise GatePrError(f"gate paths must live inside the repo root {cwd}: {exc}") from exc
 
+    gh_cmd = (
+        f"gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)} "
+        f"--title {shlex.quote(pr_title)} --body-file {shlex.quote(str(rel_body))}"
+    )
+
+    if not open_pr:
+        # Committing to the operator's repository is part of the PR flow, so it
+        # is gated on the flag that REQUESTS the PR flow. This used to run
+        # unconditionally, above the old `if not open_pr` check, so a user
+        # running plain `mylonite gate` to see what it finds got a branch and a
+        # commit they never asked for. Read-only is the default; the artifacts
+        # are on disk and the exact command sequence is printed instead.
+        body_path.write_text(pr_body, encoding="utf-8")
+        add_cmd = " ".join(shlex.quote(str(r)) for r in rels)
+        manual = (
+            f"git checkout -b {shlex.quote(branch)}\n"
+            f"  git add {add_cmd}\n"
+            f"  git commit -m {shlex.quote(pr_title)}\n"
+            f"  git push -u origin {shlex.quote(branch)}\n"
+            f"  {gh_cmd}"
+        )
+        echo(
+            f"\nGate artifacts written to '{paths.gate_dir}'. "
+            f"Your repository was not modified.\n"
+            f"To commit them and open the gating PR, run:\n"
+            f"  {manual}\n"
+            f"Or re-run with --open-pr to do all of it automatically.\n"
+        )
+        return PrResult(branch=branch, opened=False, printed_command=manual)
+
     # Capture whatever branch was actually checked out BEFORE doing anything
     # destructive, so a mid-sequence failure can restore exactly that — not a
     # hardcoded assumption (``base`` is the PR's merge target, which may differ
@@ -143,12 +173,11 @@ def open_or_print_pr(
         _rollback(cwd=cwd, original_branch=original_branch, branch=branch, _run=_run)
         raise
 
-    if not open_pr or not gh_available(_run=_run):
+    if not gh_available(_run=_run):
+        # The operator asked for the PR flow, so the commit above is what they
+        # wanted; only the gh half is unavailable. Degrade to printing the
+        # remaining two steps.
         body_path.write_text(pr_body, encoding="utf-8")
-        gh_cmd = (
-            f"gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)} "
-            f"--title {shlex.quote(pr_title)} --body-file {shlex.quote(str(rel_body))}"
-        )
         echo(
             f"\nGate artifacts committed to branch '{branch}'.\n"
             f"To open the gating PR, run:\n"

@@ -57,6 +57,59 @@ def test_print_path_when_open_pr_false(tmp_path, capsys):
     assert not any(c[:1] == ["gh"] for c in runner.calls)
 
 
+def test_no_git_mutation_at_all_without_open_pr(tmp_path, capsys):
+    """Without --open-pr, `gate` must not touch the operator's repository.
+
+    The commit sequence used to run BEFORE the `if not open_pr` check, so a user
+    running plain `mylonite gate` to see what it finds got a new branch and a
+    commit they never asked for. Committing is part of the PR flow; it is gated
+    on the flag that requests the PR flow.
+    """
+    paths = _make_artifacts(tmp_path)
+    runner = _fake_runner_recording()
+
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        _run=runner,
+    )
+
+    assert result.opened is False
+    # NOTHING ran. Not rev-parse, not checkout, not add, not commit.
+    assert runner.calls == [], f"expected zero git subprocesses; got {runner.calls}"
+    # ...and the operator is told exactly how to do it by hand instead.
+    printed = result.printed_command or ""
+    assert "git checkout -b" in printed
+    assert "git add" in printed
+    assert "git commit" in printed
+    assert "gh pr create" in printed
+
+
+def test_open_pr_still_commits(tmp_path, monkeypatch):
+    """The commit sequence still runs when the operator asks for the PR flow."""
+    import mylonite.gate.pr as prmod
+
+    monkeypatch.setattr(prmod.shutil, "which", lambda _: "/usr/bin/gh")
+    paths = _make_artifacts(tmp_path)
+    runner = _fake_runner_recording()
+
+    open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=True,
+        _run=runner,
+    )
+
+    assert ["git", "checkout", "-b", "mylonite/gate-x"] in runner.calls
+    assert any(c[:2] == ["git", "add"] for c in runner.calls)
+    assert ["git", "commit", "-m", "Gate: x"] in runner.calls
+
+
 def test_open_path_calls_gh_when_available(tmp_path, monkeypatch):
     import mylonite.gate.pr as prmod
 
@@ -112,7 +165,10 @@ def test_relative_gate_dir_does_not_crash(tmp_path, monkeypatch):
     Before the fix, Path(".mylonite/gate").relative_to(tmp_path) raised ValueError because
     you cannot call relative_to() on a relative path against an absolute one.
     """
+    import mylonite.gate.pr as prmod
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(prmod.shutil, "which", lambda _: None)  # stop after the commit
     gate_dir = tmp_path / ".mylonite" / "gate"
     gate_dir.mkdir(parents=True)
     (gate_dir / "test_security_x.py").write_text("# t\n", encoding="utf-8")
@@ -127,7 +183,7 @@ def test_relative_gate_dir_does_not_crash(tmp_path, monkeypatch):
         branch="b",
         pr_title="t",
         pr_body="x",
-        open_pr=False,
+        open_pr=True,  # the commit sequence only runs under the PR flow
         _run=runner,
     )
     assert result.opened is False
@@ -150,7 +206,7 @@ def test_failing_git_commit_raises(tmp_path):
         return _CP()
 
     with pytest.raises(GatePrError):
-        open_or_print_pr(paths, branch="b", pr_title="t", pr_body="x", open_pr=False, _run=run)
+        open_or_print_pr(paths, branch="b", pr_title="t", pr_body="x", open_pr=True, _run=run)
 
 
 def test_printed_command_quotes_every_interpolated_value(tmp_path):
@@ -203,7 +259,7 @@ def test_failed_commit_restores_the_original_branch(tmp_path):
             branch="mylonite/gate-fail",
             pr_title="t",
             pr_body="x",
-            open_pr=False,
+            open_pr=True,
             _run=run,
         )
 
@@ -311,7 +367,7 @@ def test_rollback_step_failure_warns_but_does_not_replace_the_original_error(tmp
             branch="mylonite/gate-fail",
             pr_title="t",
             pr_body="x",
-            open_pr=False,
+            open_pr=True,
             _run=run,
         )
 
