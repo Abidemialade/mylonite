@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-08-28
+
+A correctness pass over the places Mylonite mishandled the operator's repository,
+buried an error, or described itself inaccurately. Twelve fixes, no new features.
+
+### Changed
+
+- **`gate` no longer modifies your repository unless you ask it to.** Read this if
+  you script `gate`.
+
+  It used to run `git checkout -b`, `git add` and `git commit` on *every* run, and
+  scaffold two files into `.github/workflows/` unless you passed `--no-workflows`.
+  The commit sequence sat above the `if not open_pr` check, so a user running plain
+  `mylonite gate` to see what it finds got a branch, a commit and two workflow files
+  they never asked for.
+
+  Committing is part of the PR flow, so it is now gated on the flag that requests
+  the PR flow, and `--workflows` defaults to off. Without `--open-pr`, `gate` writes
+  only to its output directory and prints the exact `git`/`gh` command sequence to
+  run by hand.
+
+  **Migration:** add `--open-pr` to keep the branch-and-commit behaviour, and
+  `--workflows` to keep the CI scaffolding. With `--open-pr` the behaviour is
+  otherwise unchanged, including the rollback on a failed commit.
+
+- **A synthetic-twin PASS no longer claims your control carries the security.** The
+  reject branch always distinguished the server-layer twin from the synthetic one;
+  the pass branch printed *"the safeguard - not the model - carries the security"*
+  either way — on the green, test-emitting, CI-gating outcome. On a synthetic twin
+  the guarded side is Mylonite's own canonical shim, so the run measured the control
+  *class*, never your implementation. The validator detail and the gating PR headline
+  now match the twin that produced them. A server-layer pass still makes the strong
+  claim; it is earned. Findings are KEPT either way — only the claim narrows.
+
+### Fixed
+
+- **A failed launch is reported as a launch failure, and names the command.** A
+  launch command that does not exist fell through `_classify_failure` to
+  `planner_exception`, telling the operator their planner had broken when the server
+  never started. `PermissionError` and `NotADirectoryError` join it. The
+  classification was also written to metadata nothing read, so it never reached the
+  operator; it now leads the skip reason, and a launch failure names the command via
+  the description helper that already formatted exactly that string.
+
+- **Budget exhaustion produces one exit code instead of three.** It yielded `3` from
+  the engine, `2` or `0` when the adapter's catch-all downgraded it to a skipped
+  attempt, and `1` as an uncaught traceback from the validator. The adapter's
+  re-raise tuple is now documented as the control-flow allowlist and includes it;
+  `gate` catches it and exits `3`.
+
+- **A wrong `--model` gives one line, not hundreds of traceback lines.**
+  `logger.exception` fired for every recoverable completion failure, once per caller
+  per seed, with no logging configuration anywhere in the package. It is now one
+  warning line with the traceback at DEBUG. The retry storm should not have happened
+  either: a provider `BadRequestError` was filed under the catch-all `unknown`
+  category and retried, so the one error whose remedy says "Check --model" was the
+  one being retried. It now has its own non-recoverable `bad_request` category.
+
+- **`--env-file` accepts the variables in the project's own `.env.example`.** It
+  accepted 7 of 18 and rejected 11, including `MYLONITE_MODEL`, which that file marks
+  required. The `MYLONITE_*` allowlist is derived from the typed settings object that
+  defines which of them mean anything, so the loader and the consumer cannot drift.
+  It is not a prefix match. `AWS_REGION_NAME` and `OPENAI_API_BASE` are recognised as
+  optional provider vars without becoming required credentials.
+
+- **`gate` reports a git/gh failure gracefully.** `GatePrError` had no handler, so
+  any git or `gh` failure surfaced as a raw traceback after the whole run had been
+  paid for. It is now a named error on the new exit code `8`.
+
+- **A git failure costs no evidence.** `gate` now writes the validation report to the
+  output directory before any git command runs, alongside the generated test and the
+  exploit JSON that were already written there.
+
+- **Incomplete coverage is reported even when the scan found something.** The caveat
+  was gated on `findings_count == 0`, so the run that most needs it — a finding
+  alongside untested seeds — reported nothing through the structured outcome. The
+  exit code is unchanged: "ran and found something" still exits `0`.
+
+- **A synthesised seed keeps its own compliance tags.** The seed lookup was built from
+  the static catalogue, so a synthesised seed's id missed and the engine fell back to
+  the umbrella module's tags. The excessive-agency module spans W3 and W4 and its
+  module-level tags are the W3 set, so a synthesised W4 finding was emitted stamped
+  `ASI05` and `AML.T0049` — an egress technique it had not exercised. Those tags
+  become pytest markers and SARIF tags in a consumer's repository.
+
+### Documentation
+
+- README rewritten: accurate command surface, the two control-efficacy fidelities and
+  what each proves, the external verification numbers (including the misses), and an
+  explicit note that a clean result is a result.
+- `docs/ci-gating.md`, `docs/cli-reference.md`, `docs/reading-results.md`,
+  `docs/validation.md` and `docs/architecture.md` updated for the behaviour changes
+  above; new "Which claim you earned" section in `docs/reading-results.md`.
+- The `primary_tools` "narrows seed selection" claim is removed from
+  `docs/target-file.md` and the scaffold comment. It has zero readers; wiring it is
+  tracked in `TODOS.md`.
+
 ## [0.8.4] - 2026-08-27
 
 ### Fixed
@@ -3228,6 +3325,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - mkdocs-material docs scaffold.
 
 [Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...HEAD
+[0.8.5]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/Abidemialade/mylonite/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Abidemialade/mylonite/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/Abidemialade/mylonite/compare/v0.8.1...v0.8.2
