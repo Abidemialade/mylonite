@@ -33,6 +33,31 @@ class GateResult:
     kept: bool | None = None
 
 
+def _write_validation_report(out_dir: Path, report: ValidationReport) -> None:
+    """Persist the oracle verdict to ``out_dir``, redacted for commit.
+
+    Mirrors what ``validate`` writes so the two commands leave the same artefact
+    on disk. ``outcome.detail`` and ``notes`` are free text that can carry a live
+    exception message (DCR-0003) and this file gets committed to a branch, so the
+    same sanitisation applies here.
+    """
+    from mylonite._redaction import redact
+
+    sanitized = report.model_copy(
+        update={
+            "outcomes": [
+                outcome.model_copy(update={"detail": redact(outcome.detail)})
+                for outcome in report.outcomes
+            ],
+            "notes": redact(report.notes) if report.notes else report.notes,
+        }
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "validation_report.json").write_text(
+        sanitized.model_dump_json(indent=2) + "\n", encoding="utf-8"
+    )
+
+
 @dataclass(frozen=True)
 class ScanOutcomeBundle:
     """What ``scan_fn`` hands ``run_gate``: the typed verdict AND the exploits.
@@ -105,6 +130,14 @@ def run_gate(
     if not report.kept:
         echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
         return GateResult(exit_code=EXIT_NOT_KEPT, opened_pr=False, kept=False)
+
+    # Persist the oracle verdict BEFORE any git contact. The generated test and
+    # the exploit JSON were already on disk above, but the validation report --
+    # the most expensive artefact of the run -- was only ever written by
+    # `validate`, so a failure in the git/gh step threw it away. Redacted the
+    # same way `validate` redacts it (DCR-0003): outcome.detail and notes can
+    # carry a live exception message, and this file is committed to a branch.
+    _write_validation_report(out_dir, report)
 
     body = build_pr_body(
         exploit,

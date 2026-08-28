@@ -1,3 +1,7 @@
+import json
+
+import pytest
+
 from mylonite.contracts._types import (
     AdapterResponse,
     ComplianceTags,
@@ -159,6 +163,53 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     ).exists()
     assert "Suggested mitigation" in pr_calls["body"]
     assert pr_calls["open_pr"] is False
+
+
+def test_validation_report_is_on_disk_before_the_pr_step_runs(tmp_path):
+    """A failing git/gh step must cost the operator no evidence.
+
+    The generated test and the exploit JSON were already persisted before
+    ``open_pr_fn``, but the validation report — the oracle verdict the whole run
+    exists to produce — was only ever written by `validate`, never by `gate`. A
+    git failure at the last step therefore threw away the most expensive
+    artefact of the run.
+    """
+    ex = _exploit()
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        kept=True,
+        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="5/5", metric=1.0)],
+        mutation_score=None,
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    seen: dict[str, bool] = {}
+
+    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
+        # observed from INSIDE the PR step: the report must already be there
+        seen["report_on_disk"] = (out_dir / "validation_report.json").exists()
+        raise RuntimeError("git exploded")
+
+    with pytest.raises(RuntimeError):
+        run_gate(
+            out_dir=out_dir,
+            scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
+            generate_fn=lambda exploit: GeneratedTest(
+                framework="pytest",
+                filename="test_security_x.py",
+                source="# test\n",
+                exploit=exploit,
+            ),
+            validate_fn=lambda test: report,
+            open_pr_fn=fake_open_pr,
+            open_pr=True,
+        )
+
+    assert seen["report_on_disk"] is True
+    # and it survives the failure, alongside the other two artefacts
+    assert (out_dir / "validation_report.json").exists()
+    assert (out_dir / "test_security_x.py").exists()
+    persisted = json.loads((out_dir / "validation_report.json").read_text(encoding="utf-8"))
+    assert persisted["kept"] is True
 
 
 def test_run_gate_threads_system_prompt_so_localize_resolves_a_line(tmp_path):
