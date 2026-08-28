@@ -820,3 +820,39 @@ def test_llm_scope_policy_only_leaves_counter_untouched() -> None:
     with counter.active(), llm_scope(policy=LLMPolicy(temperature=0.42)):
         assert active_counter() is counter  # untouched by the policy-only scope
         assert active_policy().temperature == 0.42
+
+
+def test_a_recoverable_call_failure_logs_one_line_not_a_traceback(caplog: Any) -> None:
+    """A recoverable provider error must not dump a stack trace per call.
+
+    `logger.exception` fired once per caller per seed with no logging
+    configuration anywhere in src/, so a single bad --model produced hundreds of
+    traceback lines before any usable summary. The operator needs one legible
+    line; the traceback belongs at DEBUG for whoever actually wants it.
+    """
+    import logging
+
+    def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError("RateLimitError: 429 Too Many Requests")
+
+    with caplog.at_level(logging.DEBUG, logger="mylonite.scan._llm"):
+        result = litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+
+    cause, _detail = pop_fallback_cause(result)
+    assert cause == FALLBACK_CALL_RAISED
+    assert result == {"body": "fb"}
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, [r.getMessage() for r in warnings]
+    # the one-line summary carries the useful detail...
+    assert "RateLimitError" in warnings[0].getMessage()
+    # ...and carries NO traceback
+    assert warnings[0].exc_info is None
+    # the traceback is still available to anyone who asks for DEBUG
+    assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)

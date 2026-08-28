@@ -107,7 +107,7 @@ class BudgetExceededError(RuntimeError):
 #: Every OTHER category (rate_limit, network, unknown) keeps the existing
 #: swallow-into-fallback behaviour unchanged: those genuinely can clear up on
 #: their own or on a later run.
-_NON_RECOVERABLE_CATEGORIES: Final = frozenset({"auth", "tls", "context_window"})
+_NON_RECOVERABLE_CATEGORIES: Final = frozenset({"auth", "tls", "context_window", "bad_request"})
 
 
 class NonRecoverableProviderError(RuntimeError):
@@ -453,7 +453,19 @@ def _classify_or_swallow(
         )
         _mark_failure()
         raise NonRecoverableProviderError(diagnosis, caller=caller) from exc
-    logger.exception("%s: LiteLLM completion raised", caller)
+    # ONE legible line, not a stack trace. This fires once per caller per seed
+    # and there is no logging configuration anywhere in src/, so `logger.
+    # exception` turned a single bad --model into hundreds of traceback lines
+    # before any usable summary. WARNING is emitted by Python's lastResort
+    # handler without any configuration, so the operator still sees it; the
+    # traceback drops to DEBUG for whoever actually wants it.
+    logger.warning(
+        "%s: LiteLLM completion failed [%s], continuing with a fallback: %s",
+        caller,
+        diagnosis.category,
+        _exc_detail(exc),
+    )
+    logger.debug("%s: full traceback for the failure above", caller, exc_info=exc)
     _mark_failure()
     return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
 
