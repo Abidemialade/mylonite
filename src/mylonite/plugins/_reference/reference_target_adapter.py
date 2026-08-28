@@ -319,6 +319,16 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
                 "note_id": note_id or "",
                 "setup": setup,
                 "drive": drive,
+                # #119: the same per-call results `drive_planner` stamps. Without
+                # it every trace-reading predicate hit its absent-evidence guard
+                # and returned None on this path, so the ONE target the
+                # differential oracle uses as ground truth was also the one
+                # getting a model-graded verdict instead of a deterministic one.
+                # No catalogue seed reads the trace (all 16 key on the store
+                # blobs), so this changes no existing reference verdict -- it
+                # makes a deterministic verdict reachable where the judge used
+                # to decide.
+                "effect_trace": json.dumps(server.tool_results),
                 "tool_surface": await _tool_surface_json(server),
             },
         )
