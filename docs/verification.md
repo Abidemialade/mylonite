@@ -12,9 +12,12 @@ This page is the honest scorecard. The numbers are from live runs in June 2026 w
 machine), small samples, cost-bounded. Read the caveats — several numbers mean less (or
 more) than they look.
 
-The single-model evidence base is the biggest caveat on this page, and its direction is not
-the one you might assume: a KEPT proof gets *easier* on a weaker model, so these figures are
-the conservative case. That is spelled out, along with every other known gap, in
+The single-model evidence base is the biggest caveat on this page. A second model has since
+been run against the *bundled* targets (locally, zero cost) and the result is more
+interesting than "a weaker model finds more": recall turned out **not** to be monotonic in
+model weakness — a weaker planner raises exposure for attacks that need the model to comply,
+and lowers it for attacks that need the model to be capable. Every number on this page is
+still single-model. Both are spelled out, with every other known gap, in
 [Known limitations](limitations.md).
 
 ## The one-line result

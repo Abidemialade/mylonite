@@ -217,6 +217,27 @@ nothing left the machine).
    layer's safeguards only matter when the app is built to act without asking — and that's
    precisely the surface Mylonite exists to gate.**
 
+8. **Recall is NOT monotonic in model weakness — Lesson 7 needs a floor as well as a
+   ceiling.** Lesson 7 concluded that a KEPT proof needs either a weaker model or an
+   auto-acting app. A second-model run (2026-08-28, `llama3.2:3b` planner / `qwen2.5-coder:7b`
+   judge, local via Ollama, zero API cost) against the reference targets shows the first half
+   is only half-true. Both models found two weaknesses on `reference:vulnerable`, but not the
+   same two: W4 fired on **both** (the app-design flaw is model-independent — the thesis),
+   W3 fired **only** on the weak planner (it complied where Haiku refused — the predicted
+   direction), and W1 fired **only** on Haiku. W1 requires the agent to *competently follow*
+   a smuggled instruction, so a model too weak to execute the attack coherently suppresses
+   the finding instead of falling for it. Stated plainly: **a weaker model raises exposure
+   for compliance-dependent attacks (W3/W4) and lowers it for capability-dependent ones
+   (W1).** Picking a planner for a KEPT proof is a band, not a floor.
+
+   Two corollaries from the same run. (a) **Prefer a stronger judge than planner.** The local
+   judge asserted with `confidence: 1.0` that `web_fetch` had been called when the trace
+   showed only `write_note`/`read_note`; the deterministic predicate layer overrode it and
+   the verdict was still correct — the architecture held, but a weak judge fabricates
+   evidence in the *reason* text an operator reads. (b) `gpt-oss:20b` is **unusable in any
+   LLM role here**: it returns empty `message.content` (its output routes to a reasoning
+   field), so it fails silently rather than loudly.
+
 ## How to run
 
 Live phases need the targets running + an LLM key + network (see
