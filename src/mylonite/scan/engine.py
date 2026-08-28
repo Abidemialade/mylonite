@@ -37,7 +37,12 @@ from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
-from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, target_family
+from mylonite.scan.seeds import (
+    SEED_CATALOGUE,
+    SeedPattern,
+    seeds_for_descriptor,
+    target_family,
+)
 from mylonite.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -228,6 +233,11 @@ class ScanEngine:
         self._attack_modules = list(attack_modules)
         self._customiser = customiser
         self._judge = judge
+        #: Seeds resolvable by pattern_id for THIS run. Seeded with the static
+        #: catalogue and widened in ``run()`` with the descriptor's synthesised
+        #: seeds, so a synthesised seed's own compliance tags survive instead of
+        #: falling back to its umbrella module's.
+        self._seeds_by_id: dict[str, SeedPattern] = dict(_SEEDS_BY_ID)
 
     async def run(self) -> ScanResult:
         counter = LiteLLMCallCounter(cap=self._config.max_llm_calls)
@@ -273,6 +283,18 @@ class ScanEngine:
                 return self._finalize(
                     attempts, exploits, aborted, time.monotonic() - start, module_ids
                 )
+
+            # Resolve seeds against the seeds THIS RUN actually has, not the
+            # static catalogue alone. `_SEEDS_BY_ID` is built from SEED_CATALOGUE,
+            # so a SYNTHESISED seed's id missed and `_run_payload` fell back to
+            # the umbrella MODULE's compliance tags. The excessive-agency module
+            # spans W3 and W4 and its module-level tags are the W3 set, so a
+            # synthesised W4 finding (an unconfirmed consequential action) was
+            # emitted stamped ASI05 + AML.T0049 -- tags that describe unrestricted
+            # egress. The catalogued W4 seed, being in the map, was stamped
+            # correctly: same weakness class, two tag sets, decided by provenance.
+            # Those tags become pytest markers and SARIF tags in a consumer's repo.
+            self._seeds_by_id.update({s.pattern_id: s for s in seeds_for_descriptor(descriptor)})
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(self._config.max_concurrent)
@@ -622,7 +644,10 @@ class ScanEngine:
         # party plugins whose seed_id is not in SEED_CATALOGUE get skipped
         # cleanly (the engine still runs, just without LLM customisation for
         # those seeds).
-        seed = _SEEDS_BY_ID.get(seed_id)
+        # Per-run map (catalogue + this descriptor's synthesised seeds), so a
+        # synthesised seed's own compliance tags survive instead of falling back
+        # to the umbrella module's.
+        seed = self._seeds_by_id.get(seed_id)
         needs_customisation = payload.metadata.get("needs_customisation") == "true"
         # A catalogue-unknown seed_id is only fatal when the payload asks to be
         # customised — the customiser prompt is built from the SeedPattern shape.
