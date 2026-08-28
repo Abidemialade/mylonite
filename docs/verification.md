@@ -8,9 +8,9 @@ against external ground truth it **did not author** — runnable vulnerable MCP 
 published academic benchmarks — and publishes the result here, **negatives included**.
 
 This page is the honest scorecard. The numbers are from live runs in June 2026 with
-**Claude Haiku 4.5** as the planner/judge (the only provider keyed on the maintainer's
-machine), small samples, cost-bounded. Read the caveats — several numbers mean less (or
-more) than they look.
+**Claude Haiku 4.5** as the planner/judge (the only hosted provider these runs used),
+small samples, cost-bounded. Read the caveats — several numbers mean less (or more) than
+they look.
 
 The single-model evidence base is the biggest caveat on this page. A second model has since
 been run against the *bundled* targets (locally, zero cost) and the result is more

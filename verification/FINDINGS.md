@@ -2,7 +2,7 @@
 
 This is the evidence-backed scorecard from running Mylonite against ground truth it
 did not author. Numbers are from live runs in June 2026 with **Claude Haiku 4.5**
-as the planner/judge (the only provider keyed on this machine), small samples,
+as the planner/judge (the only hosted provider these runs used), small samples,
 cost-bounded. Read the caveats — several numbers mean less (or more) than they look.
 
 ## The one-line result
