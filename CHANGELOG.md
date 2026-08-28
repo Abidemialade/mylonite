@@ -3334,7 +3334,7 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.5...HEAD
 [0.8.5]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/Abidemialade/mylonite/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Abidemialade/mylonite/compare/v0.8.2...v0.8.3
