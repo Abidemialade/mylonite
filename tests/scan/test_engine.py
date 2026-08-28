@@ -55,11 +55,13 @@ class _AdapterStub:
         raise_skipped: bool = False,
         raise_no_seed_arm: bool = False,
         raise_describe: bool = False,
+        descriptor: TargetDescriptor | None = None,
     ) -> None:
         self._response = response
         self._raise_skipped = raise_skipped
         self._raise_no_seed_arm = raise_no_seed_arm
         self._raise_describe = raise_describe
+        self._descriptor = descriptor
         self.invoked: list[Payload] = []
         #: Every invoke() ATTEMPT, including ones that go on to raise a
         #: structural skip — unlike ``invoked`` (only successful calls). Lets
@@ -69,6 +71,8 @@ class _AdapterStub:
     async def describe(self) -> TargetDescriptor:
         if self._raise_describe:
             raise RuntimeError("describe boom")
+        if self._descriptor is not None:
+            return self._descriptor
         return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
@@ -289,6 +293,84 @@ async def test_engine_stamps_compliance_from_firing_seed_not_module() -> None:
     assert len(result.exploits) == 1
     # Round-trip: the emitted compliance is exactly the firing seed's, not the module's.
     assert result.exploits[0].compliance == seed.compliance
+
+
+@pytest.mark.asyncio
+async def test_engine_stamps_compliance_from_a_SYNTHESISED_seed_too() -> None:
+    """The provenance rule must hold for synthesised seeds, not just catalogue ones.
+
+    `_SEEDS_BY_ID` is built from SEED_CATALOGUE alone, so a synthesised seed's
+    id misses and the engine falls back to the umbrella MODULE's tags. The
+    excessive-agency module spans W3 and W4, and its module-level tags are the
+    W3 set -- so a synthesised W4 finding (an unconfirmed consequential action)
+    was emitted stamped ASI05 + AML.T0049, which describe unrestricted egress.
+    A CATALOGUED W4 seed, being in the map, was stamped correctly. Same weakness
+    class, two different tag sets, decided by seed provenance.
+
+    Those tags become pytest markers and SARIF tags in a consumer's repository.
+    """
+    from mylonite.contracts import ToolSpec
+    from mylonite.scan.seeds import seeds_for_descriptor
+
+    descriptor = TargetDescriptor(
+        target_id="mcp:stub",
+        kind="mcp",
+        system_prompt="x",
+        tools=[
+            ToolSpec(
+                name="send_email",
+                description="Send an email to a recipient.",
+                json_schema={
+                    "type": "object",
+                    "properties": {"to": {"type": "string"}, "body": {"type": "string"}},
+                    "required": ["to", "body"],
+                },
+            )
+        ],
+        weakness_classes=["W4"],
+    )
+    # The REAL synthesis path, not a hand-rolled seed — so the pattern_id and
+    # tags are exactly what a live scan of this target would produce.
+    synth_seed = next(
+        s for s in seeds_for_descriptor(descriptor) if s.pattern_id.startswith("synth-")
+    )
+    assert synth_seed.weakness == "W4"
+    payload = Payload(
+        pattern_id=synth_seed.pattern_id,
+        channel=synth_seed.channel,
+        body=synth_seed.seed_body,
+        metadata={
+            "seed_id": synth_seed.pattern_id,
+            "weakness": synth_seed.weakness,
+            "predicate": synth_seed.predicate,
+            "setup": synth_seed.setup,
+            "drive": synth_seed.drive,
+            # Synthesised bodies are already target-shaped — they run DIRECT.
+            "needs_customisation": "false",
+        },
+    )
+    module = _ModuleStub([payload])
+    # Precondition: the module's tags differ from the seed's, so the assertion
+    # can distinguish the two sources.
+    assert module.attack_metadata().compliance != synth_seed.compliance
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response(), descriptor=descriptor),
+        attack_modules=[module],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(
+            Verdict(success=True, reason="caught it", evidence={}, mechanism="predicate")
+        ),
+    )
+    result = await engine.run()
+
+    assert len(result.exploits) == 1
+    emitted = result.exploits[0].compliance
+    assert emitted == synth_seed.compliance
+    # The specific mislabelling: a W4 finding must not claim an egress technique.
+    assert "ASI05" not in emitted.owasp_asi
+    assert "AML.T0049" not in emitted.mitre_atlas
 
 
 @pytest.mark.asyncio
