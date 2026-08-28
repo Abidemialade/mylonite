@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-08-28
+
+Two output surfaces stated a stronger claim than the run behind them supported. Both
+now resolve guarded-twin fidelity the same way the rest of the tool already did, and a
+drift guard keeps the next one from diverging. No API or contract changes.
+
 ### Fixed
 
 - **SARIF no longer claims your control carries the security when it did not measure it.**
@@ -3391,7 +3397,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.8.6...HEAD
+[0.8.6]: https://github.com/Abidemialade/mylonite/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/Abidemialade/mylonite/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/Abidemialade/mylonite/compare/v0.8.2...v0.8.3
