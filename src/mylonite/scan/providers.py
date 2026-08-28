@@ -44,6 +44,24 @@ _EXTRA_ENV_VARS: dict[str, tuple[str, ...]] = {
     "azure": ("AZURE_API_BASE", "AZURE_API_VERSION"),
 }
 
+#: OPTIONAL provider vars: recognised by :func:`looks_like_provider_env_var` so
+#: ``--env-file`` will load them, but NOT required to route a call.
+#:
+#: Kept separate from :data:`_EXTRA_ENV_VARS` because that map feeds
+#: :func:`required_env_vars`, and anything listed there becomes a HARD
+#: precondition -- putting an optional var in it makes a working configuration
+#: report as missing credentials. "Loadable" and "required" are different
+#: questions and need different lists.
+_OPTIONAL_ENV_VARS: tuple[str, ...] = (
+    # Bedrock's region. LiteLLM defaults it, so it is optional -- but it ships
+    # in .env.example and `--env-file` used to reject it.
+    "AWS_REGION_NAME",
+    # An OpenAI-compatible endpoint (a local vLLM/Ollama shim, a gateway). The
+    # AZURE_* family got recognition for free from its own regex; OpenAI's
+    # equivalent matched nothing.
+    "OPENAI_API_BASE",
+)
+
 # Pattern layer for `looks_like_provider_env_var` (the env-file/`--env-file`
 # funnel): LiteLLM's own convention for a provider's credential var is
 # `<PROVIDER>_API_KEY` (confirmed against the installed litellm package for
@@ -150,4 +168,12 @@ def looks_like_provider_env_var(key: str) -> bool:
     """
     if _RE_API_KEY_VAR.match(key) or _RE_AZURE_VAR.match(key):
         return True
-    return any(key in variables for variables in PROVIDER_ENV_VARS.values())
+    if any(key in variables for variables in PROVIDER_ENV_VARS.values()):
+        return True
+    # ...plus the non-key vars a provider needs to route a call, and the
+    # optional ones. Neither map was consulted here, so AWS_REGION_NAME and
+    # OPENAI_API_BASE were dropped from `--env-file` while Azure's equivalents
+    # passed only by accident of the AZURE_* regex.
+    if any(key in variables for variables in _EXTRA_ENV_VARS.values()):
+        return True
+    return key in _OPTIONAL_ENV_VARS
