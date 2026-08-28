@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Committing no longer fails once on an unrelated change to `.secrets.baseline`.**
+  Contributor-facing only; nothing in the published package changes.
+
+  `detect-secrets` rewrites the baseline whenever a recorded finding's line number
+  shifts, and pre-commit fails any hook that modifies a tracked file regardless of its
+  exit code. With 50 audited findings across 17 files — 13 in `tests/test_cli.py`, 12 in
+  `tests/test_redaction.py`, 2 in `CHANGELOG.md` — almost every commit moved at least
+  one, and every release moved the `CHANGELOG.md` pair. The result was a failed hook, a
+  `git add`, and a second attempt, every time.
+
+  `scripts/normalize_secrets_baseline.py` now stores `line_number: 0`, which
+  `detect-secrets` treats as "not provided" and skips comparing, alongside the path and
+  `generated_at` normalisation it already did. Detection is unchanged: a new secret is
+  caught by the set difference on `(hashed_secret, type)` that runs before the
+  baseline-update branch is reached, verified against a planted credential.
+  `tests/test_secrets_baseline_normalizer.py` fails if a regenerated baseline
+  reintroduces real line numbers.
+
 ## [0.8.6] - 2026-08-28
 
 Two output surfaces stated a stronger claim than the run behind them supported. Both

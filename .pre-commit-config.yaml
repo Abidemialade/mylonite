@@ -30,10 +30,20 @@ repos:
 
   - repo: local
     hooks:
-      # detect-secrets rewrites the baseline whenever line numbers shift, using
-      # the path separator of whichever OS ran it. A Windows contributor emits
-      # `docs\quarry.md` where CI expects `docs/quarry.md`, so previously-audited
-      # findings read as new and the precommit job fails on an unrelated change.
+      # Strips the baseline's volatile metadata, which is what made this hook
+      # pair fail a commit and pass on the retry.
+      #
+      # Paths: detect-secrets records findings under the separator of whichever
+      # OS ran it, so a Windows contributor emits `docs\quarry.md` where CI
+      # expects `docs/quarry.md` and previously-audited findings read as new.
+      #
+      # Line numbers: detect-secrets rewrites the baseline whenever a recorded
+      # finding's line number shifts, and pre-commit fails any hook that
+      # modifies a tracked file regardless of exit code. Storing `line_number:
+      # 0` ("not provided") makes it skip the comparison, so an unrelated edit
+      # no longer rewrites the file. A new secret is still caught earlier and
+      # unconditionally -- see scripts/normalize_secrets_baseline.py.
+      #
       # Runs immediately after detect-secrets so the baseline is normalised
       # before it is staged.
       - id: normalize-secrets-baseline
