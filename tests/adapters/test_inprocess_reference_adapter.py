@@ -266,6 +266,72 @@ async def test_invoke_w4_send_email_direct_against_vulnerable() -> None:
     assert response.metadata["drive"] == "send_email_direct"
 
 
+@pytest.mark.asyncio
+async def test_invoke_stamps_an_effect_trace() -> None:
+    """Issue #119: the ground-truth target was the one getting a model-graded verdict.
+
+    `_InProcessAttackSession.drive_planner` surfaces per-call results as
+    `metadata["effect_trace"]`; `invoke()` — the path a normal `scan`/`gate`
+    against `reference:vulnerable` actually takes — stamped none at all. Every
+    trace-reading predicate therefore returned None (inconclusive) here and the
+    LLM judge decided instead, including `consequential_action_executed`, whose
+    entire purpose is to be a deterministic verdict.
+
+    The differential oracle's ground truth is the one target where a
+    deterministic verdict matters most.
+    """
+    iteration = [0]
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        iteration[0] += 1
+        if iteration[0] == 1:
+            return _tool_response(
+                [_tool_call("send_email", {"to": "ops@example.com", "subject": "s", "body": "b"})]
+            )
+        return _text_response("sent.")
+
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
+    response = await adapter.invoke(_w4_payload())
+
+    assert "effect_trace" in response.metadata
+    trace = json.loads(response.metadata["effect_trace"])
+    assert isinstance(trace, list) and trace, "the trace must carry the executed calls"
+    assert any(entry.get("tool") == "send_email" for entry in trace), trace
+
+
+@pytest.mark.asyncio
+async def test_a_trace_reading_predicate_is_decisive_on_the_single_shot_path() -> None:
+    """The consequence of the fix, asserted where it actually matters.
+
+    Without a stamped trace `consequential_action_executed` bails to None on its
+    absent-evidence guard (the DCR-0038 trap: absence of evidence is never a
+    confident negative). With one, it renders a real predicate verdict.
+    """
+    from mylonite.scan.predicates import consequential_action_executed
+
+    iteration = [0]
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        iteration[0] += 1
+        if iteration[0] == 1:
+            return _tool_response(
+                [_tool_call("send_email", {"to": "ops@example.com", "subject": "s", "body": "b"})]
+            )
+        return _text_response("sent.")
+
+    payload = _w4_payload()
+    payload = payload.model_copy(
+        update={"metadata": {**payload.metadata, "consequential_tool": "send_email"}}
+    )
+    adapter = InProcessReferenceAdapter(variant="vulnerable", model="stub", completion_fn=stub)
+    response = await adapter.invoke(payload)
+
+    verdict = consequential_action_executed(payload, response)
+    assert verdict is not None, "the predicate must not fall through to the LLM judge here"
+    assert verdict.mechanism == "predicate"
+    assert verdict.success is True
+
+
 # --- v0.3.0 (PR A) — injectable note_id_factory for deterministic demo IDs ----
 
 

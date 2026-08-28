@@ -85,6 +85,16 @@ buried an error, or described itself inaccurately. Twelve fixes, no new features
   alongside untested seeds — reported nothing through the structured outcome. The
   exit code is unchanged: "ran and found something" still exits `0`.
 
+- **The reference adapter stamps an effect trace on the single-shot path** (#119).
+  `_InProcessAttackSession.drive_planner` surfaced per-call results as
+  `metadata["effect_trace"]`; `invoke()` — the path a normal `scan`/`gate` against
+  `reference:vulnerable` actually takes — stamped none. Every trace-reading
+  predicate hit its absent-evidence guard and returned inconclusive, so the one
+  target the differential oracle uses as ground truth was also the one getting a
+  model-graded verdict rather than a deterministic one. No existing reference
+  verdict changes: all 16 catalogue seeds key on the store blobs, not the trace.
+  What changes is that a deterministic verdict is now reachable there.
+
 - **A synthesised seed keeps its own compliance tags.** The seed lookup was built from
   the static catalogue, so a synthesised seed's id missed and the engine fell back to
   the umbrella module's tags. The excessive-agency module spans W3 and W4 and its
