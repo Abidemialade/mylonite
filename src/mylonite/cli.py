@@ -43,6 +43,7 @@ from mylonite.exit_codes import (
     EXIT_CONFIG,
     EXIT_FINDINGS,
     EXIT_NOT_KEPT,
+    EXIT_PR_FAILED,
     EXIT_PROVIDER,
     EXIT_SUCCESS,
 )
@@ -4065,19 +4066,32 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
-    with llm_scope(policy=effective_policy):
-        result = run_gate(
-            out_dir=out,
-            scan_fn=scan_fn,
-            generate_fn=generate_fn,
-            validate_fn=validate_fn,
-            open_pr_fn=open_pr_fn,
-            open_pr=open_pr,
-            llm_enrich=llm_enrich,
-            mitigation_model=effective_model,
-            system_prompt=gate_system_prompt,
-            target_context=gate_target_context,
+    try:
+        with llm_scope(policy=effective_policy):
+            result = run_gate(
+                out_dir=out,
+                scan_fn=scan_fn,
+                generate_fn=generate_fn,
+                validate_fn=validate_fn,
+                open_pr_fn=open_pr_fn,
+                open_pr=open_pr,
+                llm_enrich=llm_enrich,
+                mitigation_model=effective_model,
+                system_prompt=gate_system_prompt,
+                target_context=gate_target_context,
+            )
+    except pr_mod.GatePrError as exc:
+        # The git/gh step is the LAST thing gate does, so by the time it fails
+        # the scan, generation and validation have all been paid for and their
+        # artefacts are already on disk under --out. Report it as a named error
+        # with its own exit code instead of a raw traceback, and point the
+        # operator at the evidence they still have.
+        echo_err(f"\nerror: the gate's git/gh step failed: {exc}")
+        echo_err(
+            f"The findings, the generated test and the validation report are "
+            f"still in '{out}'. Nothing was lost; only the PR step failed."
         )
+        raise typer.Exit(code=EXIT_PR_FAILED) from exc
     raise typer.Exit(code=result.exit_code)
 
 
