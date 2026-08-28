@@ -20,6 +20,7 @@ Contract:
 * ``5`` a generated test was not kept (differential/validation did not hold)
 * ``6`` test generation failed
 * ``7`` test validation failed
+* ``8`` the gate's git/gh step failed (the findings are still on disk)
 """
 
 from __future__ import annotations
@@ -34,3 +35,4 @@ EXIT_PROVIDER: Final = 4
 EXIT_NOT_KEPT: Final = 5
 EXIT_GENERATE_FAILED: Final = 6
 EXIT_VALIDATE_FAILED: Final = 7
+EXIT_PR_FAILED: Final = 8

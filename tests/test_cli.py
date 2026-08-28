@@ -4049,6 +4049,65 @@ def _stub_open_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_gate_reports_a_pr_failure_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A git/gh failure must be a named error with an exit code, not a traceback.
+
+    ``GatePrError`` had zero catchers in cli.py, so any git or gh failure — not a
+    repo, branch already exists, gh not authenticated — surfaced as a raw
+    traceback AFTER 100% of the LLM spend had been paid.
+    """
+    from mylonite.exit_codes import EXIT_PR_FAILED
+    from mylonite.gate import pr as pr_mod
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_differential_validator(
+        monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
+    )
+
+    def _boom(*_a: Any, **_k: Any) -> Any:
+        raise pr_mod.GatePrError("git checkout -b failed (rc=128): not a git repository")
+
+    monkeypatch.setattr(pr_mod, "open_or_print_pr", _boom)
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    out = tmp_path / "gate_out"
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(out),
+                "--no-workflows",
+            ],
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert result.exit_code == EXIT_PR_FAILED, result.output
+    # a named, readable error — not a stack trace
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "not a git repository" in result.output
+
+
 def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """T11 / finding E: for a target with a SERVER-LAYER control_env toggle,
     gate's raw side must genuinely launch with that guard DISABLED — not be a
