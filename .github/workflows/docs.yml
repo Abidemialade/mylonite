@@ -62,7 +62,9 @@ jobs:
       # `mkdocs gh-deploy` pushes via the git remote, so persisting the token is
       # the mechanism, not an oversight. Safe here specifically because this job
       # runs only on push to main -- it never checks out pull-request code, so
-      # there is no contributor-authored step to read .git/config.
+      # there is no contributor-authored step to read them. (checkout v6+ keeps
+      # credentials under $RUNNER_TEMP rather than .git/config; still readable by
+      # a step in the same job, just less obviously so.)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

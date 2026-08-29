@@ -14,23 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a pull request: see the new
   ["What we can and can't accept"](CONTRIBUTING.md#what-we-can-and-cant-accept).
 
+  - **`main` is now protected by a repository ruleset** requiring one approving
+    review, code-owner review, stale-review dismissal on push, and the `lint` /
+    `typecheck` / `test` / `precommit` / `security` checks. `security` was never
+    a required check before, so `bandit`, `detect-secrets` and `pip-audit` could
+    all go red without blocking a merge. `.github/CODEOWNERS` is now path-scoped
+    over the trust base — workflows, `gate-action/`, `.pre-commit-config.yaml`,
+    `pyproject.toml`, `scripts/`, `.secrets.baseline`, `reference_targets/` — so
+    those paths need an explicit code-owner approval. Repository admins are a
+    bypass actor while there is a single maintainer, who otherwise could not
+    merge at all; see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the
+    trigger to remove it. This replaces the older per-branch protection settings
+    rather than sitting alongside them.
   - `scripts/check_reference_target_inert.py` pins the property that makes the
     deliberately-vulnerable reference target auditable: the package is inert, so
     it cannot reach the network, spawn a process, or execute constructed code.
     Insecure code is expected there, which is exactly what makes it the cheapest
     place to hide a real backdoor — "it's intentional, see the seed catalogue"
-    is unfalsifiable by eye. The guard also requires every exposed tool to be
-    catalogued in `seeds/seeds.yaml` and to have a counterpart on the guarded
-    twin. Runs in pre-commit and the test suite.
-  - `Sensitive paths` check: pull requests touching workflows, `gate-action/`,
-    `.pre-commit-config.yaml`, `pyproject.toml`, `scripts/check_*.py`,
-    `.secrets.baseline`, or `reference_targets/` fail until a maintainer applies
-    the `reviewed:sensitive-paths` label. This makes `CODEOWNERS` enforceable
-    without requiring an approval the sole maintainer cannot give — see
-    [GOVERNANCE.md](GOVERNANCE.md#required-reviews), which records the trigger
-    for switching to real required reviews.
-  - OpenSSF Scorecard publishes the supply-chain posture, so a later change
-    that undoes this work shows up as a score drop rather than going unnoticed.
+    is unfalsifiable by eye. The guard confines the transport stack (`asyncio`,
+    `mcp`) to the one file that speaks the wire protocol, requires capable
+    packages to be imported `from` rather than bound as a name, and requires the
+    tools `_call_tool` dispatches on to equal the tools `list_tools` declares —
+    an undeclared branch is reachable, because the stdio layer forwards any name
+    straight through. Runs in pre-commit and the test suite.
+  - OpenSSF Scorecard runs weekly, with results in the Security tab, so a later
+    change that undoes this work shows up as a score drop. Not badged in the
+    README yet — see SECURITY.md for why.
   - No CodeQL workflow was added: CodeQL is already running here via GitHub's
     default setup, covering both `python` and `actions`. An advanced
     configuration cannot upload results while default setup is enabled, so
@@ -46,12 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `pip-audit` in CI is a gate again. It carried `continue-on-error: true`, which
+- `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
   did more than its comment justified: dropping `--strict` already avoids the
   editable-install false failure, so the flag was additionally swallowing real
-  dependency CVEs. A known vulnerability now fails the build.
-- Every `actions/checkout` sets `persist-credentials: false`, so the token is no
-  longer left in `.git/config` while CI installs and executes pull-request code.
+  dependency CVEs. Note this only became a *merge* gate once `security` was
+  added to the required checks above — the flag alone would have made the job
+  red without blocking anything.
+- Every `actions/checkout` sets `persist-credentials: false`, so a checkout does
+  not leave usable credentials behind while CI installs and executes
+  pull-request code. (`actions/checkout` v6+ stores them under `$RUNNER_TEMP`
+  rather than `.git/config`, which narrows the exposure but does not remove it.)
   The one job that genuinely needs those credentials, docs deployment, was split
   out of the docs build for this reason.
 - `Docs` workflow is two jobs. `contents: write` was granted workflow-wide while
