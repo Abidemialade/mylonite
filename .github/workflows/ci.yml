@@ -188,18 +188,29 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install
+      - name: Install via the [demo] extra, against the PUBLISHED reference app
+        # Deliberately NOT `pip install -e ./reference_targets/mcp_kitchen_sink`.
+        #
+        # The replay cache key folds in `tools`, and those tool schemas come from
+        # mcp-kitchen-sink. Installing the local editable copy would validate the
+        # fixtures against the working tree -- which is never what a user has.
+        # `pip install ".[demo]"` resolves the `==` pin and pulls the PUBLISHED
+        # wheel, so this job reproduces the actual `pip install "mylonite[demo]"`
+        # experience the README puts first.
+        #
+        # That closes the more likely break. The `==` pin defends against a
+        # FUTURE kitchen-sink release; it cannot defend against the local and
+        # published 0.1.0 being different bytes, which is what happens the first
+        # time someone edits a tool description in reference_targets/ without a
+        # version bump. Under this job that lands as a red demo here instead of a
+        # 100% fixture miss for every user of the extra.
+        #
+        # The `test` and `test-windows` jobs still install the local editable
+        # copy, so ordinary development of the reference target is unaffected.
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
-          pip install -e ./reference_targets/mcp_kitchen_sink
-      - name: The [demo] extra must resolve
-        # README and quickstart put `pip install "mylonite[demo]"` first, and the
-        # mcp-kitchen-sink `==` pin inside it is load-bearing (the replay cache key
-        # folds in that package's tool schemas). Resolve the extra for real, from
-        # the local project, so a broken or unsatisfiable pin fails here rather
-        # than for the first stranger who follows the README.
-        run: pip install --dry-run --ignore-installed ".[demo]"
+          pip install ".[demo]"
+          python -c "import mcp_kitchen_sink, importlib.metadata as m; print('kitchen-sink', m.version('mcp-kitchen-sink'), 'from', mcp_kitchen_sink.__file__)"
       - name: Run the offline demo (no API key set)
         # No provider key in the environment on purpose: if replay ever fell
         # through to a live call, this step must fail rather than quietly spend.

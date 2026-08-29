@@ -14,6 +14,7 @@ They prove three things:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ from typer.testing import CliRunner
 
 from mylonite.cli import EXIT_CONFIG, app
 from mylonite.demo import packaged_fixture_dir
+from mylonite.demo import runner as runner_mod
 from mylonite.demo.runner import DemoFixtureError, run_demo
 
 
@@ -61,10 +63,18 @@ async def test_demo_recorded_happy_path() -> None:
     assert result.guarded.report.findings_count == 0
     assert result.vulnerable.report.aborted is None
     assert result.guarded.report.aborted is None
-    # startswith, not ==: the label now carries fixture provenance
+    # startswith, not ==: the label carries fixture provenance
     # ("recorded <date> against <model>") so a replayed number is never
     # mistaken for a live measurement.
     assert result.mode.startswith("replay (offline)")
+    # ...and the provenance itself is asserted, against the REAL committed
+    # sidecars. `startswith` alone would pass on the bare label, which is
+    # exactly how the feature could rot while README, ROADMAP, quarry and the
+    # changelog all keep claiming the demo names its model and record date.
+    assert re.fullmatch(
+        r"replay \(offline\); recorded \d{4}-\d{2}-\d{2} against \S+", result.mode
+    ), f"mode line lost its provenance: {result.mode!r}"
+    assert runner_mod.DEMO_MODEL in result.mode
 
 
 async def test_demo_replay_is_zero_network(monkeypatch: pytest.MonkeyPatch) -> None:
