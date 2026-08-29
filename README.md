@@ -43,22 +43,56 @@ Two fidelities, and Mylonite always tells you which one you got:
 The second is genuinely useful and it is what runs on most real targets. It is not the same
 claim as the first, and Mylonite will not print the stronger wording for it.
 
-## Evidence
+## What's proven, what isn't
 
 Mylonite maintains an [independent verification harness](./docs/verification.md) that scores
 it against ground truth it did not author — runnable third-party MCP servers and published
-academic benchmarks. **It publishes the misses as well as the hits.**
+academic benchmarks. The harness is in this repo and you can re-run it yourself.
+
+Here is the honest split. Read the third bucket before the first.
+
+### Proven, against targets we did not write
 
 - **A KEPT external differential** on a third-party MCP email server: the attack fired
   **5/5** on the raw target, the guarded build leaked **0/5**, success-rate gap **1.00**.
 - **Zero false positives** on a benign third-party server — the external precision baseline.
 - **An external detection catch** on a peer-reviewed vulnerable MCP corpus.
-- **0/8 recall** on one external challenge set, **0/60** on another flagged as vacuous, and
-  an LLM-judge agreement F1 of **0.41**. Those are real results and they are published for
-  the same reason the good ones are.
+- **The judge's positive class verified on real third-party positives** (AgentDojo
+  trajectories from models that genuinely fell for attacks — not synthesised by us).
+- **Honesty rails hold under test:** NOT-TESTED is never rendered as clean, vacuous
+  agreement is flagged as vacuous, out-of-scope work is marked rather than scored.
 
-Every capability has been exercised against real third-party servers through the unchanged
-CLI. Full scorecard, caveats included: [docs/verification.md](./docs/verification.md).
+### Measured, and negative
+
+Published for the same reason the wins are.
+
+- **0/8 recall** on one external challenge set (DVMCP, with Claude Haiku 4.5).
+- **0/60** on another, flagged as vacuous — a model that resists every case leaves the
+  judge no positives to classify, so the resulting F1 would have meant nothing.
+- **LLM-judge agreement F1 of 0.41** against AgentDojo's oracle. The judge measures
+  *effect* ("did harm materialise?"); AgentDojo measures *exact goal achievement*. Some
+  of that gap is a real semantic mismatch we have not resolved.
+- **No model-fooling catch on an external app.** Every generic injection was resisted by a
+  robust model. The one thing that landed was an *app-design* flaw.
+
+### Not claimed
+
+- **On a single-build app, the strong claim is unavailable.** Without a `control_env` to
+  toggle, the guarded side is Mylonite's own shim, not your code. That is a boundary proxy,
+  and no surface will print the stronger wording for it.
+- **A clean result is the common result.** Against a well-designed app and a robust model,
+  the correct answer is usually "nothing". See [below](#a-clean-result-is-a-result).
+- **The evidence base is essentially one model** — Claude Haiku 4.5 — at small,
+  cost-bounded sample sizes.
+- **The published figures date from June 2026 and are not version-stamped.** They have not
+  been re-measured across the releases since, so treat them as a floor on current
+  behaviour rather than a current reading. Per-release re-measurement is planned.
+- **Run transcripts are not committed.** The harness and its scorers are public and
+  re-runnable, so you can produce your own numbers; you cannot yet audit ours.
+- **No third party has built a plugin** against the extension contracts yet.
+
+Full scorecard with caveats: [docs/verification.md](./docs/verification.md). Everything
+that limits the tool's reach is collected in [docs/limitations.md](./docs/limitations.md).
 
 ## A clean result is a result
 

@@ -61,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   match what the published package actually does, which was the point: the install
   line, the first command, and the shipped extra had drifted apart.
 
+- **The README's evidence section is now three explicit buckets: proven, measured-and-
+  negative, and not-claimed.** The old flat list mixed wins and misses, which made it
+  easy to skim past the misses. The third bucket is new and is the one that matters
+  most on first read: it states plainly that the strong control-efficacy claim is
+  unavailable on a single-build app, that a clean result is the *common* result, that
+  the evidence base is essentially one model, that run transcripts are not committed so
+  you can reproduce our numbers but not audit them — and that the published figures date
+  from June 2026 and are not version-stamped, so they are a floor on current behaviour
+  rather than a current reading.
+
 - **`cli.py` stayed under its fat-controller ceiling.** The restored command's body
   lives in `mylonite.demo.cli_entry`, not inlined — `tests/test_cli_size.py` says
   plainly that being over the cap is "the signal to extract, not to raise the
