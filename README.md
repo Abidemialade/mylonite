@@ -11,7 +11,6 @@
 [![PyPI](https://img.shields.io/pypi/v/mylonite.svg)](https://pypi.org/project/mylonite/)
 [![GitHub release](https://img.shields.io/github/v/release/Abidemialade/mylonite)](https://github.com/Abidemialade/mylonite/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Abidemialade/mylonite/badge)](https://scorecard.dev/viewer/?uri=github.com/Abidemialade/mylonite)
 
 **Built for teams shipping MCP or agentic apps who need CI-enforced regression coverage on
 the AI layer.**

@@ -278,10 +278,13 @@ Every push and pull request runs a permanent `security` job in CI
 - **Workflow lint — `zizmor` + `actionlint`** via pre-commit. Workflows are the
   one class of file that can disable every other check here, and until recently
   nothing checked them.
-- **Supply-chain posture — OpenSSF Scorecard**, published weekly
-  (`.github/workflows/scorecard.yml`) and linked from the README badge. It
+- **Supply-chain posture — OpenSSF Scorecard**, weekly
+  (`.github/workflows/scorecard.yml`), results in the Security tab. It
   independently re-checks action pinning, token scopes, and branch protection,
-  so a change that quietly weakens one shows up as a score drop.
+  so a change that quietly weakens one shows up as a score drop. Deliberately
+  **not** badged in the README yet: the first score under the new ruleset has
+  not been observed, and publishing a number before reading it is how a badge
+  ends up asserting the opposite of what it is meant to.
 
 Two project-specific guards run alongside the general tooling:
 
@@ -291,6 +294,9 @@ Two project-specific guards run alongside the general tooling:
   tool it exposes is catalogued and has a guarded counterpart. Insecure code is
   *expected* there, which is what would make a genuine backdoor cheap to
   disguise; this keeps the two separable by construction rather than by review.
-- **`scripts/check_sensitive_paths.py`** requires an explicit maintainer
-  sign-off on pull requests that modify the checks themselves. See
-  [GOVERNANCE.md](./GOVERNANCE.md#required-reviews).
+Enforcement of *who* may change those guards is not a script. It is the
+`main` ruleset plus path-scoped [`.github/CODEOWNERS`](.github/CODEOWNERS) — see
+[GOVERNANCE.md](./GOVERNANCE.md#branch-protection). A CI job cannot do this job:
+for a `pull_request` event GitHub runs workflow files from the pull request's own
+checkout, so a check written as a workflow can be edited or deleted by the very
+diff it is judging.

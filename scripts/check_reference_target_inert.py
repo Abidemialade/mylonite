@@ -5,48 +5,80 @@ WHY THIS EXISTS
 ---------------
 ``reference_targets/mcp_kitchen_sink`` ships an intentionally insecure MCP
 server. CLAUDE.md's rule is that a weakness there is fine if it is catalogued in
-``seeds/seeds.yaml`` and a real bug otherwise. That rule has no teeth: a
-contributor can add anything to ``server_vulnerable.py`` and label it
+``seeds/seeds.yaml`` and a real bug otherwise. That rule has no teeth on its own:
+a contributor can add anything to ``server_vulnerable.py`` and label it
 "intentional, see the seed catalogue", and no reviewer can cheaply falsify the
-claim. It is the single best place in this repository to hide malicious code,
-precisely because insecure code there is expected.
+claim. It is the best place in this repository to hide malicious code, precisely
+because insecure code there is expected.
 
-What makes the file auditable is a property it happens to have today: the whole
-package is INERT. It imports no network, no subprocess, no filesystem, no
-deserialisation. ``web_fetch`` does not fetch and ``send_email`` does not send —
-both are simulated against an in-memory store. Every seeded weakness is a
-*behavioural* flaw in how the simulated tools are described and sequenced, not a
-real capability.
+What makes the file auditable is a property it has today: the package is INERT.
+``web_fetch`` does not fetch and ``send_email`` does not send -- both are
+simulated against an in-memory store. Every seeded weakness is a *behavioural*
+flaw in how simulated tools are described and sequenced, not a real capability.
 
-So the seeded weaknesses and a genuine backdoor are separable by construction: a
-backdoor needs real I/O, and there is currently none to hide among. This script
-pins that. It does not try to judge whether a weakness is "intended" — an
-unwinnable argument — it asserts the far cheaper property that no code here can
-reach the outside world at all.
+So a seeded weakness and a genuine backdoor are separable by construction: a
+backdoor needs real I/O, and there is none here to hide among. This script pins
+that. It does not judge whether a weakness is "intended" -- an unwinnable
+argument -- it asserts the cheaper property that this code cannot reach the
+outside world at all.
 
-THE FOUR CHECKS
----------------
-1. INERTNESS   — imports come from a fixed allowlist; no dynamic-execution or
-                 deserialisation builtins are called.
-2. PARITY      — the guarded twin exposes every tool the vulnerable one does. A
-                 tool that exists only on the vulnerable side is an uncatalogued
-                 capability, which is what an added backdoor tool looks like.
-3. CATALOGUE   — every seed's ``vulnerable_locus`` / ``guarded_locus`` resolves
-                 to a symbol that actually exists, so the catalogue cannot rot
-                 into a rubber stamp that points at nothing.
-4. COVERAGE    — every tool on the vulnerable server is named by some seed's
-                 locus, so a tool cannot be added without a catalogue entry.
+HOW IT AVOIDS BEING THEATRE
+---------------------------
+An earlier version of this script allowed a module prefix and stopped there. A
+review showed that was worthless: 19 hostile payloads passed it, because
+allowing ``asyncio`` also allows ``asyncio.create_subprocess_shell``, allowing
+``mcp`` allows ``mcp.client.stdio.stdio_client``, and allowing
+``mylonite.scan.llm_types`` allows ``mylonite.os.system`` -- Python binds the
+ROOT package name, so any capability reachable by attribute traversal from it
+comes along. Checking import statements while ignoring attribute access is
+checking the doorway and not the wall.
+
+Two rules replace that, and between them they close attribute traversal by
+construction rather than by blocklist:
+
+1. **Capable roots may only be imported ``from``, never bound as a name.**
+   ``from urllib.parse import urlparse`` binds ``urlparse``; ``import
+   urllib.parse`` binds ``urllib``, and from there ``urllib.request.urlopen`` is
+   two attributes away. Same for ``mylonite`` and ``mcp``. If the module object
+   is never bound, there is nothing to traverse.
+
+2. **Transport imports are confined to one file.** ``asyncio`` and ``mcp``
+   genuinely carry capability, and exactly one module needs them:
+   ``_stdio_common.py``, which is the wire transport. Every other module --
+   including both servers, where the seeded weaknesses live -- is held to the
+   inert set. The blast radius of "this import is dangerous but necessary" is
+   one 90-line file that does no tool work.
+
+THE CHECKS
+----------
+1. INERTNESS  -- per-file import allowlist, plus the two rules above, plus a ban
+                 on data-to-code builtins (checked wherever the NAME appears, so
+                 ``_e = eval`` does not slip past a call-site-only check).
+2. SURFACE    -- the tools ``_call_tool`` dispatches on must be exactly the tools
+                 ``list_tools`` declares. This is what stops "add a hidden branch
+                 and call it intentional": an undeclared branch is reachable,
+                 because the stdio layer forwards any name straight through.
+3. PARITY     -- the guarded twin covers every tool the vulnerable one exposes.
+4. CATALOGUE  -- every seed's loci resolve to real symbols, and every exposed
+                 tool is named by some seed.
 
 WHAT THIS DOES NOT CLAIM
 ------------------------
 Passing does not mean the reference target is secure. It is emphatically not,
-and must not be — see CLAUDE.md. It means the target cannot reach the network,
-spawn a process, read the filesystem, or execute constructed code, so its
-insecurity stays confined to the simulated tool surface the oracle measures.
+and must not be -- see CLAUDE.md.
 
-Widening ``ALLOWED_IMPORT_PREFIXES`` is therefore a security decision, not a
-build fix. If a change here genuinely needs real I/O, that is a design
-discussion in an issue, not a one-line edit to the allowlist.
+Scope is the shipped package (``src/mcp_kitchen_sink/``). It does NOT cover the
+target's own ``tests/`` or its ``pyproject.toml`` build hooks, both of which
+execute in CI. Those are covered by CODEOWNERS review on ``reference_targets/``,
+not by this script; do not read a pass here as a statement about them.
+
+Nor is this a sandbox. It reasons about source, so a sufficiently determined
+author can still construct capability (``getattr`` chains over allowed objects,
+say). It raises the cost from "add a plausible-looking import" to "write
+something that visibly does not belong in a note-taking fixture", which is the
+difference between a backdoor that survives review and one that does not.
+
+Widening any allowlist here is a security decision, not a build fix.
 """
 
 from __future__ import annotations
@@ -61,56 +93,87 @@ TARGET_ROOT = REPO_ROOT / "reference_targets" / "mcp_kitchen_sink"
 PKG_ROOT = TARGET_ROOT / "src" / "mcp_kitchen_sink"
 SEEDS_PATH = TARGET_ROOT / "seeds" / "seeds.yaml"
 
-#: Dotted module prefixes the reference target may import. A module matches if
-#: it equals an entry or is a submodule of one.
+#: Modules any file here may import, in any form. Every one is incapable of
+#: I/O by itself: data structures, text handling, and arithmetic.
 #:
-#: Prefixes, not top-level roots, because two entries here are only safe at
-#: submodule granularity:
+#: `json` and friends are on this list deliberately. An earlier version omitted
+#: them, so a contributor writing a legitimate seeded weakness hit a hard failure
+#: on `import json` and was told to open an issue -- friction with no security
+#: value whatsoever, since `json` cannot reach anything.
 #:
-#: - ``urllib.parse`` is pure string parsing (``urlparse`` backs the guarded
-#:   server's W3 hostname allowlist). Allowing bare ``urllib`` would admit
-#:   ``urllib.request``, which fetches.
-#: - ``mylonite.scan.llm_types`` is a declared dependency re-exporting the
-#:   shared Pydantic models (see the target's pyproject.toml). Allowing bare
-#:   ``mylonite`` would admit LiteLLM and with it real network reach -- the
-#:   reference target would gain, transitively, the capability this file exists
-#:   to deny it.
+#: Deliberately absent, and not an oversight: `base64` and `binascii`. Decoding a
+#: payload from an opaque blob is the exact shape CONTRIBUTING.md bans, so if one
+#: is ever genuinely needed that should be argued in an issue.
+INERT_MODULES = frozenset(
+    {
+        "__future__",
+        "abc",
+        "collections",
+        "copy",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "enum",
+        "functools",
+        "itertools",
+        "json",
+        "math",
+        "mcp_kitchen_sink",
+        "re",
+        "string",
+        "sys",
+        "textwrap",
+        "typing",
+        "uuid",
+    }
+)
+
+#: Modules reachable ONLY via ``from X import name``, never ``import X``.
 #:
-#: Everything else is inert: data structures, text handling, or the MCP protocol
-#: plumbing the server is *for*. Absent by design: subprocess, socket, http,
-#: httpx, requests, os, pathlib, shutil, pickle, marshal, shelve, ctypes,
-#: importlib, tempfile.
+#: Each is a submodule of a package that also contains capability. Binding the
+#: root name would make that capability two attribute lookups away:
+#: ``urllib`` -> ``urllib.request.urlopen``, ``mylonite`` -> ``mylonite.os``
+#: (``mylonite/__init__.py`` imports ``os``). Importing the leaf names instead
+#: binds only the functions and classes actually wanted.
+FROM_IMPORT_ONLY = frozenset(
+    {
+        "urllib.parse",
+        "mylonite.scan.llm_types",
+    }
+)
+
+#: Files permitted to import the transport stack, and what each may import.
 #:
-#: ``asyncio`` and ``mcp`` are the two carrying real capability, and both are
-#: confined to the stdio entrypoints -- the transport, not the tool bodies.
-ALLOWED_IMPORT_PREFIXES = (
-    "__future__",
-    "asyncio",
-    "dataclasses",
-    "mcp",
-    "mcp_kitchen_sink",
-    "mylonite.scan.llm_types",
-    "re",
-    "sys",
-    "typing",
-    "urllib.parse",
+#: ``asyncio`` and ``mcp`` are the two genuinely capable dependencies --
+#: ``asyncio.create_subprocess_shell`` and ``mcp.client.stdio.stdio_client``
+#: both spawn processes. They are needed to speak the wire protocol at all, so
+#: they are confined to the module that does exactly that and nothing else.
+TRANSPORT_IMPORTS: dict[str, frozenset[str]] = {
+    "_stdio_common.py": frozenset({"asyncio", "mcp"}),
+}
+
+#: Names that turn data into code, or open a file. Checked wherever the NAME is
+#: loaded, not only at a call site, so aliasing (``_e = eval``) is caught too.
+#:
+#: ``open`` is here because it needs no import: it is the one capability the
+#: inert allowlist cannot deny by omission.
+BANNED_NAMES = frozenset(
+    {
+        "__import__",
+        "breakpoint",
+        "compile",
+        "eval",
+        "exec",
+        "globals",
+        "locals",
+        "open",
+        "vars",
+    }
 )
 
 
-def _import_allowed(module: str) -> bool:
-    """True when ``module`` is an allowed prefix or a submodule of one."""
-    return any(
-        module == prefix or module.startswith(f"{prefix}.") for prefix in ALLOWED_IMPORT_PREFIXES
-    )
-
-
-#: Builtins that turn data into code, or bytes into objects. A backdoor that
-#: could not import its way to a capability would reach for one of these.
-BANNED_CALLS = frozenset({"eval", "exec", "compile", "__import__", "breakpoint"})
-
-
 class Finding(NamedTuple):
-    """One violation, in a form that renders as an editor-clickable line."""
+    """One violation, rendered as an editor-clickable line."""
 
     path: Path
     line: int
@@ -129,54 +192,81 @@ def _python_files() -> list[Path]:
     return sorted(PKG_ROOT.rglob("*.py"))
 
 
+def _root(module: str) -> str:
+    return module.split(".", 1)[0]
+
+
+def _allowed_roots(path: Path) -> frozenset[str]:
+    """Module roots this specific file may bind, transport exception included."""
+    return INERT_MODULES | TRANSPORT_IMPORTS.get(path.name, frozenset())
+
+
 def check_inertness(trees: dict[Path, ast.Module]) -> list[Finding]:
-    """No import and no call may give this package real-world reach."""
+    """No import and no name may give this package real-world reach."""
     findings: list[Finding] = []
     for path, tree in trees.items():
+        allowed = _allowed_roots(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if not _import_allowed(alias.name):
+                    if alias.name in FROM_IMPORT_ONLY or _root(alias.name) in {
+                        _root(m) for m in FROM_IMPORT_ONLY
+                    }:
                         findings.append(
                             Finding(
                                 path,
                                 node.lineno,
-                                f"imports {alias.name!r}, which is not on the inertness "
-                                f"allowlist. The reference target must stay incapable of "
-                                f"real I/O; see this script's docstring before widening it.",
+                                f"`import {alias.name}` binds the root package "
+                                f"{_root(alias.name)!r}, which also contains capability "
+                                f"reachable by attribute access. Use `from "
+                                f"{alias.name} import <name>` instead.",
+                            )
+                        )
+                    elif _root(alias.name) not in allowed:
+                        findings.append(
+                            Finding(
+                                path,
+                                node.lineno,
+                                f"imports {alias.name!r}, which is not inert and is not "
+                                f"permitted in this file. See this script's docstring "
+                                f"before widening any allowlist.",
                             )
                         )
             elif isinstance(node, ast.ImportFrom):
-                # A relative import (level > 0) never leaves the package.
+                # A relative import never leaves the package; those files are
+                # scanned on their own account.
                 if node.level:
                     continue
-                if not _import_allowed(node.module or ""):
+                module = node.module or ""
+                if module in FROM_IMPORT_ONLY:
+                    continue
+                if _root(module) not in allowed:
                     findings.append(
                         Finding(
                             path,
                             node.lineno,
-                            f"imports from {node.module!r}, which is not on the inertness "
-                            f"allowlist. The reference target must stay incapable of "
-                            f"real I/O; see this script's docstring before widening it.",
+                            f"imports from {module!r}, which is not inert and is not "
+                            f"permitted in this file. See this script's docstring "
+                            f"before widening any allowlist.",
                         )
                     )
             elif (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id in BANNED_CALLS
+                isinstance(node, ast.Name)
+                and isinstance(node.ctx, ast.Load)
+                and node.id in BANNED_NAMES
             ):
                 findings.append(
                     Finding(
                         path,
                         node.lineno,
-                        f"calls {node.func.id}(), which turns data into code. The "
-                        f"seeded weaknesses are behavioural; none needs this.",
+                        f"uses {node.id!r}, which turns data into code or opens a file. "
+                        f"The seeded weaknesses are behavioural; none needs it.",
                     )
                 )
     return findings
 
 
-def _tool_names(tree: ast.Module) -> dict[str, int]:
+def _declared_tools(tree: ast.Module) -> dict[str, int]:
     """Tool names declared as ``ToolDescription(name="...")``, mapped to line."""
     names: dict[str, int] = {}
     for node in ast.walk(tree):
@@ -196,22 +286,98 @@ def _tool_names(tree: ast.Module) -> dict[str, int]:
     return names
 
 
+def _dispatched_tools(tree: ast.Module) -> dict[str, int]:
+    """Tool names a ``_call_tool`` body compares against, mapped to line.
+
+    Matches ``name == "x"`` and ``name in ("x", "y")`` inside any function whose
+    first argument is called ``name`` -- the dispatch shape both servers use.
+    """
+    names: dict[str, int] = {}
+    for func in ast.walk(tree):
+        if not isinstance(func, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        args = [a.arg for a in func.args.args]
+        if "name" not in args:
+            continue
+        for node in ast.walk(func):
+            if not isinstance(node, ast.Compare) or not isinstance(node.left, ast.Name):
+                continue
+            if node.left.id != "name":
+                continue
+            for comparator in node.comparators:
+                parts = (
+                    comparator.elts
+                    if isinstance(comparator, ast.Tuple | ast.List | ast.Set)
+                    else [comparator]
+                )
+                for part in parts:
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                        names.setdefault(part.value, part.lineno)
+    return names
+
+
+def check_surface(trees: dict[Path, ast.Module]) -> list[Finding]:
+    """Dispatched tools must equal declared tools, on both twins.
+
+    This is the check that prices "add a hidden branch and call it intentional".
+    ``_stdio_common.py`` forwards whatever tool name arrives straight to
+    ``call_tool`` without consulting ``list_tools``, so a dispatch branch with no
+    matching ``ToolDescription`` is fully reachable over the wire while being
+    invisible to anything that reads only the declared surface -- including, in
+    an earlier version, every other check in this file.
+
+    Both directions are errors. An undeclared branch is the backdoor shape. A
+    declared-but-undispatched tool is a weaker signal, but it means the
+    advertised surface and the real one disagree, which is how the first kind
+    gets to look normal.
+    """
+    findings: list[Finding] = []
+    for filename in ("server_vulnerable.py", "server_guarded.py"):
+        path = PKG_ROOT / filename
+        if path not in trees:
+            findings.append(Finding(PKG_ROOT, 0, f"expected {filename} to exist"))
+            continue
+        declared = _declared_tools(trees[path])
+        dispatched = _dispatched_tools(trees[path])
+        findings += [
+            Finding(
+                path,
+                line,
+                f"dispatches tool {name!r}, which no ToolDescription declares. The "
+                f"stdio layer forwards any name to call_tool, so this branch is "
+                f"reachable while staying off the advertised surface.",
+            )
+            for name, line in sorted(dispatched.items())
+            if name not in declared
+        ]
+        findings += [
+            Finding(
+                path,
+                line,
+                f"declares tool {name!r} but never dispatches it; the advertised "
+                f"surface and the real one disagree.",
+            )
+            for name, line in sorted(declared.items())
+            if name not in dispatched
+        ]
+    return findings
+
+
 def check_parity(trees: dict[Path, ast.Module]) -> list[Finding]:
     """Guarded must cover every tool vulnerable exposes.
 
-    Deliberately one-directional. The guarded twin legitimately adds tools the
+    One-directional on purpose. The guarded twin legitimately adds tools the
     vulnerable one lacks (``confirm_send`` is W4's whole mitigation), but a tool
-    that exists ONLY on the vulnerable side is capability with no defended
-    counterpart -- which is both the shape of an added backdoor and a hole in the
-    differential oracle, since nothing on the guarded side can prove it blocked.
+    only on the vulnerable side is capability with no defended counterpart --
+    both the shape of an added backdoor and a hole in the differential oracle,
+    since nothing on the guarded side can prove it blocked.
     """
     vuln_path = PKG_ROOT / "server_vulnerable.py"
     guard_path = PKG_ROOT / "server_guarded.py"
     if vuln_path not in trees or guard_path not in trees:
-        return [Finding(PKG_ROOT, 0, "expected both server_vulnerable.py and server_guarded.py")]
+        return []
 
-    vulnerable = _tool_names(trees[vuln_path])
-    guarded = set(_tool_names(trees[guard_path]))
+    guarded = set(_declared_tools(trees[guard_path]))
     return [
         Finding(
             vuln_path,
@@ -220,7 +386,7 @@ def check_parity(trees: dict[Path, ast.Module]) -> list[Finding]:
             f"counterpart in server_guarded.py, so the differential oracle can "
             f"never show it being blocked.",
         )
-        for name, line in sorted(vulnerable.items())
+        for name, line in sorted(_declared_tools(trees[vuln_path]).items())
         if name not in guarded
     ]
 
@@ -240,12 +406,11 @@ def _load_seeds() -> tuple[list[dict[str, object]], list[Finding]]:
 
 
 def _defined_symbols(tree: ast.Module) -> set[str]:
-    """Every function, method and class name defined in a module."""
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            out.add(node.name)
-    return out
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
 
 
 def check_catalogue(trees: dict[Path, ast.Module], seeds: list[dict[str, object]]) -> list[Finding]:
@@ -253,12 +418,11 @@ def check_catalogue(trees: dict[Path, ast.Module], seeds: list[dict[str, object]
 
     A locus reads ``server_vulnerable.call_tool (web_fetch branch)``. Only the
     ``module.symbol`` head is resolved; the parenthetical is prose for a human.
-    Resolving the head is enough to catch the failure that matters -- a catalogue
-    entry left pointing at code that was renamed or deleted, which silently
-    becomes a seed nobody can check.
+    Resolving the head catches the failure that matters -- an entry left pointing
+    at renamed or deleted code, which silently becomes a seed nobody can check.
     """
     findings: list[Finding] = []
-    seen: dict[str, object] = {}
+    seen: set[str] = set()
 
     for seed in seeds:
         seed_id = seed.get("id")
@@ -267,7 +431,7 @@ def check_catalogue(trees: dict[Path, ast.Module], seeds: list[dict[str, object]
             continue
         if seed_id in seen:
             findings.append(Finding(SEEDS_PATH, 0, f"duplicate seed id {seed_id!r}"))
-        seen[seed_id] = seed
+        seen.add(seed_id)
 
         for field in ("vulnerable_locus", "guarded_locus"):
             raw = seed.get(field)
@@ -298,11 +462,13 @@ def check_catalogue(trees: dict[Path, ast.Module], seeds: list[dict[str, object]
 def check_coverage(trees: dict[Path, ast.Module], seeds: list[dict[str, object]]) -> list[Finding]:
     """Every vulnerable tool must be named by at least one seed.
 
-    This is what stops "add a tool, call it intentional" from being free. The
-    match is on the tool name appearing anywhere in a seed's loci or summary,
-    which is loose on purpose: the goal is to force a contributor adding a tool
-    to write down why, not to police catalogue prose.
+    Matches on word boundaries, not substrings. A plain ``in`` test let a tool
+    called ``send`` ride on a seed that happened to mention ``send_email``, and
+    ``list``, ``read``, ``fetch``, ``note`` and ``call`` were all free for the
+    same reason -- so the check could be defeated by choosing a name.
     """
+    import re
+
     vuln_path = PKG_ROOT / "server_vulnerable.py"
     if vuln_path not in trees:
         return []
@@ -316,12 +482,12 @@ def check_coverage(trees: dict[Path, ast.Module], seeds: list[dict[str, object]]
         Finding(
             vuln_path,
             line,
-            f"tool {name!r} is not mentioned anywhere in seeds/seeds.yaml. Every "
+            f"tool {name!r} is not named anywhere in seeds/seeds.yaml. Every "
             f"capability on the vulnerable server needs a catalogue entry saying "
-            f"what weakness it is there to demonstrate.",
+            f"what weakness it demonstrates.",
         )
-        for name, line in sorted(_tool_names(trees[vuln_path]).items())
-        if name not in catalogue_text
+        for name, line in sorted(_declared_tools(trees[vuln_path]).items())
+        if not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", catalogue_text)
     ]
 
 
@@ -340,6 +506,7 @@ def main() -> int:
 
     seeds, findings = _load_seeds()
     findings += check_inertness(trees)
+    findings += check_surface(trees)
     findings += check_parity(trees)
     findings += check_catalogue(trees, seeds)
     findings += check_coverage(trees, seeds)
@@ -358,7 +525,7 @@ def main() -> int:
 
     print(
         f"reference target inert: {len(trees)} modules, {len(seeds)} catalogued seeds, "
-        f"no un-allowlisted imports, no unguarded tools"
+        f"no capability imports, declared and dispatched surfaces agree"
     )
     return 0
 

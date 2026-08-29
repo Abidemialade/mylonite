@@ -136,15 +136,21 @@ deserialisation, no dynamic execution. `web_fetch` does not fetch and
 `seeds/seeds.yaml` and have a counterpart on the guarded twin. Widening that
 script's allowlist is a security decision — open an issue first.
 
-**Some files need an explicit maintainer sign-off.** Workflows, `gate-action/`,
-`.pre-commit-config.yaml`, `pyproject.toml`, `scripts/check_*.py`,
-`.secrets.baseline`, and `reference_targets/` control what the project's own
-checks do. A pull request touching any of them fails the `Sensitive paths`
-check until a maintainer reads that specific diff and applies the
-`reviewed:sensitive-paths` label. This is not a signal that we distrust you —
-it exists because a change there can disable the machinery that would catch the
-rest of the diff, so it has to be a decision rather than an oversight. Say in
-the PR description why the change is needed and it will move faster.
+**Some files need code-owner review.** Workflows, `gate-action/`,
+`.pre-commit-config.yaml`, `pyproject.toml`, `scripts/`, `.secrets.baseline`,
+and `reference_targets/` control what the project's own checks do, so
+[`.github/CODEOWNERS`](.github/CODEOWNERS) requires the maintainer's approval on
+them. This is not a signal that we distrust you — a change there can disable the
+machinery that would catch the rest of the diff, so it has to be a decision
+rather than an oversight. Say in the PR description why the change is needed and
+it will move faster.
+
+**If you are touching CI**, two repository settings will bite you and neither is
+visible in the tree. Actions must be **pinned to a commit SHA**, not a tag
+(`uses: owner/action@<40-hex> # vX.Y.Z`), and only GitHub-owned actions plus a
+short allowlist may run at all. A workflow using an unlisted third-party action
+fails to start with a policy error you cannot fix from a pull request — propose
+the action in an issue first and it can be added to the allowlist.
 
 **Report vulnerabilities privately, including ones you find in Mylonite's own
 guards.** If you spot a way around any of the above, that is a security report,
