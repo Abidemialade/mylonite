@@ -316,6 +316,13 @@ jobs:
         env:
           SKIP: no-commit-to-branch
         run: pre-commit run --all-files --show-diff-on-failure
+      - name: Run actionlint (manual stage)
+        # actionlint is pinned to `stages: [manual]` so it does not drag a Go
+        # toolchain onto a contributor's machine -- see the note in
+        # .pre-commit-config.yaml. That means the run above skips it, so it is
+        # invoked here by name. This runner has Go, and the workflows are
+        # exactly the files that must not go unlinted.
+        run: pre-commit run --hook-stage manual actionlint --all-files --show-diff-on-failure
 
   security:
     runs-on: ubuntu-latest

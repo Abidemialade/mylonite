@@ -28,7 +28,11 @@ jobs:
   # Runs on pull requests, including from forks, so it executes contributor-
   # authored content (docs macros, mkdocs plugins). It therefore gets nothing:
   # a read-only token, and no credentials left in .git/config.
-  build:
+  #
+  # Named `docs-build`, not `build`: ci.yml already has a job called `build`, and
+  # two check runs sharing a name are ambiguous to read and worse to name in a
+  # ruleset's required-checks list.
+  docs-build:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +48,7 @@ jobs:
       # Fail on broken nav/links/anchors so docs can't rot.
       - run: mkdocs build --strict
 
-  # Split from `build` deliberately. `mkdocs gh-deploy` pushes to the gh-pages
+  # Split from `docs-build` deliberately. `mkdocs gh-deploy` pushes to the gh-pages
   # branch, so this job needs BOTH `contents: write` and the credentials that
   # checkout persists into .git/config -- the two things the build job must not
   # have. While one job served both triggers, every pull-request run was handed
