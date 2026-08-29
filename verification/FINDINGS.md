@@ -5,6 +5,21 @@ did not author. Numbers are from live runs in June 2026 with **Claude Haiku 4.5*
 as the planner/judge (the only hosted provider these runs used), small samples,
 cost-bounded. Read the caveats — several numbers mean less (or more) than they look.
 
+> **Which version produced these?** The June 2026 figures below predate versioned
+> results and are **not** stamped to a release — they are roughly v0.7.0-era and have
+> not been re-measured across the releases since. Treat them as a floor on current
+> behaviour rather than a current reading.
+>
+> From **0.9.0** onward, every minor/major release commits a version-stamped result
+> set under [`results/`](results/), measured against the **published PyPI wheel**
+> rather than a working tree, and the release is gated on it existing. The
+> release-over-release table is [`TRENDS.md`](TRENDS.md).
+>
+> **The first stamped measurement did not improve anything.** Judge agreement against
+> AgentDojo was **F1 0.41** in June 2026 and is **F1 0.412** on 0.9.0. That is the
+> point of measuring: a number nobody would choose to publish is the one worth
+> trusting the rest of the page over.
+
 ## The one-line result
 
 **Model robustness ≠ app security.** A frontier model resisted *generic* injection
