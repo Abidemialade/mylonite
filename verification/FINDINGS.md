@@ -6,19 +6,44 @@ as the planner/judge (the only hosted provider these runs used), small samples,
 cost-bounded. Read the caveats — several numbers mean less (or more) than they look.
 
 > **Which version produced these?** The June 2026 figures below predate versioned
-> results and are **not** stamped to a release — they are roughly v0.7.0-era and have
-> not been re-measured across the releases since. Treat them as a floor on current
-> behaviour rather than a current reading.
->
-> From **0.9.0** onward, every minor/major release commits a version-stamped result
-> set under [`results/`](results/), measured against the **published PyPI wheel**
-> rather than a working tree, and the release is gated on it existing. The
+> results and are **not** stamped to a release — they are roughly v0.7.0-era. From
+> **0.9.0** onward, every minor/major release commits a version-stamped result set
+> under [`results/`](results/), measured against the **published PyPI wheel** rather
+> than a working tree, and the release is gated on it existing. The
 > release-over-release table is [`TRENDS.md`](TRENDS.md).
 >
-> **The first stamped measurement did not improve anything.** Judge agreement against
-> AgentDojo was **F1 0.41** in June 2026 and is **F1 0.412** on 0.9.0. That is the
-> point of measuring: a number nobody would choose to publish is the one worth
-> trusting the rest of the page over.
+> ### 0.9.0, measured 2026-08-29
+>
+> | Layer | Result | Basis |
+> |---|---|---|
+> | Judge agreement (AgentDojo) | **F1 0.412** | 27 cases, 12 real third-party positives |
+> | Judge agreement (InjecAgent `dh`) | **F1 1.000** | precision 1.0, recall 1.0, ASR 9% |
+> | Judge agreement (InjecAgent `ds`) | **F1 0.400** | precision 1.0, **recall 0.25**, ASR 8% |
+> | Precision (`reference:guarded`) | **0 FP / 7 probes** | 1 of 8 probes not exercised, excluded |
+> | Recall (DVMCP) | **0/8** | 9 exercised attempts across all 8 challenges |
+>
+> **AgentDojo agreement held steady** (0.41 → 0.412) across the releases since June.
+> Nothing in that window targeted judge agreement, so stability is the expected
+> outcome rather than a regression — and recall of 0.583 over 12 genuine positives is
+> real detection. The low precision is largely the semantic mismatch described below:
+> the judge measures *effect*, AgentDojo's oracle measures *exact goal achievement*.
+>
+> **InjecAgent is new information.** June's run used a well-aligned model that
+> resisted every case, leaving the judge no positives and a vacuous F1. Re-running
+> with a deliberately weaker planner (`llama3.2:3b`, local, no API cost) produced real
+> positives for the first time: the judge **never false-positives** on either split
+> and catches **every** direct-harm attack, but misses **three quarters** of the
+> data-stealing split. That recall gap on `ds` is the most actionable weakness on this
+> page.
+>
+> **Read the DVMCP 0/8 as a floor, not a clean recall figure.** Every challenge was
+> genuinely exercised this time (9 attempts; the first attempt at this run had 3
+> challenges with *zero* exercised attempts because the target generator inferred the
+> wrong weakness classes). But the Layer 1 scorer still counts an untested challenge
+> as a miss, and `crosswalk.yaml` maps challenges 3 and 7 to **W3** although neither
+> server exposes an egress tool — so W3 is unmeasurable there by construction and
+> still scored against recall. Tracked in
+> [issue #136](https://github.com/Abidemialade/mylonite/issues/136).
 
 ## The one-line result
 
