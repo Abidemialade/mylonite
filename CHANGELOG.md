@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Contributor guardrails.** The repository now defends the machinery that
+  checks contributions, not just the contributions. Relevant if you are opening
+  a pull request: see the new
+  ["What we can and can't accept"](CONTRIBUTING.md#what-we-can-and-cant-accept).
+
+  - `scripts/check_reference_target_inert.py` pins the property that makes the
+    deliberately-vulnerable reference target auditable: the package is inert, so
+    it cannot reach the network, spawn a process, or execute constructed code.
+    Insecure code is expected there, which is exactly what makes it the cheapest
+    place to hide a real backdoor — "it's intentional, see the seed catalogue"
+    is unfalsifiable by eye. The guard also requires every exposed tool to be
+    catalogued in `seeds/seeds.yaml` and to have a counterpart on the guarded
+    twin. Runs in pre-commit and the test suite.
+  - `Sensitive paths` check: pull requests touching workflows, `gate-action/`,
+    `.pre-commit-config.yaml`, `pyproject.toml`, `scripts/check_*.py`,
+    `.secrets.baseline`, or `reference_targets/` fail until a maintainer applies
+    the `reviewed:sensitive-paths` label. This makes `CODEOWNERS` enforceable
+    without requiring an approval the sole maintainer cannot give — see
+    [GOVERNANCE.md](GOVERNANCE.md#required-reviews), which records the trigger
+    for switching to real required reviews.
+  - CodeQL (`security-extended`) adds cross-file taint tracking to the existing
+    single-file bandit pass, and OpenSSF Scorecard publishes the supply-chain
+    posture so a later change that undoes this work shows up as a score drop.
+  - `zizmor` and `actionlint` now lint the workflows themselves — previously the
+    one class of file that could silence every other check went unchecked.
+
+### Changed
+
+- `pip-audit` in CI is a gate again. It carried `continue-on-error: true`, which
+  did more than its comment justified: dropping `--strict` already avoids the
+  editable-install false failure, so the flag was additionally swallowing real
+  dependency CVEs. A known vulnerability now fails the build.
+- Every `actions/checkout` sets `persist-credentials: false`, so the token is no
+  longer left in `.git/config` while CI installs and executes pull-request code.
+  The one job that genuinely needs those credentials, docs deployment, was split
+  out of the docs build for this reason.
+- `Docs` workflow is two jobs. `contents: write` was granted workflow-wide while
+  the workflow also triggered on `pull_request`, so every documentation pull
+  request ran under a write-scoped token it had no use for.
+- Repository Actions policy restricts runnable actions to GitHub-owned plus an
+  explicit allowlist, and requires SHA pinning.
+
+### Fixed
+
+- `gate-action/action.yml` pinned `actions/setup-python@v6` by moving tag and
+  interpolated its inputs directly into a `run:` block. Both are more serious
+  here than in this repository's own workflows, because this composite action
+  executes inside **downstream users'** CI: a moved tag would run new code in
+  every consumer at once, and `${{ }}` is substituted before bash parses the
+  script, so an input containing shell syntax became shell syntax. Now
+  SHA-pinned, with inputs passed through the environment.
+
 ## [0.9.0] - 2026-08-28
 
 ### Added

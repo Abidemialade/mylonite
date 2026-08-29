@@ -1,0 +1,62 @@
+name: Scorecard
+
+# OpenSSF Scorecard rates this repository's supply-chain posture from the
+# outside: are actions pinned, are workflow tokens least-privilege, is branch
+# protection real, are dependencies updated, is there a security policy.
+#
+# Two reasons it earns a slot in a project this size. First, it independently
+# re-checks the things this pull request hardened by hand, so a later change
+# that quietly undoes one of them shows up as a score drop rather than going
+# unnoticed. Second, Mylonite asks people to run a security tool in their CI;
+# a public score is the cheapest way for a stranger to sanity-check that the
+# project holds itself to the standard it sells.
+
+on:
+  branch_protection_rule:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 2"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Publish results to the Security tab.
+      security-events: write
+      # Needed by the Scorecard publishing step and for reading branch
+      # protection. Explicitly NOT granting `actions: read` beyond default or
+      # any write scope: Scorecard reads metadata, it never needs to change it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishes the score so the README badge resolves and the result is
+          # independently verifiable rather than self-reported.
+          publish_results: true
+
+      # Kept because the SARIF upload below only surfaces findings GitHub knows
+      # how to render; the raw file carries the full per-check reasoning, which
+      # is what you actually want when a score drops.
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload to code-scanning
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: results.sarif

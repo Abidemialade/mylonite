@@ -15,6 +15,27 @@ the issue tracker and announced in the changelog. The intent is to follow a
 standard "two +1s, no -1s" merge rule for non-trivial changes once there is
 more than one maintainer.
 
+### Required reviews
+
+`main` currently requires **zero** approving reviews. That is not a preference.
+Branch protection has `enforce_admins` on and there is one maintainer, who
+cannot approve their own pull request — requiring an approval would make the
+repository unmergeable by the only person able to merge.
+
+The gap is covered from the other side. The `Sensitive paths` check fails on any
+pull request touching the files that control what the project's own checks do
+(workflows, `gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`,
+`scripts/check_*.py`, `.secrets.baseline`, `reference_targets/`), and clears only
+when a maintainer applies the `reviewed:sensitive-paths` label. Applying a label
+requires write access, so the contributor under review cannot self-clear. See
+`scripts/check_sensitive_paths.py`.
+
+**Trigger:** the moment a second maintainer is onboarded, set
+`required_approving_review_count` to 1 and enable `require_code_owner_reviews`.
+The reason for the exception disappears with the second maintainer, and the
+tripwire is a weaker control than real review — it proves someone looked, not
+that someone else agreed.
+
 ## Roles
 
 - **Maintainer.** Has merge rights on `main`, can cut releases, manages
