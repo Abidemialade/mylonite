@@ -30,7 +30,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/setup-python@v6
+    # SHA-pinned like every action in this repository's own workflows. It
+    # matters more here than there: this composite action runs inside OTHER
+    # people's CI, so a moved tag would execute new code in every downstream
+    # repository at once, with whatever permissions their workflow granted.
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install mylonite
@@ -38,10 +42,29 @@ runs:
       run: pip install "mylonite"
     - name: Run mylonite gate
       shell: bash
-      run: >
-        mylonite gate
-        --target-file "${{ inputs.target-file }}"
-        --authorize "${{ inputs.authorize }}"
-        --model "${{ inputs.model }}"
-        --runs-on "${{ inputs.runs-on }}"
-        ${{ inputs.open-pr == 'true' && '--open-pr' || '' }}
+      # Inputs travel through env, never through `${{ }}` inside `run:`. GitHub
+      # substitutes those expressions textually BEFORE bash parses the script,
+      # so an input containing a quote or a `;` becomes shell syntax rather than
+      # an argument. The caller controls these values, but "the caller" is a
+      # workflow that may well wire them from an issue body or a matrix -- and
+      # this action runs in their repository, so the injection would be theirs
+      # to suffer and ours to have enabled.
+      env:
+        TARGET_FILE: ${{ inputs.target-file }}
+        AUTHORIZE: ${{ inputs.authorize }}
+        MODEL: ${{ inputs.model }}
+        RUNS_ON: ${{ inputs.runs-on }}
+        OPEN_PR: ${{ inputs.open-pr }}
+      run: |
+        args=(
+          --target-file "$TARGET_FILE"
+          --authorize "$AUTHORIZE"
+          --model "$MODEL"
+          --runs-on "$RUNS_ON"
+        )
+        # Opt-in, and only on an exact match: any other value (including the
+        # empty string a caller gets from an unset variable) must not open a PR.
+        if [ "$OPEN_PR" = "true" ]; then
+          args+=(--open-pr)
+        fi
+        mylonite gate "${args[@]}"

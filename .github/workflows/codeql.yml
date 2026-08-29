@@ -1,0 +1,58 @@
+name: CodeQL
+
+# Adds taint tracking to the security job's existing bandit pass. Bandit matches
+# patterns within a single file at medium+ severity; CodeQL follows data from an
+# untrusted source to a dangerous sink across files, which is the shape of most
+# real findings in a tool that parses attacker-supplied target descriptions,
+# tool schemas, and model output.
+#
+# Results land as annotations on the pull request that introduced them, so a
+# contributor sees them without a maintainer relaying anything.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly-published query finds existing code rather than waiting
+    # for the next pull request to touch it. Off-peak on a Tuesday: cron '0 0
+    # * * 0' is the most-used slot on GitHub and gets throttled.
+    - cron: "37 4 * * 2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Write the SARIF results back to the Security tab. Scoped to this job,
+      # not the workflow, so the checkout of pull-request code does not run
+      # under it.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: python
+          # `security-and-quality` would also report maintainability findings.
+          # Deliberately not used: this gate exists for security, and mixing in
+          # style findings is how a security tab becomes background noise that
+          # nobody opens.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: "/language:python"

@@ -100,6 +100,56 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.
 
+## What we can and can't accept
+
+Mylonite reproduces working exploits, so a contribution here carries risks that
+an ordinary library's does not. These rules are enforced by CI where they can
+be, and by review where they can't. None of them is a judgement about you — we
+apply them to every pull request, including the maintainer's.
+
+**Never include a live credential.** Not in a test, a fixture, a recorded
+transcript, or a comment — even an expired or free-tier one, even yours.
+`detect-secrets` runs on every commit and push-protection runs on GitHub's side,
+but neither is a substitute: a rotated-looking key still tells an attacker which
+provider to try and which account to target. Use the recorded fixtures under
+`src/mylonite/demo/fixtures/`, or a `sk-test-...`-style obvious fake.
+
+**Only target things you control.** Attack payloads, target YAMLs, and test
+fixtures must point at the in-repo reference targets or at hosts you personally
+own. A pull request that scans a third party's server — however public, however
+"just a demo" — will be closed regardless of intent. See
+[SECURITY.md](./SECURITY.md#responsible-use--dual-use-policy).
+
+**Payloads ship as inert data.** An attack module contributes a *seed body* and
+a *predicate*, both data interpreted by the engine. Code that fetches a payload
+at runtime, decodes one from an obfuscated blob, or reaches the network outside
+the adapter layer will not be merged — that pattern is indistinguishable from a
+dropper, and reviewers cannot tell the difference on a diff.
+
+**The deliberately-vulnerable reference target has extra rules.**
+`reference_targets/mcp_kitchen_sink/` is the differential oracle's ground truth,
+so insecure code there is expected and a real backdoor would be cheap to hide
+among it. `scripts/check_reference_target_inert.py` therefore enforces that the
+package stays *inert*: no network, no subprocess, no filesystem, no
+deserialisation, no dynamic execution. `web_fetch` does not fetch and
+`send_email` does not send. Every tool it exposes must be named in
+`seeds/seeds.yaml` and have a counterpart on the guarded twin. Widening that
+script's allowlist is a security decision — open an issue first.
+
+**Some files need an explicit maintainer sign-off.** Workflows, `gate-action/`,
+`.pre-commit-config.yaml`, `pyproject.toml`, `scripts/check_*.py`,
+`.secrets.baseline`, and `reference_targets/` control what the project's own
+checks do. A pull request touching any of them fails the `Sensitive paths`
+check until a maintainer reads that specific diff and applies the
+`reviewed:sensitive-paths` label. This is not a signal that we distrust you —
+it exists because a change there can disable the machinery that would catch the
+rest of the diff, so it has to be a decision rather than an oversight. Say in
+the PR description why the change is needed and it will move faster.
+
+**Report vulnerabilities privately, including ones you find in Mylonite's own
+guards.** If you spot a way around any of the above, that is a security report,
+not a pull request — see [SECURITY.md](./SECURITY.md).
+
 ## Cutting a release
 
 ```bash

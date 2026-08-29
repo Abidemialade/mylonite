@@ -260,7 +260,35 @@ Every push and pull request runs a permanent `security` job in CI
   secrets); any *new* secret-shaped token fails the job. Regenerate with
   `detect-secrets scan --baseline .secrets.baseline` and review with
   `detect-secrets audit .secrets.baseline`.
-- **Dependency CVEs — `pip-audit`** over the installed environment
-  (informational: it surfaces advisories without blocking unrelated PRs on
-  transient upstream CVEs). Genuine advisories are remediated by raising the
-  affected dependency floor in `pyproject.toml`.
+- **Dependency CVEs — `pip-audit`** over the installed environment (blocking).
+  This step was informational until it was found to be swallowing real
+  advisories rather than only the editable-install skip its exemption was
+  written for. Genuine advisories are remediated by raising the affected
+  dependency floor in `pyproject.toml`; an advisory with no fix yet available
+  gets a scoped, commented `--ignore-vuln <ID>`, so every exception is visible
+  and attributable instead of blanket.
+- **Taint analysis — CodeQL** (`security-extended`) on every push and pull
+  request, plus weekly (`.github/workflows/codeql.yml`). Complements `bandit`,
+  which matches patterns inside a single file: CodeQL follows data from an
+  untrusted source to a dangerous sink across files, which is the shape of most
+  real findings in a tool that parses attacker-supplied target descriptions,
+  tool schemas, and model output.
+- **Workflow lint — `zizmor` + `actionlint`** via pre-commit. Workflows are the
+  one class of file that can disable every other check here, and until recently
+  nothing checked them.
+- **Supply-chain posture — OpenSSF Scorecard**, published weekly
+  (`.github/workflows/scorecard.yml`) and linked from the README badge. It
+  independently re-checks action pinning, token scopes, and branch protection,
+  so a change that quietly weakens one shows up as a score drop.
+
+Two project-specific guards run alongside the general tooling:
+
+- **`scripts/check_reference_target_inert.py`** asserts that the deliberately
+  vulnerable reference target stays incapable of real I/O — no network,
+  subprocess, filesystem, deserialisation, or dynamic execution — and that every
+  tool it exposes is catalogued and has a guarded counterpart. Insecure code is
+  *expected* there, which is what would make a genuine backdoor cheap to
+  disguise; this keeps the two separable by construction rather than by review.
+- **`scripts/check_sensitive_paths.py`** requires an explicit maintainer
+  sign-off on pull requests that modify the checks themselves. See
+  [GOVERNANCE.md](./GOVERNANCE.md#required-reviews).
