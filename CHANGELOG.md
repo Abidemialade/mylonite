@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     failing job.
   - `zizmor` and `actionlint` now lint the workflows themselves — previously the
     one class of file that could silence every other check went unchecked.
+  - Dependabot updates wait 7 days (`cooldown`). Package compromises follow a
+    shape: a malicious version is published, sits live for hours to days, then
+    is yanked once someone notices. Zero cooldown opened a PR into this repo
+    during exactly that window, with CI green because the package installs
+    fine. Security updates bypass cooldown, so CVE fixes still arrive at once.
 
 ### Changed
 
