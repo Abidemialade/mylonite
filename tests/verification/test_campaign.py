@@ -129,6 +129,39 @@ def test_a_missing_prebuilt_report_is_an_error_not_a_silent_not_run(tmp_path: Pa
         campaign.fold_in_prebuilt(results_dir, "layer1", tmp_path / "absent.json")
 
 
+def test_measured_sha_resolves_the_release_tag_not_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``git_sha`` must name the tag that built the measured wheel, not HEAD.
+
+    A campaign can only run AFTER the tag is published (the silo needs an
+    installed artifact), so HEAD has usually moved on -- frequently onto the
+    verification work itself. An earlier version read HEAD for both fields, which
+    made them always identical and quietly reduced "distinguish the tool from the
+    scorer" to a claim the data could not support.
+    """
+    calls: list[str] = []
+
+    def fake_rev_parse(rev: str) -> str:
+        calls.append(rev)
+        return "tagsha1" if rev.startswith("v0.9.0") else "headsha"
+
+    monkeypatch.setattr(campaign, "_rev_parse", fake_rev_parse)
+    assert campaign.measured_sha("0.9.0") == "tagsha1"
+    assert calls == ["v0.9.0^{}"], "must ask for the tag's COMMIT, not the tag object"
+
+
+def test_measured_sha_falls_back_to_head_when_the_tag_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unfetched tag costs precision, never the whole campaign.
+
+    The fields going equal is then itself the signal that the tag was not found.
+    """
+    monkeypatch.setattr(
+        campaign, "_rev_parse", lambda rev: "unknown" if rev.startswith("v") else "headsha"
+    )
+    assert campaign.measured_sha("0.9.0") == "headsha"
+
+
 def test_finalise_records_a_skipped_layer_and_validates(tmp_path: Path) -> None:
     """A layer that did not run is present and says so -- never absent, never 0."""
     results_dir = tmp_path / "0.9.0"

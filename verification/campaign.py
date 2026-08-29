@@ -75,15 +75,16 @@ class CampaignError(RuntimeError):
     """A campaign could not produce an honest result set."""
 
 
-def _git_sha() -> str:
-    """Short sha of the checkout, or ``"unknown"``.
+def _rev_parse(rev: str) -> str:
+    """Short sha for ``rev``, or ``"unknown"``.
 
-    Never raises: a campaign that dies because ``git`` is missing would be a
-    worse outcome than one whose provenance says ``unknown`` out loud.
+    Never raises: a campaign that dies because ``git`` is missing, or because a
+    tag is not fetched locally, would be a worse outcome than provenance that
+    says ``unknown`` out loud.
     """
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "rev-parse", "--short", rev],
             capture_output=True,
             text=True,
             check=True,
@@ -92,6 +93,27 @@ def _git_sha() -> str:
     except (OSError, subprocess.SubprocessError):
         return "unknown"
     return out.stdout.strip() or "unknown"
+
+
+def measured_sha(version: str) -> str:
+    """The commit that produced the artifact being measured.
+
+    Resolves the RELEASE TAG (``v<version>^{}``), not ``HEAD``.
+
+    This distinction is the whole point of recording two shas. A campaign can
+    only run after the tag is published -- the silo needs an installed wheel --
+    so by then ``HEAD`` has usually moved on, and often onto commits that are
+    themselves part of the verification work. Recording ``HEAD`` for both fields
+    made them always identical, which quietly turned "distinguish the tool from
+    the scorer" into a promise the data could not keep.
+
+    Falls back to ``HEAD`` when the tag cannot be resolved (an unfetched tag, a
+    campaign re-run against an unreleased build), because a sha that is merely
+    less precise beats no provenance at all -- but the two fields going equal is
+    then itself the signal that the tag was not found.
+    """
+    tagged = _rev_parse(f"v{version}^{{}}")
+    return tagged if tagged != "unknown" else _rev_parse("HEAD")
 
 
 def _write_layer(results_dir: Path, layer: str, payload: dict[str, Any]) -> None:
@@ -165,8 +187,12 @@ def finalise(
     """
     meta = build_meta(
         mylonite_version=version,
-        git_sha=_git_sha(),
-        harness_sha=harness_sha or _git_sha(),
+        # The tagged commit that produced the measured wheel...
+        git_sha=measured_sha(version),
+        # ...versus the checkout that ran the scorer. Usually different, and the
+        # difference is what lets a trend distinguish "the tool changed" from
+        # "we changed how we measure".
+        harness_sha=harness_sha or _rev_parse("HEAD"),
         model=model,
         recorded_at=datetime.now(UTC).date().isoformat(),
         layers=layers,

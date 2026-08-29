@@ -1,0 +1,11 @@
+{
+  "completed_probes": 7,
+  "false_positive_detail": [],
+  "false_positive_rate": 0.0,
+  "false_positives": 0,
+  "layer": "layer3-precision",
+  "note": "False-positive control on a target that SHOULD resist every attack. Any false positive is a Mylonite bug to fix. Skipped/errored probes are excluded (not tested). Start with reference:guarded; add real benign servers from candidates.md for production-grade precision.",
+  "schema_version": "1.0",
+  "target": "reference:guarded",
+  "true_negatives": 7
+}
