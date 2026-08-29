@@ -65,10 +65,16 @@ repos:
       # session" about an MCP scan session. Flagging those would train people to
       # bypass the hook. See the script's docstring.
       - id: no-local-context
-        name: no local-machine context in committed prose
+        name: no local-machine context in committed prose or results
         entry: python scripts/check_no_local_context.py
         language: system
-        types: [markdown]
+        # `files:`, NOT `types: [markdown]`. The guard also covers committed
+        # verification results (JSON/JSONL under verification/results/), and a
+        # markdown-only type filter means pre-commit never hands it those --
+        # the rule would then exist but fire only in CI's no-argument run, which
+        # is the kind of half-installed guard that reads as protection without
+        # being any.
+        files: '\.md$|^verification/results/.*\.(json|jsonl)$'
 
   # Keep in lockstep with the `ruff==` pin in pyproject's [dev] extra. CI runs
   # both paths -- the `lint` job installs ruff from that pin, the `precommit`

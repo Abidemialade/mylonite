@@ -47,6 +47,20 @@ jobs:
           python-version: "3.12"
       - name: Tag, version.py, pyproject and CHANGELOG all agree
         run: python scripts/prepare_release.py --check --tag "${{ inputs.tag || github.ref_name }}"
+      - name: A minor/major release has committed verification results
+        # CI cannot RUN the verification campaign: it needs a provider key, and
+        # deliberately no key is configured as a repository secret. But it can
+        # check that someone did.
+        #
+        # This is what stops the scorecard decaying again. The published figures
+        # went unversioned across fifteen releases with nothing to signal the
+        # drift, because "re-measure each release" was discipline rather than a
+        # gate. Discipline is what already failed.
+        #
+        # Minor/major only. Patch releases are exempt by design: gating every
+        # patch on a campaign would make the campaign the thing people route
+        # around, and a rule that gets routed around protects nothing.
+        run: python scripts/check_verification_freshness.py
 
   ci:
     # The full suite, against the tagged commit. Before this, a tag published a
