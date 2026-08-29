@@ -109,7 +109,10 @@ async def test_run_demo_injected_runs_both_variants() -> None:
     assert isinstance(result, DemoResult)
     assert result.vulnerable.report.target_id == "reference:vulnerable"
     assert result.guarded.report.target_id == "reference:guarded"
-    assert result.mode == "replay (offline)"
+    # startswith, not ==: the label now carries fixture provenance
+    # ("recorded <date> against <model>") so a replayed number is never
+    # mistaken for a live measurement.
+    assert result.mode.startswith("replay (offline)")
     assert result.provider == runner_mod.DEMO_PROVIDER
     assert result.model == runner_mod.DEMO_MODEL
     assert result.elapsed_s >= 0.0

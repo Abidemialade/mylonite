@@ -28,6 +28,8 @@ recorder's cumulative state (``cache_misses`` / ``last_error``) and raise
 
 from __future__ import annotations
 
+import contextlib
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -59,6 +61,37 @@ DEMO_MODEL = "claude-haiku-4-5-20251001"
 
 #: The two reference variants the demo runs, in render order.
 _VARIANTS: tuple[Literal["vulnerable", "guarded"], ...] = ("vulnerable", "guarded")
+
+
+def _replay_mode_label() -> str:
+    """``replay (offline)`` plus the provenance of the fixtures being replayed.
+
+    A replayed result is NOT a measurement of today's model, and the output has to
+    say so on its own face -- a reader who sees a differential should not have to
+    consult the docs to learn that the model replies were canned months ago. So
+    the mode line carries the record date and the model they were recorded
+    against.
+
+    Degrades to the bare label if the sidecar is missing or unreadable.
+    Provenance is informative, not load-bearing: it must never be the thing that
+    stops the demo from running. Fixture *validity* is enforced elsewhere, by the
+    recorder-state inspection below.
+    """
+    label = "replay (offline)"
+    meta: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        meta = json.loads(
+            (packaged_fixture_dir() / "vulnerable" / "_meta.json").read_text(encoding="utf-8")
+        )
+    parts = [
+        text
+        for text in (
+            f"recorded {meta['recorded_at']}" if meta.get("recorded_at") else "",
+            f"against {meta['model']}" if meta.get("model") else "",
+        )
+        if text
+    ]
+    return f"{label}; {' '.join(parts)}" if parts else label
 
 
 class DemoFixtureError(FixtureError):
@@ -196,7 +229,7 @@ async def run_demo(
         return DemoResult(
             vulnerable=result["vulnerable"],
             guarded=result["guarded"],
-            mode="replay (offline)",
+            mode=_replay_mode_label(),
             provider=DEMO_PROVIDER,
             model=DEMO_MODEL,
             elapsed_s=elapsed,
@@ -278,7 +311,7 @@ async def run_demo(
     return DemoResult(
         vulnerable=results["vulnerable"],
         guarded=results["guarded"],
-        mode="replay (offline)",
+        mode=_replay_mode_label(),
         provider=DEMO_PROVIDER,
         model=DEMO_MODEL,
         elapsed_s=elapsed,

