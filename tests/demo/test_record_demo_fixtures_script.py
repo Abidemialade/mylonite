@@ -21,6 +21,7 @@ doesn't) before any provider is ever touched.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -117,3 +118,23 @@ def test_stamp_meta_writes_cache_key_version_field(tmp_path: Path) -> None:
     # a DIFFERENT subsystem (mylonite.demo, not mylonite.testkit) and must not
     # accidentally claim to speak testkit.FIXTURE_FORMAT_VERSION's meaning.
     assert "format_version" not in meta
+
+
+def test_stamp_meta_records_provenance(tmp_path: Path) -> None:
+    """The sidecar must carry model + record date, because the OUTPUT claims it does.
+
+    ``mylonite demo``'s mode line reads "recorded <date> against <model>", and
+    README / ROADMAP / quarry / the changelog all state it does. Those claims are
+    held up by exactly two fields written here. ``_replay_mode_label`` degrades
+    silently to the bare label when they are absent -- correct behaviour for a
+    cosmetic field, but it means dropping them breaks four documents without
+    breaking anything that shouts. This test is what shouts.
+    """
+    variant_dir = tmp_path / "vulnerable"
+    m._stamp_meta(variant_dir, "vulnerable")
+
+    meta = json.loads((variant_dir / "_meta.json").read_text(encoding="utf-8"))
+    assert meta["model"] == m.DEMO_MODEL
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", meta["recorded_at"]), (
+        f"recorded_at must be a plain ISO date for the mode line, got {meta['recorded_at']!r}"
+    )

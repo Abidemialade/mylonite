@@ -21,11 +21,16 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from pathlib import Path
+
+import pytest
 
 import mylonite.demo
 import mylonite.demo.cli_entry
 import mylonite.demo.runner
+import mylonite.scan.wiring
 from mylonite import cli
+from mylonite.demo import runner as runner_mod
 
 
 def _called_names(func: object) -> set[str]:
@@ -101,6 +106,76 @@ def test_demo_never_discovers_a_run_config() -> None:
         "./mylonite.yaml could supply an api_base and silently invalidate every "
         "recorded fixture."
     )
+
+
+def test_build_scan_passes_attack_modules_explicitly() -> None:
+    """No environment input may change which payloads the demo sends.
+
+    ``MYLONITE_ATTACK_MODULES`` (added alongside this work) lets an operator add
+    third-party attack modules to a scan. That must never reach the demo: extra
+    modules mean extra payloads, extra payloads mean ``(model, messages)`` pairs
+    that were never recorded, and an unrecorded pair is a cache miss. The demo
+    would then refuse to run -- but only for users who happen to have that
+    variable exported, which is the worst kind of bug to receive a report about.
+
+    Today ``wiring.build_scan`` passes ``attack_modules=`` explicitly, so
+    ``assembly.build_scan_engine`` never calls ``discover_attack_modules`` and
+    the variable is inert on this path. This pins that. A refactor that "unifies
+    the demo with normal discovery" fails here rather than in the wild.
+    """
+    source = inspect.getsource(mylonite.scan.wiring.build_scan)
+    tree = ast.parse(textwrap.dedent(source))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "build_scan_engine":
+            assert any(kw.arg == "attack_modules" for kw in node.keywords), (
+                "wiring.build_scan must pass attack_modules= explicitly; otherwise "
+                "build_scan_engine falls back to entry-point discovery and "
+                "MYLONITE_ATTACK_MODULES can inject payloads the fixtures never recorded."
+            )
+            return
+    raise AssertionError("no build_scan_engine(...) call found in wiring.build_scan")
+
+
+def test_replay_mode_label_degrades_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A malformed sidecar must cost provenance, never the demo itself.
+
+    ``json.loads`` succeeds on any valid JSON, so a sidecar containing ``null``
+    or ``2`` binds a non-dict. Reading ``.get`` off that outside the suppressed
+    block raises ``AttributeError``, which ``cli_entry`` does not catch -- an
+    unhandled traceback on the first command a newcomer ever runs, for a purely
+    cosmetic field.
+    """
+    for payload in ("null", "2", '"text"', "[]", "{not json", ""):
+        for variant in ("vulnerable", "guarded"):
+            d = tmp_path / variant
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "_meta.json").write_text(payload, encoding="utf-8")
+        monkeypatch.setattr(runner_mod, "packaged_fixture_dir", lambda: tmp_path)
+        assert runner_mod._replay_mode_label() == "replay (offline)", (
+            f"sidecar payload {payload!r} must degrade to the bare label"
+        )
+
+
+def test_replay_mode_label_reports_the_older_date(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mismatched variants report the OLDER date, never the newer one.
+
+    A partial re-record is permitted, so one variant can be stamped today while
+    the other still holds months-old responses. Reporting the newer date would
+    overstate how fresh the replayed evidence is, which is the direction that
+    actually misleads.
+    """
+    for variant, date in (("vulnerable", "2026-08-28"), ("guarded", "2026-01-02")):
+        d = tmp_path / variant
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "_meta.json").write_text(
+            f'{{"model": "m", "recorded_at": "{date}"}}', encoding="utf-8"
+        )
+    monkeypatch.setattr(runner_mod, "packaged_fixture_dir", lambda: tmp_path)
+    assert "recorded 2026-01-02" in runner_mod._replay_mode_label()
 
 
 def test_demo_does_not_import_a_second_replay_core() -> None:

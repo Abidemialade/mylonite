@@ -78,16 +78,33 @@ def _replay_mode_label() -> str:
     recorder-state inspection below.
     """
     label = "replay (offline)"
-    meta: dict[str, Any] = {}
-    with contextlib.suppress(Exception):
-        meta = json.loads(
-            (packaged_fixture_dir() / "vulnerable" / "_meta.json").read_text(encoding="utf-8")
-        )
+    root = packaged_fixture_dir()
+    metas: list[dict[str, Any]] = []
+    for variant in _VARIANTS:
+        with contextlib.suppress(Exception):
+            loaded = json.loads((root / variant / "_meta.json").read_text(encoding="utf-8"))
+            # isinstance, not just suppress: json.loads succeeds on any valid
+            # JSON, so a sidecar containing `null` or `2` would bind a non-dict
+            # and blow up on .get() BELOW the suppressed block. Same guard the
+            # sibling reader uses (``_replay._read_meta_cache_key_version``).
+            if isinstance(loaded, dict):
+                metas.append(loaded)
+
+    # Both variants, not just `vulnerable`. A partial re-record is permitted --
+    # `_check_dir_safe_to_record` lets a run resume, and the record script stamps
+    # per variant in sequence -- so an interrupted run can leave one directory
+    # newer than the other. `model` cannot diverge silently (replay forces
+    # DEMO_MODEL, so a mismatched variant cache-misses and the staleness guard
+    # fires), but `recorded_at` has no such enforcement. Report the OLDER date:
+    # it is the honest floor on how stale the replayed evidence is, and
+    # overstating freshness is the failure that matters here.
+    dates = sorted(str(m["recorded_at"]) for m in metas if m.get("recorded_at"))
+    models = {str(m["model"]) for m in metas if m.get("model")}
     parts = [
         text
         for text in (
-            f"recorded {meta['recorded_at']}" if meta.get("recorded_at") else "",
-            f"against {meta['model']}" if meta.get("model") else "",
+            f"recorded {dates[0]}" if dates else "",
+            f"against {models.pop()}" if len(models) == 1 else "",
         )
         if text
     ]
