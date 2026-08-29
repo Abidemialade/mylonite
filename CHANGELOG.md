@@ -18,14 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     review, code-owner review, stale-review dismissal on push, and the `lint` /
     `typecheck` / `test` / `precommit` / `security` checks. `security` was never
     a required check before, so `bandit`, `detect-secrets` and `pip-audit` could
-    all go red without blocking a merge. `.github/CODEOWNERS` is now path-scoped
-    over the trust base — workflows, `gate-action/`, `.pre-commit-config.yaml`,
-    `pyproject.toml`, `scripts/`, `.secrets.baseline`, `reference_targets/` — so
-    those paths need an explicit code-owner approval. Repository admins are a
-    bypass actor while there is a single maintainer, who otherwise could not
-    merge at all; see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the
-    trigger to remove it. This replaces the older per-branch protection settings
-    rather than sitting alongside them.
+    all go red without blocking a merge. `.github/CODEOWNERS` stays a single
+    catch-all, so code-owner review applies to every path; the **trust base**
+    (workflows, `gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`,
+    `scripts/`, `.secrets.baseline`, `reference_targets/`) is documented in
+    CONTRIBUTING.md, and gets its own CODEOWNERS entries once a second
+    maintainer makes them mean something. Repository admins are a bypass actor
+    while there is a single maintainer, who otherwise could not merge at all;
+    see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the trigger to
+    remove it. The ruleset does not require branches to be up to date before
+    merging — pull requests are already built against the merge result, so it
+    would mostly serialise merges. This replaces the older per-branch protection
+    settings rather than sitting alongside them.
   - `scripts/check_reference_target_inert.py` pins the property that makes the
     deliberately-vulnerable reference target auditable: the package is inert, so
     it cannot reach the network, spawn a process, or execute constructed code.
@@ -46,7 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     adding one would have replaced a working analysis with a permanently
     failing job.
   - `zizmor` and `actionlint` now lint the workflows themselves — previously the
-    one class of file that could silence every other check went unchecked.
+    one class of file that could silence every other check went unchecked. Both
+    run in the `precommit` CI job. `zizmor` is also a local pre-commit hook;
+    `actionlint` is not, because its hook is `language: golang` and pre-commit
+    bootstraps a Go toolchain when `go` is absent — a ~100MB download and a
+    local compile triggered by an unrelated typo.
+  - Private vulnerability reporting is enabled, so the GitHub Security Advisory
+    link SECURITY.md gives as the preferred reporting channel now resolves.
+    Workflows from forks require maintainer approval for all outside
+    contributors, not only first-time ones: the argument for keeping enforcement
+    off the workflow layer applies at least as strongly to running a fork's
+    workflow at all.
   - Dependabot updates wait 7 days (`cooldown`). Package compromises follow a
     shape: a malicious version is published, sits live for hours to days, then
     is yanked once someone notices. Zero cooldown opened a PR into this repo

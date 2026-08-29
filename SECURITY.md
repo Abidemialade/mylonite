@@ -275,9 +275,11 @@ Every push and pull request runs a permanent `security` job in CI
   is deliberately no `codeql.yml` — an advanced configuration cannot upload
   results while default setup is enabled, so adding one would have replaced a
   working analysis with a failing job.
-- **Workflow lint — `zizmor` + `actionlint`** via pre-commit. Workflows are the
-  one class of file that can disable every other check here, and until recently
-  nothing checked them.
+- **Workflow lint — `zizmor` + `actionlint`**, both in the `precommit` job.
+  Workflows are the one class of file that can disable every other check here,
+  and until recently nothing checked them. `zizmor` also runs as a local
+  pre-commit hook; `actionlint` is CI-only, because its hook builds a Go
+  toolchain and that is a poor trade to impose on a contributor fixing a typo.
 - **Supply-chain posture — OpenSSF Scorecard**, weekly
   (`.github/workflows/scorecard.yml`), results in the Security tab. It
   independently re-checks action pinning, token scopes, and branch protection,
@@ -295,7 +297,7 @@ Two project-specific guards run alongside the general tooling:
   *expected* there, which is what would make a genuine backdoor cheap to
   disguise; this keeps the two separable by construction rather than by review.
 Enforcement of *who* may change those guards is not a script. It is the
-`main` ruleset plus path-scoped [`.github/CODEOWNERS`](.github/CODEOWNERS) — see
+`main` ruleset plus [`.github/CODEOWNERS`](.github/CODEOWNERS) — see
 [GOVERNANCE.md](./GOVERNANCE.md#branch-protection). A CI job cannot do this job:
 for a `pull_request` event GitHub runs workflow files from the pull request's own
 checkout, so a check written as a workflow can be edited or deleted by the very

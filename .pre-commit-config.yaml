@@ -115,10 +115,20 @@ repos:
     hooks:
       - id: zizmor
 
+  # CI-only, via `stages: [manual]`. The hook is `language: golang`, and
+  # pre-commit bootstraps an entire Go toolchain when `go` is absent -- a
+  # ~100MB download and a local compile, triggered by an unrelated README typo,
+  # on a machine that may have neither Go nor the patience. zizmor above is a
+  # Python wheel and carries the security half of this, so the local commit
+  # path loses nothing that guards a token or a gate.
+  #
+  # The `precommit` CI job runs this explicitly at the manual stage, so
+  # enforcement is unchanged; only where it runs moved.
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.12
     hooks:
       - id: actionlint
+        stages: [manual]
 
   # Keep in lockstep with the `ruff==` pin in pyproject's [dev] extra. CI runs
   # both paths -- the `lint` job installs ruff from that pin, the `precommit`

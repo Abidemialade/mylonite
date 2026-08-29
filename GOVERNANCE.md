@@ -24,10 +24,20 @@ enforced server-side rather than by a workflow.
 It requires: one approving review, code-owner review, stale-review dismissal on
 push, approval of the last push, resolved conversations, linear history, and the
 `lint` / `typecheck` / `test (3.11–3.13)` / `precommit` / `security` checks.
-`.github/CODEOWNERS` names the maintainer for the trust base — workflows,
-`gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`, `scripts/`,
-`.secrets.baseline`, `reference_targets/` — so a change there requires an
-explicit code-owner approval.
+`.github/CODEOWNERS` is a single catch-all, so code-owner review applies to every
+path.
+
+It deliberately does **not** require branches to be up to date before merging.
+GitHub already builds pull requests against the merge result, so the setting
+adds little beyond serialising merges — with daily Dependabot across two
+ecosystems, each merge would invalidate every other open pull request.
+
+The **trust base** — workflows, `gate-action/`, `.pre-commit-config.yaml`,
+`pyproject.toml`, `scripts/`, `.secrets.baseline`, `reference_targets/` — is the
+set of paths that control what the project's own checks do. It is documented in
+CONTRIBUTING.md rather than enumerated in `.github/CODEOWNERS`: while one person
+owns the catch-all, per-path entries naming that same person enforce nothing
+extra. They become meaningful at the trigger below.
 
 **Repository admins are a bypass actor.** With a single maintainer this is
 required rather than a convenience: an author cannot approve their own pull
@@ -42,10 +52,11 @@ check implemented as a workflow can therefore be edited — or simply deleted, i
 which case no check run is created at all — by the same pull request it is
 meant to judge. A ruleset cannot be.
 
-**Trigger:** when a second maintainer is onboarded, remove the admin bypass. The
-reason for it disappears with the second reviewer, and the trust-base paths in
-`.github/CODEOWNERS` should then keep naming the lead maintainer specifically
-while the catch-all widens.
+**Trigger:** when a second maintainer is onboarded, remove the admin bypass — the
+reason for it disappears with the second reviewer — and add the trust-base paths
+to `.github/CODEOWNERS`, naming the lead maintainer specifically while the
+catch-all widens to the maintainer group. Both halves of that change matter: the
+catch-all widening is what makes the per-path entries start binding.
 
 ## Roles
 

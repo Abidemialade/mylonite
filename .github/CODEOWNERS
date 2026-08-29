@@ -4,52 +4,18 @@
 # code-owner review, so an entry here is a merge requirement rather than a
 # suggestion. See GOVERNANCE.md.
 #
-# The catch-all comes first and everything after it narrows: in CODEOWNERS the
+# One line, deliberately. An earlier draft also listed the trust-base paths
+# (workflows, gate-action/, .pre-commit-config.yaml, pyproject.toml, scripts/,
+# .secrets.baseline, reference_targets/) individually. While a single owner
+# holds the catch-all those entries enforce nothing the line below does not
+# already enforce — they were prose in a config file, and prose belongs where
+# contributors read it. That list now lives in CONTRIBUTING.md ("What we can and
+# can't accept") and GOVERNANCE.md, which is also where the reason is given.
+#
+# Re-add the path scoping when a second maintainer joins: at that point the
+# catch-all widens to the maintainer group, and those paths should keep naming
+# the lead maintainer specifically. That is the moment the entries start
+# meaning something. Note the ordering rule when you do — in CODEOWNERS the
 # LAST matching pattern wins, which is the opposite of .gitignore.
 
-*                                   @Abidemialade
-
-# --- the trust base ---------------------------------------------------------
-#
-# Everything below controls what the project's own checks do. A change here can
-# disable the machinery that would catch the rest of a diff, so these are called
-# out explicitly rather than left to the catch-all — the point is that the
-# reason is written down where a contributor reads it, not that the owner
-# differs today.
-#
-# When a second maintainer joins, these are the paths that should keep requiring
-# the lead maintainer specifically while the catch-all widens.
-
-# Decides what runs in CI, and with which token permissions.
-/.github/workflows/                 @Abidemialade
-/.github/actions/                   @Abidemialade
-/.github/CODEOWNERS                 @Abidemialade
-/.github/dependabot.yml             @Abidemialade
-
-# The composite action downstream users run in THEIR CI. A change here executes
-# in other people's repositories.
-/gate-action/                       @Abidemialade
-
-# Decides which checks run on a contributor's machine.
-/.pre-commit-config.yaml            @Abidemialade
-
-# Declares entry points, so it decides what the plugin loader imports at runtime.
-/pyproject.toml                     @Abidemialade
-
-# The repository's own guards, and the tests that prove they can fail. Gutting
-# the tests is as effective as gutting the guard.
-/scripts/                           @Abidemialade
-/tests/test_reference_target_guard.py @Abidemialade
-
-# Decides which strings the secret scanner is allowed to ignore.
-/.secrets.baseline                  @Abidemialade
-
-# The deliberately-vulnerable target, where insecure code is expected and a real
-# backdoor is therefore cheapest to disguise. Includes its own tests/ and
-# pyproject.toml, which execute in CI and are outside the inertness guard's
-# scope — this review is what covers them.
-/reference_targets/                 @Abidemialade
-
-# The responsible-use and dual-use rules themselves.
-/SECURITY.md                        @Abidemialade
-/GOVERNANCE.md                      @Abidemialade
+*       @Abidemialade
