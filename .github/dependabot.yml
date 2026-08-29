@@ -2,6 +2,16 @@ version: 2
 updates:
   - package-ecosystem: "pip"
     directory: "/"
+    # Wait a week before proposing a new release. The npm/PyPI compromises of
+    # recent years all followed the same shape: a malicious version is
+    # published, sits live for hours to days, then is yanked once someone
+    # notices. Zero cooldown means Dependabot opens a PR into this repo during
+    # exactly that window, with CI green because the package installs fine.
+    #
+    # This does NOT delay security fixes: Dependabot security updates bypass
+    # cooldown, so a CVE patch still arrives immediately.
+    cooldown:
+      default-days: 7
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10
@@ -30,6 +40,10 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Same reasoning as the pip block above. It applies at least as strongly
+    # here: an action runs with whatever token the workflow granted it.
+    cooldown:
+      default-days: 7
     schedule:
       interval: "daily"
     labels:
