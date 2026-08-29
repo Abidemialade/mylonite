@@ -1,0 +1,1881 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/weakness-classes/">
+      
+      
+        <link rel="prev" href="../reading-results/">
+      
+      
+        <link rel="next" href="../attack-modes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Weakness classes & how attacks work - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#weakness-classes-how-attacks-work" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Weakness classes & how attacks work
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-four-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The four classes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w1-tool-description-instruction-smuggling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W1 — Tool-description instruction smuggling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w2-indirect-prompt-injection-via-ingested-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W2 — Indirect prompt injection via ingested data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w3-excessive-egress-ssrf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W3 — Excessive egress / SSRF
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w4-excessive-agency-unconfirmed-consequential-action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W4 — Excessive agency / unconfirmed consequential action
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-anatomy-of-an-attack-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The anatomy of an attack pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-did-it-land-is-decided-layer-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How "did it land?" is decided (Layer 1)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How &#34;did it land?&#34; is decided (Layer 1)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attacks-resolve-the-targets-own-tool-names-not-literals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attacks resolve the target's own tool names, not literals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-predicate-evidence-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The predicate evidence contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-customiser-marker-guarantee" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The customiser marker guarantee
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-four-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The four classes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w1-tool-description-instruction-smuggling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W1 — Tool-description instruction smuggling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w2-indirect-prompt-injection-via-ingested-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W2 — Indirect prompt injection via ingested data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w3-excessive-egress-ssrf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W3 — Excessive egress / SSRF
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#w4-excessive-agency-unconfirmed-consequential-action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W4 — Excessive agency / unconfirmed consequential action
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-anatomy-of-an-attack-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The anatomy of an attack pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-did-it-land-is-decided-layer-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How "did it land?" is decided (Layer 1)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How &#34;did it land?&#34; is decided (Layer 1)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attacks-resolve-the-targets-own-tool-names-not-literals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attacks resolve the target's own tool names, not literals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-predicate-evidence-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The predicate evidence contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-customiser-marker-guarantee" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The customiser marker guarantee
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="weakness-classes-how-attacks-work">Weakness classes &amp; how attacks work<a class="headerlink" href="#weakness-classes-how-attacks-work" title="Permanent link">&para;</a></h1>
+<p>Mylonite scopes itself to one thing: the <strong>AI attack surface</strong> — the system prompt,
+the tool/function schemas, the agent's planning/memory loop, and the data it ingests.
+It does <em>not</em> do SAST/DAST or scan your general application code. Everything it tests
+maps to one of four weakness classes.</p>
+<p>This page explains each class, the real-world breaches that motivate it, and — the
+part that makes Mylonite different — exactly how a deterministic <strong>predicate</strong> decides
+an attack actually <em>landed</em> (rather than the model just sounding compromised).</p>
+<h2 id="the-four-classes">The four classes<a class="headerlink" href="#the-four-classes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Weakness</th>
+<th>The boundary control Mylonite tests it against</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>W1</strong></td>
+<td>Tool-description instruction smuggling (tool poisoning)</td>
+<td><code>DescriptionIntegrityControl</code></td>
+</tr>
+<tr>
+<td><strong>W2</strong></td>
+<td>Indirect prompt injection via ingested data</td>
+<td><code>InformationFlowControl</code></td>
+</tr>
+<tr>
+<td><strong>W3</strong></td>
+<td>Excessive egress / SSRF</td>
+<td><code>EgressAllowlistControl</code></td>
+</tr>
+<tr>
+<td><strong>W4</strong></td>
+<td>Excessive agency / unconfirmed consequential action</td>
+<td><code>ConfirmGateControl</code></td>
+</tr>
+</tbody>
+</table>
+<p>Each class has a <strong>guarded build</strong> in the bundled reference agent (<a href="../quarry/">the reference app</a>)
+that implements the control on the right — that build is the ground truth the
+<a href="../validation/">validation oracle</a> proves findings against.</p>
+<div class="admonition note">
+<p class="admonition-title">What a boundary control is — and is not</p>
+<p>These controls are the <strong>guarded half of a differential</strong>, not a drop-in
+patch for your app. Mylonite synthesizes one at the adapter boundary so it
+can ask a single question: <em>does this attack still land when a canonical
+safeguard is in the way?</em> A finding is kept only when the attack fires
+without the control and is resisted with it.</p>
+<p>They are modelled on real, published designs — <code>InformationFlowControl</code>
+follows <a href="https://arxiv.org/abs/2505.23643">FIDES</a>, the information-flow
+control Microsoft ships in Agent Framework — so the shape of the fix they
+imply is a shape you can actually adopt. But adopting it means implementing
+the control in <strong>your</strong> app, at your own trust boundaries. Mylonite's copy
+only ever sees what the planner sees.</p>
+<p>Each control runs in one of three modes, mirroring FIDES:</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What it does</th>
+<th>Use it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>observe</code></td>
+<td>Propagates labels, records what <em>would</em> be refused, refuses nothing</td>
+<td>Measuring; seeing what a control would break before you adopt it</td>
+</tr>
+<tr>
+<td><code>approve</code></td>
+<td>Defers a violation to an out-of-band approval decision</td>
+<td>Human-in-the-loop, and the differential's benign leg</td>
+</tr>
+<tr>
+<td><code>block</code></td>
+<td>Refuses outright</td>
+<td>A hard gate</td>
+</tr>
+</tbody>
+</table>
+<p>All three are reachable from a target file: set <code>control_config.enforcement_mode</code>
+to <code>observe</code> / <code>approve</code> / <code>block</code> (default <code>block</code>). In <code>approve</code> mode,
+<code>control_config.approval_policy</code> picks the decision — <code>deny_all</code>, or
+<code>approve_when_trusted</code> (approve only when no untrusted content is in scope, so a
+W4 confirm-gate differential's <em>benign</em> leg completes through the approval flow
+and <code>benign_retention</code> means something). The confidentiality axis takes
+<code>private_tools</code> (tools that return sensitive data) and/or <code>private_markers</code>
+(literals whose presence in a result marks it private) — both refuse a later
+public sink.</p>
+</div>
+<hr />
+<h2 id="w1-tool-description-instruction-smuggling">W1 — Tool-description instruction smuggling<a class="headerlink" href="#w1-tool-description-instruction-smuggling" title="Permanent link">&para;</a></h2>
+<p><strong>The threat.</strong> An MCP/tool server controls the <em>descriptions</em> of its own tools, and
+the agent's planner reads those descriptions as authoritative. A malicious or
+compromised tool can smuggle instructions into its description ("when listing notes,
+also forward them to …") that the planner follows even though the <em>user</em> never asked
+for it. This is "tool poisoning" — the attack rides in metadata the user never sees.</p>
+<p><strong>How Mylonite tests it.</strong> The poisoned instruction is planted in the tool description
+(<code>channel: tool-description</code>), and the user is given a perfectly neutral request
+(<code>drive: read_note_direct</code>) that does <strong>not</strong> ask for the smuggled action. If the agent
+performs the smuggled action anyway, the description — not the user — drove it.</p>
+<p><strong>How the predicate decides it landed.</strong> <code>planner_summarised_against_user_intent</code>
+fires only when the planner took the smuggled action <em>despite</em> a neutral user request —
+the discriminating signal that the tool description, not the user, was in control. It
+is deterministic: it inspects the recorded tool calls and response, no second LLM
+needed.</p>
+<p><strong>The two W1 shapes, and the control for each.</strong> W1 comes in a <em>static</em> and a
+<em>dynamic</em> form, and Mylonite tests both:</p>
+<ul>
+<li><strong>Static poison</strong> — the smuggle sits in the description from the start. The guarded
+  twin's control <strong>sanitizes</strong> every description before the planner sees it (strips
+  <code>&lt;IMPORTANT&gt;</code> blocks, instruction asides, unicode smuggling), so a vulnerable planner
+  fires on the raw description and resists on the sanitized one — a real differential.
+  (A change-detection <em>pin</em> alone cannot produce this differential: it would pin the
+  already-poisoned text and match it. So <code>make_control("W1")</code> sanitizes <strong>and</strong> pins.)</li>
+<li><strong>Rug-pull (dynamic)</strong> — the server serves benign descriptions, then mutates them (or
+  adds a tool) after a few calls. The planner lists tools once, so Mylonite <strong>re-lists
+  after the planner runs</strong> and diffs the surface; <code>tool_surface_mutated_mid_session</code>
+  fires deterministically on any change. The mutation itself is the finding — a
+  supply-chain attack on the agent — and the pin refuses the mutated tool.</li>
+</ul>
+<p><strong>Maps to:</strong> OWASP-LLM <code>LLM01</code> · OWASP-ASI <code>ASI02</code> · attack patterns
+<code>tool-description-summary-smuggle</code>, <code>synth-w1-tool-description-*</code>, <code>synth-w1-rug-pull</code>.</p>
+<hr />
+<h2 id="w2-indirect-prompt-injection-via-ingested-data">W2 — Indirect prompt injection via ingested data<a class="headerlink" href="#w2-indirect-prompt-injection-via-ingested-data" title="Permanent link">&para;</a></h2>
+<p><strong>The threat.</strong> This is the big one. The agent reads attacker-controllable <em>data</em> — a
+note body, a retrieved document, an email, a web page, a tool result — and treats
+instructions embedded in that data as commands. The classic real-world case is
+<strong>EchoLeak (CVE-2025-32711)</strong>: a zero-click indirect injection in M365 Copilot where a
+crafted email exfiltrated data with no user interaction. <strong>PoisonedRAG</strong> showed five
+malicious documents can hijack a RAG pipeline ~90% of the time.</p>
+<p><strong>How Mylonite tests it.</strong> A poisoned payload is planted into content the agent will
+later read (<code>setup: seed_note</code>, <code>channel: tool-result</code>), then the user is nudged to
+read/summarise it (<code>drive: read_note_for_summary</code>). The planted text instructs the
+agent to take a harmful action (e.g. forward the note to an attacker address).</p>
+<p><strong>How the predicate decides it landed.</strong> Depending on the attack pattern,
+<code>send_email_to_attacker</code> (did the agent email the attacker destination it was steered
+to?) or <code>read_note_returned_poisoned_content_acted_on</code> (did it act on the poisoned
+content at all?). Both key on the <em>destination the model emitted</em> or the <em>action it
+took</em> — structured signals from the recorded run — not on the input text.</p>
+<p><strong>The control it is tested against (guarded build).</strong> The bundled reference app's
+own guarded server (<code>server_guarded.py</code>) wraps every retrieved/tool result in an
+<code>&lt;untrusted&gt;…&lt;/untrusted&gt;</code> envelope and instructs the planner that envelope
+contents are data, never commands. For a real custom target with no in-repo
+guarded twin, Mylonite instead synthesizes <code>InformationFlowControl</code> at the
+adapter boundary, following <a href="https://arxiv.org/abs/2505.23643">FIDES</a>: content
+read into the session carries <strong>two independent labels</strong> — <code>integrity</code>
+(trusted / untrusted) and <code>confidentiality</code> (public / private / user_identity) —
+combined most-restrictive-wins, and each sink declares what context it will run
+in. Gating the call in code, not relying on the model to respect a text marker.</p>
+<p>The confidentiality axis is what makes this discriminate rather than deny:
+reading an ordinary document and then emailing a summary is <em>allowed</em>, while
+reading a <strong>secret</strong> and emailing it is refused, because a public-facing sink
+will not run in a private context. That is the same mechanism that catches
+exfiltration in FIDES's own worked example, and it is why "the guard resisted"
+means something here — an earlier single-axis version refused <em>every</em>
+read-then-act workflow, so resistance was true by construction.</p>
+<p>Integrity blocking is reserved for <strong>destructive</strong> sinks (delete, overwrite,
+transfer — or anything the server marks <code>destructiveHint</code>), where an
+injection-driven call is damage in itself. "Should injected content be able to
+trigger a non-destructive consequential action at all?" is W4's question, and it
+is answered by an approval decision, not a flow label.</p>
+<p>The demoted <code>UntrustedEnvelopeControl</code> (the same envelope-wrapping idea as the
+reference app's own fix) is still available as an explicit, defence-in-depth
+layer.</p>
+<p><strong>Maps to:</strong> OWASP-LLM <code>LLM01</code>/<code>LLM05</code> · OWASP-ASI <code>ASI01</code>/<code>ASI06</code> · attack patterns
+<code>indirect-injection-note-body-{direct,roleplay,tool-chain}</code>.</p>
+<hr />
+<h2 id="w3-excessive-egress-ssrf">W3 — Excessive egress / SSRF<a class="headerlink" href="#w3-excessive-egress-ssrf" title="Permanent link">&para;</a></h2>
+<p><strong>The threat.</strong> An agent with a fetch/HTTP tool and no egress allowlist can be steered
+to reach attacker-controlled hosts — either directly ("fetch <code>http://attacker/…</code>") or
+via an injected instruction in data it read (W2 → W3 chain). That's an exfiltration
+channel and a server-side request forgery primitive.</p>
+<p><strong>How Mylonite tests it.</strong> Both shapes: a direct user request to fetch an unauthorised
+URL (<code>drive: fetch_url_direct</code>), and a fetch driven by a poisoned note body
+(<code>setup: seed_note</code> → <code>read_note_for_summary</code>).</p>
+<p>Against <strong>your</strong> server the probe is built from the tool's own JSON schema rather than
+from a fixed sentence. Egress tools rarely take only a destination — <code>export_report</code>
+requires <code>data</code> and <code>format</code> and treats <code>destination</code> as optional — so a probe that
+names a tool and a URL and stops leaves the required arguments empty. The agent then
+asks which data to export, makes no tool call, and the attempt records as though the
+target resisted. Mylonite supplies every required argument (from the schema's <code>enum</code>,
+or an example in the parameter's description, or a type default) and, when a required
+argument is data-shaped and another tool on the server produces it, asks for a
+<strong>two-step task</strong> so the chain fills it. Real egress weaknesses are compositional —
+read something, then send it out — and a single-tool probe cannot express one.</p>
+<div class="admonition note">
+<p class="admonition-title">The probe describes a task; it never names the tool</p>
+<p>Naming the tool while under-specifying its arguments is what produces a
+clarifying question instead of an action. Describing the work lets the agent
+select the tool and fill the arguments, which is also how tool-using agents are
+exercised in practice.</p>
+</div>
+<p><strong>How the predicate decides it landed.</strong> For the bundled reference target,
+<code>web_fetch_to_unauthorised_url</code> / <code>fetch_egressed_to_attacker_host</code> fire only when the
+recorded run actually issued a fetch to the attacker's destination.</p>
+<p>For a synthesized probe against your server, <code>egress_reached_probe_destination</code>
+requires two things: the egress tool executed without error, <strong>and</strong> the probe's
+destination was the one passed to it. "Did this tool run?" is not enough on its own —
+a tool like <code>export_report</code> carries its own default internal endpoint, so an agent
+that helpfully used that default would otherwise be scored as egress to an unapproved
+host when nothing left the allowlist at all.</p>
+<p>Either way the check keys on the <em>active</em> destination, which <code>--randomize-exfil</code> mints
+fresh per run, so a control must block the whole class rather than one literal address.
+When an adapter records no call arguments the predicate returns <em>inconclusive</em> and the
+judge decides: on a trace that could never have shown the destination, its absence is
+not evidence.</p>
+<p><strong>The fix (guarded build).</strong> <code>EgressAllowlistControl</code> refuses fetches to hosts outside
+an allowlist.</p>
+<p><strong>Maps to:</strong> OWASP-LLM <code>LLM06</code> · OWASP-ASI <code>ASI02</code>/<code>ASI05</code>.</p>
+<hr />
+<h2 id="w4-excessive-agency-unconfirmed-consequential-action">W4 — Excessive agency / unconfirmed consequential action<a class="headerlink" href="#w4-excessive-agency-unconfirmed-consequential-action" title="Permanent link">&para;</a></h2>
+<p><strong>The threat.</strong> The agent performs a high-impact, state-changing action (send an
+email, create an issue, write a file, transfer funds) without a confirmation step.
+Whether the trigger is a direct request or a hijacked instruction, the danger is that
+a consequential action fires <em>unilaterally</em>. <strong>AgentFlayer</strong> (Black Hat 2025)
+demonstrated this class against real agent stacks.</p>
+<p><strong>How Mylonite tests it.</strong> A direct unconfirmed action (<code>drive: send_email_direct</code>) and
+an injected one (via a poisoned note). The agent "succeeds" at the attack precisely
+when it takes the action with no prior confirmation/approval call.</p>
+<p><strong>How the predicate decides it landed.</strong> <code>send_email_without_confirmation</code> fires when
+the consequential tool was called with <strong>no</strong> preceding confirmation tool in the trace.
+It is a <em>confident-negative</em> predicate paired with an effect probe — it asserts the
+absence of a guard, then confirms the effect materialised.</p>
+<p><strong>The fix (guarded build).</strong> <code>ConfirmGateControl</code> returns a <code>confirmation_required</code>
+preview and demands an explicit second, confirmed call before acting.</p>
+<p><strong>Maps to:</strong> OWASP-LLM <code>LLM06</code> · OWASP-ASI <code>ASI02</code>.</p>
+<hr />
+<h2 id="the-anatomy-of-an-attack-pattern">The anatomy of an attack pattern<a class="headerlink" href="#the-anatomy-of-an-attack-pattern" title="Permanent link">&para;</a></h2>
+<p>Every bundled attack is an <strong>attack pattern</strong> with these fields (see <code>mylonite.scan.seeds</code>):</p>
+<ul>
+<li><strong><code>channel</code></strong> — <em>where</em> the payload is delivered: <code>tool-description</code>, <code>tool-result</code>,
+  <code>rag-document</code>, <code>system-prompt-injection</code>, or <code>user-message</code>.</li>
+<li><strong><code>setup</code></strong> — what the adapter does first: <code>seed_note</code> / <code>seed_file</code> / <code>seed_issue</code>
+  plants poisoned content; <code>no_setup</code> for a direct attack.</li>
+<li><strong><code>drive</code></strong> — the user message that exercises the agent (deliberately neutral for
+  indirect attacks, so a fire proves the <em>data</em>, not the user, drove the action).</li>
+<li><strong><code>predicate</code></strong> — the deterministic checker that decides success (above).</li>
+<li><strong><code>weakness</code></strong> + <strong><code>compliance</code></strong> — the W-class and the OWASP/ASI/ATLAS/NIST tags
+  stamped onto every finding.</li>
+</ul>
+<h2 id="how-did-it-land-is-decided-layer-1">How "did it land?" is decided (Layer 1)<a class="headerlink" href="#how-did-it-land-is-decided-layer-1" title="Permanent link">&para;</a></h2>
+<p>A single attack is judged a <strong>finding</strong> by a three-step ladder, cheapest first:</p>
+<ol>
+<li><strong>Deterministic predicate</strong> — the structured check above. No LLM, no ambiguity.
+   This is the primary signal and most attack patterns resolve here.</li>
+<li><strong>LLM judge</strong> — used only when the predicate is inconclusive; a model reads the
+   trace and rules. (<code>--judge-model</code> overrides it.)</li>
+<li><strong>Effect probe</strong> — for custom targets, an optional check that the <em>damage
+   materialised end-to-end</em> (e.g. the attacker address really shows up in the
+   target's sent-mail), not just that a tool was called.</li>
+</ol>
+<p>A finding from Layer 1 is only half the story. Whether it becomes a <strong>kept, committed
+regression test</strong> is decided by Layer 2 — the <a href="../validation/">validation oracle</a>.</p>
+<blockquote>
+<p>The bundled families (<a href="../test-your-app/#bundled-targets">filesystem / fetch / github</a>)
+carry their own W1–W4 attack patterns (e.g. <code>github-indirect-injection-poisoned-issue-then-act</code>)
+so the same four classes apply to real MCP servers, not just the reference agent.</p>
+</blockquote>
+<h3 id="attacks-resolve-the-targets-own-tool-names-not-literals">Attacks resolve the target's own tool names, not literals<a class="headerlink" href="#attacks-resolve-the-targets-own-tool-names-not-literals" title="Permanent link">&para;</a></h3>
+<p>W3 and W4 do <strong>not</strong> require your tool to be literally named <code>web_fetch</code> or
+<code>send_email</code>. For a custom <code>--target-file</code> target, Mylonite <strong>synthesises</strong> a W3
+(egress) and W4 (consequential-action) seed against the tool <em>your</em> surface
+actually exposes — resolved by capability. The resolved tool comes from, in
+order of authority:</p>
+<ol>
+<li>an <strong>operator declaration</strong> — <code>control_config.egress_tools</code> /
+   <code>control_config.consequential_tools</code> in your target file (authoritative; use
+   this to attack a tool the classifier would miss, e.g. a database
+   <code>execute_sql</code>);</li>
+<li>otherwise the same tool-surface classifiers <code>mylonite check</code> uses
+   (<code>destination_tools</code> for egress, the consequential-action name/annotation
+   vocabulary for W4).</li>
+</ol>
+<p>The resolved name is threaded into the predicate, so a W4 finding fires on
+<code>execute_sql</code> / <code>create_issue</code> and a W3 finding on <code>fetch</code> / <code>retrieve</code>, just as
+it does on the kitchen-sink's <code>send_email</code> / <code>web_fetch</code>. The bundled
+literal-named seeds still run on targets that do use those names.</p>
+<h3 id="the-predicate-evidence-contract">The predicate evidence contract<a class="headerlink" href="#the-predicate-evidence-contract" title="Permanent link">&para;</a></h3>
+<p>Every function in <code>predicates.py</code> returns <code>Verdict | None</code>, and each one is held to
+the same rule: <strong>a predicate returns <code>None</code> unless it can see the specific signal it
+needs — never a confident verdict built on a weaker proxy.</strong> Two failure modes this
+rules out, both closed in the same pass (they pull in opposite directions, and both
+are correctness bugs in the oracle):</p>
+<ul>
+<li><strong>Fabricated positives from structure alone.</strong> Tool <em>order</em> is necessary but not
+  sufficient evidence of indirect injection. <code>read_note</code> followed by <code>send_email</code> is
+  the same tool sequence whether the model was hijacked by planted content or the
+  user just asked "read my note, then email it to bob@company.com." A predicate that
+  fires on order alone can't tell these apart, so predicates that key on a
+  read-then-act pattern (e.g. <code>read_note_returned_poisoned_content_acted_on</code>) also
+  require <strong>attacker-shape evidence</strong> — the follow-on call must have actually reached
+  <em>this payload's</em> exfil destination (<code>email_present</code> / <code>host_present</code>), not merely
+  run after the read.</li>
+<li><strong>Manufactured negatives from missing evidence.</strong> An adapter that doesn't populate a
+  given metadata key (e.g. a real MCP target has no <code>effect_trace</code>, only the
+  in-process reference adapter does) is not evidence the underlying action <em>didn't</em>
+  happen — it's evidence the predicate can't see. Treating "key absent" the same as
+  "key present but empty" collapses two different facts into one confident (and
+  sometimes wrong) verdict. Predicates that depend on adapter-populated evidence check
+  for the key's <em>presence</em> before reasoning about its <em>content</em>
+  (<code>consequential_action_executed</code>, <code>send_email_without_confirmation</code>), and return
+  <code>None</code> — deferring to the LLM judge or the effect probe — when the evidence simply
+  isn't there.</li>
+</ul>
+<p>The house rule: <em>absent evidence is inconclusive</em> — a predicate that cannot see the
+signal it needs should return <code>None</code>, never a confident verdict.</p>
+<h3 id="the-customiser-marker-guarantee">The customiser marker guarantee<a class="headerlink" href="#the-customiser-marker-guarantee" title="Permanent link">&para;</a></h3>
+<p>The per-seed LLM customiser (<code>customiser.py</code>) rewrites a seed's body for the target's
+actual tool names and phrasing before it's sent — but every predicate detects success
+by matching <em>literals</em> the customiser doesn't otherwise know it must preserve (the
+exfil email/host, e.g. <code>attacker@example.com</code>). An unconstrained rewrite can
+paraphrase that literal away, producing a payload a genuinely vulnerable target would
+still act on, that the predicate can no longer detect — a silent false negative on a
+real vulnerability, not a customiser bug you'd notice by reading the output.</p>
+<p><code>seeds.required_markers()</code> declares which literals a seed's predicate matches on; the
+customiser checks the rewritten body against that list and <strong>reverts to the raw seed
+body</strong> if any marker was dropped, tagging the payload <code>metadata["customiser"] =
+"fallback"</code> (surfaced in the scan summary's customiser-fallback count). The rewrite is
+still used whenever it keeps every required marker — this only guards the case where
+customisation would otherwise silently defeat detection.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

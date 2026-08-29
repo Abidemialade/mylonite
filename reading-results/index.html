@@ -1,0 +1,1684 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/reading-results/">
+      
+      
+        <link rel="prev" href="../ci-gating/">
+      
+      
+        <link rel="next" href="../weakness-classes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Reading the results - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#reading-the-results" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Reading the results
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-terminal-trust-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The terminal trust panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sarif-210-sarif-github-code-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SARIF 2.1.0 — --sarif (GitHub code scanning)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json-finding-bundle-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON finding bundle — --json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-gating-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gating PR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-claim-you-earned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which claim you earned
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compliance-metadata-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compliance metadata (everywhere)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes-for-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes (for CI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-terminal-trust-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The terminal trust panel
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sarif-210-sarif-github-code-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SARIF 2.1.0 — --sarif (GitHub code scanning)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#json-finding-bundle-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON finding bundle — --json
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-gating-pr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The gating PR
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#which-claim-you-earned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which claim you earned
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compliance-metadata-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compliance metadata (everywhere)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes-for-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes (for CI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="reading-the-results">Reading the results<a class="headerlink" href="#reading-the-results" title="Permanent link">&para;</a></h1>
+<p>A finding is only useful if a human (or a pipeline) can act on it. Mylonite renders
+every scan and validation in the format you actually consume — from a terminal trust
+panel to GitHub code scanning to a machine-readable bundle — all from the same
+underlying data, all offline (no LLM, no network).</p>
+<p>The one command for all of it is <code>mylonite report</code>, pointed at a scan dir, a
+<code>generate</code>-emitted dir once <code>validate</code> has run (both write into the same
+dir), or a <code>*_report.json</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mylonite<span class="w"> </span>report<span class="w"> </span>.mylonite/scans/&lt;dir&gt;<span class="w">                 </span><span class="c1"># terminal trust panel</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mylonite<span class="w"> </span>report<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--sarif<span class="w"> </span>out.sarif<span class="w">               </span><span class="c1"># GitHub code scanning</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>mylonite<span class="w"> </span>report<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--json<span class="w"> </span>finding.json<span class="w">             </span><span class="c1"># dashboards / SIEM / bots</span>
+</code></pre></div>
+<h2 id="the-terminal-trust-panel">The terminal trust panel<a class="headerlink" href="#the-terminal-trust-panel" title="Permanent link">&para;</a></h2>
+<p>The default. For a scan it shows the findings, coverage per weakness class, and any
+<strong>NOT TESTED</strong> gap (an attack pattern that couldn't be delivered — surfaced loudly, never silently
+counted as clean). For a validation it shows the verdict and the evidence behind it:</p>
+<div class="admonition note">
+<p class="admonition-title">What counts as NOT TESTED</p>
+<p>An attempt is only a clean result when the attack was actually exercised. These
+are all reported as NOT TESTED, never as a pass:</p>
+<table>
+<thead>
+<tr>
+<th>Outcome</th>
+<th>What happened</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>not_applicable</code></td>
+<td>the seed needs a capability this target does not expose</td>
+</tr>
+<tr>
+<td><code>skipped_no_seed_arm</code></td>
+<td>there was no way to plant the poisoned content</td>
+</tr>
+<tr>
+<td><code>skipped_payload_not_delivered</code></td>
+<td>the plant never reached the model</td>
+</tr>
+<tr>
+<td><code>skipped_planner_no_engagement</code></td>
+<td>the agent never invoked <strong>the tool this attack targets</strong></td>
+</tr>
+<tr>
+<td><code>skipped_planner_failure</code> / <code>error</code></td>
+<td>the run broke before a verdict</td>
+</tr>
+</tbody>
+</table>
+<p><code>skipped_planner_no_engagement</code> is the subtlest of these: the attack was
+generated and delivered, and the agent never exercised it against the target.
+Nothing was put to the target, so it is not evidence the target is defended.</p>
+<p>Two shapes reach it. The agent may have made <strong>no tool calls at all</strong> — it
+declined, or answered in prose. Or it may have called <em>other</em> tools and never
+reached the one under test: a two-step probe whose first step fails (a source
+tool returning an error, or the call budget running out mid-chain) leaves a
+non-empty trace and still proves nothing about the sink. The attempt's
+<code>verdict_reason</code> names the tool that was never reached.</p>
+<p>Look at <code>raw_response</code> to see what the agent said instead. A planner that will
+not engage at all usually means a different <code>--planner-model</code>; a chain that
+stalls usually means the first step failed, or <code>--max-llm-calls</code> was too tight
+for the number of seeds (the summary names any seed that never started).</p>
+</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>leg          result   metric  detail
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>build        pass      -      offline pass with fixtures
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>differential pass     1.00    vulnerable fired, guarded resisted
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>flakiness    pass     1.00    reproducibility 5/5 vulnerable, 5/5 guarded
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>metamorphic  pass     0.86    robustness (6/7 perturbations held; gates kept)
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>gate: kept = build ✓ AND differential ✓ AND flakiness ✓ AND metamorphic ✓  =&gt;  KEPT
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>reproducibility: vulnerable fired 5/5, guarded resisted 5/5
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>mutation score: 7/8   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
+</code></pre></div>
+<p>That panel is the <strong>anti-false-positive trust signal</strong>: ~46% of security alerts are
+false positives, so a finding that ships with a machine-checkable differential proof
+("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.</p>
+<h2 id="sarif-210-sarif-github-code-scanning">SARIF 2.1.0 — <code>--sarif</code> (GitHub code scanning)<a class="headerlink" href="#sarif-210-sarif-github-code-scanning" title="Permanent link">&para;</a></h2>
+<p>SARIF is the portal to where developers already triage every other finding — the
+GitHub <strong>Security tab</strong> and PR checks. <code>--sarif</code> writes a SARIF 2.1.0 document where
+each result carries:</p>
+<ul>
+<li>a <strong>severity</strong> (<code>security-severity</code> + level) GitHub uses to bucket the finding,</li>
+<li>the <strong>compliance tags</strong> (OWASP-LLM/ASI · MITRE ATLAS · NIST),</li>
+<li>the <strong>differential proof</strong> in the message (fired N/N on the raw target, resisted M/M
+  with the control — worded to match the twin that produced it; see
+  <a href="#which-claim-you-earned">Which claim you earned</a> below),</li>
+<li>a <strong>location</strong> — a <code>logicalLocation</code> pinning the implicated tool/field (a remote MCP
+  tool has no source line, so the honest unit is the tool + field), plus a real
+  prompt-file line when the AI layer is a committed file.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mylonite<span class="w"> </span>report<span class="w"> </span>.mylonite/generated/&lt;dir&gt;<span class="w"> </span>--sarif<span class="w"> </span>mylonite.sarif
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="c1"># then upload via github/codeql-action/upload-sarif in CI</span>
+</code></pre></div>
+<h2 id="json-finding-bundle-json">JSON finding bundle — <code>--json</code><a class="headerlink" href="#json-finding-bundle-json" title="Permanent link">&para;</a></h2>
+<p>For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom CI.
+A single <code>finding.json</code> (versioned <code>schema_version</code>) with, per finding: <code>pattern_id</code>,
+<code>weakness_class</code>, <code>severity</code>, <code>attack_shape</code>, the full <code>compliance</code> block, the R4
+<code>localization</code> (tool/field/line), the <code>proof</code> (vuln/guard counts + <code>kept</code>), and the
+<code>proven_control</code>. It reuses the exact data the SARIF report computes — no new
+analysis. Source: <code>mylonite.report.bundle</code>.</p>
+<h2 id="the-gating-pr">The gating PR<a class="headerlink" href="#the-gating-pr" title="Permanent link">&para;</a></h2>
+<p>When you run <a href="../ci-gating/"><code>gate</code></a>, the PR body is itself a result surface:</p>
+<ul>
+<li><strong>What was found</strong> — the validated weakness, compliance tags, attack tier.</li>
+<li><strong>The differential proof</strong> — the fires/resists numbers and the kept formula, so the
+  reviewer sees <em>why the test is trustworthy</em>, not just that it exists.</li>
+<li><strong>Located at</strong> — the exact locus to fix: which tool's <em>description</em> smuggled the
+  instruction, which tool's <em>returned content</em> was trusted, which action <em>handler</em> fired
+  without a guard, or which <em>system-prompt line</em> is at fault. Derived deterministically
+  from the finding (<code>mylonite.gate.localize</code>).</li>
+<li><strong>The proven fix</strong> — an evidence-anchored recommendation naming the actual tool and
+  argument that landed the exploit (your own tool, for a <code>--target-file</code> app; the
+  reference app's tool, for the bundled <code>reference:*</code> targets), as a fenced <strong>code
+  sketch</strong> (never a diff — Mylonite doesn't assert it knows your file layout), tiered
+  deterministic/probabilistic/detective (<code>mylonite.gate.recommend</code>). Framed as a
+  <strong>Proven fix</strong> for a control-efficacy finding, a <strong>Recommended fix</strong> otherwise.</li>
+<li><strong>Inline annotations</strong> — with <code>--open-pr</code>, a finding that maps to a committed prompt
+  line also posts a best-effort GitHub check-run annotation on that line.</li>
+</ul>
+<h2 id="which-claim-you-earned">Which claim you earned<a class="headerlink" href="#which-claim-you-earned" title="Permanent link">&para;</a></h2>
+<p>A KEPT verdict is not one claim, it is two — and the difference is which guarded side ran.
+Mylonite words every surface (the trust panel, SARIF, the JSON bundle, the PR body) to
+match, and never prints the stronger sentence for the weaker run.</p>
+<table>
+<thead>
+<tr>
+<th>Guarded side</th>
+<th>Wording you get</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Server-layer twin</strong> — your own control, toggled via <code>control_env</code></td>
+<td><em>"the safeguard — not the model — carries the security"</em></td>
+<td>Disabling <strong>your</strong> control let the attack through and re-enabling it stopped it. Your implementation is load-bearing.</td>
+</tr>
+<tr>
+<td><strong>Synthetic boundary twin</strong> — Mylonite's canonical control at the adapter boundary (the default)</td>
+<td><em>"a canonical control stops this attack ... this does not establish that YOUR control carries the security"</em></td>
+<td>The attack is real and this class of control closes it. The guarded side was Mylonite's shim, so your implementation was never measured.</td>
+</tr>
+</tbody>
+</table>
+<p>Both are KEPT: the attack fired, a control stopped it, and the emitted regression test is
+worth gating on either way. To upgrade a synthetic result to the strong claim, declare
+<code>control_env</code> in your <code>target.yaml</code> so Mylonite can toggle your real control — see
+<a href="../target-file/">target.yaml</a>.</p>
+<p>A <strong>rejection</strong> on a synthetic twin is likewise not evidence your control is ineffective:
+the boundary shim cannot see a guard enforced inside your server. The reject message says
+so explicitly.</p>
+<h2 id="compliance-metadata-everywhere">Compliance metadata (everywhere)<a class="headerlink" href="#compliance-metadata-everywhere" title="Permanent link">&para;</a></h2>
+<p>Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
+body — carries the compliance mapping for the finding: <strong>OWASP LLM Top 10 (2025)</strong>,
+<strong>OWASP ASI (2026)</strong>, <strong>MITRE ATLAS</strong> technique IDs, and a <strong>NIST AI RMF</strong> function tag.
+This is near-free at generation time and is the foundation of audit/compliance reporting
+— see <a href="../standards-mapping/">Standards mapping</a>.</p>
+<h2 id="exit-codes-for-ci">Exit codes (for CI)<a class="headerlink" href="#exit-codes-for-ci" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>success / the test is kept</td>
+</tr>
+<tr>
+<td>2</td>
+<td>config or usage error (incl. an empty scan — never reads as a clean pass)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>LLM-call budget exceeded</td>
+</tr>
+<tr>
+<td>4</td>
+<td>provider unreachable</td>
+</tr>
+<tr>
+<td>5</td>
+<td>the generated test was rejected (not kept)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>gate</code>: the test generator returned nothing</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>gate</code>: the validator returned nothing</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>gate</code>: the git/gh step failed (findings and report still written to <code>--out</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>A clean exit <code>0</code> means the run actually happened — an aborted or empty scan exits
+non-zero so a misconfiguration can never masquerade as "all clear".</p>
+<p>Exit <code>0</code> with findings can still carry a coverage caveat: if some seeds were never
+exercised, the run reports that alongside the findings rather than letting a partial scan
+read as a complete one. Finding something does not make an incomplete scan complete.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

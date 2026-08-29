@@ -1,0 +1,1756 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/cli-reference/">
+      
+      
+        <link rel="prev" href="../standards-mapping/">
+      
+      
+        <link rel="next" href="../target-file/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>CLI reference - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#demo-the-reference-app-playground" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        demo — the reference-app playground
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-static-structural-pre-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check — static structural pre-check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scan-find-weaknesses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scan — find weaknesses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generate-emit-the-regression-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate — emit the regression test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-prove-the-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate — prove the test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate-scan-generate-validate-pr-the-full-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gate — scan → generate → validate → PR (the full pipeline)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#report-render-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        report — render findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ablate-score-the-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ablate — score the safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        plugins
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="plugins">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-config-myloniteyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run config (mylonite.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#demo-the-reference-app-playground" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        demo — the reference-app playground
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check-static-structural-pre-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        check — static structural pre-check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scan-find-weaknesses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        scan — find weaknesses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generate-emit-the-regression-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        generate — emit the regression test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-prove-the-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate — prove the test
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate-scan-generate-validate-pr-the-full-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gate — scan → generate → validate → PR (the full pipeline)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#report-render-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        report — render findings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ablate-score-the-safeguards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ablate — score the safeguards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        version
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plugins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        plugins
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="plugins">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-config-myloniteyaml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run config (mylonite.yaml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-reference">CLI reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
+<p>Every command, its key options, and a worked example. Run <code>mylonite COMMAND --help</code> for
+the authoritative, always-current list (the help strings and usage examples live in the
+CLI itself). Global options <code>--api-key-file</code> and <code>--env-file</code> work before any command.</p>
+<p><strong>Exit codes:</strong> <code>0</code> ok/kept · <code>1</code> <code>check --enforce</code>: structural findings present · <code>2</code>
+config or usage error (incl. an empty scan) · <code>3</code> LLM-call budget exceeded · <code>4</code> provider
+unreachable · <code>5</code> test rejected (not kept) · <code>6</code> <code>gate</code>: the test generator returned
+nothing (internal collaborator failure) · <code>7</code> <code>gate</code>: the validator returned nothing
+(internal collaborator failure) · <code>8</code> <code>gate</code>: the git/gh step failed (your findings and
+validation report are still in <code>--out</code>).</p>
+<p>Budget exhaustion always exits <code>3</code>, whichever layer of the run observes it first.</p>
+<hr />
+<h2 id="demo-the-reference-app-playground"><code>demo</code> — the reference-app playground<a class="headerlink" href="#demo-the-reference-app-playground" title="Permanent link">&para;</a></h2>
+<p>Zero-config, zero-key: runs the vulnerable-vs-guarded differential on the bundled
+reference agent. This is the fastest way to see what the tool actually does. Needs
+<code>pip install "mylonite[demo]"</code> (the extra pulls the reference app).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mylonite<span class="w"> </span>demo<span class="w">            </span><span class="c1"># offline replay, instant, no API key</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mylonite<span class="w"> </span>demo<span class="w"> </span>--live<span class="w">     </span><span class="c1"># real calls (~a minute, a few cents on Haiku)</span>
+</code></pre></div>
+<p>Options: <code>--live</code>; <code>--provider</code>, <code>--model</code> (both <code>--live</code> only — replay is pinned to the
+provider/model the fixtures were recorded against, and the command says so rather than
+silently ignoring the flags).</p>
+<p><strong>What the default mode is, precisely.</strong> It replays LLM responses recorded against the
+bundled targets, so it makes no network call and is byte-for-byte deterministic. The
+scan, the adapters, the predicates and the differential are the real ones; only the model
+responses are canned. The output labels itself <code>mode: replay (offline)</code> and carries the
+model and date the fixtures were recorded — do not read a replayed number as a fresh
+measurement of today's model. <code>--live</code> is the fresh measurement.</p>
+<p>One deliberate difference from <code>scan</code>: the demo runs with the per-seed LLM customiser and
+the LLM-judge fallback <strong>off</strong>, so it drives raw seed bodies judged by deterministic
+predicates only. That is what makes the recording reproducible. A <code>--live</code> <code>scan</code> exercises
+both of those stages and can legitimately reach a different result.</p>
+<p>If fixtures are missing or stale the command <strong>fails</strong> with exit <code>2</code> and tells you to
+re-record. It does not fall back to a live call, and it does not render a clean result —
+a stale fixture would otherwise make the vulnerable side look guarded. See
+<a href="../quarry/">the reference app</a>.</p>
+<h2 id="check-static-structural-pre-check"><code>check</code> — static structural pre-check<a class="headerlink" href="#check-static-structural-pre-check" title="Permanent link">&para;</a></h2>
+<p>Zero-key, zero-spend on-ramp: connects to a target ONCE (<code>describe()</code> — no LLM call, no
+attack) and reports structural exposure from the tool schemas alone. Belongs in CI stage
+1, next to lint — cheap enough to run on every push.</p>
+<p>Options: <code>--target-file PATH</code> (required — or set <code>target_file:</code> in <code>mylonite.yaml</code>);
+<code>--enforce</code> (exit <code>1</code> on the substantive W1–W4 structural findings instead of reporting and
+exiting <code>0</code> — the report-then-enforce adoption ramp). The "unpinned descriptions" advisory
+is <strong>shown but does not gate</strong>: it fires on every tool of every server on first contact, so
+gating on it would make <code>--enforce</code> red for everyone and unusable as a CI stage.
+<code>--config mylonite.yaml</code> (auto-discovered from <code>./mylonite.yaml</code> when present).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mylonite<span class="w"> </span>check<span class="w"> </span>--target-file<span class="w"> </span>app.yaml
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>mylonite<span class="w"> </span>check<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--enforce<span class="w">   </span><span class="c1"># CI gate once the surface is clean</span>
+</code></pre></div>
+<p>Reports: consequential tools with no approval-shaped sibling tool, descriptions that
+steer the agent, tools taking an apparent network destination, content-processing tools
+that could carry an indirect-injection payload, unpinned tool descriptions (paste-ready
+digests for <code>control_config.description_pins</code>), and which weakness classes the surface
+suggests. Every finding is a hint to confirm, never a verdict — <code>scan</code>/<code>gate</code> are what
+prove an attack actually lands.</p>
+<h2 id="scan-find-weaknesses"><code>scan</code> — find weaknesses<a class="headerlink" href="#scan-find-weaknesses" title="Permanent link">&para;</a></h2>
+<p>Run the exploit-finding loop against a target.</p>
+<p><strong>Target</strong> (positional): <code>reference:vulnerable</code> / <code>reference:guarded</code> (the bundled
+reference app builds), or <code>mcp:custom</code> with <code>--command</code>/<code>--arg</code>. Omit when using <code>--target-file</code>
+(your own MCP app). Non-reference targets need <code>--authorize</code>.</p>
+<p>Key options: <code>--target-file PATH</code>, <code>--authorize NAME</code>, <code>--model</code> (any LiteLLM
+provider via a <code>provider/model</code> prefix, e.g. <code>openai/gpt-4o</code>),
+<code>--planner-model</code>, <code>--customiser-model</code>, <code>--judge-model</code>, <code>--max-llm-calls N</code>,
+<code>--max-concurrent N</code>, <code>--output-dir PATH</code>, <code>--config mylonite.yaml</code>, <code>--dry-run</code>,
+<code>--allow-no-seed-arm</code>, <code>--purpose "…"</code> (a one-line description of what the app is for;
+tailors the probes to its domain — overrides <code>purpose</code> in the target file, and is
+persisted so <code>generate</code>/<code>validate</code> reuse it); <code>--randomize-exfil/--no-randomize-exfil</code>
+(mint a unique exfil address per run so a finding proves the target leaks to ANY
+attacker destination, not one demo literal — <strong>defaults ON for live custom-target
+scans</strong>, off for the reference/replay path; matches <code>generate</code>/<code>validate</code>/<code>gate</code>).
+For a custom target: <code>--command</code>, <code>--arg</code>,
+<code>--env</code>, <code>--scope</code>, <code>--system-prompt[-file]</code>, <code>--primary-tool</code>, <code>--weakness-class</code>.</p>
+<p><strong>Scaffold mode</strong> — <code>--scaffold PATH</code> (with <code>--command</code>) introspects an MCP server
+(one launch, <strong>no LLM call, no attack</strong>, so no <code>--authorize</code> needed) and writes a
+commented starter <code>target.yaml</code> with suggested <code>weakness_classes</code> and auto-detected
+<code>seed_arm</code>/<code>effect_probe</code> candidates. Add <code>--force</code> to overwrite. Edit it, then scan
+with <code>--target-file</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mylonite<span class="w"> </span>scan<span class="w"> </span>--command<span class="w"> </span>python<span class="w"> </span>--arg<span class="w"> </span>my_server.py<span class="w"> </span>--scaffold<span class="w"> </span>app.yaml<span class="w">   </span><span class="c1"># generate the target file</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>mylonite<span class="w"> </span>scan<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--authorize<span class="w"> </span>custom<span class="w">                 </span><span class="c1"># then scan it</span>
+</code></pre></div>
+<h2 id="generate-emit-the-regression-test"><code>generate</code> — emit the regression test<a class="headerlink" href="#generate-emit-the-regression-test" title="Permanent link">&para;</a></h2>
+<p>Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no
+LLM call. Carries the compliance metadata.</p>
+<p>Options: <code>scan_path</code> (an <code>exploit_*.json</code> or scan dir) or <code>--latest</code>; <code>--out PATH</code>;
+<code>--target-file PATH</code> (custom targets — co-locates the YAML so the live test re-drives
+your app); <code>--prove-control</code> (emit a control-efficacy test).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>mylonite<span class="w"> </span>generate<span class="w"> </span>--latest<span class="w"> </span>--out<span class="w"> </span>.mylonite/generated/my-finding
+</code></pre></div>
+<h2 id="validate-prove-the-test"><code>validate</code> — prove the test<a class="headerlink" href="#validate-prove-the-test" title="Permanent link">&para;</a></h2>
+<p>Run the generated test through the <a href="../validation/">validation engine</a>, LIVE. On a real
+<code>--target-file</code> app the <a href="../validation/#the-control-efficacy-check">control-efficacy check</a>
+holds the model constant and toggles only the safeguard; against the bundled reference app
+it runs the two-build differential. A test is <strong>kept</strong> only when it discriminates reliably.</p>
+<p>Options: <code>target</code> (the generated dir/file); <code>--iterations N</code> (default 5); <code>--model</code>
+(any LiteLLM provider via a <code>provider/model</code> prefix); <code>--target-file PATH</code> (re-drive
+your REAL app instead of the reference build);
+<code>--authorize</code> (<strong>required</strong> when <code>--target-file</code> names a custom target — must equal the
+target's declared <code>scope</code>, or its family name if no scope is declared; see
+<a href="../target-file/">target-file.md</a>); <code>--fast</code>
+(skip the differential leg — faster, weaker); <code>--randomize-exfil/--no-randomize-exfil</code>
+(mint a unique exfil address per run so the finding proves the target blocks ANY attacker
+destination, not one demo literal — <strong>defaults ON for live custom-target runs</strong>, off for the
+reference/replay path); <code>--iteration-timeout S</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>mylonite<span class="w"> </span>validate<span class="w"> </span>.mylonite/generated/my-finding<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--authorize<span class="w"> </span>my-app
+</code></pre></div>
+<h2 id="gate-scan-generate-validate-pr-the-full-pipeline"><code>gate</code> — scan → generate → validate → PR (the full pipeline)<a class="headerlink" href="#gate-scan-generate-validate-pr-the-full-pipeline" title="Permanent link">&para;</a></h2>
+<p>The whole pipeline; only a kept test makes it through. The PR body always includes a
+<strong>Proven fix</strong> (control-efficacy findings) or <strong>Recommended fix</strong> (otherwise) — an
+evidence-anchored recommendation naming the actual tool and argument that landed the
+exploit, as a fenced code sketch. See <a href="../reading-results/#the-gating-pr">Reading the
+results</a>.</p>
+<p><strong><code>gate</code> does not modify your repository unless you ask it to.</strong> By default it writes
+only to <code>--out</code> (normally <code>.mylonite/gate/</code>) and prints the <code>git</code>/<code>gh</code> commands to
+commit and open the PR yourself. <code>--open-pr</code> performs the branch/commit/push/PR;
+<code>--workflows</code> scaffolds the two CI templates. Both default to off — changed in 0.8.5,
+where <code>--workflows</code> defaulted on and the branch and commit happened on every run.</p>
+<p>Options: <code>target</code> or <code>--target-file</code>; <code>--authorize</code>; <code>--open-pr</code> (create the branch,
+commit, push, and open the PR via <code>gh</code>); <code>--config</code>; <code>--model</code> (any LiteLLM provider via
+a <code>provider/model</code> prefix); <code>--out PATH</code>; <code>--max-llm-calls</code>;
+<code>--iterations N</code> (validation-leg iterations, <strong>default 3</strong> — the kept verdict reflects
+reproducibility across runs; pass <code>1</code> for the fastest, weakest gate); <code>--runs-on LABEL</code>
+(GitHub runner; use a self-hosted label for in-perimeter MCP backends);
+<code>--workflows/--no-workflows</code> (<strong>default off</strong>); <code>--llm-enrich</code> (append a labelled, unverified LLM fix
+suggestion, rendered after the structural recommendation above); <code>--fast</code>;
+<code>--randomize-exfil/--no-randomize-exfil</code> (defaults ON for a live custom target).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>mylonite<span class="w"> </span>gate<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--authorize<span class="w"> </span>my-app<span class="w"> </span>--open-pr
+</code></pre></div>
+<h2 id="report-render-findings"><code>report</code> — render findings<a class="headerlink" href="#report-render-findings" title="Permanent link">&para;</a></h2>
+<p>Render a saved scan or validation as a terminal trust panel — including the same
+evidence-anchored recommendation the gating PR carries — offline. See <a href="../reading-results/">Reading the
+results</a>.</p>
+<p>Options: <code>target</code> (a scan dir, a <code>generate</code>-emitted dir <strong>once <code>validate</code> has run</strong>, or a
+<code>*_report.json</code>); <code>--sarif PATH</code> (SARIF 2.1.0
+for GitHub code scanning); <code>--json PATH</code> (machine-readable finding bundle). Both carry
+the differential proof, the OWASP/ASI/ATLAS/NIST tags, and the same recommendation.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mylonite<span class="w"> </span>report<span class="w"> </span>.mylonite/scans/&lt;dir&gt;<span class="w"> </span>--sarif<span class="w"> </span>out.sarif<span class="w"> </span>--json<span class="w"> </span>finding.json
+</code></pre></div>
+<h2 id="ablate-score-the-safeguards"><code>ablate</code> — score the safeguards<a class="headerlink" href="#ablate-score-the-safeguards" title="Permanent link">&para;</a></h2>
+<p>Toggle each AI safeguard and report which are <strong>load-bearing</strong>, <strong>security theater</strong>, or
+<strong>redundant</strong>. See <a href="../validation/#the-control-efficacy-check">the control-efficacy check</a>.</p>
+<p>Options: <code>--target-file PATH</code> (<strong>required</strong> — there is no positional target form, and the
+bundled <code>reference:*</code> targets are not accepted); <code>--authorize</code>; <code>--controls W2,W3,W4</code>;
+<code>--iterations N</code>; <code>--redundancy</code> (all-minus-one, to tell redundant from theater);
+<code>--max-seeds N</code>; <code>--model</code> (any LiteLLM provider via a <code>provider/model</code> prefix).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>mylonite<span class="w"> </span>ablate<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--authorize<span class="w"> </span>my-app<span class="w"> </span>--controls<span class="w"> </span>W2,W4<span class="w"> </span>--redundancy
+</code></pre></div>
+<blockquote>
+<p><strong>Scaffolding moved.</strong> The old <code>mylonite init-target</code> command is now <code>mylonite scan
+--scaffold PATH</code> (see <a href="#scan-find-weaknesses"><code>scan</code></a> above). See <a href="../test-your-app/">Test your own
+app</a> and the <a href="../target-file/">target.yaml reference</a>.</p>
+</blockquote>
+<h2 id="version"><code>version</code><a class="headerlink" href="#version" title="Permanent link">&para;</a></h2>
+<p>Print the installed version.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>mylonite<span class="w"> </span>version
+</code></pre></div>
+<hr />
+<h2 id="plugins"><code>plugins</code><a class="headerlink" href="#plugins" title="Permanent link">&para;</a></h2>
+<p>List installed <a href="../plugin-authoring/">extension plugins</a> across all five contract
+groups, with each plugin's declared contract version. Discovery here also runs
+the version-compatibility check, so a major-mismatched plugin is reported rather
+than failing silently mid-run. Attack modules are the group that is also <em>run</em>
+by <code>scan</code>/<code>gate</code>; the other four use the bundled reference implementation.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>mylonite<span class="w"> </span>plugins
+</code></pre></div>
+<p>An adapter marked <em>"configured per target"</em> is not broken: the target-adapter
+contract flows configuration through the target-file factory, so an adapter for
+a named server family is built with that family rather than discovered
+ready-made.</p>
+<p>A plugin marked <em>"INCOMPATIBLE"</em> declares a contract major version this Mylonite
+cannot load, and will be skipped at run time. The full listing still prints —
+that is the point of the command — and the exit code is non-zero so a scripted
+check still catches it.</p>
+<hr />
+<h3 id="run-config-myloniteyaml">Run config (<code>mylonite.yaml</code>)<a class="headerlink" href="#run-config-myloniteyaml" title="Permanent link">&para;</a></h3>
+<p><code>scan</code> and <code>gate</code> accept <code>--config mylonite.yaml</code> (auto-discovered from <code>./mylonite.yaml</code>)
+to declare <code>target_file</code> / <code>authorize</code> / <code>provider</code> / <code>model</code> / budget once. An explicit
+flag always wins.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

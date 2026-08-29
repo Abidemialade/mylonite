@@ -1,0 +1,1623 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/contributing/releasing/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Releasing & versioning - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#releasing-versioning" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Releasing &amp; versioning
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-happy-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The happy path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-automation-checks-for-you" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the automation checks for you
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the automation checks for you">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tag-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tag format
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioning-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioning policy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Versioning policy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-road-to-100" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The road to 1.0.0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-independent-version-axes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two independent version axes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-untagged-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known-untagged history
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-secretsbaseline-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The .secrets.baseline step
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#before-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before a release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kitchen-sink-releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kitchen-sink releases
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="releasing-versioning">Releasing &amp; versioning<a class="headerlink" href="#releasing-versioning" title="Permanent link">&para;</a></h1>
+<p>How a Mylonite release is cut, what the version numbers mean, and what the
+automation will refuse to let you do.</p>
+<h2 id="the-happy-path">The happy path<a class="headerlink" href="#the-happy-path" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>scripts/prepare_release.py<span class="w"> </span><span class="m">0</span>.8.0<span class="w">   </span><span class="c1"># bump + roll the CHANGELOG + refresh the baseline</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>diff<span class="w">                                  </span><span class="c1"># review it</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># commit, open a PR, merge to main</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>git<span class="w"> </span>tag<span class="w"> </span>v0.8.0<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>v0.8.0<span class="w">  </span><span class="c1"># this is what publishes</span>
+</code></pre></div>
+<p><code>prepare_release.py</code> deliberately does <strong>not</strong> tag or push. Pushing the tag is
+the single irreversible act in the process, and it stays a human decision.</p>
+<p>Before tagging, you can rehearse the exact check the release will run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>scripts/prepare_release.py<span class="w"> </span>--check<span class="w"> </span><span class="m">0</span>.8.0
+</code></pre></div>
+<h2 id="what-the-automation-checks-for-you">What the automation checks for you<a class="headerlink" href="#what-the-automation-checks-for-you" title="Permanent link">&para;</a></h2>
+<p>A pushed <code>vX.Y.Z</code> tag runs <code>gate → ci → build → testpypi → pypi →
+github-release</code>. Everything irreversible is downstream of the first two.</p>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>What it refuses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gate</code></td>
+<td>A tag that doesn't match <code>version.py</code>, a <code>pyproject.toml</code> that disagrees, a missing or blank <code>## [X.Y.Z]</code> CHANGELOG section, a missing link-reference</td>
+</tr>
+<tr>
+<td><code>ci</code></td>
+<td>Any test, lint, type, or packaging failure <strong>on the tagged commit</strong></td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td>A distribution that won't build or whose metadata <code>twine</code> rejects</td>
+</tr>
+</tbody>
+</table>
+<p>This exists because of a specific history: 0.7.6 and 0.7.7 both merged with the
+version bump or the CHANGELOG update unfinished and no tag ever pushed, and
+0.7.8's GitHub Release came out with an empty body. Those are now mechanical
+failures rather than things to remember.</p>
+<p>Two things worth knowing about the gate:</p>
+<ul>
+<li>It reports <strong>every</strong> problem it finds, not just the first.</li>
+<li>It runs <strong>before</strong> the build. A PyPI upload cannot be undone and a version
+  number cannot be reused, so nothing reaches PyPI on a tag the gate rejects.</li>
+</ul>
+<h3 id="tag-format">Tag format<a class="headerlink" href="#tag-format" title="Permanent link">&para;</a></h3>
+<p>The trigger is <code>v[0-9]+.[0-9]+.[0-9]+</code> — any plain <code>vX.Y.Z</code>. Prereleases
+(<code>v1.0.0rc1</code>) deliberately do <strong>not</strong> match, because this workflow publishes
+straight to PyPI.</p>
+<p>If a release fails late (say a GitHub outage during <code>github-release</code>), don't
+invent a throwaway version — re-run the workflow via <strong>Actions → Release → Run
+workflow</strong> and give it the existing tag.</p>
+<h2 id="versioning-policy">Versioning policy<a class="headerlink" href="#versioning-policy" title="Permanent link">&para;</a></h2>
+<p>Mylonite follows <a href="https://semver.org/">Semantic Versioning</a>, with one rule that
+matters more than any other right now:</p>
+<div class="admonition warning">
+<p class="admonition-title">While the version starts with <code>0.</code>, the <strong>minor</strong> position carries breaking changes.</p>
+<p><code>0.7.x → 0.8.0</code> is <strong>not</strong> a safe upgrade. Pin an exact version if you
+depend on Mylonite's CLI surface or output formats.</p>
+</div>
+<p>This documents what the project has actually done rather than adding a new rule:
+0.7.4 removed <code>scan --adaptive</code>, <code>--synthesize</code>, <code>report --html</code> and <code>export</code>
+outright, and 0.8.0 removes <code>demo</code>, <code>init</code>, <code>doctor</code> and <code>taxonomy list</code> and
+changes which control each weakness class is guarded by.</p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>While <code>0.x</code></th>
+<th>Examples from this project</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>major</td>
+<td>reserved for 1.0.0</td>
+<td>—</td>
+</tr>
+<tr>
+<td>minor</td>
+<td>features <strong>and</strong> breaking changes</td>
+<td>commands removed (0.7.4, 0.8.0); primary W1/W2 controls swapped (0.8.0)</td>
+</tr>
+<tr>
+<td>patch</td>
+<td>fixes only, no surface change</td>
+<td>0.7.7's claim corrections; 0.7.8's execution-context fix</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-road-to-100">The road to 1.0.0<a class="headerlink" href="#the-road-to-100" title="Permanent link">&para;</a></h3>
+<p>1.0.0 is when the deprecation promise starts, so it should not be spent on a
+version number alone. The criteria are meant to be checkable, not aspirational:</p>
+<ol>
+<li>All five <code>CONTRACT_VERSION</code>s at <code>&gt;= 1.0.0</code>, with a written deprecation window.</li>
+<li>The plugin registry's compatibility rules exercised against a real
+   third-party plugin, not only the bundled reference implementations.</li>
+<li>An external differential published in <code>verification/</code> — a finding proven
+   against a control <strong>the project did not author</strong> (see
+   <a href="../../verification/">Verification</a>).</li>
+<li>A stated precision/recall floor for the bundled corpus, enforced in CI.</li>
+<li>A supported-version window in <code>SECURITY.md</code>.</li>
+</ol>
+<h2 id="two-independent-version-axes">Two independent version axes<a class="headerlink" href="#two-independent-version-axes" title="Permanent link">&para;</a></h2>
+<p>The package version and the extension contracts move separately. Nothing links
+them, and a contract bump does not imply a package bump or the reverse.</p>
+<table>
+<thead>
+<tr>
+<th>Contract</th>
+<th>Current</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>attack_module</code></td>
+<td>0.1.0</td>
+</tr>
+<tr>
+<td><code>compliance_mapper</code></td>
+<td>0.1.0</td>
+</tr>
+<tr>
+<td><code>test_generator</code></td>
+<td>0.2.0</td>
+</tr>
+<tr>
+<td><code>target_adapter</code></td>
+<td>0.5.0</td>
+</tr>
+<tr>
+<td><code>validator</code></td>
+<td>0.5.0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>A contract major bump is a bigger event than a package major bump.</strong>
+<code>mylonite.plugins.registry</code> <em>refuses</em> to load a plugin whose major differs and
+only warns on a minor mismatch, so bumping a contract's major breaks every
+third-party plugin built against it, immediately. It additionally requires an
+issue tagged <code>contract-change</code> open for at least a week — see
+<a href="https://github.com/Abidemialade/mylonite/blob/main/GOVERNANCE.md">GOVERNANCE.md</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Known gap</p>
+<p>Only <code>target_adapter</code> and <code>validator</code> are pinned by literal assertions
+(<code>tests/contracts/test_attack_session_contract.py</code>,
+<code>tests/contracts/test_validation_metrics.py</code>). The other three can be bumped,
+or left stale, without any test noticing. Worth closing before 1.0.0.</p>
+</div>
+<h2 id="known-untagged-history">Known-untagged history<a class="headerlink" href="#known-untagged-history" title="Permanent link">&para;</a></h2>
+<p>Three versions are documented in <code>CHANGELOG.md</code> as released but have no tag and
+were never published. The work shipped; only the release ceremony was skipped.
+They are kept, not deleted — the entries are accurate about what was built.</p>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>What happened</th>
+<th>Its link points at</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.6.0</td>
+<td>Release commit <code>529ff26</code> landed on <code>main</code>, never tagged. Much of it was then removed again in 0.7.4.</td>
+<td>the commit</td>
+</tr>
+<tr>
+<td>0.7.1</td>
+<td>Squash-merged into the commit <code>v0.7.3</code> tags</td>
+<td><code>v0.7.3</code></td>
+</tr>
+<tr>
+<td>0.7.2</td>
+<td>Same</td>
+<td><code>v0.7.3</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Do not create these tags retroactively.</strong> <code>v0.6.0</code> matches <code>release.yml</code>'s
+trigger, so pushing it would publish a months-old build to PyPI under a version
+number that can never be reused. <code>tests/test_changelog.py</code> enforces this via
+<code>KNOWN_UNTAGGED</code>.</p>
+<h2 id="the-secretsbaseline-step">The <code>.secrets.baseline</code> step<a class="headerlink" href="#the-secretsbaseline-step" title="Permanent link">&para;</a></h2>
+<p>Editing <code>CHANGELOG.md</code> shifts the line numbers of the deliberately-fake
+credentials <code>detect-secrets</code> has baselined in it, which fails CI's <code>precommit</code>
+and <code>security</code> jobs. <code>prepare_release.py</code> refreshes the baseline for you; if you
+do it by hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>ls-files<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>detect-secrets<span class="w"> </span>scan<span class="w"> </span>--baseline<span class="w"> </span>.secrets.baseline
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>git<span class="w"> </span>add<span class="w"> </span>.secrets.baseline
+</code></pre></div>
+<p><code>xargs</code> is load-bearing. <code>filenames</code> is a <em>positional</em> argument, so piping
+straight in passes zero files — it scans nothing, writes nothing, and exits <code>0</code>.
+That silent no-op is why this problem recurred for 0.7.7 <em>and</em> 0.7.8 after being
+written down: the documented command never worked.</p>
+<p>On Windows, normalise the <code>results</code> keys back to forward slashes afterwards —
+<code>detect-secrets</code> writes them with <code>os.sep</code>, and a backslash-keyed baseline
+matches nothing on ubuntu, making every entry read as a brand-new secret.</p>
+<p>Verify with the hook (the baseline must be <strong>staged</strong> first, or it aborts before
+scanning). Exit <code>0</code> is clean, <code>3</code> means "baseline updated", only <code>1</code> is a real
+finding:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>git<span class="w"> </span>ls-files<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>detect-secrets-hook<span class="w"> </span>--baseline<span class="w"> </span>.secrets.baseline
+</code></pre></div>
+<h2 id="before-a-release">Before a release<a class="headerlink" href="#before-a-release" title="Permanent link">&para;</a></h2>
+<p>Run the <a href="../live-e2e-tests/">live end-to-end tests</a>. They are gated behind
+<code>MYLONITE_LIVE_E2E=1</code> and don't run in CI, so a break in the real wire
+interaction with MCP servers or providers only shows up here.</p>
+<p>Also run the CLI from a real terminal on Windows. CI is ubuntu-only and never
+catches the cp1252 console-encoding class of bug.</p>
+<h2 id="kitchen-sink-releases">Kitchen-sink releases<a class="headerlink" href="#kitchen-sink-releases" title="Permanent link">&para;</a></h2>
+<p><code>mcp-kitchen-sink</code> — the deliberately-vulnerable reference target — is a
+separate PyPI package released on its own <code>ks-vX.Y.Z</code> tag prefix, so a routine
+<code>mylonite</code> release never republishes it. It has the same version gate and
+deliberately keeps <strong>no</strong> CHANGELOG of its own and <strong>no</strong> GitHub Release (a
+<code>gh release create</code> would mark the vulnerable target as the repo's <em>Latest</em>
+release).</p>
+<div class="admonition warning">
+<p class="admonition-title">Coordination constraint</p>
+<p>The published <code>mcp-kitchen-sink</code> 0.1.0 pins <code>mcp&lt;2.0</code> in immutable
+distribution metadata. Any move to mcp 2.0 therefore needs a <strong>paired</strong>
+<code>ks-v0.2.0</code> and <code>vX.Y.Z</code> release — bumping the root package alone leaves an
+unsatisfiable combination for anyone installing both.</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
