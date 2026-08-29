@@ -267,12 +267,14 @@ Every push and pull request runs a permanent `security` job in CI
   dependency floor in `pyproject.toml`; an advisory with no fix yet available
   gets a scoped, commented `--ignore-vuln <ID>`, so every exception is visible
   and attributable instead of blanket.
-- **Taint analysis — CodeQL** (`security-extended`) on every push and pull
-  request, plus weekly (`.github/workflows/codeql.yml`). Complements `bandit`,
-  which matches patterns inside a single file: CodeQL follows data from an
-  untrusted source to a dangerous sink across files, which is the shape of most
-  real findings in a tool that parses attacker-supplied target descriptions,
-  tool schemas, and model output.
+- **Taint analysis — CodeQL** over `python` and `actions`, on every push and
+  pull request plus weekly, via GitHub's default setup. Complements `bandit`, which matches patterns inside a single
+  file: CodeQL follows data from an untrusted source to a dangerous sink across
+  files, which is the shape of most real findings in a tool that parses
+  attacker-supplied target descriptions, tool schemas, and model output. There
+  is deliberately no `codeql.yml` — an advanced configuration cannot upload
+  results while default setup is enabled, so adding one would have replaced a
+  working analysis with a failing job.
 - **Workflow lint — `zizmor` + `actionlint`** via pre-commit. Workflows are the
   one class of file that can disable every other check here, and until recently
   nothing checked them.

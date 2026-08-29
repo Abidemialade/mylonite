@@ -29,9 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     without requiring an approval the sole maintainer cannot give — see
     [GOVERNANCE.md](GOVERNANCE.md#required-reviews), which records the trigger
     for switching to real required reviews.
-  - CodeQL (`security-extended`) adds cross-file taint tracking to the existing
-    single-file bandit pass, and OpenSSF Scorecard publishes the supply-chain
-    posture so a later change that undoes this work shows up as a score drop.
+  - OpenSSF Scorecard publishes the supply-chain posture, so a later change
+    that undoes this work shows up as a score drop rather than going unnoticed.
+  - No CodeQL workflow was added: CodeQL is already running here via GitHub's
+    default setup, covering both `python` and `actions`. An advanced
+    configuration cannot upload results while default setup is enabled, so
+    adding one would have replaced a working analysis with a permanently
+    failing job.
   - `zizmor` and `actionlint` now lint the workflows themselves — previously the
     one class of file that could silence every other check went unchecked.
 
