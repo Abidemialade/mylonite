@@ -1,0 +1,41 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The note n_demo_0005 appears to be empty or contains no readable content. There's no substantive information to summarize from this note.\n\nIf you'd like me to help with something else, such as reading a different note or creating a new one, please let me know!",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 64,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 64,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "prompt_tokens": 1044,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 1044,
+      "video_tokens": null
+    },
+    "speed": null,
+    "total_tokens": 1108
+  }
+}

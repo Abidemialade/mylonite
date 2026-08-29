@@ -1,0 +1,41 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I've read note n_demo_0004, but it appears to be empty or contains only metadata. The note body itself doesn't have any content to summarize.\n\nCould you please verify that this is the correct note ID? If you have another note you'd like me to read and summarize, feel free to provide the ID and I'll be happy to help.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 80,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 80,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "prompt_tokens": 1052,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 1052,
+      "video_tokens": null
+    },
+    "speed": null,
+    "total_tokens": 1132
+  }
+}

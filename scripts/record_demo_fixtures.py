@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mylonite._replay import (
@@ -181,7 +182,15 @@ def _stamp_meta(variant_dir: Path, variant: str) -> None:
     meta_path = variant_dir / "_meta.json"
     meta_path.write_text(
         json.dumps(
-            {CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION, "model": DEMO_MODEL, "variant": variant},
+            {
+                CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION,
+                "model": DEMO_MODEL,
+                "variant": variant,
+                # Surfaced in the demo's own mode line. A replayed result is not
+                # a measurement of today's model, and the output says so on its
+                # face rather than only in the docs.
+                "recorded_at": datetime.now(UTC).date().isoformat(),
+            },
             indent=2,
             sort_keys=True,
         )

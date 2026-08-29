@@ -61,7 +61,10 @@ async def test_demo_recorded_happy_path() -> None:
     assert result.guarded.report.findings_count == 0
     assert result.vulnerable.report.aborted is None
     assert result.guarded.report.aborted is None
-    assert result.mode == "replay (offline)"
+    # startswith, not ==: the label now carries fixture provenance
+    # ("recorded <date> against <model>") so a replayed number is never
+    # mistaken for a live measurement.
+    assert result.mode.startswith("replay (offline)")
 
 
 async def test_demo_replay_is_zero_network(monkeypatch: pytest.MonkeyPatch) -> None:
