@@ -1,0 +1,27 @@
+{
+  "benchmark_asr": 0.09,
+  "benchmark_metric": "asr-all",
+  "cases": 100,
+  "dataset": "injecagent",
+  "disagreements": [],
+  "fpr_informative": true,
+  "judge_agreement": {
+    "f1": 1.0,
+    "false_positive_rate": 0.0,
+    "fn": 0,
+    "fp": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "tn": 91,
+    "tp": 9
+  },
+  "judge_agreement_exercised": true,
+  "judge_mode": "deterministic",
+  "layer": "layer2-judge-agreement",
+  "model": "",
+  "negative_cases": 91,
+  "note": "judge_agreement compares Mylonite's success-judge to the benchmark's own success rule on real recorded transcripts. benchmark_asr is the benchmark's result, not Mylonite's. See verification/README.md for prompt-fidelity caveats.",
+  "positive_cases": 9,
+  "schema_version": "1.0",
+  "synthetic": false
+}
