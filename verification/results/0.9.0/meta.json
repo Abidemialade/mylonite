@@ -1,11 +1,11 @@
 {
   "git_sha": "699f911",
-  "harness_sha": "699f911",
+  "harness_sha": "3216e03",
   "layers": {
     "layer1": "not-run",
     "layer2-agentdojo": "ran",
     "layer2-injecagent": "not-run",
-    "layer3": "not-run"
+    "layer3": "ran"
   },
   "model": "anthropic/claude-haiku-4-5-20251001",
   "mylonite_origin": "site-packages",
