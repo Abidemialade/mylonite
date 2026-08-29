@@ -59,14 +59,19 @@ from verification._provenance import assert_siloed, build_meta
 LAYER_FILES = {
     "layer1": "layer1-recall.json",
     "layer2-agentdojo": "layer2-agentdojo.json",
-    "layer2-injecagent": "layer2-injecagent.json",
+    # BOTH splits, never one. dh (direct harm) and ds (data stealing) gave
+    # F1 1.000 and 0.400 respectively on the same run -- recording either
+    # alone would be cherry-picking, and the gap between them is the finding.
+    "layer2-injecagent-dh": "layer2-injecagent-dh.json",
+    "layer2-injecagent-ds": "layer2-injecagent-ds.json",
     "layer3": "layer3-precision.json",
 }
 
 _ALLOWLISTS = {
     "layer1": _sanitise.LAYER1_FIELDS,
     "layer2-agentdojo": _sanitise.LAYER2_FIELDS,
-    "layer2-injecagent": _sanitise.LAYER2_FIELDS,
+    "layer2-injecagent-dh": _sanitise.LAYER2_FIELDS,
+    "layer2-injecagent-ds": _sanitise.LAYER2_FIELDS,
     "layer3": _sanitise.LAYER3_FIELDS,
 }
 

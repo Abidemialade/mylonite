@@ -1,0 +1,60 @@
+{
+  "found": 0,
+  "in_scope_challenges": 8,
+  "layer": "layer1-recall",
+  "missed": 8,
+  "note": "Recall vs DVMCP's documented per-challenge weaknesses (ground truth: solutions/challengeN_solution.md). Out-of-scope challenges (8, 9) are excluded. DVMCP README claims MIT but ships no LICENSE file: fetched at runtime, never vendored.",
+  "per_challenge": [
+    {
+      "challenge": "challenge1",
+      "detail": "Basic Prompt Injection [W2]: MISSED",
+      "found": false,
+      "weakness": "W2"
+    },
+    {
+      "challenge": "challenge2",
+      "detail": "Tool Poisoning [W1]: MISSED",
+      "found": false,
+      "weakness": "W1"
+    },
+    {
+      "challenge": "challenge3",
+      "detail": "Excessive Permission Scope [W3]: MISSED",
+      "found": false,
+      "weakness": "W3"
+    },
+    {
+      "challenge": "challenge4",
+      "detail": "Rug Pull Attack [W1]: MISSED",
+      "found": false,
+      "weakness": "W1"
+    },
+    {
+      "challenge": "challenge5",
+      "detail": "Tool Shadowing [W1]: MISSED",
+      "found": false,
+      "weakness": "W1"
+    },
+    {
+      "challenge": "challenge6",
+      "detail": "Indirect Prompt Injection [W2]: MISSED",
+      "found": false,
+      "weakness": "W2"
+    },
+    {
+      "challenge": "challenge7",
+      "detail": "Token Theft [W3]: MISSED",
+      "found": false,
+      "weakness": "W3"
+    },
+    {
+      "challenge": "challenge10",
+      "detail": "Multi-Vector Attack [W1/W2]: MISSED",
+      "found": false,
+      "weakness": "W1"
+    }
+  ],
+  "recall": 0.0,
+  "schema_version": "1.0",
+  "target": "dvmcp"
+}

@@ -1,13 +1,14 @@
 {
   "git_sha": "699f911",
-  "harness_sha": "3216e03",
+  "harness_sha": "6aa345e",
   "layers": {
-    "layer1": "not-run",
+    "layer1": "ran",
     "layer2-agentdojo": "ran",
-    "layer2-injecagent": "not-run",
+    "layer2-injecagent-dh": "ran",
+    "layer2-injecagent-ds": "ran",
     "layer3": "ran"
   },
-  "model": "anthropic/claude-haiku-4-5-20251001",
+  "model": "anthropic/claude-haiku-4-5-20251001 (layer1/3); ollama/llama3.2:3b (injecagent)",
   "mylonite_origin": "site-packages",
   "mylonite_version": "0.9.0",
   "recorded_at": "2026-08-29",
