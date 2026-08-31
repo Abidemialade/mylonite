@@ -154,6 +154,7 @@ mylonite = "mylonite.cli:app"
 prompt_injection = "mylonite.plugins._reference.prompt_injection_module:PromptInjectionAttackModule"
 excessive_agency = "mylonite.plugins._reference.excessive_agency_module:ExcessiveAgencyAttackModule"
 reference_example = "mylonite.plugins._reference.reference_attack_module:ReferenceAttackModule"
+markdown_egress = "mylonite.plugins._reference.markdown_egress_module:MarkdownImageEgressAttackModule"
 
 [project.entry-points."mylonite.target_adapters"]
 in_process_reference_vulnerable = "mylonite.plugins._reference.reference_target_adapter:InProcessVulnerableReferenceAdapter"
