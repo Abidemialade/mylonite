@@ -76,6 +76,60 @@ repos:
         # being any.
         files: '\.md$|^verification/results/.*\.(json|jsonl)$'
 
+      # The deliberately-vulnerable reference target is the one place in this
+      # repository where insecure code is expected, which makes it the cheapest
+      # place to disguise a real backdoor: "it's intentional, see the seed
+      # catalogue" is unfalsifiable by eye. This asserts the property that keeps
+      # the two separable -- the package is inert, so it cannot reach the
+      # network, spawn a process, or execute constructed code, and every tool it
+      # exposes is catalogued and has a guarded counterpart.
+      #
+      # always_run with pass_filenames: false because three of its four checks
+      # are cross-file (a tool added to one server, a seed pointing at a symbol
+      # in another); handing it only the changed paths would miss exactly the
+      # inconsistencies it exists to find.
+      #
+      # `language: python` with an explicit dependency, not `system`: the script
+      # imports yaml, and pre-commit is often installed via pipx rather than
+      # into the project's .[dev] venv. Under `system` that contributor would
+      # fail on EVERY commit, including a README typo, with a ModuleNotFoundError
+      # that has nothing to do with their change.
+      - id: reference-target-inert
+        name: reference target stays inert and fully catalogued
+        entry: python scripts/check_reference_target_inert.py
+        language: python
+        additional_dependencies: ["pyyaml"]
+        pass_filenames: false
+        always_run: true
+
+  # Lints the workflows themselves. Everything else in this file checks the code
+  # CI runs; nothing checked CI's own definition, where a mistake is worse --
+  # a workflow can grant a token, run untrusted input, or disable a gate, and it
+  # is the one file that can silence every other check here.
+  #
+  # zizmor is security-specific (unpinned action refs, credential persistence,
+  # template-injection sinks, over-broad permissions); actionlint catches the
+  # ordinary breakage (bad expressions, unknown keys, shellcheck on `run:`).
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.29.0
+    hooks:
+      - id: zizmor
+
+  # CI-only, via `stages: [manual]`. The hook is `language: golang`, and
+  # pre-commit bootstraps an entire Go toolchain when `go` is absent -- a
+  # ~100MB download and a local compile, triggered by an unrelated README typo,
+  # on a machine that may have neither Go nor the patience. zizmor above is a
+  # Python wheel and carries the security half of this, so the local commit
+  # path loses nothing that guards a token or a gate.
+  #
+  # The `precommit` CI job runs this explicitly at the manual stage, so
+  # enforcement is unchanged; only where it runs moved.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        stages: [manual]
+
   # Keep in lockstep with the `ruff==` pin in pyproject's [dev] extra. CI runs
   # both paths -- the `lint` job installs ruff from that pin, the `precommit`
   # job runs this hook -- so a drift between them lets one job pass while the

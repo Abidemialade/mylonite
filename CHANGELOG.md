@@ -17,6 +17,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument, so allowlists that only inspect declared arguments to a known
   sink can miss it. Reuses the shared `egress_reached_probe_destination`
   predicate; ships no new oracle.
+- **Contributor guardrails.** The repository now defends the machinery that
+  checks contributions, not just the contributions. Relevant if you are opening
+  a pull request: see the new
+  ["What we can and can't accept"](CONTRIBUTING.md#what-we-can-and-cant-accept).
+
+  - **`main` is now protected by a repository ruleset** requiring one approving
+    review, code-owner review, stale-review dismissal on push, and the `lint` /
+    `typecheck` / `test` / `precommit` / `security` checks. `security` was never
+    a required check before, so `bandit`, `detect-secrets` and `pip-audit` could
+    all go red without blocking a merge. `.github/CODEOWNERS` stays a single
+    catch-all, so code-owner review applies to every path; the **trust base**
+    (workflows, `gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`,
+    `scripts/`, `.secrets.baseline`, `reference_targets/`) is documented in
+    CONTRIBUTING.md, and gets its own CODEOWNERS entries once a second
+    maintainer makes them mean something. Repository admins are a bypass actor
+    while there is a single maintainer, who otherwise could not merge at all;
+    see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the trigger to
+    remove it. The ruleset does not require branches to be up to date before
+    merging — pull requests are already built against the merge result, so it
+    would mostly serialise merges. This replaces the older per-branch protection
+    settings rather than sitting alongside them.
+  - `scripts/check_reference_target_inert.py` pins the property that makes the
+    deliberately-vulnerable reference target auditable: the package is inert, so
+    it cannot reach the network, spawn a process, or execute constructed code.
+    Insecure code is expected there, which is exactly what makes it the cheapest
+    place to hide a real backdoor — "it's intentional, see the seed catalogue"
+    is unfalsifiable by eye. The guard confines the transport stack (`asyncio`,
+    `mcp`) to the one file that speaks the wire protocol, requires capable
+    packages to be imported `from` rather than bound as a name, and requires the
+    tools `_call_tool` dispatches on to equal the tools `list_tools` declares —
+    an undeclared branch is reachable, because the stdio layer forwards any name
+    straight through. Runs in pre-commit and the test suite.
+  - OpenSSF Scorecard runs weekly, with results in the Security tab, so a later
+    change that undoes this work shows up as a score drop. Not badged in the
+    README yet — see SECURITY.md for why.
+  - No CodeQL workflow was added: CodeQL is already running here via GitHub's
+    default setup, covering both `python` and `actions`. An advanced
+    configuration cannot upload results while default setup is enabled, so
+    adding one would have replaced a working analysis with a permanently
+    failing job.
+  - `zizmor` and `actionlint` now lint the workflows themselves — previously the
+    one class of file that could silence every other check went unchecked. Both
+    run in the `precommit` CI job. `zizmor` is also a local pre-commit hook;
+    `actionlint` is not, because its hook is `language: golang` and pre-commit
+    bootstraps a Go toolchain when `go` is absent — a ~100MB download and a
+    local compile triggered by an unrelated typo.
+  - Private vulnerability reporting is enabled, so the GitHub Security Advisory
+    link SECURITY.md gives as the preferred reporting channel now resolves.
+    Workflows from forks require maintainer approval for all outside
+    contributors, not only first-time ones: the argument for keeping enforcement
+    off the workflow layer applies at least as strongly to running a fork's
+    workflow at all.
+  - Dependabot updates wait 7 days (`cooldown`). Package compromises follow a
+    shape: a malicious version is published, sits live for hours to days, then
+    is yanked once someone notices. Zero cooldown opened a PR into this repo
+    during exactly that window, with CI green because the package installs
+    fine. Security updates bypass cooldown, so CVE fixes still arrive at once.
+
+### Changed
+
+- `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
+  did more than its comment justified: dropping `--strict` already avoids the
+  editable-install false failure, so the flag was additionally swallowing real
+  dependency CVEs. Note this only became a *merge* gate once `security` was
+  added to the required checks above — the flag alone would have made the job
+  red without blocking anything.
+- Every `actions/checkout` sets `persist-credentials: false`, so a checkout does
+  not leave usable credentials behind while CI installs and executes
+  pull-request code. (`actions/checkout` v6+ stores them under `$RUNNER_TEMP`
+  rather than `.git/config`, which narrows the exposure but does not remove it.)
+  The one job that genuinely needs those credentials, docs deployment, was split
+  out of the docs build for this reason.
+- `Docs` workflow is two jobs. `contents: write` was granted workflow-wide while
+  the workflow also triggered on `pull_request`, so every documentation pull
+  request ran under a write-scoped token it had no use for.
+- Repository Actions policy restricts runnable actions to GitHub-owned plus an
+  explicit allowlist, and requires SHA pinning.
+
+### Fixed
+
+- `gate-action/action.yml` pinned `actions/setup-python@v6` by moving tag and
+  interpolated its inputs directly into a `run:` block. Both are more serious
+  here than in this repository's own workflows, because this composite action
+  executes inside **downstream users'** CI: a moved tag would run new code in
+  every consumer at once, and `${{ }}` is substituted before bash parses the
+  script, so an input containing shell syntax became shell syntax. Now
+  SHA-pinned, with inputs passed through the environment.
 
 ## [0.9.0] - 2026-08-28
 

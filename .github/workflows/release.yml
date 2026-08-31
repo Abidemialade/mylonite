@@ -41,12 +41,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Tag, version.py, pyproject and CHANGELOG all agree
-        run: python scripts/prepare_release.py --check --tag "${{ inputs.tag || github.ref_name }}"
+        # RELEASE_TAG via env, not `${{ }}` inside the script. On
+        # workflow_dispatch `inputs.tag` is free text typed by whoever started
+        # the run, and an expression is pasted in before bash parses the line --
+        # so a tag containing shell syntax would execute here, in the one job
+        # every irreversible step of this workflow depends on.
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python scripts/prepare_release.py --check --tag "$RELEASE_TAG"
       - name: A minor/major release has committed verification results
         # CI cannot RUN the verification campaign: it needs a provider key, and
         # deliberately no key is configured as a repository secret. But it can
@@ -78,11 +86,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
+          # No `cache: pip` here, unlike the CI jobs. This job produces the
+          # artifact that gets published to PyPI, and the Actions cache is
+          # writable from any branch: a cache entry poisoned by an earlier run
+          # could be restored into this build and end up inside a signed
+          # release. The cache saves seconds on a workflow that runs a few times
+          # a year. Not a trade worth making.
       - name: Build
         # twine must stay current: 6.2.0 and earlier overwrite packaging's
         # _VALID_METADATA_VERSIONS with a hardcoded list ending at "2.4" and so
@@ -149,6 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: ${{ inputs.tag || github.ref }}
       - name: Extract this version's CHANGELOG section
         run: |

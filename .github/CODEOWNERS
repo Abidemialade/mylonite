@@ -1,13 +1,21 @@
 # Mylonite CODEOWNERS
 #
-# When the project moves to multi-maintainer governance (see GOVERNANCE.md),
-# split ownership by extension point. Suggested split:
+# This file is enforced. `main` is protected by a repository ruleset requiring
+# code-owner review, so an entry here is a merge requirement rather than a
+# suggestion. See GOVERNANCE.md.
 #
-#   /src/mylonite/contracts/                @contracts-maintainers
-#   /src/mylonite/taxonomy/                 @taxonomy-maintainers
-#   /reference_targets/                     @target-adapter-maintainers
-#   /docs/                                  @docs-maintainers
+# One line, deliberately. An earlier draft also listed the trust-base paths
+# (workflows, gate-action/, .pre-commit-config.yaml, pyproject.toml, scripts/,
+# .secrets.baseline, reference_targets/) individually. While a single owner
+# holds the catch-all those entries enforce nothing the line below does not
+# already enforce — they were prose in a config file, and prose belongs where
+# contributors read it. That list now lives in CONTRIBUTING.md ("What we can and
+# can't accept") and GOVERNANCE.md, which is also where the reason is given.
 #
-# For now, a single owner reviews everything.
+# Re-add the path scoping when a second maintainer joins: at that point the
+# catch-all widens to the maintainer group, and those paths should keep naming
+# the lead maintainer specifically. That is the moment the entries start
+# meaning something. Note the ordering rule when you do — in CODEOWNERS the
+# LAST matching pattern wins, which is the opposite of .gitignore.
 
 *       @Abidemialade

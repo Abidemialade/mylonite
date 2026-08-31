@@ -15,6 +15,49 @@ the issue tracker and announced in the changelog. The intent is to follow a
 standard "two +1s, no -1s" merge rule for non-trivial changes once there is
 more than one maintainer.
 
+### Branch protection
+
+`main` is protected by a **repository ruleset** ("main protection"), not by the
+older per-branch settings. One mechanism rather than two, and rules that are
+enforced server-side rather than by a workflow.
+
+It requires: one approving review, code-owner review, stale-review dismissal on
+push, approval of the last push, resolved conversations, linear history, and the
+`lint` / `typecheck` / `test (3.11–3.13)` / `precommit` / `security` checks.
+`.github/CODEOWNERS` is a single catch-all, so code-owner review applies to every
+path.
+
+It deliberately does **not** require branches to be up to date before merging.
+GitHub already builds pull requests against the merge result, so the setting
+adds little beyond serialising merges — with daily Dependabot across two
+ecosystems, each merge would invalidate every other open pull request.
+
+The **trust base** — workflows, `gate-action/`, `.pre-commit-config.yaml`,
+`pyproject.toml`, `scripts/`, `.secrets.baseline`, `reference_targets/` — is the
+set of paths that control what the project's own checks do. It is documented in
+CONTRIBUTING.md rather than enumerated in `.github/CODEOWNERS`: while one person
+owns the catch-all, per-path entries naming that same person enforce nothing
+extra. They become meaningful at the trigger below.
+
+**Repository admins are a bypass actor.** With a single maintainer this is
+required rather than a convenience: an author cannot approve their own pull
+request, so without the bypass the repository would be unmergeable by the only
+person able to merge it. Every rule above still binds every non-admin
+contributor. The bypass is the deliberate, documented exception, and it
+disappears at the trigger below.
+
+Why enforcement lives in the platform and not in a CI job: for a `pull_request`
+event GitHub runs workflow files **from the pull request's own checkout**. A
+check implemented as a workflow can therefore be edited — or simply deleted, in
+which case no check run is created at all — by the same pull request it is
+meant to judge. A ruleset cannot be.
+
+**Trigger:** when a second maintainer is onboarded, remove the admin bypass — the
+reason for it disappears with the second reviewer — and add the trust-base paths
+to `.github/CODEOWNERS`, naming the lead maintainer specifically while the
+catch-all widens to the maintainer group. Both halves of that change matter: the
+catch-all widening is what makes the per-path entries start binding.
+
 ## Roles
 
 - **Maintainer.** Has merge rights on `main`, can cut releases, manages

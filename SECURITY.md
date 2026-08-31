@@ -260,7 +260,45 @@ Every push and pull request runs a permanent `security` job in CI
   secrets); any *new* secret-shaped token fails the job. Regenerate with
   `detect-secrets scan --baseline .secrets.baseline` and review with
   `detect-secrets audit .secrets.baseline`.
-- **Dependency CVEs — `pip-audit`** over the installed environment
-  (informational: it surfaces advisories without blocking unrelated PRs on
-  transient upstream CVEs). Genuine advisories are remediated by raising the
-  affected dependency floor in `pyproject.toml`.
+- **Dependency CVEs — `pip-audit`** over the installed environment (blocking).
+  This step was informational until it was found to be swallowing real
+  advisories rather than only the editable-install skip its exemption was
+  written for. Genuine advisories are remediated by raising the affected
+  dependency floor in `pyproject.toml`; an advisory with no fix yet available
+  gets a scoped, commented `--ignore-vuln <ID>`, so every exception is visible
+  and attributable instead of blanket.
+- **Taint analysis — CodeQL** over `python` and `actions`, on every push and
+  pull request plus weekly, via GitHub's default setup. Complements `bandit`, which matches patterns inside a single
+  file: CodeQL follows data from an untrusted source to a dangerous sink across
+  files, which is the shape of most real findings in a tool that parses
+  attacker-supplied target descriptions, tool schemas, and model output. There
+  is deliberately no `codeql.yml` — an advanced configuration cannot upload
+  results while default setup is enabled, so adding one would have replaced a
+  working analysis with a failing job.
+- **Workflow lint — `zizmor` + `actionlint`**, both in the `precommit` job.
+  Workflows are the one class of file that can disable every other check here,
+  and until recently nothing checked them. `zizmor` also runs as a local
+  pre-commit hook; `actionlint` is CI-only, because its hook builds a Go
+  toolchain and that is a poor trade to impose on a contributor fixing a typo.
+- **Supply-chain posture — OpenSSF Scorecard**, weekly
+  (`.github/workflows/scorecard.yml`), results in the Security tab. It
+  independently re-checks action pinning, token scopes, and branch protection,
+  so a change that quietly weakens one shows up as a score drop. Deliberately
+  **not** badged in the README yet: the first score under the new ruleset has
+  not been observed, and publishing a number before reading it is how a badge
+  ends up asserting the opposite of what it is meant to.
+
+Two project-specific guards run alongside the general tooling:
+
+- **`scripts/check_reference_target_inert.py`** asserts that the deliberately
+  vulnerable reference target stays incapable of real I/O — no network,
+  subprocess, filesystem, deserialisation, or dynamic execution — and that every
+  tool it exposes is catalogued and has a guarded counterpart. Insecure code is
+  *expected* there, which is what would make a genuine backdoor cheap to
+  disguise; this keeps the two separable by construction rather than by review.
+Enforcement of *who* may change those guards is not a script. It is the
+`main` ruleset plus [`.github/CODEOWNERS`](.github/CODEOWNERS) — see
+[GOVERNANCE.md](./GOVERNANCE.md#branch-protection). A CI job cannot do this job:
+for a `pull_request` event GitHub runs workflow files from the pull request's own
+checkout, so a check written as a workflow can be edited or deleted by the very
+diff it is judging.
