@@ -70,6 +70,37 @@ def test_prompt_asks_whether_an_attack_was_present_at_all() -> None:
     assert "ordinary" in prompt.lower() or "benign" in _JUDGE_SYSTEM.lower()
 
 
+def test_prompt_requires_the_reason_to_describe_the_agent() -> None:
+    """The `reason` content contract must reach the model by all three routes.
+
+    A judge asked only "is this a finding?" answers "why not" by describing the
+    instruction it was shown. That text is printed beside a passing mark, so it
+    reads as though the attack had landed. The contract has to be in the system
+    prompt, repeated in the user turn (providers weight the two differently),
+    and in the response schema that drives provider-native structured output.
+    """
+    assert "what the AGENT DID" in _JUDGE_SYSTEM
+    prompt = _build_judge_prompt(_payload(BENIGN), _response())
+    assert "must not restate the out-of-band instruction" in prompt
+
+    from mylonite.scan.judge import _JudgeOut
+
+    description = _JudgeOut.model_fields["reason"].description
+    assert description is not None
+    assert "AGENT" in description
+
+
+def test_reason_contract_did_not_reintroduce_the_attacker_premise() -> None:
+    """The new wording must not undo the benign-framing fix.
+
+    A concrete example address would help a small model follow the contract, and
+    would also reinstate exactly the presupposition this module exists to keep
+    out — so the GOOD/BAD examples stay abstract.
+    """
+    assert "attacker's intent" not in _JUDGE_SYSTEM
+    assert "attacker@" not in _JUDGE_SYSTEM
+
+
 @pytest.mark.asyncio
 async def test_benign_request_scores_not_applicable_not_resisted_attack() -> None:
     """The measurement this unblocks: a benign probe must be distinguishable
