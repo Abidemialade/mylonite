@@ -57,6 +57,28 @@ _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]
 _CLEAN_MARK: Final[str] = OUTCOME_MARKS["no_finding"]
 _SKIPPED_MARK: Final[str] = OUTCOME_MARKS["skipped_planner_failure"]
 
+#: Rich styles for the outcome marks. The demo's entire claim is a contrast
+#: between two columns, and an unstyled table renders FOUND and clean as the
+#: same weight of plain text -- the differential is invisible until you read
+#: every cell individually. Colour makes the shape of the result legible
+#: before the words are, which is the one thing this table exists to do.
+_MARK_STYLES: Final[dict[str, str]] = {
+    _FOUND_MARK: "bold red",
+    _CLEAN_MARK: "bold green",
+    _SKIPPED_MARK: "bold yellow",
+}
+
+
+def _styled(mark: str) -> str:
+    """``mark`` wrapped in its Rich style, or returned unchanged if it has none.
+
+    Styling is applied here rather than inside :func:`_aggregate_mark` so that
+    function keeps returning a bare comparable string.
+    """
+    style = _MARK_STYLES.get(mark)
+    return f"[{style}]{mark}[/{style}]" if style else mark
+
+
 # Human-readable weakness names, verbatim from the kitchen-sink seed
 # catalogue (reference_targets/mcp_kitchen_sink/seeds/seeds.yaml); the seed
 # objects carry taxonomy tags but not these names.
@@ -151,8 +173,8 @@ def render_demo(
             weakness,
             _WEAKNESS_NAMES[weakness],
             _taxonomy_cell(weakness),
-            _aggregate_mark(vulnerable, pattern_ids),
-            _aggregate_mark(guarded, pattern_ids),
+            _styled(_aggregate_mark(vulnerable, pattern_ids)),
+            _styled(_aggregate_mark(guarded, pattern_ids)),
         )
     console_print(console, table)
 
