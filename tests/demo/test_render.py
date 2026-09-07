@@ -188,3 +188,58 @@ def test_render_skipped_and_error_outcomes_do_not_crash() -> None:
     # W2 still reports FOUND: any finding in the weakness wins over skips.
     assert "✗ FOUND" in output
     assert "1 exploits on vulnerable, 0 on guarded" in output
+
+
+# --- verdict-mark styling ---------------------------------------------------
+#
+# `_render` above exports plain text, which discards styling, so nothing in this
+# file could see the marks' colour. These pin it directly: the differential is
+# meant to be legible as SHAPE before it is read as words, and an uncoloured
+# table renders FOUND and clean as the same weight of text.
+
+
+def test_styled_wraps_each_known_mark_in_its_own_style() -> None:
+    from mylonite.demo.render import _CLEAN_MARK, _FOUND_MARK, _SKIPPED_MARK, _styled
+
+    assert _styled(_FOUND_MARK) == f"[bold red]{_FOUND_MARK}[/bold red]"
+    assert _styled(_CLEAN_MARK) == f"[bold green]{_CLEAN_MARK}[/bold green]"
+    assert _styled(_SKIPPED_MARK) == f"[bold yellow]{_SKIPPED_MARK}[/bold yellow]"
+
+
+def test_styled_passes_an_unknown_mark_through_unchanged() -> None:
+    """A future OUTCOME_MARKS entry with no style must render, not crash.
+
+    `_aggregate_mark` can return any mark in the table; an unmapped one falls
+    through verbatim rather than being wrapped in a broken markup tag.
+    """
+    from mylonite.demo.render import _styled
+
+    assert _styled("⚠ NOT TESTED") == "⚠ NOT TESTED"
+    assert _styled("") == ""
+
+
+def test_render_demo_emits_colour_for_the_verdict_marks() -> None:
+    """End-to-end: the rendered table carries colour, not just glyphs."""
+    import re
+
+    vulnerable = _result(
+        "reference:vulnerable",
+        _outcomes(
+            {
+                "excessive-agency-fetch-attacker-url-direct": "finding",
+                "tool-description-summary-smuggle": "skipped_planner_failure",
+            }
+        ),
+    )
+    guarded = _result("reference:guarded", _outcomes())
+
+    console = Console(
+        file=io.StringIO(), record=True, width=240, force_terminal=True, color_system="truecolor"
+    )
+    render_demo(vulnerable, guarded, mode="replay (offline)", elapsed_s=0.1, console=console)
+    html = console.export_html(inline_styles=True, clear=False)
+
+    colours = set(re.findall(r"color: (#[0-9a-fA-F]{6})", html))
+    # Foreground/background plus the panel border alone would be three; the three
+    # verdict styles have to add to that, and they must differ from each other.
+    assert len(colours) >= 5, f"expected distinct verdict colours, saw {sorted(colours)}"
