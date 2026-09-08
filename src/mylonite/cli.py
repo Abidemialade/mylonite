@@ -1572,18 +1572,6 @@ def _slugify_pattern(pattern_id: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in pattern_id).strip("_") or "exploit"
 
 
-def _find_latest_scan_dir(scans_root: Path) -> Path | None:
-    """Return the newest ``<ts>/`` subdir under ``scans_root`` (lexical = chronological).
-
-    Scan dirs are ISO-timestamped (``write_artefacts``), so the lexically-greatest
-    name is the most recent. Returns ``None`` if the root is absent or empty.
-    """
-    if not scans_root.is_dir():
-        return None
-    candidates = sorted((p for p in scans_root.iterdir() if p.is_dir()), reverse=True)
-    return candidates[0] if candidates else None
-
-
 def _exploits_in_dir(scan_dir: Path) -> list[Path]:
     """All (sorted) ``exploit_*.json`` inside ``scan_dir``."""
     return sorted(scan_dir.glob("exploit_*.json"))
@@ -1617,10 +1605,16 @@ def _resolve_exploit_paths(scan_path: Path | None, latest: bool, scans_root: Pat
         raise typer.Exit(code=EXIT_CONFIG)
 
     if latest:
-        scan_dir = _find_latest_scan_dir(scans_root)
+        from mylonite.scan.artefacts import find_latest_scan_dir, warn_if_scan_is_stale
+
+        scan_dir = find_latest_scan_dir(scans_root)
         if scan_dir is None:
             echo_err(f"no scans found under {scans_root}. Run `mylonite scan <target>` first.")
             raise typer.Exit(code=EXIT_CONFIG)
+        # `--latest` picks by directory NAME with no age check: say which.
+
+        echo(f"generate --latest: using {scan_dir}")
+        warn_if_scan_is_stale(scan_dir, emit=echo_err)
         found = _exploits_in_dir(scan_dir)
         if not found:
             echo_err(

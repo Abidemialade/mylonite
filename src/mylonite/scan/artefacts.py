@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 
@@ -98,6 +100,72 @@ def _sanitise_filename(pattern_id: str) -> str:
     return safe_slug(pattern_id)
 
 
+#: The one format for a scan directory's name. `_timestamped_subdir` writes it
+#: and `parse_scan_dir_timestamp` reads it back, so the two cannot drift.
+_SCAN_DIR_TIME_FORMAT: Final = "%Y-%m-%dT%H-%M-%SZ"
+
+#: How old a `--latest` scan may be before `generate` mentions it. A judgement
+#: call, not a measured threshold: long enough not to nag during an ordinary
+#: scan-then-generate session, short enough to catch "I ran that last week".
+STALE_SCAN_AGE: Final = timedelta(hours=24)
+
+
+def find_latest_scan_dir(scans_root: Path) -> Path | None:
+    """Return the newest ``<ts>/`` subdir under ``scans_root``.
+
+    Scan dirs are ISO-timestamped by :func:`_timestamped_subdir`, so the
+    lexically-greatest name is the most recent. ``None`` if the root is absent
+    or empty.
+
+    Note what this does NOT consider: how old that directory is. A caller
+    offering a ``--latest`` affordance should say which one it picked — see
+    :func:`warn_if_scan_is_stale`.
+    """
+    if not scans_root.is_dir():
+        return None
+    candidates = sorted((p for p in scans_root.iterdir() if p.is_dir()), reverse=True)
+    return candidates[0] if candidates else None
+
+
+def parse_scan_dir_timestamp(scan_dir: Path) -> datetime | None:
+    """UTC time from a scan directory's name, or ``None``.
+
+    The inverse of :func:`_timestamped_subdir`, including its ``-N`` collision
+    suffix. Returns ``None`` -- never raises -- for a hand-created or
+    older-format directory, because staleness is advisory and must not be able
+    to break the command that consults it.
+    """
+    base = re.sub(r"-\d+$", "", scan_dir.name)
+    try:
+        return datetime.strptime(base, _SCAN_DIR_TIME_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def warn_if_scan_is_stale(scan_dir: Path, *, emit: Callable[[str], None]) -> None:
+    """Advisory note when a resolved scan is older than :data:`STALE_SCAN_AGE`.
+
+    Deliberately non-fatal, and deliberately not raising. Scanning once then
+    generating or gating repeatedly while iterating on the emitted test is a
+    normal workflow, and an old-but-valid scan is a legitimate input -- the
+    problem being addressed is only that the choice was previously invisible.
+
+    ``emit`` is injected rather than imported so this stays free of CLI
+    concerns, per this package's no-``typer`` rule.
+    """
+    recorded = parse_scan_dir_timestamp(scan_dir)
+    if recorded is None:
+        return
+    age = datetime.now(UTC) - recorded
+    if age <= STALE_SCAN_AGE:
+        return
+    emit(
+        f"warning: that scan is {age.days}d old. It may predate changes to the "
+        "target, the seeds, or the model. Re-run `mylonite scan` if the emitted "
+        "test should reflect the target as it is now."
+    )
+
+
 def _timestamped_subdir(root: Path) -> Path:
     """Atomically create and return a never-collide subdir under ``root``.
 
@@ -111,7 +179,7 @@ def _timestamped_subdir(root: Path) -> Path:
     loop makes directory creation itself the atomicity boundary — there is no
     window between "check" and "create" for a second process to land in.
     """
-    base = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    base = datetime.now(UTC).strftime(_SCAN_DIR_TIME_FORMAT)
     suffix = 0
     while True:
         candidate = root / base if suffix == 0 else root / f"{base}-{suffix}"

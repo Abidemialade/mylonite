@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import importlib.resources as ir
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -398,3 +399,79 @@ def test_scan_output_dir_flag_wins_over_config_root_and_env(
     assert (tmp_path / flag_dir).is_dir()
     assert not (tmp_path / "from-config-root").exists()
     assert not (tmp_path / "from-env-root").exists()
+
+
+# --- CLI: `generate --latest` names, and dates, the scan it picked ----------
+
+
+def test_generate_latest_echoes_the_scan_dir_it_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--latest` picks by directory NAME with no age check and used to say so
+    nowhere. A user with several scans days apart could generate from an
+    arbitrarily old one with nothing in the output identifying which.
+    """
+    monkeypatch.chdir(tmp_path)
+    scans = tmp_path / "scans"
+    recent = scans / f"{datetime.now(UTC).strftime('%Y-%m-%dT%H-%M-%SZ')}"
+    recent.mkdir(parents=True)
+
+    runner = CliRunner()
+    res = runner.invoke(app, ["generate", "--latest", "--scans-dir", str(scans)])
+
+    assert "generate --latest: using" in res.output
+    assert recent.name in res.output
+
+
+def test_generate_latest_warns_when_the_scan_is_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Advisory only — an old-but-valid scan is a legitimate input.
+
+    Scanning once then generating repeatedly while iterating on the emitted test
+    is a normal workflow, so this must not become an error. It only makes the
+    age visible.
+    """
+    monkeypatch.chdir(tmp_path)
+    scans = tmp_path / "scans"
+    old = scans / (datetime.now(UTC) - timedelta(days=9)).strftime("%Y-%m-%dT%H-%M-%SZ")
+    old.mkdir(parents=True)
+
+    runner = CliRunner()
+    res = runner.invoke(app, ["generate", "--latest", "--scans-dir", str(scans)])
+
+    assert "9d old" in res.output
+
+
+def test_generate_latest_does_not_warn_on_a_fresh_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: the note must not cry wolf during an ordinary session."""
+    monkeypatch.chdir(tmp_path)
+    scans = tmp_path / "scans"
+    fresh = scans / datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    fresh.mkdir(parents=True)
+
+    runner = CliRunner()
+    res = runner.invoke(app, ["generate", "--latest", "--scans-dir", str(scans)])
+
+    assert "old." not in res.output
+
+
+def test_generate_latest_survives_an_unparseable_scan_dir_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hand-created or older-format directory must not break `generate`.
+
+    Staleness is advisory; the parser returns None rather than raising, so the
+    command proceeds to its ordinary "no exploits" path.
+    """
+    monkeypatch.chdir(tmp_path)
+    scans = tmp_path / "scans"
+    (scans / "hand-made-scan").mkdir(parents=True)
+
+    runner = CliRunner()
+    res = runner.invoke(app, ["generate", "--latest", "--scans-dir", str(scans)])
+
+    assert "hand-made-scan" in res.output
+    assert "Traceback" not in res.output

@@ -273,3 +273,79 @@ def _adapter_note_ids(result: DemoResult) -> list[str]:
             if note_id:
                 ids.append(note_id)
     return ids
+
+
+async def test_live_model_only_override_derives_the_provider_from_the_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model override without a provider must not stamp the default provider.
+
+    `--live --model ollama_chat/llama3.2:3b` printed `live (anthropic/...)` for a
+    run LiteLLM routed to Ollama on the model prefix -- and stamped "anthropic"
+    into ScanConfig, ScanReport.provider and every exploit's ExecContext.
+    """
+    captured: list[dict[str, Any]] = []
+    real_build = runner_mod._build_scan
+    fake = _FakeRecorder()
+
+    def spy_build_live(variant: str, **kwargs: Any) -> Any:
+        captured.append({"variant": variant, **kwargs})
+        kwargs = dict(kwargs)
+        kwargs["completion_fn"] = fake
+        return real_build(variant, **kwargs)
+
+    monkeypatch.setattr(runner_mod, "_build_scan", spy_build_live)
+    result = await run_demo(live=True, provider=None, model="ollama_chat/llama3.2:3b")
+
+    # `ollama_chat`, not `ollama`: they are distinct LiteLLM routes (/api/chat
+    # vs /api/generate) and `docs/self-hosted-models.md` tells users to prefer
+    # the former for tool-calling. Reporting the route actually taken is the
+    # point of this fix, so it must not be normalised away.
+    assert {c["provider"] for c in captured} == {"ollama_chat"}
+    assert result.provider == "ollama_chat"
+    assert "ollama_chat/" in result.mode
+
+
+async def test_live_explicit_provider_still_wins_over_the_model_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller who passed --provider meant it; never re-derive over the top."""
+    captured: list[dict[str, Any]] = []
+    real_build = runner_mod._build_scan
+    fake = _FakeRecorder()
+
+    def spy_build_live(variant: str, **kwargs: Any) -> Any:
+        captured.append({"variant": variant, **kwargs})
+        kwargs = dict(kwargs)
+        kwargs["completion_fn"] = fake
+        return real_build(variant, **kwargs)
+
+    monkeypatch.setattr(runner_mod, "_build_scan", spy_build_live)
+    await run_demo(live=True, provider="anthropic", model="ollama_chat/llama3.2:3b")
+
+    assert {c["provider"] for c in captured} == {"anthropic"}
+
+
+async def test_live_unroutable_bare_model_falls_back_to_the_demo_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An honest limit, pinned rather than left to LiteLLM's live registry.
+
+    A bare model with no prefix and no --provider cannot be attributed, so the
+    recorded default stands. `--provider` exists for exactly this case.
+    """
+    captured: list[dict[str, Any]] = []
+    real_build = runner_mod._build_scan
+    fake = _FakeRecorder()
+
+    def spy_build_live(variant: str, **kwargs: Any) -> Any:
+        captured.append({"variant": variant, **kwargs})
+        kwargs = dict(kwargs)
+        kwargs["completion_fn"] = fake
+        return real_build(variant, **kwargs)
+
+    monkeypatch.setattr(runner_mod, "_build_scan", spy_build_live)
+    monkeypatch.setattr(runner_mod, "provider_from_model", lambda *_a, **_k: None)
+    await run_demo(live=True, provider=None, model="some-bare-model")
+
+    assert {c["provider"] for c in captured} == {runner_mod.DEMO_PROVIDER}

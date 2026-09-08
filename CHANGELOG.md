@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The demo table can now tell "resisted" from "never exercised".**
+  `render_demo` collapsed every non-clean outcome into one generic `⚠ skipped`,
+  so a seed where the agent made no tool calls at all — canonically
+  `⚠ NOT TESTED`, because an attempt in which the agent did nothing proves
+  nothing — was indistinguishable from a harness error. `OUTCOME_MARKS` already
+  drew that distinction; the renderer was re-collapsing it. It now maps through,
+  falling back to the generic mark only when a weakness row genuinely mixes two
+  different non-clean kinds. `mylonite demo` also gained the NOT-TESTED coverage
+  note `scan`'s own summary has carried for some time. On the shipped fixtures
+  this changes the guarded W3 cell from `⚠ skipped` to `⚠ NOT TESTED`.
+
+- **`mylonite demo --live` no longer reports a provider it did not use.**
+  A model override without a provider override left `used_provider` at the
+  recorded default, so `--live --model ollama_chat/llama3.2:3b` printed
+  `live (anthropic/…)` for a run LiteLLM routed to Ollama on the model prefix —
+  and stamped that provider into `ScanReport.provider` and every exploit's
+  `ExecContext`. The provider is now derived from the model when, and only when,
+  a model override arrives without an explicit provider; an explicit
+  `--provider` still wins, and a bare unprefixed model still falls back.
+
+- **`mylonite generate --latest` says which scan it chose, and how old it is.**
+  It selects by directory name with no age check, so a user with several scans
+  days apart could generate from an arbitrarily old one with nothing in the
+  output identifying which. It now echoes the resolved directory and, past 24
+  hours, adds a non-blocking note — advisory by design, since scanning once and
+  generating repeatedly while iterating on the emitted test is ordinary.
+  `find_latest_scan_dir`, `parse_scan_dir_timestamp` and `warn_if_scan_is_stale`
+  live in `scan/artefacts.py` beside `_timestamped_subdir`, which formats the
+  very names they parse; both directions now share one format constant.
+
+- **Two documentation claims corrected.** `scripts/record_demo_fixtures.py`
+  stated that CI "carries an input-drift guard that hashes exactly this set" —
+  no such hash exists anywhere in the repo. What CI has is a job that verifies
+  an already-corrupted fixture is refused, which catches a fixture set that has
+  broken, not a change that should have triggered a re-record; re-recording is
+  manual and trust-based. `README.md` said scanning "needs an LLM API key",
+  contradicting `docs/self-hosted-models.md` and `scan/providers.py`, which map
+  `ollama`/`vllm`/`litellm-proxy` to no required env var. Both claims are now
+  pinned by assertions in `tests/test_docs_consistency.py`.
+
 - **An attempt where no verdict was reached no longer counts as resistance.**
   When the LLM-judge call raised, returned unparseable output, or was disabled
   while the deterministic predicate stayed inconclusive, the engine recorded

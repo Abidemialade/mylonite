@@ -42,6 +42,7 @@ from mylonite.demo import (
     packaged_fixture_dir,
 )
 from mylonite.scan.engine import ScanResult
+from mylonite.scan.providers import provider_from_model
 from mylonite.scan.wiring import build_scan, note_id_counter
 
 #: Back-compat private aliases. The neutral wiring helpers were promoted to
@@ -259,6 +260,23 @@ async def run_demo(
         # default rather than being silently discarded (DCR-0030).
         used_provider = provider if provider is not None else DEMO_PROVIDER
         used_model = model if model is not None else DEMO_MODEL
+        # A model override alone used to leave the provider at DEMO_PROVIDER
+        # ("anthropic"), so `--live --model ollama_chat/llama3.2:3b` printed
+        # `live (anthropic/...)` for a run LiteLLM routed to Ollama on the model
+        # prefix — and stamped that provider into ScanConfig, ScanReport.provider
+        # and every exploit's ExecContext. Derive it from the model instead.
+        #
+        # Guarded on BOTH conditions, deliberately. An explicit provider always
+        # wins (a caller who passed one meant it), and DCR-0030 pins that a
+        # falsy-but-explicit `provider=""`/`model=""` passes through untouched --
+        # which is why this uses `provider_from_model` rather than
+        # `ModelRef.parse`, whose ValueError on an empty model would break that.
+        # A bare unprefixed model with no --provider still falls back to
+        # DEMO_PROVIDER: an honest limit, and `--provider` exists for it.
+        if provider is None and model is not None:
+            derived = provider_from_model(used_model)
+            if derived is not None:
+                used_provider = derived
         # The two variants are independent — separate engines, no completion_fn
         # (real litellm.acompletion), random note IDs — so nothing is shared
         # between them. Drive them concurrently instead of one after another.

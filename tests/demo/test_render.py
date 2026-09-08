@@ -214,7 +214,10 @@ def test_styled_passes_an_unknown_mark_through_unchanged() -> None:
     """
     from mylonite.demo.render import _styled
 
-    assert _styled("⚠ NOT TESTED") == "⚠ NOT TESTED"
+    # Deliberately a string no OUTCOME_MARKS value equals. "⚠ NOT TESTED" used
+    # to serve here and no longer can: it is now a styled mark in its own right,
+    # distinct from the generic "⚠ skipped".
+    assert _styled("⚠ some future mark") == "⚠ some future mark"
     assert _styled("") == ""
 
 
@@ -243,3 +246,74 @@ def test_render_demo_emits_colour_for_the_verdict_marks() -> None:
     # Foreground/background plus the panel border alone would be three; the three
     # verdict styles have to add to that, and they must differ from each other.
     assert len(colours) >= 5, f"expected distinct verdict colours, saw {sorted(colours)}"
+
+
+def test_a_never_exercised_seed_renders_as_not_tested_not_skipped() -> None:
+    """The distinction the demo table could not previously express.
+
+    `skipped_planner_no_engagement` means the attack was delivered and the agent
+    made no tool calls at all — it proves nothing about the target. Rendering it
+    with the same generic mark as a harness error let an unexercised cell read
+    as a boring skip beside a "0 exploits on guarded" headline.
+    """
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result(
+        "reference:guarded",
+        _outcomes({"excessive-agency-fetch-attacker-url-direct": "skipped_planner_no_engagement"}),
+    )
+
+    output = _render(vulnerable, guarded)
+
+    assert "⚠ NOT TESTED" in output
+    assert "coverage:" in output
+    assert "NOT TESTED" in output
+
+
+def test_a_harness_failure_still_renders_as_a_plain_skip() -> None:
+    """Negative control: the widened mapping must not relabel everything.
+
+    A planner failure is a harness problem, not an unexercised attack, and keeps
+    the generic mark.
+    """
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result(
+        "reference:guarded",
+        _outcomes({"excessive-agency-fetch-attacker-url-direct": "skipped_planner_failure"}),
+    )
+
+    output = _render(vulnerable, guarded)
+
+    assert "⚠ skipped" in output
+    assert "⚠ NOT TESTED" not in output
+
+
+def test_a_row_mixing_two_non_clean_kinds_falls_back_to_the_generic_mark() -> None:
+    """A genuine ambiguity is rendered as one, not resolved by guessing.
+
+    W3 has two seeds; giving them different non-clean outcomes means the row
+    cannot honestly claim either label.
+    """
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result(
+        "reference:guarded",
+        _outcomes(
+            {
+                "excessive-agency-fetch-attacker-url-direct": "skipped_planner_no_engagement",
+                "excessive-agency-fetch-via-note-body": "skipped_planner_failure",
+            }
+        ),
+    )
+
+    output = _render(vulnerable, guarded)
+
+    assert "⚠ skipped" in output
+
+
+def test_no_coverage_note_when_every_seed_was_exercised() -> None:
+    """The note must not cry wolf on a fully-exercised run."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes())
+
+    output = _render(vulnerable, guarded)
+
+    assert "coverage:" not in output

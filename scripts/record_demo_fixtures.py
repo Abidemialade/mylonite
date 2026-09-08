@@ -52,9 +52,19 @@ trigger set is:
 * the ``LLMPolicy`` kwargs shape (``api_base`` is in the key),
 * ``DEMO_MODEL``.
 
-A normal code change does NOT need a re-record. CI carries an input-drift guard
-that hashes exactly this set, so drift is caught at PR time rather than by a
-user hitting a silent cache miss.
+A normal code change does NOT need a re-record.
+
+There is NO automated backstop for the list above. This docstring used to claim
+CI "carries an input-drift guard that hashes exactly this set" — no such hash
+exists anywhere in the repo. What CI actually has is the `demo` job in
+`.github/workflows/ci.yml`, which corrupts a fixture and asserts the demo
+REFUSES to run: that catches a fixture set already broken, not a code change
+that should have triggered a re-record.
+
+So re-recording after a trigger-set change is manual and trust-based: whoever
+changes one of those inputs is responsible for re-running this script. A real
+drift guard would be a genuine improvement and is tracked separately; until it
+exists, do not rely on CI to notice.
 
 How to run
 ----------
