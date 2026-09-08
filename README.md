@@ -130,7 +130,9 @@ pip install "mylonite[demo]"    # ...plus the bundled reference app, for `myloni
 ```
 
 Python 3.11–3.13. (3.14 is not yet supported: `litellm` has no wheels for it.) Scanning
-needs an LLM API key; `demo`, `check`, `--scaffold` and `report` do not.
+needs a model: an API key for a hosted provider, or none at all for a self-hosted one
+(Ollama, vLLM, or a LiteLLM proxy — see [self-hosted models](./docs/self-hosted-models.md)).
+`demo`, `check`, `--scaffold` and `report` never need either.
 
 ## Try it
 

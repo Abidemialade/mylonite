@@ -25,7 +25,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mylonite._cli_io import console_print
-from mylonite.scan.artefacts import OUTCOME_MARKS
+from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, OUTCOME_MARKS
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, Weakness
 
@@ -56,16 +56,25 @@ _NEXT_STEP: Final[str] = (
 _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]
 _CLEAN_MARK: Final[str] = OUTCOME_MARKS["no_finding"]
 _SKIPPED_MARK: Final[str] = OUTCOME_MARKS["skipped_planner_failure"]
+#: Distinct from the above: the attack was delivered but the agent never
+#: engaged, so nothing was exercised. `scan/artefacts.py` already renders this
+#: as its own mark and warns loudly about it; the demo table did not.
+_NOT_TESTED_MARK: Final[str] = OUTCOME_MARKS["skipped_planner_no_engagement"]
 
 #: Rich styles for the outcome marks. The demo's entire claim is a contrast
 #: between two columns, and an unstyled table renders FOUND and clean as the
 #: same weight of plain text -- the differential is invisible until you read
 #: every cell individually. Colour makes the shape of the result legible
 #: before the words are, which is the one thing this table exists to do.
+#:
+#: NOT TESTED shares the caution colour with a plain skip on purpose: both mean
+#: "this cell is not a result", and the difference between them is *why*, which
+#: is carried by the words. A third colour would imply a third severity.
 _MARK_STYLES: Final[dict[str, str]] = {
     _FOUND_MARK: "bold red",
     _CLEAN_MARK: "bold green",
     _SKIPPED_MARK: "bold yellow",
+    _NOT_TESTED_MARK: "bold yellow",
 }
 
 
@@ -120,12 +129,21 @@ def _taxonomy_cell(weakness: Weakness) -> str:
 def _aggregate_mark(result: ScanResult, pattern_ids: frozenset[str]) -> str:
     """Collapse one weakness's seed attempts into a single outcome mark.
 
-    Binding rule: FOUND if ANY seed in the weakness found, else SKIPPED if any
-    seed skipped / errored (or no attempt reached the weakness at all), else
-    clean. A harness ``error`` outcome is intentionally absorbed into the
-    SKIPPED bucket at this weakness-aggregation level (the demo only needs the
-    found / not-found differential). Unknown outcome strings also fall into the
-    skipped bucket — never crash.
+    Binding rule: FOUND if ANY seed in the weakness found, else clean only if
+    EVERY seed came back ``no_finding``, else the outcome's own mark.
+
+    That last clause is the point. This used to collapse everything non-clean
+    into one generic "⚠ skipped", which made a seed the agent never engaged with
+    indistinguishable from a harness error — and `OUTCOME_MARKS` already draws
+    that distinction: ``skipped_planner_no_engagement`` is "⚠ NOT TESTED",
+    because an attempt in which the agent did nothing proves nothing about the
+    target, while ``skipped_planner_failure`` is a genuine "⚠ skipped". Both
+    render on the guarded column of the shipped demo today, and reading the
+    first as the second overstates what the differential established.
+
+    A row mixing two DIFFERENT non-clean kinds falls back to the generic mark:
+    that is a real ambiguity, and inventing a winner between them would be the
+    same overstatement in miniature.
     """
     # Join on pattern_id (== seed_id in v0.2); _WEAKNESS_PATTERNS is keyed the
     # same way, so a future pattern_id/seed_id divergence would surface as rows
@@ -135,9 +153,48 @@ def _aggregate_mark(result: ScanResult, pattern_ids: frozenset[str]) -> str:
     ]
     if any(outcome == "finding" for outcome in outcomes):
         return _FOUND_MARK
-    if not outcomes or any(outcome != "no_finding" for outcome in outcomes):
+    if not outcomes:
         return _SKIPPED_MARK
-    return _CLEAN_MARK
+    if all(outcome == "no_finding" for outcome in outcomes):
+        return _CLEAN_MARK
+    # `.get` rather than `[]`: an unknown outcome string must degrade to the
+    # generic mark, never crash the one command a newcomer runs first.
+    non_clean = {
+        OUTCOME_MARKS.get(outcome, _SKIPPED_MARK) for outcome in outcomes if outcome != "no_finding"
+    }
+    return non_clean.pop() if len(non_clean) == 1 else _SKIPPED_MARK
+
+
+def _print_coverage_note(console: Console, vulnerable: ScanResult, guarded: ScanResult) -> None:
+    """Say plainly when a row is not a result.
+
+    ``scan``'s own summary has carried a loud NOT-TESTED callout for some time
+    (``artefacts.render_summary``); the demo table had no equivalent, so a
+    guarded column containing an unexercised seed read as a clean sweep next to
+    a headline of "0 exploits on guarded". The headline is honest — it counts
+    findings — but on its own it invites the wrong conclusion about the cells
+    that produced no evidence either way.
+
+    Deliberately not styled bold red like ``scan``'s: this is the bundled
+    reference app, where a seed the planner declined to engage is an expected
+    property of the recorded run rather than a misconfiguration the reader can
+    act on. It still has to be said.
+    """
+    untested = sum(
+        1
+        for result in (vulnerable, guarded)
+        for attempt in result.report.attempts
+        if attempt.outcome in NOT_TESTED_OUTCOMES
+    )
+    if not untested:
+        return
+    console_print(
+        console,
+        f"[yellow]coverage: {untested} attempt(s) were NOT TESTED — the attack was "
+        "delivered but the agent never engaged, so those seeds established nothing "
+        "in either direction. A ⚠ cell is not a clean one.[/yellow]",
+        highlight=False,
+    )
 
 
 def render_demo(
@@ -185,6 +242,7 @@ def render_demo(
     )
     if n_guard > 0:
         console_print(console, f"[yellow]{_GUARDED_FINDING_NOTE}[/yellow]", highlight=False)
+    _print_coverage_note(console, vulnerable, guarded)
     console_print(console, _TEASER, highlight=False)
     console_print(console, _NEXT_STEP, highlight=False)
     console_print(console, f"mode: {mode} — {elapsed_s:.1f}s", highlight=False)

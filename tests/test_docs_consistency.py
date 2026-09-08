@@ -262,3 +262,48 @@ def test_control_config_synthetic_accepts_a_control_list_not_a_bool() -> None:
     # A real list of control names must still validate.
     ControlConfig.model_validate({"synthetic": ["W3", "W4"]})
     assert field.default == (), "ControlConfig.synthetic's default changed shape"
+
+
+# --- README vs the code it describes ---------------------------------------
+
+
+def test_readme_does_not_overstate_the_api_key_requirement() -> None:
+    """The README said scanning "needs an LLM API key", full stop.
+
+    `docs/self-hosted-models.md` documents the opposite for Ollama/vLLM, and
+    `scan/providers.py` backs it: those providers map to `()`, no env var
+    required. The unqualified claim undersold a no-key path the project's own
+    docs and code support — the kind of drift this module exists to catch, one
+    file over from the CLI epilogs.
+    """
+    from mylonite.scan.providers import PROVIDER_ENV_VARS
+
+    readme = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Scanning\nneeds an LLM API key" not in readme
+    assert "self-hosted" in readme, "the no-key path must be discoverable from the README"
+    assert "docs/self-hosted-models.md" in readme
+
+    # The claim the README now makes, pinned against the code that makes it true.
+    keyless = {p for p, env in PROVIDER_ENV_VARS.items() if not env and p != "stub"}
+    assert {"ollama", "vllm", "litellm-proxy"} <= keyless
+
+
+def test_record_script_does_not_promise_a_ci_guard_that_does_not_exist() -> None:
+    """`scripts/record_demo_fixtures.py` claimed CI hashes its trigger set.
+
+    No such hash exists. A maintainer trusting that promise would skip a needed
+    re-record and find out via a user's silent cache miss, which is precisely
+    what the promise said could not happen.
+    """
+    raw = (_REPO_ROOT / "scripts" / "record_demo_fixtures.py").read_text(encoding="utf-8")
+    # Whitespace-normalised: the docstring is hard-wrapped, so a literal match
+    # would break on a reflow rather than on the claim actually returning.
+    script = " ".join(raw.split())
+
+    # Asserted positively. The docstring QUOTES the old false claim in order to
+    # correct it, so "is this phrase absent?" cannot tell a retraction from a
+    # reassertion -- only the presence of the correction can.
+    assert "no such hash exists anywhere in the repo" in script
+    assert "manual and trust-based" in script
+    assert "do not rely on CI to notice" in script

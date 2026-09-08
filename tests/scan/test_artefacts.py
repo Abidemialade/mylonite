@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import jsonschema
@@ -492,3 +493,83 @@ def test_prefixed_reason_reads_as_a_negative_beside_the_clean_mark() -> None:
     assert "attack not confirmed" in out
     # The conclusion must precede the model's wording, not trail it.
     assert out.index("attack not confirmed") < out.index("Out-of-band")
+
+
+# --- scan-directory naming: format and parse, in one place ------------------
+
+
+def test_scan_dir_timestamp_round_trips_through_the_writer(tmp_path: Path) -> None:
+    """The parser is the inverse of the name `write_artefacts` actually writes.
+
+    Asserted against a real written directory rather than a hand-built string,
+    so a change to the format on either side fails here instead of silently
+    disabling the staleness check.
+    """
+    from mylonite.scan.artefacts import parse_scan_dir_timestamp
+
+    scan_dir = write_artefacts(_result(findings=0), tmp_path)
+    parsed = parse_scan_dir_timestamp(scan_dir)
+
+    assert parsed is not None
+    assert abs((datetime.now(UTC) - parsed).total_seconds()) < 300
+
+
+def test_scan_dir_timestamp_strips_the_collision_suffix() -> None:
+    """`_timestamped_subdir` appends `-N` when two scans land in one second."""
+    from mylonite.scan.artefacts import parse_scan_dir_timestamp
+
+    plain = parse_scan_dir_timestamp(Path("2026-09-07T03-19-02Z"))
+    suffixed = parse_scan_dir_timestamp(Path("2026-09-07T03-19-02Z-2"))
+
+    assert plain is not None
+    assert plain == suffixed
+
+
+def test_scan_dir_timestamp_returns_none_rather_than_raising() -> None:
+    """Staleness is advisory: an unparseable name must not break the caller."""
+    from mylonite.scan.artefacts import parse_scan_dir_timestamp
+
+    assert parse_scan_dir_timestamp(Path("hand-made-scan")) is None
+    assert parse_scan_dir_timestamp(Path()) is None
+
+
+def test_find_latest_scan_dir_picks_the_newest_name(tmp_path: Path) -> None:
+    from mylonite.scan.artefacts import find_latest_scan_dir
+
+    for name in ("2026-09-01T00-00-00Z", "2026-09-07T03-19-02Z", "2026-08-15T00-00-00Z"):
+        (tmp_path / name).mkdir()
+
+    found = find_latest_scan_dir(tmp_path)
+
+    assert found is not None
+    assert found.name == "2026-09-07T03-19-02Z"
+
+
+def test_find_latest_scan_dir_handles_an_absent_or_empty_root(tmp_path: Path) -> None:
+    from mylonite.scan.artefacts import find_latest_scan_dir
+
+    assert find_latest_scan_dir(tmp_path / "nope") is None
+    assert find_latest_scan_dir(tmp_path) is None
+
+
+def test_stale_warning_fires_only_past_the_threshold() -> None:
+    """Both directions, since a note that always fires is as useless as none."""
+    from mylonite.scan.artefacts import STALE_SCAN_AGE, warn_if_scan_is_stale
+
+    def _dir(age: timedelta) -> Path:
+        return Path((datetime.now(UTC) - age).strftime("%Y-%m-%dT%H-%M-%SZ"))
+
+    # Derived, not hard-coded: the age is STALE_SCAN_AGE plus the offset, so a
+    # literal would silently drift if the threshold ever changed.
+    age = STALE_SCAN_AGE + timedelta(days=3)
+    old: list[str] = []
+    warn_if_scan_is_stale(_dir(age), emit=old.append)
+    assert old and f"{age.days}d old" in old[0]
+
+    fresh: list[str] = []
+    warn_if_scan_is_stale(_dir(timedelta(minutes=5)), emit=fresh.append)
+    assert fresh == []
+
+    unparseable: list[str] = []
+    warn_if_scan_is_stale(Path("hand-made"), emit=unparseable.append)
+    assert unparseable == []
