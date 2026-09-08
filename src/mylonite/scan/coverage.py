@@ -117,6 +117,79 @@ if set(ATTEMPT_CLASS) != set(get_args(ScanAttemptOutcome)):
     )
 
 
+# --- No-verdict attempts ---------------------------------------------------------
+#
+# `outcome="no_finding"` conflates two different facts. Usually it means a
+# mechanism looked at the attempt and concluded the target resisted. But it is
+# ALSO what the engine records when no mechanism decided anything: the LLM-judge
+# call raised or returned unparseable output, or the deterministic predicate was
+# inconclusive and the judge was disabled. Both hard-code `success=False`, which
+# is structurally indistinguishable from a real negative everywhere downstream.
+#
+# That distinction was already recorded -- `Verdict.fallback_cause` flows into
+# `ScanAttempt.judge_evidence["fallback_cause"]` -- but nothing read it, so five
+# consumers turned "we never found out" into "the guard held": `_resisted` and
+# `_invoke_and_judge_async` in the reference validator, `_assert_from_result` in
+# the testkit (which decides whether an EMITTED REGRESSION TEST PASSES), and the
+# coverage/exit-code loop below.
+#
+# The direction of harm is what makes this worth a dedicated predicate rather
+# than an inline check: it can only ever manufacture false ASSURANCE, never a
+# false finding, because a `Verdict.success=True` needs a real decision plus
+# confidence >= the floor.
+
+#: ``judge_evidence`` keys that each mean "no verdict was reached", written by
+#: ``SuccessJudge.judge`` and flattened onto the attempt by the engine.
+#:
+#: Two keys, deliberately, because they are different operator problems and the
+#: engine treats them differently. ``fallback_cause`` means an LLM call degraded
+#: (raised, or returned unparseable output) and is counted into
+#: ``ScanReport.inconclusive_attempts``/``fallback_breakdown``, which
+#: ``artefacts.render_summary`` reports as failed LLM output. ``no_adjudicator``
+#: means no call was attempted at all because the judge is disabled — routine in
+#: the demo's wiring, and NOT a provider degradation. Reusing ``fallback_cause``
+#: for it would make every demo attempt print a bold-red "failed LLM output"
+#: warning that is simply untrue.
+NO_VERDICT_EVIDENCE_KEYS: Final[tuple[str, ...]] = ("fallback_cause", "no_adjudicator")
+
+#: Evidence value stamped when the judge is disabled and the predicate declined.
+NO_ADJUDICATOR: Final = "llm_judge_disabled"
+
+
+def attempt_reached_no_verdict(attempt: object) -> bool:
+    """True when no mechanism decided this attempt.
+
+    Covers a judge call that raised, one that returned unparseable output, and a
+    predicate that was inconclusive with the judge disabled (the demo's wiring).
+
+    Only ``no_finding`` can be affected: every no-verdict path hard-codes
+    ``success=False`` with ``applicable=True``, so none of them can produce
+    ``finding``, ``not_applicable`` or any ``skipped_*`` outcome. Checking the
+    outcome as well as the cause keeps that invariant explicit rather than
+    implicit, so a future path that sets a cause on some other outcome does not
+    silently change what "resisted" means.
+
+    Typed against ``object`` rather than ``ScanAttempt`` only to keep this module
+    free of a runtime import it does not otherwise need; callers pass a
+    ``ScanAttempt``.
+
+    When ``undecided`` lands as a first-class ``ScanAttemptOutcome`` (issue #144),
+    this collapses to an ``ATTEMPT_CLASS`` entry and the override in
+    :meth:`ScanOutcome.from_report` can be deleted.
+    """
+    outcome = getattr(attempt, "outcome", None)
+    if outcome != "no_finding":
+        return False
+    evidence = getattr(attempt, "judge_evidence", None) or {}
+    return any(bool(evidence.get(key)) for key in NO_VERDICT_EVIDENCE_KEYS)
+
+
+def no_verdict_causes(attempt: object) -> list[str]:
+    """The recorded reasons no verdict was reached, for operator messaging."""
+    evidence = getattr(attempt, "judge_evidence", None) or {}
+    return sorted({str(evidence[k]) for k in NO_VERDICT_EVIDENCE_KEYS if evidence.get(k)})
+
+
 # --- Coverage verdict ------------------------------------------------------------
 
 
@@ -294,7 +367,17 @@ class ScanOutcome:
         not_tested = 0
         intentionally_skipped = 0
         for attempt in report.attempts:
-            attempt_class = ATTEMPT_CLASS[attempt.outcome]
+            # `ATTEMPT_CLASS` stays an unconditional, exhaustive map from the
+            # outcome literal; the per-attempt override lives here because the
+            # distinction is carried by evidence, not by the outcome value. An
+            # attempt where no mechanism reached a verdict proved nothing about
+            # the target, exactly like `not_applicable` or a zero-engagement
+            # attempt -- so it is NOT_TESTED, never EXERCISED_RESISTED.
+            attempt_class = (
+                AttemptClass.NOT_TESTED
+                if attempt_reached_no_verdict(attempt)
+                else ATTEMPT_CLASS[attempt.outcome]
+            )
             if attempt_class in (
                 AttemptClass.EXERCISED_FIRED,
                 AttemptClass.EXERCISED_RESISTED,

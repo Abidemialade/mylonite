@@ -23,6 +23,7 @@ from mylonite.scan._llm import (
 )
 from mylonite.scan._llm import fence as _fence
 from mylonite.scan._types import Verdict
+from mylonite.scan.coverage import NO_ADJUDICATOR
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.predicates import PredicateNotFound, lookup_predicate
 
@@ -441,11 +442,21 @@ class SuccessJudge:
         if deterministic is not None:
             return deterministic
         if not self._llm_fallback:
+            # `success=False` here means "nobody decided", not "the target
+            # resisted" -- the predicate declined to rule and there is no
+            # adjudicator configured. Stamping a cause makes that visible to
+            # `coverage.attempt_reached_no_verdict`, which is what stops this
+            # from being counted as resistance by the validator, the testkit
+            # and the coverage/exit-code loop.
             return Verdict(
                 success=False,
                 reason="predicate inconclusive; LLM-judge fallback disabled",
-                evidence={"predicate": predicate_name},
+                evidence={"predicate": predicate_name, "no_adjudicator": NO_ADJUDICATOR},
                 mechanism="predicate",
+                # Deliberately NOT `fallback_cause`: nothing degraded, no call
+                # was made. That field feeds `inconclusive_attempts` /
+                # `fallback_breakdown`, which render as "failed LLM output" —
+                # false on every demo run, where this branch is routine.
             )
         # LLM fallback ---------------------------------------------------------
         fallback = {

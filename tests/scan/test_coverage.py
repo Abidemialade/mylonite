@@ -28,13 +28,19 @@ EXIT_BUDGET = 3
 EXIT_PROVIDER = 4
 
 
-def _attempt(outcome: ScanAttemptOutcome, *, seed_id: str = "s1") -> ScanAttempt:
+def _attempt(
+    outcome: ScanAttemptOutcome,
+    *,
+    seed_id: str = "s1",
+    judge_evidence: dict[str, str] | None = None,
+) -> ScanAttempt:
     return ScanAttempt(
         seed_id=seed_id,
         pattern_id=seed_id,
         outcome=outcome,
         verdict_mechanism=None,
         verdict_reason=None,
+        judge_evidence=judge_evidence or {},
     )
 
 
@@ -434,3 +440,65 @@ def test_budget_exceeded_has_an_actionable_operator_message() -> None:
     assert message is not None
     assert "--max-llm-calls" in message, "it must name the flag that fixes it"
     assert "incomplete" in message, "and be explicit that this is not a clean result"
+
+
+# --- no-verdict attempts ----------------------------------------------------
+#
+# `no_finding` carries two different facts: a mechanism decided the target
+# resisted, or nothing decided anything. Only the first is coverage.
+
+
+@pytest.mark.parametrize(
+    ("evidence", "label"),
+    [
+        ({"fallback_cause": "call_raised"}, "judge call raised"),
+        ({"fallback_cause": "unparseable_output"}, "judge output unparseable"),
+        ({"no_adjudicator": "llm_judge_disabled"}, "judge disabled, predicate inconclusive"),
+    ],
+)
+def test_no_verdict_no_finding_is_not_trustworthy_clean(
+    evidence: dict[str, str], label: str
+) -> None:
+    """The false-clean this fix exists to close.
+
+    A scan whose only attempt never reached a verdict used to report
+    `coverage=EXERCISED`, `trustworthy_clean=True` and exit 0 — identical to a
+    genuine clean pass, because a fallback verdict hard-codes `success=False`
+    and the engine records that as `no_finding`.
+    """
+    outcome = ScanOutcome.from_report(
+        _report(attempts=[_attempt("no_finding", judge_evidence=evidence)])
+    )
+
+    assert outcome.trustworthy_clean is False, label
+    assert outcome.coverage is not Coverage.EXERCISED, label
+    assert outcome.not_tested == 1, label
+    assert outcome.exit_code != EXIT_SUCCESS, label
+
+
+def test_genuine_no_finding_is_still_trustworthy_clean() -> None:
+    """The negative control: a real judged negative must stay a clean pass.
+
+    Without this, a fix that over-fires would quietly turn every honest clean
+    scan into a non-zero exit — a worse failure than the one being fixed.
+    """
+    outcome = ScanOutcome.from_report(
+        _report(attempts=[_attempt("no_finding", judge_evidence={"confidence": "0.9"})])
+    )
+
+    assert outcome.trustworthy_clean is True
+    assert outcome.coverage is Coverage.EXERCISED
+    assert outcome.exit_code == EXIT_SUCCESS
+
+
+def test_a_finding_is_never_treated_as_a_no_verdict_attempt() -> None:
+    """Only `no_finding` can be a non-verdict; a finding required a decision."""
+    outcome = ScanOutcome.from_report(
+        _report(
+            attempts=[_attempt("finding", judge_evidence={"fallback_cause": "call_raised"})],
+            findings_count=1,
+        )
+    )
+
+    assert outcome.exercised == 1
+    assert outcome.not_tested == 0
