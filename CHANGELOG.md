@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An attempt where no verdict was reached no longer counts as resistance.**
+  When the LLM-judge call raised, returned unparseable output, or was disabled
+  while the deterministic predicate stayed inconclusive, the engine recorded
+  `outcome="no_finding"` — the same literal used for a genuinely resisted
+  attack. Five consumers turned that into "the guard held", and none of them
+  read the `fallback_cause` the judge had already recorded.
+
+  The consequence that matters: **an emitted regression test could pass on an
+  attempt where nothing was ever decided.** `testkit._assert_from_result` is the
+  single funnel for `assert_guard_holds`, `assert_target_resists` and
+  `assert_control_holds`, so every generated test was exposed. It needed no
+  persistent outage — `runs` defaults to 1 and the judge path has no retry, so
+  one transient failure was enough; and because `DifferentialValidator` records
+  its shipped fixtures from a single live run, a blip there could bake a
+  permanently-green gate that replays as a cache hit forever.
+
+  `coverage.attempt_reached_no_verdict` is now the one place that decides, wired
+  into `ScanOutcome.from_report` (which fixes `trustworthy_clean`, `exit_code`,
+  `gate` and `ablate` at the root), `reference_validator._resisted`,
+  `reference_validator._invoke_and_judge_async` (whose existing guards only
+  covered a judge that *raised*, while `SuccessJudge` catches its own failures
+  and returns), and `testkit._assert_from_result`, which now refuses to pass and
+  names the cause. Under `runs>1` the engine also prefers a pass that reached a
+  verdict when recording the decisive one, so run order no longer decides
+  whether an attempt looks decided.
+
+  Two distinct evidence keys, deliberately: `fallback_cause` (an LLM call
+  degraded — counted into `fallback_breakdown` and reported as failed LLM
+  output) and `no_adjudicator` (no call was attempted because the judge is
+  disabled — routine in the demo, and not a provider problem).
+
+  User-visible: `gate` and `ablate` may now exit non-zero on runs that
+  previously exited 0, and a generated test may now fail where it previously
+  passed. In both cases the earlier result was not evidence of anything. No
+  contract change; `ScanAttemptOutcome` and every JSON schema are untouched.
+
+- **Four test suites were asserting against a judge that was never consulted.**
+  Two scripted completion doubles matched the judge by a phrase from an older
+  `_JUDGE_SYSTEM` wording. When the prompt was reworded the match silently
+  stopped, the judge received planner prose, and the unparseable-output fallback
+  produced the same `no_finding` the tests asserted — so nothing went red. Both
+  doubles now key on the response-schema key `harmful_intent_present`, and each
+  file carries a guard asserting the marker against the live prompt.
+
 ### Added
 
 - **Markdown image/link egress probe (W3).** New opt-in attack module,

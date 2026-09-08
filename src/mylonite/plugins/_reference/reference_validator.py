@@ -96,6 +96,7 @@ from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
+from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import CompletionFn
@@ -952,13 +953,22 @@ class DifferentialValidator(ValidatorBase):
         Clean resistance = a ``no_finding`` attempt for that pattern_id and no
         finding for it. A skip/error attempt is NOT clean resistance — the guard
         wasn't actually exercised, so it doesn't count.
+
+        Neither is an attempt where no mechanism reached a verdict (a judge call
+        that raised or returned unparseable output, or an inconclusive predicate
+        with the judge disabled). Those arrive as ``no_finding`` too, so the
+        allowlist above read them as resistance — which is how a guard that
+        actually leaks could be canonicalised and shipped as "proven clean" off
+        one bad LLM response at record time.
         """
         matching = [a for a in result.report.attempts if a.pattern_id == pattern_id]
         if any(a.outcome == "finding" for a in matching):
             return False
         if any(e.pattern_id == pattern_id for e in result.exploits):
             return False
-        return any(a.outcome == "no_finding" for a in matching)
+        return any(
+            a.outcome == "no_finding" and not attempt_reached_no_verdict(a) for a in matching
+        )
 
     # -- mutation score -------------------------------------------------------
 
@@ -1211,6 +1221,18 @@ class DifferentialValidator(ValidatorBase):
             # neither a fired nor a resisted result (DCR-0022) — a judge
             # infra failure must not be misread as "the guard resisted".
             logger.exception("metamorphic: judge.judge raised unexpectedly")
+            return None
+        if verdict.fallback_cause is not None:
+            # The same failure as the `except` above, arriving by the other
+            # door. `SuccessJudge.judge` catches its own LLM-call failures and
+            # returns a `success=False` verdict rather than raising, so the
+            # guard directly above never sees them -- and `success=False` read
+            # as `guard_resisted=True`, inflating the metamorphic robustness
+            # score on exactly the runs where nothing was actually judged.
+            logger.warning(
+                "metamorphic: no verdict reached (%s) — counting as neither fired nor resisted",
+                verdict.fallback_cause,
+            )
             return None
         return verdict.success
 

@@ -769,8 +769,23 @@ class ScanEngine:
         # (a minority success must not stamp a no_finding with a success reason).
         # When not a finding there is always at least one failing pass; last_pass is
         # a defensive fallback only.
+        # Under runs>1 the failing passes can be a mix of real negatives and
+        # passes where no verdict was reached (a judge call that raised or
+        # returned unparseable output). Taking [0] would let run ORDER decide
+        # whether the recorded attempt looks decided or not. Prefer a pass that
+        # actually reached a verdict; fall back to the first only when every
+        # failing pass is a non-verdict, which is the honest record for that case.
         decisive = (
-            success_passes[0] if is_finding else (fail_passes[0] if fail_passes else last_pass)
+            success_passes[0]
+            if is_finding
+            else (
+                next(
+                    (p for p in fail_passes if p.verdict.fallback_cause is None),
+                    fail_passes[0],
+                )
+                if fail_passes
+                else last_pass
+            )
         )
         verdict = decisive.verdict
         tool_call_trace = decisive.tool_call_trace

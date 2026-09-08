@@ -64,6 +64,7 @@ from mylonite._replay import (
     LiteLLMRecorder,
 )
 from mylonite.contracts import AbortReason, ExploitRecord
+from mylonite.scan.coverage import attempt_reached_no_verdict, no_verdict_causes
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.llm_types import CompletionFn
@@ -293,7 +294,10 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
             "intent — this is a regression in the guard."
         )
 
-    if any(a.outcome == "no_finding" for a in matching):
+    # `no_finding` alone is not enough: the engine records it both for "a
+    # mechanism looked and the target resisted" and for "no mechanism reached a
+    # verdict at all". Only the former may pass the gate.
+    if any(a.outcome == "no_finding" and not attempt_reached_no_verdict(a) for a in matching):
         return
 
     # The re-drive hit its own bound (TESTKIT_REDRIVE_MAX_LLM_CALLS /
@@ -324,6 +328,22 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
         )
 
     outcomes: list[str] = sorted({str(a.outcome) for a in matching}) or ["<no attempt>"]
+    # The judge never reached a verdict — its call raised, returned unparseable
+    # output, or was disabled while the predicate stayed inconclusive. This
+    # arrives as `no_finding`, so before this branch existed it took the early
+    # return above and the emitted regression test PASSED on the strength of
+    # nothing having been decided. Named separately from the generic hint below
+    # because the fix is a provider/judge problem, not a fixture one — and there
+    # is nothing useful to re-record while the judge is still failing.
+    if matching and all(attempt_reached_no_verdict(a) for a in matching):
+        causes = sorted({c for a in matching for c in no_verdict_causes(a)})
+        raise TestkitFixtureError(
+            f"inconclusive: no verdict was reached for {pattern_id!r} against the "
+            f"guarded twin (cause: {', '.join(causes) or 'unknown'}). The judge did "
+            "not decide, so resistance was NOT confirmed and the gate refuses to "
+            "pass. Check the LLM provider is healthy and the judge model returns "
+            "parseable JSON, then re-run — this is not a fixture problem."
+        )
     # An undelivered indirect payload is a distinct, common cause on a LIVE custom
     # target: either the app defended by never surfacing the poison, OR the
     # seed_arm/drive needs tuning so the planter actually retrieves it. Naming both

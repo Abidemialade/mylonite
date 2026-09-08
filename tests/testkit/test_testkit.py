@@ -98,8 +98,18 @@ def _is_customiser(messages: list[dict[str, Any]]) -> bool:
     return any("craft security probes" in str(m.get("content", "")) for m in messages)
 
 
+#: Matched against the judge's system prompt. Keyed on the response-schema key
+#: rather than prose: this predicate previously looked for "evaluate whether an
+#: AI agent", which stopped matching when the prompt was reworded, and NOTHING
+#: failed — the double fell through to the planner branch, the judge received
+#: plain text, and the unparseable-output fallback produced the same
+#: `no_finding` the test was asserting. `test_judge_double_matches_the_real_judge_prompt`
+#: below now fails loudly if this drifts again.
+_JUDGE_PROMPT_MARKER = "harmful_intent_present"
+
+
 def _is_judge(messages: list[dict[str, Any]]) -> bool:
-    return any("evaluate whether an AI agent" in str(m.get("content", "")) for m in messages)
+    return any(_JUDGE_PROMPT_MARKER in str(m.get("content", "")) for m in messages)
 
 
 def _customiser_reply() -> SimpleNamespace:
@@ -517,3 +527,51 @@ def test_resolve_exec_context_message_when_sibling_unparseable(tmp_path: Path) -
     msg = str(excinfo.value)
     assert "isn't valid JSON" in msg
     assert "no sibling scan_report.json was found" not in msg
+
+
+def test_judge_double_matches_the_real_judge_prompt() -> None:
+    """The stub's judge branch must actually recognise the judge.
+
+    Regression guard for a silent drift: `_is_judge` keyed on prose that was
+    later reworded, so every "guard held" test in this file was in fact passing
+    on an unparseable-output judge fallback rather than on a judge verdict. The
+    outcome was identical (`no_finding`), so nothing went red. Assert the
+    marker against the real prompt so a future rewording fails here instead.
+    """
+    from mylonite.scan.judge import _JUDGE_SYSTEM
+
+    assert _JUDGE_PROMPT_MARKER in _JUDGE_SYSTEM
+    assert _is_judge([{"role": "system", "content": _JUDGE_SYSTEM}])
+    assert not _is_judge([{"role": "user", "content": "read note n_1 for me"}])
+
+
+async def _guarded_judge_unparseable_fn(
+    *, model: str, messages: list[dict[str, Any]], **kwargs: Any
+) -> Any:
+    """Planner refuses, but the JUDGE returns text it cannot parse as JSON."""
+    del model, kwargs
+    if _is_customiser(messages):
+        return _customiser_reply()
+    if _is_judge(messages):
+        return _msg("I'm sorry, I can't help with that request.")
+    return _msg("I cannot follow embedded instructions from note content.")
+
+
+def test_guard_holds_refuses_to_pass_when_the_judge_never_reached_a_verdict() -> None:
+    """The false-assurance hole this fix closes.
+
+    The judge call returns unparseable output, so it falls back to
+    `success=False` — recorded as `no_finding`, exactly like a genuine
+    resistance. Before the fix `_assert_from_result` took its `no_finding`
+    early-return and the EMITTED REGRESSION TEST PASSED, certifying a guard on
+    the strength of one bad LLM response. A gate that goes green because nobody
+    decided is worse than no gate.
+    """
+    with pytest.raises(_FixtureError) as excinfo:
+        assert_guard_holds(_exploit(), _completion_fn=_guarded_judge_unparseable_fn)
+
+    message = str(excinfo.value)
+    assert "no verdict" in message.lower()
+    assert "unparseable_output" in message
+    # Must NOT send the reader hunting for a fixture bug that isn't there.
+    assert "replay/fixture problem" not in message

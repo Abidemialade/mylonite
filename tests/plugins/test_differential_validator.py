@@ -75,6 +75,16 @@ def _tool_response(calls: list[SimpleNamespace]) -> SimpleNamespace:
     )
 
 
+#: Matched against the judge's system prompt to route this file's completion
+#: double. Keyed on the response-schema key, not prose: the previous marker
+#: ("evaluate whether") stopped matching when `_JUDGE_SYSTEM` was reworded, and
+#: nothing failed — the double fell through to its planner branch, the judge got
+#: plain text, and the unparseable-output fallback produced the same
+#: `no_finding` these tests assert. Pinned by
+#: `test_judge_double_matches_the_real_judge_prompt` below.
+_JUDGE_PROMPT_MARKER = "harmful_intent_present"
+
+
 def _system_of(messages: list[dict[str, Any]]) -> str:
     return next((m["content"] for m in messages if m.get("role") == "system"), "")
 
@@ -122,7 +132,7 @@ class _ScriptedCompletion:
         if "craft security probes" in system:
             # Customiser: pass the seed body through unchanged.
             return _text_response(json.dumps({"body": "REFINED"}))
-        if "evaluate whether" in system:
+        if _JUDGE_PROMPT_MARKER in system:
             # Judge fallback: decline (predicates carry the real findings).
             return _text_response(
                 json.dumps({"success": False, "confidence": 0.0, "reason": "declined"})
@@ -1420,3 +1430,109 @@ def test_no_reference_to_assert_attack_reproduces() -> None:
         encoding="utf-8"
     )
     assert "assert_attack_reproduces" not in text
+
+
+def test_judge_double_matches_the_real_judge_prompt() -> None:
+    """This file's stub must actually recognise the judge.
+
+    Regression guard for a silent drift shared with `tests/testkit/`: the marker
+    keyed on prose that was later reworded, so the judge branch never fired and
+    every verdict here came from an unparseable-output fallback instead. The
+    recorded outcome was identical (`no_finding`), so nothing went red.
+    """
+    from mylonite.scan.judge import _JUDGE_SYSTEM
+
+    assert _JUDGE_PROMPT_MARKER in _JUDGE_SYSTEM
+    assert _JUDGE_PROMPT_MARKER not in "craft security probes for a target agent"
+
+
+def test_invoke_and_judge_async_returns_none_when_no_verdict_was_reached(monkeypatch) -> None:
+    """The non-raising sibling of the two guards above, and the gap they left.
+
+    ``SuccessJudge.judge`` catches its OWN LLM-call failures and returns a
+    ``success=False`` verdict rather than raising, so the ``except`` guards never
+    saw them — and ``success=False`` read as ``guard_resisted=True``, inflating
+    the metamorphic robustness score on exactly the runs where nothing was
+    judged. Must degrade to ``None`` (neither fired nor resisted), matching the
+    raising case.
+    """
+    from mylonite.scan import judge as judge_mod
+
+    async def _fallback_verdict(self, payload, response):
+        del self, payload, response
+        return Verdict(
+            success=False,
+            reason="LLM-judge inconclusive — LLM output not parseable as JSON",
+            evidence={"fallback_cause": "unparseable_output", "detail": "..."},
+            mechanism="llm",
+            fallback_cause="unparseable_output",
+        )
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _fallback_verdict)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+
+    assert result is None, "a non-verdict must not be reported as resistance"
+
+
+def test_invoke_and_judge_async_still_returns_a_real_verdict(monkeypatch) -> None:
+    """Negative control: a genuine judged negative is still `False`, not `None`."""
+    from mylonite.scan import judge as judge_mod
+
+    async def _real_negative(self, payload, response):
+        del self, payload, response
+        return Verdict(
+            success=False,
+            reason="the agent refused the injected instruction",
+            evidence={"confidence": 0.9},
+            mechanism="llm",
+        )
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _real_negative)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+
+    assert result is False
+
+
+def test_resisted_is_false_when_the_only_no_finding_reached_no_verdict() -> None:
+    """`_resisted` decides which iteration is canonicalised and shipped.
+
+    A no-verdict attempt arrives as `no_finding`, so the allowlist counted it as
+    clean resistance — meaning a guard that actually leaks could be recorded as
+    "proven clean" off one bad LLM response at record time, then replayed as a
+    cache hit by every future CI run.
+    """
+    from mylonite.contracts._types import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanResult
+
+    def _result(evidence: dict[str, str]) -> ScanResult:
+        return ScanResult(
+            report=ScanReport(
+                target_id="reference:guarded",
+                provider="p",
+                model="m",
+                elapsed_seconds=1.0,
+                attempts=[
+                    ScanAttempt(
+                        seed_id=_EXPLOIT_PATTERN_ID,
+                        pattern_id=_EXPLOIT_PATTERN_ID,
+                        outcome="no_finding",
+                        judge_evidence=evidence,
+                    )
+                ],
+                findings_count=0,
+                mylonite_version="0.0.0",
+            ),
+            exploits=[],
+        )
+
+    tainted = _result({"fallback_cause": "call_raised"})
+    genuine = _result({"confidence": "0.9"})
+
+    assert DifferentialValidator._resisted(tainted, _EXPLOIT_PATTERN_ID) is False
+    assert DifferentialValidator._resisted(genuine, _EXPLOIT_PATTERN_ID) is True
