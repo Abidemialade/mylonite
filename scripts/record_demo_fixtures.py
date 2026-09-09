@@ -68,23 +68,29 @@ exists, do not rely on CI to notice.
 
 How to run
 ----------
-The provider key is read from the environment via LiteLLM's normal mechanism
-(e.g. ``ANTHROPIC_API_KEY``). Never hardcode or print keys.
+``DEMO_PROVIDER``/``DEMO_MODEL`` are self-hosted, so the default invocation
+needs no API key and no account — only that the model is served locally::
 
-bash::
+    ollama pull llama3.2:3b
+    python scripts/record_demo_fixtures.py
 
-    ANTHROPIC_API_KEY=… python scripts/record_demo_fixtures.py
+That is the whole prerequisite, and it is deliberate: the demo is the first
+command a newcomer runs and it advertises needing no key, so re-recording it
+must not require a paid vendor account either.
+
+``--provider``/``--model`` override the recorded pair, which is how the demo
+would be re-recorded against a hosted model instead::
+
+    ANTHROPIC_API_KEY=… python scripts/record_demo_fixtures.py \
+        --provider anthropic --model claude-haiku-4-5-20251001
 
 PowerShell::
 
-    $env:ANTHROPIC_API_KEY="…"; python scripts/record_demo_fixtures.py
+    $env:ANTHROPIC_API_KEY="…"; python scripts/record_demo_fixtures.py `
+        --provider anthropic --model claude-haiku-4-5-20251001
 
-``--provider``/``--model`` override the recorded pair (both default to
-``DEMO_PROVIDER``/``DEMO_MODEL``), which is how the demo gets re-recorded
-against a self-hosted model needing no key at all::
-
-    python scripts/record_demo_fixtures.py \
-        --provider ollama --model ollama_chat/llama3.2:3b
+A hosted provider's key is read from the environment via LiteLLM's normal
+mechanism. Never hardcode or print keys.
 
 Whatever you pass to ``--model`` is stamped into ``_meta.json`` and surfaces in
 the demo's own mode line, so the output names the model it actually replays.
@@ -332,7 +338,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         default=DEMO_PROVIDER,
-        help=f"LiteLLM provider to record against (default: {DEMO_PROVIDER})",
+        help=(
+            f"provider label for this recording (default: {DEMO_PROVIDER}). Display "
+            "only: LiteLLM routes purely on the --model prefix, so this never "
+            "changes which endpoint is called. Pass it alongside a --model from a "
+            "different provider, or the console output names the wrong one. It is "
+            "deliberately NOT derived from the model prefix, which would resolve "
+            "the default pair's 'ollama_chat/' route to the label 'ollama_chat' "
+            "rather than the provider 'ollama'."
+        ),
     )
     parser.add_argument(
         "--model",

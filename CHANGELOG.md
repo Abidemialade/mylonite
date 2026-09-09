@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collect-only and the CLI told the operator to commit fixtures that were never
   written. This is the same "absence of failure is not proof of resistance" bug
   already fixed in `_resisted` and the testkit, sitting in the oracle itself.
+- **`mylonite demo` now replays fixtures recorded against a self-hosted model.**
+  `DEMO_PROVIDER`/`DEMO_MODEL` move from `anthropic`/`claude-haiku-4-5-20251001`
+  to `ollama`/`ollama_chat/llama3.2:3b`, and all 32 fixtures are re-recorded.
+  The demo needs no API key, but its own provenance line named a hosted model,
+  so the one command a newcomer runs first could not actually be reproduced
+  without a paid account. It now can: `ollama pull llama3.2:3b` and
+  `python scripts/record_demo_fixtures.py`. The differential is unchanged — 2
+  exploits on vulnerable, 0 on guarded — and the guarded column improves, with
+  the previously unexercised W3 cell now engaged. `demo --help`, the
+  record-script instructions, and the "no provider reachable" error all follow
+  the new default: that error used to open by telling you to set a hosted
+  vendor's API key, which the default configuration does not use and which
+  would not fix the likely cause — a local model server that is not running.
 
   `_decide` now requires `guard_resists` and a `min_guard_resist_rate`
   (default 0.6, matching the metamorphic threshold's rationale): the guard must
