@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a paid account. It now can: `ollama pull llama3.2:3b` and
   `python scripts/record_demo_fixtures.py`. The differential is unchanged — 2
   exploits on vulnerable, 0 on guarded — and the guarded column improves, with
-  the previously unexercised W3 cell now engaged.
+  the previously unexercised W3 cell now engaged. `demo --help`, the
+  record-script instructions, and the "no provider reachable" error all follow
+  the new default: that error used to open by telling you to set a hosted
+  vendor's API key, which the default configuration does not use and which
+  would not fix the likely cause — a local model server that is not running.
 
   A stronger 4B local model was measured and rejected: it landed more attacks on
   the vulnerable build but also drove the *guarded* build into emailing an
