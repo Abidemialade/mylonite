@@ -13,11 +13,13 @@ mocks — so these tests pin the renderer to the actual engine output shape.
 from __future__ import annotations
 
 import io
+from collections.abc import Iterable, Mapping
 
 from rich.console import Console
 
 from mylonite.contracts._types import ScanAttempt, ScanAttemptOutcome, ScanReport
 from mylonite.demo.render import render_demo
+from mylonite.scan.coverage import NO_ADJUDICATOR
 from mylonite.scan.engine import ScanResult
 
 # The eight kitchen-sink pattern_ids, grouped by seeded weakness (must match
@@ -39,7 +41,12 @@ _W4 = (
 _ALL_PATTERNS = _W1 + _W2 + _W3 + _W4
 
 
-def _attempt(pattern_id: str, outcome: ScanAttemptOutcome) -> ScanAttempt:
+def _attempt(
+    pattern_id: str,
+    outcome: ScanAttemptOutcome,
+    *,
+    judge_evidence: dict[str, str] | None = None,
+) -> ScanAttempt:
     return ScanAttempt(
         seed_id=pattern_id,
         pattern_id=pattern_id,
@@ -47,11 +54,41 @@ def _attempt(pattern_id: str, outcome: ScanAttemptOutcome) -> ScanAttempt:
         verdict_mechanism="predicate" if outcome in ("finding", "no_finding") else None,
         verdict_reason="synthetic verdict for renderer tests",
         error_detail="RuntimeError" if outcome == "error" else None,
+        judge_evidence=judge_evidence or {},
     )
 
 
-def _result(target_id: str, outcomes: dict[str, ScanAttemptOutcome]) -> ScanResult:
-    attempts = [_attempt(pattern_id, outcome) for pattern_id, outcome in outcomes.items()]
+def _result(
+    target_id: str,
+    outcomes: dict[str, ScanAttemptOutcome],
+    *,
+    no_verdict: Mapping[str, str] | Iterable[str] = (),
+) -> ScanResult:
+    """Build a ScanResult; ``no_verdict`` names the attempts nothing adjudicated.
+
+    Pass an iterable of pattern_ids for the demo's own case (predicate
+    inconclusive, judge disabled), or a mapping of pattern_id → evidence key to
+    exercise the other cause (a judge call that fell back). Both are recorded on
+    ``judge_evidence`` exactly as the engine records them, so these tests fail if
+    the key convention `scan.coverage` reads ever changes underneath the demo.
+    """
+    causes: Mapping[str, str] = (
+        no_verdict
+        if isinstance(no_verdict, Mapping)
+        else dict.fromkeys(no_verdict, "no_adjudicator")
+    )
+    attempts = [
+        _attempt(
+            pattern_id,
+            outcome,
+            judge_evidence=(
+                {"predicate": "reply_contains_marker", causes[pattern_id]: NO_ADJUDICATOR}
+                if pattern_id in causes
+                else None
+            ),
+        )
+        for pattern_id, outcome in outcomes.items()
+    ]
     report = ScanReport(
         target_id=target_id,
         attack_modules=["mylonite.prompt-injection", "mylonite.excessive-agency"],
@@ -199,11 +236,18 @@ def test_render_skipped_and_error_outcomes_do_not_crash() -> None:
 
 
 def test_styled_wraps_each_known_mark_in_its_own_style() -> None:
-    from mylonite.demo.render import _CLEAN_MARK, _FOUND_MARK, _SKIPPED_MARK, _styled
+    from mylonite.demo.render import (
+        _CLEAN_MARK,
+        _FOUND_MARK,
+        _NO_VERDICT_MARK,
+        _SKIPPED_MARK,
+        _styled,
+    )
 
     assert _styled(_FOUND_MARK) == f"[bold red]{_FOUND_MARK}[/bold red]"
     assert _styled(_CLEAN_MARK) == f"[bold green]{_CLEAN_MARK}[/bold green]"
     assert _styled(_SKIPPED_MARK) == f"[bold yellow]{_SKIPPED_MARK}[/bold yellow]"
+    assert _styled(_NO_VERDICT_MARK) == f"[bold yellow]{_NO_VERDICT_MARK}[/bold yellow]"
 
 
 def test_styled_passes_an_unknown_mark_through_unchanged() -> None:
@@ -317,3 +361,105 @@ def test_no_coverage_note_when_every_seed_was_exercised() -> None:
     output = _render(vulnerable, guarded)
 
     assert "coverage:" not in output
+
+
+# ---------------------------------------------------------------------------
+# Unadjudicated rows. The demo runs with the LLM judge disabled, so a predicate
+# that cannot rule leaves the attempt with NO mechanism that decided it. The
+# engine still records `no_finding` — the only outcome those code paths can
+# produce — which the table read as a win for the target.
+
+
+def _row(output: str, weakness: str) -> str:
+    """The one rendered table row for ``weakness``, box-drawing and all."""
+    rows = [line for line in output.splitlines() if line.lstrip("│ ").startswith(f"{weakness} ")]
+    assert len(rows) == 1, f"expected exactly one {weakness} row, got {rows}"
+    return rows[0]
+
+
+def test_an_unadjudicated_no_finding_renders_as_no_verdict_not_clean() -> None:
+    """The headline bug: `no_finding` with no adjudicator is not a clean result.
+
+    W1 has a single seed, so both of its cells turn over together — which is
+    exactly the shipped fixtures' shape, where the predicate is inconclusive on
+    both builds and the row claimed the guard held on both.
+    """
+    smuggle = _W1[0]
+    vulnerable = _result("reference:vulnerable", _outcomes(), no_verdict=[smuggle])
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=[smuggle])
+
+    row = _row(_render(vulnerable, guarded), "W1")
+
+    assert row.count("⚠ NO VERDICT") == 2
+    assert "✓ clean" not in row
+
+
+def test_a_genuine_predicate_negative_still_renders_clean() -> None:
+    """Negative control. Only the evidence separates this from the case above."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes())
+
+    output = _render(vulnerable, guarded)
+
+    assert _row(output, "W1").count("✓ clean") == 2
+    assert "NO VERDICT" not in output
+
+
+def test_a_judge_fallback_also_renders_as_no_verdict() -> None:
+    """The other cause of a non-verdict, which `scan` can hit with the judge ON.
+
+    A judge call that raised or returned unparseable output records
+    ``fallback_cause``; a predicate left unadjudicated by a disabled judge
+    records ``no_adjudicator``. Neither decided anything, and the demo must not
+    treat the difference as meaningful.
+    """
+    smuggle = _W1[0]
+    vulnerable = _result(
+        "reference:vulnerable", _outcomes(), no_verdict={smuggle: "fallback_cause"}
+    )
+    guarded = _result("reference:guarded", _outcomes(), no_verdict={smuggle: "fallback_cause"})
+
+    assert "⚠ NO VERDICT" in _row(_render(vulnerable, guarded), "W1")
+
+
+def test_a_row_keeps_its_clean_mark_when_one_of_its_seeds_was_adjudicated() -> None:
+    """Documented aggregation rule, pinned so the fix does not overshoot.
+
+    W3 has two seeds. If one produced a real predicate negative, the row reports
+    what that verdict supports — the note below the table still counts the other.
+    """
+    unadjudicated = _W3[0]
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=[unadjudicated])
+
+    output = _render(vulnerable, guarded)
+
+    assert "✓ clean" in _row(output, "W3")
+    assert "1 reached NO VERDICT" in output
+
+
+def test_the_coverage_note_counts_both_kinds_of_non_result() -> None:
+    """Counting only unexercised attempts undercounted the shipped run 12-to-1."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result(
+        "reference:guarded",
+        _outcomes({_W3[0]: "skipped_planner_no_engagement"}),
+        no_verdict=[_W1[0]],
+    )
+
+    output = _render(vulnerable, guarded)
+
+    assert "1 reached NO VERDICT" in output
+    assert "1 was NOT TESTED" in output
+    assert "of 16 attempts across both builds" in output
+
+
+def test_the_coverage_note_agrees_in_number_with_what_it_counts() -> None:
+    """Two of a kind reads "were", one reads "was"; the singular case is real."""
+    vulnerable = _result("reference:vulnerable", _outcomes(), no_verdict=_W2[:2])
+    guarded = _result("reference:guarded", _outcomes({_W3[0]: "skipped_planner_no_engagement"}))
+
+    output = _render(vulnerable, guarded)
+
+    assert "2 reached NO VERDICT" in output
+    assert "1 was NOT TESTED" in output

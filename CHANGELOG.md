@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The demo table no longer shows a clean cell where nothing adjudicated.**
+  `mylonite demo` runs with the LLM judge disabled, so its differential stays
+  purely predicate-driven and reproducible. The consequence is that an
+  inconclusive predicate has no adjudicator at all — and the engine records
+  those attempts as `no_finding`, the only outcome that path can produce, which
+  the table read as `✓ clean` and reported as the guard holding. They now render
+  `⚠ NO VERDICT`, distinct from both `⚠ NOT TESTED` (the attack was delivered
+  but the agent never engaged) and `⚠ skipped` (a harness error), and the
+  coverage note counts them alongside unexercised attempts. The headline is
+  unchanged: it counts findings, which were always earned.
+
 - **The demo table can now tell "resisted" from "never exercised".**
   `render_demo` collapsed every non-clean outcome into one generic `⚠ skipped`,
   so a seed where the agent made no tool calls at all — canonically
