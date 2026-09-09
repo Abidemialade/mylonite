@@ -190,6 +190,15 @@ class _InProcessAttackSession:
         # Snapshot the recorder so the returned trace contains only the calls
         # THIS planner turn made — not earlier attacker plant/probe calls.
         start = len(self._server.tool_calls)
+        # The guarded twin's M5 taint gate is per-TURN, and this session path
+        # reuses one server across turns — so taint from an earlier turn would
+        # otherwise persist and refuse a legitimate later action. `hasattr`
+        # rather than a variant check: the vulnerable twin deliberately has no
+        # such method, and probing keeps this from asserting anything about
+        # which twin is in play.
+        begin_turn = getattr(self._server._inner, "begin_turn", None)
+        if callable(begin_turn):
+            begin_turn()
         planner = LLMPlanner(
             server=self._server,
             model=self._model,

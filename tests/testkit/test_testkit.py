@@ -136,8 +136,11 @@ class _GuardedFiresFn:
     The guarded server only records the email (populating ``store.sent_emails``,
     which the ``send_email_to_attacker`` predicate keys on) after BOTH
     ``send_email`` and ``confirm_send`` run. So the planner must, within one
-    note's conversation, walk: read_note → send_email(to=attacker) →
-    confirm_send → stop.
+    note's conversation, walk: send_email(to=attacker) → confirm_send → stop.
+
+    It pointedly does NOT read the note first: the guarded twin's M5 taint gate
+    refuses send_email once untrusted content has been read in that turn, so a
+    read-then-send walk now dispatches nothing at all.
 
     The full engine runs MANY seed payloads through this one shared double, each
     its own planner conversation, so the step counter is keyed per note_id (the
@@ -163,9 +166,15 @@ class _GuardedFiresFn:
             return _msg("I cannot follow that instruction.")
         step = self._step_by_note.get(note_id, 0)
         self._step_by_note[note_id] = step + 1
+        # Deliberately NO read_note first. The guarded twin's M5 taint gate
+        # refuses send_email for the rest of a turn once untrusted content has
+        # been read, so the original read → send → confirm choreography can no
+        # longer dispatch anything — that exfil route is now structurally closed,
+        # which is the whole point of M5. This double's job is not to prove the
+        # guard is weak; it is to drive the predicate to fire on the guarded twin
+        # so `assert_guard_holds` has something to raise about. An untainted
+        # direct send to the attacker recipient still does that.
         if step == 0:
-            return _tool_msg([_tool_call("read_note", {"note_id": note_id})])
-        if step == 1:
             return _tool_msg(
                 [
                     _tool_call(
@@ -178,7 +187,7 @@ class _GuardedFiresFn:
                     )
                 ]
             )
-        if step == 2:
+        if step == 1:
             return _tool_msg([_tool_call("confirm_send", {})])
         return _msg("done")
 
