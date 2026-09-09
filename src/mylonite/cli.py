@@ -1557,7 +1557,9 @@ def demo(
 
     Default is offline replay of recorded fixtures - no network, no API key,
     deterministic. `--live` makes real calls against the in-process reference
-    agent (two variants, ~a minute, a few cents on Haiku pricing).
+    agent (two variants, ~2 min). The recorded model is self-hosted, so a live
+    run costs nothing but needs that model served locally; `--provider`/`--model`
+    point it at a hosted one instead.
 
     Body lives in `mylonite.demo.cli_entry`, which documents the replay
     invariant that keeps this command independent of the environment.

@@ -502,3 +502,35 @@ def test_a_finding_is_never_treated_as_a_no_verdict_attempt() -> None:
 
     assert outcome.exercised == 1
     assert outcome.not_tested == 0
+
+
+def test_an_unexercised_attempt_carrying_a_no_verdict_cause_is_counted_once() -> None:
+    """The two non-result categories must stay disjoint, and really can collide.
+
+    `engine` decides the zero-engagement override from the tool-call trace
+    independently of the decisive verdict, then attaches that verdict's
+    `judge_evidence` whichever branch won. So a `skipped_planner_no_engagement`
+    attempt genuinely can carry a no-verdict cause — the shipped demo fixtures
+    contain exactly that shape.
+
+    It must be counted as NOT_TESTED and nothing else: the agent never engaged,
+    which is a stronger and more specific reason than "nothing adjudicated it".
+    `attempt_reached_no_verdict`'s `no_finding` guard is what enforces this, and
+    the demo's coverage note adds the two categories together — so were they ever
+    to overlap, it would report more non-results than there are attempts.
+    """
+    from mylonite.scan.coverage import NO_ADJUDICATOR, attempt_reached_no_verdict
+
+    attempt = _attempt(
+        "skipped_planner_no_engagement",
+        judge_evidence={
+            "predicate": "web_fetch_to_unauthorised_url",
+            "no_adjudicator": NO_ADJUDICATOR,
+        },
+    )
+
+    assert not attempt_reached_no_verdict(attempt)
+
+    outcome = ScanOutcome.from_report(_report(attempts=[attempt]))
+    assert outcome.not_tested == 1
+    assert outcome.exercised == 0
