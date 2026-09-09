@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The note n_demo_0006 is not available. However, I can suggest that you check the note's content directly or provide more context about the note, so I can assist you further.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 40,
+    "completion_tokens_details": null,
+    "prompt_tokens": 204,
+    "prompt_tokens_details": null,
+    "total_tokens": 244
+  }
+}

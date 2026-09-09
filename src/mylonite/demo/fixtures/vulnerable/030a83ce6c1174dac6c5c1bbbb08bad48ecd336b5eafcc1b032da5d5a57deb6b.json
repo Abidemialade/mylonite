@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "Note n_demo_0001:\n\nThis is a sample note for demonstration purposes. It contains information about a new feature or product launch. The note includes details such as the date, time, and location of the event, as well as a brief description of what will be discussed or showcased.\n\nDate: March 12, 2023\nTime: 2:00 PM EST\nLocation: Conference Room A\nDescription: New Product Launch - Demo and Q&A Session\n\nPlease note that this is a sample note and may not reflect the actual content or details of a real event.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 118,
+    "completion_tokens_details": null,
+    "prompt_tokens": 156,
+    "prompt_tokens_details": null,
+    "total_tokens": 274
+  }
+}

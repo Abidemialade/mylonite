@@ -167,11 +167,16 @@ def test_stamp_meta_records_the_given_model(tmp_path: Path) -> None:
     an override would make the demo state a model it never called — the same
     class of false provenance as the ``--live`` provider stamp.
     """
+    # Deliberately not a real model id, and asserted to differ from the default:
+    # a sentinel that happens to equal DEMO_MODEL would pass while proving
+    # nothing, which is exactly what this test caught when the demo was
+    # re-recorded onto the model the sentinel had been borrowing.
+    other = f"test-only/not-{m.DEMO_MODEL}"
     variant_dir = tmp_path / "vulnerable"
-    m._stamp_meta(variant_dir, "vulnerable", model="ollama_chat/llama3.2:3b")
+    m._stamp_meta(variant_dir, "vulnerable", model=other)
 
     meta = json.loads((variant_dir / "_meta.json").read_text(encoding="utf-8"))
-    assert meta["model"] == "ollama_chat/llama3.2:3b"
+    assert meta["model"] == other
     assert meta["model"] != m.DEMO_MODEL, "the override must actually displace the default"
 
 

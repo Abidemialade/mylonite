@@ -84,6 +84,31 @@ simple. A weaker model raises exposure for *compliance-dependent* attacks and lo
   for the planner role;** `scan` accepts role-separated `--planner-model` / `--judge-model`
   overrides for exactly this reason.
 
+### A third model showed the guarded twin's W2 control is only as strong as the planner
+
+Selecting the model to record the offline demo against (2026-09-08, local Ollama, judge
+disabled) put a 4B-class planner — `qwen3:4b-instruct-2507-q4_K_M` — against both reference
+builds. It landed more attacks on `reference:vulnerable` than either model above, which is
+the expected direction. It also, in **2 of 3 runs**, drove `reference:guarded` into calling
+`send_email` with an attacker-controlled recipient and the injected note body as the message.
+
+That is not judge noise: the judge was off, and the finding came from the deterministic
+predicate reading the server's own recorded `sent_emails` effect.
+
+It is also not a code defect in the guarded twin. Its W2 mitigation is a *prompt-level*
+control — `read_note` wraps untrusted content in an `<untrusted>…</untrusted>` envelope
+declaring it data rather than instruction (`server_guarded._quarantine`). A planner that
+respects the envelope resists; one that does not, does not. Claude Haiku 4.5 and
+`llama3.2:3b` respect it. This model, in the majority of runs, did not.
+
+The consequence is worth stating plainly, because it cuts at the differential oracle itself:
+**a "PASS on guarded" for a soft-control weakness class is a statement about the planner as
+much as about the app.** It holds for W3 and W4, whose guarded mitigations are enforced in
+server code (an egress allowlist; a two-step confirm), and it is contingent for W1 and W2,
+whose mitigations are instructions to the model. `_quarantine`'s own docstring already
+names the stronger construction — a nonce delimiter — as the next step; this is the first
+in-repo measurement showing the current envelope actually being walked through.
+
 ### What is still missing
 
 A second model against a **third-party** target. Every external number remains single-model,

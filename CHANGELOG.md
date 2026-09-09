@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`mylonite demo` now replays fixtures recorded against a self-hosted model.**
+  `DEMO_PROVIDER`/`DEMO_MODEL` move from `anthropic`/`claude-haiku-4-5-20251001`
+  to `ollama`/`ollama_chat/llama3.2:3b`, and all 32 fixtures are re-recorded.
+  The demo needs no API key, but its own provenance line named a hosted model,
+  so the one command a newcomer runs first could not actually be reproduced
+  without a paid account. It now can: `ollama pull llama3.2:3b` and
+  `python scripts/record_demo_fixtures.py`. The differential is unchanged — 2
+  exploits on vulnerable, 0 on guarded — and the guarded column improves, with
+  the previously unexercised W3 cell now engaged.
+
+  A stronger 4B local model was measured and rejected: it landed more attacks on
+  the vulnerable build but also drove the *guarded* build into emailing an
+  attacker in 2 of 3 runs, because that build's W2 mitigation is a prompt-level
+  `<untrusted>` envelope that holds only as far as the planner respects it. That
+  result is written up in `docs/limitations.md` rather than discarded — it is a
+  real limit on what a "PASS on guarded" means for soft-control weakness classes.
+
 ### Fixed
 
 - **The demo table no longer shows a clean cell where nothing adjudicated.**

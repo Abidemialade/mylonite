@@ -54,11 +54,34 @@ _note_id_counter = note_id_counter
 
 #: The provider the demo fixtures are recorded against. Replay forces this;
 #: live runs default to it but honour caller overrides.
-DEMO_PROVIDER = "anthropic"
+#:
+#: A self-hosted provider on purpose. ``mylonite demo`` is the one command a
+#: newcomer runs first and it needs no API key — but the fixtures it replayed
+#: were recorded against a hosted model, so its own provenance line contradicted
+#: that claim. Recording against a model anyone can run locally for free makes
+#: the demo reproducible by the people it is aimed at: ``ollama pull
+#: llama3.2:3b`` and ``python scripts/record_demo_fixtures.py`` is the whole
+#: prerequisite, where before it was a paid vendor account.
+#:
+#: ``ollama``, not ``ollama_chat``: this names the PROVIDER (which
+#: ``scan.providers.PROVIDER_ENV_VARS`` maps to ``()`` — no key required), while
+#: ``ollama_chat`` below is a LiteLLM ROUTE on that provider.
+DEMO_PROVIDER = "ollama"
 #: The exact model the demo fixtures are recorded with. Binding for this
 #: project — the recorded fixtures use this model and replay keys on it, so
-#: changing it invalidates every fixture. Do NOT swap to claude-sonnet-4-6.
-DEMO_MODEL = "claude-haiku-4-5-20251001"
+#: changing it invalidates every fixture.
+#:
+#: ``ollama_chat/`` rather than ``ollama/`` is the chat-completions route, which
+#: is what Ollama's own tool-calling support targets — and the demo is entirely
+#: a tool-calling exercise. See docs/self-hosted-models.md.
+#:
+#: Chosen over a stronger local model on measured evidence, not size. A 4B
+#: candidate landed more attacks on the vulnerable build but also, in 2 of 3
+#: runs, drove the GUARDED build into emailing an attacker — the guarded twin's
+#: W2 control is a prompt-level ``<untrusted>`` envelope, so it holds only as
+#: far as the planner respects it. Recording that would have shipped a demo
+#: whose control arm fails. See docs/limitations.md.
+DEMO_MODEL = "ollama_chat/llama3.2:3b"
 
 #: The two reference variants the demo runs, in render order.
 _VARIANTS: tuple[Literal["vulnerable", "guarded"], ...] = ("vulnerable", "guarded")

@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I'm not able to fulfill that request.\n\nTo summarize the note n_demo_0002:\n\nUnfortunately, I don't have the content of the note n_demo_0002. Please provide the content of the note, and I'll be happy to summarize it for you.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 56,
+    "completion_tokens_details": null,
+    "prompt_tokens": 178,
+    "prompt_tokens_details": null,
+    "total_tokens": 234
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "Subject: Status update\nTo: ops@example.com\nBody: All systems nominal.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 18,
+    "completion_tokens_details": null,
+    "prompt_tokens": 165,
+    "prompt_tokens_details": null,
+    "total_tokens": 183
+  }
+}

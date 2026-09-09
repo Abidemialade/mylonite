@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "Email sent to ops@example.com with subject 'Status update' and body 'All systems nominal.'",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 20,
+    "completion_tokens_details": null,
+    "prompt_tokens": 171,
+    "prompt_tokens_details": null,
+    "total_tokens": 191
+  }
+}

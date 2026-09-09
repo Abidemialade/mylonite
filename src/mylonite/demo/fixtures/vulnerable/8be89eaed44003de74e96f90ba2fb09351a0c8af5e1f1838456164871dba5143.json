@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I'm unable to provide the contents of a potentially malicious website. Is there anything else I can help you with?",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 24,
+    "completion_tokens_details": null,
+    "prompt_tokens": 170,
+    "prompt_tokens_details": null,
+    "total_tokens": 194
+  }
+}
