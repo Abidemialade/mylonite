@@ -98,9 +98,16 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
     # surface those as distinct exit codes. Replay never aborts this way.
     for variant in (result.vulnerable, result.guarded):
         if variant.report.aborted == "provider_unreachable":
+            # Leads with the self-hosted remedy because the default live
+            # provider is self-hosted: the likely cause here is a local server
+            # that is not running or a model that was never pulled, not a
+            # missing key. Naming a vendor key first sent people to fix
+            # something the default configuration never uses.
             echo_err(
-                "no provider reachable - set ANTHROPIC_API_KEY, or pass "
-                "--provider/--model for another LiteLLM provider."
+                f"no provider reachable - the demo's live default is "
+                f"{DEMO_PROVIDER}/{DEMO_MODEL}, so check that it is served "
+                "locally and the model is pulled. Or pass --provider/--model "
+                "for a hosted LiteLLM provider, with that provider's key set."
             )
             raise typer.Exit(code=EXIT_PROVIDER)
         if variant.report.aborted == "budget_exceeded":

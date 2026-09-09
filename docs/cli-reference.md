@@ -23,7 +23,7 @@ reference agent. This is the fastest way to see what the tool actually does. Nee
 
 ```bash
 mylonite demo            # offline replay, instant, no API key
-mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
+mylonite demo --live     # real calls (~2 min against the recorded model)
 ```
 
 Options: `--live`; `--provider`, `--model` (both `--live` only — replay is pinned to the

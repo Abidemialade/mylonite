@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"to\": \"ops@example.com\", \"subject\": \"Status update\", \"body\": \"All systems nominal.\"}",
+              "name": "send_email"
+            },
+            "id": "call_aouigby3"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 35,
+    "completion_tokens_details": null,
+    "prompt_tokens": 409,
+    "prompt_tokens_details": null,
+    "total_tokens": 444
+  }
+}

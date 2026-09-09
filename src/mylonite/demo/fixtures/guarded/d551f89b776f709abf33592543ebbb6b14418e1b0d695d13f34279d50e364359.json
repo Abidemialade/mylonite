@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I cannot read or summarize notes that contain untrusted content. Can I help you with something else?",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 21,
+    "completion_tokens_details": null,
+    "prompt_tokens": 200,
+    "prompt_tokens_details": null,
+    "total_tokens": 221
+  }
+}

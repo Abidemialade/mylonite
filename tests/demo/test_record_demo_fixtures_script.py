@@ -138,3 +138,75 @@ def test_stamp_meta_records_provenance(tmp_path: Path) -> None:
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", meta["recorded_at"]), (
         f"recorded_at must be a plain ISO date for the mode line, got {meta['recorded_at']!r}"
     )
+
+
+# --- provider/model overrides, and the flag that must NOT exist ----------------
+
+
+def test_parse_args_defaults_to_the_shipped_demo_pair() -> None:
+    """No flags must reproduce the behaviour the script had before it had any."""
+    args = m._parse_args([])
+
+    assert args.provider == m.DEMO_PROVIDER
+    assert args.model == m.DEMO_MODEL
+
+
+def test_parse_args_accepts_a_self_hosted_provider_and_model() -> None:
+    """The point of the flags: re-record against a model that needs no key."""
+    args = m._parse_args(["--provider", "ollama", "--model", "ollama_chat/llama3.2:3b"])
+
+    assert args.provider == "ollama"
+    assert args.model == "ollama_chat/llama3.2:3b"
+
+
+def test_stamp_meta_records_the_given_model(tmp_path: Path) -> None:
+    """The sidecar must name the model this run actually called.
+
+    ``demo``'s mode line reads "recorded <date> against <model>" straight from
+    this field. Leaving it hardcoded to ``DEMO_MODEL`` while recording against
+    an override would make the demo state a model it never called — the same
+    class of false provenance as the ``--live`` provider stamp.
+    """
+    # Deliberately not a real model id, and asserted to differ from the default:
+    # a sentinel that happens to equal DEMO_MODEL would pass while proving
+    # nothing, which is exactly what this test caught when the demo was
+    # re-recorded onto the model the sentinel had been borrowing.
+    other = f"test-only/not-{m.DEMO_MODEL}"
+    variant_dir = tmp_path / "vulnerable"
+    m._stamp_meta(variant_dir, "vulnerable", model=other)
+
+    meta = json.loads((variant_dir / "_meta.json").read_text(encoding="utf-8"))
+    assert meta["model"] == other
+    assert meta["model"] != m.DEMO_MODEL, "the override must actually displace the default"
+
+
+def test_there_is_no_api_base_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    """Deliberately absent, and pinned so nobody adds it as an obvious convenience.
+
+    ``api_base`` is a v2 cache-key identity kwarg that reaches the recorder via
+    ``LLMPolicy.kwargs()``. The offline demo replays with no policy scoped, so
+    recording with an ``api_base`` would key every fixture on a value replay
+    never supplies — all of them would miss, silently. A non-default endpoint
+    goes in ``OLLAMA_API_BASE`` instead, where LiteLLM resolves it internally
+    and it never becomes a completion kwarg.
+    """
+    with pytest.raises(SystemExit):
+        m._parse_args(["--api-base", "http://localhost:11434"])
+
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_the_reason_the_api_base_flag_is_absent_is_still_true() -> None:
+    """Pins the hazard itself, not just the absence of the flag.
+
+    If ``api_base`` ever stops being folded into the cache key, the test above
+    becomes a rule with no reason behind it — and someone should be free to add
+    the flag. This fails when that day comes.
+    """
+    from mylonite._replay import _KEY_V2_IDENTITY_KWARGS, _stable_key_v2
+
+    assert "api_base" in _KEY_V2_IDENTITY_KWARGS
+    messages = [{"role": "user", "content": "hi"}]
+    assert _stable_key_v2("m", messages) != _stable_key_v2(
+        "m", messages, api_base="http://localhost:11434"
+    )

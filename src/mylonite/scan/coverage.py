@@ -162,12 +162,20 @@ def attempt_reached_no_verdict(attempt: object) -> bool:
     Covers a judge call that raised, one that returned unparseable output, and a
     predicate that was inconclusive with the judge disabled (the demo's wiring).
 
-    Only ``no_finding`` can be affected: every no-verdict path hard-codes
-    ``success=False`` with ``applicable=True``, so none of them can produce
-    ``finding``, ``not_applicable`` or any ``skipped_*`` outcome. Checking the
-    outcome as well as the cause keeps that invariant explicit rather than
-    implicit, so a future path that sets a cause on some other outcome does not
-    silently change what "resisted" means.
+    The outcome check is load-bearing, NOT a restatement of an invariant. An
+    earlier version of this docstring claimed every no-verdict path hard-codes
+    ``success=False``/``applicable=True`` and therefore could only ever produce
+    ``no_finding``. That is false, and the shipped demo fixtures contain the
+    counter-example: ``engine`` decides the zero-engagement override from the
+    tool-call trace independently of the decisive verdict, then attaches that
+    verdict's ``judge_evidence`` to the attempt whichever branch won — so a
+    ``skipped_planner_no_engagement`` attempt can and does carry a no-verdict
+    cause.
+
+    Such an attempt is already NOT_TESTED for a stronger reason (the agent never
+    engaged, so nothing was exercised at all), and the ``no_finding`` guard below
+    is what keeps it counted once, in that category, rather than in both. Do not
+    remove the guard on the belief that the cause alone is sufficient.
 
     Typed against ``object`` rather than ``ScanAttempt`` only to keep this module
     free of a runtime import it does not otherwise need; callers pass a
