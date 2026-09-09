@@ -79,12 +79,38 @@ PowerShell::
 
     $env:ANTHROPIC_API_KEY="…"; python scripts/record_demo_fixtures.py
 
+``--provider``/``--model`` override the recorded pair (both default to
+``DEMO_PROVIDER``/``DEMO_MODEL``), which is how the demo gets re-recorded
+against a self-hosted model needing no key at all::
+
+    python scripts/record_demo_fixtures.py \
+        --provider ollama --model ollama_chat/llama3.2:3b
+
+Whatever you pass to ``--model`` is stamped into ``_meta.json`` and surfaces in
+the demo's own mode line, so the output names the model it actually replays.
+
+There is deliberately no ``--api-base`` flag
+--------------------------------------------
+``api_base`` is one of the four identity kwargs folded into the v2 cache key
+(see :data:`mylonite._replay._KEY_V2_IDENTITY_KWARGS`), and it reaches the
+recorder as a real completion kwarg via ``LLMPolicy.kwargs()``. The offline
+demo replays with no policy scoped, so its lookups carry no ``api_base`` —
+recording *with* one would therefore key every fixture on a value replay never
+supplies, and all 32 would miss. That is the exact "wiring drift between record
+and replay" this module's opening warning is about, and it would fail silently.
+
+Point a non-default endpoint at LiteLLM out-of-band instead, where it never
+becomes a completion kwarg: Ollama reads ``OLLAMA_API_BASE`` from the
+environment and otherwise defaults to ``http://localhost:11434``, which is what
+a local ``ollama serve`` already listens on — so the common case needs nothing.
+
 After recording, eyeball the written fixtures for accidental secrets before
 committing them.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 from datetime import UTC, datetime
@@ -175,7 +201,7 @@ def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
     )
 
 
-def _stamp_meta(variant_dir: Path, variant: str) -> None:
+def _stamp_meta(variant_dir: Path, variant: str, *, model: str = DEMO_MODEL) -> None:
     """Write the ``_meta.json`` sidecar BEFORE recording begins.
 
     Stamped up front (not after ``engine.run()``, as an earlier version of
@@ -194,7 +220,7 @@ def _stamp_meta(variant_dir: Path, variant: str) -> None:
         json.dumps(
             {
                 CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION,
-                "model": DEMO_MODEL,
+                "model": model,
                 "variant": variant,
                 # Surfaced in the demo's own mode line. A replayed result is not
                 # a measurement of today's model, and the output says so on its
@@ -209,11 +235,18 @@ def _stamp_meta(variant_dir: Path, variant: str) -> None:
     )
 
 
-async def _record_variant(variant: str) -> tuple[int, int]:
-    """Record one variant's fixtures; return (fixture_count, findings_count)."""
+async def _record_variant(
+    variant: str, *, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL
+) -> tuple[int, int]:
+    """Record one variant's fixtures; return (fixture_count, findings_count).
+
+    ``provider``/``model`` default to the shipped demo pair. They are threaded
+    through rather than read from the module constants so the sidecar this run
+    stamps always names the model this run actually called.
+    """
     variant_dir = FIXTURES_ROOT / variant
     _check_dir_safe_to_record(variant_dir, CACHE_KEY_VERSION)
-    _stamp_meta(variant_dir, variant)
+    _stamp_meta(variant_dir, variant, model=model)
     recorder = LiteLLMRecorder(variant_dir, mode="record")
     assert recorder.key_version == CACHE_KEY_VERSION, (
         f"internal error: _stamp_meta declared cache_key_version={CACHE_KEY_VERSION} for "
@@ -224,8 +257,8 @@ async def _record_variant(variant: str) -> tuple[int, int]:
         variant,
         completion_fn=recorder,
         note_id_factory=_note_id_counter(),
-        provider=DEMO_PROVIDER,
-        model=DEMO_MODEL,
+        provider=provider,
+        model=model,
         # Demo determinism: the live customiser AND the LLM-judge fallback are
         # non-deterministic LLM calls whose output makes fixtures unreproducible
         # (same key, different content; varying findings). The demo drives raw
@@ -244,8 +277,8 @@ async def _record_variant(variant: str) -> tuple[int, int]:
     return fixture_count, findings_count
 
 
-async def _main() -> None:
-    print(f"Recording demo fixtures with {DEMO_PROVIDER}/{DEMO_MODEL}")
+async def _main(*, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL) -> None:
+    print(f"Recording demo fixtures with {provider}/{model}")
     print(f"Fixtures root: {FIXTURES_ROOT.resolve()}")
     counts: dict[str, tuple[int, int]] = {}
     # Deliberately SEQUENTIAL — not migrated to run_twins (mylonite._concurrency)
@@ -265,7 +298,7 @@ async def _main() -> None:
     # performance finding whose "fix" would trade determinism for a speedup
     # nobody needs here.
     for variant in _VARIANTS:
-        counts[variant] = await _record_variant(variant)
+        counts[variant] = await _record_variant(variant, provider=provider, model=model)
 
     print("\n=== Recording summary ===")
     for variant in _VARIANTS:
@@ -282,5 +315,37 @@ async def _main() -> None:
     print("\nReminder: eyeball the written fixtures for accidental secrets before committing.")
 
 
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse the provider/model overrides.
+
+    No ``--api-base``: see the module docstring for why one would silently
+    invalidate every fixture it recorded.
+    """
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0] if __doc__ else None,
+        epilog=(
+            "A non-default endpoint goes in the environment (OLLAMA_API_BASE), not a "
+            "flag -- api_base is part of the fixture cache key and the demo replays "
+            "without one."
+        ),
+    )
+    parser.add_argument(
+        "--provider",
+        default=DEMO_PROVIDER,
+        help=f"LiteLLM provider to record against (default: {DEMO_PROVIDER})",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEMO_MODEL,
+        help=(
+            "model to record against, provider-prefixed as LiteLLM expects "
+            f"(default: {DEMO_MODEL}). Stamped into _meta.json and shown in the "
+            "demo's mode line."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    asyncio.run(_main())
+    args = _parse_args()
+    asyncio.run(_main(provider=args.provider, model=args.model))
