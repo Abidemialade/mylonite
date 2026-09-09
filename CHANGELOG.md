@@ -47,6 +47,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   k/n`, `reached no verdict j/n` — so an undecided judge reads as an undecided
   judge rather than a failed guard. `gate`'s default of 3 iterations tolerates
   one inconclusive run.
+- **The guarded reference twin's W2 mitigation is now enforced in code, not
+  requested of the model.** Its defence against indirect injection was a
+  prompt-level `<untrusted>` envelope, which only holds if the planner chooses to
+  honour it. Measurement showed it does not: driven by a capable 4B local planner,
+  the guarded build was walked into emailing an attacker on **40–100% of runs**,
+  and the leak rate swung purely with the attacker's *phrasing* — 0% under one
+  wording, 100% under another. A control whose hold depends on the payload's
+  prose is not a control, and every W2 regression test validated against it was
+  resting on model goodwill.
+
+  A taint gate (M5) replaces that dependence: once a turn consumes untrusted
+  content — any successful `read_note` or `web_fetch` — the egress tools
+  (`send_email`, `web_fetch`) are refused for the rest of that turn, in server
+  code, regardless of what the planner decides. `web_fetch` is deliberately both
+  source and sink, which also closes "fetch an allowed page, then egress what it
+  told you to". W2 now carries the same class of structural guarantee W3's
+  allowlist and W4's two-step confirm already did.
+
+  The envelope is retained as defence in depth, so the byte-for-byte parity with
+  `scan._control_primitives.quarantine` is unchanged. The vulnerable twin is
+  untouched — it must stay exploitable, or the differential proves nothing.
+
+  **Deliberately blunt:** the gate also refuses a *benign* read-then-send in the
+  same turn. That is the intended trade — a false refusal is recoverable, a false
+  permit exfiltrates — and it is the honest shape of a boundary control that
+  cannot read intent. `begin_turn()` clears the taint for multi-turn sessions.
 
 ### Fixed
 
