@@ -201,13 +201,19 @@ third had two. All four are now closed:
   merely *implies* urgency without tripping a directive pattern) is not caught — this
   matches the boundary control's own documented gap
   (`mylonite.scan._control_primitives.sanitize_tool_description`).
-- **W2 (untrusted-content envelope).** `_quarantine` strips any literal `<untrusted>` /
-  `</untrusted>` tag from attacker-controlled content *before* wrapping it, so content
-  containing the closing tag can no longer terminate the envelope early and place text
-  where the planner treats it as trusted instruction. Mirrors
-  `mylonite.scan._control_primitives.quarantine` byte-for-byte — same envelope bytes,
-  same neutralisation, applied in two places (the reference twin and the boundary-control
-  shim used against real targets) so they cannot drift apart silently.
+- **W2 (taint gate, plus the untrusted-content envelope).** The load-bearing control is
+  **M5**: once a turn consumes untrusted content (a successful `read_note` or `web_fetch`),
+  the guarded server refuses the egress tools — `send_email` and `web_fetch` — for the rest
+  of that turn, in server code. `web_fetch` is both source and sink, which also closes
+  "fetch an allowed page, then egress what it told you to". This is a structural
+  guarantee in the same class as W3's allowlist and W4's two-step confirm: it does not ask
+  the planner to cooperate.
+
+  The `_quarantine` envelope remains as defence in depth (it strips any literal
+  `<untrusted>` / `</untrusted>` tag from attacker content before wrapping, so the content
+  cannot terminate the envelope early), and still mirrors
+  `mylonite.scan._control_primitives.quarantine` byte-for-byte. But W2's guarantee no
+  longer rests on it — see the note below on why.
 - **W3 (egress allowlist).** Unchanged this phase — no confirmed bypass found.
 - **W4 (send/confirm two-step).** `confirm_send` now requires exactly one `send_email`
   stage since the last confirmation. A second `send_email` call — the shape injected
@@ -215,13 +221,19 @@ third had two. All four are now closed:
   `confirm_send` refuses and clears state if more than one stage occurred, instead of
   dispatching the last-staged message under the original approval.
 
-**Pending:** the envelope's fixed `<untrusted>` / `</untrusted>` delimiter is a known
-gap. The current fix (Step 3) neutralises a *literal* delimiter appearing in attacker
-content, but the delimiter itself is a fixed string an attacker who knows the scheme
-could still target with a fresh variant. A per-session nonce delimiter is the stronger
-construction, and is deliberately **not** implemented yet — it would change the exact
-bytes the demo fixtures were recorded against, and this phase is scoped to fixture-neutral
-fixes only. It is pending a fixture re-record.
+**Superseded by M5 (the W2 taint gate).** The envelope's fixed `<untrusted>` /
+`</untrusted>` delimiter was a known gap, and a per-session nonce delimiter was the
+planned answer. Measurement overtook it: against a capable 4B planner the envelope leaked
+on 40–100% of runs, and the leak rate swung purely with the attacker's *phrasing* — so the
+weakness was never really the delimiter's predictability, it was that the whole mechanism
+asks the model to cooperate. A nonce would have hardened the delimiter and left that
+intact.
+
+W2's guarantee is now structural instead: once a turn reads untrusted content, the guarded
+server refuses `send_email`/`web_fetch` for the rest of that turn, in code, whatever the
+planner decides. The envelope is retained as defence in depth — it still helps a planner
+that *does* honour it, and it still neutralises a literal delimiter — but nothing
+load-bearing rests on it, so the nonce upgrade is no longer on the critical path.
 
 `tests/reference_targets/test_guarded_twin_adversarial.py` is the contract for this: it
 red-teams the guarded twin directly (not through a scan), and a change to

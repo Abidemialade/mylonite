@@ -18,8 +18,24 @@ Mitigations applied:
 * M2 — ``read_note``/``web_fetch`` wrap untrusted content in ``<untrusted>...
   </untrusted>``, first neutralising any literal ``<untrusted>``/
   ``</untrusted>`` tag already present in that content so attacker text can't
-  close the envelope early — and the guarded planner is documented to refuse
-  to follow instructions found inside the envelope (mitigates W2).
+  close the envelope early. Defense in depth only: the envelope asks the
+  planner to treat the content as data, and a planner that declines to honour
+  that walks straight through it. M5 is what actually holds W2.
+* M5 — TAINT GATE (mitigates W2, structurally). Once a turn has consumed
+  untrusted content — any successful ``read_note`` or ``web_fetch`` — the
+  consequential/egress tools (``send_email``, ``web_fetch``) are refused for
+  the rest of that turn, in server code, regardless of what the planner
+  decides. This exists because M2 alone was measured failing: against a
+  capable 4B planner the envelope leaked on 40-100% of runs, and the leak rate
+  swung purely with the attacker's phrasing — a control whose hold depends on
+  the payload's wording is not a control. The gate makes "read untrusted
+  content, then act on it" unreachable rather than merely discouraged, which is
+  the same class of guarantee M3 and M4 already give.
+
+  Deliberately blunt: it also refuses a *benign* read-then-send in the same
+  turn. That is the intended trade — a false refusal is recoverable, a false
+  permit exfiltrates — and it is the honest shape of a boundary control that
+  cannot read intent.
 * M3 — ``web_fetch`` enforces a hostname allowlist (mitigates W3).
 * M4 — ``send_email`` is a two-step flow: ``send_email`` stages the
   message, and a separate ``confirm_send`` step is required to actually
@@ -87,6 +103,14 @@ DEFAULT_FETCH_ALLOWLIST: tuple[str, ...] = (
     "127.0.0.1",
     "example.com",
 )
+
+#: M5 — tools refused once the turn is tainted. These are the two that carry
+#: data OUT of the agent: `send_email` (to an arbitrary recipient) and
+#: `web_fetch` (to an arbitrary URL, so the data rides in the query string).
+#: `read_note`/`write_note` are absent on purpose — they move nothing outward,
+#: and blocking reads after a read would stop the agent doing its job without
+#: closing any exfil path.
+_TAINT_SINKS = frozenset({"send_email", "web_fetch"})
 
 
 def _validate_description(text: str) -> str:
@@ -167,6 +191,24 @@ class GuardedKitchenSinkServer:
         #: shared, versioned `ToolResult` contract in
         #: `mylonite.scan.llm_types` for zero current consumers -- deferred.
         self._stage_count = 0
+        #: M5 — set once this turn consumes untrusted content (a successful
+        #: ``read_note``/``web_fetch``), and checked before every consequential
+        #: tool. A plain bool on the instance, exactly like ``_stage_count``:
+        #: no new import, nothing for the inertness checker to object to.
+        self._turn_tainted = False
+
+    def begin_turn(self) -> None:
+        """Clear the taint for a new planner turn.
+
+        The single-shot adapter path builds a fresh server per attempt, so taint
+        starts ``False`` there and this is never needed. The stateful
+        multi-turn session path reuses ONE server across turns, where taint set
+        in turn N would otherwise bleed into turn N+1 and refuse a legitimate
+        later action. Callers invoke this at the top of each turn; the
+        vulnerable twin has no such method, and callers probe for it rather
+        than assume it, so this stays a guarded-only concept.
+        """
+        self._turn_tainted = False
 
     def list_tools(self) -> list[ToolDescription]:
         return [
@@ -244,11 +286,28 @@ class GuardedKitchenSinkServer:
             )
 
     def _call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        # M5 — the taint gate, checked FIRST so it cannot be reached around.
+        # `web_fetch` is both a sink and a source, so this must precede the
+        # source-side tainting below: otherwise the very first fetch would taint
+        # the turn and then refuse itself.
+        if name in _TAINT_SINKS and self._turn_tainted:
+            return ToolResult(
+                name=name,
+                content=(
+                    f"refused: {name} is unavailable after untrusted content was "
+                    "read this turn; start a new turn, or act on content the user "
+                    "supplied directly"
+                ),
+                isError=True,
+            )
         if name == "read_note":
             note_id = str(arguments["note_id"])
             body = self.store.read(note_id)
             if body is None:
                 return ToolResult(name=name, content="", isError=True)
+            # Taint only on the success path: a failed read returned no
+            # untrusted content, so it must not disarm the rest of the turn.
+            self._turn_tainted = True
             return ToolResult(name=name, content=_quarantine(body))
         if name == "write_note":
             self.store.write(str(arguments["note_id"]), str(arguments["body"]))
@@ -263,6 +322,10 @@ class GuardedKitchenSinkServer:
                     isError=True,
                 )
             self.store.record_fetch(url)
+            # Source side: an allowlisted fetch still returns attacker-reachable
+            # content, so it taints the turn just as a note read does. Closes
+            # "fetch an allowed page, then egress what it told you to".
+            self._turn_tainted = True
             return ToolResult(name=name, content=_quarantine(f"<<body of {url}>>"))
         if name == "send_email":
             self._pending_email = (
