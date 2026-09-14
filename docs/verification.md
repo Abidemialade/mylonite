@@ -109,9 +109,15 @@ AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
 
 - `reference:guarded`: **8 probes, 0 false positives (FPR 0%).** Mylonite stays quiet on
   a defended app.
-- External benign baseline: **a known gap.** Freely-available MCP servers are
-  *unguarded-capable* — attacks "land" by design, so they aren't clean baselines. A truly
-  external *defended* server is the missing precision baseline.
+- External benign baseline: **0 false positives** on Enkrypt's benign `echo_mcp`
+  (`enkryptai/secure-mcp-gateway`), recorded in
+  [the capability matrix](../verification/CAPABILITY_MATRIX.md). This page used to call the
+  external benign baseline a flat gap while the matrix reported the measurement — the two
+  disagreed, and the matrix was right.
+- External *defended* baseline: **still a gap.** Freely-available MCP servers are
+  *unguarded-capable* — attacks "land" by design, so they are not clean baselines for a
+  differential. A gateway-defended-versus-raw run needs a vendor API key and has not been
+  done.
 
 ## Where the value is real vs. open
 

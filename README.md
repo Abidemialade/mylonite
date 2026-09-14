@@ -55,8 +55,18 @@ Here is the honest split. Read the third bucket before the first.
 
 - **A KEPT external differential** on a third-party MCP email server: the attack fired
   **5/5** on the raw target, the guarded build leaked **0/5**, success-rate gap **1.00**.
-- **Zero false positives** on a benign third-party server — the external precision baseline.
-- **An external detection catch** on a peer-reviewed vulnerable MCP corpus.
+  Three caveats travel with that number, and they are material: the server needed two
+  setup fixes to run at all (a launch wrapper, and a one-line bug in its own `send_email`);
+  the flaw only materialises when the app's system prompt instructs auto-sending; and the
+  guarded side is Mylonite's own boundary control shim, not a second real build. All three
+  are recorded in [the capability matrix](./verification/CAPABILITY_MATRIX.md).
+- **Zero false positives** on an external benign server (Enkrypt's `echo_mcp`). A
+  *defended*-server differential is still open — see
+  [verification](./docs/verification.md#layer-3--precision-false-positives-on-known-good-targets).
+- **An external detection catch** on a peer-reviewed vulnerable MCP corpus (MCPSecBench)
+  — and on a second one the oracle then **refused to keep the test**, as non-reproducible
+  (fired 0/3 raw, guard held 3/3). Both halves belong here: detection alone is not the
+  product, and an oracle that rejects its own flaky finding is the product working.
 - **The judge's positive class verified on real third-party positives** (AgentDojo
   trajectories from models that genuinely fell for attacks — not synthesised by us).
 - **Honesty rails hold under test:** NOT-TESTED is never rendered as clean, vacuous
@@ -116,8 +126,9 @@ about *your control*, not about how a description reads or how a model scored to
 
 ## Project status
 
-**Beta, single maintainer.** As of v0.8.5 that is 241 commits from one contributor, with a
-1,900-test suite and CI (ruff, mypy, pytest, pre-commit) enforced on every PR. The extension
+**Beta, single maintainer.** 288 commits: 280 from the maintainer, one from an outside
+contributor, the rest from dependabot. A 2,300-test suite with CI (ruff, mypy, pytest,
+pre-commit) enforced on every PR. The extension
 contracts are versioned public API, but no third party has built a plugin against them yet.
 If you are weighing this as a dependency in a security pipeline, pin a version — and read
 [Known limitations](./docs/limitations.md) first.

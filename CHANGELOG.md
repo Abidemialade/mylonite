@@ -132,6 +132,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`prepare_release` no longer stages a baseline the pre-commit hook rewrites**
+  (issue #137). The release flow refreshed `.secrets.baseline` and normalised it
+  with its own partial copy of the logic — path separators only — while the
+  `normalize-secrets-baseline` hook also zeroes `line_number` and drops
+  `generated_at`. pre-commit fails any hook that modifies a tracked file
+  regardless of exit code, so the release commit aborted every time, and the
+  abort is invisible when the commit output is piped: the only symptom is that
+  `HEAD` did not move. It got through the 0.9.0 release twice. `prepare_release`
+  now delegates to the hook's own `normalise`, making what it stages the hook's
+  fixed point by construction. The duplication was the bug, not an optimisation,
+  and a test fails if a second private copy reappears.
+
+- **Four public claims corrected.** These were the ones that could not be backed
+  as written:
+    - The **KEPT external differential** now carries its three material caveats
+      inline instead of leaving them in the capability matrix: the third-party
+      server needed two setup fixes to run at all, the flaw only materialises
+      when the app's system prompt instructs auto-sending, and the guarded side
+      is Mylonite's own boundary control shim rather than a second real build.
+    - The **precision baseline** now names its target (Enkrypt's benign
+      `echo_mcp`) and says that a *defended*-server differential is still open.
+      `docs/verification.md` called the external benign baseline a flat gap while
+      the capability matrix reported the measurement; the two disagreed, and the
+      matrix was right. Reconciled.
+    - The **external detection catch** is stated together with the fact that the
+      oracle then refused to keep a second one as non-reproducible (fired 0/3
+      raw, guard held 3/3). Detection alone is not the product, and an oracle
+      that rejects its own flaky finding is the product working.
+    - **"241 commits from one contributor"** was wrong on both counts: 288
+      commits, 280 from the maintainer, one from an outside contributor, the rest
+      from Dependabot. The test-suite figure moves from 1,900+ to 2,300+.
+
 - **W1 can now report that the guard HELD, not just that it failed** (issue
   #145). The only W1 predicate read the planner's prose and nothing else, so its
   codomain was exactly `{Verdict(success=True), None}`: it could report the
