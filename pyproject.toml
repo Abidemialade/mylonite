@@ -124,6 +124,20 @@ dev = [
 # recorder inspection, which a user only sees as the demo refusing to run). A range
 # specifier would let that happen on an install of an unchanged mylonite. Bump this
 # pin only together with a fixture re-record.
+#
+# RELEASE BLOCKER for 0.10.0, deliberately left visible rather than papered over.
+# The guarded twin's `read_note` output changed in this release (the `<untrusted>`
+# envelope was replaced by a code-enforced taint gate), so the source in
+# reference_targets/ is now 0.2.0 and the re-recorded demo fixtures were produced
+# against it. This pin still names 0.1.0 because 0.2.0 is not on PyPI yet, and a
+# pin to an unpublished version would make `pip install ".[demo]"` unresolvable
+# for everyone including the maintainer.
+#
+# Consequence, which CI's `demo` job exists to surface: that job installs the
+# PUBLISHED wheel and therefore misses every re-recorded fixture, so it is red
+# until `mcp-kitchen-sink` 0.2.0 ships. See
+# reference_targets/mcp_kitchen_sink/PUBLISHING.md for the one command that
+# publishes it and the exact order to follow afterwards.
 demo = [
     "mcp-kitchen-sink==0.1.0",
 ]
