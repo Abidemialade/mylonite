@@ -100,7 +100,10 @@ the misses. In summary:
   about); **0/15** even with `--elicit-positives` telling the agent to comply.
 - **LLM-judge agreement F1 of 0.41** against independent labels.
 - Against that: a **KEPT external differential** on a third-party MCP email server (fired
-  5/5 raw, leaked 0/5 guarded), and **zero false positives** on a benign third-party server.
+  5/5 raw, leaked 0/5 guarded) — carrying three material caveats, chiefly that the guarded
+  side is Mylonite's own boundary control shim rather than a second real build — and
+  **zero false positives** on an external benign server. A *defended*-server differential
+  remains open.
 
 Full scorecard with caveats:
 [verification/FINDINGS.md](https://github.com/Abidemialade/mylonite/blob/main/verification/FINDINGS.md).
@@ -137,13 +140,13 @@ Accepted, documented, and not yet built — from
 
 ## 6. Project maturity
 
-Mylonite is **beta software with a single maintainer**. As of v0.8.5 that is 241 commits
-from one contributor (plus Dependabot), with no external users yet that the maintainer is
-aware of.
+Mylonite is **beta software with a single maintainer**. 288 commits: 280 from the
+maintainer, one from an outside contributor, the rest from Dependabot — with no external
+users yet that the maintainer is aware of.
 
 Concretely, what that does and does not mean:
 
-- The test suite (1,900+ tests), CI (ruff, mypy, pytest, pre-commit), semantic versioning,
+- The test suite (2,300+ tests), CI (ruff, mypy, pytest, pre-commit), semantic versioning,
   and the versioned extension contracts are real and enforced on every PR.
 - Bus factor is one. There is no second reviewer, no on-call, and no SLA on a security
   report beyond what [SECURITY.md](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)
