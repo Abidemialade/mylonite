@@ -223,6 +223,47 @@ class _JudgedPass:
     judge_evidence: dict[str, str]
 
 
+def _schema_attack_was_fully_delivered(payload: Payload, passes: Sequence[_JudgedPass]) -> bool:
+    """True when the target's whole contribution to this attack happened BEFORE
+    the planner could call anything — and we observed what it contributed.
+
+    Guards the zero-engagement branch below from misfiring on W1. For every
+    other channel, "the planner never touched the tool under test" genuinely
+    does mean nothing was exercised against the target, which is the false-clean
+    that branch exists to prevent: the payload rides in a user message or a tool
+    result, and the target only gets to respond once the planner acts on it.
+
+    A tool-description attack is different in kind. The attack IS the tool
+    schema. The target either served a smuggled directive or its description
+    allowlist refused to, and ``list_tools`` settled that before the first token
+    was generated. A guarded twin that served nothing imperative HAS
+    demonstrated its control; recording that attempt as NOT TESTED because the
+    planner then declined to act denies evidence we are holding — and it made
+    the guarded W1 cell decidable only on the runs where a planner happened to
+    engage, which is not a property of the target at all.
+
+    Deliberately conjunctive, so this cannot widen into a false clean:
+
+    * the seed's channel must be ``tool-description``;
+    * EVERY pass must carry a confident predicate verdict — never the LLM judge,
+      and never a no-verdict pass, so an inconclusive attempt still falls
+      through to the honest NOT-TESTED record; and
+    * EVERY pass must carry the surfaced ``tool_descriptions`` the verdict was
+      drawn from. Without them the verdict cannot have been grounded in what the
+      target served, and an unknown surface is never read as a clean one.
+    """
+    if payload.channel != "tool-description":
+        return False
+    if not passes:
+        return False
+    return all(
+        pass_.verdict.mechanism == "predicate"
+        and pass_.verdict.fallback_cause is None
+        and bool(pass_.response.metadata.get("tool_descriptions"))
+        for pass_ in passes
+    )
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -898,6 +939,7 @@ class ScanEngine:
             and all(
                 never_exercised_tool_under_test(p.response, tool_under_test) for p in all_passes
             )
+            and not _schema_attack_was_fully_delivered(payload, all_passes)
         ):
             unexercised_reason = (
                 (
