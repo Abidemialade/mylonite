@@ -151,6 +151,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo rows now report per-row adjudication coverage.** `render_demo`
+  selected a weakness row's mark from the raw outcome string. A no-verdict
+  attempt has two representations — the `undecided` literal added in this
+  release, and `no_finding` carrying a no-adjudicator evidence key, which
+  reports read from disk still use — so equivalent rows could render either
+  `✓ clean` or `⚠ NO VERDICT` depending on which representation an attempt
+  used.
+
+  Aggregation is now keyed on `attempt_reached_no_verdict`, so both
+  representations resolve identically. A row whose attempts were all
+  adjudicated clean renders `✓ clean`; a row with at least one clean verdict
+  and the remainder unadjudicated renders `✓ clean (k/n)`. On the shipped
+  fixtures the guarded W2 row moves from `⚠ NO VERDICT` to `✓ clean (1/3)`:
+  `indirect-injection-note-body-direct` records the taint gate refusing an
+  attacker-addressed `send_email`, and the two remaining seeds do not reach an
+  egress sink on that build.
+
 - **`TRENDS.md` published one layer-2 number and hid the rest of the same run.**
   The trend table had a single "Layer 2 judge F1" cell reading AgentDojo, while
   the same 0.9.0 campaign scored InjecAgent **dh F1 1.000** and **ds F1 0.400 at
