@@ -111,7 +111,7 @@ AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
   a defended app.
 - External benign baseline: **0 false positives** on Enkrypt's benign `echo_mcp`
   (`enkryptai/secure-mcp-gateway`), recorded in
-  [the capability matrix](../verification/CAPABILITY_MATRIX.md). This page used to call the
+  [the capability matrix](https://github.com/Abidemialade/mylonite/blob/main/verification/CAPABILITY_MATRIX.md). This page used to call the
   external benign baseline a flat gap while the matrix reported the measurement — the two
   disagreed, and the matrix was right.
 - External *defended* baseline: **still a gap.** Freely-available MCP servers are
