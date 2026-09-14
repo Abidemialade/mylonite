@@ -1,9 +1,12 @@
 # Enterprise & air-gapped networking
 
-Mylonite's per-PR gate re-drives *your* MCP server in CI. Because Mylonite uses
-the **stdio** MCP transport, the server is spawned as a subprocess **inside the
-runner** (from your `target.yaml`'s `command`/`args`/`env`) — there is no
-inbound connection to your agent. So "can CI reach my MCP server?" reduces to
+Mylonite's per-PR gate re-drives *your* MCP server in CI. This page covers the
+**stdio** transport, where the server is spawned as a subprocess **inside the
+runner** (from your `target.yaml`'s `command`/`args`/`env`) — so there is no
+inbound connection to your agent. The other transports (`sse`, `http`, `rest`)
+connect *outbound* to a URL you supply and spawn nothing; for those, the relevant
+question is whether the runner can reach that URL. See
+[target.yaml](target-file.md) and [HTTP agents](http-agent.md). So "can CI reach my MCP server?" reduces to
 three questions, each with an answer.
 
 ## 1. Your MCP server's backend dependencies (internal DBs, private APIs)

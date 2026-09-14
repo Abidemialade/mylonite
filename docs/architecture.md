@@ -93,8 +93,9 @@ an API change — see [Plugin authoring](plugin-authoring.md).
 
 ## Constraints worth knowing
 
-- **All LLM access flows through LiteLLM** — no provider SDKs imported directly; there's
-  no default provider (you must configure one). This is what makes the
+- **All LLM access flows through LiteLLM** — no provider SDKs imported directly, and no
+  default *credential*: the model defaults to Claude Haiku 4.5, but nothing runs until you
+  supply that provider's key or point it at a self-hosted one. This is what makes the
   [model roles](attack-modes.md#composing-the-model-roles) possible. Every model call
   routes through one chokepoint — the transport wrapper that owns call-budget counting
   and the active policy, whose public name is `mylonite.scan.llm`. A direct

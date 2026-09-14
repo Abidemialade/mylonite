@@ -100,7 +100,7 @@ On Linux / macOS (bash):
 ```bash
 mylonite scan reference:vulnerable
 mylonite generate --latest
-mylonite validate .mylonite/generated/indirect-injection-note-body-direct
+mylonite validate .mylonite/generated/indirect_injection_note_body_direct
 ```
 
 On Windows (PowerShell):
@@ -108,7 +108,7 @@ On Windows (PowerShell):
 ```powershell
 mylonite scan reference:vulnerable
 mylonite generate --latest
-mylonite validate .mylonite\generated\indirect-injection-note-body-direct
+mylonite validate .mylonite\generated\indirect_injection_note_body_direct
 ```
 
 - `mylonite scan reference:vulnerable` — runs the live exploit-finding loop

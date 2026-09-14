@@ -94,7 +94,7 @@ surface as unknown rather than clean, falling through to the LLM judge.
 
 !!! note "Why surfacing the descriptions mattered"
 
-    Until 0.10.0 the only W1 predicate read the planner's prose and nothing else, so its
+    Before this release the only W1 predicate read the planner's prose and nothing else, so its
     codomain was exactly `{fired, inconclusive}`. It could report the weakness landing
     and had no way to report it *holding*, which meant the guarded half of every W1
     differential reached no verdict — and `absent evidence is inconclusive` (see below)
@@ -107,9 +107,11 @@ surface as unknown rather than clean, falling through to the LLM judge.
 *dynamic* form, and Mylonite tests both:
 
 - **Static poison** — the smuggle sits in the description from the start. The guarded
-  twin's control **sanitizes** every description before the planner sees it (strips
-  `<IMPORTANT>` blocks, instruction asides, unicode smuggling), so a vulnerable planner
-  fires on the raw description and resists on the sanitized one — a real differential.
+  twin **rejects** a poisoned description outright: `_validate_description` raises rather
+  than filtering, so the planner never sees one. (The *boundary* control Mylonite
+  synthesizes for a third-party target sanitizes instead — stripping `<IMPORTANT>`
+  blocks, instruction asides and unicode smuggling — because it cannot change how
+  someone else's server registers its tools.)
   (A change-detection *pin* alone cannot produce this differential: it would pin the
   already-poisoned text and match it. So `make_control("W1")` sanitizes **and** pins.)
 - **Rug-pull (dynamic)** — the server serves benign descriptions, then mutates them (or
@@ -145,11 +147,15 @@ content at all?). Both key on the *destination the model emitted* or the *action
 took* — structured signals from the recorded run — not on the input text.
 
 **The control it is tested against (guarded build).** The bundled reference app's
-own guarded server (`server_guarded.py`) wraps every retrieved/tool result in an
-`<untrusted>…</untrusted>` envelope and instructs the planner that envelope
-contents are data, never commands. For a real custom target with no in-repo
-guarded twin, Mylonite instead synthesizes `InformationFlowControl` at the
-adapter boundary, following [FIDES](https://arxiv.org/abs/2505.23643): content
+own guarded server (`server_guarded.py`) enforces a **taint gate in code**: once a
+turn has read untrusted content (a successful `read_note`, or an allowlisted
+`web_fetch`), it refuses the egress tools — `send_email` and `web_fetch` — for the
+rest of that turn, whatever the planner decides. `read_note` returns the note body
+verbatim on both builds, so the attack is attempted identically against each and
+the guarded build's refusal is what distinguishes them. For a real custom target
+with no in-repo guarded twin, Mylonite instead synthesizes
+`InformationFlowControl` at the adapter boundary, following
+[FIDES](https://arxiv.org/abs/2505.23643): content
 read into the session carries **two independent labels** — `integrity`
 (trusted / untrusted) and `confidentiality` (public / private / user_identity) —
 combined most-restrictive-wins, and each sink declares what context it will run
@@ -207,9 +213,10 @@ read something, then send it out — and a single-tool probe cannot express one.
     select the tool and fill the arguments, which is also how tool-using agents are
     exercised in practice.
 
-**How the predicate decides it landed.** For the bundled reference target,
-`web_fetch_to_unauthorised_url` / `fetch_egressed_to_attacker_host` fire only when the
-recorded run actually issued a fetch to the attacker's destination.
+**How the predicate decides it landed.** For the bundled reference target
+`web_fetch_to_unauthorised_url` fires only when the recorded run actually issued a
+fetch to the attacker's destination; the bundled `mcp:fetch` family uses
+`fetch_egressed_to_attacker_host` for the same job.
 
 For a synthesized probe against your server, `egress_reached_probe_destination`
 requires two things: the egress tool executed without error, **and** the probe's

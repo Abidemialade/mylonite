@@ -32,6 +32,9 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     | `skipped_no_seed_arm` | there was no way to plant the poisoned content |
     | `skipped_payload_not_delivered` | the plant never reached the model |
     | `skipped_planner_no_engagement` | the agent never invoked **the tool this attack targets** |
+    | `undecided` | the attack ran, but nothing adjudicated it — shown as `⚠ NO VERDICT` |
+    | `launch_failure` | the target's command never started — shown as `⚠ LAUNCH FAILED` |
+    | `skipped_invalid_metadata` / `skipped_unknown_seed` | the attempt was malformed before it ran |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
 
     `skipped_planner_no_engagement` is the subtlest of these: the attack was
@@ -54,14 +57,14 @@ counted as clean). For a validation it shows the verdict and the evidence behind
 leg          result   metric  detail
 build        pass      -      offline pass with fixtures
 differential pass     1.00    vulnerable fired, guarded resisted
-flakiness    pass     1.00    reproducibility 5/5 vulnerable, 5/5 guarded
+flakiness    pass     1.00    gap +100% (vuln 100% - guarded 0%); guarded RESISTED 5/5
 metamorphic  pass     0.86    robustness (6/7 perturbations held; gates kept)
 gate: kept = build ✓ AND differential ✓ AND flakiness ✓ AND metamorphic ✓  =>  KEPT
 reproducibility: vulnerable fired 5/5, guarded resisted 5/5
-mutation score: 7/8   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
+mutation score: 7/9   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
 ```
 
-That panel is the **anti-false-positive trust signal**: ~46% of security alerts are
+That panel is the **anti-false-positive trust signal**: a large share of security alerts are
 false positives, so a finding that ships with a machine-checkable differential proof
 ("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.
 
@@ -138,7 +141,7 @@ so explicitly.
 
 Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
 body — carries the compliance mapping for the finding: **OWASP LLM Top 10 (2025)**,
-**OWASP ASI (2026)**, **MITRE ATLAS** technique IDs, and a **NIST AI RMF** function tag.
+**OWASP ASI (2026)**, a **NIST AI RMF** function tag, and **MITRE ATLAS** technique IDs where the class has them mapped (W1-W3 do; the W4 seeds carry none).
 This is near-free at generation time and is the foundation of audit/compliance reporting
 — see [Standards mapping](standards-mapping.md).
 
@@ -147,6 +150,7 @@ This is near-free at generation time and is the foundation of audit/compliance r
 | Code | Meaning |
 |------|---------|
 | 0 | success / the test is kept |
+| 1 | findings were reported (`check --enforce`, and `scan` when weaknesses land) |
 | 2 | config or usage error (incl. an empty scan — never reads as a clean pass) |
 | 3 | LLM-call budget exceeded |
 | 4 | provider unreachable |

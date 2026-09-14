@@ -38,9 +38,11 @@ The validation engine layers four mechanisms:
    [control-efficacy check](#control-efficacy-which-safeguard-is-load-bearing)
    below produces this differential by toggling the safeguard; the bundled
    reference app produces it directly (two builds).
-3. **Flakiness filter (5 runs)** — LLM stochasticity makes single-run
-   evidence weak. Tests are kept only if they hold across at least five
-   repeated runs.
+3. **Repeat-run filter** — LLM stochasticity makes single-run evidence weak.
+   The differential is repeated (five iterations by default, three under `gate`)
+   and judged on rates: a success-rate gap of at least 50%, no leak at all on the
+   guarded build, and the guarded build having *positively resisted* on at least
+   60% of runs. See [the validation engine](validation.md) for the full set.
 4. **Metamorphic robustness** — the same exploit, paraphrased / re-encoded
    / lowered in case, must still fail when the safeguard is off. This
    catches brittle, over-fit tests.

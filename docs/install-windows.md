@@ -45,7 +45,7 @@ helper so provider calls don't fail `CERTIFICATE_VERIFY_FAILED` — see
 so a dev install already has it:
 
 ```powershell
-pip install -e ".[enterprise]"   # end users / non-dev installs
+pip install mylonite             # truststore is already a base dependency
 ```
 
 ## 4. UTF-8 output — handled automatically, with a fallback

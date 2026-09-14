@@ -65,7 +65,7 @@ matters more than any other right now:
 
 This documents what the project has actually done rather than adding a new rule:
 0.7.4 removed `scan --adaptive`, `--synthesize`, `report --html` and `export`
-outright, and 0.8.0 removes `demo`, `init`, `doctor` and `taxonomy list` and
+outright, and 0.8.0 removed `demo`, `init`, `doctor` and `taxonomy list` and
 changes which control each weakness class is guarded by.
 
 | Position | While `0.x` | Examples from this project |
@@ -98,7 +98,7 @@ them, and a contract bump does not imply a package bump or the reverse.
 | `attack_module` | 0.1.0 |
 | `compliance_mapper` | 0.1.0 |
 | `test_generator` | 0.2.0 |
-| `target_adapter` | 0.5.0 |
+| `target_adapter` | 0.8.0 |
 | `validator` | 0.5.0 |
 
 **A contract major bump is a bigger event than a package major bump.**
