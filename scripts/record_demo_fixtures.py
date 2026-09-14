@@ -153,6 +153,26 @@ def _existing_fixture_count(variant_dir: Path) -> int:
     return len([p for p in variant_dir.glob("*.json") if p.name != "_meta.json"])
 
 
+def _clear_variant_dir(variant_dir: Path) -> int:
+    """Delete every fixture and sidecar in ``variant_dir``; return how many.
+
+    What ``--force`` does. The documented recovery from a refused or partial
+    recording was "delete the stale ``*.json`` fixtures (and ``_meta.json``) by
+    hand, then re-run", which is both easy to half-do and easy to skip: an
+    incremental re-record over a directory whose sidecar happens to match is
+    ALLOWED, so stale fixtures for keys this run no longer produces survive it
+    silently. After a seed or schema change that is exactly the wrong outcome —
+    the set on disk describes two different runs.
+    """
+    if not variant_dir.is_dir():
+        return 0
+    removed = 0
+    for path in sorted(variant_dir.glob("*.json")):
+        path.unlink()
+        removed += 1
+    return removed
+
+
 def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
     """Refuse to record into a directory that could end up mixed-key-version.
 
@@ -241,8 +261,61 @@ def _stamp_meta(variant_dir: Path, variant: str, *, model: str = DEMO_MODEL) -> 
     )
 
 
+#: Attempt outcomes that mean the RECORDING is unusable, not that the target
+#: resisted. A provider that dies mid-run (a crashed local model runner, a rate
+#: limit, a dropped connection) surfaces here: the planner's call raised, the
+#: engine swallowed it into a skip, and the script would otherwise print its
+#: per-variant line and exit 0 — leaving a partial fixture set on disk that
+#: replays forever as a real run. That has already produced one demo table that
+#: was simply false. `undecided` is deliberately NOT in this set: an inconclusive
+#: predicate with the judge disabled is a legitimate, reproducible result.
+_UNUSABLE_OUTCOMES: frozenset[str] = frozenset(
+    {"skipped_planner_failure", "launch_failure", "error"}
+)
+
+
+class RecordingIncompleteError(RuntimeError):
+    """Raised when a recording run hit provider/launch failures.
+
+    Aborts the whole script rather than leaving a half-recorded fixture set
+    behind: the fixtures are committed and shipped in the wheel, so a partial
+    set is not a degraded artefact, it is a misleading one.
+    """
+
+
+def _reject_partial_recording(variant: str, report: object) -> None:
+    """Abort if any attempt failed for a reason that is about US, not the target."""
+    attempts = getattr(report, "attempts", ()) or ()
+    broken = [a for a in attempts if getattr(a, "outcome", None) in _UNUSABLE_OUTCOMES]
+    if not broken:
+        return
+    tally: dict[str, int] = {}
+    for attempt in broken:
+        outcome = str(getattr(attempt, "outcome", "?"))
+        tally[outcome] = tally.get(outcome, 0) + 1
+    detail = ", ".join(f"{outcome}={count}" for outcome, count in sorted(tally.items()))
+    # Name the seeds, not just the count. A provider that fails on SOME calls is
+    # usually failing on particular content, and the pattern_id is the only
+    # handle an operator (or a future debugging session) has on which.
+    named = ", ".join(
+        sorted({f"{getattr(a, 'pattern_id', '?')}[{getattr(a, 'outcome', '?')}]" for a in broken})
+    )
+    raise RecordingIncompleteError(
+        f"[{variant}] {len(broken)}/{len(attempts)} attempts did not run: {detail}. "
+        f"Affected seeds: {named}. "
+        "The provider failed part-way through, so the fixtures written so far are "
+        "an incomplete record of a run that never happened. Fix the provider "
+        "(for a local model server: restart it and re-check it answers), then "
+        "re-record from scratch with --force. Nothing has been committed."
+    )
+
+
 async def _record_variant(
-    variant: str, *, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL
+    variant: str,
+    *,
+    provider: str = DEMO_PROVIDER,
+    model: str = DEMO_MODEL,
+    force: bool = False,
 ) -> tuple[int, int]:
     """Record one variant's fixtures; return (fixture_count, findings_count).
 
@@ -251,6 +324,10 @@ async def _record_variant(
     stamps always names the model this run actually called.
     """
     variant_dir = FIXTURES_ROOT / variant
+    if force:
+        removed = _clear_variant_dir(variant_dir)
+        if removed:
+            print(f"[{variant}] --force: removed {removed} existing file(s)")
     _check_dir_safe_to_record(variant_dir, CACHE_KEY_VERSION)
     _stamp_meta(variant_dir, variant, model=model)
     recorder = LiteLLMRecorder(variant_dir, mode="record")
@@ -274,6 +351,7 @@ async def _record_variant(
         llm_assist=False,
     )
     result = await engine.run()
+    _reject_partial_recording(variant, result.report)
     fixture_count = len(list(variant_dir.glob("*.json"))) - 1  # exclude _meta.json
     findings_count = result.report.findings_count
     print(
@@ -283,7 +361,9 @@ async def _record_variant(
     return fixture_count, findings_count
 
 
-async def _main(*, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL) -> None:
+async def _main(
+    *, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL, force: bool = False
+) -> None:
     print(f"Recording demo fixtures with {provider}/{model}")
     print(f"Fixtures root: {FIXTURES_ROOT.resolve()}")
     counts: dict[str, tuple[int, int]] = {}
@@ -304,7 +384,9 @@ async def _main(*, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL) -> No
     # performance finding whose "fix" would trade determinism for a speedup
     # nobody needs here.
     for variant in _VARIANTS:
-        counts[variant] = await _record_variant(variant, provider=provider, model=model)
+        counts[variant] = await _record_variant(
+            variant, provider=provider, model=model, force=force
+        )
 
     print("\n=== Recording summary ===")
     for variant in _VARIANTS:
@@ -357,9 +439,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "demo's mode line."
         ),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "delete every existing fixture and sidecar in both variant "
+            "directories first, so the run records a genuinely fresh set. Use "
+            "this after any change to the seeds or tool schemas: an incremental "
+            "re-record leaves stale fixtures for keys this run no longer "
+            "produces."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    asyncio.run(_main(provider=args.provider, model=args.model))
+    asyncio.run(_main(provider=args.provider, model=args.model, force=args.force))
