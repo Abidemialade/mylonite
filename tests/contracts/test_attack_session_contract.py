@@ -15,7 +15,7 @@ from mylonite.contracts.target_adapter import (
 )
 
 
-def test_contract_version_bumped_to_0_7_0() -> None:
+def test_contract_version_bumped_to_0_8_0() -> None:
     # 0.3.0 -> 0.4.0: additive AttackSession / SupportsAttackSession capability.
     # 0.4.0 -> 0.5.0: additive drive_planner(pattern_id=...) provenance kwarg.
     # 0.5.0 -> 0.6.0: additive `not_applicable` outcome + its reason field,
@@ -23,7 +23,15 @@ def test_contract_version_bumped_to_0_7_0() -> None:
     # 0.6.0 -> 0.7.0: additive `skipped_planner_no_engagement` outcome. Adapters
     # need no change — the engine derives it from the AdapterResponse they
     # already return; only an exhaustive consumer of the outcome set is affected.
-    assert target_adapter.CONTRACT_VERSION == "0.7.0"
+    # 0.7.0 -> 0.8.0: additive `undecided` + `launch_failure` outcomes (issue
+    # #144). Adapters need no change for `undecided` — the engine derives it from
+    # the verdict it already computed. `launch_failure` is derived from a
+    # classification the MCP adapters already made, now carried structurally in
+    # AdapterInvocationSkipped.attempt_metadata["failure_kind"] instead of only
+    # in the reason text. MIGRATION: a consumer that treats `no_finding` as "the
+    # guard held" must NOT treat `undecided` the same way — that conflation is
+    # the bug this bump exists to fix.
+    assert target_adapter.CONTRACT_VERSION == "0.8.0"
 
 
 def test_tool_call_outcome_round_trips_and_defaults() -> None:

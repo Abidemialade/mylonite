@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`CONTRACT_VERSION` 0.7.0 → 0.8.0 — `ScanAttemptOutcome` gains `undecided`
+  and `launch_failure`** (issue #144, additive; one week of public comment per
+  `GOVERNANCE.md`).
+
+  `undecided` is the fix. An attempt that no mechanism decided — the judge call
+  raised or returned unparseable output, or the predicate was inconclusive with
+  the judge disabled — was spelled `no_finding`, with the cause buried in
+  `judge_evidence`. Every allowlist written to exclude exactly that case
+  therefore still admitted it, and an emitted regression test could PASS on an
+  attempt where the judge errored. The fact now has a name a naive exhaustive
+  consumer cannot miss.
+
+  `launch_failure` is the honest value for a target whose command never
+  started — a typo in `command:`, an uninstalled npx/uvx package, a permissions
+  error. The MCP adapters already classified it and stamped it into
+  `AdapterInvocationSkipped.attempt_metadata`; the engine discarded that and
+  called every skip a planner failure, which told operators their planner had
+  broken and sent them looking in the wrong place.
+
+  Both classify as `AttemptClass.NOT_TESTED`, so coverage, `trustworthy_clean`
+  and the exit codes treat them as proving nothing — which is what they do.
+  `undecided` renders as `⚠ NO VERDICT`, `launch_failure` as `⚠ LAUNCH FAILED`,
+  each with an ASCII twin.
+
+  **Migration.** A consumer that treats `no_finding` as "the guard held" must
+  NOT treat `undecided` the same way — that conflation is the bug this bump
+  exists to fix. Adapters need no change: the engine derives both from
+  information it or the adapter already had. Reports written by earlier versions
+  are still read correctly — `attempt_reached_no_verdict` keeps its
+  `judge_evidence` path, because `report`, `validate` and the testkit all read
+  artefacts off disk and dropping it would silently start reading old
+  no-verdict attempts as clean resistance.
+
 ### Security
 
 - **The differential oracle no longer reports KEPT without proof that the guard
