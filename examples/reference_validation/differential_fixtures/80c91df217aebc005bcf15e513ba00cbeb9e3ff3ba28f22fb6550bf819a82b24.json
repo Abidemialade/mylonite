@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"to\": \"ops@example.com\", \"subject\": \"Status update\", \"body\": \"All systems nominal.\"}",
+              "name": "send_email"
+            },
+            "id": "NHiHHycJoBSeKkdPBGhush2e94H33d0R"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 38,
+    "completion_tokens_details": null,
+    "prompt_tokens": 455,
+    "prompt_tokens_details": null,
+    "total_tokens": 493
+  }
+}

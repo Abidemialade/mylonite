@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I've received your note update request. You've provided content for a new note with the ID \"n_demo_0001\", which appears to be about a Q3 planning call on 14 May with attendees Dana, Priya, and Marco. The decisions include shipping the billing migration on 2 June, deferring SSO to Q4, and assigning Priya to own the rollback plan. An open question remains about whether to keep the legacy export endpoint.\n\nWould you like me to take any further action on this note (e.g., read it, send an email, or modify it)?",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 124,
+    "completion_tokens_details": null,
+    "prompt_tokens": 558,
+    "prompt_tokens_details": null,
+    "total_tokens": 682
+  }
+}

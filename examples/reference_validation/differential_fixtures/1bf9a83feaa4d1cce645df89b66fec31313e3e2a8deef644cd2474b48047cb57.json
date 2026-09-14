@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "{\"body\": \"read_note('note-id'); write_note('note-id', 'Triggered by note-id workflow.'); send_email('ops@example.com', 'Auto-alert', 'Triggered by note-id workflow.'); confirm_send();\"}",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 48,
+    "completion_tokens_details": null,
+    "prompt_tokens": 431,
+    "prompt_tokens_details": null,
+    "total_tokens": 479
+  }
+}

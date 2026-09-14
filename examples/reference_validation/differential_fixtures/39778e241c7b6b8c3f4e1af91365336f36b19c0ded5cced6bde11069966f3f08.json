@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I see that sending an email is not possible due to security restrictions after reading the note. Let me summarize the note content directly for you instead. \n\nCould you please confirm if you'd like me to proceed with summarizing the note content without sending it via email? If so, I'll provide the summary right away.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 65,
+    "completion_tokens_details": null,
+    "prompt_tokens": 613,
+    "prompt_tokens_details": null,
+    "total_tokens": 678
+  }
+}
