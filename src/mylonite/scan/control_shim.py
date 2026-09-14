@@ -293,10 +293,14 @@ class UntrustedEnvelopeControl(BoundaryControl):
 
     The canonical indirect-injection mitigation (data marking / spotlighting):
     content the planner reads back from storage/fetch is marked as data, not
-    instruction. Mirrors ``server_guarded._quarantine`` applied to read results.
-    Whether the envelope actually stops the attack depends on the target's model
-    and system prompt respecting it — which is exactly what the differential
-    measures.
+    instruction. Whether the envelope actually stops the attack depends on the
+    target's model and system prompt respecting it — which is exactly what the
+    differential measures, and which measurement has since shown to be an
+    unreliable hold (40-100% by payload phrasing against a capable 4B planner).
+    The guarded reference twin therefore replaced its own envelope with a
+    code-enforced taint gate; this shim cannot, because it applies to servers
+    Mylonite does not own. It is the best text-level control available here, not
+    an equivalent of that gate.
     """
 
     weakness = "W2"
