@@ -307,3 +307,66 @@ def test_record_script_does_not_promise_a_ci_guard_that_does_not_exist() -> None
     assert "no such hash exists anywhere in the repo" in script
     assert "manual and trust-based" in script
     assert "do not rely on CI to notice" in script
+
+
+# --- the same guard, pointed at verification/ (issue #138) -------------------
+#
+# `verification/runner.py` printed `mylonite scan --target-file <t> --json
+# <report>`. `scan` has no `--json` flag, so anyone following the instruction
+# verbatim got a usage error at exactly the point they were furthest from a
+# working Layer 1 run.
+#
+# The machinery above already proves every backtick-quoted `mylonite ...`
+# example in a CLI epilog or under docs/ parses against the real CLI. It just
+# was not pointed at verification/, which prints operator-facing invocations of
+# its own — the same drift class, in a directory the guard did not cover.
+
+_VERIFICATION_DIR = _REPO_ROOT / "verification"
+
+#: Placeholder spellings that appear in these operator-facing strings. Click
+#: parses them as ordinary values, so they need no special handling — but a
+#: shell-metacharacter placeholder would break `shlex.split`, and that is worth
+#: failing on, since it would also break the copy-paste it exists for.
+_PLACEHOLDER_SAFE = re.compile(r"^[A-Za-z0-9 _\-./<>*={}$:,'\"\[\]]+$")
+
+
+def _verification_mylonite_examples() -> list[tuple[str, str]]:
+    """Every backtick-quoted or printed `mylonite ...` invocation under
+    `verification/`, as (location, example) pairs."""
+    found: list[tuple[str, str]] = []
+    for path in sorted(_VERIFICATION_DIR.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        for match in _BACKTICK_MYLONITE_RE.finditer(text):
+            found.append((rel, match.group(1).strip()))
+        # Printed instructions are not backticked, so also take any string
+        # literal line that *starts* with the command.
+        for raw in re.finditer(r'"(\s*mylonite [^"]+)"', text):
+            candidate = raw.group(1).strip()
+            if candidate not in {e for _, e in found}:
+                found.append((rel, candidate))
+    return found
+
+
+def test_verification_prints_only_parseable_mylonite_commands() -> None:
+    """Issue #138. Every `mylonite ...` invocation `verification/` shows an
+    operator must parse against the real CLI."""
+    examples = _verification_mylonite_examples()
+    assert examples, (
+        "collected no `mylonite ...` invocations under verification/ — the "
+        "collector has drifted and this guard is now vacuous"
+    )
+    for location, example in examples:
+        if not _PLACEHOLDER_SAFE.match(example):
+            pytest.fail(f"{location}: {example!r} contains characters shlex cannot split")
+        _assert_example_parses(location, example)
+
+
+def test_verification_runner_no_longer_advertises_a_json_flag() -> None:
+    """The specific regression: `scan --json` never existed."""
+    source = (_VERIFICATION_DIR / "runner.py").read_text(encoding="utf-8")
+
+    assert "scan --target-file <t> --json" not in source, (
+        "the unparseable `mylonite scan ... --json <report>` instruction is back; "
+        "scan writes into --output-dir and the Layer 1 scorer globs {family}*.json"
+    )

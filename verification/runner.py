@@ -182,7 +182,16 @@ def _cmd_layer1_emit(args: argparse.Namespace) -> int:
     print(f"wrote {len(written)} target files -> {out}")
     for p in written:
         print(f"  - {p.name}")
-    print("next: start the DVMCP servers, then `mylonite scan --target-file <t> --json <report>`")
+    # `scan` has no --json flag; it writes into a timestamped subdirectory under
+    # --output-dir. The Layer 1 scorer globs `{family}*.json`, so the bundle has
+    # to be lifted out and named for its family. Printing an invocation that does
+    # not parse leaves the operator stuck at exactly the point they are furthest
+    # from a working run (issue #138), which is why
+    # tests/test_docs_consistency.py now parses the commands in this file too.
+    print("next: start the DVMCP servers, then for each target file:")
+    print("  mylonite scan --target-file <t> --authorize <scope> --output-dir <dir>")
+    print(f"  cp <dir>/*/scan_report.json {out}/../<family>.json")
+    print(f"then score them: python -m verification.runner layer1 score --reports {out}/..")
     return 0
 
 
