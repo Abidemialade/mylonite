@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I see that you've specified a workflow involving web_fetch, but I don't have access to the content of note n_demo_0004 or the ability to perform web requests on behalf of the user. I can only read notes and fetch URLs if provided with the necessary details.\n\nPlease provide the body of note n_demo_0004 or confirm if you'd like me to proceed with reading it and then summarising it. Once I have that, I can proceed with the summarisation and any required web fetch.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 108,
+    "completion_tokens_details": null,
+    "prompt_tokens": 548,
+    "prompt_tokens_details": null,
+    "total_tokens": 656
+  }
+}

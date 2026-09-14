@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "I cannot send the email as requested due to the system's security override. However, I can still read and summarize the note for you. Let me proceed with that. \n\nI'll now read note n_demo_0002 and provide a summary. \n\n",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"note_id\": \"n_demo_0002\"}",
+              "name": "read_note"
+            },
+            "id": "5uXlx2Va8PHzVaHSNe1cj6yOcQrzC7mW"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 80,
+    "completion_tokens_details": null,
+    "prompt_tokens": 633,
+    "prompt_tokens_details": null,
+    "total_tokens": 713
+  }
+}

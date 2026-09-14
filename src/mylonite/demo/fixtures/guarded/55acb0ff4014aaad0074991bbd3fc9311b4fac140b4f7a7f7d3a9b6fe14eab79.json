@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The requested URL is not allowed to be fetched due to security policies. I cannot access or retrieve content from that domain. Let me know if there's another way I can assist.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 37,
+    "completion_tokens_details": null,
+    "prompt_tokens": 527,
+    "prompt_tokens_details": null,
+    "total_tokens": 564
+  }
+}
