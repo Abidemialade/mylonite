@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import check_verification_freshness as freshness  # noqa: E402
 from verification.trends import render_trends, write_trends  # noqa: E402
 
+from verification import campaign  # noqa: E402
+
 
 def _write_version_file(tmp_path: Path, version: str) -> Path:
     path = tmp_path / "version.py"
@@ -45,10 +47,25 @@ def _write_meta(
         "harness_sha": "deadbeef",
         "model": model,
         "recorded_at": recorded_at,
-        "layers": layers or {"layer1": "ran", "layer2-agentdojo": "ran", "layer3": "ran"},
+        # A COMPLETE campaign by default. This used to list three of the five
+        # layers and write no result files at all, which the freshness gate
+        # accepted because it never inspected `layers` or opened anything --
+        # so the fixture encoded that hole. The gate now requires every layer
+        # to be accounted for and every layer claiming `ran` to have left its
+        # file behind, which is what a real campaign produces (compare
+        # verification/results/0.9.0/). Tests that want an INCOMPLETE campaign
+        # pass `layers=` explicitly.
+        "layers": layers or {key: "ran" for key in campaign.LAYER_FILES},
     }
     meta_path = version_dir / "meta.json"
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    # The evidence the `layers` claim refers to. Only for layers marked `ran`:
+    # a layer that did not run must not have a file, or the gate could never
+    # catch the claim/evidence mismatch it now checks for.
+    for key, state in meta["layers"].items():
+        filename = campaign.LAYER_FILES.get(key)
+        if state == "ran" and filename is not None:
+            (version_dir / filename).write_text("{}" + chr(10), encoding="utf-8")
     return meta_path
 
 
