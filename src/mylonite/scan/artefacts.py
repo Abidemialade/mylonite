@@ -59,9 +59,16 @@ OUTCOME_MARKS: Final[dict[str, str]] = {
     # exist on that server — a distinction only visible by opening the raw JSON.
     # It is now visible in the table.
     "not_applicable": "⚠ N/A (no such capability)",
+    # Distinct from BOTH "✓ clean" and "⚠ NOT TESTED". The attack was delivered
+    # AND the agent engaged — but nothing adjudicated the result, so the cell
+    # establishes nothing in either direction.
+    "undecided": "⚠ NO VERDICT",
     "skipped_invalid_metadata": "⚠ skipped",
     "skipped_unknown_seed": "⚠ skipped",
     "skipped_planner_failure": "⚠ skipped",
+    # Named separately from a planner skip because the remedy differs: the
+    # target's command never started.
+    "launch_failure": "⚠ LAUNCH FAILED",
     "skipped_no_seed_arm": "⚠ NOT TESTED",
     "skipped_payload_not_delivered": "⚠ NOT TESTED",
     "skipped_planner_no_engagement": "⚠ NOT TESTED",
@@ -75,9 +82,11 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "finding": "FOUND",
     "no_finding": "clean",
     "not_applicable": "N/A-no-capability",
+    "undecided": "NO-VERDICT",
     "skipped_invalid_metadata": "skip",
     "skipped_unknown_seed": "skip",
     "skipped_planner_failure": "skip",
+    "launch_failure": "LAUNCH-FAILED",
     "skipped_no_seed_arm": "NOT-TESTED",
     "skipped_payload_not_delivered": "NOT-TESTED",
     "skipped_planner_no_engagement": "NOT-TESTED",

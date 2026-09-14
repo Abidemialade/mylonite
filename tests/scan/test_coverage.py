@@ -534,3 +534,46 @@ def test_an_unexercised_attempt_carrying_a_no_verdict_cause_is_counted_once() ->
     outcome = ScanOutcome.from_report(_report(attempts=[attempt]))
     assert outcome.not_tested == 1
     assert outcome.exercised == 0
+
+
+# --- `undecided` and `launch_failure` as first-class outcomes (issue #144) ----
+
+
+def test_undecided_is_not_tested_and_not_resistance() -> None:
+    """The whole point of the contract bump: the literal alone now carries the
+    fact. A consumer reading only `outcome` can no longer mistake "nothing
+    decided this" for "the guard held"."""
+    from mylonite.scan.coverage import attempt_reached_no_verdict
+
+    attempt = _attempt("undecided")
+
+    assert ATTEMPT_CLASS["undecided"] is AttemptClass.NOT_TESTED
+    assert attempt_reached_no_verdict(attempt) is True
+
+    outcome = ScanOutcome.from_report(_report(attempts=[attempt]))
+    assert outcome.not_tested == 1
+    assert outcome.exercised == 0
+    assert outcome.trustworthy_clean is False
+
+
+def test_a_legacy_no_verdict_attempt_is_still_recognised() -> None:
+    """Back-compat, and it matters: `report`, `validate` and the testkit all read
+    artefacts off DISK. A report written by an earlier version spells this
+    `no_finding` plus a cause key, and dropping that path would silently start
+    reading old no-verdict attempts as clean resistance."""
+    from mylonite.scan.coverage import NO_ADJUDICATOR, attempt_reached_no_verdict
+
+    legacy = _attempt("no_finding", judge_evidence={"no_adjudicator": NO_ADJUDICATOR})
+
+    assert attempt_reached_no_verdict(legacy) is True
+
+
+def test_launch_failure_is_not_tested() -> None:
+    """A target whose command never started exercised nothing — and the remedy
+    is to fix the command, not the planner."""
+    attempt = _attempt("launch_failure")
+
+    assert ATTEMPT_CLASS["launch_failure"] is AttemptClass.NOT_TESTED
+    outcome = ScanOutcome.from_report(_report(attempts=[attempt]))
+    assert outcome.not_tested == 1
+    assert outcome.trustworthy_clean is False

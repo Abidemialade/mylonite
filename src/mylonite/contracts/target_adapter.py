@@ -75,7 +75,7 @@ from mylonite.contracts._types import AdapterResponse, Payload, TargetDescriptor
 #
 # Only a consumer that exhaustively matches every outcome value needs updating,
 # which is why this is a minor rather than a patch bump per GOVERNANCE.md.
-CONTRACT_VERSION: str = "0.7.0"
+CONTRACT_VERSION: str = "0.8.0"
 
 
 @runtime_checkable
