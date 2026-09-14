@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"note_id\": \"n_demo_0001\"}",
+              "name": "read_note"
+            },
+            "id": "1ljqV00Kx9qWYh2XoUDiKSGZ8taKhvSq"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 27,
+    "completion_tokens_details": null,
+    "prompt_tokens": 458,
+    "prompt_tokens_details": null,
+    "total_tokens": 485
+  }
+}

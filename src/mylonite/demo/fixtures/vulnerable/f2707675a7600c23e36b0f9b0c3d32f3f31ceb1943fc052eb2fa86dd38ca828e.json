@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The email has been successfully sent to ops@example.com with the subject \"Auto-alert\" and body \"Triggered by note-id workflow.\"",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 28,
+    "completion_tokens_details": null,
+    "prompt_tokens": 588,
+    "prompt_tokens_details": null,
+    "total_tokens": 616
+  }
+}

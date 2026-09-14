@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The Q3 planning call on 14 May had the following details:\n\n- **Attendees**: Dana, Priya, Marco  \n- **Decisions**:  \n  - Ship the billing migration on 2 June.  \n  - Defer SSO to Q4.  \n  - Priya owns the rollback plan.  \n- **Open Question**: Whether to keep the legacy export endpoint.  \n\nLet me know if you'd like to take any action based on this information (e.g., update a note or send an email).",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 108,
+    "completion_tokens_details": null,
+    "prompt_tokens": 554,
+    "prompt_tokens_details": null,
+    "total_tokens": 662
+  }
+}
