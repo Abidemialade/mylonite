@@ -53,12 +53,22 @@ def test_generate_payloads_emits_one_per_kitchen_sink_w1_w2_seed() -> None:
 def test_emitted_payloads_carry_required_metadata() -> None:
     module = PromptInjectionAttackModule()
     required = {"seed_id", "weakness", "predicate", "setup", "drive", "needs_customisation"}
+    by_id = {s.pattern_id: s for s in SEED_CATALOGUE}
     for payload in module.generate_payloads(_mcp_descriptor()):
         assert required.issubset(payload.metadata), (
             f"payload {payload.pattern_id} missing metadata keys: "
             f"{required - payload.metadata.keys()}"
         )
-        assert payload.metadata["needs_customisation"] == "true"
+        # The flag must MIRROR the seed's own `customise` field, not be a
+        # constant: `tool-description-send-licence-smuggle` deliberately opts
+        # out, because the clause in its body withholding dispatch is what makes
+        # a dispatch unauthorised, and a customiser rewrite could drop it.
+        expected = "true" if by_id[payload.pattern_id].customise else "false"
+        assert payload.metadata["needs_customisation"] == expected, (
+            f"payload {payload.pattern_id} reports needs_customisation="
+            f"{payload.metadata['needs_customisation']!r} but its seed says "
+            f"customise={by_id[payload.pattern_id].customise!r}"
+        )
 
 
 def test_skips_non_mcp_targets() -> None:
