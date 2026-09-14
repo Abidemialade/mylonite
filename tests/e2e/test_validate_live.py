@@ -7,7 +7,9 @@ LIVE ``DifferentialValidator`` (Haiku, no injected ``completion_fn``) for the W2
 ``kept``, the mutation score is a float in [0, 1], and the flakiness
 reproducibility is high.
 
-It SKIPS in normal CI — that is correct. The committed offline proof of the same
+It SKIPS in normal CI — that is correct. It also skips, with the cause named,
+when the configured planner refuses the seed outright: that leaves the guarded
+twin unexercised, so the differential is inconclusive rather than failed. The committed offline proof of the same
 differential is the reference example recorded by
 ``scripts/record_reference_example.py``; this is the live counterpart that proves
 the validator's moat against real, stochastic model behaviour.
@@ -91,6 +93,31 @@ def test_live_differential_validator_keeps_w2_seed() -> None:
         ReferenceVulnerableOracle().adapter(),
         ReferenceVulnerableOracle(),
     )
+
+    # An attack the planner never performed leaves the guarded twin untested.
+    # The vulnerable twin carries NO guard, so `vuln_fired == 0` has exactly one
+    # explanation: the planner model declined to carry out the injection. That
+    # is a fact about the model, not evidence about the validator, and the
+    # differential it would have measured does not exist.
+    #
+    # Asserting KEPT here would report a refusing planner as a broken moat --
+    # the same conflation the 0.10.0 oracle fix removed on the guarded side
+    # ("an attempt with no verdict is not resistance"). Measured 2026-09-14:
+    # `claude-haiku-4-5-20251001` refuses all three W2 note-body seeds on the
+    # unguarded twin, while the W1 and W4 predicates still fire on it.
+    #
+    # Narrow by construction: this skips ONLY when the attack never landed
+    # unguarded. A vulnerable twin that fired and a guard that leaked, or a
+    # metamorphic bypass, still fail loudly below.
+    evidence = report.reproducibility
+    assert evidence is not None, report.notes
+    if evidence.vuln_fired == 0:
+        pytest.skip(
+            "inconclusive, not a failure: the planner declined the attack on the "
+            f"UNGUARDED twin ({evidence.vuln_fired}/{evidence.iterations} fired), so "
+            "there is no differential to measure. Re-run with a planner that "
+            f"performs this seed. Validator said: {report.notes}"
+        )
 
     assert report.kept is True, report.notes
 
