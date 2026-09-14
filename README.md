@@ -55,18 +55,17 @@ Here is the honest split. Read the third bucket before the first.
 
 - **A KEPT external differential** on a third-party MCP email server: the attack fired
   **5/5** on the raw target, the guarded build leaked **0/5**, success-rate gap **1.00**.
-  Three caveats travel with that number, and they are material: the server needed two
-  setup fixes to run at all (a launch wrapper, and a one-line bug in its own `send_email`);
-  the flaw only materialises when the app's system prompt instructs auto-sending; and the
-  guarded side is Mylonite's own boundary control shim, not a second real build. All three
-  are recorded in [the capability matrix](./verification/CAPABILITY_MATRIX.md).
+  Scope of that run: the server needed two setup fixes to start (a launch wrapper, and a
+  one-line bug in its own `send_email`), the flaw materialises when the app's system
+  prompt instructs auto-sending, and the guarded side is Mylonite's boundary control shim
+  rather than a second build. Full detail in
+  [the capability matrix](./verification/CAPABILITY_MATRIX.md).
 - **Zero false positives** on an external benign server (Enkrypt's `echo_mcp`). A
-  *defended*-server differential is still open — see
+  defended-server differential is still open — see
   [verification](./docs/verification.md#layer-3--precision-false-positives-on-known-good-targets).
-- **An external detection catch** on a peer-reviewed vulnerable MCP corpus (MCPSecBench)
-  — and on a second one the oracle then **refused to keep the test**, as non-reproducible
-  (fired 0/3 raw, guard held 3/3). Both halves belong here: detection alone is not the
-  product, and an oracle that rejects its own flaky finding is the product working.
+- **An external detection catch** on a peer-reviewed vulnerable MCP corpus (MCPSecBench).
+  On a second finding from that corpus the flakiness gate rejected the test as
+  non-reproducible (fired 0/3 raw, guard held 3/3), so it was not shipped.
 - **The judge's positive class verified on real third-party positives** (AgentDojo
   trajectories from models that genuinely fell for attacks — not synthesised by us).
 - **Honesty rails hold under test:** NOT-TESTED is never rendered as clean, vacuous

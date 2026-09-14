@@ -18,9 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The `[demo]` extra still pins `==0.1.0`, deliberately: pinning an unpublished
   version would make `pip install ".[demo]"` unresolvable for everyone,
-  maintainer included. The consequence is that CI's `demo` job — which installs
-  the *published* wheel precisely to catch this class of mismatch — stays red
-  until `mcp-kitchen-sink` 0.2.0 is on PyPI. That is the job working.
+  maintainer included. CI's `demo` job installs the *published* wheel to
+  reproduce a user's install, so it reports `MissingFixtureError` for the guarded
+  set until `mcp-kitchen-sink` 0.2.0 is on PyPI.
 
   The remaining step is a single irreversible command
   (`git tag ks-v0.2.0 && git push origin ks-v0.2.0`, which the existing
@@ -168,31 +168,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attacker-addressed `send_email`, and the two remaining seeds do not reach an
   egress sink on that build.
 
-- **`TRENDS.md` published one layer-2 number and hid the rest of the same run.**
-  The trend table had a single "Layer 2 judge F1" cell reading AgentDojo, while
-  the same 0.9.0 campaign scored InjecAgent **dh F1 1.000** and **ds F1 0.400 at
-  recall 0.25** — both genuinely exercised, both committed to JSON, and neither
-  visible in the only human-readable view of them. `_LAYER_FILES`' own comment
-  calls that gap "the finding".
+- **The verification trend table now carries all three layer-2 columns.** It
+  had a single "Layer 2 judge F1" cell reading AgentDojo, while the same 0.9.0
+  campaign also recorded InjecAgent **dh F1 1.000** and **ds F1 0.400 at recall
+  0.25**, both exercised, in committed JSON.
 
-  AgentDojo remains the headline for the reason already recorded there (its
-  positive class is released third-party trajectories that really do contain
-  successful attacks, rather than a run this project authored). The two
-  InjecAgent splits now have columns beside it, so the good number and the bad
-  one are published together — the standard the README sets for itself.
+  AgentDojo remains the trended figure for the reason recorded at
+  `_LAYER_FILES`: its positive class is released third-party trajectories,
+  whereas InjecAgent requires a recorded model run that an aligned model can
+  resist entirely, producing a vacuous F1. The two InjecAgent splits now have
+  columns alongside it.
 
-  `TRENDS.md` is a generated file that nothing checked for currency, which makes
-  a stale one worse than none: a published number nobody re-derived. A test now
-  regenerates it from the committed results and fails on any drift, the same
-  idiom the generated JSON schemas already use.
+  `TRENDS.md` is generated and had no currency check. A test now regenerates it
+  from the committed results and fails on drift, the same approach used for the
+  generated JSON schemas.
 
-- **The verification-freshness release gate required a claim of evidence, not
-  the evidence.** `scripts/check_verification_freshness.py` checked that
-  `verification/results/X.Y.0/meta.json` existed, parsed, and carried a matching
-  `mylonite_version` — and then returned. It never inspected `layers` and never
-  opened a result file, so a `meta.json` containing nothing but the right version
-  string passed, and so did one claiming `{"layer1": "ran"}` with no such file on
-  disk. A release could cite a campaign that measured nothing.
+- **The verification-freshness release gate now validates the recorded layers.**
+  `scripts/check_verification_freshness.py` checked that
+  `verification/results/X.Y.0/meta.json` existed, parsed, and recorded a matching
+  `mylonite_version`, and returned. It did not read `layers` or open a result
+  file, so a `meta.json` carrying only a matching version passed, as did one
+  recording `{"layer1": "ran"}` with no corresponding file.
 
   It now also fails on a missing or non-object `layers`, an omitted layer key, no
   layer recorded as `ran`, an unknown layer key, any layer claiming `ran` whose
@@ -224,28 +220,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed point by construction. The duplication was the bug, not an optimisation,
   and a test fails if a second private copy reappears.
 
-- **Four public claims corrected.** These were the ones that could not be backed
-  as written:
-    - The **KEPT external differential** now carries its three material caveats
-      inline instead of leaving them in the capability matrix: the third-party
-      server needed two setup fixes to run at all, the flaw only materialises
-      when the app's system prompt instructs auto-sending, and the guarded side
-      is Mylonite's own boundary control shim rather than a second real build.
+- **Four public claims restated to match the recorded evidence.**
+    - The **KEPT external differential** now states the scope of that run
+      alongside the figure, rather than only in the capability matrix: the
+      third-party server required two setup fixes to start, the flaw
+      materialises when the app's system prompt instructs auto-sending, and the
+      guarded side is Mylonite's boundary control shim rather than a second
+      build.
     - The **precision baseline** now names its target (Enkrypt's benign
       `echo_mcp`) and says that a *defended*-server differential is still open.
       `docs/verification.md` called the external benign baseline a flat gap while
-      the capability matrix reported the measurement; the two disagreed, and the
-      matrix was right. Reconciled.
-    - The **external detection catch** is stated together with the fact that the
-      oracle then refused to keep a second one as non-reproducible (fired 0/3
-      raw, guard held 3/3). Detection alone is not the product, and an oracle
-      that rejects its own flaky finding is the product working.
-    - **"241 commits from one contributor"** was wrong on both counts: 288
-      commits, 280 from the maintainer, one from an outside contributor, the rest
-      from Dependabot. The test-suite figure moves from 1,900+ to 2,300+.
+      the capability matrix recorded the measurement; the two pages are now
+      consistent, and the benign baseline is stated separately from the
+      defended-server differential.
+    - The **external detection catch** is stated together with the second
+      finding from that corpus, which the flakiness gate rejected as
+      non-reproducible (fired 0/3 raw, guard held 3/3).
+    - **The contributor and commit figures** are updated: 288 commits, 280 from
+      the maintainer across two identities, one from an outside contributor, the
+      remainder from Dependabot. Test-suite figure 1,900+ → 2,300+.
 
-- **W1 can now report that the guard HELD, not just that it failed** (issue
-  #145). The only W1 predicate read the planner's prose and nothing else, so its
+- **W1 is now adjudicable in both directions** (issue #145). The only W1 predicate read the planner's prose and nothing else, so its
   codomain was exactly `{Verdict(success=True), None}`: it could report the
   weakness landing and had no branch that reported it holding. The guarded half
   of every W1 differential therefore reached no verdict on every run, and the
@@ -281,8 +276,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   regexes so detection and removal can never disagree about what a smuggle
   looks like.
 
-- **A tool-description attempt is no longer recorded as NOT TESTED when the
-  planner declines to act.** The engine reports
+- **A tool-description attempt retains its verdict when the planner does not
+  call a tool.** The engine reports
   `skipped_planner_no_engagement` when no pass invoked the tool under test —
   correctly, for a seed whose payload rides in a user message or a tool result,
   because the target only gets to respond once the planner acts on it. A
@@ -298,8 +293,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tool_descriptions` that verdict was drawn from. An unknown description
   surface is still never read as a clean one.
 
-- **The W1 summary seed planted a developer placeholder instead of note
-  content.** `tool-description-summary-smuggle` seeded the body
+- **The W1 summary seed now plants ordinary note content.** `tool-description-summary-smuggle` seeded the body
   `[planted in tool description by the vulnerable server; no per-payload body
   needed]`. The body *was* still planted and read: the planner received that
   string as its `read_note` result, replied that no content was found, and had
@@ -311,7 +305,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it a W2 indirect-injection test instead. The smuggle still lives only in the
   description, so the differential is unchanged.
 
-- **Every seeded weakness now decides both twins, provably and without a model.**
+- **Every seeded weakness is adjudicated on both twins, with no model in the
+  loop.**
   `tests/scan/test_every_seed_decides_both_twins.py` drives one scripted planner
   that performs each seed's attack *identically* against the vulnerable and
   guarded reference servers, and asserts the predicate fires on one and returns
@@ -320,16 +315,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   found separately by reading traces; this is the guard that makes the next one
   fail at review. Holding planner behaviour fixed is the point: a real planner
   that declines on the guarded build leaves the control unexercised and produces
-  no evidence either way, which is exactly how the soft `<untrusted>` envelope
-  used to hide the W2 taint gate.
+  no evidence either way, which is why the `<untrusted>` envelope left the W2
+  taint gate unexercised.
 
-- **`scripts/record_demo_fixtures.py` no longer calls a half-failed recording a
-  success.** A provider that died part-way through — a crashed local model
+- **`scripts/record_demo_fixtures.py` aborts on an incomplete recording.** A provider that died part-way through — a crashed local model
   runner, a dropped connection — surfaced as planner-call exceptions, which the
   engine swallowed into per-attempt skips; the script then printed its
   per-variant line and exited 0, leaving a partial fixture set on disk that
   replays forever as a run that never happened. That had already produced one
-  demo table that was simply false. It now aborts with `RecordingIncompleteError`
+  demo table that did not correspond to a completed run. It now aborts with
+  `RecordingIncompleteError`
   naming the count, the outcomes and the affected seeds, and writes nothing
   further. `undecided` is deliberately not treated as a failure: an inconclusive
   predicate with the judge disabled is a legitimate, reproducible result.

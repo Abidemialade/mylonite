@@ -100,10 +100,9 @@ the misses. In summary:
   about); **0/15** even with `--elicit-positives` telling the agent to comply.
 - **LLM-judge agreement F1 of 0.41** against independent labels.
 - Against that: a **KEPT external differential** on a third-party MCP email server (fired
-  5/5 raw, leaked 0/5 guarded) — carrying three material caveats, chiefly that the guarded
-  side is Mylonite's own boundary control shim rather than a second real build — and
-  **zero false positives** on an external benign server. A *defended*-server differential
-  remains open.
+  5/5 raw, leaked 0/5 guarded), in a run whose guarded side is Mylonite's boundary control
+  shim rather than a second build, and **zero false positives** on an external benign
+  server. A defended-server differential remains open.
 
 Full scorecard with caveats:
 [verification/FINDINGS.md](https://github.com/Abidemialade/mylonite/blob/main/verification/FINDINGS.md).
