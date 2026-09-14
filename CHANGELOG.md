@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-14
+
 ### Added
 
 - **Markdown image/link egress probe (W3).** New opt-in attack module,
@@ -145,6 +147,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit allowlist, and requires SHA pinning.
 
 ### Fixed
+
+- **The live differential no longer reads a refused attack as a failed
+  differential.** `tests/e2e/test_validate_live.py` asserted that the validator
+  kept its test without first checking the attack had landed. The vulnerable
+  twin carries no guard, so an attack that does not fire there has one
+  explanation: the planner model declined to carry it out. That leaves the
+  guarded twin unexercised and the differential unmeasurable, so the assertion
+  reported a refusing planner as a broken validator.
+
+  This is the same distinction drawn on the guarded side in this release, where
+  an attempt that reached no verdict was being counted as the guard resisting.
+  Absent evidence is inconclusive in both directions. The test now skips with
+  the cause named when the attack never lands unguarded, and still fails on
+  every other shape — a vulnerable twin that fired alongside a guard that
+  leaked, or a metamorphic bypass.
+
+  Measured against `claude-haiku-4-5-20251001`: on the unguarded reference twin
+  the W1 and W4 predicates fire while all three W2 note-body seeds are refused.
+  Which attacks a planner will perform is a property of the model, and the
+  reference seeds are not calibrated to any particular one.
 
 - **Demo rows now report per-row adjudication coverage.** `render_demo`
   selected a weakness row's mark from the raw outcome string. A no-verdict
@@ -4015,7 +4037,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Abidemialade/mylonite/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Abidemialade/mylonite/compare/v0.8.6...v0.9.0
 [0.8.6]: https://github.com/Abidemialade/mylonite/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/Abidemialade/mylonite/compare/v0.8.4...v0.8.5
