@@ -31,13 +31,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as _datetime
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from normalize_secrets_baseline import normalise
 from release_version import (
     ROOT,
     UNRELEASED_RE,
@@ -283,23 +283,29 @@ def refresh_secrets_baseline(root: Path) -> None:
     if result.returncode != 0:
         raise SystemExit(f"detect-secrets scan failed with exit {result.returncode}")
 
-    _normalise_baseline_separators(baseline)
+    _normalise_baseline(baseline)
     subprocess.run(["git", "add", "--", str(baseline)], cwd=root, check=True)
     print(f"refreshed and staged {baseline.name}")
 
 
-def _normalise_baseline_separators(baseline: Path) -> None:
-    """Rewrite ``results`` keys with POSIX separators.
+def _normalise_baseline(baseline: Path) -> None:
+    """Normalise the refreshed baseline EXACTLY as the pre-commit hook would.
 
-    detect-secrets keys its results with ``os.sep``, so regenerating on Windows
-    spells every path with backslashes. CI runs the same check on ubuntu, where
-    ``git ls-files`` yields forward slashes -- a backslash-keyed baseline matches
-    nothing there and every entry reads as a brand-new secret.
+    Issue #137. This used to be a second, partial copy of the normalisation
+    logic: it fixed path separators and nothing else, while the
+    `normalize-secrets-baseline` hook also zeroes `line_number` and drops
+    `generated_at`. So the release flow staged a file the hook immediately
+    rewrote, and pre-commit fails any hook that modifies a tracked file
+    regardless of exit code -- aborting the release commit every time. Worse,
+    the abort is invisible when the commit output is piped, and the only symptom
+    is that HEAD did not move; it bit the 0.9.0 release twice.
+
+    Delegating to the hook's own `normalise` makes the staged bytes the hook's
+    fixed point by construction, so the two can never disagree again. The
+    duplication was the bug, not an optimisation.
     """
-    data = json.loads(baseline.read_text(encoding="utf-8"))
-    results = {key.replace("\\", "/"): value for key, value in data["results"].items()}
-    data["results"] = {key: results[key] for key in sorted(results)}
-    baseline.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
+    raw = baseline.read_text(encoding="utf-8")
+    baseline.write_text(normalise(raw), encoding="utf-8", newline="\n")
 
 
 # --------------------------------------------------------------------------- #
