@@ -75,6 +75,28 @@ async def _tool_surface_json(server: _InProcessServer) -> str:
     return json.dumps([d.name for d in await server.list_tools()])
 
 
+async def _tool_descriptions_json(server: _InProcessServer) -> str:
+    """This server's tool DESCRIPTIONS, keyed by tool name.
+
+    W1 (tool-description instruction smuggling) is the one weakness class whose
+    attack vector lives in the tool schema rather than in any payload or tool
+    result — and until this existed there was no way for a predicate to see it.
+    `tool_surface` carries names only, `effect_trace` carries call results, and
+    a predicate is handed `(payload, response)` and never the descriptor. So the
+    only W1 signal available was the planner's free-text reply, which is why
+    that predicate could fire but never produce a confident negative.
+
+    Stamped here so a W1 predicate can read the actual served description and
+    decide BOTH directions structurally: a directive-shaped description plus the
+    licensed action taken is a finding, and a description carrying no directive
+    at all is positive evidence that the guard which refuses to serve one held.
+
+    `AdapterResponse.metadata` is a free-form `dict[str, str]`, so this needs no
+    contract change.
+    """
+    return json.dumps({d.name: d.description for d in await server.list_tools()})
+
+
 def _drive_user_message(drive: str, note_id: str | None, payload_body: str = "") -> str:
     """Pick the user message the planner will see, based on seed.drive.
 
@@ -225,6 +247,7 @@ class _InProcessAttackSession:
                 "store_fetched_urls": str(self._store.fetched_urls),
                 "effect_trace": json.dumps(effect_trace),
                 "tool_surface": await _tool_surface_json(self._server),
+                "tool_descriptions": await _tool_descriptions_json(self._server),
             },
         )
 
@@ -333,12 +356,16 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
                 # and returned None on this path, so the ONE target the
                 # differential oracle uses as ground truth was also the one
                 # getting a model-graded verdict instead of a deterministic one.
-                # No catalogue seed reads the trace (all 16 key on the store
-                # blobs), so this changes no existing reference verdict -- it
-                # makes a deterministic verdict reachable where the judge used
-                # to decide.
+                # When this was added no catalogue seed read the trace, so it
+                # changed no existing reference verdict -- it made a
+                # deterministic verdict reachable where the judge used to
+                # decide. Several now do: the trace is where an OBSERVED refusal
+                # or a deferred/staged result lives, which is the only evidence
+                # that distinguishes "the guard held" from "nothing happened".
+                # Stop stamping it and every guarded cell goes back to silence.
                 "effect_trace": json.dumps(server.tool_results),
                 "tool_surface": await _tool_surface_json(server),
+                "tool_descriptions": await _tool_descriptions_json(server),
             },
         )
 
