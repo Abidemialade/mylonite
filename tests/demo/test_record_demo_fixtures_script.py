@@ -205,3 +205,105 @@ def test_the_reason_the_api_base_flag_is_absent_is_still_true() -> None:
     assert _stable_key_v2("m", messages) != _stable_key_v2(
         "m", messages, api_base="http://localhost:11434"
     )
+
+
+# --- the partial-recording guard ----------------------------------------------
+#
+# The hazard these pin is not hypothetical: a local model runner died part-way
+# through a recording on this repo, every remaining planner call raised, the
+# engine swallowed each one into a skip, and the script printed its per-variant
+# line and exited 0 — leaving a fixture set that replays forever as a run that
+# never happened. The demo built from it showed a table that was simply false.
+
+
+class _StubAttempt:
+    def __init__(self, outcome: str, pattern_id: str = "some-seed") -> None:
+        self.outcome = outcome
+        self.pattern_id = pattern_id
+
+
+class _StubReport:
+    def __init__(self, *outcomes: str) -> None:
+        self.attempts = [_StubAttempt(o, f"seed-{i}") for i, o in enumerate(outcomes)]
+
+
+def test_a_clean_recording_is_accepted() -> None:
+    m._reject_partial_recording("vulnerable", _StubReport("finding", "no_finding"))
+
+
+def test_an_inconclusive_attempt_is_not_a_recording_failure() -> None:
+    """`undecided` is a legitimate, reproducible result with the judge disabled —
+    an inconclusive predicate and nothing decided it. Treating it as a provider
+    failure would make every honest no-verdict cell abort the recording."""
+    m._reject_partial_recording("guarded", _StubReport("no_finding", "undecided"))
+
+
+def test_a_seed_the_agent_declined_to_engage_is_not_a_recording_failure() -> None:
+    m._reject_partial_recording("guarded", _StubReport("skipped_planner_no_engagement"))
+
+
+@pytest.mark.parametrize("outcome", ["skipped_planner_failure", "launch_failure", "error"])
+def test_a_provider_failure_aborts_the_recording(outcome: str) -> None:
+    with pytest.raises(m.RecordingIncompleteError, match="did not run"):
+        m._reject_partial_recording("vulnerable", _StubReport("finding", outcome))
+
+
+def test_the_abort_message_names_the_counts_and_the_remedy() -> None:
+    with pytest.raises(m.RecordingIncompleteError) as excinfo:
+        m._reject_partial_recording(
+            "guarded", _StubReport("skipped_planner_failure", "skipped_planner_failure", "finding")
+        )
+    message = str(excinfo.value)
+    assert "[guarded] 2/3" in message
+    assert "skipped_planner_failure=2" in message
+    assert "--force" in message, "the operator needs to be told how to recover"
+    # The seeds themselves, because a provider that fails on only some calls is
+    # usually failing on particular content.
+    assert "seed-0[skipped_planner_failure]" in message
+    assert "seed-1[skipped_planner_failure]" in message
+    assert "seed-2" not in message, "only the broken attempts get named"
+
+
+def test_a_report_without_attempts_does_not_crash_the_guard() -> None:
+    """Defensive: the guard runs on the happy path of every recording, so a
+    report shape it does not recognise must not be the thing that fails."""
+    m._reject_partial_recording("vulnerable", object())
+
+
+# --- --force ------------------------------------------------------------------
+
+
+def test_force_clears_fixtures_and_the_sidecar(tmp_path: Path) -> None:
+    variant_dir = tmp_path / "vulnerable"
+    variant_dir.mkdir()
+    (variant_dir / "aaa.json").write_text("{}", encoding="utf-8")
+    (variant_dir / "bbb.json").write_text("{}", encoding="utf-8")
+    (variant_dir / "_meta.json").write_text("{}", encoding="utf-8")
+
+    removed = m._clear_variant_dir(variant_dir)
+
+    assert removed == 3
+    assert list(variant_dir.glob("*.json")) == []
+
+
+def test_clearing_a_missing_dir_is_a_noop(tmp_path: Path) -> None:
+    assert m._clear_variant_dir(tmp_path / "never-existed") == 0
+
+
+def test_force_makes_a_previously_refused_directory_recordable(tmp_path: Path) -> None:
+    """The recovery path the flag exists for: a sidecar-less directory is
+    refused, and --force is what makes it safe rather than hand-deletion."""
+    variant_dir = tmp_path / "vulnerable"
+    variant_dir.mkdir()
+    (variant_dir / "deadbeef.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        m._check_dir_safe_to_record(variant_dir, m.CACHE_KEY_VERSION)
+
+    m._clear_variant_dir(variant_dir)
+
+    m._check_dir_safe_to_record(variant_dir, m.CACHE_KEY_VERSION)  # must not raise
+
+
+def test_parse_args_force_defaults_off() -> None:
+    assert m._parse_args([]).force is False
+    assert m._parse_args(["--force"]).force is True
