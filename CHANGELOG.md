@@ -77,24 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`mcp-kitchen-sink` source is now 0.2.0, and publishing it is a release
-  blocker for 0.10.0.** The guarded twin's observable behaviour changed — the
-  `<untrusted>` envelope was replaced by a code-enforced taint gate, which
-  changes `read_note`'s output and every tool-schema hash derived from it. The
-  demo's replay cache key folds in those schemas, and the re-recorded fixtures
-  were produced against the 0.2.0 source.
+- **`mcp-kitchen-sink` 0.2.0, and the `[demo]` extra re-pinned to it.** The
+  guarded twin's observable behaviour changed — the `<untrusted>` envelope was
+  replaced by a code-enforced taint gate, which changes `read_note`'s output and
+  every tool-schema hash derived from it. The demo's replay cache key folds in
+  those schemas, so the fixtures and the pin had to move together; the `==` pin
+  exists to make that coupling impossible to break silently.
 
-  The `[demo]` extra still pins `==0.1.0`, deliberately: pinning an unpublished
-  version would make `pip install ".[demo]"` unresolvable for everyone,
-  maintainer included. CI's `demo` job installs the *published* wheel to
-  reproduce a user's install, so it reports `MissingFixtureError` for the guarded
-  set until `mcp-kitchen-sink` 0.2.0 is on PyPI.
+  CI's `demo` job installs the *published* wheel rather than the local source,
+  which is what makes the coupling observable: it reproduces a user's
+  `pip install "mylonite[demo]"` instead of the maintainer's checkout.
 
-  The remaining step is a single irreversible command
-  (`git tag ks-v0.2.0 && git push origin ks-v0.2.0`, which the existing
-  `release-kitchen-sink` workflow turns into a TestPyPI → PyPI publish), then
-  re-pin, then re-record the demo fixtures against the published build. The exact
-  order is in `reference_targets/mcp_kitchen_sink/PUBLISHING.md`.
+  The base `pip install mylonite` never pulls this deliberately-vulnerable
+  agent. Release order for future versions is in
+  `reference_targets/mcp_kitchen_sink/PUBLISHING.md`.
 
 - **`CONTRACT_VERSION` 0.7.0 → 0.8.0 — `ScanAttemptOutcome` gains `undecided`
   and `launch_failure`** (issue #144, additive; one week of public comment per

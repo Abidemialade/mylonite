@@ -1,33 +1,35 @@
 # Publishing `mcp-kitchen-sink` to PyPI (front-door handoff)
 
-> **Status: 0.2.0 is prepared and NOT yet published — this blocks the mylonite
-> 0.10.0 release.** v0.1.0 went to PyPI on 2026-08-05. The source here is now
-> 0.2.0, because the guarded twin's behaviour changed: the `<untrusted>` envelope
-> was removed and replaced by a code-enforced taint gate, which changes
-> `read_note`'s observable output and every tool schema hash derived from it.
+> **Status: 0.2.0 published 2026-09-14.** v0.1.0 went to PyPI on 2026-08-05.
+> 0.2.0 is the release in which the guarded twin's behaviour changed: the
+> `<untrusted>` envelope was replaced by a code-enforced taint gate, which
+> changes `read_note`'s observable output and every tool schema hash derived
+> from it.
 >
-> **Why it blocks.** `mylonite`'s `[demo]` extra pins `mcp-kitchen-sink==0.1.0`,
-> and the demo's replay cache key folds in the tool schemas. The re-recorded demo
-> fixtures were produced against this 0.2.0 source, so anyone running
-> `pip install "mylonite[demo]"` would get the 0.1.0 wheel and miss every
-> fixture. CI's `demo` job installs the published wheel precisely to catch this,
-> and it stays red until 0.2.0 is on PyPI.
->
-> **The remaining step is one command**, and it is deliberately left to a
-> maintainer because it publishes irreversibly:
->
-> ```bash
-> git tag ks-v0.2.0 && git push origin ks-v0.2.0
-> ```
->
-> `.github/workflows/release-kitchen-sink.yml` then builds from this directory
-> and publishes TestPyPI → PyPI via Trusted Publishing. **After it lands**, in
-> this order: re-pin `mcp-kitchen-sink==0.2.0` in the root `pyproject.toml`, then
-> re-record the demo fixtures against the published build
-> (`python scripts/record_demo_fixtures.py --force`), then re-run the demo job.
+> **Why the two had to move together.** `mylonite`'s `[demo]` extra pins an
+> exact version, and the demo's replay cache key folds in the tool schemas. The
+> demo fixtures were recorded against the 0.2.0 source, so while the pin still
+> named 0.1.0 anyone running `pip install "mylonite[demo]"` would have received
+> the 0.1.0 wheel and missed every fixture. CI's `demo` job installs the
+> published wheel precisely to catch that, and it was red until 0.2.0 shipped.
+> The root `pyproject.toml` now pins `mcp-kitchen-sink==0.2.0`.
 >
 > The base `pip install mylonite` is unaffected and **never** pulls this
 > deliberately-vulnerable agent — that invariant is preserved.
+
+## Releasing a new version
+
+```bash
+git tag ks-vX.Y.Z && git push origin ks-vX.Y.Z
+```
+
+`.github/workflows/release-kitchen-sink.yml` builds from this directory and
+publishes TestPyPI → PyPI via Trusted Publishing. It publishes irreversibly, so
+it is left to a maintainer rather than automated on merge. **Afterwards**, in
+this order: re-pin the exact version in the root `pyproject.toml`, re-record the
+demo fixtures if any tool name or description moved
+(`python scripts/record_demo_fixtures.py --force`), then confirm the `demo` job
+is green.
 
 ## Status (published 2026-08-05)
 
