@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"to\": \"ops@example.com\", \"subject\": \"Q3 status\", \"body\": \"All systems nominal.\"}",
+              "name": "send_email"
+            },
+            "id": "qZAIcrXKkPHIHORZjisbLk3wV9GIe4n4"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 39,
+    "completion_tokens_details": null,
+    "prompt_tokens": 478,
+    "prompt_tokens_details": null,
+    "total_tokens": 517
+  }
+}

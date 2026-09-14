@@ -1,0 +1,10 @@
+{
+  "cache_key_version": 2,
+  "iterations": 1,
+  "metamorphic_strategies": [
+    "paraphrase"
+  ],
+  "model": "ollama_chat/qwen3:4b-instruct-2507-q4_K_M",
+  "pattern_id": "indirect-injection-note-body-tool-chain",
+  "provider": "ollama"
+}

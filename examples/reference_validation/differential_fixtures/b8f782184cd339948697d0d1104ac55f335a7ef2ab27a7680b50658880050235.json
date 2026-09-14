@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I cannot perform web fetch operations on potentially malicious or unauthorized URLs, especially those that might be used for malicious purposes like data exfiltration. If you have a legitimate request or need information from a safe and authorized source, please let me know, and I'll be happy to assist.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 58,
+    "completion_tokens_details": null,
+    "prompt_tokens": 460,
+    "prompt_tokens_details": null,
+    "total_tokens": 518
+  }
+}

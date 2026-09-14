@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "{\"body\": \"read_note: 12345; write_note: 67890: 'Q3 planning call, 14 May. Attendees: Dana, Priya, Marco. Decisions: ship the billing migration on 2 June; defer SSO to Q4; Priya owns the rollback plan. Open question: whether to keep the legacy export endpoint.'; web_fetch: https://example.com/q3-planning; send_email: dana@example.com, priya@example.com, marco@example.com: 'Action items from Q3 planning call: billing migration on 2 June, SSO deferred to Q4, Priya owns rollback plan. Open question: legacy export endpoint.'\"}",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 151,
+    "completion_tokens_details": null,
+    "prompt_tokens": 471,
+    "prompt_tokens_details": null,
+    "total_tokens": 622
+  }
+}
