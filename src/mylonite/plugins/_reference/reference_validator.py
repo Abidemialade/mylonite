@@ -248,6 +248,14 @@ class _CustomRun:
     finding: bool
     effect_confirmed: str  # "true" | "false" | "unprobed" | "errored"
     response: Any
+    #: Whether this run POSITIVELY demonstrated resistance (`_resisted`, which
+    #: excludes an attempt that reached no verdict). Defaults False so an
+    #: unset construction is inconclusive rather than silently counted as a
+    #: control holding — the previous code derived the count as
+    #: `n - guard_fired`, which counted every `error` and `skipped_*` as
+    #: resistance and reported perfect control for a twin whose every run
+    #: errored.
+    resisted: bool = False
 
 
 @dataclass(frozen=True)
@@ -292,6 +300,7 @@ class DifferentialValidator(ValidatorBase):
         min_rate_gap: float = 0.5,
         min_vuln_rate: float = 0.4,
         max_guard_leak: float = 0.0,
+        min_guard_resist_rate: float = 0.6,
         provider: str = "anthropic",
         model: str = "claude-haiku-4-5-20251001",
         planner_model: str | None = None,
@@ -362,6 +371,15 @@ class DifferentialValidator(ValidatorBase):
         self._min_rate_gap = min_rate_gap
         self._min_vuln_rate = min_vuln_rate
         self._max_guard_leak = max_guard_leak
+        #: Fraction of iterations on which the guarded twin must have
+        #: POSITIVELY demonstrated resistance (a decided `no_finding`, not an
+        #: attempt that reached no verdict). A majority, matching
+        #: `metamorphic_robustness_threshold`'s rationale: one inconclusive
+        #: draw must not reject a genuine finding, but a guard that never
+        #: demonstrated anything is not a control. With `max_guard_leak=0.0`
+        #: this is exactly a cap on inconclusive guarded runs — at the default
+        #: 5 iterations, 3 must be decided and 2 may not be.
+        self._min_guard_resist_rate = min_guard_resist_rate
         self._provider = provider
         self._model = model
         # Role-separated models for the live differential (each defaults to model).
@@ -430,24 +448,51 @@ class DifferentialValidator(ValidatorBase):
         guard_fires = sum(1 for t in tallies if t.guard_fired)
         decision = self._decide(
             vuln_fires=vuln_fires,
+            guard_resists=guard_resists,
             guard_fires=guard_fires,
             iterations=self._iterations,
             min_rate_gap=self._min_rate_gap,
             min_vuln_rate=self._min_vuln_rate,
             max_guard_leak=self._max_guard_leak,
+            min_guard_resist_rate=self._min_guard_resist_rate,
         )
+        # A run that BOTH fired and resisted is the only kind that proves the
+        # differential on one paired observation — and it is the same
+        # precondition `_build_outcome` needs to record fixtures. Requiring it
+        # here is what makes `kept` and the artefact on disk incapable of
+        # disagreeing: without it the loop could report KEPT while
+        # `_canonical_run_index` found nothing to record and the build silently
+        # degraded to collect-only.
+        #
+        # Reference path only: `_run_iteration` drives both twins concurrently
+        # in ONE `run_twins`, so index i is a genuinely paired experiment. The
+        # custom path runs two independent sequential loops, where aligning
+        # index i of one with index i of the other would be an arbitrary pairing.
+        clean_runs = len(self._clean_run_indices(tallies))
         n = self._iterations
         vuln_rate = vuln_fires / n if n else 0.0
         guard_leak_rate = guard_fires / n if n else 0.0
         rate_gap = vuln_rate - guard_leak_rate
 
+        # An inconclusive guarded run is NOT a leak, so say so separately —
+        # otherwise a rejection for "the judge never decided" reads to an
+        # operator as "your guard failed", which is a different and much more
+        # alarming claim.
+        undecided = n - guard_resists - guard_fires
+        guard_evidence = (
+            f"guarded RESISTED {guard_resists}/{n} (need >= "
+            f"{self._min_guard_resist_rate:.0%}), leaked {guard_fires}/{n}, "
+            f"reached no verdict {undecided}/{n}"
+        )
+        differential_passed = decision.differential_passed and clean_runs > 0
+
         differential = ValidationOutcome(
             stage="differential",
-            passed=decision.differential_passed,
+            passed=differential_passed,
             detail=(
-                f"vulnerable fired the exploit {vuln_fires}/{n} ({vuln_rate:.0%}), "
-                f"guarded leaked {guard_fires}/{n} ({guard_leak_rate:.0%}); the test "
-                f"{'discriminates' if decision.differential_passed else 'does NOT discriminate'} "
+                f"vulnerable fired the exploit {vuln_fires}/{n} ({vuln_rate:.0%}); "
+                f"{guard_evidence}; {clean_runs}/{n} runs both fired and resisted; the test "
+                f"{'discriminates' if differential_passed else 'does NOT discriminate'} "
                 f"between the twins (strength={decision.differential_metric:.2f})"
             ),
             metric=decision.differential_metric,
@@ -457,8 +502,9 @@ class DifferentialValidator(ValidatorBase):
             passed=decision.flakiness_passed,
             detail=(
                 f"success-rate gap {rate_gap:+.0%} (vulnerable {vuln_rate:.0%} minus guarded "
-                f"{guard_leak_rate:.0%}); need gap >= {self._min_rate_gap:.0%}, vulnerable "
-                f">= {self._min_vuln_rate:.0%}, guard leak <= {self._max_guard_leak:.0%} "
+                f"{guard_leak_rate:.0%}); {guard_evidence}; need gap >= "
+                f"{self._min_rate_gap:.0%}, vulnerable >= {self._min_vuln_rate:.0%}, "
+                f"guard leak <= {self._max_guard_leak:.0%} "
                 f"({'significant' if decision.flakiness_passed else 'not significant'})"
             ),
             metric=decision.flakiness_metric,
@@ -644,13 +690,16 @@ class DifferentialValidator(ValidatorBase):
                     )
                 )
             guard_fired = sum(1 for r in guard_runs if r.finding)
+            guard_resisted_count = sum(1 for r in guard_runs if r.resisted)
             decision = self._decide(
                 vuln_fires=fired,
+                guard_resists=guard_resisted_count,
                 guard_fires=guard_fired,
                 iterations=n,
                 min_rate_gap=self._min_rate_gap,
                 min_vuln_rate=self._min_vuln_rate,
                 max_guard_leak=self._max_guard_leak,
+                min_guard_resist_rate=self._min_guard_resist_rate,
             )
             passed = decision.differential_passed and decision.flakiness_passed
             control = self._control_weakness or "boundary control"
@@ -708,7 +757,7 @@ class DifferentialValidator(ValidatorBase):
             repro = ReproducibilityEvidence(
                 iterations=n,
                 vuln_fired=fired,
-                guard_resisted=n - guard_fired,
+                guard_resisted=guard_resisted_count,
                 guard_fired=guard_fired,
                 rate_gap=rate_gap,
             )
@@ -791,8 +840,14 @@ class DifferentialValidator(ValidatorBase):
                 finding=True,
                 effect_confirmed=response.metadata.get("effect_confirmed", "unprobed"),
                 response=response,
+                resisted=False,
             )
-        return _CustomRun(finding=False, effect_confirmed="unprobed", response=None)
+        return _CustomRun(
+            finding=False,
+            effect_confirmed="unprobed",
+            response=None,
+            resisted=self._resisted(result, pattern_id),
+        )
 
     @staticmethod
     async def _judge_or_none(coro: Coroutine[Any, Any, Verdict]) -> Verdict | None:
@@ -858,11 +913,13 @@ class DifferentialValidator(ValidatorBase):
     def _decide(
         *,
         vuln_fires: int,
+        guard_resists: int,
         guard_fires: int,
         iterations: int,
         min_rate_gap: float,
         min_vuln_rate: float,
         max_guard_leak: float,
+        min_guard_resist_rate: float,
     ) -> _Decision:
         """Pure STATISTICAL decision over the differential tallies.
 
@@ -872,21 +929,41 @@ class DifferentialValidator(ValidatorBase):
         old "vulnerable fires ≥ N-1" gate did.
 
         * differential: the test discriminates *at all* — vulnerable fires
-          strictly more often than the guard leaks (gap > 0). Metric is the
-          discrimination strength ``(vuln_rate + (1 - guard_rate)) / 2`` ∈ [0,1].
+          strictly more often than the guard leaks (gap > 0) AND the guard
+          demonstrated resistance at least once. Metric is the discrimination
+          strength ``(vuln_rate + guard_resist_rate) / 2`` ∈ [0,1].
         * flakiness (significance): the gap is large and clean — gap ≥
           ``min_rate_gap`` AND vuln_rate ≥ ``min_vuln_rate`` AND guard leak ≤
-          ``max_guard_leak``. Metric is the rate gap itself, clamped to [0,1].
+          ``max_guard_leak`` AND the guard PROVED it resisted on at least
+          ``min_guard_resist_rate`` of runs. Metric is the rate gap itself.
+
+        ``guard_resists`` is the count of runs where the guarded twin
+        *positively demonstrated* resistance — ``_resisted``, which excludes an
+        attempt that reached no verdict. It is required, and keyword-only, on
+        purpose: it was previously computed by the caller and never passed here,
+        so "the guard leaked 0/5" and "the guard never decided anything 0/5"
+        were the same number to this function and both were KEPT. A default
+        value is exactly how that hole would silently re-open.
+
+        Both new conditions state the same principle the rest of this codebase
+        already enforces: **absence of failure is not proof of resistance.**
+        Because ``max_guard_leak`` forces ``guard_fires == 0`` in practice,
+        ``min_guard_resist_rate`` is precisely a cap on *inconclusive* guarded
+        runs — a majority must have been decided, and a minority may not have.
         """
         n = max(1, iterations)
         vuln_rate = vuln_fires / n
         guard_rate = guard_fires / n
+        guard_resist_rate = guard_resists / n
         gap = vuln_rate - guard_rate
 
-        differential_passed = gap > 0.0
-        differential_metric = max(0.0, min(1.0, (vuln_rate + (1.0 - guard_rate)) / 2.0))
+        differential_passed = gap > 0.0 and guard_resists > 0
+        differential_metric = max(0.0, min(1.0, (vuln_rate + guard_resist_rate) / 2.0))
         flakiness_passed = (
-            gap >= min_rate_gap and vuln_rate >= min_vuln_rate and guard_rate <= max_guard_leak
+            gap >= min_rate_gap
+            and vuln_rate >= min_vuln_rate
+            and guard_rate <= max_guard_leak
+            and guard_resist_rate >= min_guard_resist_rate
         )
         flakiness_metric = max(0.0, min(1.0, gap))
         return _Decision(
@@ -1287,16 +1364,26 @@ class DifferentialValidator(ValidatorBase):
         )
 
     @staticmethod
+    def _clean_run_indices(tallies: list[_IterationTally]) -> list[int]:
+        """Indices of every iteration that BOTH fired and resisted.
+
+        A "clean" run is one paired observation that proves the differential on
+        its own: the attack landed on the vulnerable twin AND the guarded twin
+        positively demonstrated resistance (``_resisted``, which excludes an
+        attempt that reached no verdict). Both the differential gate and
+        fixture recording key on this, so they cannot disagree.
+        """
+        return [i for i, t in enumerate(tallies) if t.vuln_fired and t.guard_resisted]
+
+    @staticmethod
     def _canonical_run_index(tallies: list[_IterationTally]) -> int | None:
         """Index of the FIRST iteration that BOTH fired and resisted (D4), or None.
 
         That clean, discriminating run is the canonical reproduction worth
         recording. If none qualifies (flaky / failed loop), recording is skipped.
         """
-        for i, tally in enumerate(tallies):
-            if tally.vuln_fired and tally.guard_resisted:
-                return i
-        return None
+        indices = DifferentialValidator._clean_run_indices(tallies)
+        return indices[0] if indices else None
 
     def _collect_only_outcome(self, test: GeneratedTest, *, suffix: str = "") -> ValidationOutcome:
         """Collect-only build: assert the emitted source collects under pytest."""

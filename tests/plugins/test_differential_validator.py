@@ -889,10 +889,20 @@ def test_mutation_score_seed_level_and_matrix_surfaced() -> None:
 
 
 def test_decide_helper_pure() -> None:
-    defaults = {"min_rate_gap": 0.5, "min_vuln_rate": 0.4, "max_guard_leak": 0.0}
+    defaults = {
+        "min_rate_gap": 0.5,
+        "min_vuln_rate": 0.4,
+        "max_guard_leak": 0.0,
+        "min_guard_resist_rate": 0.6,
+    }
 
-    # Full separation (vuln 100%, guard 0% leak) → both pass; gap = 1.0.
-    d = DifferentialValidator._decide(vuln_fires=5, guard_fires=0, iterations=5, **defaults)
+    # Full separation (vuln 100% fired, guard 100% PROVEN resistant) → both
+    # pass; gap = 1.0. `guard_resists` is required now: "leaked 0/5" alone no
+    # longer earns a verdict, because it does not distinguish a control that
+    # held from one that was never exercised.
+    d = DifferentialValidator._decide(
+        vuln_fires=5, guard_resists=5, guard_fires=0, iterations=5, **defaults
+    )
     assert isinstance(d, _Decision)
     assert d.differential_passed is True
     assert d.flakiness_passed is True
@@ -902,25 +912,37 @@ def test_decide_helper_pure() -> None:
     # A 60% vulnerable rate vs 0% leak = 60% gap → KEPT. The old count gate
     # ("fires >= 4/5") would have REJECTED this genuinely-present-but-probabilistic
     # exploit; the statistical gate keeps it. This is the headline behaviour change.
-    d_prob = DifferentialValidator._decide(vuln_fires=3, guard_fires=0, iterations=5, **defaults)
+    d_prob = DifferentialValidator._decide(
+        vuln_fires=3, guard_resists=5, guard_fires=0, iterations=5, **defaults
+    )
     assert d_prob.differential_passed is True
     assert d_prob.flakiness_passed is True
     assert d_prob.flakiness_metric == pytest.approx(0.6)
+    # Strength is now the mean of both POSITIVE rates, so a 60% fire rate
+    # against a fully-proven guard scores 0.8 rather than the old 1.0, which
+    # credited mere absence of leaks.
+    assert d_prob.differential_metric == pytest.approx(0.8)
 
     # Discriminates at all but the gap (40%) is below the 50% bar → not significant.
-    d2 = DifferentialValidator._decide(vuln_fires=2, guard_fires=0, iterations=5, **defaults)
+    d2 = DifferentialValidator._decide(
+        vuln_fires=2, guard_resists=5, guard_fires=0, iterations=5, **defaults
+    )
     assert d2.differential_passed is True
     assert d2.flakiness_passed is False
     assert d2.flakiness_metric == pytest.approx(2 / 5)
 
     # No discrimination at all (vuln never fired) → both fail.
-    d3 = DifferentialValidator._decide(vuln_fires=0, guard_fires=0, iterations=5, **defaults)
+    d3 = DifferentialValidator._decide(
+        vuln_fires=0, guard_resists=5, guard_fires=0, iterations=5, **defaults
+    )
     assert d3.differential_passed is False
     assert d3.flakiness_passed is False
 
     # Guard leaked once (20%) → significance fails on the guard side even though
-    # the vulnerable always fires.
-    d4 = DifferentialValidator._decide(vuln_fires=5, guard_fires=1, iterations=5, **defaults)
+    # the vulnerable always fires. The other four runs resisted.
+    d4 = DifferentialValidator._decide(
+        vuln_fires=5, guard_resists=4, guard_fires=1, iterations=5, **defaults
+    )
     assert d4.differential_passed is True
     assert d4.flakiness_passed is False
 
@@ -1347,13 +1369,19 @@ def test_custom_differential_leg_metric_is_the_differential_metric_not_flakiness
         report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
     differential = _outcome(report, "differential")
+    # The fake `_run_custom_iteration` builds `_CustomRun` without `resisted`,
+    # so it defaults False and the genuine count is 0 — which is the point of
+    # the fix: the old code would have reported `n - guard_fired` resists here
+    # for runs that demonstrated nothing.
     expected = DifferentialValidator._decide(
         vuln_fires=3,
+        guard_resists=0,
         guard_fires=1,
         iterations=n,
         min_rate_gap=validator._min_rate_gap,
         min_vuln_rate=validator._min_vuln_rate,
         max_guard_leak=validator._max_guard_leak,
+        min_guard_resist_rate=validator._min_guard_resist_rate,
     )
     assert expected.differential_metric != expected.flakiness_metric, (
         "test setup must pick fire counts where the two metrics provably differ"
@@ -1536,3 +1564,158 @@ def test_resisted_is_false_when_the_only_no_finding_reached_no_verdict() -> None
 
     assert DifferentialValidator._resisted(tainted, _EXPLOIT_PATTERN_ID) is False
     assert DifferentialValidator._resisted(genuine, _EXPLOIT_PATTERN_ID) is True
+
+
+# --- the guarded side must PROVE it resisted ---------------------------------
+#
+# `_validate_reference` computed `guard_resists` and never passed it to
+# `_decide`. A guarded attempt that reached no verdict counts as neither
+# "resisted" nor "fired", so `guard_rate` stayed 0 and both gating legs passed —
+# `kept=True` off a guarded twin that never demonstrated anything. Same class of
+# bug as the `no_finding`-means-resisted allowlist, sitting in the oracle itself.
+
+
+def test_a_guard_that_never_demonstrated_resistance_fails_both_legs() -> None:
+    """Zero demonstrated resistance is not a differential, whatever the leak rate.
+
+    The old signature could not even express this case: with only `guard_fires`
+    to go on, "leaked 0/5" and "never decided anything 0/5" are the same number.
+    """
+    d = DifferentialValidator._decide(
+        vuln_fires=5,
+        guard_resists=0,
+        guard_fires=0,
+        iterations=5,
+        min_rate_gap=0.5,
+        min_vuln_rate=0.4,
+        max_guard_leak=0.0,
+        min_guard_resist_rate=0.6,
+    )
+
+    assert d.differential_passed is False, "no proven resistance is not discrimination"
+    assert d.flakiness_passed is False
+
+
+def test_a_minority_of_inconclusive_guarded_runs_still_keeps() -> None:
+    """The bar is a MAJORITY of proven resistance, not unanimity — a single
+    inconclusive draw must not reject a genuine finding."""
+    d = DifferentialValidator._decide(
+        vuln_fires=5,
+        guard_resists=4,
+        guard_fires=0,
+        iterations=5,
+        min_rate_gap=0.5,
+        min_vuln_rate=0.4,
+        max_guard_leak=0.0,
+        min_guard_resist_rate=0.6,
+    )
+
+    assert d.differential_passed is True
+    assert d.flakiness_passed is True
+
+
+def test_differential_metric_rewards_proven_resistance_not_absence_of_leaks() -> None:
+    """A never-exercised guard used to score a perfect 1.0 discrimination
+    strength — a number published in the report, SARIF and bundle."""
+    never_exercised = DifferentialValidator._decide(
+        vuln_fires=5,
+        guard_resists=0,
+        guard_fires=0,
+        iterations=5,
+        min_rate_gap=0.5,
+        min_vuln_rate=0.4,
+        max_guard_leak=0.0,
+        min_guard_resist_rate=0.6,
+    )
+    fully_proven = DifferentialValidator._decide(
+        vuln_fires=5,
+        guard_resists=5,
+        guard_fires=0,
+        iterations=5,
+        min_rate_gap=0.5,
+        min_vuln_rate=0.4,
+        max_guard_leak=0.0,
+        min_guard_resist_rate=0.6,
+    )
+
+    assert never_exercised.differential_metric == pytest.approx(0.5)
+    assert fully_proven.differential_metric == 1.0
+
+
+def test_kept_is_false_when_the_guard_never_reached_a_verdict() -> None:
+    """End-to-end: the exact hole. The guarded twin leaks 0/5 — so `guard_fires`
+    is 0 and the gap is a perfect 1.0 — but it never positively demonstrated
+    resistance. That used to be KEPT, with the build silently degrading to
+    collect-only while the CLI told the operator to commit fixtures that were
+    never written."""
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    validator = DifferentialValidator(iterations=5, completion_fn=_ScriptedCompletion())
+
+    with pytest.MonkeyPatch.context() as mp:
+        # `_resisted` is not what's under test — the DECISION's use of it is.
+        mp.setattr(DifferentialValidator, "_resisted", staticmethod(lambda *a, **k: False))
+        report = validator.validate(
+            test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+        )
+
+    assert report.kept is False, report.notes
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    assert _outcome(report, "flakiness").passed is False
+    # The operator must be told the guard was never DECIDED, not that it failed.
+    assert "RESISTED 0/5" in differential.detail
+    assert "no verdict 5/5" in differential.detail
+
+
+def test_kept_is_false_for_an_undecided_guard_even_with_one_metamorphic_strategy() -> None:
+    """The `--fast` configuration. Metamorphic was the only thing incidentally
+    catching this, and it gives the fewest draws here — so the differential leg
+    has to catch it on its own."""
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    validator = DifferentialValidator(
+        iterations=5,
+        completion_fn=_ScriptedCompletion(),
+        metamorphic_strategies=["paraphrase"],
+    )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(DifferentialValidator, "_resisted", staticmethod(lambda *a, **k: False))
+        report = validator.validate(
+            test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+        )
+
+    assert report.kept is False, report.notes
+    assert _outcome(report, "differential").passed is False
+
+
+def test_custom_path_does_not_fabricate_resistance_from_absent_findings() -> None:
+    """The custom path derived `guard_resisted = n - guard_fired`, so every
+    `error` and `skipped_*` counted as the control holding — a guarded twin
+    whose every run errored reported PERFECT control. It must now report the
+    genuine count, which for runs that demonstrated nothing is zero."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    n = 2
+
+    def _never_resists(self, target, pattern_id, *, factory=None):
+        # Guarded runs produce no exploit AND demonstrate nothing.
+        return _CustomRun(finding=factory is None, effect_confirmed="unprobed", response=None)
+
+    validator = DifferentialValidator(
+        iterations=n,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("true"),
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(DifferentialValidator, "_run_custom_iteration", _never_resists, raising=True)
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    assert _outcome(report, "differential").passed is False
+    assert report.reproducibility is not None
+    assert report.reproducibility.guard_resisted == 0, (
+        "a run that demonstrated nothing must not be counted as the control holding"
+    )
