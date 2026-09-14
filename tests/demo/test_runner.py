@@ -301,8 +301,8 @@ async def test_live_model_only_override_derives_the_provider_from_the_prefix(
     # vs /api/generate) and `docs/self-hosted-models.md` tells users to prefer
     # the former for tool-calling. Reporting the route actually taken is the
     # point of this fix, so it must not be normalised away.
-    assert {c["provider"] for c in captured} == {"ollama_chat"}
-    assert result.provider == "ollama_chat"
+    assert {c["provider"] for c in captured} == {"ollama"}
+    assert result.provider == "ollama"
     assert "ollama_chat/" in result.mode
 
 
