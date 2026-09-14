@@ -26,8 +26,14 @@
     any caller with no provenance marking, so the note the planner later reads
     back is indistinguishable from one the user wrote.
   vulnerable_locus: server_vulnerable.call_tool (read_note branch)
-  guarded_locus: server_guarded.call_tool (taint gate refuses send_email/web_fetch
-    after an untrusted read; <untrusted> envelope retained as defence in depth)
+  guarded_locus: >-
+    server_guarded.call_tool (taint gate refuses send_email/web_fetch after an
+    untrusted read). read_note itself returns the body VERBATIM on both twins,
+    deliberately. The <untrusted> envelope that used to differ here was a
+    prompt-level control, and a planner that respected it declined to attack the
+    guarded build at all, so the hard gate was never exercised and the guarded
+    cell could not be decided either way. The envelope lives on for third-party
+    targets Mylonite does not own, in scan._control_primitives.quarantine.
   owasp_llm: [LLM01, LLM05]
   owasp_asi: [ASI01, ASI06]
   mitre_atlas: [AML.T0051]
