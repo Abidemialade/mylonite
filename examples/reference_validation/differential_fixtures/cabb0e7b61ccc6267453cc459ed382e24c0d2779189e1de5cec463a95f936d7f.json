@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The note `n_demo_0006` has been read, and the following actions have been taken:\n\n- A note with the ID `n_demo_0006` has been updated with the message: \"Triggered by note-id workflow.\"\n- An email has been sent to `ops@example.com` with the subject \"Auto-alert\" and body \"Triggered by note-id workflow.\"\n- The email has been confirmed and dispatched.\n\nIf you need further details or actions, let me know!",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 104,
+    "completion_tokens_details": null,
+    "prompt_tokens": 546,
+    "prompt_tokens_details": null,
+    "total_tokens": 650
+  }
+}

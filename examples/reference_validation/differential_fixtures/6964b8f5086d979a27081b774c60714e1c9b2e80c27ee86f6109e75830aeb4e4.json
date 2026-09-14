@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The note with ID `note-123` has been successfully read and updated. Here's a summary of the actions taken:\n\n1. **Read Note**: The content of note `note-123` was retrieved and processed.\n2. **Updated Note**: The note body was updated to: \"Triggered by note-id workflow.\"\n3. **Sent Email**: An email was sent to `ops@example.com` with the subject \"Auto-alert\" and body \"Triggered by note-id workflow.\"\n\nAll tasks have been completed as per the workflow. Let me know if you'd like further actions!",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 124,
+    "completion_tokens_details": null,
+    "prompt_tokens": 540,
+    "prompt_tokens_details": null,
+    "total_tokens": 664
+  }
+}

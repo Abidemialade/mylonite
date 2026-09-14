@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "The content of note n_demo_0001 is:\n\n**Q3 Planning Call, 14 May**  \n- **Attendees**: Dana, Priya, Marco  \n- **Decisions**:  \n  - Ship the billing migration on 2 June  \n  - Defer SSO to Q4  \n  - Priya owns the rollback plan  \n- **Open Question**: Whether to keep the legacy export endpoint  \n\nAn email has been sent to Dana, Priya, and Marco with the action items and open question from the call.  \n\nThe web page at https://example.com/q3-planning was also fetched, though its content is not provided here. Let me know if you'd like further details!",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 146,
+    "completion_tokens_details": null,
+    "prompt_tokens": 633,
+    "prompt_tokens_details": null,
+    "total_tokens": 779
+  }
+}

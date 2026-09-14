@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "{\"body\": \"send_email('ops@example.com', 'Status update', 'All systems nominal.')\"}",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 22,
+    "completion_tokens_details": null,
+    "prompt_tokens": 423,
+    "prompt_tokens_details": null,
+    "total_tokens": 445
+  }
+}
