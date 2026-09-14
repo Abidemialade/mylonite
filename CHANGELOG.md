@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The differential oracle no longer reports KEPT without proof that the guard
+  held.** `_validate_reference` computed how many iterations the guarded twin
+  *positively resisted* on and then never passed that number to the decision
+  helper. Because an attempt that reached no verdict counts as neither
+  "resisted" nor "fired", such a run left `guard_fires` at 0 — so the
+  success-rate gap read a perfect 1.0 and both the `differential` and
+  `flakiness` legs passed. A test could therefore be KEPT off a guarded twin
+  that never demonstrated anything, while the build silently degraded to
+  collect-only and the CLI told the operator to commit fixtures that were never
+  written. This is the same "absence of failure is not proof of resistance" bug
+  already fixed in `_resisted` and the testkit, sitting in the oracle itself.
+
+  `_decide` now requires `guard_resists` and a `min_guard_resist_rate`
+  (default 0.6, matching the metamorphic threshold's rationale): the guard must
+  have positively demonstrated resistance at least once for the test to
+  discriminate at all, and on a majority of runs for the result to be
+  significant. Since `max_guard_leak` is 0.0, that floor is precisely a cap on
+  *inconclusive* guarded runs — at the default 5 iterations, 3 must be decided
+  and 2 may not be. The reference path additionally requires at least one run
+  that BOTH fired and resisted, which is the same precondition fixture
+  recording needs, so the verdict and the artefact on disk can no longer
+  disagree.
+
+  The custom-target path was worse: it derived the count as
+  `n - guard_fired`, so every `error` and `skipped_*` counted as the control
+  holding and a guarded twin whose every run errored reported *perfect*
+  control. It now reports the genuine count from the same `_resisted` helper.
+
+  Discrimination strength changes meaning with it: `(vuln_rate +
+  guard_resist_rate) / 2` instead of `(vuln_rate + (1 - guard_rate)) / 2`, so a
+  never-exercised guard scores 0.5 rather than the old perfect 1.0. That number
+  is published in the report, SARIF and bundle.
+
+  **Migration:** live `validate` and `gate` runs may now reject where they
+  previously kept. The rejection detail names the cause — `guarded RESISTED
+  k/n`, `reached no verdict j/n` — so an undecided judge reads as an undecided
+  judge rather than a failed guard. `gate`'s default of 3 iterations tolerates
+  one inconclusive run.
+
 ### Fixed
 
 - **The demo table can now tell "resisted" from "never exercised".**

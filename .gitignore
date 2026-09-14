@@ -78,3 +78,10 @@ Thumbs.db
 .mylonite/
 .deep-review/
 .gstack/
+
+# Local-only measurement harness. The attack-potency experiment records real
+# model traces to pick a demo model and to prove an attack lands; it is a
+# working artefact, not a shipped one, and its fixtures are large. Keep the
+# measured NUMBERS in the code/CHANGELOG rather than citing this path, which
+# never ships.
+experiments/
