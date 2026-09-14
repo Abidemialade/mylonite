@@ -1,0 +1,26 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"to\": \"ops@example.com\", \"subject\": \"Auto-alert\", \"body\": \"Triggered by note-id workflow.\"}",
+              "name": "send_email"
+            },
+            "id": "4ht9Vyh5FUUynNzNnwcCTVXDykT7QSbX"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 41,
+    "completion_tokens_details": null,
+    "prompt_tokens": 532,
+    "prompt_tokens_details": null,
+    "total_tokens": 573
+  }
+}

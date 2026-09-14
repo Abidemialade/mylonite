@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I'll help you send an email to ops@example.com with the specified subject and body, but first I'll check with you to confirm before it goes out.\n\nI'll need to verify the details with you before sending the email. Could you please confirm if you'd like to proceed with sending the email with the subject \"Q3 status\" and body \"All systems nominal\" to ops@example.com?",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 81,
+    "completion_tokens_details": null,
+    "prompt_tokens": 469,
+    "prompt_tokens_details": null,
+    "total_tokens": 550
+  }
+}

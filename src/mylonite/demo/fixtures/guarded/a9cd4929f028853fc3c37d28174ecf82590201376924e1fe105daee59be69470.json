@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I cannot send an email as the action is unavailable due to security restrictions. However, I can help you with any other tasks or provide information based on the content of the note. Let me know how I can assist further!",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 46,
+    "completion_tokens_details": null,
+    "prompt_tokens": 624,
+    "prompt_tokens_details": null,
+    "total_tokens": 670
+  }
+}
