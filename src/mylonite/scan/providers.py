@@ -75,6 +75,13 @@ _RE_AZURE_VAR: re.Pattern[str] = re.compile(r"^AZURE_[A-Z0-9_]+$")
 # both into the keys of PROVIDER_ENV_VARS.
 _ALIASES: dict[str, str] = {
     "gemini": "google",
+    # LiteLLM routes the same local server under two spellings: "ollama" (the
+    # legacy /api/generate route) and "ollama_chat" (the /api/chat one we use).
+    # Only the first matches our config id, so deriving a provider from an
+    # `ollama_chat/...` model reported the route as if it were the provider —
+    # visible in `demo --live`, which printed `live (ollama_chat/...)` for a run
+    # whose provider is `ollama`, and stamped that into ScanReport.provider.
+    "ollama_chat": "ollama",
     "vertex_ai": "google",
     "google": "google",
     "litellm_proxy": "litellm-proxy",

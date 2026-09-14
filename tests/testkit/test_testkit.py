@@ -584,3 +584,88 @@ def test_guard_holds_refuses_to_pass_when_the_judge_never_reached_a_verdict() ->
     assert "unparseable_output" in message
     # Must NOT send the reader hunting for a fixture bug that isn't there.
     assert "replay/fixture problem" not in message
+
+
+# --- the provider comes from the sidecar, not from a hardcoded vendor --------
+#
+# `assert_guard_holds` read `model` from the sidecar and then passed
+# provider="anthropic" unconditionally. The provider is not part of the replay
+# cache key (only api_base is), so the replay still worked — but every committed
+# report and every ExecContext produced from an artefact recorded elsewhere
+# carried a provider that had nothing to do with the run. For a committed proof
+# whose whole value is its provenance, that is the defect.
+
+
+class _CapturedProvider(Exception):
+    """Carries the provider `assert_guard_holds` resolved, out of the scan call."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider)
+        self.provider = provider
+
+
+def _capture_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _spy(_exploit: Any, *, completion_fn: Any, provider: str, model: str) -> Any:
+        raise _CapturedProvider(provider)
+
+    monkeypatch.setattr(testkit, "_run_guarded_scan", _spy)
+
+
+def _sidecar(tmp_path: Path, **extra: Any) -> Path:
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({"format_version": 2, "pattern_id": _PATTERN_ID, **extra}),
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_provider_is_read_from_the_sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _capture_provider(monkeypatch)
+    fixtures = _sidecar(tmp_path, model="ollama_chat/some-model", provider="ollama")
+
+    with pytest.raises(_CapturedProvider) as excinfo:
+        assert_guard_holds(_exploit(), fixtures_dir=fixtures)
+
+    assert excinfo.value.provider == "ollama"
+
+
+def test_provider_falls_back_to_the_model_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An artefact recorded before the sidecar carried a provider. Deriving it
+    from what was actually recorded beats asserting a vendor."""
+    _capture_provider(monkeypatch)
+    fixtures = _sidecar(tmp_path, model="ollama_chat/some-model")
+
+    with pytest.raises(_CapturedProvider) as excinfo:
+        assert_guard_holds(_exploit(), fixtures_dir=fixtures)
+
+    assert excinfo.value.provider == "ollama"
+
+
+def test_provider_is_unknown_when_it_cannot_be_determined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No sidecar provider and an unprefixed, unrecognised model: say so rather
+    than name a vendor that may have had nothing to do with the run."""
+    _capture_provider(monkeypatch)
+    fixtures = _sidecar(tmp_path, model="not-a-real-model-name")
+
+    with pytest.raises(_CapturedProvider) as excinfo:
+        assert_guard_holds(_exploit(), fixtures_dir=fixtures)
+
+    assert excinfo.value.provider == "unknown"
+
+
+def test_an_explicit_sidecar_provider_wins_over_the_model_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A proxy or gateway run: the route says one thing, the recording says what
+    actually served it. The recording wins."""
+    _capture_provider(monkeypatch)
+    fixtures = _sidecar(tmp_path, model="openai/gpt-4o-mini", provider="litellm-proxy")
+
+    with pytest.raises(_CapturedProvider) as excinfo:
+        assert_guard_holds(_exploit(), fixtures_dir=fixtures)
+
+    assert excinfo.value.provider == "litellm-proxy"

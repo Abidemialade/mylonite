@@ -68,6 +68,7 @@ from mylonite.scan.coverage import attempt_reached_no_verdict, no_verdict_causes
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.llm_types import CompletionFn
+from mylonite.scan.providers import provider_from_model
 from mylonite.scan.wiring import build_scan, note_id_counter
 
 #: On-disk format version for a ``fixtures_dir`` sidecar (``_meta.json``). Bumped
@@ -674,6 +675,18 @@ def assert_guard_holds(
     fixtures_path = Path(fixtures_dir)
     meta = _read_meta(fixtures_path)
     model = str(meta.get("model", "")) or "unknown"
+    # Read the provider from the sidecar too, rather than naming one. This used
+    # to pass provider="anthropic" unconditionally while reading `model` from
+    # the sidecar, so an artefact recorded against any other provider stamped a
+    # false provenance into the committed report and every ExecContext in it.
+    # The provider is not part of the replay cache key (only api_base is), so
+    # this was never a correctness problem for the replay itself — purely a
+    # truthfulness one, which is the whole point of a committed proof.
+    #
+    # Falls back to the model's own provider prefix ("ollama_chat/..." ->
+    # "ollama") before "unknown": deriving it from what was actually recorded
+    # beats asserting a vendor that may have had nothing to do with the run.
+    provider = str(meta.get("provider", "")) or provider_from_model(model) or "unknown"
 
     recorder = LiteLLMRecorder(
         fixtures_path,
@@ -684,7 +697,7 @@ def assert_guard_holds(
         _run_guarded_scan(
             exploit,
             completion_fn=recorder,
-            provider="anthropic",
+            provider=provider,
             model=model,
         )
     )
