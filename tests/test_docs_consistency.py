@@ -316,10 +316,10 @@ def test_record_script_does_not_promise_a_ci_guard_that_does_not_exist() -> None
 # verbatim got a usage error at exactly the point they were furthest from a
 # working Layer 1 run.
 #
-# The machinery above already proves every backtick-quoted `mylonite ...`
-# example in a CLI epilog or under docs/ parses against the real CLI. It just
-# was not pointed at verification/, which prints operator-facing invocations of
-# its own — the same drift class, in a directory the guard did not cover.
+# The machinery above parses every backtick-quoted `mylonite ...` example in a
+# CLI epilog against the real CLI. `verification/` prints operator-facing
+# invocations of its own, and README.md and docs/ carry the examples a reader is
+# most likely to copy; all three are covered below.
 
 _VERIFICATION_DIR = _REPO_ROOT / "verification"
 
@@ -369,4 +369,205 @@ def test_verification_runner_no_longer_advertises_a_json_flag() -> None:
     assert "scan --target-file <t> --json" not in source, (
         "the unparseable `mylonite scan ... --json <report>` instruction is back; "
         "scan writes into --output-dir and the Layer 1 scorer globs {family}*.json"
+    )
+
+
+# --- README.md and docs/ examples parse against the real CLI -----------------
+#
+# The epilog guard above covers examples embedded in `--help` output. The
+# examples a reader is most likely to copy live in README.md and under docs/,
+# and nothing parsed those: a renamed or removed flag could ship with the
+# quickstart still advertising it. A README audit found several such drifts, all
+# outside the guard's reach.
+
+_README = _REPO_ROOT / "README.md"
+
+#: Fenced-block languages that hold shell commands worth checking.
+_SHELL_FENCES = ("bash", "sh", "shell", "console")
+
+
+def _markdown_mylonite_examples() -> list[tuple[str, str]]:
+    """Every `mylonite ...` invocation in README.md and docs/, as (where, cmd).
+
+    Collects both backtick-quoted spans and lines inside shell fences. Skips
+    `docs/superpowers/` (local working notes, not published) and `docs/reviews/`
+    (point-in-time records that intentionally quote historical commands).
+    """
+    sources = [_README, *sorted(_DOCS_DIR.rglob("*.md"))]
+    found: list[tuple[str, str]] = []
+    for path in sources:
+        parts = path.parts
+        if "superpowers" in parts or "reviews" in parts:
+            continue
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+
+        for match in _BACKTICK_MYLONITE_RE.finditer(text):
+            found.append((rel, match.group(1).strip()))
+
+        in_shell = False
+        for raw in text.splitlines():
+            stripped = raw.strip()
+            if stripped.startswith("```"):
+                lang = stripped[3:].strip().lower()
+                in_shell = bool(lang) and lang in _SHELL_FENCES
+                continue
+            if in_shell and stripped.startswith("mylonite "):
+                # Drop a trailing `# comment`, which these examples use heavily.
+                command = stripped.split("#", 1)[0].strip()
+                found.append((rel, command))
+    return found
+
+
+#: Characters `shlex` can split and Click can bind. A `$VAR`, a pipe or a
+#: redirect means the line is a shell snippet rather than a single invocation,
+#: and parsing it as one would fail for the wrong reason.
+_PARSEABLE_EXAMPLE = re.compile(r"^[A-Za-z0-9 _\-./:@=,\"'<>\[\]{}*]+$")
+
+#: Documentation templates rather than invocations: `mylonite COMMAND --help`,
+#: `--target-file <path>`, `{version}`. Parsing these tells us nothing about
+#: drift, because the placeholder is not meant to be a real token.
+#: Commands that no longer exist and that the docs may still name on purpose, to
+#: tell a reader where the functionality went. `cli-reference.md` carries such a
+#: note for `init-target`, which became `scan --scaffold`. A migration note is
+#: good documentation, so the guard must not treat it as drift — but it is listed
+#: here explicitly, so a doc cannot quietly reference a removed command without
+#: someone adding it to this set.
+_GENERATED_DIR_RE = re.compile(r"\.mylonite[/\\]generated[/\\]([A-Za-z0-9_\-]+)")
+
+_RETIRED_COMMANDS = frozenset({"init-target", "export", "doctor", "taxonomy"})
+
+_TEMPLATE_PLACEHOLDER = re.compile(r"<[^>]*>|\{[^}]*\}|\b[A-Z][A-Z_]{1,}\b")
+
+
+def _assert_command_exists(location: str, example: str) -> None:
+    """Resolve `example` down to a real Click command without binding arguments.
+
+    For a bare reference like `` `mylonite validate` `` in a command table, the
+    claim being made is that the command exists — not that the bare form is a
+    runnable invocation. `make_context` would reject it for a missing required
+    argument, which says nothing about drift.
+    """
+    tokens = shlex.split(example)[1:]
+    cmd = _click_command_tree()
+    consumed: list[str] = []
+    while tokens and getattr(cmd, "commands", None):
+        name = tokens.pop(0)
+        sub = cmd.commands.get(name)
+        if sub is None:
+            pytest.fail(
+                f"{location}: {example!r} — {name!r} is not a known subcommand under "
+                f"{'mylonite ' + ' '.join(consumed) if consumed else 'mylonite'} "
+                f"(known: {sorted(cmd.commands)})"
+            )
+        consumed.append(name)
+        cmd = sub
+    assert consumed, f"{location}: {example!r} names no subcommand"
+
+
+def _assert_markdown_example(location: str, example: str) -> None:
+    """Prove `example` names a real command and only real options.
+
+    Prose in these files references flags without values (`` `mylonite gate
+    --authorize` ``) and commands without their required argument. Click tells
+    the two cases apart for us: an unrecognised flag raises "No such option",
+    while a recognised one missing its value raises "requires an argument", and
+    an omitted positional raises "Missing parameter". The last two prove the flag
+    or command exists, which is the drift this guard is for; only the first is a
+    failure.
+    """
+    try:
+        _assert_example_parses(location, example)
+    except BaseException as exc:  # pytest.fail raises Failed, not Exception
+        message = str(exc)
+        tolerated = ("requires an argument", "Missing parameter", "Missing argument")
+        if any(hint in message for hint in tolerated):
+            return
+        raise
+
+
+def test_markdown_mylonite_examples_parse() -> None:
+    """Every `mylonite ...` example in README.md and docs/ must resolve against the
+    CURRENT CLI — the drift class a docs audit found repeatedly.
+
+    An example carrying arguments is parsed in full, so a renamed or removed flag
+    fails. A bare `mylonite <command>` reference is only resolved to its command,
+    since a command table is naming the command, not demonstrating a run.
+    """
+    examples = _markdown_mylonite_examples()
+    assert len(examples) >= 20, (
+        f"collected only {len(examples)} `mylonite ...` examples from README.md and "
+        "docs/; the collector has drifted and this guard is going vacuous"
+    )
+    checked_with_args = 0
+    for location, example in examples:
+        if not _PARSEABLE_EXAMPLE.match(example):
+            continue  # a shell snippet, not a single invocation
+        if _TEMPLATE_PLACEHOLDER.search(example):
+            continue  # a documentation template, not an invocation
+        tokens = shlex.split(example)[1:]
+        if tokens and tokens[0] in _RETIRED_COMMANDS:
+            continue  # a documented migration note, not a live invocation
+        if len(tokens) == 1 and not tokens[0].startswith("-"):
+            _assert_command_exists(location, example)
+            continue
+        _assert_markdown_example(location, example)
+        checked_with_args += 1
+    assert checked_with_args >= 10, (
+        f"only {checked_with_args} example(s) with arguments were checked; the "
+        "flag-drift half of this guard is going vacuous"
+    )
+
+
+def test_documented_generated_dirs_match_the_real_slug() -> None:
+    """A `.mylonite/generated/<slug>` path that names a seed must equal what
+    `generate` actually writes.
+
+    `generate` slugifies a pattern id by mapping every non-alphanumeric character
+    to `_`. The quickstart documented the hyphenated pattern id instead, so its
+    third command failed with "path not found" — the headline three-command flow,
+    broken by a character. Parsing alone could not catch it: the command parses
+    fine, the *value* was wrong.
+
+    Only a path naming a SEED is checkable. `--out` takes an arbitrary directory
+    name, and `cli-reference.md` rightly shows `generated/my-finding` for it, so
+    flagging every hyphen would be a false positive.
+    """
+    from mylonite.cli import _slugify_pattern
+    from mylonite.scan.seeds import SEED_CATALOGUE
+
+    pattern_ids = {seed.pattern_id for seed in SEED_CATALOGUE}
+    offenders: list[str] = []
+    for path in [_README, *sorted(_DOCS_DIR.rglob("*.md"))]:
+        if "superpowers" in path.parts:
+            continue
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        for match in _GENERATED_DIR_RE.finditer(path.read_text(encoding="utf-8")):
+            slug = match.group(1)
+            if slug in pattern_ids and slug != _slugify_pattern(slug):
+                offenders.append(f"{rel}: {slug!r} -> should be {_slugify_pattern(slug)!r}")
+
+    assert not offenders, "documented generated/ paths that `generate` never writes:\n" + "\n".join(
+        offenders
+    )
+
+
+def test_documented_not_tested_outcomes_are_complete() -> None:
+    """`docs/reading-results.md` lists the outcomes reported as NOT TESTED. Every
+    outcome the code classifies that way must appear.
+
+    The table had drifted to five of ten entries. `undecided` and
+    `launch_failure` were both missing, so a user seeing `⚠ NO VERDICT` or
+    `⚠ LAUNCH FAILED` had no documentation anywhere explaining what they mean —
+    and these are precisely the marks that must not be read as a pass.
+    """
+    from mylonite.scan.coverage import ATTEMPT_CLASS
+
+    not_tested = {outcome for outcome, cls in ATTEMPT_CLASS.items() if cls.name == "NOT_TESTED"}
+    page = (_DOCS_DIR / "reading-results.md").read_text(encoding="utf-8")
+
+    missing = sorted(outcome for outcome in not_tested if f"`{outcome}`" not in page)
+    assert not missing, (
+        f"docs/reading-results.md does not document these NOT-TESTED outcomes: {missing}. "
+        "A reader who sees one in the output has nothing to look it up in."
     )

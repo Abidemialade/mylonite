@@ -49,7 +49,9 @@ mylonite check reference:vulnerable   # its structural report, no LLM call
 `demo` replays committed fixtures: real scan, real predicates, real differential,
 canned model replies. It names the model and date they were recorded against, and
 it fails loudly rather than showing a clean result if a fixture is missing. Add
-`--live` to re-run the attacks for real.
+`--live` to re-run the attacks for real — that calls a model, and by default the
+self-hosted one the fixtures were recorded against, which must be served locally
+(or pass `--provider`/`--model` for a hosted one, with that provider's key set).
 
 To drive the attacks live against this app, add a key:
 
@@ -139,12 +141,13 @@ the injected text.
 
 - **Taxonomy IDs:** OWASP LLM `LLM01`, `LLM05` · OWASP ASI `ASI01`, `ASI06`
   · MITRE ATLAS `AML.T0051`
-- **The guard that closes it:** the guarded build's `read_note` wraps note
-  bodies in `<untrusted>` markers, so the planner treats them as data, not
-  instruction.
-- **Why it matters:** the guarded build defines the expected
-  post-fix behaviour; a regression test generated from this finding is valid
-  only if the `<untrusted>` quarantine makes it pass.
+- **The guard that closes it:** a taint gate in the guarded build's server code.
+  Once a turn has read untrusted content, `send_email` and `web_fetch` are refused
+  for the rest of that turn, whatever the planner decides. `read_note` returns the
+  note body verbatim on both builds.
+- **Why it matters:** the guarded build defines the expected post-fix behaviour; a
+  regression test generated from this finding is valid only if that refusal makes
+  it pass.
 
 ### W3 — unrestricted-web-fetch
 

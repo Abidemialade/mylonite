@@ -7,17 +7,22 @@ carries a separate **third-party verification harness** (`verification/`) that s
 against external ground truth it **did not author** — runnable vulnerable MCP servers and
 published academic benchmarks — and publishes the result here, **negatives included**.
 
-This page is the honest scorecard. The numbers are from live runs in June 2026 with
-**Claude Haiku 4.5** as the planner/judge (the only hosted provider these runs used),
-small samples, cost-bounded. Read the caveats — several numbers mean less (or more) than
-they look.
+This page is the scorecard. The numbers come from live runs between 25 June and
+29 August 2026. **Claude Haiku 4.5** was the planner/judge for the DVMCP and precision
+layers; the InjecAgent layer was run against a self-hosted `llama3.2:3b`. Samples are
+small and cost-bounded. Read the caveats — several numbers mean less (or more) than they
+look. The release-gated result set lives in
+[`verification/results/0.9.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.9.0)
+with a per-release trend table in
+[`TRENDS.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/TRENDS.md).
 
 The single-model evidence base is the biggest caveat on this page. A second model has since
 been run against the *bundled* targets (locally, zero cost) and the result is more
 interesting than "a weaker model finds more": recall turned out **not** to be monotonic in
 model weakness — a weaker planner raises exposure for attacks that need the model to comply,
-and lowers it for attacks that need the model to be capable. Every number on this page is
-still single-model. Both are spelled out, with every other known gap, in
+and lowers it for attacks that need the model to be capable. Most numbers on this page
+come from a single hosted model; the InjecAgent judge-agreement figures come from a
+self-hosted one. Both are spelled out, with every other known gap, in
 [Known limitations](limitations.md).
 
 ## The one-line result
@@ -63,7 +68,7 @@ scanned over SSE (the remote adapter), same model:
 
 | Dataset | What we measured | Result |
 | --- | --- | --- |
-| InjecAgent (run by us, Haiku) | faithful ASR | **0/60** — Haiku resisted; judge agreement **vacuous** (no positives), flagged as such |
+| InjecAgent (run by us, `llama3.2:3b`) | judge agreement | **dh F1 1.000** · **ds F1 0.400 at 0.25 recall**, 100 cases per split — the gap between the splits is the finding, so both are recorded |
 | InjecAgent `--elicit-positives` | compliant agent to manufacture positives | **0/15** — Haiku resisted even when told to comply |
 | **AgentDojo (its released runs, gpt-3.5)** | **judge vs AgentDojo's `security` oracle on real third-party positives** | **27 runs, 12 real positives (ASR 44.4%); judge agreement P=0.32, R=0.58, F1=0.41** |
 
@@ -107,7 +112,7 @@ AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
 
 ## Layer 3 — precision (false positives on known-good targets)
 
-- `reference:guarded`: **8 probes, 0 false positives (FPR 0%).** Mylonite stays quiet on
+- `reference:guarded`: **7 probes, 0 false positives (FPR 0%).** Mylonite stays quiet on
   a defended app.
 - External benign baseline: **0 false positives** on Enkrypt's benign `echo_mcp`
   (`enkryptai/secure-mcp-gateway`), recorded in
@@ -136,7 +141,8 @@ AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
 - DVMCP recall is 0 with Haiku (weaker models / app-flaw challenges would differ).
 - Judge ≠ AgentDojo oracle (F1 0.41) — a semantic mismatch still to investigate.
 - No external *defended* server for a true external precision number.
-- Samples are small and Claude-only; the opt-in `verification.yml` workflow runs larger N.
+- Samples are small, and the hosted-model layers use one model; the opt-in
+  `verification.yml` workflow runs larger N on manual dispatch.
 
 ## Reproduce it yourself
 
@@ -173,8 +179,10 @@ Run InjecAgent or DVMCP recall the same way — the exact commands, the pinned s
 every honesty caveat (prompt fidelity, sample size, which input is Mylonite-authored) are
 in the harness's own [`README`](https://github.com/Abidemialade/mylonite/blob/main/verification/README.md)
 and [`FINDINGS.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/FINDINGS.md).
-The opt-in `.github/workflows/verification.yml` runs the larger-N live numbers on a
-schedule.
+The opt-in `.github/workflows/verification.yml` runs the larger-N live numbers on
+**manual dispatch** (`workflow_dispatch`). It has no schedule — the weekly trigger was
+removed in August 2026 — and it needs a provider key configured as a repository secret
+before it can run at all.
 
 ## Bottom line
 

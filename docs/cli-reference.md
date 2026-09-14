@@ -23,7 +23,7 @@ reference agent. This is the fastest way to see what the tool actually does. Nee
 
 ```bash
 mylonite demo            # offline replay, instant, no API key
-mylonite demo --live     # real calls (~a minute, a few cents on Haiku)
+mylonite demo --live     # real calls; needs the recorded model served locally
 ```
 
 Options: `--live`; `--provider`, `--model` (both `--live` only — replay is pinned to the
@@ -236,6 +236,6 @@ check still catches it.
 
 ### Run config (`mylonite.yaml`)
 
-`scan` and `gate` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)
+`scan`, `gate`, `validate`, `ablate` and `check` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)
 to declare `target_file` / `authorize` / `provider` / `model` / budget once. An explicit
 flag always wins.

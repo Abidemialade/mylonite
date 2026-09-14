@@ -85,7 +85,7 @@ This runs the [single-shot engine](attack-modes.md). Findings land under
 and only a **kept** test makes it through:
 
 ```bash
-mylonite gate --target-file app.yaml --authorize my-app            # writes test + CI workflows
+mylonite gate --target-file app.yaml --authorize my-app            # writes the test; add --workflows for CI templates
 mylonite gate --target-file app.yaml --authorize my-app --open-pr  # also opens the PR via gh
 ```
 

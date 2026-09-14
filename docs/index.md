@@ -27,9 +27,10 @@ The phased build plan lives in
 
 !!! quote "Example: same model, two app versions"
     The *same* model, two versions of the bundled app: against the vulnerable version
-    Mylonite catches a `send_email` dispatched with no approval step (a pure app-design
-    flaw); against the guarded version it finds nothing. The app's design decides — see the
-    full [independent scorecard](verification.md), negatives included.
+    Mylonite catches weaknesses including a `send_email` dispatched with no approval step
+    (a pure app-design flaw); against the guarded version it reports no findings at all.
+    The app's design decides — see the full [independent scorecard](verification.md),
+    negatives included.
 
 ## Where to go next
 
