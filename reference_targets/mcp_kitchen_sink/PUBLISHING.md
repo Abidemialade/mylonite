@@ -1,13 +1,33 @@
 # Publishing `mcp-kitchen-sink` to PyPI (front-door handoff)
 
-> **Status: done.** `mcp-kitchen-sink` v0.1.0 was published to PyPI on 2026-08-05, so
-> `pip install mylonite mcp-kitchen-sink` resolves both packages from a clean install
-> with no clone needed. The base `pip install mylonite` is unaffected and **never**
-> pulls this deliberately-vulnerable agent — that invariant is preserved. (The
-> `mylonite[demo]` extra that originally wrapped this install has since been retired
-> along with the `mylonite demo` command — see CHANGELOG.md.) This doc is
-> kept as the record of how the release was set up, for future re-releases (`ks-vX.Y.Z`
-> tags) of this package.
+> **Status: 0.2.0 is prepared and NOT yet published — this blocks the mylonite
+> 0.10.0 release.** v0.1.0 went to PyPI on 2026-08-05. The source here is now
+> 0.2.0, because the guarded twin's behaviour changed: the `<untrusted>` envelope
+> was removed and replaced by a code-enforced taint gate, which changes
+> `read_note`'s observable output and every tool schema hash derived from it.
+>
+> **Why it blocks.** `mylonite`'s `[demo]` extra pins `mcp-kitchen-sink==0.1.0`,
+> and the demo's replay cache key folds in the tool schemas. The re-recorded demo
+> fixtures were produced against this 0.2.0 source, so anyone running
+> `pip install "mylonite[demo]"` would get the 0.1.0 wheel and miss every
+> fixture. CI's `demo` job installs the published wheel precisely to catch this,
+> and it stays red until 0.2.0 is on PyPI.
+>
+> **The remaining step is one command**, and it is deliberately left to a
+> maintainer because it publishes irreversibly:
+>
+> ```bash
+> git tag ks-v0.2.0 && git push origin ks-v0.2.0
+> ```
+>
+> `.github/workflows/release-kitchen-sink.yml` then builds from this directory
+> and publishes TestPyPI → PyPI via Trusted Publishing. **After it lands**, in
+> this order: re-pin `mcp-kitchen-sink==0.2.0` in the root `pyproject.toml`, then
+> re-record the demo fixtures against the published build
+> (`python scripts/record_demo_fixtures.py --force`), then re-run the demo job.
+>
+> The base `pip install mylonite` is unaffected and **never** pulls this
+> deliberately-vulnerable agent — that invariant is preserved.
 
 ## Status (published 2026-08-05)
 
