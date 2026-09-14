@@ -1,0 +1,1722 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/reviews/2026-08-06-0.7.7-honest-results-review/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Code review — release/0.7.7-honest-results vs main - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#code-review-release077-honest-results-vs-main" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Code review — release/0.7.7-honest-results vs main
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blockers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Blockers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dcr-0005-weakness_classes-has-no-membership-validation-letting-a-miscased-class-silently-bypass-the-w2-seed_arm-hard-block" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DCR-0005 — weakness_classes has no membership validation, letting a miscased class silently bypass the W2 seed_arm hard block
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dcr-0009-_is_secret_env-never-checks-the-key-name-when-the-env-value-is-non-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DCR-0009 — _is_secret_env never checks the key name when the env value is non-string
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#findings-by-lens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Findings by lens
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Findings by lens">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#logic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cross-cutting-themes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cross-cutting themes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#unverified-needs-human-eyes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unverified — needs human eyes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Method
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="code-review-release077-honest-results-vs-main">Code review — release/0.7.7-honest-results vs main<a class="headerlink" href="#code-review-release077-honest-results-vs-main" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-08-06
+<strong>Mode:</strong> diff (release/0.7.7-honest-results vs <code>main</code> @ <code>98d1b28</code>)
+<strong>Profile:</strong> thorough
+<strong>Verdict:</strong> <strong>NO-GO as-is, 2 blockers.</strong> Both are cheap, targeted fixes (not architectural), and T9 in particular (<code>_redaction.py</code>) is already gated on maintainer sign-off per <code>GOVERNANCE.md</code> — this review's two high findings should be read as required input to that sign-off, not a separate gate. Everything else (0 critical, 13 medium, 4 low) is non-blocking; full test suite (1261 passed, 7 skipped), ruff, mypy, and <code>mkdocs build --strict</code> are all green on the reviewed tip.</p>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Files in scope</td>
+<td>58 changed files (5,947 insertions, 397 deletions)</td>
+</tr>
+<tr>
+<td>Slices deep-reviewed</td>
+<td>26 files / 43 (file, lens) review units across logic/security/performance</td>
+</tr>
+<tr>
+<td>Slices swept</td>
+<td>17 (Haiku triage pass — all clean, none promoted)</td>
+</tr>
+<tr>
+<td>Slices not reviewed</td>
+<td>Architecture lens not run this pass (risk-ranked queue for this diff carried no architecture-tagged slices at the thorough cutoff)</td>
+</tr>
+<tr>
+<td>Findings replayed from ledger</td>
+<td>0 (fresh ledger, first run on this branch)</td>
+</tr>
+<tr>
+<td>Scanners available</td>
+<td>ruff (0 raw findings — clean)</td>
+</tr>
+<tr>
+<td>Scanners missing</td>
+<td>bandit, pip-audit, semgrep, eslint, osv-scanner — coverage gap, notably for a release that includes secret-handling code (T9); nothing installed mid-review per skill rules</td>
+</tr>
+<tr>
+<td>Parse failures</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<p>State plainly what was not looked at: the <code>docs/</code> prose diff itself was spot-checked rather than read line-by-line (its factual claims were already independently spec-reviewed twice for T17); this review's code-side scope is <code>cli.py</code>, <code>demo/render.py</code>, and the <code>src/</code>/<code>tests/</code> files listed in the diff. No live-provider/live-target testing was performed (all live e2e tests remain correctly skipped in CI).</p>
+<h2 id="blockers">Blockers<a class="headerlink" href="#blockers" title="Permanent link">&para;</a></h2>
+<h3 id="dcr-0005-weakness_classes-has-no-membership-validation-letting-a-miscased-class-silently-bypass-the-w2-seed_arm-hard-block">DCR-0005 — <code>weakness_classes</code> has no membership validation, letting a miscased class silently bypass the W2 seed_arm hard block<a class="headerlink" href="#dcr-0005-weakness_classes-has-no-membership-validation-letting-a-miscased-class-silently-bypass-the-w2-seed_arm-hard-block" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Severity:</strong> high (adjudicated: exploitability 2 × impact 3 × exposure 1.0 = 6.0)</li>
+<li><strong>Standard:</strong> logic (general correctness, no CWE mapping)</li>
+<li><strong>Location:</strong> <code>src/mylonite/plugins/_mcp/target_file.py:87</code> in <code>TargetFile</code></li>
+<li><strong>Reachable from:</strong> <code>mylonite scan --target-file</code>, <code>mylonite gate --target-file</code>, <code>mylonite validate --target-file</code> — all target-file-driven entrypoints</li>
+</ul>
+<p><strong>Failure scenario.</strong> A <code>target.yaml</code> with <code>weakness_classes: ["w2"]</code> (lowercase, or any other typo of <code>W2</code>) and no <code>seed_arm</code> passes <code>TargetFile</code> validation — only <code>control_env</code> keys are checked against <code>_WEAKNESS_CLASSES</code>. <code>validate_for_scan</code>'s <code>set(tf.weakness_classes) &amp; _INDIRECT_ONLY_WEAKNESS_CLASSES</code> intersection is then empty (case-sensitive), so the hard pre-flight block — which exists specifically to stop a seed-less W2 target from silently reading as clean — never fires, and the scan proceeds without ever planting the indirect-injection payload.</p>
+<p><strong>Evidence.</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">weakness_classes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+</code></pre></div></p>
+<p><strong>Proposed fix.</strong> Add a validator in <code>TargetFile._check</code> (mirroring the existing <code>control_env</code>-key check already present in the same class) that rejects any <code>weakness_classes</code> entry not in <code>_WEAKNESS_CLASSES</code>.</p>
+<p><strong>Proof test.</strong> Not yet written — recommend <code>tests/plugins/test_target_file.py::test_weakness_classes_rejects_unknown_or_miscased_entry</code> asserting <code>TargetFile(weakness_classes=["w2"])</code> raises a <code>ValidationError</code>.</p>
+<h3 id="dcr-0009-_is_secret_env-never-checks-the-key-name-when-the-env-value-is-non-string">DCR-0009 — <code>_is_secret_env</code> never checks the key name when the env value is non-string<a class="headerlink" href="#dcr-0009-_is_secret_env-never-checks-the-key-name-when-the-env-value-is-non-string" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Severity:</strong> high (adjudicated: exploitability 2 × impact 3 × exposure 1.0 = 6.0)</li>
+<li><strong>Standard:</strong> logic (general correctness, no CWE mapping) — directly material to T9's secret-handling scope</li>
+<li><strong>Location:</strong> <code>src/mylonite/_redaction.py:374</code> in <code>_is_secret_env</code></li>
+<li><strong>Reachable from:</strong> <code>redact_target_yaml</code>, called from all three write sites in <code>cli.py</code> (scan scaffold, generate, gate-PR artefact write) — every path that persists a <code>target.yaml</code> copy</li>
+</ul>
+<p><strong>Failure scenario.</strong> <code>redact_target_yaml</code> on a <code>target.yaml</code> containing <code>env:\n  API_TOKEN: 8675309123456</code> (an unquoted numeric token — YAML parses this as a Python <code>int</code>, not <code>str</code>) hits <code>_is_secret_env</code>'s leading <code>isinstance(value, str)</code> check, which returns <code>False</code> <em>before</em> <code>_key_looks_secret(key)</code> is ever evaluated. The key name obviously signals a credential, but the raw numeric value is written verbatim into the persisted <code>.mylonite</code> target.yaml copy — exactly the file this release's <code>${VAR}</code> indirection work (T9) exists to make safe, and exactly the file the docs tell an operator to commit/push as a gate artefact. The sibling <code>headers</code> masking path is type-agnostic, confirming this is an asymmetry, not a deliberate design choice.</p>
+<p><strong>Evidence.</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>        <span class="k">return</span> <span class="kc">False</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">if</span> <span class="n">_key_looks_secret</span><span class="p">(</span><span class="n">key</span><span class="p">):</span>
+</code></pre></div></p>
+<p><strong>Proposed fix.</strong> Check <code>_key_looks_secret(key)</code> before the <code>isinstance(value, str)</code> short-circuit, or coerce <code>value</code> to <code>str</code> first so a key-name match still masks a numeric/boolean-typed secret.</p>
+<p><strong>Proof test.</strong> Not yet written — recommend extending <code>tests/test_redaction.py</code> with <code>test_numeric_valued_secret_key_is_still_masked</code> asserting <code>redact_target_yaml</code> on a YAML doc with <code>env: {API_TOKEN: 8675309123456}</code> produces no occurrence of <code>8675309123456</code> in the output.</p>
+<p><strong>Escalated:</strong> yes, adjudicated by opus → confirmed at high (up from the original reviewer's high, unchanged, but independently re-derived from the rubric rather than taken on trust).</p>
+<h2 id="findings-by-lens">Findings by lens<a class="headerlink" href="#findings-by-lens" title="Permanent link">&para;</a></h2>
+<h3 id="logic">Logic<a class="headerlink" href="#logic" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Severity</th>
+<th>Location</th>
+<th>Standard</th>
+<th>Title</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DCR-0005</td>
+<td>high</td>
+<td><code>target_file.py:87</code></td>
+<td>logic</td>
+<td><code>weakness_classes</code> unvalidated — see Blockers</td>
+</tr>
+<tr>
+<td>DCR-0009</td>
+<td>high</td>
+<td><code>_redaction.py:374</code></td>
+<td>logic</td>
+<td><code>_is_secret_env</code> type check ordering — see Blockers</td>
+</tr>
+<tr>
+<td>DCR-0001</td>
+<td>medium</td>
+<td><code>cli.py:1081</code></td>
+<td>logic</td>
+<td><code>--target-file</code> silently overrides a non-<code>reference:</code> positional TARGET in <code>scan()</code> — the <code>mcp:filesystem</code>-plus-<code>--target-file</code> combination scans a different target than the one named on the command line, using the weaker custom-target authorize check instead of the stricter <code>mcp:filesystem</code> one.</td>
+</tr>
+<tr>
+<td>DCR-0003</td>
+<td>medium</td>
+<td><code>cli.py:3530</code></td>
+<td>logic</td>
+<td>Same gap as DCR-0001, in <code>gate()</code> — a pushed gate PR can end up proving a different target than the one named on the command line.</td>
+</tr>
+<tr>
+<td>DCR-0004</td>
+<td>medium</td>
+<td><code>cli.py:3604</code></td>
+<td>logic</td>
+<td><code>gate()</code>'s <code>scan_fn</code> target_id drops the custom target's scope and diverges from <code>scan()</code>'s <code>report_target_id</code> formula, mislabeling emitted exploit/PR/report artefacts.</td>
+</tr>
+<tr>
+<td>DCR-0006</td>
+<td>medium</td>
+<td><code>scan/_llm.py:231</code></td>
+<td>logic</td>
+<td><code>_first_balanced_object</code> locks onto the first brace-balanced JSON span in prose-only mode, which can be an earlier draft/example object rather than the model's real final answer — can silently flip a verdict.</td>
+</tr>
+<tr>
+<td>DCR-0010</td>
+<td>medium</td>
+<td><code>_redaction.py:190</code></td>
+<td>logic</td>
+<td>Key-name-based unconditional masking in <code>redact_value</code> only applies to string leaves, not nested list/dict values under a secret-named key — contradicts the docstring's "masked unconditionally" claim.</td>
+</tr>
+<tr>
+<td>DCR-0011</td>
+<td>medium</td>
+<td><code>reference_validator.py:1070</code></td>
+<td>logic</td>
+<td>A <code>vuln_fired=True</code> + guarded-adapter-error combination is mislabeled <code>attack_malformed</code>, contradicting the branch's own comment; misleads debugging of a metamorphic-robustness rejection.</td>
+</tr>
+<tr>
+<td>DCR-0008</td>
+<td>medium</td>
+<td><code>_redaction.py:215</code></td>
+<td>logic</td>
+<td><code>SecretRedactingFilter.filter</code>'s exception guard on a malformed logging call leaves stdlib <code>logging.Handler.handleError()</code> free to print the raw unredacted message to stderr. Adjudicated down from the reviewer's high: transient stderr sink, not a persisted artefact, and requires a separate pre-existing malformed-call bug to trigger.</td>
+</tr>
+<tr>
+<td>DCR-0012</td>
+<td>low</td>
+<td><code>reference_validator.py:677</code></td>
+<td>logic</td>
+<td>Custom-target differential leg's <code>guard_resisted</code> count treats any non-firing guarded run (including adapter errors/timeouts) as genuine resistance, unlike the reference-twin path.</td>
+</tr>
+<tr>
+<td>DCR-0002</td>
+<td>low</td>
+<td><code>cli.py:1854</code></td>
+<td>logic</td>
+<td><code>frozenset(...) or None</code> collapses an explicitly-declared empty <code>control_config</code> list into "not declared". Adjudicated down from the reviewer's escalation: fails in the safe direction (routes to a documented fail-closed default), and an identical collapse is already documented as intentional elsewhere in the same module for the same reason.</td>
+</tr>
+<tr>
+<td>DCR-0007</td>
+<td>low</td>
+<td><code>test_docs_consistency.py:51</code></td>
+<td>logic</td>
+<td>Prose-example regex cannot match a mid-string <code>mylonite ...</code> invocation with no trailing <code>(</code> or em-dash before a newline. Adjudicated: real and reproduced, but bounded — <code>_NEXT_STEP</code> has an explicit count assertion that would catch it; only <code>_TEASER</code> is exposed, and it's test-only code (exposure 0.35).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Severity</th>
+<th>Location</th>
+<th>Standard</th>
+<th>Title</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DCR-0014</td>
+<td>medium</td>
+<td><code>_redaction.py:74</code></td>
+<td>V7.1.1 / CWE-532</td>
+<td>KV credential regex requires the key immediately adjacent to the separator, so a quoted dict-repr rendering (e.g. <code>str(exc)</code> embedding <code>{'GH_TOKEN': 'ghp_...'}</code>) bypasses redaction entirely.</td>
+</tr>
+<tr>
+<td>DCR-0015</td>
+<td>medium</td>
+<td><code>_redaction.py:434</code></td>
+<td>V6.4.1 / CWE-200</td>
+<td><code>redact_target_yaml</code> only masks the <code>headers</code>/<code>request.headers</code>/<code>env</code> sections — a credential embedded in a URL (<code>scheme://&lt;user&gt;:&lt;password&gt;@host</code>) is persisted to git/PR artefacts unredacted, even though <code>_URL_CRED_PATTERN</code> exists elsewhere in the same module to catch exactly this shape.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Severity</th>
+<th>Location</th>
+<th>Standard</th>
+<th>Title</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DCR-0016</td>
+<td>medium</td>
+<td><code>reference_validator.py:422</code></td>
+<td>PERF-SERIAL-IO / CWE-1049</td>
+<td><code>DifferentialValidator</code>'s N statistically-independent iterations run sequentially, multiplying wall-clock ~5x at the default <code>iterations=5</code>. Adjudicated down from the reviewer's high: <code>run_twins</code> already parallelizes the two twins within one iteration at <code>max_concurrent=1</code> as a deliberate throughput/rate-limit boundary, not an oversight — parallelizing further risks provider throttling contaminating the rate statistic the oracle depends on. Still a real, worthwhile optimization (matches the rubric's own N+1 worked example at medium).</td>
+</tr>
+<tr>
+<td>DCR-0017</td>
+<td>medium</td>
+<td><code>reference_validator.py:527</code></td>
+<td>PERF-SERIAL-IO / CWE-1049</td>
+<td>Custom-target stability re-drives (the <code>n</code> independent live LLM scans in the stability loop) run sequentially.</td>
+</tr>
+<tr>
+<td>DCR-0018</td>
+<td>medium</td>
+<td><code>reference_validator.py:620</code></td>
+<td>PERF-SERIAL-IO / CWE-1049</td>
+<td>Boundary-guarded-twin differential re-drives are also serialised, doubling the sequential cost on top of the stability loop — up to 2n=10 full LLM-driven scans back-to-back at the default <code>iterations=5</code>.</td>
+</tr>
+<tr>
+<td>DCR-0019</td>
+<td>medium</td>
+<td><code>reference_validator.py:1061</code></td>
+<td>PERF-SERIAL-IO / CWE-1049</td>
+<td>The 7 built-in metamorphic perturbation strategies are driven through both twins one at a time instead of concurrently.</td>
+</tr>
+<tr>
+<td>DCR-0020</td>
+<td>low</td>
+<td><code>reference_validator.py:739</code></td>
+<td>PERF-CACHE</td>
+<td>Plugin entry-point discovery (<code>discover("mylonite.attack_modules")</code>) is re-run with no caching on every custom-target iteration — up to 10 redundant calls per <code>validate</code> invocation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cross-cutting-themes">Cross-cutting themes<a class="headerlink" href="#cross-cutting-themes" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong><code>_redaction.py</code> has three independent gaps in the same release that adds <code>${VAR}</code> indirection to it (T9).</strong> DCR-0009 (non-string value skips key-name check), DCR-0010 (unconditional masking doesn't recurse into lists/dicts), DCR-0014 (quoted-dict-repr bypasses the KV regex), and DCR-0015 (URL-embedded credentials never redacted in <code>redact_target_yaml</code>) are four distinct code paths in the same file that share one root pattern: the module's masking logic was built and tested against the "normal" case (a flat string value under a plain key) and doesn't yet cover the shapes that show up once you go looking for them (non-string YAML values, nested collections, dict reprs, URLs). Given <code>_redaction.py</code> is explicitly gated on maintainer sign-off this release, this cluster is worth reviewing together rather than one finding at a time — fixing DCR-0009 alone without the other three leaves the same "committed copy still leaks in shape X" story just moved to a different shape.</li>
+<li><strong><code>--target-file</code> combined with a non-<code>mcp:custom</code> positional <code>TARGET</code> silently overrides the positional argument, in both <code>scan()</code> (DCR-0001) and <code>gate()</code> (DCR-0003)</strong> — the same gap exists at both call sites because both independently re-derive "did the operator mean <code>--target-file</code> or the positional" rather than sharing one resolution function. This is the same class of bug the whole 0.7.7 release exists to close (Class A: fail-opens from re-derived logic instead of a single source of truth) — it just wasn't in the plan's original defect list because it wasn't found until this review.</li>
+<li><strong><code>DifferentialValidator</code>'s live re-drive loops (DCR-0016 through DCR-0019) are all the same pattern repeated four times in one class</strong>: N or 2N independent, statistically-uncorrelated LLM-driven scans run in a plain sequential Python <code>for</code>/list-append loop instead of a bounded <code>gather</code>. None are individually severe, but together they mean <code>mylonite validate --iterations 5</code> against a custom target with a guarded adapter costs roughly <code>5 + 5 + 7 = 17x</code> a single scan's wall-clock instead of something closer to <code>max_concurrent</code>-bounded — worth a single follow-up task consolidating all four into one concurrency-bounded runner rather than four separate point fixes.</li>
+</ol>
+<h2 id="unverified-needs-human-eyes">Unverified — needs human eyes<a class="headerlink" href="#unverified-needs-human-eyes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Location</th>
+<th>Claim</th>
+<th>Failed check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(quarantined, no DCR id assigned)</td>
+<td><code>src/mylonite/scan/ablation.py:285</code> in <code>run_control_ablation</code></td>
+<td>Independent per-seed/per-iteration scan pairs in <code>run_control_ablation</code> are driven sequentially across an outer for-loop instead of concurrently — the same PERF-SERIAL-IO pattern as DCR-0016–0019, in <code>ablate</code> rather than <code>validate</code>.</td>
+<td>Evidence did not appear verbatim at the cited line (line-number drift, not a fabricated finding — the reviewer's cited snippet is real code nearby). Worth a human re-check given the same pattern is confirmed at medium severity four times over in the sibling <code>reference_validator.py</code> class.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="method">Method<a class="headerlink" href="#method" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Models</td>
+<td>haiku (sweep triage, 17 slices, 0 promoted), sonnet (deep specialists — 4 logic batches, 2 security batches, 4 performance batches, 26 files), opus (adjudication of 8 escalated findings)</td>
+</tr>
+<tr>
+<td>Standards version</td>
+<td>2026-07-30.2</td>
+</tr>
+<tr>
+<td>Specialist calls</td>
+<td>10 deep-review dispatches (grouped by lens, multiple slices per dispatch) + 3 sweep dispatches + 1 adjudication dispatch = 14</td>
+</tr>
+<tr>
+<td>Token spend</td>
+<td>not separately metered per-tier in this run; see individual dispatch <code>subagent_tokens</code> in session transcript</td>
+</tr>
+<tr>
+<td>Wall time</td>
+<td>approximately 45 minutes across free phases + sweep + deep review + adjudication</td>
+</tr>
+<tr>
+<td>Command to reproduce</td>
+<td><code>cartography.py</code> → <code>scanners.py</code> → <code>risk_rank.py --profile thorough</code> → filter to <code>git diff --name-only main...HEAD</code> → sweep (haiku) → deep (sonnet, per-lens) → <code>verify.py</code> → adjudicate (opus) → this report</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
