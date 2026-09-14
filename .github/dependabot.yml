@@ -35,8 +35,17 @@ updates:
       # Re-evaluate as a deliberate port: fix the call sites, republish the
       # reference target, then move both pins together. Minor/patch updates
       # within mcp 1.x are unaffected by this rule.
+      #
+      # `versions`, not `update-types`. This rule was added on 2026-08-05 to
+      # stop exactly these pull requests, and Dependabot opened them twice more
+      # anyway (#120, #154). Both were titled "update mcp REQUIREMENT from
+      # <2.0,>=1.0 to >=1.0,<3.0": widening a range is not a
+      # `version-update:*`, which is the only thing `update-types` filters, so
+      # the rule never applied to the shape Dependabot actually proposes for a
+      # ranged library dependency. `versions` excludes the versions themselves
+      # and so covers both shapes.
       - dependency-name: "mcp"
-        update-types: ["version-update:semver-major"]
+        versions: [">=2.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
