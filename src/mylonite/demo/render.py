@@ -26,6 +26,7 @@ from rich.table import Table
 
 from mylonite._cli_io import console_print
 from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, OUTCOME_MARKS
+from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.seeds import SEED_CATALOGUE, SeedPattern, Weakness
 
@@ -60,6 +61,12 @@ _SKIPPED_MARK: Final[str] = OUTCOME_MARKS["skipped_planner_failure"]
 #: engaged, so nothing was exercised. `scan/artefacts.py` already renders this
 #: as its own mark and warns loudly about it; the demo table did not.
 _NOT_TESTED_MARK: Final[str] = OUTCOME_MARKS["skipped_planner_no_engagement"]
+#: A third kind of non-result, distinct from both of the above. The attack was
+#: delivered AND the agent engaged — but the deterministic predicate declined to
+#: rule and the demo runs with no LLM judge to adjudicate, so nothing decided.
+#: Not in OUTCOME_MARKS because it is not an outcome: the engine records these
+#: as `no_finding`, and only `judge_evidence` distinguishes them.
+_NO_VERDICT_MARK: Final[str] = "⚠ NO VERDICT"
 
 #: Rich styles for the outcome marks. The demo's entire claim is a contrast
 #: between two columns, and an unstyled table renders FOUND and clean as the
@@ -75,6 +82,7 @@ _MARK_STYLES: Final[dict[str, str]] = {
     _CLEAN_MARK: "bold green",
     _SKIPPED_MARK: "bold yellow",
     _NOT_TESTED_MARK: "bold yellow",
+    _NO_VERDICT_MARK: "bold yellow",
 }
 
 
@@ -144,18 +152,29 @@ def _aggregate_mark(result: ScanResult, pattern_ids: frozenset[str]) -> str:
     A row mixing two DIFFERENT non-clean kinds falls back to the generic mark:
     that is a real ambiguity, and inventing a winner between them would be the
     same overstatement in miniature.
+
+    ``no_finding`` alone is not enough for clean. The demo runs with the LLM
+    judge disabled (``wiring.build_scan(judge_fallback=...)``) so its differential
+    stays purely predicate-driven and reproducible — which means an inconclusive
+    predicate has no adjudicator at all and is recorded as ``no_finding`` with a
+    ``no_adjudicator`` cause. Nothing decided those; rendering them ✓ clean
+    claimed a result the demo never established.
     """
     # Join on pattern_id (== seed_id in v0.2); _WEAKNESS_PATTERNS is keyed the
     # same way, so a future pattern_id/seed_id divergence would surface as rows
     # quietly dropping into the skip bucket rather than a crash.
-    outcomes = [
-        attempt.outcome for attempt in result.report.attempts if attempt.pattern_id in pattern_ids
-    ]
+    attempts = [a for a in result.report.attempts if a.pattern_id in pattern_ids]
+    outcomes = [attempt.outcome for attempt in attempts]
     if any(outcome == "finding" for outcome in outcomes):
         return _FOUND_MARK
     if not outcomes:
         return _SKIPPED_MARK
+    if all(attempt_reached_no_verdict(a) for a in attempts):
+        return _NO_VERDICT_MARK
     if all(outcome == "no_finding" for outcome in outcomes):
+        # At least one genuine verdict, and no non-clean outcome: the ones that
+        # WERE adjudicated all came back clean. Reporting the row as clean is
+        # what those verdicts support.
         return _CLEAN_MARK
     # `.get` rather than `[]`: an unknown outcome string must degrade to the
     # generic mark, never crash the one command a newcomer runs first.
@@ -179,20 +198,37 @@ def _print_coverage_note(console: Console, vulnerable: ScanResult, guarded: Scan
     reference app, where a seed the planner declined to engage is an expected
     property of the recorded run rather than a misconfiguration the reader can
     act on. It still has to be said.
+
+    Counts BOTH kinds of non-result, and names them separately because their
+    causes are different and only one is about the target: an unexercised
+    attempt means the agent never engaged, while a no-verdict attempt means the
+    agent engaged and nothing adjudicated the outcome. Reporting only the first
+    would undercount the cells that establish nothing -- on the shipped fixtures,
+    by an order of magnitude.
     """
-    untested = sum(
-        1
-        for result in (vulnerable, guarded)
-        for attempt in result.report.attempts
-        if attempt.outcome in NOT_TESTED_OUTCOMES
-    )
-    if not untested:
+    attempts = [a for r in (vulnerable, guarded) for a in r.report.attempts]
+    untested = sum(1 for a in attempts if a.outcome in NOT_TESTED_OUTCOMES)
+    no_verdict = sum(1 for a in attempts if attempt_reached_no_verdict(a))
+    if not (untested or no_verdict):
         return
+
+    parts = []
+    if no_verdict:
+        parts.append(
+            f"{no_verdict} reached NO VERDICT (the agent engaged, but the "
+            "deterministic predicate declined to rule and this demo runs with no "
+            "LLM judge, so nothing decided them)"
+        )
+    if untested:
+        was = "was" if untested == 1 else "were"
+        parts.append(
+            f"{untested} {was} NOT TESTED (the attack was delivered but the agent never engaged)"
+        )
     console_print(
         console,
-        f"[yellow]coverage: {untested} attempt(s) were NOT TESTED — the attack was "
-        "delivered but the agent never engaged, so those seeds established nothing "
-        "in either direction. A ⚠ cell is not a clean one.[/yellow]",
+        f"[yellow]coverage: of {len(attempts)} attempts across both builds, "
+        f"{' and '.join(parts)}. A ⚠ cell is not a clean one — it establishes "
+        "nothing in either direction.[/yellow]",
         highlight=False,
     )
 

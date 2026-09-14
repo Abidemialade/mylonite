@@ -54,11 +54,35 @@ _note_id_counter = note_id_counter
 
 #: The provider the demo fixtures are recorded against. Replay forces this;
 #: live runs default to it but honour caller overrides.
-DEMO_PROVIDER = "anthropic"
+#:
+#: Self-hosted on purpose. `mylonite demo` advertises needing no API key, but
+#: replayed fixtures recorded against a hosted model meant the one command a
+#: newcomer runs first could not be reproduced without a paid account. It now
+#: can: `ollama pull qwen3:4b-instruct-2507-q4_K_M`, then
+#: `python scripts/record_demo_fixtures.py`.
+#:
+#: `ollama`, not `ollama_chat`: this names the PROVIDER (which
+#: `scan.providers.PROVIDER_ENV_VARS` maps to `()` — no key required), while
+#: `ollama_chat` below is a LiteLLM ROUTE on that provider.
+DEMO_PROVIDER = "ollama"
 #: The exact model the demo fixtures are recorded with. Binding for this
 #: project — the recorded fixtures use this model and replay keys on it, so
-#: changing it invalidates every fixture. Do NOT swap to claude-sonnet-4-6.
-DEMO_MODEL = "claude-haiku-4-5-20251001"
+#: changing it invalidates every fixture.
+#:
+#: Chosen on measured evidence (`experiments/attack_potency`), and the choice
+#: was previously made WRONG in a way worth recording. A weaker 3B planner was
+#: picked first because a capable one drove the *guarded* twin into exfiltration
+#: on 40-100% of runs — which was hiding a real hole in the guarded control
+#: behind a planner too weak to find it. That hole is now closed in server code
+#: (the W2 taint gate, M5), and the leak re-measured at 0%, so the capable
+#: planner is the honest choice: it actually exercises the attacks (100%
+#: execution on every W2/W3/W4 variant) and the guard genuinely holds against
+#: it. Picking the weak model was the demo-tuning; this is the correction.
+#:
+#: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is
+#: what Ollama's own tool-calling support targets — and the demo is entirely a
+#: tool-calling exercise. See docs/self-hosted-models.md.
+DEMO_MODEL = "ollama_chat/qwen3:4b-instruct-2507-q4_K_M"
 
 #: The two reference variants the demo runs, in render order.
 _VARIANTS: tuple[Literal["vulnerable", "guarded"], ...] = ("vulnerable", "guarded")
