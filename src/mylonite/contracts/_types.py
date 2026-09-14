@@ -422,9 +422,25 @@ ScanAttemptOutcome = Literal[
     # `skipped_payload_not_delivered` (the plant never reached the planner):
     # here delivery and planning both succeeded and the agent simply did not act.
     "skipped_planner_no_engagement",
+    # NO mechanism decided this attempt: the LLM-judge call raised or returned
+    # unparseable output, or the deterministic predicate was inconclusive and the
+    # judge was disabled. Previously spelled `no_finding` with the cause buried in
+    # `judge_evidence`, which meant every allowlist written to exclude exactly
+    # this case still admitted it -- an emitted regression test could PASS on an
+    # attempt where the judge errored. NOT evidence the target is defended:
+    # absence of a verdict is not a verdict. A consumer that treats `no_finding`
+    # as "the guard held" must NOT treat this the same way.
+    "undecided",
     "skipped_invalid_metadata",
     "skipped_unknown_seed",
     "skipped_planner_failure",
+    # The target's own launch never started -- a command that does not exist, an
+    # uninstalled npx/uvx package, a permissions error. Nothing about the planner
+    # is involved. Previously spelled `skipped_planner_failure`, which told the
+    # operator their planner had broken and sent them looking in entirely the
+    # wrong place; the classification already existed in the reason text and had
+    # no structural home.
+    "launch_failure",
     "skipped_no_seed_arm",
     "skipped_payload_not_delivered",
     "skipped_dry_run",

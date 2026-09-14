@@ -87,9 +87,18 @@ ATTEMPT_CLASS: Final[dict[str, AttemptClass]] = {
     # The seed needed customisation but couldn't be resolved from the
     # catalogue — the attack never ran.
     "skipped_unknown_seed": AttemptClass.NOT_TESTED,
+    # No mechanism decided the attempt. NOT_TESTED for the same reason as the
+    # two above: absence of a verdict is not a verdict, and this is the outcome
+    # that used to be spelled `no_finding` — indistinguishable from a real
+    # negative to every consumer that read only the literal.
+    "undecided": AttemptClass.NOT_TESTED,
     # adapter.invoke() raised AdapterInvocationSkipped (A3) — the planner
     # failed before the attack could be delivered.
     "skipped_planner_failure": AttemptClass.NOT_TESTED,
+    # The target's own launch never started, so nothing was exercised against
+    # it. Distinct from `skipped_planner_failure` because the remedy is
+    # different: fix the command, not the planner.
+    "launch_failure": AttemptClass.NOT_TESTED,
     # No seed_arm was available to plant the payload — nothing was exercised.
     "skipped_no_seed_arm": AttemptClass.NOT_TESTED,
     # The target confirmed the planted payload was never delivered.
@@ -181,11 +190,17 @@ def attempt_reached_no_verdict(attempt: object) -> bool:
     free of a runtime import it does not otherwise need; callers pass a
     ``ScanAttempt``.
 
-    When ``undecided`` lands as a first-class ``ScanAttemptOutcome`` (issue #144),
-    this collapses to an ``ATTEMPT_CLASS`` entry and the override in
-    :meth:`ScanOutcome.from_report` can be deleted.
+    ``undecided`` is now a first-class ``ScanAttemptOutcome`` (issue #144), so the
+    literal alone settles it for anything this version produced. The
+    ``judge_evidence`` path below is kept for reports written by an EARLIER
+    version, which spelled the same fact as ``no_finding`` plus a cause key --
+    `report`, `validate` and the testkit all read artefacts off disk, so dropping
+    it would silently start reading old no-verdict attempts as clean resistance.
+    That is the exact regression this function exists to prevent.
     """
     outcome = getattr(attempt, "outcome", None)
+    if outcome == "undecided":
+        return True
     if outcome != "no_finding":
         return False
     evidence = getattr(attempt, "judge_evidence", None) or {}

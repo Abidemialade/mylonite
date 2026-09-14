@@ -24,7 +24,14 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite._redaction import redact
-from mylonite.contracts import ExploitRecord, Payload, ScanAttempt, ScanReport, TargetDescriptor
+from mylonite.contracts import (
+    ExploitRecord,
+    Payload,
+    ScanAttempt,
+    ScanAttemptOutcome,
+    ScanReport,
+    TargetDescriptor,
+)
 from mylonite.scan._llm import (
     BudgetExceededError,
     LiteLLMCallCounter,
@@ -32,7 +39,7 @@ from mylonite.scan._llm import (
     seed_scope,
 )
 from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
-from mylonite.scan.coverage import AbortReason
+from mylonite.scan.coverage import NO_VERDICT_EVIDENCE_KEYS, AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
@@ -921,11 +928,20 @@ class ScanEngine:
                 customiser_fallback=customiser_fallback,
                 run_disagreement=run_disagreement,
             )
+        # `no_finding` means a mechanism looked at this attempt and concluded the
+        # target resisted. When NOTHING decided it -- the judge call raised or
+        # returned unparseable output, or the predicate was inconclusive with the
+        # judge disabled -- that is a different fact, and spelling it `no_finding`
+        # is what let every allowlist written to exclude exactly this case still
+        # admit it. `undecided` gives it a name a naive exhaustive-switch
+        # consumer cannot miss. The cause stays in `judge_evidence` for
+        # diagnostics; the literal is what consumers gate on.
+        undecided = any(bool(judge_evidence.get(key)) for key in NO_VERDICT_EVIDENCE_KEYS)
         return _PerPayloadOutcome(
             attempt=ScanAttempt(
                 seed_id=seed_id,
                 pattern_id=payload.pattern_id,
-                outcome="no_finding",
+                outcome="undecided" if undecided else "no_finding",
                 verdict_mechanism=verdict.mechanism,
                 verdict_reason=verdict.reason,
                 error_detail=None,
@@ -1092,11 +1108,23 @@ class ScanEngine:
             # (a credential embedded in a request that failed) straight into
             # this ScanAttempt, which write_artefacts persists to disk.
             _exc_detail = skip.attempt_metadata.get("exception")
+            # The MCP adapters already classify WHY the invocation was skipped
+            # and stamp it here; the engine used to discard that and call every
+            # one a planner failure. A target whose command does not exist is
+            # not a broken planner, and telling the operator it was sent them
+            # looking in entirely the wrong place. `launch_failure` is now its
+            # own outcome, so the remedy ("fix the command") is visible in the
+            # report rather than buried in prose.
+            _skip_outcome: ScanAttemptOutcome = (
+                "launch_failure"
+                if skip.attempt_metadata.get("reason") == "launch_failure"
+                else "skipped_planner_failure"
+            )
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
                     seed_id=seed_id,
                     pattern_id=payload.pattern_id,
-                    outcome="skipped_planner_failure",
+                    outcome=_skip_outcome,
                     verdict_mechanism=None,
                     verdict_reason=skip.reason,
                     error_detail=redact(_exc_detail)
