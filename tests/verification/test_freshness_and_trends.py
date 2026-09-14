@@ -11,7 +11,9 @@ pass, and none of them write outside ``tmp_path``.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -339,3 +341,54 @@ def test_render_trends_reports_numeric_layer1_recall(tmp_path: Path) -> None:
 
     row = next(line for line in table.splitlines() if line.startswith("| 0.9.0"))
     assert "75.0%" in row
+
+
+# --- TRENDS.md is generated, so pin that it is current ----------------------
+#
+# `verification/TRENDS.md` says "GENERATED FILE. Do not edit by hand." and
+# nothing checked that the committed bytes match what the generator produces
+# from the committed results. A stale generated file is worse than no file: it
+# is a published number nobody re-derived.
+#
+# Same idiom `tests/test_schemas.py` uses for the generated JSON schemas.
+
+
+def test_committed_TRENDS_md_is_current() -> None:
+    from verification.trends import write_trends
+
+    results_root = ROOT / "verification" / "results"
+    committed = (ROOT / "verification" / "TRENDS.md").read_text(encoding="utf-8")
+
+    regenerated_dir = Path(tempfile.mkdtemp())
+    try:
+        out = regenerated_dir / "TRENDS.md"
+        write_trends(results_root, out)
+        regenerated = out.read_text(encoding="utf-8")
+    finally:
+        shutil.rmtree(regenerated_dir, ignore_errors=True)
+
+    assert committed == regenerated, (
+        "verification/TRENDS.md is stale. Regenerate it with "
+        "`python -m verification.trends` and commit the result."
+    )
+
+
+def test_the_trend_table_shows_both_injecagent_splits() -> None:
+    """The regression this guards. The table published one "Layer 2 judge F1"
+    cell reading AgentDojo, while the same 0.9.0 run scored InjecAgent dh F1
+    1.000 and ds F1 0.400 at recall 0.25 — both genuinely exercised. The
+    `_LAYER_FILES` comment calls that gap "the finding", and it was committed to
+    JSON and absent from the only human-readable view of it.
+
+    AgentDojo stays the headline for the documented reason (its positive class
+    is released third-party trajectories, not ours). The other two are shown
+    beside it rather than instead of it."""
+    from verification.trends import _HEADER
+
+    for column in ("AgentDojo", "InjecAgent dh F1", "InjecAgent ds F1"):
+        assert column in _HEADER, f"{column!r} missing from the trend table header"
+
+    committed = (ROOT / "verification" / "TRENDS.md").read_text(encoding="utf-8")
+    # The 0.9.0 row must carry all three, so the good number and the bad one are
+    # published together.
+    assert "| 41.2% | 100.0% | 40.0% |" in committed
