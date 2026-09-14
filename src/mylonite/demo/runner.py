@@ -69,15 +69,21 @@ DEMO_PROVIDER = "ollama"
 #: project — the recorded fixtures use this model and replay keys on it, so
 #: changing it invalidates every fixture.
 #:
-#: Chosen on measured evidence (`experiments/attack_potency`), and the choice
-#: was previously made WRONG in a way worth recording. A weaker 3B planner was
-#: picked first because a capable one drove the *guarded* twin into exfiltration
-#: on 40-100% of runs — which was hiding a real hole in the guarded control
-#: behind a planner too weak to find it. That hole is now closed in server code
-#: (the W2 taint gate, M5), and the leak re-measured at 0%, so the capable
-#: planner is the honest choice: it actually exercises the attacks (100%
-#: execution on every W2/W3/W4 variant) and the guard genuinely holds against
-#: it. Picking the weak model was the demo-tuning; this is the correction.
+#: Chosen on measured evidence, and the choice was previously made WRONG in a
+#: way worth recording. A weaker 3B planner was picked first because a capable
+#: one drove the *guarded* twin into exfiltration — measured at 40%, 80% and
+#: 100% of runs across three W2 payload phrasings, the swing itself proving the
+#: old prompt-level control was not a control. Picking the planner too weak to
+#: find that hole made the demo look clean while leaving the hole open: it was
+#: demo-tuning. The hole is now closed in server code (the W2 taint gate, M5)
+#: and the leak re-measured at 0/0/0%, so the capable planner is the honest
+#: choice — it executes on every W2/W3/W4 variant tried and the guard holds
+#: against it anyway.
+#:
+#: The numbers are inlined deliberately rather than cited: the harness that
+#: produced them is a local working artefact (see .gitignore), so a path
+#: reference here would point at evidence that never ships and cannot be
+#: audited by a reader.
 #:
 #: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is
 #: what Ollama's own tool-calling support targets — and the demo is entirely a
