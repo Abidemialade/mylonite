@@ -38,8 +38,11 @@ import re
 from pathlib import Path
 from typing import Any
 
-_HEADER = "| Version | Date | Model | Layer 1 recall | Layer 2 judge F1 | Layer 3 FPR |"
-_SEPARATOR = "| --- | --- | --- | --- | --- | --- |"
+_HEADER = (
+    "| Version | Date | Model | Layer 1 recall | Layer 2 judge F1 (AgentDojo) "
+    "| InjecAgent dh F1 | InjecAgent ds F1 | Layer 3 FPR |"
+)
+_SEPARATOR = "| --- | --- | --- | --- | --- | --- | --- | --- |"
 
 #: Per-layer summary filename, keyed by the same layer name meta.json's
 #: ``layers`` mapping uses.
@@ -122,12 +125,27 @@ def _render_layer1(version_dir: Path, meta: dict[str, Any]) -> str:
         return "error"
 
 
-def _render_layer2(version_dir: Path, meta: dict[str, Any]) -> str:
-    """Judge agreement, read from the AgentDojo report -- see ``_LAYER_FILES``."""
-    if _layer_status(meta, "layer2-agentdojo") != "ran":
+def _render_judge_f1(version_dir: Path, meta: dict[str, Any], layer_key: str) -> str:
+    """Judge-agreement F1 from one layer-2 report.
+
+    Parameterised over the layer so the table can show all three columns. It
+    used to read AgentDojo only, and the table had one "Layer 2 judge F1" cell.
+    AgentDojo is still the number worth *trending* for the reason recorded at
+    ``_LAYER_FILES`` -- its positive class is released third-party trajectories
+    that really do contain successful attacks -- and it stays the headline.
+
+    But publishing it alone hid the rest of the same run. On 0.9.0 the
+    InjecAgent splits scored F1 1.000 (direct harm) and 0.400 at recall 0.25
+    (data stealing), both genuinely exercised. ``_LAYER_FILES``' own comment
+    calls that gap "the finding"; it was committed to JSON and absent from the
+    only human-readable view of it. Both now have columns, so a reader sees the
+    good number and the bad one together -- which is the standard the README
+    sets for itself ("published for the same reason the wins are").
+    """
+    if _layer_status(meta, layer_key) != "ran":
         return "not run"
     try:
-        data = _load_json(version_dir / _LAYER_FILES["layer2-agentdojo"])
+        data = _load_json(version_dir / _LAYER_FILES[layer_key])
         # Vacuous check FIRST: a False here means the F1 field below is not a
         # real measurement no matter what number it holds.
         if not data.get("judge_agreement_exercised", False):
@@ -193,7 +211,10 @@ def render_trends(results_root: Path) -> str:
         model = str(meta.get("model", "?"))
         row = (
             f"| {version} | {_render_date(meta)} | {model} "
-            f"| {_render_layer1(entry, meta)} | {_render_layer2(entry, meta)} "
+            f"| {_render_layer1(entry, meta)} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-agentdojo')} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-dh')} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-ds')} "
             f"| {_render_layer3(entry, meta)} |"
         )
         rows.append((key, row))

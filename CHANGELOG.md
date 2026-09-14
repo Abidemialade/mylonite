@@ -151,6 +151,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`TRENDS.md` published one layer-2 number and hid the rest of the same run.**
+  The trend table had a single "Layer 2 judge F1" cell reading AgentDojo, while
+  the same 0.9.0 campaign scored InjecAgent **dh F1 1.000** and **ds F1 0.400 at
+  recall 0.25** — both genuinely exercised, both committed to JSON, and neither
+  visible in the only human-readable view of them. `_LAYER_FILES`' own comment
+  calls that gap "the finding".
+
+  AgentDojo remains the headline for the reason already recorded there (its
+  positive class is released third-party trajectories that really do contain
+  successful attacks, rather than a run this project authored). The two
+  InjecAgent splits now have columns beside it, so the good number and the bad
+  one are published together — the standard the README sets for itself.
+
+  `TRENDS.md` is a generated file that nothing checked for currency, which makes
+  a stale one worse than none: a published number nobody re-derived. A test now
+  regenerates it from the committed results and fails on any drift, the same
+  idiom the generated JSON schemas already use.
+
 - **The verification-freshness release gate required a claim of evidence, not
   the evidence.** `scripts/check_verification_freshness.py` checked that
   `verification/results/X.Y.0/meta.json` existed, parsed, and carried a matching
