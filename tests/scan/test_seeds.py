@@ -84,13 +84,19 @@ def test_every_seed_has_non_empty_applicable_targets(seed: SeedPattern) -> None:
     )
 
 
-def test_kitchen_sink_family_has_all_v0_2_1_seeds() -> None:
-    """The 8 seeds shipped through v0.2.1 all apply to the kitchen-sink family."""
+def test_kitchen_sink_family_covers_every_weakness_class() -> None:
+    """The kitchen-sink catalogue: the 8 seeds shipped through v0.2.1 plus the
+    0.10.0 W1 send-licence seed, all applying to the kitchen-sink family.
+
+    The count is pinned because the demo table joins on it: a seed added here
+    without a decidable predicate puts a NO-VERDICT cell into the one command a
+    newcomer runs first (see demo.render._aggregate_mark)."""
     kitchen_sink_seeds = [s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets]
-    assert len(kitchen_sink_seeds) == 8, (
-        f"expected 8 kitchen-sink seeds (the v0.2.1 catalogue); got "
-        f"{len(kitchen_sink_seeds)}: {[s.pattern_id for s in kitchen_sink_seeds]}"
+    assert len(kitchen_sink_seeds) == 9, (
+        f"expected 9 kitchen-sink seeds (v0.2.1's 8 + the W1 send-licence seed); "
+        f"got {len(kitchen_sink_seeds)}: {[s.pattern_id for s in kitchen_sink_seeds]}"
     )
+    assert {s.weakness for s in kitchen_sink_seeds} == {"W1", "W2", "W3", "W4"}
 
 
 def test_each_v0_2_2_target_family_has_at_least_one_seed() -> None:
