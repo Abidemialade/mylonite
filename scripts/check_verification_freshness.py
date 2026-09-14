@@ -46,6 +46,28 @@ ROOT = Path(__file__).resolve().parent.parent
 _VERSION_RE = re.compile(r'__version__\s*=\s*"(?P<version>\d+\.\d+\.\d+)"')
 _SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
 
+#: Result filenames, duplicated from ``verification.campaign.LAYER_FILES``
+#: rather than imported: this script must run with NO dependencies installed
+#: (see the module docstring), and importing the harness would pull in the
+#: package. ``tests/test_verification_freshness.py`` pins the duplication
+#: against the real constant, the same idiom campaign<->trends already uses.
+_LAYER_FILES = {
+    "layer1": "layer1-recall.json",
+    "layer2-agentdojo": "layer2-agentdojo.json",
+    "layer2-injecagent-dh": "layer2-injecagent-dh.json",
+    "layer2-injecagent-ds": "layer2-injecagent-ds.json",
+    "layer3": "layer3-precision.json",
+}
+
+#: Layers that must have actually RUN for a release to be verification-fresh.
+#: The layer-2 benchmark scorers replay committed trajectories and need no live
+#: server, so "we could not run them" is never a legitimate state for a release.
+_CORE_LAYERS = ("layer2-agentdojo", "layer2-injecagent-dh", "layer2-injecagent-ds")
+
+#: Layers that legitimately need third-party servers standing up, so a release
+#: may ship without them. Their absence is reported, not fatal.
+_BEST_EFFORT_LAYERS = ("layer1", "layer3")
+
 
 def read_version(version_file: Path) -> str:
     """Regex ``__version__`` out of ``version_file``. Raises if it's not there."""
@@ -100,7 +122,70 @@ def check(version: str, *, results_root: Path) -> list[str]:
             f"re-run the campaign against {version} and commit fresh results."
         ]
 
-    return []
+    # Everything below is the part this gate was missing. It used to stop here,
+    # so a meta.json carrying nothing but a matching version passed -- and so did
+    # one claiming `{"layer1": "ran"}` with no result file on disk. A release gate
+    # that accepts a claim of evidence instead of the evidence is the same
+    # false-assurance shape this project fixes everywhere else.
+    results_dir = results_root / version
+    problems: list[str] = []
+
+    layers = meta.get("layers")
+    if not isinstance(layers, dict):
+        return [
+            f"{meta_path} has no 'layers' object (got {type(layers).__name__}). "
+            f"Without it the gate cannot tell which layers actually ran, and a "
+            f"release would cite a campaign that may have measured nothing."
+        ]
+
+    missing_keys = [key for key in _LAYER_FILES if key not in layers]
+    if missing_keys:
+        problems.append(
+            f"{meta_path} 'layers' omits {sorted(missing_keys)}. Every layer must be "
+            f"accounted for -- an omitted key is indistinguishable from a layer that "
+            f"was silently skipped."
+        )
+
+    ran = [key for key, state in layers.items() if state == "ran"]
+    if not ran:
+        problems.append(
+            f"{meta_path} records no layer as 'ran' ({layers}). That is a campaign "
+            f"that measured nothing; it cannot make a release verification-fresh."
+        )
+
+    for key in _CORE_LAYERS:
+        if key in layers and layers[key] != "ran":
+            problems.append(
+                f"{meta_path} records {key}={layers[key]!r}. The layer-2 scorers replay "
+                f"committed trajectories and need no live server, so they must run for "
+                f"every release."
+            )
+
+    # A layer claiming to have run must have left its file behind.
+    for key, state in sorted(layers.items()):
+        if state != "ran":
+            continue
+        filename = _LAYER_FILES.get(key)
+        if filename is None:
+            problems.append(
+                f"{meta_path} records an unknown layer {key!r}; expected one of "
+                f"{sorted(_LAYER_FILES)}."
+            )
+            continue
+        if not (results_dir / filename).is_file():
+            problems.append(
+                f"{meta_path} records {key}='ran' but {results_dir / filename} is "
+                f"missing. The claim and the evidence disagree."
+            )
+
+    for key in _BEST_EFFORT_LAYERS:
+        if key in layers and layers[key] != "ran":
+            print(
+                f"note: {key}={layers[key]!r} -- this layer needs third-party servers "
+                f"standing up, so a release may ship without it. Recorded, not fatal."
+            )
+
+    return problems
 
 
 def main(argv: list[str] | None = None) -> int:
