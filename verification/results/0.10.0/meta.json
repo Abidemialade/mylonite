@@ -1,0 +1,16 @@
+{
+  "git_sha": "5a71c10",
+  "harness_sha": "5a71c10",
+  "layers": {
+    "layer1": "not-run",
+    "layer2-agentdojo": "ran",
+    "layer2-injecagent-dh": "ran",
+    "layer2-injecagent-ds": "ran",
+    "layer3": "ran"
+  },
+  "model": "anthropic/claude-haiku-4-5-20251001 (agentdojo judge, layer3); ollama/llama3.2:3b (injecagent record)",
+  "mylonite_origin": "site-packages",
+  "mylonite_version": "0.10.0",
+  "recorded_at": "2026-09-14",
+  "schema_version": "1.0"
+}

@@ -8,9 +8,42 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > **Which version produced these?** The June 2026 figures below predate versioned
 > results and are **not** stamped to a release — they are roughly v0.7.0-era. From
 > **0.9.0** onward, every minor/major release commits a version-stamped result set
-> under [`results/`](results/), measured against the **published PyPI wheel** rather
-> than a working tree, and the release is gated on it existing. The
+> under [`results/`](results/), measured against an **installed wheel outside the
+> checkout** rather than a working tree, and the release is gated on it existing.
+> (The gate requires the results before the tag, so the measured wheel is the
+> release candidate; `meta.json` records `git_sha` and `harness_sha` separately,
+> and their being equal is the signal that no release tag existed yet.) The
 > release-over-release table is [`TRENDS.md`](TRENDS.md).
+>
+> ### 0.10.0, measured 2026-09-14
+>
+> | Layer | Result | Basis |
+> |---|---|---|
+> | Judge agreement (AgentDojo) | **F1 0.412** | 27 cases, 12 real third-party positives |
+> | Judge agreement (InjecAgent `dh`) | **F1 1.000** | precision 1.0, recall 1.0, ASR 10% |
+> | Judge agreement (InjecAgent `ds`) | **F1 0.833** | precision 1.0, recall 0.714, ASR 7% |
+> | Precision (`reference:guarded`) | **0 FP / 8 probes** | all 8 exercised probes clean |
+> | Recall (DVMCP) | not run | needs the challenge servers standing up; see #136 |
+>
+> **AgentDojo and `dh` reproduced exactly** — 0.412 and 1.000, unchanged from 0.9.0
+> on a fresh run. Nothing in this release targeted judge agreement, so holding
+> steady is the expected outcome and is the clearest signal available that the
+> release did not disturb the judge.
+>
+> **Do not read `ds` 0.400 → 0.833 as the judge improving.** Recall on `ds` is
+> measured only over cases where the attack actually succeeded, and this run
+> produced **7** such positives (5 caught, 2 missed) against 8 in 0.9.0. A metric
+> with a single-digit denominator moves this far on case mix alone, and the
+> recording is a fresh stochastic run of the same model. Nothing in this release
+> touched the judge. The honest reading is that `ds` recall remains
+> **unresolved at this sample size**, not fixed — the split gap is still the
+> finding, and settling it needs a recording large enough to measure.
+>
+> **Layer 1 was not run.** It needs the DVMCP challenge servers standing up, and
+> its scorer still counts an untested challenge as a miss while `crosswalk.yaml`
+> maps two challenges to W3 on servers exposing no egress tool (#136). Re-quoting
+> the 0/8 without fixing that would repeat a figure already known to be wrong, so
+> the layer is recorded as `not-run` rather than carried forward.
 >
 > ### 0.9.0, measured 2026-08-29
 >

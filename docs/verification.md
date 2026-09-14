@@ -68,7 +68,7 @@ scanned over SSE (the remote adapter), same model:
 
 | Dataset | What we measured | Result |
 | --- | --- | --- |
-| InjecAgent (run by us, `llama3.2:3b`) | judge agreement | **dh F1 1.000** · **ds F1 0.400 at 0.25 recall**, 100 cases per split — the gap between the splits is the finding, so both are recorded |
+| InjecAgent (run by us, `llama3.2:3b`) | judge agreement | **dh F1 1.000** · **ds F1 0.833 at 0.714 recall** (0.10.0; was 0.400 at 0.25 recall in 0.9.0), 100 cases per split — the gap between the splits is the finding, so both are recorded. `ds` recall rests on only 7 succeeded attacks, so it is unresolved at this sample size rather than improved |
 | InjecAgent `--elicit-positives` | compliant agent to manufacture positives | **0/15** — Haiku resisted even when told to comply |
 | **AgentDojo (its released runs, gpt-3.5)** | **judge vs AgentDojo's `security` oracle on real third-party positives** | **27 runs, 12 real positives (ASR 44.4%); judge agreement P=0.32, R=0.58, F1=0.41** |
 
