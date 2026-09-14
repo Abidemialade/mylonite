@@ -151,6 +151,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The verification-freshness release gate required a claim of evidence, not
+  the evidence.** `scripts/check_verification_freshness.py` checked that
+  `verification/results/X.Y.0/meta.json` existed, parsed, and carried a matching
+  `mylonite_version` — and then returned. It never inspected `layers` and never
+  opened a result file, so a `meta.json` containing nothing but the right version
+  string passed, and so did one claiming `{"layer1": "ran"}` with no such file on
+  disk. A release could cite a campaign that measured nothing.
+
+  It now also fails on a missing or non-object `layers`, an omitted layer key, no
+  layer recorded as `ran`, an unknown layer key, any layer claiming `ran` whose
+  file is absent, and any of the three layer-2 scorers not having run — those
+  replay committed trajectories and need no live server. `layer1`/`layer3` need
+  third-party servers standing up, so their absence is reported rather than
+  fatal. The layer filenames stay duplicated (the script must run with no
+  dependencies installed) with a test pinning them to
+  `verification.campaign.LAYER_FILES`.
+
+- **`verification/runner.py` printed a next step that does not parse** (issue
+  #138). `layer1 emit-targets` told the operator to run
+  `mylonite scan --target-file <t> --json <report>`; `scan` has no `--json` flag,
+  so following it verbatim produced a usage error at the point they were furthest
+  from a working Layer 1 run. It now prints the real sequence, and
+  `tests/test_docs_consistency.py` — which already parsed every backtick-quoted
+  `mylonite ...` example in CLI epilogs and under `docs/` — now covers the
+  invocations `verification/` prints too.
+
 - **`prepare_release` no longer stages a baseline the pre-commit hook rewrites**
   (issue #137). The release flow refreshed `.secrets.baseline` and normalised it
   with its own partial copy of the logic — path separators only — while the
