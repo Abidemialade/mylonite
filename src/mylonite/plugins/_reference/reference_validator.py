@@ -1447,6 +1447,12 @@ class DifferentialValidator(ValidatorBase):
                     "format_version": FIXTURE_FORMAT_VERSION,
                     "cache_key_version": recorder.key_version,
                     "model": self._model,
+                    # Stamped so `testkit.assert_guard_holds` can read the
+                    # provider instead of naming one. It used to read `model`
+                    # from here and pass provider="anthropic" regardless, which
+                    # put a false provenance into every committed report made
+                    # from an artefact recorded elsewhere.
+                    "provider": self._provider,
                     "pattern_id": exploit.pattern_id,
                 },
                 indent=2,

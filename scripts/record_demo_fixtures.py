@@ -425,9 +425,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "only: LiteLLM routes purely on the --model prefix, so this never "
             "changes which endpoint is called. Pass it alongside a --model from a "
             "different provider, or the console output names the wrong one. It is "
-            "deliberately NOT derived from the model prefix, which would resolve "
-            "the default pair's 'ollama_chat/' route to the label 'ollama_chat' "
-            "rather than the provider 'ollama'."
+            "deliberately NOT derived from the model prefix: a route spelling is "
+            "not a provider id, and only the ones in scan.providers._ALIASES are "
+            "normalised."
         ),
     )
     parser.add_argument(
