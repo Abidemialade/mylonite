@@ -22,9 +22,13 @@ from mylonite.demo.render import render_demo
 from mylonite.scan.coverage import NO_ADJUDICATOR
 from mylonite.scan.engine import ScanResult
 
-# The eight kitchen-sink pattern_ids, grouped by seeded weakness (must match
-# SEED_CATALOGUE / reference_targets/mcp_kitchen_sink/seeds/seeds.yaml).
-_W1 = ("tool-description-summary-smuggle",)
+# The nine kitchen-sink pattern_ids, grouped by seeded weakness (must match
+# SEED_CATALOGUE / reference_targets/mcp_kitchen_sink/seeds/seeds.yaml) --
+# `test_the_pattern_ids_match_the_catalogue` below fails if they drift.
+_W1 = (
+    "tool-description-summary-smuggle",
+    "tool-description-send-licence-smuggle",
+)
 _W2 = (
     "indirect-injection-note-body-direct",
     "indirect-injection-note-body-roleplay",
@@ -380,13 +384,14 @@ def _row(output: str, weakness: str) -> str:
 def test_an_unadjudicated_no_finding_renders_as_no_verdict_not_clean() -> None:
     """The headline bug: `no_finding` with no adjudicator is not a clean result.
 
-    W1 has a single seed, so both of its cells turn over together — which is
-    exactly the shipped fixtures' shape, where the predicate is inconclusive on
-    both builds and the row claimed the guard held on both.
+    Every W1 seed is left unadjudicated, so neither cell has a verdict to
+    report — the shipped fixtures' shape before 0.10.0, where the predicate was
+    inconclusive on both builds and the row nonetheless claimed the guard held
+    on both. A row with SOME verdict is a different case, covered by
+    `test_a_partly_adjudicated_clean_row_shows_its_coverage`.
     """
-    smuggle = _W1[0]
-    vulnerable = _result("reference:vulnerable", _outcomes(), no_verdict=[smuggle])
-    guarded = _result("reference:guarded", _outcomes(), no_verdict=[smuggle])
+    vulnerable = _result("reference:vulnerable", _outcomes(), no_verdict=list(_W1))
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=list(_W1))
 
     row = _row(_render(vulnerable, guarded), "W1")
 
@@ -413,11 +418,9 @@ def test_a_judge_fallback_also_renders_as_no_verdict() -> None:
     records ``no_adjudicator``. Neither decided anything, and the demo must not
     treat the difference as meaningful.
     """
-    smuggle = _W1[0]
-    vulnerable = _result(
-        "reference:vulnerable", _outcomes(), no_verdict={smuggle: "fallback_cause"}
-    )
-    guarded = _result("reference:guarded", _outcomes(), no_verdict={smuggle: "fallback_cause"})
+    fallbacks = dict.fromkeys(_W1, "fallback_cause")
+    vulnerable = _result("reference:vulnerable", _outcomes(), no_verdict=fallbacks)
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=fallbacks)
 
     assert "⚠ NO VERDICT" in _row(_render(vulnerable, guarded), "W1")
 
@@ -451,7 +454,7 @@ def test_the_coverage_note_counts_both_kinds_of_non_result() -> None:
 
     assert "1 reached NO VERDICT" in output
     assert "1 was NOT TESTED" in output
-    assert "of 16 attempts across both builds" in output
+    assert "of 18 attempts across both builds" in output
 
 
 def test_the_coverage_note_agrees_in_number_with_what_it_counts() -> None:
@@ -463,3 +466,115 @@ def test_the_coverage_note_agrees_in_number_with_what_it_counts() -> None:
 
     assert "2 reached NO VERDICT" in output
     assert "1 was NOT TESTED" in output
+
+
+# --- a partly-adjudicated clean row reports its coverage --------------------
+#
+# Guarded W2 in the shipped run is the real case: of three seeds,
+# `indirect-injection-note-body-direct` caught the taint gate refusing an
+# attacker-addressed `send_email` outright, and the other two never reached a
+# sink. Collapsing that to the bare NO-VERDICT mark asserted the row had
+# established nothing, which was false; a plain clean would have claimed all
+# three resisted, which is the opposite error.
+#
+# These assert on the GUARDED cell specifically. `_row` returns the whole row,
+# whose vulnerable cell is usually clean too, so a bare `not in row` check reads
+# the wrong column.
+
+
+def _guarded_cell(output: str, weakness: str) -> str:
+    """The guarded (last) cell of ``weakness``'s rendered row."""
+    cells = [c.strip() for c in _row(output, weakness).split("│") if c.strip()]
+    return cells[-1]
+
+
+def test_a_partly_adjudicated_clean_row_shows_its_coverage() -> None:
+    """One real predicate negative, two no-verdicts, nothing found."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=[_W2[1], _W2[2]])
+
+    cell = _guarded_cell(_render(vulnerable, guarded), "W2")
+
+    assert cell == "✓ clean (1/3)", cell
+
+
+def test_a_fully_adjudicated_clean_row_carries_no_count() -> None:
+    """Non-regression: an unqualified clean stays unqualified, or every green
+    cell in the table grows noise."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes())
+
+    assert _guarded_cell(_render(vulnerable, guarded), "W4") == "✓ clean"
+
+
+def test_a_row_with_no_adjudicated_verdict_still_reports_no_verdict() -> None:
+    """The floor this must not erode: zero verdicts means zero, and the cell has
+    to say so rather than borrow confidence from a sibling attempt."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=list(_W2))
+
+    cell = _guarded_cell(_render(vulnerable, guarded), "W2")
+
+    assert "NO VERDICT" in cell
+    assert "clean" not in cell
+
+
+def test_both_spellings_of_a_no_verdict_attempt_render_the_same() -> None:
+    """The inconsistency this fix removes. A no-verdict attempt has two
+    spellings -- the `undecided` literal, and the older `no_finding` carrying a
+    no-adjudicator evidence key -- and branching on the raw string rendered the
+    same situation two different ways."""
+    vulnerable = _result("reference:vulnerable", _outcomes())
+
+    legacy = _result("reference:guarded", _outcomes(), no_verdict=[_W2[1], _W2[2]])
+    literal = _result(
+        "reference:guarded",
+        _outcomes({_W2[1]: "undecided", _W2[2]: "undecided"}),
+    )
+
+    assert _guarded_cell(_render(vulnerable, legacy), "W2") == _guarded_cell(
+        _render(vulnerable, literal), "W2"
+    )
+
+
+def test_the_counted_clean_mark_is_styled_as_clean() -> None:
+    """It is built at render time so it cannot be a key in the style map, and an
+    unstyled cell in a styled column reads as a rendering bug."""
+    from mylonite.demo.render import _CLEAN_MARK, _styled
+
+    counted = f"{_CLEAN_MARK} (1/3)"
+
+    assert _styled(counted) == f"[bold green]{counted}[/bold green]"
+
+
+def test_a_finding_still_wins_over_a_partly_clean_row() -> None:
+    """Precedence unchanged: one exploit makes the row FOUND regardless of how
+    many siblings came back clean or undecided."""
+    vulnerable = _result(
+        "reference:vulnerable",
+        _outcomes({_W2[0]: "finding", _W2[1]: "undecided"}),
+    )
+    guarded = _result("reference:guarded", _outcomes())
+
+    cells = [c.strip() for c in _row(_render(vulnerable, guarded), "W2").split("│") if c.strip()]
+
+    assert "FOUND" in cells[-2], cells
+
+
+def test_the_pattern_ids_match_the_catalogue() -> None:
+    """This module hard-codes the kitchen-sink pattern_ids so it can build
+    synthetic results without running a scan. It listed eight while the
+    catalogue had nine — the W1 send-licence seed added in 0.10.0 — so the W1
+    row under test carried one attempt where the real demo has two. Nothing
+    failed, which is exactly why this guard is here.
+    """
+    from mylonite.scan.seeds import SEED_CATALOGUE
+
+    catalogue = {
+        seed.pattern_id for seed in SEED_CATALOGUE if "kitchen-sink" in seed.applicable_targets
+    }
+
+    assert set(_ALL_PATTERNS) == catalogue, (
+        f"drifted from SEED_CATALOGUE: missing {sorted(catalogue - set(_ALL_PATTERNS))}, "
+        f"stale {sorted(set(_ALL_PATTERNS) - catalogue)}"
+    )

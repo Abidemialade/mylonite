@@ -93,6 +93,10 @@ def _styled(mark: str) -> str:
     function keeps returning a bare comparable string.
     """
     style = _MARK_STYLES.get(mark)
+    if style is None and mark.startswith(_CLEAN_MARK):
+        # The counted clean mark ("✓ clean (1/3)") is built at render time, so it
+        # cannot be a dict key. It is still a clean verdict and must read as one.
+        style = _MARK_STYLES[_CLEAN_MARK]
     return f"[{style}]{mark}[/{style}]" if style else mark
 
 
@@ -169,13 +173,34 @@ def _aggregate_mark(result: ScanResult, pattern_ids: frozenset[str]) -> str:
         return _FOUND_MARK
     if not outcomes:
         return _SKIPPED_MARK
-    if all(attempt_reached_no_verdict(a) for a in attempts):
+    undecided = [a for a in attempts if attempt_reached_no_verdict(a)]
+    if len(undecided) == len(attempts):
         return _NO_VERDICT_MARK
-    if all(outcome == "no_finding" for outcome in outcomes):
-        # At least one genuine verdict, and no non-clean outcome: the ones that
-        # WERE adjudicated all came back clean. Reporting the row as clean is
-        # what those verdicts support.
-        return _CLEAN_MARK
+
+    # A row of adjudicated clean verdicts, possibly alongside attempts nothing
+    # adjudicated, and no finding anywhere.
+    #
+    # Keyed on `attempt_reached_no_verdict`, NOT on the raw outcome string,
+    # because a no-verdict attempt has two spellings: the `undecided` literal
+    # added in 0.10.0, and the older `no_finding` carrying a no-adjudicator
+    # evidence key (still produced by reports read off disk). Branching on the
+    # string rendered the SAME situation two different ways -- plain clean for
+    # one spelling, the bare NO-VERDICT mark for the other -- which is how
+    # guarded W2 came to claim it had established nothing when one of its three
+    # seeds had caught the taint gate refusing an attacker-addressed
+    # `send_email` outright.
+    #
+    # Fully adjudicated stays an unqualified clean. Partly adjudicated carries
+    # the count, so the cell neither erases the verdicts it does have nor
+    # implies verdicts it does not: a plain green here would claim all three
+    # seeds resisted when two never reached a sink.
+    decided_clean = [
+        a for a in attempts if a.outcome == "no_finding" and not attempt_reached_no_verdict(a)
+    ]
+    if decided_clean and len(decided_clean) + len(undecided) == len(attempts):
+        if not undecided:
+            return _CLEAN_MARK
+        return f"{_CLEAN_MARK} ({len(decided_clean)}/{len(attempts)})"
     # `.get` rather than `[]`: an unknown outcome string must degrade to the
     # generic mark, never crash the one command a newcomer runs first.
     non_clean = {
