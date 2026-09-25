@@ -35,6 +35,7 @@ from mylonite.contracts import (
 from mylonite.scan._llm import (
     BudgetExceededError,
     LiteLLMCallCounter,
+    LLMSpend,
     llm_scope,
     seed_scope,
 )
@@ -199,6 +200,11 @@ class ScanResult:
     #: engine (gate/recommend.py, PR2) see the real tool inventory without
     #: re-describing the target at prescription time.
     descriptor: TargetDescriptor | None = None
+    #: What this scan spent on LLM calls — calls by caller, the cap in force,
+    #: and reported tokens. Like ``descriptor``, an in-process field outside
+    #: ScanReport's schema. ``None`` when the result was reconstructed from a
+    #: persisted ``scan_report.json``: an unknown spend is not a zero spend.
+    llm_spend: LLMSpend | None = None
 
 
 @dataclass
@@ -329,7 +335,12 @@ class ScanEngine:
                 logger.error("ScanEngine: adapter.describe() raised: %s", type(exc).__name__)
                 aborted = AbortReason.DESCRIBE_FAILED
                 return self._finalize(
-                    attempts, exploits, aborted, time.monotonic() - start, module_ids
+                    attempts,
+                    exploits,
+                    aborted,
+                    time.monotonic() - start,
+                    module_ids,
+                    llm_spend=counter.spend(),
                 )
 
             # Resolve seeds against the seeds THIS RUN actually has, not the
@@ -413,6 +424,7 @@ class ScanEngine:
                     time.monotonic() - start,
                     module_ids,
                     descriptor=descriptor,
+                    llm_spend=counter.spend(),
                 )
 
             timeout_s = self._config.wall_clock_timeout_s
@@ -523,6 +535,7 @@ class ScanEngine:
             inconclusive_attempts=inconclusive_attempts,
             fallback_breakdown=fallback_breakdown,
             descriptor=descriptor,
+            llm_spend=counter.spend(),
         )
 
     def _finalize(
@@ -536,6 +549,7 @@ class ScanEngine:
         inconclusive_attempts: int = 0,
         fallback_breakdown: dict[str, int] | None = None,
         descriptor: TargetDescriptor | None = None,
+        llm_spend: LLMSpend | None = None,
     ) -> ScanResult:
         report = ScanReport(
             target_id=self._config.target_id,
@@ -552,7 +566,10 @@ class ScanEngine:
             mylonite_version=__version__,
         )
         return ScanResult(
-            report=report, exploits=self._stamp_exec_context(exploits), descriptor=descriptor
+            report=report,
+            exploits=self._stamp_exec_context(exploits),
+            descriptor=descriptor,
+            llm_spend=llm_spend,
         )
 
     def _stamp_exec_context(self, exploits: list[ExploitRecord]) -> list[ExploitRecord]:

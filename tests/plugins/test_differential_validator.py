@@ -1719,3 +1719,56 @@ def test_custom_path_does_not_fabricate_resistance_from_absent_findings() -> Non
     assert report.reproducibility.guard_resisted == 0, (
         "a run that demonstrated nothing must not be counted as the control holding"
     )
+
+
+# --- the metamorphic stage runs under its own call budget ---------------------
+
+
+class _CountedCompletion(_ScriptedCompletion):
+    """Records, for every completion call, whether a call counter was active."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.uncounted_calls = 0
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        from mylonite.scan._llm import active_counter
+
+        if active_counter() is None:
+            self.uncounted_calls += 1
+        return await super().__call__(**kwargs)
+
+
+def test_every_validation_call_runs_under_a_call_counter() -> None:
+    """Every LLM call a reference validation makes — differential iterations and
+    metamorphic re-drives alike — is inside a budget scope, so a cap bounds it."""
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    completion = _CountedCompletion()
+    validator = DifferentialValidator(iterations=2, completion_fn=completion)
+    validator.validate(test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle())
+    assert completion.uncounted_calls == 0
+
+
+def test_metamorphic_stage_fails_closed_when_its_budget_is_reached() -> None:
+    """The stage gates ``kept``, so one that could not finish every perturbation
+    does not pass on the ones it did."""
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    validator = DifferentialValidator(
+        iterations=2,
+        completion_fn=_ScriptedCompletion(),
+        metamorphic_max_llm_calls=1,
+    )
+    report = validator.validate(
+        test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+    metamorphic = _outcome(report, "metamorphic")
+    assert metamorphic.passed is False
+    assert "metamorphic call budget (1) reached" in metamorphic.detail
+    assert report.kept is False
+
+
+def test_metamorphic_budget_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="metamorphic_max_llm_calls"):
+        DifferentialValidator(iterations=1, metamorphic_max_llm_calls=0)

@@ -27,6 +27,7 @@ import inspect
 import logging
 import os
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar
@@ -53,6 +54,7 @@ from mylonite.plugins._mcp.scaffold import (
     _relative_sqlite_env_keys as _relative_sqlite_env_keys,  # re-export (tests import from cli)
 )
 from mylonite.plugins._mcp.scaffold import (
+    _scaffold_rest_target_file,
     _scaffold_target_file,
     _target_file_from_flags,
 )
@@ -2488,8 +2490,9 @@ def validate(
             help=(
                 "The dir (or test file) emitted by `mylonite generate`. Runs the "
                 "differential-oracle validator LIVE by default — real LLM calls "
-                "(Haiku): ~5 iterations x 2 twins, roughly a minute and a few "
-                "cents. Needs a provider (ANTHROPIC_API_KEY)."
+                "(Haiku): ~5 iterations x 2 twins plus metamorphic re-drives; the "
+                "LLM calls and tokens used are printed when it finishes. Needs a "
+                "provider (ANTHROPIC_API_KEY)."
             ),
         ),
     ],
@@ -2623,8 +2626,9 @@ def validate(
     """Run a generated test through the differential-oracle validator (LIVE).
 
     Runs LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM
-    (Haiku) — roughly a minute and a few cents — and needs a provider
-    (ANTHROPIC_API_KEY). Validates the ACTUAL committed test on disk (no
+    (Haiku), plus the metamorphic re-drives, and needs a provider
+    (ANTHROPIC_API_KEY). The LLM calls and tokens it used are printed when it
+    finishes. Validates the ACTUAL committed test on disk (no
     re-emit), then — on a clean discriminating run — RECORDS the canonical guarded
     fixtures into the generated dir's ``fixtures/`` and runs that on-disk test
     offline as a full-pass build, so the command leaves a ready-to-commit,
@@ -2731,6 +2735,9 @@ def validate(
             target_file = candidate
             echo_err(f"Using target: {candidate} (co-located with the test)")
 
+    from mylonite.scan._llm import usage_tally
+    from mylonite.scan.artefacts import spend_summary
+
     if is_custom:
         # DCR-0008: the provider-reachability preflight is done INSIDE
         # _validate_custom, AFTER its authorization gate — never before it.
@@ -2741,27 +2748,28 @@ def validate(
         # authorization concern of its own, but ordering it before the
         # authorize check would still mean an unauthorized `validate` burns a
         # live LLM call before being rejected.
-        report = _validate_custom(
-            generated,
-            target_file,
-            iterations,
-            effective_provider,
-            effective_model,
-            iteration_timeout_s=iteration_timeout,
-            randomize_exfil=randomize_exfil,
-            fast=fast,
-            prove_input_control=prove_input_control,
-            authorize=authorize,
-            planner_model=effective_planner_model if planner_model else None,
-            customiser_model=effective_customiser_model if customiser_model else None,
-            judge_model=effective_judge_model if judge_model else None,
-            policy=effective_policy,
-        )
+        spend_started = time.monotonic()
+        with usage_tally() as spend_tally:
+            report = _validate_custom(
+                generated,
+                target_file,
+                iterations,
+                effective_provider,
+                effective_model,
+                iteration_timeout_s=iteration_timeout,
+                randomize_exfil=randomize_exfil,
+                fast=fast,
+                prove_input_control=prove_input_control,
+                authorize=authorize,
+                planner_model=effective_planner_model if planner_model else None,
+                customiser_model=effective_customiser_model if customiser_model else None,
+                judge_model=effective_judge_model if judge_model else None,
+                policy=effective_policy,
+            )
     else:
-        echo_err(
-            f"validate runs ~{iterations} iterations x 2 twins live (Haiku) — roughly a "
-            "minute, a few cents; needs a provider (ANTHROPIC_API_KEY)."
-        )
+        from mylonite.plugins._reference.reference_validator import workload_message
+
+        echo_err(workload_message(iterations, fast=fast))
         # T14/H3: cheap, no-network credential-presence pre-flight before the
         # real live _provider_preflight call just below (no authorize gate on
         # this branch -- the bundled reference twins are safe-by-construction).
@@ -2823,7 +2831,8 @@ def validate(
         )
         from mylonite.scan._llm import llm_scope
 
-        with llm_scope(policy=effective_policy):
+        spend_started = time.monotonic()
+        with llm_scope(policy=effective_policy), usage_tally() as spend_tally:
             report = validator.validate(
                 generated,
                 ReferenceVulnerableOracle().adapter(),
@@ -2863,6 +2872,7 @@ def validate(
     report_path.write_text(sanitized_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     _render_validation_report(report)
+    echo(spend_summary(spend_tally.spend(), time.monotonic() - spend_started))
 
     if report.kept:
         echo("")
@@ -3184,129 +3194,6 @@ def report(
             )
             echo(f"Wrote JSON finding bundle: {json_bundle}")
     raise typer.Exit(code=exit_code)
-
-
-_RESERVED_FAMILIES = frozenset({"filesystem", "fetch", "github", "target", "app"})
-
-
-def _redact_credential_shaped_query_params(url: str) -> str:
-    """Mask any query-string parameter VALUE that looks like a live credential.
-
-    ``dump_target_file``/``redact_target_yaml``'s generic sweep already masks a
-    value keyed by a RECOGNISED credential name (``api_key=``, ``token=``,
-    ``secret=``, ...) or matching a known provider-key prefix (``sk-``,
-    ``AKIA``, ...). This closes the residual gap for an opaque,
-    key-name-agnostic token under a non-standard param name (e.g. a webhook
-    signing secret passed as ``?sig=<opaque>``), mirroring the broader
-    :func:`mylonite._redaction.looks_like_api_key` heuristic that ``--env``
-    values already get via ``redact_env``/``_is_secret_env`` (DCR-0002).
-    """
-    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
-    from mylonite._redaction import REDACTION_PLACEHOLDER, looks_like_api_key
-
-    parts = urlsplit(url)
-    if not parts.query:
-        return url
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    masked = [(k, REDACTION_PLACEHOLDER if looks_like_api_key(v) else v) for k, v in pairs]
-    new_query = urlencode(masked)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
-
-
-def _redact_credential_shaped_json_body(body: str) -> str:
-    """Mask any JSON string leaf that looks like a live credential (DCR-0002).
-
-    Best-effort: only touches ``body`` when it parses as JSON (the common
-    case — the default/most rest-body templates are simple JSON objects) and
-    only rewrites it when something was actually masked, so a non-JSON or
-    already-clean body is returned byte-for-byte unchanged (never reformatted
-    for no reason). Uses the same :func:`~mylonite._redaction.looks_like_api_key`
-    heuristic as :func:`_redact_credential_shaped_query_params` — the
-    ``{prompt}`` placeholder itself is far too short to ever match it.
-    """
-    import json
-
-    from mylonite._redaction import REDACTION_PLACEHOLDER, looks_like_api_key
-
-    try:
-        data = json.loads(body)
-    except (ValueError, TypeError):
-        return body
-
-    def _walk(value: object) -> object:
-        if isinstance(value, str):
-            return REDACTION_PLACEHOLDER if looks_like_api_key(value) else value
-        if isinstance(value, dict):
-            return {k: _walk(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [_walk(v) for v in value]
-        return value
-
-    masked = _walk(data)
-    if masked == data:
-        return body
-    return json.dumps(masked)
-
-
-def _scaffold_rest_target_file(
-    *,
-    output: Path,
-    rest_url: str,
-    rest_body: str | None,
-    rest_response_path: str | None,
-    force: bool,
-) -> None:
-    """Implement ``scan --scaffold --rest-url``: write a RUNNABLE HTTP-agent target.
-
-    A plain HTTP agent has nothing to introspect, so (unlike the MCP scaffold) this
-    writes a complete, ready-to-scan ``target.yaml`` for the endpoint — no hand-editing
-    required. See docs/http-agent.md.
-    """
-    from mylonite.plugins._mcp.target_file import TargetFile, dump_target_file
-    from mylonite.plugins._mcp.target_registry import RequestSpec
-
-    if output.exists() and not force:
-        echo_err(f"{output} already exists — pass --force to overwrite.")
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    body = rest_body or '{"prompt": "{prompt}"}'
-    if "{prompt}" not in body:
-        echo_err("--rest-body must contain a {prompt} placeholder.")
-        raise typer.Exit(code=EXIT_CONFIG)
-
-    import re
-
-    stem = re.sub(r"[^a-z0-9]+", "-", output.stem.lower()).strip("-") or "http-agent"
-    family = "http-agent" if stem in _RESERVED_FAMILIES else stem
-
-    # This TargetFile is only ever serialised to disk below — no live request is
-    # made from this scaffold path — so redacting rest_url/rest_body BEFORE
-    # construction is safe and closes the credential-in-URL leak (DCR-0002)
-    # at the source, on top of dump_target_file's own generic redaction pass.
-    safe_url = _redact_credential_shaped_query_params(rest_url)
-    safe_body = _redact_credential_shaped_json_body(body)
-
-    try:
-        tf = TargetFile(
-            family=family,
-            transport="rest",
-            weakness_classes=["W2"],
-            request=RequestSpec(url=safe_url, body=safe_body, response_path=rest_response_path),
-        )
-    except Exception as exc:
-        echo_exc("invalid rest target", exc)
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-    header = (
-        "# Mylonite HTTP-agent target — generated by `mylonite scan --scaffold ... --rest-url`.\n"
-        "# A black-box HTTP agent is tested for prompt-injection / goal-hijack (W2), judged\n"
-        "# on the reply. This file is runnable as-is; edit the request block to match your\n"
-        "# endpoint (auth goes in request.headers — never logged). See docs/http-agent.md.\n\n"
-    )
-    output.write_text(header + dump_target_file(tf), encoding="utf-8")
-    echo(f"wrote runnable HTTP-agent target -> {output}")
-    echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")
 
 
 def _post_gate_annotations(
@@ -4117,10 +4004,12 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
-    from mylonite.scan._llm import BudgetExceededError
+    from mylonite.scan._llm import BudgetExceededError, usage_tally
+    from mylonite.scan.artefacts import spend_summary
 
+    spend_started = time.monotonic()
     try:
-        with llm_scope(policy=effective_policy):
+        with llm_scope(policy=effective_policy), usage_tally() as spend_tally:
             result = run_gate(
                 out_dir=out,
                 scan_fn=scan_fn,
@@ -4152,6 +4041,7 @@ def gate(
             f"still in '{out}'. Nothing was lost; only the PR step failed."
         )
         raise typer.Exit(code=EXIT_PR_FAILED) from exc
+    echo(f"gate {spend_summary(spend_tally.spend(), time.monotonic() - spend_started)}")
     raise typer.Exit(code=result.exit_code)
 
 

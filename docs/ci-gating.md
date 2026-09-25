@@ -85,10 +85,12 @@ scaffolded workflows:
 
 - **`mylonite-gate.yml`** runs on every PR. It re-drives your agent (bounded:
   deterministic effect-probe, small model, 1 iteration) and fails the check on
-  a regression. Cheap — a few cents per PR. It sets `MYLONITE_LIVE_TARGET=1`
-  for you (see [The validation engine](validation.md)) — without that
-  variable the committed test for a custom target is *skipped*, not run, and
-  `pytest` still exits `0`.
+  a regression. It sets `MYLONITE_LIVE_TARGET=1` for you (see
+  [The validation engine](validation.md)) — without that variable the committed
+  test for a custom target is *skipped*, not run. It also sets
+  `MYLONITE_REQUIRE_GATE_RUN=1`, which makes the job fail if a Mylonite gate test
+  was skipped or none was collected, so the check can only go green by running
+  the gate. `pytest -ra` prints the reason if it does.
 
     The re-drive carries a **hard call budget and a wall-clock timeout**. It is
     scoped to the single already-known pattern, so a healthy run is a customiser
@@ -166,8 +168,18 @@ MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate
 ```
 
 **The environment variable is required.** Without it the live test is skipped and `pytest`
-exits **0** — your pipeline goes green having tested nothing. `mylonite generate` prints
-this exact command for that reason. You also need:
+exits **0**. `mylonite generate` prints this exact command for that reason. To make the job
+fail rather than pass when the gate test did not run, also set
+`MYLONITE_REQUIRE_GATE_RUN=1` in the CI job — the same check the scaffolded GitHub workflow
+enables:
+
+```bash
+MYLONITE_LIVE_TARGET=1 MYLONITE_REQUIRE_GATE_RUN=1 pytest .mylonite/gate -ra
+```
+
+With it set, the session fails if any `mylonite_security` test was skipped or if none was
+collected; tests without that marker are never inspected. Leave it unset for local runs,
+where a keyless skip is the intended default. You also need:
 
 - `mylonite` and `pytest` installed
 - the scan artefacts (`exploit_<pattern_id>.json`, `target.yaml`) co-located with the test

@@ -94,7 +94,7 @@ from mylonite.contracts import (
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan._llm import BudgetExceededError
+from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.engine import ScanResult
@@ -227,6 +227,16 @@ class ReferenceVulnerableOracle:
         return InProcessReferenceAdapter(variant="vulnerable")  # type: ignore[return-value]
 
 
+def workload_message(iterations: int, *, fast: bool) -> str:
+    """The pre-run statement of what a reference ``validate`` will drive."""
+    perturbations = 1 if fast else len(_deterministic_strategies())
+    return (
+        f"validate runs {iterations} iterations x 2 twins live (Haiku), each a full "
+        f"scan, plus {perturbations} metamorphic re-drive(s) x 2 twins; needs a "
+        "provider (ANTHROPIC_API_KEY). LLM calls and tokens are reported at the end."
+    )
+
+
 @dataclass(frozen=True)
 class _IterationTally:
     """Per-iteration result of running the full scan against both twins."""
@@ -311,6 +321,7 @@ class DifferentialValidator(ValidatorBase):
         record_fixtures_dir: Path | None = None,
         metamorphic_strategies: list[str] | None = None,
         metamorphic_robustness_threshold: float = 0.6,
+        metamorphic_max_llm_calls: int = 120,
         target_adapter_factory: Callable[[], Any] | None = None,
         guarded_adapter_factory: Callable[[], Any] | None = None,
         control_weakness: str | None = None,
@@ -410,6 +421,14 @@ class DifferentialValidator(ValidatorBase):
         # means a single aggressive rewording that doesn't reproduce won't reject a
         # genuine finding.
         self._metamorphic_threshold = metamorphic_robustness_threshold
+        # The metamorphic stage drives its perturbations directly (adapter +
+        # judge, no ScanEngine), so it carries its own call budget rather than
+        # inheriting a scan's. Sized well above the default workload (7
+        # strategies x 2 twins x a few planner turns + one judge call) so it
+        # bounds a runaway run without changing a normal one.
+        if metamorphic_max_llm_calls < 1:
+            raise ValueError("metamorphic_max_llm_calls must be >= 1")
+        self._metamorphic_max_llm_calls = metamorphic_max_llm_calls
 
     # -- public contract ------------------------------------------------------
 
@@ -1167,30 +1186,42 @@ class DifferentialValidator(ValidatorBase):
         reject an otherwise-robust finding.
         """
         results: list[tuple[str, bool, str]] = []
-        for name, transform in self._metamorphic_strategies:
-            perturbed_body = transform(exploit.payload.body)
-            vuln_fired, guard_resisted, guard_fired = self._run_perturbed(exploit, perturbed_body)
-            if vuln_fired and guard_resisted:
-                classification = "held"
-            elif vuln_fired and guard_fired:
-                # The attack fired on both twins — a genuine bypass, not a
-                # harness artefact.
-                classification = "guard_bypassed"
-            else:
-                # `vuln_fired` is False here (the `elif` above already
-                # required it True for guard_bypassed). This covers BOTH: (a)
-                # the perturbation never fired on either twin (a harness/
-                # payload defect — the common case), and (b) the surprising
-                # inverted case `vuln_fired=False, guard_fired=True` — the
-                # guarded twin alone fired. That inverted case is deliberately
-                # NOT `guard_bypassed`: the two twins are driven by
-                # INDEPENDENT LLM planner runs, so a guarded-twin-only firing
-                # with no vulnerable-twin corroboration reads as LLM-sampling
-                # noise, not proof the perturbed payload defeated the guard
-                # (see the docstring's "NOTABLE edge case" paragraph).
-                classification = "attack_malformed"
-            held = classification == "held"
-            results.append((name, held, classification))
+        counter = LiteLLMCallCounter(cap=self._metamorphic_max_llm_calls)
+        budget_reached = False
+        with llm_scope(counter=counter):
+            for name, transform in self._metamorphic_strategies:
+                if counter.count >= counter.cap:
+                    budget_reached = True
+                    break
+                perturbed_body = transform(exploit.payload.body)
+                try:
+                    vuln_fired, guard_resisted, guard_fired = self._run_perturbed(
+                        exploit, perturbed_body
+                    )
+                except BudgetExceededError:
+                    budget_reached = True
+                    break
+                held, classification = self._classify_perturbation(
+                    vuln_fired, guard_resisted, guard_fired
+                )
+                results.append((name, held, classification))
+
+        total_planned = len(self._metamorphic_strategies)
+        if budget_reached:
+            # Fail closed: this stage gates `kept`, so a stage that could not run
+            # every perturbation must not pass on the ones it did.
+            done = ", ".join(f"{n}:{c}" for n, _held, c in results) or "none"
+            return ValidationOutcome(
+                stage="metamorphic",
+                passed=False,
+                detail=(
+                    f"metamorphic call budget ({counter.cap}) reached after "
+                    f"{len(results)} of {total_planned} perturbation(s) ({done}); the "
+                    "stage did not complete, so it does not pass. Re-run with a "
+                    "larger metamorphic budget."
+                ),
+                metric=None,
+            )
 
         total = len(results)
         held_count = sum(1 for _, held, _ in results if held)
@@ -1208,6 +1239,32 @@ class DifferentialValidator(ValidatorBase):
             ),
             metric=robustness,
         )
+
+    @staticmethod
+    def _classify_perturbation(
+        vuln_fired: bool, guard_resisted: bool, guard_fired: bool
+    ) -> tuple[bool, str]:
+        """``(held, classification)`` for one perturbation — see ``_metamorphic_outcome``."""
+        if vuln_fired and guard_resisted:
+            classification = "held"
+        elif vuln_fired and guard_fired:
+            # The attack fired on both twins — a genuine bypass, not a
+            # harness artefact.
+            classification = "guard_bypassed"
+        else:
+            # `vuln_fired` is False here (the `elif` above already
+            # required it True for guard_bypassed). This covers BOTH: (a)
+            # the perturbation never fired on either twin (a harness/
+            # payload defect — the common case), and (b) the surprising
+            # inverted case `vuln_fired=False, guard_fired=True` — the
+            # guarded twin alone fired. That inverted case is deliberately
+            # NOT `guard_bypassed`: the two twins are driven by
+            # INDEPENDENT LLM planner runs, so a guarded-twin-only firing
+            # with no vulnerable-twin corroboration reads as LLM-sampling
+            # noise, not proof the perturbed payload defeated the guard
+            # (see the docstring's "NOTABLE edge case" paragraph).
+            classification = "attack_malformed"
+        return classification == "held", classification
 
     def _run_perturbed(
         self, exploit: ExploitRecord, perturbed_body: str
