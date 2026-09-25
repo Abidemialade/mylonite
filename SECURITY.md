@@ -6,6 +6,10 @@ formal dual-use policy. This document covers both **how to report a
 vulnerability in Mylonite itself** and **the rules under which Mylonite may be
 used**.
 
+For how Mylonite protects the operator from the targets it tests — a hostile
+target server, a `target.yaml` from someone else, and leaks through its own
+output — see the [threat model](docs/threat-model.md).
+
 ## Reporting a vulnerability
 
 Please **do not** open public issues for security-sensitive reports.

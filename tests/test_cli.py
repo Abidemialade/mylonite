@@ -360,6 +360,76 @@ def test_check_reports_structural_findings_and_exits_zero(
     assert "6 structural finding(s) across 3 tool(s)." in out
 
 
+def test_check_reports_the_lethal_trifecta_legs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With untrusted content and external communication on the surface and no
+    private data declared, `check` names the legs and says what to declare."""
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.output + (result.stderr or "")
+    assert "lethal trifecta" in out
+    assert "untrusted content:      read_note, web_fetch" in out
+    assert "external communication: send_email, web_fetch" in out
+    assert "private data:           not declared" in out
+    assert "private_tools: [read_note]" in out
+
+
+def test_check_trifecta_reads_declared_private_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(
+        tmp_path, extra="control_config:\n  private_tools: [read_note]\n"
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    out = result.output + (result.stderr or "")
+    assert "private data:           read_note" in out
+    assert "declare the tools that return sensitive data" not in out
+
+
+def test_check_trifecta_advisory_never_gates_enforce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Like the unpinned-descriptions row, the trifecta summary is advisory: a
+    surface whose only other output is advisory still passes --enforce."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+    from mylonite.scan.control_shim import DescriptionIntegrityControl
+
+    tools = [
+        ("read_note", "Read a stored note by id.", {"note_id": {"type": "string"}}),
+        ("post_update", "Post a status update.", {"text": {"type": "string"}}),
+    ]
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(name=n, description=d, json_schema={"properties": props})
+                for n, d, props in tools
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    # Declaring the consequential set keeps post_update out of the W4 row, so the
+    # only output left is advisory: the pinned descriptions and the trifecta.
+    pins = "".join(f"    {n}: {DescriptionIntegrityControl.digest(d)}\n" for n, d, _ in tools)
+    target_file = _write_check_target(
+        tmp_path,
+        extra=(
+            "control_config:\n  consequential_tools: [archive_note]\n  description_pins:\n" + pins
+        ),
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    out = result.output + (result.stderr or "")
+    assert "lethal trifecta" in out
+    assert result.exit_code == EXIT_SUCCESS, out
+
+
 def test_check_enforce_exits_findings_code_when_issues_found(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1959,6 +2029,27 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "flakiness" in result.output
     assert "mutation score" in result.output
     assert "KEPT" in result.output
+
+
+def test_validate_stamps_the_planner_model_it_was_proved_against(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp names the planner — the model driving the agent under test —
+    so re-validating with a new ``--planner-model`` records that model."""
+    import json
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True, mutation_score=1.0)
+
+    result = runner.invoke(
+        app, ["validate", str(out_dir), "--planner-model", "anthropic/claude-new-planner"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    notes = json.loads((out_dir / "validation_report.json").read_text(encoding="utf-8"))["notes"]
+    assert "validated against model: anthropic/claude-new-planner" in notes
+    assert "llm: 0 calls" in result.output  # the spend line always prints
 
 
 def test_validate_kept_false_exit_5(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

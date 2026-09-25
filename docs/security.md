@@ -2,7 +2,9 @@
 
 The canonical version of this policy is
 [`SECURITY.md`](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)
-in the repository root. This page mirrors it for the docs site.
+in the repository root. This page mirrors it for the docs site. For the
+controls that protect the operator from the targets Mylonite tests, see the
+[threat model](threat-model.md).
 
 ## Reporting vulnerabilities in Mylonite
 

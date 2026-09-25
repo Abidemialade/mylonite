@@ -55,7 +55,9 @@ seed_arm:                    # how to plant untrusted content (required for W2)
 needed — and reports structural exposure straight from the tool schemas: consequential
 tools with no approval-shaped sibling, descriptions that steer the agent, tools taking an
 apparent network destination, and unpinned tool descriptions (paste-ready digests for
-`control_config.description_pins`):
+`control_config.description_pins`). It also summarises the surface's
+[lethal-trifecta](weakness-classes.md#the-lethal-trifecta) legs and, when no private data
+is declared, suggests the `private_tools` entry that lets the W2 control protect it:
 
 ```bash
 mylonite check --target-file app.yaml
@@ -99,6 +101,8 @@ and proves the finding *differentially* by default — the emitted test gates on
 
 - **`mylonite ablate --target-file app.yaml --authorize my-app`** — score each safeguard:
   load-bearing, security theater, or (with `--redundancy`) redundant.
+- **When you change models** — re-validate the committed test with the new
+  `--planner-model` before you ship. See [Re-validate on a new model](model-upgrade.md).
 
 ## Bundled targets
 

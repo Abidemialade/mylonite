@@ -2842,8 +2842,12 @@ def validate(
     # T2: stamp the model the differential was proven against, so the committed
     # regression is honest about which model version it gates (a fix can silently
     # re-emerge on a model upgrade — re-run `validate` with the new
-    # `--planner-model` to check).
-    _stamp = f"validated against model: {effective_model}"
+    # `--planner-model` to check; see docs/model-upgrade.md).
+    from mylonite.plugins._reference.reference_validator import validated_model_stamp
+
+    _stamp = validated_model_stamp(
+        effective_planner_model, effective_customiser_model, effective_judge_model
+    )
     report = report.model_copy(
         update={"notes": (f"{report.notes}\n{_stamp}" if report.notes else _stamp)}
     )
@@ -4486,7 +4490,13 @@ def check(
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_mcp_adapter
     from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
-    from mylonite.scan.control_shim import consequential_tool_names
+    from mylonite.report.render import trifecta_lines
+    from mylonite.scan.control_shim import (
+        consequential_tool_names,
+        outbound_tool_names,
+        trifecta_legs,
+        untrusted_content_tool_names,
+    )
 
     _config_path, rc = _discover_run_config(run_config_path, command="check")
     if target_file is None and rc is not None:
@@ -4624,6 +4634,18 @@ def check(
             for name, digest in unpinned:
                 echo_err(f"  {name}: {digest}")
         echo_err(f"suggested weakness_classes {suggested or '[]'} (hints — confirm/edit).")
+
+    # Advisory, like the unpinned-descriptions row: it never counts toward --enforce.
+    legs = trifecta_legs(
+        untrusted_content=[n for n, _ in untrusted_content_tool_names(tools)]
+        + [n for n, _ in processors],
+        external_communication=[name for name, _param, _reason in egress]
+        + outbound_tool_names(tools, declared=frozenset(declared_egress)),
+        private_tools=tuple(cc.private_tools) if cc else (),
+        private_markers=tuple(cc.private_markers) if cc else (),
+    )
+    for line in trifecta_lines(legs):
+        echo_err(line)
 
     echo(f"{findings} structural finding(s) across {len(tools)} tool(s).")
     # The "Unpinned tool descriptions" row fires on EVERY tool of EVERY
