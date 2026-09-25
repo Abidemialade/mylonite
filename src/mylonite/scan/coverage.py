@@ -216,6 +216,57 @@ def no_verdict_causes(attempt: object) -> list[str]:
 # --- Coverage verdict ------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class AdjudicationCounts:
+    """How a scan's verdicts were reached — a deterministic check or an LLM judge.
+
+    Every attack pattern is judged by a deterministic predicate first; the LLM
+    judge is consulted only when the predicate cannot see the signal it needs.
+    This splits the *decided* attempts by which of the two settled them, so a
+    reader can see how much of a result rests on each.
+
+    Only attempts that reached a verdict are counted as decided: an attack that
+    fired or was resisted, excluding any attempt where no mechanism reached a
+    verdict (:func:`attempt_reached_no_verdict`). Attempts that never ran
+    (NOT_TESTED, dry runs) are in neither bucket — ``total_attempts`` is context,
+    never a denominator.
+    """
+
+    predicate: int
+    llm: int
+    no_verdict: int
+    total_attempts: int
+
+    @property
+    def decided(self) -> int:
+        return self.predicate + self.llm
+
+
+_DECIDED_CLASSES: Final = frozenset({AttemptClass.EXERCISED_FIRED, AttemptClass.EXERCISED_RESISTED})
+
+
+def adjudication_counts(report: ScanReport) -> AdjudicationCounts:
+    """Count a scan's decided attempts by verdict mechanism. Pure; reads persisted
+    fields only, so it gives the same answer for a live scan and a saved one."""
+    predicate = llm = no_verdict = 0
+    for attempt in report.attempts:
+        if attempt_reached_no_verdict(attempt):
+            no_verdict += 1
+            continue
+        if ATTEMPT_CLASS.get(attempt.outcome) not in _DECIDED_CLASSES:
+            continue
+        if attempt.verdict_mechanism == "predicate":
+            predicate += 1
+        elif attempt.verdict_mechanism == "llm":
+            llm += 1
+    return AdjudicationCounts(
+        predicate=predicate,
+        llm=llm,
+        no_verdict=no_verdict,
+        total_attempts=len(report.attempts),
+    )
+
+
 class Coverage(Enum):
     """Did the scan actually exercise what it set out to?"""
 

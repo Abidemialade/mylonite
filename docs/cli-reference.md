@@ -186,6 +186,10 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 
 Toggle each AI safeguard and report which are **load-bearing**, **security theater**, or
 **redundant**. See [the control-efficacy check](validation.md#the-control-efficacy-check).
+Under the matrix, `guarded side:` names what played the guarded side — your own
+server-layer control (via `control_env`) or Mylonite's boundary control — together with
+the claim a load-bearing row earns (see
+[Which claim you earned](reading-results.md#which-claim-you-earned)).
 
 Options: `--target-file PATH` (**required** — there is no positional target form, and the
 bundled `reference:*` targets are not accepted); `--authorize`; `--controls W2,W3,W4`;

@@ -219,3 +219,4 @@ def test_every_verdict_surface_still_makes_the_earned_claim() -> None:
     surfaces = _rendered_surfaces(exploit, report(True))
     assert _STRONG_CLAIM.search(surfaces["sarif"]), "sarif dropped the earned claim"
     assert _STRONG_CLAIM.search(surfaces["pr_body"]), "pr_body dropped the earned claim"
+    assert _STRONG_CLAIM.search(surfaces["bundle"]), "bundle dropped the earned claim"

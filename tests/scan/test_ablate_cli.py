@@ -199,6 +199,87 @@ def test_render_ablation_matrix_neutralises_inconclusive_row() -> None:
     assert "2/0 of 2 (2 inconclusive)" in out
 
 
+def _render_matrix(guarded_layer: Any) -> str:
+    import io
+
+    from rich.console import Console
+
+    from mylonite.cli import _render_ablation_matrix
+    from mylonite.scan.ablation import ControlContribution
+
+    row = ControlContribution(
+        weakness="W2",
+        raw_fired=2,
+        guarded_fired=0,
+        total=2,
+        contribution=1.0,
+        status="load-bearing",
+    )
+    buf = io.StringIO()
+    console = Console(file=buf, width=400, force_terminal=False)
+    _render_ablation_matrix([row], console=console, guarded_layer=guarded_layer)
+    return buf.getvalue()
+
+
+def test_render_ablation_matrix_states_a_boundary_guarded_side() -> None:
+    """A matrix scored against Mylonite's boundary shim says so, and makes the
+    boundary claim rather than the server-layer one."""
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+
+    out = _render_matrix("boundary")
+    assert "guarded side: adapter-shim" in out
+    assert "does not establish that your own control carries the security" in out
+    assert PROOF_CLAIM_SERVER not in out
+
+
+def test_render_ablation_matrix_states_a_server_layer_guarded_side() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+
+    out = _render_matrix("server")
+    assert "guarded side: server-layer" in out
+    assert PROOF_CLAIM_SERVER in out
+
+
+def test_render_ablation_matrix_makes_no_claim_for_an_unknown_guarded_side() -> None:
+    """``None`` must render neither claim: defaulting to one would assert
+    something about a run the renderer was not told about."""
+    from mylonite._twin_fidelity import PROOF_CLAIM_BOUNDARY, PROOF_CLAIM_SERVER
+
+    out = _render_matrix(None)
+    assert "guarded side" not in out
+    assert PROOF_CLAIM_SERVER not in out
+    assert PROOF_CLAIM_BOUNDARY not in out
+
+
+def test_ablate_cli_states_the_boundary_guarded_side(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: a target with no ``control_env`` is ablated through the
+    boundary shim, and the rendered matrix says so."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import FireOutcome
+
+    def fake_scan(adapter: Any, pattern_id: str, **kwargs: Any) -> FireOutcome:
+        applied = {c.weakness for c in adapter._controls}
+        return FireOutcome.FIRED if len(applied) == 0 else FireOutcome.RESISTED
+
+    monkeypatch.setattr(ablation_mod, "scan_target_fires", fake_scan)
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "guarded side: adapter-shim" in result.output
+
+
 def test_ablate_requires_authorize(tmp_path: Path) -> None:
     result = _runner.invoke(app, ["ablate", "--target-file", str(_write(tmp_path))])
     assert result.exit_code != 0

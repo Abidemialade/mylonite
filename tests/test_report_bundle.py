@@ -104,11 +104,63 @@ def test_bundle_recommendation_present_with_a_target() -> None:
     json.dumps(f)  # still fully serialisable with the recommendation present
 
 
-def test_bundle_schema_version_bumped_for_the_additive_recommendation_key() -> None:
+def test_bundle_schema_version_tracks_additive_keys() -> None:
+    """1.1 added "recommendation"; 1.2 added "guarded_twin_layer" and "proof.claim"."""
     from mylonite.report.bundle import SCHEMA_VERSION, to_bundle
 
-    assert SCHEMA_VERSION == "1.1"
-    assert to_bundle([])["schema_version"] == "1.1"
+    assert SCHEMA_VERSION == "1.2"
+    assert to_bundle([])["schema_version"] == "1.2"
+
+
+def _fidelity_report(*, server_layer: bool, guard_resisted: int | None = 5) -> Any:
+    from mylonite._twin_fidelity import format_marker
+    from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
+
+    return ValidationReport(
+        test_filename="test_security_finding.py",
+        kept=True,
+        notes=format_marker(server_layer=server_layer),
+        reproducibility=ReproducibilityEvidence(
+            iterations=5, vuln_fired=5, guard_resisted=guard_resisted
+        ),
+    )
+
+
+def test_bundle_states_a_boundary_guarded_side() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_BOUNDARY
+    from mylonite.report.bundle import to_bundle
+
+    f = to_bundle([(_exploit("W2"), _fidelity_report(server_layer=False))])["findings"][0]
+    assert f["guarded_twin_layer"] == "boundary"
+    assert f["proof"]["claim"] == PROOF_CLAIM_BOUNDARY
+
+
+def test_bundle_states_a_server_layer_guarded_side() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+    from mylonite.report.bundle import to_bundle
+
+    f = to_bundle([(_exploit("W2"), _fidelity_report(server_layer=True))])["findings"][0]
+    assert f["guarded_twin_layer"] == "server"
+    assert f["proof"]["claim"] == PROOF_CLAIM_SERVER
+
+
+def test_bundle_makes_no_differential_claim_without_a_guarded_twin() -> None:
+    """A stability-only run (``guard_resisted is None``) had no guarded side, so it
+    carries neither a layer nor a claim -- mirroring SARIF's "no guarded twin" text."""
+    from mylonite.report.bundle import to_bundle
+
+    report = _fidelity_report(server_layer=False, guard_resisted=None)
+    f = to_bundle([(_exploit("W2"), report)])["findings"][0]
+    assert f["guarded_twin_layer"] is None
+    assert f["proof"]["claim"] is None
+
+
+def test_bundle_scan_only_finding_carries_no_layer() -> None:
+    from mylonite.report.bundle import to_bundle
+
+    f = to_bundle([(_exploit("W2"), None)])["findings"][0]
+    assert f["guarded_twin_layer"] is None
+    assert f["proof"] is None
 
 
 def test_bundle_empty() -> None:

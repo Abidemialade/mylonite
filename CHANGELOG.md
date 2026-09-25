@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Every verdict surface states its provenance.** Three additions, all read from
+  data Mylonite already records:
+  - **`ablate` names its guarded side.** Under the matrix, `guarded side:` says whether
+    your own server-layer controls (`control_env`) or Mylonite's boundary controls
+    were scored, followed by the claim a load-bearing row earns — the same wording, from
+    the same source (`mylonite._twin_fidelity`), as `validate`, SARIF and the gating PR.
+  - **The JSON finding bundle carries twin fidelity.** Each finding gains
+    `guarded_twin_layer` (`server` / `boundary`) and `proof.claim`, both `null` when no
+    guarded twin ran. `schema_version` moves to `1.2`; the change is additive. The
+    twin-fidelity guard test now asserts the earned claim on the bundle as well as on
+    SARIF and the PR body.
+  - **The scan summary shows how verdicts were reached.** A `verdicts:` line splits the
+    decided attempts into those settled by a deterministic check and those settled by
+    the LLM judge, and lists any attempt that reached no verdict. It reads persisted
+    fields only, so `mylonite report <scan-dir>` shows it offline. A scan that exercised
+    every attempt and found nothing adds a `result:` line stating what that clean result
+    covers. The counting lives in `mylonite.scan.coverage.adjudication_counts`.
+
 ### Changed
 
 - **Cross-model guidance points at the current path.** The verification
