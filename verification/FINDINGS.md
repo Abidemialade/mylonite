@@ -189,11 +189,11 @@ nuance), not under-reporting of a real effect.
 
 ## Cross-model durability
 
-The capability exists (`mylonite validate <dir> --models …`, repo-tested via
-`scan.cross_model`) and is the right answer for "does my defense hold across the
-models I actually run." The live demo on `reference:vulnerable` ran long and was
-stopped; a broad cross-model number also needs non-Claude provider keys (absent
-here).
+The dedicated multi-model mode (`validate --models`) was retired in v0.7.4. The
+supported path for "does my defense hold across the models I actually run" is to
+re-run `mylonite validate` on the committed test with `--planner-model <model>`,
+once per model. A broad cross-model number still needs non-Claude provider keys
+(absent here).
 
 ## Where the value is real vs. open
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Cross-model guidance points at the current path.** The verification
+  findings (`verification/FINDINGS.md`) now describe how to check a defence
+  across models today — re-run `mylonite validate` on the committed test with
+  `--planner-model <model>`, once per model — and note that the dedicated
+  `validate --models` mode was retired in v0.7.4. The `open_session` docstring
+  and one comment in `cli.py` were brought in line with the same change.
+
 ## [0.10.0] - 2026-09-14
 
 ### Added

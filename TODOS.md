@@ -245,6 +245,18 @@ attack-family filter landing first. *Trigger:* batch with the next
 alongside the queued `ScanAttemptOutcome` enum item above — one comment clock,
 not two.
 
+## `SupportsAttackSession` has no in-tree consumer (contract-change)
+
+`SupportsAttackSession` / `open_session` (`contracts/target_adapter.py`, added in
+the 0.3.0 -> 0.4.0 `TargetAdapter` bump) is implemented by both shipped adapters
+and exported from `mylonite.contracts`, but nothing in `src/` calls it since the
+`--adaptive` loop was retired in v0.7.4. It is still public API, so a third-party
+driver may depend on it.
+
+*Trigger:* decide keep-or-deprecate in the next `contract-change` issue, batched
+with the two items above — one comment clock. Keeping it costs little; removing
+it is a major `TargetAdapter` bump and needs a deprecation cycle.
+
 ## Rejected (recorded so they aren't re-raised)
 
 - **`mylonite demo` GIF / `--save`-`--out` artefact flag / Codespaces one-click
