@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-25
+
 ### Added
 
 - **Every verdict surface states its provenance.** Three additions, all read from
@@ -4103,7 +4105,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Abidemialade/mylonite/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Abidemialade/mylonite/compare/v0.8.6...v0.9.0
 [0.8.6]: https://github.com/Abidemialade/mylonite/compare/v0.8.5...v0.8.6
