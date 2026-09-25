@@ -2832,7 +2832,8 @@ def validate(
 
     # T2: stamp the model the differential was proven against, so the committed
     # regression is honest about which model version it gates (a fix can silently
-    # re-emerge on a model upgrade — see `validate --models`).
+    # re-emerge on a model upgrade — re-run `validate` with the new
+    # `--planner-model` to check).
     _stamp = f"validated against model: {effective_model}"
     report = report.model_copy(
         update={"notes": (f"{report.notes}\n{_stamp}" if report.notes else _stamp)}

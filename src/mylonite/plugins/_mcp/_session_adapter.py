@@ -694,17 +694,18 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
     async def open_session(self) -> _MCPAttackSession:
         """Open a stateful session that persists ONE MCP session across steps.
 
-        Satisfies the optional ``SupportsAttackSession`` capability so the
-        adaptive loop (``--adaptive``) runs against a real MCP target instead of
-        degrading to single-shot.
+        Satisfies the optional ``SupportsAttackSession`` capability, so a
+        multi-step driver can plant, probe and drive the planner against the same
+        target state. (Its original in-tree consumer, the ``--adaptive`` loop,
+        was retired in v0.7.4; the capability remains part of the public
+        ``TargetAdapter`` contract.)
 
         Lifecycle constraint: the returned session must be opened, used, and
-        closed within a SINGLE coroutine/task — exactly what the adaptive
-        driver's ``_attempt`` does (open -> plant -> drive -> close). Because the
-        SDK client cancel scope is then entered and exited in the same task, the
-        cross-invoke reuse hazard documented in ``invoke`` does not apply. The
-        engine probes this once (open+close) before activating the adaptive path
-        and degrades to single-shot if it raises.
+        closed within a SINGLE coroutine/task (open -> plant -> drive -> close).
+        Because the SDK client cancel scope is then entered and exited in the
+        same task, the cross-invoke reuse hazard documented in ``invoke`` does
+        not apply. A driver should probe this once (open+close) and fall back to
+        single-shot ``invoke`` if it raises.
 
         Ownership of the manually-entered ``cm`` (DCR-0011): this method enters
         it directly (``cm.__aenter__()``, not ``async with``) because the
