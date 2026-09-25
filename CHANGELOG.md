@@ -39,6 +39,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite-gate.yml` now sets it and runs `pytest -ra`, so a re-scaffolded
   workflow can only pass by running the gate.
 
+- **`mylonite check` reports the lethal trifecta.** Under its table, `check` names the
+  surface's untrusted-content tools, its external-communication tools, and the private
+  data declared in `control_config`. When the first two are present and no
+  `private_tools` / `private_markers` is declared, it suggests the entry that gives
+  W2's confidentiality check something to protect. Advisory: it never affects
+  `--enforce`.
+- **New guide: [Re-validate on a new model](docs/model-upgrade.md)** — re-prove a
+  committed test with `validate --planner-model` when the model changes, and read the
+  two ways a test can stop being kept.
+- **New page: [Threat model](docs/threat-model.md)** — the controls that protect the
+  operator from a hostile target server, a `target.yaml` from someone else, and leaks
+  through Mylonite's own output, in one place and linked from `SECURITY.md`.
+
 ### Changed
 
 - **The metamorphic stage runs under its own call budget.** `DifferentialValidator`
@@ -49,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`validate` states its workload up front.** The pre-run message names the
   iterations, twins and metamorphic re-drives it will run, and the command reports
   the calls and tokens it actually used when it finishes.
+- **`validate` stamps the planner model.** The `validated against model:` note names
+  the planner — the model driving the agent under test — and adds the customiser and
+  judge models when they differ, so re-validating with a new `--planner-model`
+  records that model.
 - **Cross-model guidance points at the current path.** The verification
   findings (`verification/FINDINGS.md`) now describe how to check a defence
   across models today — re-run `mylonite validate` on the committed test with

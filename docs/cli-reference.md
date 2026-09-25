@@ -125,7 +125,9 @@ holds the model constant and toggles only the safeguard; against the bundled ref
 it runs the two-build differential. A test is **kept** only when it discriminates reliably.
 
 Options: `target` (the generated dir/file); `--iterations N` (default 5); `--model`
-(any LiteLLM provider via a `provider/model` prefix); `--target-file PATH` (re-drive
+(any LiteLLM provider via a `provider/model` prefix); `--planner-model`,
+`--customiser-model`, `--judge-model` (the three [model roles](attack-modes.md#composing-the-model-roles),
+each defaulting to `--model`); `--config PATH`; `--target-file PATH` (re-drive
 your REAL app instead of the reference build);
 `--authorize` (**required** when `--target-file` names a custom target — must equal the
 target's declared `scope`, or its family name if no scope is declared; see
@@ -134,6 +136,11 @@ target's declared `scope`, or its family name if no scope is declared; see
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
 reference/replay path); `--iteration-timeout S`.
+
+The report's notes record the models the test was proved against
+(`validated against model: <planner>`, plus the customiser and judge when they differ).
+To re-prove a committed test after a model change, see
+[Re-validate on a new model](model-upgrade.md).
 
 When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
 tokens the provider reported, and the wall-clock time. The metamorphic stage runs under

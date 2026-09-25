@@ -227,6 +227,19 @@ class ReferenceVulnerableOracle:
         return InProcessReferenceAdapter(variant="vulnerable")  # type: ignore[return-value]
 
 
+def validated_model_stamp(planner: str, customiser: str, judge: str) -> str:
+    """The note recording which models a validation was proved against.
+
+    Leads with the planner — the model driving the agent under test, and so the
+    one a model upgrade changes — and names the customiser and judge only when
+    they differ from it, so a single-model run reads as one model.
+    """
+    stamp = f"validated against model: {planner}"
+    if customiser != planner or judge != planner:
+        stamp += f"  (customiser: {customiser}, judge: {judge})"
+    return stamp
+
+
 def workload_message(iterations: int, *, fast: bool) -> str:
     """The pre-run statement of what a reference ``validate`` will drive."""
     perturbations = 1 if fast else len(_deterministic_strategies())

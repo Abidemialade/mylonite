@@ -37,6 +37,7 @@ import hmac
 import json
 import logging
 import secrets
+from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from mylonite.scan._control_primitives import (
@@ -56,6 +57,7 @@ from mylonite.scan.labels import (
 )
 from mylonite.scan.llm_types import ToolDescription, ToolResult
 from mylonite.scan.tool_classifier import (
+    _SEND_NAME_HINTS,
     _hint,
     annotation_is_egress,
     annotation_is_read,
@@ -1123,3 +1125,103 @@ def consequential_tool_names(
         if applies and reason != "fail-closed default":
             out.append((name, reason))
     return out
+
+
+def untrusted_content_tool_names(
+    tools: Any, *, declared: frozenset[str] | None = None
+) -> list[tuple[str, str]]:
+    """``(tool_name, reason)`` for every tool whose results ``InformationFlowControl``
+    would label untrusted, via a declared ``read_tool_names`` list, the MCP
+    ``readOnlyHint`` annotation, or its read-tool name vocabulary.
+
+    The static counterpart of the live W2 control's source classification, in
+    the same shape as :func:`consequential_tool_names` — and, like it, never
+    surfaces the fail-closed tier, which is right for a runtime gate and would
+    bury a discovery report.
+    """
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        if not name:
+            continue
+        applies, reason = classify(
+            name,
+            declared=declared,
+            hints=_READ_HINTS,
+            annotation_says=annotation_is_read(getattr(tool, "annotations", None)),
+        )
+        if applies and reason != "fail-closed default":
+            out.append((name, reason))
+    return out
+
+
+def outbound_tool_names(tools: Any, *, declared: frozenset[str] | None = None) -> list[str]:
+    """Tools that send data off the host: a declared egress tool, an MCP
+    ``openWorldHint``, or a send-shaped name (``send``, ``post``, ``upload``,
+    ``webhook``, ...). Complements :func:`destination_tools`, which finds tools
+    by a destination-shaped *argument*; a ``send_email`` needs neither a URL nor
+    the word "fetch" to carry data out."""
+    out: list[str] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        if not name:
+            continue
+        if (
+            (declared is not None and name in declared)
+            or annotation_is_egress(getattr(tool, "annotations", None)) is True
+            or hint_matches(name, _SEND_NAME_HINTS)
+        ):
+            out.append(name)
+    return out
+
+
+@dataclass(frozen=True)
+class TrifectaLegs:
+    """The three legs of the "lethal trifecta" on one tool surface.
+
+    An agent that can take in untrusted content, read private data, and
+    communicate externally can be steered by the first into sending the second
+    out through the third (Simon Willison, 2025). Mylonite's W2 control models
+    exactly these legs: integrity (untrusted content), confidentiality (private
+    data) and the sink (external communication).
+
+    ``untrusted_content`` and ``external_communication`` are read off the tool
+    surface. ``private_data`` comes from the target file's ``private_tools`` and
+    ``private_markers``: which data is sensitive is the operator's to declare.
+    """
+
+    untrusted_content: tuple[str, ...]
+    external_communication: tuple[str, ...]
+    private_tools: tuple[str, ...]
+    private_markers: tuple[str, ...]
+
+    @property
+    def private_data_declared(self) -> bool:
+        return bool(self.private_tools or self.private_markers)
+
+    @property
+    def undeclared_private_leg(self) -> bool:
+        """True when the surface has the other two legs but no private data is
+        declared — the case where W2's confidentiality check has nothing to
+        protect, and declaring ``private_tools`` is the missing step."""
+        return (
+            bool(self.untrusted_content)
+            and bool(self.external_communication)
+            and not self.private_data_declared
+        )
+
+
+def trifecta_legs(
+    *,
+    untrusted_content: list[str],
+    external_communication: list[str],
+    private_tools: tuple[str, ...] = (),
+    private_markers: tuple[str, ...] = (),
+) -> TrifectaLegs:
+    """Assemble :class:`TrifectaLegs`, de-duplicated and sorted for stable output."""
+    return TrifectaLegs(
+        untrusted_content=tuple(sorted(set(untrusted_content))),
+        external_communication=tuple(sorted(set(external_communication))),
+        private_tools=tuple(sorted(set(private_tools))),
+        private_markers=tuple(private_markers),
+    )

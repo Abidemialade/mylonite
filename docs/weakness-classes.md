@@ -179,6 +179,30 @@ The demoted `UntrustedEnvelopeControl` (the same envelope-wrapping idea as the
 reference app's own fix) is still available as an explicit, defence-in-depth
 layer.
 
+### The lethal trifecta
+
+W2's two labels are the three legs of what Simon Willison named
+[the lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/): an
+agent that takes in **untrusted content**, can read **private data**, and can
+**communicate externally** can be steered by the first into sending the second out
+through the third. Integrity tracks the first leg, confidentiality the second, and each
+sink's policy the third.
+
+`mylonite check` reports the legs it finds on your tool surface:
+
+```
+lethal trifecta (untrusted content + private data + external communication):
+  untrusted content:      read_note, web_fetch
+  external communication: send_email, web_fetch
+  private data:           not declared
+```
+
+Untrusted content and external communication are read off the tool surface. Private data
+is yours to declare — which data is sensitive is a property of your app, not of a tool's
+name — through `control_config.private_tools` or `private_markers`. When the other two
+legs are present and none is declared, `check` suggests the entry to add: without it, the
+confidentiality check has nothing marked private to keep in.
+
 **Maps to:** OWASP-LLM `LLM01`/`LLM05` · OWASP-ASI `ASI01`/`ASI06` · attack patterns
 `indirect-injection-note-body-{direct,roleplay,tool-chain}`.
 

@@ -42,7 +42,9 @@ The phased build plan lives in
 - [Attack modes](attack-modes.md) — the single-shot W1–W4 attack engine.
 - [The validation engine](validation.md) — the control-efficacy check and the differential.
 - [Independent verification](verification.md) — the honest scorecard against ground truth Mylonite didn't author.
+- [Re-validate on a new model](model-upgrade.md) — re-prove a committed test when the model changes.
 - [CLI reference](cli-reference.md) · [Architecture](architecture.md) · [Plugin authoring](plugin-authoring.md).
+- [Threat model](threat-model.md) — how Mylonite protects the operator from the targets it tests.
 - [Standards mapping](standards-mapping.md) — OWASP LLM / OWASP ASI / MITRE
   ATLAS / NIST AI RMF.
 - [Security](security.md) — responsible-use and dual-use policy.

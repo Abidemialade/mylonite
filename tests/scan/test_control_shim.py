@@ -941,3 +941,68 @@ async def test_declaring_consequential_tools_does_not_disable_destructive_gate()
     result = await shim.call_tool("delete_all", {})
     assert result.isError is True, "a declared destructive tool must still be gated"
     assert "refused" in result.content
+
+
+# --- lethal trifecta: static classification for `mylonite check` ------------
+
+
+def _tools(*names: str, annotations: dict[str, object] | None = None) -> list[object]:
+    from types import SimpleNamespace
+
+    return [SimpleNamespace(name=n, annotations=annotations) for n in names]
+
+
+def test_untrusted_content_tools_use_the_w2_read_vocabulary() -> None:
+    from mylonite.scan.control_shim import untrusted_content_tool_names
+
+    found = dict(untrusted_content_tool_names(_tools("read_note", "search_docs", "send_email")))
+    assert set(found) == {"read_note", "search_docs"}
+
+
+def test_outbound_tools_include_send_shaped_names_and_declared_egress() -> None:
+    from mylonite.scan.control_shim import outbound_tool_names
+
+    names = outbound_tool_names(
+        _tools("send_email", "upload_file", "read_note", "crm_push"),
+        declared=frozenset({"crm_push"}),
+    )
+    assert names == ["send_email", "upload_file", "crm_push"]
+
+
+def test_outbound_tools_honour_an_open_world_annotation() -> None:
+    from mylonite.scan.control_shim import outbound_tool_names
+
+    assert outbound_tool_names(_tools("lookup", annotations={"openWorldHint": True})) == ["lookup"]
+
+
+def test_trifecta_flags_an_undeclared_private_leg_only_when_the_others_exist() -> None:
+    from mylonite.scan.control_shim import trifecta_legs
+
+    both = trifecta_legs(untrusted_content=["read_note"], external_communication=["send_email"])
+    assert both.undeclared_private_leg
+
+    declared = trifecta_legs(
+        untrusted_content=["read_note"],
+        external_communication=["send_email"],
+        private_markers=("INTERNAL-",),
+    )
+    assert declared.private_data_declared and not declared.undeclared_private_leg
+
+    no_egress = trifecta_legs(untrusted_content=["read_note"], external_communication=[])
+    assert not no_egress.undeclared_private_leg
+
+
+def test_trifecta_lines_are_ascii_and_suggest_a_declaration() -> None:
+    from mylonite.report.render import trifecta_lines
+    from mylonite.scan.control_shim import trifecta_legs
+
+    lines = trifecta_lines(
+        trifecta_legs(
+            untrusted_content=["web_fetch", "read_note", "read_note"],
+            external_communication=["send_email"],
+        )
+    )
+    text = "\n".join(lines)
+    assert text.isascii()
+    assert "untrusted content:      read_note, web_fetch" in text
+    assert "private_tools: [read_note]" in text

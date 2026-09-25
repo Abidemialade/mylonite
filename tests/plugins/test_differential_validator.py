@@ -1772,3 +1772,17 @@ def test_metamorphic_stage_fails_closed_when_its_budget_is_reached() -> None:
 def test_metamorphic_budget_must_be_positive() -> None:
     with pytest.raises(ValueError, match="metamorphic_max_llm_calls"):
         DifferentialValidator(iterations=1, metamorphic_max_llm_calls=0)
+
+
+def test_validated_model_stamp_names_one_model_when_roles_agree() -> None:
+    from mylonite.plugins._reference.reference_validator import validated_model_stamp
+
+    assert validated_model_stamp("m", "m", "m") == "validated against model: m"
+
+
+def test_validated_model_stamp_names_every_role_when_they_differ() -> None:
+    from mylonite.plugins._reference.reference_validator import validated_model_stamp
+
+    assert validated_model_stamp("new", "old", "old") == (
+        "validated against model: new  (customiser: old, judge: old)"
+    )

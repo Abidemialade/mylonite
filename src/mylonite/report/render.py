@@ -282,3 +282,33 @@ def _render_ablation_matrix(
         console_print(console, f"guarded side: {_ABLATION_GUARDED_SIDE[guarded_layer]}")
         if load_bearing or redundant:
             console_print(console, f"what a load-bearing row shows: {proof_claim(guarded_layer)}.")
+
+
+def trifecta_lines(legs: Any) -> list[str]:
+    """The ``mylonite check`` summary of a surface's lethal-trifecta legs.
+
+    ``legs`` is a :class:`mylonite.scan.control_shim.TrifectaLegs`. Plain ASCII,
+    for any console. When the surface can take in untrusted content and send
+    data out but no private data is declared, the last lines say what to
+    declare so W2's confidentiality check has something to protect.
+    """
+
+    def _names(values: tuple[str, ...]) -> str:
+        return ", ".join(values) if values else "none found"
+
+    private = list(legs.private_tools) + [f"marker {m!r}" for m in legs.private_markers]
+    lines = [
+        "lethal trifecta (untrusted content + private data + external communication):",
+        f"  untrusted content:      {_names(legs.untrusted_content)}",
+        f"  external communication: {_names(legs.external_communication)}",
+        f"  private data:           {', '.join(private) if private else 'not declared'}",
+    ]
+    if legs.undeclared_private_leg:
+        example = legs.untrusted_content[0]
+        lines += [
+            "declare the tools that return sensitive data, so W2's confidentiality check "
+            "refuses sending it out through an external sink:",
+            "  control_config:",
+            f'    private_tools: [{example}]   # or private_markers: ["<literal>"]',
+        ]
+    return lines

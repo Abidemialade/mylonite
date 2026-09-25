@@ -299,7 +299,8 @@ auditors already use. See [docs/standards-mapping.md](./docs/standards-mapping.m
 - [Independent verification](./docs/verification.md) — the full scorecard against material Mylonite did not write.
 - [Known limitations](./docs/limitations.md) — where the tool's reach ends, in one place.
 - [Reading the results](./docs/reading-results.md) · [CLI reference](./docs/cli-reference.md) · [target.yaml](./docs/target-file.md).
-- [CI gating](./docs/ci-gating.md) · [Architecture](./docs/architecture.md) · [Plugin authoring](./docs/plugin-authoring.md).
+- [CI gating](./docs/ci-gating.md) · [Re-validate on a new model](./docs/model-upgrade.md) — keep the gate proving your safeguard as models change.
+- [Architecture](./docs/architecture.md) · [Plugin authoring](./docs/plugin-authoring.md) · [Threat model](./docs/threat-model.md).
 - [ROADMAP.md](./ROADMAP.md) · [CONTRIBUTING.md](./CONTRIBUTING.md) · [GOVERNANCE.md](./GOVERNANCE.md) · [SECURITY.md](./SECURITY.md).
 
 ## Responsible use
