@@ -22,6 +22,7 @@ their raw IDs also ride in the emitted test's docstring.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from mylonite.taxonomy import load_atlas_techniques, load_nist_ai_rmf
@@ -31,6 +32,11 @@ if TYPE_CHECKING:
 
 #: The base marker every Mylonite-generated test carries.
 MYLONITE_SECURITY_MARKER = "mylonite_security"
+
+#: Set to ``"1"`` in the CI job that runs the committed gate to require that the
+#: gate actually ran. The scaffolded ``mylonite-gate.yml`` sets it. Unset (the
+#: default everywhere else), the plugin only registers markers.
+REQUIRE_GATE_RUN_ENV = "MYLONITE_REQUIRE_GATE_RUN"
 
 #: The exact set of OWASP marker names this plugin registers. The generator
 #: imports this and emits an ``@pytest.mark.owasp_*`` marker ONLY when its
@@ -69,7 +75,13 @@ REGISTERED_NIST_MARKERS: frozenset[str] = frozenset(
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the mylonite-emitted markers so they collect warning-free."""
+    """Register the mylonite-emitted markers so they collect warning-free.
+
+    When :data:`REQUIRE_GATE_RUN_ENV` is ``"1"``, also register the check that
+    fails the session if the committed gate did not run (see ``_GateRunCheck``).
+    """
+    if os.environ.get(REQUIRE_GATE_RUN_ENV) == "1":
+        config.pluginmanager.register(_GateRunCheck(), "mylonite-require-gate-run")
     config.addinivalue_line(
         "markers",
         f"{MYLONITE_SECURITY_MARKER}: a Mylonite-generated security regression test",
@@ -93,3 +105,62 @@ def pytest_configure(config: pytest.Config) -> None:
             "markers",
             f"{name}: NIST AI RMF subcategory (bundled taxonomy)",
         )
+
+
+class _GateRunCheck:
+    """Fail the session when the committed gate did not run.
+
+    Registered only when :data:`REQUIRE_GATE_RUN_ENV` is ``"1"``. A live gate
+    test for a custom target is skipped unless ``MYLONITE_LIVE_TARGET=1`` is set,
+    which is the right default for a keyless local ``pytest``. In the CI job
+    whose purpose is to run that test, a skip means the gate checked nothing, so
+    this makes two cases fail the session:
+
+    * a ``mylonite_security`` test was selected but skipped;
+    * no ``mylonite_security`` test was selected at all (an empty or moved
+      gate directory).
+
+    Tests without the marker are never inspected.
+    """
+
+    def __init__(self) -> None:
+        self.selected = 0
+        self.skipped: list[str] = []
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        self.selected = sum(
+            1 for item in session.items if item.get_closest_marker(MYLONITE_SECURITY_MARKER)
+        )
+
+    def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        if report.skipped and MYLONITE_SECURITY_MARKER in report.keywords:
+            self.skipped.append(report.nodeid)
+
+    def _problem(self) -> str | None:
+        if self.skipped:
+            return (
+                f"{len(self.skipped)} Mylonite gate test(s) were skipped, so the gate "
+                "checked nothing. Set MYLONITE_LIVE_TARGET=1 (and the provider key) "
+                "in this job: " + ", ".join(self.skipped)
+            )
+        if self.selected == 0:
+            return (
+                "no Mylonite gate test was collected. Check that pytest is pointed at "
+                "the committed gate directory."
+            )
+        return None
+
+    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
+        import pytest
+
+        if session.config.option.collectonly:
+            return
+        if self._problem() is not None and exitstatus == pytest.ExitCode.OK:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+    def pytest_terminal_summary(self, terminalreporter: pytest.TerminalReporter) -> None:
+        if terminalreporter.config.option.collectonly:
+            return
+        problem = self._problem()
+        if problem is not None:
+            terminalreporter.write_line(f"{REQUIRE_GATE_RUN_ENV}: {problem}", red=True)

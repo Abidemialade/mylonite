@@ -856,3 +856,70 @@ def test_a_recoverable_call_failure_logs_one_line_not_a_traceback(caplog: Any) -
     assert warnings[0].exc_info is None
     # the traceback is still available to anyone who asks for DEBUG
     assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
+
+
+# --- spend: token capture and the command-level usage tally ------------------
+
+
+def _usage_response(text: str, prompt: int, completion: int) -> SimpleNamespace:
+    response = _stub_response(text)
+    response.usage = SimpleNamespace(prompt_tokens=prompt, completion_tokens=completion)
+    return response
+
+
+def _json_call(stub: Any, caller: str = "judge") -> None:
+    litellm_json_call(
+        model="stub",
+        prompt="p",
+        expected_keys={"body"},
+        fallback={"body": "fb"},
+        caller=caller,
+        completion_fn=stub,
+    )
+
+
+def test_counter_records_reported_token_usage() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+    with counter.active():
+        _json_call(lambda **_: _usage_response('{"body": "x"}', 120, 30))
+        _json_call(lambda **_: _usage_response('{"body": "x"}', 80, 10))
+    spend = counter.spend()
+    assert (spend.calls, spend.prompt_tokens, spend.completion_tokens) == (2, 200, 40)
+    assert spend.calls_with_usage == 2
+    assert spend.cap == 5
+
+
+def test_calls_without_reported_usage_are_counted_but_not_tokenised() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+    with counter.active():
+        _json_call(lambda **_: _stub_response('{"body": "x"}'))
+    spend = counter.spend()
+    assert spend.calls == 1
+    assert spend.calls_with_usage == 0
+    assert spend.prompt_tokens == 0
+
+
+def test_usage_tally_observes_calls_across_separate_counters() -> None:
+    """A command running several scans (each with its own counter) sees its total."""
+    from mylonite.scan._llm import usage_tally
+
+    stub = lambda **_: _usage_response('{"body": "x"}', 10, 2)  # noqa: E731
+    with usage_tally() as tally:
+        for _ in range(2):
+            with LiteLLMCallCounter(cap=1).active():
+                _json_call(stub, caller="customiser")
+        _json_call(stub, caller="judge")  # no counter active at all
+    spend = tally.spend()
+    assert spend.calls == 3
+    assert spend.by_caller == {"customiser": 2, "judge": 1}
+    assert (spend.prompt_tokens, spend.completion_tokens) == (30, 6)
+    assert spend.cap == 0
+
+
+def test_usage_tally_never_enforces_a_cap() -> None:
+    from mylonite.scan._llm import usage_tally
+
+    with usage_tally() as tally:
+        for _ in range(5):
+            _json_call(lambda **_: _stub_response('{"body": "x"}'))
+    assert tally.count == 5

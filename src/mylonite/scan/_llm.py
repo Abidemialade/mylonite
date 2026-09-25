@@ -32,6 +32,7 @@ import contextvars
 import hashlib
 import json
 import logging
+import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -131,6 +132,65 @@ class NonRecoverableProviderError(RuntimeError):
         )
 
 
+@dataclass(frozen=True)
+class LLMSpend:
+    """What a run spent on LLM calls: the call count, who made the calls, and the
+    tokens the provider reported.
+
+    ``cap`` is the budget in force (``0`` for an uncapped :class:`UsageTally`).
+    ``calls_with_usage`` says how many of ``calls`` reported token usage, so a
+    token total over a provider that reports none reads as partial, not zero.
+    """
+
+    calls: int
+    by_caller: dict[str, int]
+    cap: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls_with_usage: int = 0
+
+
+@dataclass
+class UsageTally:
+    """Observe every LLM call made inside a ``with usage_tally():`` block.
+
+    A command-level observer, distinct from :class:`LiteLLMCallCounter`: it
+    never enforces a cap and never raises. It sees every call routed through the
+    chokepoints below, however many scans (each with its own counter) the
+    command runs, so a command that runs several scans can report its total.
+    """
+
+    count: int = 0
+    by_caller: dict[str, int] = field(default_factory=dict)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls_with_usage: int = 0
+    #: ``ablate`` runs scoped scans on worker threads (``asyncio.to_thread``
+    #: copies the context, tally included), so updates are serialised.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def record(self, caller: str) -> None:
+        with self._lock:
+            self.count += 1
+            self.by_caller[caller] = self.by_caller.get(caller, 0) + 1
+
+    def record_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
+        with self._lock:
+            self.prompt_tokens += prompt_tokens
+            self.completion_tokens += completion_tokens
+            self.calls_with_usage += 1
+
+    def spend(self) -> LLMSpend:
+        return LLMSpend(
+            calls=self.count,
+            by_caller=dict(self.by_caller),
+            cap=0,
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            calls_with_usage=self.calls_with_usage,
+        )
+
+
 @dataclass
 class LiteLLMCallCounter:
     """Process-wide LLM-call counter, scoped via ``contextvars``.
@@ -179,6 +239,30 @@ class LiteLLMCallCounter:
     #: caller that never sets up reservations behaves exactly as before.
     by_seed: dict[str, int] = field(default_factory=dict)
     per_seed_floor: int = 0
+
+    #: Tokens the provider reported for calls made under this counter. Both stay
+    #: 0 for a provider (or a test stub) that reports no ``usage``; see
+    #: :attr:`calls_with_usage` for how many calls the totals cover.
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    calls_with_usage: int = 0
+
+    def record_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
+        """Add one call's reported token usage. Never counts against the cap."""
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        self.calls_with_usage += 1
+
+    def spend(self) -> LLMSpend:
+        """A frozen snapshot of what this counter recorded."""
+        return LLMSpend(
+            calls=self.count,
+            by_caller=dict(self.by_caller),
+            cap=self.cap,
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+            calls_with_usage=self.calls_with_usage,
+        )
 
     def reserve_for(self, seed_count: int, *, minimum: int = 2) -> None:
         """Guarantee every seed a floor of the budget before sharing the rest.
@@ -275,6 +359,26 @@ def active_counter() -> LiteLLMCallCounter | None:
     return _ACTIVE_COUNTER.get()
 
 
+_ACTIVE_TALLY: contextvars.ContextVar[UsageTally | None] = contextvars.ContextVar(
+    "mylonite_active_usage_tally", default=None
+)
+
+
+@contextmanager
+def usage_tally() -> Iterator[UsageTally]:
+    """Observe every LLM call made inside the block; yields the live tally.
+
+    Nestable scopes are not needed by any caller, so an inner ``usage_tally``
+    simply shadows an outer one for its duration.
+    """
+    tally = UsageTally()
+    token = _ACTIVE_TALLY.set(tally)
+    try:
+        yield tally
+    finally:
+        _ACTIVE_TALLY.reset(token)
+
+
 #: Scoped the same way as ``_ACTIVE_COUNTER`` (contextvars, nestable, opt-in) —
 #: see ``llm_scope``. Unlike the counter, ``active_policy`` never returns
 #: ``None``: a call site that never scopes a policy at all still gets the
@@ -328,6 +432,40 @@ def _bump(caller: str) -> None:
     counter = _ACTIVE_COUNTER.get()
     if counter is not None:
         counter.record(caller)
+    tally = _ACTIVE_TALLY.get()
+    if tally is not None:
+        tally.record(caller)
+
+
+def _usage_tokens(response: Any) -> tuple[int, int] | None:
+    """``(prompt_tokens, completion_tokens)`` from a LiteLLM response, or ``None``
+    when the provider (or a test stub) reported no usage."""
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
+    else:
+        prompt = getattr(usage, "prompt_tokens", None)
+        completion = getattr(usage, "completion_tokens", None)
+    if not isinstance(prompt, int) or not isinstance(completion, int):
+        return None
+    return prompt, completion
+
+
+def _record_usage(response: Any) -> None:
+    """Attribute a successful call's reported tokens to the active counter and tally."""
+    tokens = _usage_tokens(response)
+    if tokens is None:
+        return
+    counter = _ACTIVE_COUNTER.get()
+    if counter is not None:
+        counter.record_usage(*tokens)
+    tally = _ACTIVE_TALLY.get()
+    if tally is not None:
+        tally.record_usage(*tokens)
 
 
 def _mark_success() -> None:
@@ -629,6 +767,7 @@ def litellm_json_call(
     except Exception as exc:
         return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
+    _record_usage(response)
     return _parse_or_fallback(response, expected_keys, fallback, caller)
 
 
@@ -671,6 +810,7 @@ async def litellm_json_call_async(
     except Exception as exc:
         return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
+    _record_usage(response)
     return _parse_or_fallback(response, expected_keys, fallback, caller)
 
 
@@ -738,6 +878,7 @@ async def litellm_tool_call_async(
         _mark_failure()
         raise
     _mark_success()
+    _record_usage(response)
     return response
 
 
@@ -782,5 +923,6 @@ def litellm_text_call(
         _mark_failure()
         return None
     _mark_success()
+    _record_usage(response)
     text = _extract_text(response).strip()
     return text or None

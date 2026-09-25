@@ -29,6 +29,7 @@ from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
 from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
+from mylonite.scan._llm import LLMSpend
 from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass, adjudication_counts
 from mylonite.scan.engine import ScanResult
 
@@ -366,6 +367,8 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     )
     console_print(console, counts)
     console_print(console, _verdicts_line(report, sep=sep))
+    if result.llm_spend is not None:
+        console_print(console, format_spend(result.llm_spend, sep=sep))
     if report.inconclusive_attempts:
         judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
         denom = judged or report.inconclusive_attempts
@@ -418,6 +421,34 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     if scope:
         console_print(console, scope)
     return redact(buffer.getvalue())
+
+
+def format_spend(spend: LLMSpend, *, sep: str) -> str:
+    """One line stating what a run spent on LLM calls.
+
+    Calls by caller (planner / customiser / judge / ...), the cap when one was
+    in force, and the tokens the provider reported. Token totals are marked
+    partial when some calls reported no usage, so a provider that reports none
+    never reads as a zero-token run.
+    """
+    callers = ", ".join(f"{name} {n}" for name, n in sorted(spend.by_caller.items()) if n)
+    line = f"llm: {spend.calls} calls"
+    if callers:
+        line += f" ({callers})"
+    if spend.cap:
+        line += f" of {spend.cap} cap"
+    if spend.calls_with_usage:
+        tokens = f"{spend.prompt_tokens:,} in / {spend.completion_tokens:,} out tokens"
+        if spend.calls_with_usage < spend.calls:
+            tokens += f" (reported by {spend.calls_with_usage} of {spend.calls} calls)"
+        line += f"{sep}{tokens}"
+    return line
+
+
+def spend_summary(spend: LLMSpend, elapsed_s: float) -> str:
+    """The ``llm:`` line plus wall-clock, for a command that runs several scans."""
+    sep = " | " if _stdout_is_ascii_only() else " · "
+    return f"{format_spend(spend, sep=sep)}{sep}{elapsed_s:.1f}s"
 
 
 def _verdicts_line(report: ScanReport, *, sep: str) -> str:

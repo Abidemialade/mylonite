@@ -41,7 +41,9 @@ file, but what it replays at the CI gate depends on the target:
   the `MYLONITE_LIVE_TARGET=1` environment variable — without it the test is
   **skipped**, not run, and a plain `pytest` still exits `0`. `mylonite
   generate` prints the exact `MYLONITE_LIVE_TARGET=1 pytest …` command; the
-  scaffolded `mylonite-gate.yml` workflow sets the variable for you. See
+  scaffolded `mylonite-gate.yml` workflow sets the variable for you, along with
+  `MYLONITE_REQUIRE_GATE_RUN=1`, which fails the job if the gate test was
+  skipped. See
   [CI gating](ci-gating.md) for the operational details.
 
 ## "Isn't this a tautology?"

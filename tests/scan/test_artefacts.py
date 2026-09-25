@@ -635,3 +635,62 @@ def test_render_summary_omits_the_clean_scope_when_anything_was_not_tested() -> 
 def test_render_summary_omits_the_clean_scope_when_something_was_found() -> None:
     out = _summary_for([_attempt("finding", "predicate")], findings=1)
     assert "every exercised attack was resisted" not in out
+
+
+# --- the llm spend line ------------------------------------------------------
+
+
+def test_format_spend_names_calls_callers_cap_and_tokens() -> None:
+    from mylonite.scan._llm import LLMSpend
+    from mylonite.scan.artefacts import format_spend
+
+    spend = LLMSpend(
+        calls=12,
+        by_caller={"planner": 7, "judge": 3, "customiser": 2},
+        cap=50,
+        prompt_tokens=18_400,
+        completion_tokens=2_100,
+        calls_with_usage=12,
+    )
+    assert format_spend(spend, sep=" | ") == (
+        "llm: 12 calls (customiser 2, judge 3, planner 7) of 50 cap | 18,400 in / 2,100 out tokens"
+    )
+
+
+def test_format_spend_marks_partial_token_totals() -> None:
+    from mylonite.scan._llm import LLMSpend
+    from mylonite.scan.artefacts import format_spend
+
+    spend = LLMSpend(
+        calls=4,
+        by_caller={"planner": 4},
+        cap=0,
+        prompt_tokens=100,
+        completion_tokens=10,
+        calls_with_usage=3,
+    )
+    line = format_spend(spend, sep=" | ")
+    assert "cap" not in line  # an uncapped tally states no cap
+    assert "(reported by 3 of 4 calls)" in line
+
+
+def test_format_spend_omits_tokens_when_none_were_reported() -> None:
+    from mylonite.scan._llm import LLMSpend
+    from mylonite.scan.artefacts import format_spend
+
+    spend = LLMSpend(calls=2, by_caller={"judge": 2}, cap=50)
+    assert format_spend(spend, sep=" | ") == "llm: 2 calls (judge 2) of 50 cap"
+
+
+def test_render_summary_shows_spend_only_when_known() -> None:
+    """A result rebuilt from a saved report has no spend; that is not zero spend."""
+    from mylonite.scan._llm import LLMSpend
+
+    base = _result(findings=1)
+    known = ScanResult(
+        report=base.report,
+        exploits=base.exploits,
+        llm_spend=LLMSpend(calls=3, by_caller={"planner": 3}, cap=50),
+    )
+    assert "llm: 3 calls" in render_summary(known, ascii_safe=True)
+    assert "llm:" not in render_summary(base, ascii_safe=True)

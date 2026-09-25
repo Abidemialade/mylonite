@@ -26,9 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     fields only, so `mylonite report <scan-dir>` shows it offline. A scan that exercised
     every attempt and found nothing adds a `result:` line stating what that clean result
     covers. The counting lives in `mylonite.scan.coverage.adjudication_counts`.
+- **Every live command reports what it spent.** `scan` prints an `llm:` line — calls
+  by role (planner / customiser / judge), the `--max-llm-calls` cap, and the tokens
+  the provider reported. `validate` and `gate` print the same line for the whole
+  command, across every scan it ran, with its wall-clock time. Tokens rather than
+  a price, so you can apply your own provider's rates. In-process API:
+  `ScanResult.llm_spend` and `mylonite.scan._llm.usage_tally()`.
+- **`MYLONITE_REQUIRE_GATE_RUN`.** Set to `1` in the CI job that runs the committed
+  gate, the bundled pytest plugin fails the session if a `mylonite_security` test
+  was skipped or none was collected. Tests without that marker are never inspected,
+  and nothing changes when the variable is unset. The scaffolded
+  `mylonite-gate.yml` now sets it and runs `pytest -ra`, so a re-scaffolded
+  workflow can only pass by running the gate.
 
 ### Changed
 
+- **The metamorphic stage runs under its own call budget.** `DifferentialValidator`
+  gains `metamorphic_max_llm_calls` (default 120, well above the default
+  workload), and every metamorphic re-drive is counted against it. The stage gates
+  `kept`, so if the budget is reached before every perturbation has run, the stage
+  does not pass.
+- **`validate` states its workload up front.** The pre-run message names the
+  iterations, twins and metamorphic re-drives it will run, and the command reports
+  the calls and tokens it actually used when it finishes.
 - **Cross-model guidance points at the current path.** The verification
   findings (`verification/FINDINGS.md`) now describe how to check a defence
   across models today — re-run `mylonite validate` on the committed test with

@@ -135,6 +135,11 @@ target's declared `scope`, or its family name if no scope is declared; see
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
 reference/replay path); `--iteration-timeout S`.
 
+When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
+tokens the provider reported, and the wall-clock time. The metamorphic stage runs under
+its own call budget; if that budget is reached before every perturbation has run, the
+stage does not pass.
+
 ```bash
 mylonite validate .mylonite/generated/my-finding --target-file app.yaml --authorize my-app
 ```
@@ -162,6 +167,9 @@ reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on
 `--workflows/--no-workflows` (**default off**); `--llm-enrich` (append a labelled, unverified LLM fix
 suggestion, rendered after the structural recommendation above); `--fast`;
 `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
+
+`gate` ends with a `gate llm:` line: the LLM calls made across every stage (by role), the
+tokens the provider reported, and the wall-clock time.
 
 ```bash
 mylonite gate --target-file app.yaml --authorize my-app --open-pr

@@ -84,6 +84,21 @@ never ran are not counted as decided, and any attempt where neither mechanism re
 verdict is listed separately as `reached no verdict`. The line reads persisted fields
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
+### What a run spent
+
+`scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` cap
+in force, and the tokens the provider reported:
+
+```
+llm: 23 calls (customiser 4, judge 3, planner 16) of 50 cap · 31,200 in / 2,940 out tokens
+```
+
+`validate` and `gate`, which run several scans, print the same line for the whole command
+along with its wall-clock time. Token totals are marked `(reported by N of M calls)` when
+some calls reported no usage. Mylonite reports tokens rather than a price, so you can apply
+your own provider's rates. A result reloaded from a saved `scan_report.json` has no spend
+line, because the spend is not persisted.
+
 When a scan exercised every attempt and found nothing, a `result:` line states the
 scope of that result: the attack patterns run in that scan, against that model. Re-scan
 when the system prompt, the tools, or the model change.

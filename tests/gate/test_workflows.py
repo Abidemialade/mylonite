@@ -67,3 +67,14 @@ def test_workflow_gate_dir_is_substituted(tmp_path):
     # Both remain valid, job-bearing YAML after substitution.
     assert "jobs" in yaml.safe_load(gate_text)
     assert "jobs" in yaml.safe_load(discovery_text)
+
+
+def test_gate_workflow_requires_the_gate_to_run(tmp_path):
+    """The per-PR gate job sets MYLONITE_REQUIRE_GATE_RUN and prints skip reasons."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    job = doc["jobs"]["gate"]
+    assert job["env"]["MYLONITE_REQUIRE_GATE_RUN"] == "1"
+    assert job["env"]["MYLONITE_LIVE_TARGET"] == "1"
+    assert job["steps"][-1]["run"] == "pytest .mylonite/gate -q -ra"
