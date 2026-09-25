@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from mylonite._redaction import redact
+from mylonite._twin_fidelity import TwinLayer, guarded_twin_layer, proof_claim
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
 from mylonite.report.severity import severity_for
@@ -23,18 +24,39 @@ from mylonite.version import __version__
 #: 1.1 (PR6): added the optional "recommendation" key (present only when a
 #: TargetContext was supplied to to_bundle) -- additive, but every consumer
 #: of the finding shape should know the version moved.
-SCHEMA_VERSION = "1.1"
+#: 1.2: added "guarded_twin_layer" on each finding and "claim" inside "proof" --
+#: what played the guarded side of the differential, and the claim it earns.
+#: Both additive; both null when no guarded twin ran.
+SCHEMA_VERSION = "1.2"
+
+
+def _differential_layer(report: Any | None) -> TwinLayer | None:
+    """What played the guarded side, or ``None`` when no guarded twin ran.
+
+    Resolved through ``_twin_fidelity`` exactly as the SARIF export does, so the
+    two machine-readable surfaces cannot describe one run two ways. A report
+    with no guarded leg (``guard_resisted is None`` -- a stability-only
+    custom-target run) earns no differential claim at all.
+    """
+    repro = getattr(report, "reproducibility", None) if report is not None else None
+    if repro is None or not getattr(repro, "iterations", 0):
+        return None
+    if getattr(repro, "guard_resisted", None) is None:
+        return None
+    return guarded_twin_layer(report)
 
 
 def _proof(report: Any | None) -> dict[str, Any] | None:
     repro = getattr(report, "reproducibility", None) if report is not None else None
     if repro is None or not getattr(repro, "iterations", 0):
         return None
+    layer = _differential_layer(report)
     return {
         "iterations": repro.iterations,
         "vuln_fired": repro.vuln_fired,
         "guard_resisted": repro.guard_resisted,
         "kept": bool(getattr(report, "kept", False)),
+        "claim": proof_claim(layer) if layer is not None else None,
     }
 
 
@@ -84,6 +106,7 @@ def _finding(exploit: Any, report: Any | None, target: Any | None = None) -> dic
             "line": loc.line,
         },
         "proof": _proof(report),
+        "guarded_twin_layer": _differential_layer(report),
         "proven_control": md.get("synthetic_control") or None,
         "recommendation": _recommendation(exploit, report, target),
     }

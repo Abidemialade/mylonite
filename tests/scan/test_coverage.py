@@ -577,3 +577,71 @@ def test_launch_failure_is_not_tested() -> None:
     outcome = ScanOutcome.from_report(_report(attempts=[attempt]))
     assert outcome.not_tested == 1
     assert outcome.trustworthy_clean is False
+
+
+# --- adjudication_counts: how verdicts were reached -------------------------
+
+
+def _decided(outcome: ScanAttemptOutcome, mechanism: str | None, **kw: object) -> ScanAttempt:
+    return ScanAttempt(
+        seed_id="s",
+        pattern_id="s",
+        outcome=outcome,
+        verdict_mechanism=mechanism,  # type: ignore[arg-type]
+        verdict_reason=None,
+        judge_evidence=kw.get("judge_evidence") or {},  # type: ignore[arg-type]
+    )
+
+
+def test_adjudication_counts_splits_decided_attempts_by_mechanism() -> None:
+    from mylonite.scan.coverage import adjudication_counts
+
+    report = _report(
+        attempts=[
+            _decided("finding", "predicate"),
+            _decided("no_finding", "predicate"),
+            _decided("no_finding", "llm"),
+        ],
+        findings_count=1,
+    )
+    counts = adjudication_counts(report)
+    assert (counts.predicate, counts.llm, counts.no_verdict) == (2, 1, 0)
+    assert counts.decided == 3
+    assert counts.total_attempts == 3
+
+
+def test_adjudication_counts_excludes_attempts_that_never_ran() -> None:
+    """NOT_TESTED outcomes carry a mechanism in some cases (not_applicable,
+    no-engagement) but settled nothing about the attack, so they are not decided."""
+    from mylonite.scan.coverage import adjudication_counts
+
+    report = _report(
+        attempts=[
+            _decided("not_applicable", "predicate"),
+            _decided("skipped_planner_no_engagement", "predicate"),
+            _decided("error", None),
+            _decided("skipped_dry_run", None),
+        ]
+    )
+    counts = adjudication_counts(report)
+    assert counts.decided == 0
+    assert counts.no_verdict == 0
+    assert counts.total_attempts == 4
+
+
+def test_adjudication_counts_reports_attempts_that_reached_no_verdict() -> None:
+    """Both spellings of "no mechanism decided this": the current ``undecided``
+    literal and an earlier version's ``no_finding`` plus a fallback cause."""
+    from mylonite.scan.coverage import adjudication_counts
+
+    report = _report(
+        attempts=[
+            _decided("undecided", "llm"),
+            _decided("no_finding", "llm", judge_evidence={"fallback_cause": "unparseable"}),
+            _decided("no_finding", "llm"),
+        ]
+    )
+    counts = adjudication_counts(report)
+    assert counts.no_verdict == 2
+    assert counts.llm == 1
+    assert counts.decided == 1

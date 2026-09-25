@@ -178,7 +178,9 @@ Two honesty properties make this trustworthy:
 toggles each safeguard and reports which are **load-bearing**, which are
 **security theater** (the attack fires with or without them), and — with
 `--redundancy` — which are **redundant** (another control already covers the
-weakness).
+weakness). The matrix states which guarded side it scored — your server-layer
+controls when the target declares `control_env`, otherwise Mylonite's boundary
+controls — with the same claim wording as every other verdict surface.
 
 Single-model `validate` stamps the model it proved the test against into the
 report, so the committed regression is honest about which version it gates.

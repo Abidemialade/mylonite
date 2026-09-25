@@ -4448,7 +4448,11 @@ def ablate(
     finally:
         target_registry.clear_runtime_targets()
 
-    _render_ablation_matrix(results)
+    from mylonite._twin_fidelity import guarded_twin_layer
+
+    # The matrix states whose control played the guarded side, and the claim a
+    # load-bearing row earns, through the same single source as validate/SARIF.
+    _render_ablation_matrix(results, guarded_layer=guarded_twin_layer(None, server_layer))
     if server_layer and results and all(r.status == "no-attack" for r in results):
         echo_err(
             "hint: every control classified 'no-attack' — the raw side never fired. "

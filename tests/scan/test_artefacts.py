@@ -573,3 +573,65 @@ def test_stale_warning_fires_only_past_the_threshold() -> None:
     unparseable: list[str] = []
     warn_if_scan_is_stale(Path("hand-made"), emit=unparseable.append)
     assert unparseable == []
+
+
+# --- the verdicts line and the clean-result scope ---------------------------
+
+
+def _summary_for(attempts: list[ScanAttempt], *, findings: int = 0) -> str:
+    report = ScanReport(
+        target_id="mcp:myapp",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub-model",
+        elapsed_seconds=1.0,
+        attempts=attempts,
+        findings_count=findings,
+        mylonite_version="0.10.0",
+    )
+    return render_summary(ScanResult(report=report, exploits=[]), ascii_safe=True)
+
+
+def _attempt(outcome: str, mechanism: str | None) -> ScanAttempt:
+    return ScanAttempt(
+        seed_id="s",
+        pattern_id="s",
+        outcome=outcome,  # type: ignore[arg-type]
+        verdict_mechanism=mechanism,  # type: ignore[arg-type]
+        verdict_reason="r",
+        error_detail=None,
+    )
+
+
+def test_render_summary_states_how_verdicts_were_reached() -> None:
+    out = _summary_for(
+        [
+            _attempt("finding", "predicate"),
+            _attempt("no_finding", "predicate"),
+            _attempt("no_finding", "llm"),
+        ],
+        findings=1,
+    )
+    assert "verdicts: 2 by deterministic check | 1 by LLM judge (of 3 decided; 3 attempts)" in out
+
+
+def test_render_summary_verdicts_line_when_nothing_was_decided() -> None:
+    out = _summary_for([_attempt("error", None)])
+    assert "verdicts: none decided (1 attempts)" in out
+
+
+def test_render_summary_states_the_scope_of_a_clean_result() -> None:
+    out = _summary_for([_attempt("no_finding", "predicate"), _attempt("no_finding", "llm")])
+    assert "result: every exercised attack was resisted (2 decided)" in out
+    assert "against stub-model" in out
+
+
+def test_render_summary_omits_the_clean_scope_when_anything_was_not_tested() -> None:
+    """A partial scan is covered by the NOT TESTED line; it must not also read as clean."""
+    out = _summary_for([_attempt("no_finding", "predicate"), _attempt("error", None)])
+    assert "every exercised attack was resisted" not in out
+
+
+def test_render_summary_omits_the_clean_scope_when_something_was_found() -> None:
+    out = _summary_for([_attempt("finding", "predicate")], findings=1)
+    assert "every exercised attack was resisted" not in out

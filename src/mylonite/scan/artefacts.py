@@ -28,8 +28,8 @@ from rich.table import Table
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
-from mylonite.contracts import ExploitRecord, ToolSpec
-from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass
+from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
+from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass, adjudication_counts
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
@@ -365,6 +365,7 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         f"{report.elapsed_seconds:.1f}s"
     )
     console_print(console, counts)
+    console_print(console, _verdicts_line(report, sep=sep))
     if report.inconclusive_attempts:
         judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
         denom = judged or report.inconclusive_attempts
@@ -413,4 +414,48 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         )
     if report.aborted:
         console_print(console, f"[red]aborted: {report.aborted}[/red]")
+    scope = _clean_result_scope(report, not_tested=not_tested)
+    if scope:
+        console_print(console, scope)
     return redact(buffer.getvalue())
+
+
+def _verdicts_line(report: ScanReport, *, sep: str) -> str:
+    """One line stating how the scan's verdicts were reached.
+
+    Always printed, so a reader can see how much of a result was settled by a
+    deterministic check and how much by the LLM judge, without having to read
+    the per-attempt mechanism column.
+    """
+    counts = adjudication_counts(report)
+    context = f"{counts.total_attempts} attempts"
+    if counts.decided == 0:
+        line = f"verdicts: none decided ({context})"
+    else:
+        line = (
+            f"verdicts: {counts.predicate} by deterministic check{sep}"
+            f"{counts.llm} by LLM judge (of {counts.decided} decided; {context})"
+        )
+    if counts.no_verdict:
+        line += f"{sep}{counts.no_verdict} reached no verdict"
+    return line
+
+
+def _clean_result_scope(report: ScanReport, *, not_tested: int) -> str | None:
+    """The scope of a clean result, stated where the clean result is read.
+
+    Printed only for a scan that completed, exercised every attempt and found
+    nothing: the case no other summary line addresses. It says what the result
+    covers — the attack patterns in this run, against this model — so a clean
+    scan reads as the scoped statement it is.
+    """
+    if report.findings_count or report.aborted or not_tested:
+        return None
+    decided = adjudication_counts(report).decided
+    if decided == 0:
+        return None
+    return (
+        f"result: every exercised attack was resisted ({decided} decided). This "
+        f"covers the attack patterns run in this scan against {report.model}; "
+        "re-scan when the system prompt, tools or model change."
+    )

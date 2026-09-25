@@ -15,7 +15,12 @@ from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from mylonite._cli_io import console_print
-from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
+from mylonite._twin_fidelity import (
+    MARKER_SERVER_LAYER,
+    MARKER_SYNTHETIC,
+    TwinLayer,
+    proof_claim,
+)
 
 
 def _render_validation_report(report: Any, console: Console | None = None) -> None:
@@ -199,8 +204,30 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
 
 
-def _render_ablation_matrix(results: list[Any], console: Console | None = None) -> None:
-    """Render the control-ablation matrix (ASCII-safe for a legacy cp1252 console)."""
+#: How each guarded side is described on the ablation matrix. Ablation's own
+#: vocabulary ("toggling a control"), paired with the shared claim wording from
+#: ``_twin_fidelity`` so the matrix states the same claim as every other surface.
+_ABLATION_GUARDED_SIDE: dict[str, str] = {
+    "server": "server-layer (your control_env toggles)",
+    "boundary": "adapter-shim (Mylonite's canonical boundary control)",
+}
+
+
+def _render_ablation_matrix(
+    results: list[Any],
+    console: Console | None = None,
+    *,
+    guarded_layer: TwinLayer | None = None,
+) -> None:
+    """Render the control-ablation matrix (ASCII-safe for a legacy cp1252 console).
+
+    ``guarded_layer`` names what played the guarded side of every row: the
+    operator's own server-layer control or Mylonite's boundary shim. It is
+    per-run rather than per-row, so it renders once, under the table, together
+    with the claim a load-bearing row earns (``_twin_fidelity.proof_claim``).
+    ``None`` renders nothing: the matrix does not assert a claim about a run
+    whose guarded side it was not told.
+    """
     from mylonite.scan.artefacts import _stdout_is_ascii_only
 
     dash = "-" if _stdout_is_ascii_only() else "—"
@@ -251,3 +278,7 @@ def _render_ablation_matrix(results: list[Any], console: Console | None = None) 
             f"side -- NOT the same as resisted, re-run before trusting this control): "
             f"{', '.join(inconclusive)}",
         )
+    if guarded_layer is not None:
+        console_print(console, f"guarded side: {_ABLATION_GUARDED_SIDE[guarded_layer]}")
+        if load_bearing or redundant:
+            console_print(console, f"what a load-bearing row shows: {proof_claim(guarded_layer)}.")

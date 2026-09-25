@@ -68,6 +68,26 @@ That panel is the **anti-false-positive trust signal**: a large share of securit
 false positives, so a finding that ships with a machine-checkable differential proof
 ("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.
 
+### How each verdict was reached
+
+Every scan summary carries a `verdicts:` line under its counts:
+
+```
+verdicts: 12 by deterministic check | 3 by LLM judge (of 15 decided; 18 attempts)
+```
+
+Each attack pattern is judged by a deterministic predicate first; the LLM judge is
+consulted only when the predicate cannot see the signal it needs (see
+[How "did it land?" is decided](weakness-classes.md#how-did-it-land-is-decided-layer-1)).
+The line splits the *decided* attempts by which of the two settled them. Attempts that
+never ran are not counted as decided, and any attempt where neither mechanism reached a
+verdict is listed separately as `reached no verdict`. The line reads persisted fields
+only, so `mylonite report <scan-dir>` shows the same breakdown offline.
+
+When a scan exercised every attempt and found nothing, a `result:` line states the
+scope of that result: the attack patterns run in that scan, against that model. Re-scan
+when the system prompt, the tools, or the model change.
+
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 
 SARIF is the portal to where developers already triage every other finding — the
@@ -91,11 +111,13 @@ mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
 ## JSON finding bundle — `--json`
 
 For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom CI.
-A single `finding.json` (versioned `schema_version`) with, per finding: `pattern_id`,
-`weakness_class`, `severity`, `attack_shape`, the full `compliance` block, the R4
-`localization` (tool/field/line), the `proof` (vuln/guard counts + `kept`), and the
-`proven_control`. It reuses the exact data the SARIF report computes — no new
-analysis. Source: `mylonite.report.bundle`.
+A single `finding.json` (versioned `schema_version`, currently `1.2`) with, per
+finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, the full
+`compliance` block, the R4 `localization` (tool/field/line), the `proof` (vuln/guard
+counts, `kept`, and the `claim` the run earned), `guarded_twin_layer` (`server` or
+`boundary` — what played the guarded side), and the `proven_control`. `claim` and
+`guarded_twin_layer` are `null` when no guarded twin ran. It reuses the exact data the
+SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR
 
@@ -120,8 +142,8 @@ When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 ## Which claim you earned
 
 A KEPT verdict is not one claim, it is two — and the difference is which guarded side ran.
-Mylonite words every surface (the trust panel, SARIF, the JSON bundle, the PR body) to
-match, and never prints the stronger sentence for the weaker run.
+Mylonite words every surface (the trust panel, SARIF, the JSON bundle, the PR body, and
+the `ablate` matrix) to match, and never prints the stronger sentence for the weaker run.
 
 | Guarded side | Wording you get | What it means |
 |---|---|---|
