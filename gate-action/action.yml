@@ -42,7 +42,7 @@ runs:
     # bumps it with __version__, and the release gate refuses a mismatch.
     - name: Install mylonite
       shell: bash
-      run: pip install "mylonite==0.10.1"
+      run: pip install "mylonite==0.10.2"
     - name: Run mylonite gate
       shell: bash
       # Inputs travel through env, never through `${{ }}` inside `run:`. GitHub

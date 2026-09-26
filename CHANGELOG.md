@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-09-26
+
+No behaviour change for existing setups: exit codes, flag defaults and the order
+of checks are the same as in 0.10.1. Setup errors now print the fix, the demo
+runs with one `uvx` command and reads cleanly at 80 columns, and Mylonite
+installs on Python 3.14.
+
 ### Added
 
 - **Mylonite installs and runs on Python 3.14.** `requires-python` is now
@@ -15,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the `demo` and `pypi-smoke` jobs run the uvx one-liner on 3.14. The
   "unsupported Python" note that `mylonite` printed on 3.14 now appears only
   on 3.15 and later.
+- **Run the demo with one command and nothing installed.** With
+  [uv](https://docs.astral.sh/uv/) on your machine,
+  `uvx --from "mylonite[demo]" mylonite demo` runs the offline demo in a
+  throwaway environment, no API key needed; on a fresh Windows CI runner it
+  resolves, installs and finishes in under 40 seconds. It is the first command
+  in the README's "Try it" and in `docs/quickstart.md`; `pip install
+  "mylonite[demo]"` stays the route for keeping Mylonite installed. The CI
+  `demo` job builds Mylonite from source and runs this command on Linux and
+  Windows in an 80-column terminal, and fails if the output drops the finding
+  count, the `mode: replay` line, or cuts anything short with `…`.
+- **Each release is checked from PyPI after it publishes.** A new `pypi-smoke`
+  job in `release.yml` runs the same demo check with `uvx` against the
+  just-published `mylonite[demo]==X.Y.Z` on Linux and Windows. See
+  `docs/contributing/releasing.md`.
 - **A writing style guide, enforced in CI.** `docs/contributing/writing-style.md`
   sets one voice for the README, docs, changelog, commits and pull requests:
   lead with what changes for the reader, show the proof, state limits once.
@@ -26,27 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `scripts/check_prose.py` checks the pull-request title (Conventional
     Commits), the required description sections, and flags machine-sounding
     phrases in changed Markdown lines.
-- **Run the demo with one command and nothing installed.** With
-  [uv](https://docs.astral.sh/uv/) on your machine,
-  `uvx --from "mylonite[demo]" mylonite demo` runs the offline
-  demo in a throwaway environment, no API key needed. It is the first command
-  in the README's "Try it" and in `docs/quickstart.md`; `pip install
-  "mylonite[demo]"` stays the route for keeping Mylonite installed. The CI
-  `demo` job now builds Mylonite from source and runs this command on Linux and Windows in
-  an 80-column terminal, and fails if the output drops the finding count, the
-  `mode: replay` line, or cuts anything short with `…`. It needs no
-  `--python` flag: Mylonite now supports Python 3.14 as well.
-- **A post-release job proves the demo works from PyPI, not just from source.**
-  `release.yml`'s new `pypi-smoke` job runs after `publish-pypi`: on Linux and
-  Windows it installs `mylonite[demo]==X.Y.Z` with `uvx` straight from PyPI and
-  runs the same checks as the PR `demo` job (a non-zero finding count on the
-  vulnerable twin, `mode: replay`, no truncation at 80 columns), retrying a
-  few times to ride out PyPI index lag. It reports independently and never
-  blocks `github-release`. See "After publishing: `pypi-smoke`" in
-  `docs/contributing/releasing.md`.
 
 ### Changed
 
+- **`mylonite demo` reads cleanly in an 80-column terminal.** The table used
+  to need 126 columns; at 80 it cut the weakness IDs to nothing and the verdict
+  cells to `v…` and `✓ c…`. Below its full width the table now drops the
+  taxonomy column for a legend underneath, keeps the ID and verdict cells whole,
+  and breaks a long weakness name after a hyphen. The headline puts the count
+  (`reference app: 5 exploits on vulnerable, 0 on guarded`) on its own line, the
+  suggested commands each sit whole on one line within 79 columns, so they
+  paste into bash, PowerShell or cmd alike, and the recording date and model
+  move to a line under `mode: replay (offline)`. A wide terminal still gets the
+  one-line table. Output layout only: the results, exit codes and flags are
+  unchanged.
 - **The gate workflows and the gate action install a pinned release.** The
   workflows `mylonite gate --workflows` writes now run
   `pip install "mylonite==X.Y.Z"` with the version that wrote them, instead of
@@ -70,16 +84,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ROADMAP.md` lays out the road to 1.0.** Every release from 0.10.2 to 1.1
   with what it adds and a target month, what 1.0 promises, what it leaves out,
   and what comes after it.
-- **`mylonite demo` reads cleanly in an 80-column terminal.** The table used
-  to need 126 columns; at 80 it cut the weakness IDs to nothing and the verdict
-  cells to `v…` and `✓ c…`. Below its full width the table now drops the
-  taxonomy column for a legend underneath, keeps the ID and verdict cells whole,
-  and breaks a long weakness name after a hyphen. The headline puts the count
-  (`reference app: 5 exploits on vulnerable, 0 on guarded`) on its own line, the
-  suggested commands each sit whole on one line within 79 columns, so they
-  paste into bash, PowerShell or cmd alike, and the recording date and model move to a line under `mode: replay (offline)`. A
-  wide terminal still gets the one-line table. Output layout only: the results,
-  exit codes and flags are unchanged.
 
 ### Fixed
 
@@ -92,9 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Name a scope: mcp:filesystem:<scope> --authorize <scope>.`). `mcp:custom`
   given inline (no `--target-file`) gets its `--scope` flag, or the literal
   family `custom` when none was given; `gate`, which only takes a custom
-  target through `--target-file`, says that instead. The `--authorize` help on `scan`, `validate`, `gate`
-  and `ablate` states the same rule (`validate`'s also notes that a
-  `reference:*` target needs none), and the examples in
+  target through `--target-file`, says that instead. The `--authorize` help on
+  `scan`, `validate`, `gate` and `ablate` states the same rule (`validate`'s
+  also notes that a `reference:*` target needs none), and the examples in
   `docs/cli-reference.md`, `docs/http-agent.md` and `docs/test-your-app.md`
   now use the value their own scaffold step produces. The exit code is
   unchanged.
@@ -105,16 +109,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   --scope my-app`, or the HTTP-agent form) and points at
   `docs/target-file.md`, instead of a bare "No such file or directory". A
   target file that exists but fails to load, or names a `system_prompt_file`
-  that is missing, still gets the plain message naming the real problem —
+  that is missing, still gets the plain message naming the real problem:
   `--scaffold` is only the fix when the target file itself is missing.
-- **The README and the verification page quote the current results.** The
-  InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
-  recall, recorded as unresolved because it rests on 7 successful attacks), and
-  both pages date the figures to 14 September 2026 and point at
-  `verification/results/0.10.0/`.
 - **A missing LLM key now points at a way to run without one.** `scan`,
   `gate`, `validate` and `ablate` all append a line naming a local model
-  (`--model ollama_chat/llama3.2:3b`, no key needed — see
+  (`--model ollama_chat/llama3.2:3b`, no key needed; see
   `docs/self-hosted-models.md`) to their `no LLM credential configured`
   error; `scan` also suggests `--dry-run` to preview the run with no LLM
   calls at all. `validate`'s `no provider reachable` message (a configured
@@ -127,6 +126,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wording in `docs/reading-results.md`, `docs/cli-reference.md` and
   `docs/contributing/writing-style.md` match. The flag's default and
   behaviour are unchanged.
+- **The README and the verification page quote the current results.** The
+  InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
+  recall, recorded as unresolved because it rests on 7 successful attacks), and
+  both pages date the figures to 14 September 2026 and point at
+  `verification/results/0.10.0/`.
 
 ## [0.10.1] - 2026-09-25
 
@@ -4225,7 +4229,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Abidemialade/mylonite/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Abidemialade/mylonite/compare/v0.8.6...v0.9.0
