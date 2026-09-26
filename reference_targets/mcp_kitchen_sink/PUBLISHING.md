@@ -1,6 +1,10 @@
 # Publishing `mcp-kitchen-sink` to PyPI (front-door handoff)
 
-> **Status: 0.2.0 published 2026-09-14.** v0.1.0 went to PyPI on 2026-08-05.
+> **Status: 0.2.1 (metadata only) follows 0.2.0.** 0.2.1 adds the Python 3.14
+> classifier; the code, tool names, descriptions and schemas are byte-identical
+> to 0.2.0, so the demo fixtures stay valid and need no re-record.
+>
+> 0.2.0 was published 2026-09-14; v0.1.0 went to PyPI on 2026-08-05.
 > 0.2.0 is the release in which the guarded twin's behaviour changed: the
 > `<untrusted>` envelope was replaced by a code-enforced taint gate, which
 > changes `read_note`'s observable output and every tool schema hash derived
