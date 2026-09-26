@@ -33,9 +33,19 @@ shipped.
 
 - **The core claim:** a safe model is not the same thing as a safe app.
   Mylonite checks whether your app's own safeguards stop an attack.
-- **How it proves it:** each attack runs with the safeguard off and on,
-  repeatedly; a finding is kept only if it lands without the safeguard and is
-  stopped with it. That is a differential, and it is the thing to lead with.
+- **How it proves it:** where a safeguard can be switched, each attack runs
+  with it off and on, repeatedly, and the finding is kept only if it lands
+  without the safeguard and is stopped with it. That differential is the thing
+  to lead with, so state it precisely:
+  - by default the "on" side is Mylonite's stand-in guard at the tool boundary;
+    it proves the attack is real and that this kind of guard closes it;
+  - with `control_env` (a kill switch for the user's own guard) it proves the
+    user's own code does the work, which is the stronger claim;
+  - black-box targets (the HTTP `rest` transport, or a custom target with no
+    switchable control) get repeat-run, consensus and effect checks instead,
+    and the output says no differential ran.
+  Never write "your safeguard is what stops it" unless the run used
+  `control_env`.
 - **What it hands back:** a pytest regression test that gates CI, with
   OWASP LLM, OWASP ASI, MITRE ATLAS and NIST AI RMF tags.
 - **Honesty rails:** a check that could not run is never reported as a pass,

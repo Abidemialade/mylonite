@@ -22,7 +22,10 @@ times without the safeguard and 0 out of 5 with it is not "potentially
 interesting", it is a proven weakness, and the writing should read that way.
 
 **Honest.** Confidence is not overclaiming. Every claim is one you could back
-with a command, a test or a published result. When something has a limit, say
+with a command, a test or a published result. When a result comes from the
+differential, name the safeguard it used: Mylonite's stand-in guard proves the
+attack is real and that this kind of guard closes it; only a run with your own
+guard switched off and on proves your code does the work. When something has a limit, say
 so plainly, once, where the reader needs it.
 
 ## Lead with what it does, then prove it
@@ -39,7 +42,7 @@ the first two sentences whether to keep going.
 | --- | --- |
 | "This is an experimental feature that may help in some cases to detect certain issues." | "`mylonite gate` turns a confirmed exploit into a pytest test that fails your CI until the fix lands." |
 | "Unfortunately, the tool can only test MCP servers for now." | "Mylonite tests MCP servers over stdio and remote transports. Plain HTTP agents are supported for injection testing; other adapters are on the roadmap." |
-| "We tried to make the results a bit more reliable." | "Every kept finding reproduced across 5 runs and was stopped by the safeguard in all 5." |
+| "We tried to make the results a bit more reliable." | "This finding fired in 5 of 5 runs without the safeguard and 0 of 5 with it." |
 
 A limitation stated once, in the right place, builds trust. The same limitation
 repeated in every paragraph reads as a lack of conviction.
