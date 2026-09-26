@@ -107,7 +107,7 @@ Write for the user who is deciding whether to upgrade.
 
 ```markdown
 - **Every live command reports what it spent.** `scan` prints an `llm:` line
-  with calls by role, the `--max-llm-calls` cap and the tokens the provider
+  with calls by role, the `--max-llm-calls` budget and the tokens the provider
   reported. `validate` and `gate` print the same line for the whole command.
 ```
 

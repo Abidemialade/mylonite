@@ -91,7 +91,9 @@ Key options: `--target-file PATH` (a path that doesn't exist prints the exact
 [target.yaml](target-file.md)), `--authorize NAME` (must equal the target's `scope`,
 or its family when it declares no scope; a missing value prints the one to pass), `--model` (any LiteLLM
 provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
-`--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
+`--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`
+(a budget, not a hard ceiling — every seed keeps a floor of it, so the worst
+case is higher; see [Sizing --max-llm-calls](ci-gating.md)),
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
 `--allow-no-seed-arm`, `--purpose "…"` (a one-line description of what the app is for;
 tailors the probes to its domain — overrides `purpose` in the target file, and is
@@ -177,7 +179,8 @@ where `--workflows` defaulted on and the branch and commit happened on every run
 Options: `target` or `--target-file`; `--authorize` (the target's `scope`, or its family
 when it declares no scope); `--open-pr` (create the branch,
 commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
-a `provider/model` prefix); `--out PATH`; `--max-llm-calls`;
+a `provider/model` prefix); `--out PATH`; `--max-llm-calls` (a budget for the scan
+phase, not a hard ceiling — see [Sizing --max-llm-calls](ci-gating.md));
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
