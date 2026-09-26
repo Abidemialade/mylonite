@@ -144,8 +144,7 @@ launch can never be mistaken for a clean result.
 ## Enforcement
 
 Two scripts check the mechanical parts. Both run in CI on every pull request,
-and the project's Claude Code hooks run them before any commit, push or pull
-request is created.
+and you can run them locally before you push.
 
 - `scripts/check_prose.py` flags the phrases above in changed Markdown lines,
   the pull-request title (Conventional Commits) and the pull-request

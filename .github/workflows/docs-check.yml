@@ -2,8 +2,8 @@ name: Docs and writing
 
 # Keeps the docs in step with the code and the prose in the project's voice.
 # The rules live in docs/contributing/writing-style.md; the checks are
-# scripts/check_docs_sync.py and scripts/check_prose.py. The same checks run
-# locally as a Claude Code hook, but this job is the one that counts.
+# scripts/check_docs_sync.py and scripts/check_prose.py. Contributors can run
+# them locally before pushing, but this job is the one that counts.
 
 on:
   pull_request:

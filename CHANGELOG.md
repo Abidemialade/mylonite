@@ -20,10 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `scripts/check_prose.py` checks the pull-request title (Conventional
     Commits), the required description sections, and flags machine-sounding
     phrases in changed Markdown lines.
-- **The same checks run before Claude Code commits, pushes or opens a pull
-  request.** A project hook (`.claude/hooks/enforce_writing.py`) blocks the
-  call and explains the fix, and a shared `mylonite-writing` skill carries the
-  working procedure.
 
 ### Changed
 

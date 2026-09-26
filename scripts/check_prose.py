@@ -37,10 +37,7 @@ from pathlib import Path
 ALLOW_MARKER = "prose-lint: allow"
 
 # Files that quote the banned phrases on purpose, to teach them.
-EXCLUDED_PATHS = (
-    "docs/contributing/writing-style.md",
-    ".claude/skills/mylonite-writing/",
-)
+EXCLUDED_PATHS = ("docs/contributing/writing-style.md",)
 
 # (pattern, message). Errors fail the check.
 ERROR_RULES: tuple[tuple[str, str], ...] = (

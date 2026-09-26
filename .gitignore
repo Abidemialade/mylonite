@@ -1,15 +1,15 @@
 # Per-developer Claude Code / AI assistant state. The repo only commits
-# the project hooks, the project-level Claude settings, and the shared
-# mylonite-writing skill (the style guide's working procedure); everything
-# else (per-developer local settings, planning scratch, persistent memory,
-# other locally installed skills, transcripts) is private and must never be
-# pushed.
+# the gstack hook + the project-level Claude settings that CLAUDE.md
+# requires; everything else (per-developer local settings, planning
+# scratch, persistent memory, locally installed skills, transcripts) is
+# private and must never be pushed.
 .claude/*
 !.claude/hooks/
 !.claude/settings.json
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/mylonite-writing/
+# Local-only Claude Code writing hook; CI's docs-and-writing job is the
+# enforcement that counts.
+.claude/hooks/enforce_writing.py
+.claude/hooks/enforce-writing.sh
 
 # Python
 __pycache__/

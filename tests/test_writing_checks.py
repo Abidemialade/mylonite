@@ -1,5 +1,5 @@
 """Tests for the writing and docs-sync checks (``scripts/check_prose.py``,
-``scripts/check_docs_sync.py``) and the Claude Code hook that runs them.
+``scripts/check_docs_sync.py``), which the ``Docs and writing`` CI job runs.
 
 Hermetic: every case feeds the checks strings and file lists directly, so
 nothing depends on the state of the working tree. Both checks must FIRE on the
@@ -30,7 +30,6 @@ def _load(relative: str, name: str) -> ModuleType:
 
 prose = _load("scripts/check_prose.py", "check_prose")
 docs = _load("scripts/check_docs_sync.py", "check_docs_sync")
-hook = _load(".claude/hooks/enforce_writing.py", "enforce_writing")
 
 
 def _errors(findings: list) -> list:
@@ -148,10 +147,9 @@ def test_diff_parsing_tracks_added_line_numbers() -> None:
     assert [(f.source, f.line) for f in findings] == [("docs/x.md", 4)]
 
 
-def test_style_guide_and_skill_are_exempt_from_the_diff_lint() -> None:
+def test_style_guide_is_exempt_from_the_diff_lint() -> None:
     added = {
         "docs/contributing/writing-style.md": [(1, "| delve, dive into | look at |")],
-        ".claude/skills/mylonite-writing/SKILL.md": [(1, "phrases like delve")],
     }
     assert not prose.lint_diff(added)
 
@@ -201,79 +199,3 @@ def test_every_mapped_doc_page_exists() -> None:
     for rule in docs.DOC_RULES:
         for page in rule.docs:
             assert (REPO_ROOT / page).exists(), page
-
-
-# --- hook -------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "ls -la",
-        "git status",
-        "git log --oneline -5",
-        "gh pr view 12",
-        "pytest -q",
-    ],
-)
-def test_hook_ignores_unrelated_commands(command: str) -> None:
-    assert hook.run({"tool_input": {"command": command}, "cwd": str(REPO_ROOT)}) == []
-
-
-@pytest.mark.parametrize(
-    ("command", "commit", "push", "pr"),
-    [
-        ('git commit -s -m "fix: x"', True, False, False),
-        ("git -c user.name=x commit -m y", True, False, False),
-        ("git add -A && git commit -m y", True, False, False),
-        ("git push -u origin my-branch", False, True, False),
-        ("gh pr create --title t --body-file b.md", False, False, True),
-        ('cd repo; gh pr edit 12 --body "x"', False, False, True),
-        ('echo "remember to git commit later"', False, False, False),
-        ("grep -n 'git push' docs/ci-gating.md", False, False, False),
-    ],
-)
-def test_hook_recognises_commit_push_and_pr(
-    command: str, commit: bool, push: bool, pr: bool
-) -> None:
-    assert bool(hook.COMMIT_RE.search(command)) is commit
-    assert bool(hook.PUSH_RE.search(command)) is push
-    assert bool(hook.PR_RE.search(command)) is pr
-
-
-def test_hook_reads_pr_titles() -> None:
-    assert hook._pr_title('gh pr create --title "fix(scan): x" --body-file b.md') == "fix(scan): x"
-    assert hook._pr_title("gh pr create -t 'feat: y'") == "feat: y"
-    assert hook._pr_title("gh pr create --fill") is None
-
-
-def test_hook_reads_a_pr_body_file(tmp_path: Path) -> None:
-    body = tmp_path / "body.md"
-    body.write_text("## Summary\n\nx\n", encoding="utf-8")
-    assert hook._pr_body(tmp_path, f'gh pr create --body-file "{body}"') == "## Summary\n\nx\n"
-    assert hook._pr_body(tmp_path, "gh pr create --body-file body.md") == "## Summary\n\nx\n"
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        'gh pr create --title "ci: x" --body-file "$UNSET_DIR_FOR_TEST/pr.md"',
-        "gh pr create --title 'ci: x' --body-file missing.md",
-        "gh pr create --title 'ci: x' --body-file -",
-    ],
-)
-def test_hook_leaves_an_unreadable_pr_body_to_ci(
-    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A body file the hook can't resolve must not be reported as a body with
-    # every required section missing. Git is stubbed: CI checkouts are shallow.
-    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-    monkeypatch.delenv("UNSET_DIR_FOR_TEST", raising=False)
-    monkeypatch.setattr(hook, "_git", lambda *_args: "")
-    monkeypatch.setattr(docs, "commit_messages", lambda _base: [])
-    monkeypatch.setattr(prose, "added_markdown_lines", lambda _base, cwd=None: {})
-    modules = {"check_docs_sync": docs, "check_prose": prose}
-    monkeypatch.setattr(hook, "_load", lambda _project, name: modules[name])
-
-    assert hook._pr_body(tmp_path, command) is None
-    assert hook.run({"tool_input": {"command": command}, "cwd": str(tmp_path)}) == []
