@@ -84,8 +84,10 @@ Published for the same reason the positive ones are.
 
 - **0 out of 8 found** on one external challenge set (DVMCP, using Claude Haiku 4.5).
 - **On InjecAgent** (100 cases per split, using a local `llama3.2:3b`) the judge scored
-  **F1 1.000** on the direct-harm split and **F1 0.400 at 0.25 recall** on the
-  data-stealing split. The gap between those two is the finding, so both are published.
+  **F1 1.000** on the direct-harm split and **F1 0.833 at 0.714 recall** on the
+  data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests
+  on only 7 attacks that succeeded, so we record it as unresolved at this sample size, not
+  as an improvement. The gap between the splits is the finding, so both are published.
 - **Judge agreement of F1 0.41** against AgentDojo's own labels. Mylonite's judge asks "did
   harm actually happen?"; AgentDojo asks "was the exact goal achieved?". Some of that gap
   is a genuine difference in question, which we have not resolved.
@@ -101,9 +103,10 @@ Published for the same reason the positive ones are.
   [below](#finding-nothing-is-also-a-result).
 - **The evidence rests largely on one model** — Claude Haiku 4.5 — at small, deliberately
   cost-capped sample sizes.
-- **The published figures were measured between 25 June and 29 August 2026.** The
+- **The published figures were measured between 25 June and 14 September 2026.** The
   benchmark results carry the version they were measured against
-  (`verification/results/0.9.0/`); the run logs in the capability matrix do not. Figures
+  (`verification/results/0.9.0/` and `verification/results/0.10.0/`); the run logs in the
+  capability matrix do not. Figures
   have not been re-measured for every release since, so read them as a floor rather than a
   current reading. Per-release re-measurement is planned.
 - **Run transcripts are not published.** The harness and its scorers are, so you can

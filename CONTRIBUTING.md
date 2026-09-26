@@ -106,7 +106,9 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
   change needs no docs, say why in the description:
   `Docs-Impact: none - <reason>`. Run the same checks locally with
   `python scripts/check_docs_sync.py --base origin/main` and
-  `python scripts/check_prose.py --diff-base origin/main`.
+  `python scripts/check_prose.py --diff-base origin/main`. `Docs and writing`
+  is a required check, and maintainers do not use an admin merge to get past it
+  while it is red: fix the cause, or add the opt-out line with a real reason.
 - **Contract changes** (touching any file under `src/mylonite/contracts/`)
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.

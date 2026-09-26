@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The pull-request template asks for what reviewers need.** Summary, changes,
   how it was tested, docs and changelog, and security impact, with the summary
   and testing sections required.
+- **`ROADMAP.md` lays out the road to 1.0.** Every release from 0.10.2 to 1.1
+  with what it adds and a target month, what 1.0 promises, what it leaves out,
+  and what comes after it.
+
+### Fixed
+
+- **The README and the verification page quote the current results.** The
+  InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
+  recall, recorded as unresolved because it rests on 7 successful attacks), and
+  both pages date the figures to 14 September 2026 and point at
+  `verification/results/0.10.0/`.
 
 ## [0.10.1] - 2026-09-25
 

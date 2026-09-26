@@ -8,11 +8,13 @@ against external ground truth it **did not author** — runnable vulnerable MCP 
 published academic benchmarks — and publishes the result here, **negatives included**.
 
 This page is the scorecard. The numbers come from live runs between 25 June and
-29 August 2026. **Claude Haiku 4.5** was the planner/judge for the DVMCP and precision
+14 September 2026. **Claude Haiku 4.5** was the planner/judge for the DVMCP and precision
 layers; the InjecAgent layer was run against a self-hosted `llama3.2:3b`. Samples are
 small and cost-bounded. Read the caveats — several numbers mean less (or more) than they
-look. The release-gated result set lives in
-[`verification/results/0.9.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.9.0)
+look. The latest release-gated result set lives in
+[`verification/results/0.10.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.10.0)
+(the earlier one in
+[`verification/results/0.9.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.9.0)),
 with a per-release trend table in
 [`TRENDS.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/TRENDS.md).
 
