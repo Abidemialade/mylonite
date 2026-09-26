@@ -63,10 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both pages date the figures to 14 September 2026 and point at
   `verification/results/0.10.0/`.
 - **A missing LLM key now points at a way to run without one.** `scan`,
-  `gate`, `validate` and `ablate` all append the same two lines to their
-  `no LLM credential configured` error: `--model ollama_chat/llama3.2:3b`
-  (no key needed, see `docs/self-hosted-models.md`), and, on `scan` only,
-  `--dry-run` to preview the run with no LLM calls at all.
+  `gate`, `validate` and `ablate` all append a line naming a local model
+  (`--model ollama_chat/llama3.2:3b`, no key needed — see
+  `docs/self-hosted-models.md`) to their `no LLM credential configured`
+  error; `scan` also suggests `--dry-run` to preview the run with no LLM
+  calls at all. `validate`'s `no provider reachable` message (a configured
+  but unreachable provider, on either the custom-target or the
+  reference-target path) gets the same local-model line.
 - **`--max-llm-calls`'s help no longer calls it a cap.** `scan` and `gate`
   now describe it as a budget and point at `docs/ci-gating.md` for the worst
   case: every seed keeps a floor of it, so a large tool surface can spend

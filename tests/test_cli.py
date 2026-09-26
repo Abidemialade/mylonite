@@ -2164,7 +2164,16 @@ def test_post_gate_annotations_passes_a_timeout_to_the_check_run_post(
 def test_validate_provider_unreachable_exit_4(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An unreachable provider (preflight aborts) → exit 4 with the key hint."""
+    """An unreachable provider (preflight aborts) → exit 4 with the key hint.
+
+    Drives the REFERENCE-target branch of `validate` (no `--target-file`, so
+    it goes through `_provider_preflight`, not `_validate_custom`'s
+    `_provider_preflight_direct`). Both branches share
+    `_exit_if_provider_unreachable` (a fix-round finding: the reference
+    branch used to duplicate the message without the local-model hint the
+    custom branch got) -- this asserts the hint on THIS branch specifically,
+    so a future edit that reintroduces the drift is caught here.
+    """
     out_dir = _generated_dir(tmp_path)
     # T14: a credential IS configured here (distinguishing this from the
     # EXIT_CONFIG "no credential at all" pre-flight) -- it's the LIVE call
@@ -2178,6 +2187,8 @@ def test_validate_provider_unreachable_exit_4(
     assert result.exit_code == EXIT_PROVIDER, result.output
     out = result.stderr or result.output
     assert "ANTHROPIC_API_KEY" in out or "no provider reachable" in out
+    assert "ollama_chat/" in out
+    assert "docs/self-hosted-models.md" in out
 
 
 def test_validate_persists_redacted_validation_report_json(
