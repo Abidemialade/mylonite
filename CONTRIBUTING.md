@@ -44,6 +44,10 @@ pytest -n auto --dist worksteal --cov=mylonite
 serial time). Plain `pytest` still works, and is easier to read when you are
 debugging one failing test.
 
+In CI, a pull request that changes only docs (`docs/`, top-level Markdown,
+`mkdocs.yml`, the issue and PR templates) runs the suite once, on Linux with
+Python 3.12. Any other change also runs 3.11, 3.13 and Windows.
+
 `pre-commit run --all-files` runs all of the above plus file hygiene.
 
 ## Authoring a plugin
