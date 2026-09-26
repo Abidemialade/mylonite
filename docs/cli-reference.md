@@ -92,7 +92,9 @@ reference app builds), or `mcp:custom` with `--command`/`--arg`. Omit when using
 Key options: `--target-file PATH` (a path that doesn't exist prints the exact
 `--scaffold` command that creates one, and points at
 [target.yaml](target-file.md)), `--authorize NAME` (must equal the target's `scope`,
-or its family when it declares no scope; a missing value prints the one to pass), `--model` (any LiteLLM
+or its family when it declares no scope; a missing value prints the one to pass, and a
+bundled target that needs a scope, such as `mcp:filesystem`, prints the `mcp:filesystem:<scope>`
+form), `--model` (any LiteLLM
 provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`
 (a budget, not a hard ceiling — every seed keeps a floor of it, so the worst
@@ -179,8 +181,9 @@ commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
 `--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
 where `--workflows` defaulted on and the branch and commit happened on every run.
 
-Options: `target` or `--target-file`; `--authorize` (the target's `scope`, or its family
-when it declares no scope); `--open-pr` (create the branch,
+Options: `target` or `--target-file` (a custom target comes only through
+`--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
+target's `scope`, or its family when it declares no scope); `--open-pr` (create the branch,
 commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
 a `provider/model` prefix); `--out PATH`; `--max-llm-calls` (a budget for the scan
 phase, not a hard ceiling — see [Sizing --max-llm-calls](ci-gating.md));

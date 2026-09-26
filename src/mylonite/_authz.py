@@ -21,6 +21,7 @@ __all__ = [
     "AuthorizationRefused",
     "authorize_fix",
     "authorize_hint",
+    "bundled_authorize_fix",
     "bundled_authorize_value",
     "check_authorization",
     "required_authorization",
@@ -66,8 +67,9 @@ def authorize_fix(value: str) -> str:
     Capitalised: every call site interpolates this straight after a sentence
     that already ends in a full stop (typically "... See SECURITY.md."), so
     this reads as its own sentence, not a dangling clause. ``authorize_hint``
-    and the two bundled-target call sites in ``cli.py`` all route through this
-    one function so the wording cannot drift between them.
+    and ``bundled_authorize_fix`` (the two bundled-target call sites in
+    ``cli.py``) both route through this one function so the wording cannot
+    drift between them.
     """
     return f"Pass --authorize {value}."
 
@@ -111,3 +113,19 @@ def bundled_authorize_value(target: str) -> str:
     if scope:
         return scope
     return "<scope>" if spec is not None else family
+
+
+def bundled_authorize_fix(target: str) -> str:
+    """The fix sentence for a bundled ``mcp:<family>[:<scope>]`` target missing ``--authorize``.
+
+    A scope-requiring family given without a scope cannot be authorized by any
+    ``--authorize`` value alone: the target also needs its ``:<scope>`` segment.
+    That case gets the whole command form, in the same ``<scope>`` wording as
+    the check in ``cli._build_adapter_for_mcp``; every other case gets
+    :func:`authorize_fix` with the value :func:`bundled_authorize_value` derives.
+    """
+    value = bundled_authorize_value(target)
+    if value == "<scope>":
+        family = target.split(":", 2)[1]
+        return f"Name a scope: mcp:{family}:<scope> --authorize <scope>."
+    return authorize_fix(value)

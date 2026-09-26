@@ -746,15 +746,16 @@ def _exit_if_missing_target_file(exc: Exception, target_file: Path) -> None:
     Shared by every ``load_target_file``/``build_target_spec`` catch site in this
     module (``scan``, ``generate``, ``validate``, ``gate``, ``ablate``, ``check``)
     so the fix can't drift between them. Returns normally (does nothing) for any
-    other exception, so the caller's own generic ``echo_exc`` fallback still runs.
+    other exception -- including a missing file the target file itself names,
+    such as ``system_prompt_file`` -- so the caller's ``echo_exc`` fallback runs.
     """
-    if isinstance(exc, FileNotFoundError):
+    if isinstance(exc, FileNotFoundError) and not target_file.exists():
         echo_err(missing_target_file_message(target_file))
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _missing_authorize(
-    msg: str, target_file: Path | None, *, inline_scope: str | None = None
+    msg: str, target_file: Path | None, *, inline_scope: str | None = None, inline_hint: str = ""
 ) -> NoReturn:
     """Report a missing ``--authorize`` for a custom target, naming the value it needs.
 
@@ -767,12 +768,11 @@ def _missing_authorize(
     - no ``target_file`` at all (``mcp:custom`` given inline): derive the
       value the same way :func:`_target_file_from_flags` builds the spec that
       will later be checked — ``inline_scope`` (the ``--scope`` flag) if
-      given, else the literal family name ``"custom"``. ``gate`` has no
-      ``--scope`` flag for this route, so it always falls back to ``"custom"``.
+      given, else the literal family name ``"custom"``. ``gate`` refuses this
+      route outright, so it passes ``inline_hint`` (its refusal) instead.
 
-    A target file that exists but fails to load (bad YAML, wrong shape) is
-    reported with no hint at all: it is not missing, so ``--scaffold`` is not
-    the fix, and there is nothing to derive a value from either.
+    A target file that exists but fails to load (bad YAML, wrong shape) gets no
+    hint: it is not missing (so not ``--scaffold``) and yields no value.
     """
     from mylonite._authz import authorize_fix, authorize_hint
 
@@ -783,7 +783,7 @@ def _missing_authorize(
         hint = authorize_hint(target_file)
     else:
         value = inline_scope.strip() if inline_scope and inline_scope.strip() else "custom"
-        hint = authorize_fix(value)
+        hint = inline_hint or authorize_fix(value)
     echo_err(f"{msg} {hint}" if hint else msg)
     raise typer.Exit(code=EXIT_CONFIG)
 
@@ -1454,11 +1454,11 @@ def scan(
         report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
-            from mylonite._authz import authorize_fix, bundled_authorize_value
+            from mylonite._authz import bundled_authorize_fix
 
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                f"See SECURITY.md. {authorize_fix(bundled_authorize_value(target))}"
+                f"See SECURITY.md. {bundled_authorize_fix(target)}"
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
@@ -3688,11 +3688,17 @@ def gate(
     adapter_factory: Callable[[], Any]
 
     if target_file is not None or target == "mcp:custom":
-        # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
-        # exactly as scan does.
+        # Custom-target on-ramp: a missing --authorize refuses the run first, as scan
+        # does; the file is read only to print the required value in that refusal.
+        gate_inline = (
+            "gate --target-file <yaml> is the custom-target path; inline mcp:custom "
+            "flags are not wired in `gate`. Pass a target YAML via --target-file."
+        )
         if not authorize:
             _missing_authorize(
-                "--authorize is required for custom targets. See SECURITY.md.", target_file
+                "--authorize is required for custom targets. See SECURITY.md.",
+                target_file,
+                inline_hint=gate_inline,
             )
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
@@ -3706,11 +3712,7 @@ def gate(
             custom_spec = build_target_spec(tf)
         else:
             # mcp:custom with inline flags — not supported via gate (no --command etc.)
-            echo_err(
-                "gate --target-file <yaml> is the custom-target path; "
-                "inline mcp:custom flags are not wired in `gate`. "
-                "Pass a target YAML via --target-file."
-            )
+            echo_err(gate_inline)
             raise typer.Exit(code=EXIT_CONFIG)
         adapter_factory = functools.partial(
             _build_adapter_for_custom, tf, authorize, effective_planner_model, command="gate"
@@ -3726,11 +3728,11 @@ def gate(
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
-            from mylonite._authz import authorize_fix, bundled_authorize_value
+            from mylonite._authz import bundled_authorize_fix
 
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                f"See SECURITY.md. {authorize_fix(bundled_authorize_value(target))}"
+                f"See SECURITY.md. {bundled_authorize_fix(target)}"
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter_factory = functools.partial(

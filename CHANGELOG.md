@@ -41,9 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `ablate` read the target file and end the error with, for example,
   `Pass --authorize my-app.`: the target's `scope`, or its family when it
   declares no scope. A bundled target such as `mcp:filesystem:/tmp/sandbox`
-  gets `Pass --authorize /tmp/sandbox.`, and `mcp:custom` given inline (no
-  `--target-file`) gets its `--scope` flag, or the literal family `custom`
-  when none was given. The `--authorize` help on `scan`, `validate`, `gate`
+  gets `Pass --authorize /tmp/sandbox.`; one that needs a scope but was given
+  none, such as `mcp:filesystem`, gets the whole command form
+  (`Name a scope: mcp:filesystem:<scope> --authorize <scope>.`). `mcp:custom`
+  given inline (no `--target-file`) gets its `--scope` flag, or the literal
+  family `custom` when none was given; `gate`, which only takes a custom
+  target through `--target-file`, says that instead. The `--authorize` help on `scan`, `validate`, `gate`
   and `ablate` states the same rule (`validate`'s also notes that a
   `reference:*` target needs none), and the examples in
   `docs/cli-reference.md`, `docs/http-agent.md` and `docs/test-your-app.md`
@@ -55,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command that creates it (`mylonite scan --command ... --scaffold app.yaml
   --scope my-app`, or the HTTP-agent form) and points at
   `docs/target-file.md`, instead of a bare "No such file or directory". A
-  target file that exists but fails to load still gets the plain invalid-YAML
-  message — `--scaffold` is only the fix when the file is genuinely missing.
+  target file that exists but fails to load, or names a `system_prompt_file`
+  that is missing, still gets the plain message naming the real problem —
+  `--scaffold` is only the fix when the target file itself is missing.
 - **The README and the verification page quote the current results.** The
   InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
   recall, recorded as unresolved because it rests on 7 successful attacks), and

@@ -135,3 +135,20 @@ def test_authorize_hint_routes_through_authorize_fix(tmp_path: Path) -> None:
     p = tmp_path / "t.yaml"
     p.write_text("family: acme\nscope: my-app\ncommand: python\nargs: []\n", encoding="utf-8")
     assert authorize_hint(p) == authorize_fix("my-app")
+
+
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        ("mcp:filesystem:/tmp/sandbox", "Pass --authorize /tmp/sandbox."),
+        ("mcp:fetch", "Pass --authorize fetch."),
+        # No --authorize value alone can authorize a scope-requiring family with
+        # no scope: the fix is the whole command form.
+        ("mcp:filesystem", "Name a scope: mcp:filesystem:<scope> --authorize <scope>."),
+        ("mcp:github", "Name a scope: mcp:github:<scope> --authorize <scope>."),
+    ],
+)
+def test_bundled_authorize_fix(target: str, expected: str) -> None:
+    from mylonite._authz import bundled_authorize_fix
+
+    assert bundled_authorize_fix(target) == expected
