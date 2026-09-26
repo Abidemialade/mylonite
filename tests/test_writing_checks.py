@@ -176,6 +176,15 @@ def test_user_facing_module_needs_its_page() -> None:
     assert not docs.check(["src/mylonite/cli.py", "CHANGELOG.md", "docs/cli-reference.md"])
 
 
+def test_gate_action_needs_changelog_and_ci_gating_page() -> None:
+    """The action runs in other people's CI, so a change to it is user-facing."""
+    problems = docs.check(["gate-action/action.yml"])
+    assert len(problems) == 2
+    assert "CHANGELOG.md" in problems[0].message
+    assert "docs/ci-gating.md" in problems[1].message
+    assert not docs.check(["gate-action/action.yml", "CHANGELOG.md", "docs/ci-gating.md"])
+
+
 def test_opt_out_needs_a_real_reason() -> None:
     change = ["src/mylonite/cli.py"]
     assert not docs.check(change, ["Docs-Impact: none - internal refactor, no flag changes"])

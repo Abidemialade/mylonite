@@ -1,9 +1,11 @@
 import importlib.resources as ir
 from pathlib import Path
 
+import pytest
 import yaml
 
 from mylonite.gate.workflows import write_workflows
+from mylonite.version import __version__
 
 
 def test_templates_are_valid_yaml_and_ship_as_package_data():
@@ -78,3 +80,26 @@ def test_gate_workflow_requires_the_gate_to_run(tmp_path):
     assert job["env"]["MYLONITE_REQUIRE_GATE_RUN"] == "1"
     assert job["env"]["MYLONITE_LIVE_TARGET"] == "1"
     assert job["steps"][-1]["run"] == "pytest .mylonite/gate -q -ra"
+
+
+@pytest.mark.parametrize("name", ["mylonite-gate.yml", "mylonite-discovery.yml"])
+def test_emitted_workflows_pin_the_package(tmp_path, name):
+    """Emitted workflows install the release that wrote them, not whatever
+    PyPI serves on the day the job runs."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
+    assert f'"mylonite=={__version__}"' in text
+    assert '"mylonite" ' not in text
+    assert "__MYLONITE_VERSION__" not in text
+
+
+def test_discovery_passes_authorize_through_env(tmp_path):
+    """No `${{ }}` inside `run:`: GitHub substitutes it textually before bash
+    parses the script. The value travels through env, as in gate-action."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    job = yaml.safe_load(discovery.read_text(encoding="utf-8"))["jobs"]["discover"]
+    step = job["steps"][-1]
+    assert "${{" not in step["run"]
+    assert step["env"]["MYLONITE_AUTHORIZE"] == "${{ vars.MYLONITE_AUTHORIZE }}"
+    assert '--authorize "$MYLONITE_AUTHORIZE" --open-pr' in step["run"]

@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as _datetime
+import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -63,6 +65,41 @@ from release_version import (
 _MAX_CMDLINE = 30_000
 
 
+@dataclass(frozen=True)
+class ReleasePin:
+    """A file outside the version module that names the release it ships with.
+
+    ``pattern`` matches every spelling that may appear, pinned or not, so a
+    stale value and a missing pin are both caught; ``template`` is the one
+    correct spelling for a given version.
+    """
+
+    path: str
+    pattern: re.Pattern[str]
+    template: str
+
+    def expected(self, version: str) -> str:
+        return self.template.format(version=version)
+
+
+#: The gate action lives in this repository, so the release tag ``vX.Y.Z`` is
+#: also the action's tag. ``action.yml`` installs the matching package and the
+#: docs tell users to reference that tag. Main ``mylonite`` release only: the
+#: kitchen sink ships on its own ``ks-v`` tags and must never touch these.
+RELEASE_PINS: tuple[ReleasePin, ...] = (
+    ReleasePin(
+        "gate-action/action.yml",
+        re.compile(r'pip install "mylonite(?:==[^"]*)?"'),
+        'pip install "mylonite=={version}"',
+    ),
+    ReleasePin(
+        "docs/ci-gating.md",
+        re.compile(r"gate-action@(?:v\d+\.\d+\.\d+|main)\b"),
+        "gate-action@v{version}",
+    ),
+)
+
+
 def _resolve_version_file(root: Path, explicit: str | None) -> Path:
     """Where ``__version__`` lives for this package.
 
@@ -88,6 +125,7 @@ def run_checks(
     tag_prefix: str,
     version_file: Path,
     check_changelog: bool,
+    check_pins: bool = False,
 ) -> list[str]:
     """Every inconsistency found, as human-readable strings. Empty means good."""
     problems: list[str] = []
@@ -142,6 +180,31 @@ def run_checks(
     if check_changelog:
         problems.extend(_changelog_problems(version, root=root))
 
+    if check_pins:
+        problems.extend(release_pin_problems(version, root=root))
+
+    return problems
+
+
+def release_pin_problems(version: str, *, root: Path) -> list[str]:
+    """Each :data:`RELEASE_PINS` file that does not name exactly ``version``."""
+    problems: list[str] = []
+    for pin in RELEASE_PINS:
+        expected = pin.expected(version)
+        try:
+            text = (root / pin.path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            problems.append(f"{pin.path} does not exist; expected it to contain {expected!r}")
+            continue
+        found = [m.group(0) for m in pin.pattern.finditer(text)]
+        if not found:
+            problems.append(f"{pin.path} has no release pin; expected {expected!r}")
+        wrong = sorted({f for f in found if f != expected})
+        if wrong:
+            problems.append(
+                f"{pin.path} has {', '.join(repr(w) for w in wrong)}, expected {expected!r} "
+                "(run scripts/prepare_release.py to bump it)"
+            )
     return problems
 
 
@@ -202,6 +265,20 @@ def bump_version_file(version_file: Path, version: str) -> None:
     if count != 1:
         raise SystemExit(f"could not rewrite __version__ in {version_file}")
     version_file.write_text(new_text, encoding="utf-8", newline="\n")
+
+
+def bump_release_pins(root: Path, version: str) -> list[str]:
+    """Rewrite every :data:`RELEASE_PINS` occurrence to ``version``."""
+    bumped: list[str] = []
+    for pin in RELEASE_PINS:
+        path = root / pin.path
+        text = path.read_text(encoding="utf-8")
+        new_text, count = pin.pattern.subn(pin.expected(version), text)
+        if count == 0:
+            raise SystemExit(f"no release pin found in {pin.path}; expected {pin.template!r}")
+        path.write_text(new_text, encoding="utf-8", newline="\n")
+        bumped.append(pin.path)
+    return bumped
 
 
 def roll_changelog(root: Path, version: str, today: str) -> None:
@@ -340,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give a version, or a --tag to derive it from")
 
     version_file = _resolve_version_file(root, args.version_file)
+    # The gate-action pins belong to the main package, which is the repo root.
+    pins = root == ROOT.resolve()
 
     if args.check or args.tag:
         problems = run_checks(
@@ -349,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             tag_prefix=args.tag_prefix,
             version_file=version_file,
             check_changelog=not args.no_changelog,
+            check_pins=pins,
         )
         for problem in problems:
             print(f"::error::{problem}")
@@ -358,12 +438,17 @@ def main(argv: list[str] | None = None) -> int:
         checked = "tag, version file, pyproject"
         if not args.no_changelog:
             checked += ", CHANGELOG"
+        if pins:
+            checked += ", gate-action pins"
         print(f"release {version} is consistent: {checked}.")
         return 0
 
     today = _datetime.date.today().isoformat()
     bump_version_file(version_file, version)
     print(f"bumped {version_file.relative_to(ROOT).as_posix()} to {version}")
+    if pins:
+        for pinned in bump_release_pins(root, version):
+            print(f"bumped the release pin in {pinned} to {version}")
     if not args.no_changelog:
         roll_changelog(root, version, today)
         print(f"rolled CHANGELOG.md: [Unreleased] -> [{version}] - {today}")
