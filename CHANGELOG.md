@@ -4107,7 +4107,6 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - Iterative LLM payload refinement (failure → refine → retry) — a later release.
 - `mylonite init` config scaffold — later DX polish.
 - Community attack-pattern registry contribution flow — a later release.
-- Hosted CI / dashboards / compliance evidence packs — a later release.
 
 ## [0.1.0] - 2026-06-09
 
