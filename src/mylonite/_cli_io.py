@@ -12,6 +12,7 @@ Enforced by ``tests/test_cli_output_boundary.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -19,7 +20,7 @@ from rich.console import Console
 
 from mylonite._redaction import redact, redact_exception
 
-__all__ = ["console_print", "echo", "echo_err", "echo_exc"]
+__all__ = ["console_print", "echo", "echo_err", "echo_exc", "missing_target_file_message"]
 
 
 def echo(message: str = "", *, err: bool = False) -> None:
@@ -63,3 +64,20 @@ def console_print(console: Console, renderable: object = "", **kwargs: Any) -> N
     if isinstance(renderable, str):
         renderable = redact(renderable)
     console.print(renderable, **kwargs)
+
+
+def missing_target_file_message(path: Path) -> str:
+    """A missing ``--target-file`` names the fix (``--scaffold``), not a raw traceback.
+
+    Every ``load_target_file`` catch site in ``cli.py`` shows this instead of
+    a bare ``FileNotFoundError`` — hand-writing a target YAML was never the
+    intended path; introspecting the real server with ``--scaffold`` is. Pure
+    string builder: no I/O, so it is safe to call from an ``except`` block
+    that already knows the file does not exist.
+    """
+    name = path.name
+    return (
+        f"target file not found: {name}. Create one from your server with:\n"
+        f"  mylonite scan --command python --arg server.py --scaffold {name} --scope my-app\n"
+        f"(an HTTP agent: --rest-url URL --scaffold {name}). See docs/target-file.md."
+    )

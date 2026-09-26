@@ -80,7 +80,9 @@ Run the exploit-finding loop against a target.
 reference app builds), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
 (your own MCP app). Non-reference targets need `--authorize`.
 
-Key options: `--target-file PATH`, `--authorize NAME` (must equal the target's `scope`,
+Key options: `--target-file PATH` (a path that doesn't exist prints the exact
+`--scaffold` command that creates one, and points at
+[target.yaml](target-file.md)), `--authorize NAME` (must equal the target's `scope`,
 or its family when it declares no scope; a missing value prints the one to pass), `--model` (any LiteLLM
 provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,

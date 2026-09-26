@@ -78,7 +78,7 @@ def test_authorize_hint_names_the_scope(tmp_path: Path) -> None:
 
     p = tmp_path / "t.yaml"
     p.write_text("family: acme\nscope: my-app\ncommand: python\nargs: []\n", encoding="utf-8")
-    assert authorize_hint(p) == "pass --authorize my-app"
+    assert authorize_hint(p) == "Pass --authorize my-app."
 
 
 def test_authorize_hint_falls_back_to_family(tmp_path: Path) -> None:
@@ -86,7 +86,7 @@ def test_authorize_hint_falls_back_to_family(tmp_path: Path) -> None:
 
     p = tmp_path / "t.yaml"
     p.write_text("family: acme\ncommand: python\nargs: []\n", encoding="utf-8")
-    assert authorize_hint(p) == "pass --authorize acme"
+    assert authorize_hint(p) == "Pass --authorize acme."
 
 
 def test_authorize_hint_is_none_for_missing_or_invalid_file(tmp_path: Path) -> None:
@@ -117,3 +117,21 @@ def test_bundled_authorize_value(target: str, expected: str) -> None:
     from mylonite._authz import bundled_authorize_value
 
     assert bundled_authorize_value(target) == expected
+
+
+# --- authorize_fix: the one wording, shared by authorize_hint and cli.py's two
+# bundled-target inline call sites (0.10.2 / M02 controller polish) ---
+
+
+def test_authorize_fix_is_capitalised_and_ends_with_a_full_stop() -> None:
+    from mylonite._authz import authorize_fix
+
+    assert authorize_fix("my-app") == "Pass --authorize my-app."
+
+
+def test_authorize_hint_routes_through_authorize_fix(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_fix, authorize_hint
+
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\nscope: my-app\ncommand: python\nargs: []\n", encoding="utf-8")
+    assert authorize_hint(p) == authorize_fix("my-app")

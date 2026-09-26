@@ -19,6 +19,7 @@ from pathlib import Path
 
 __all__ = [
     "AuthorizationRefused",
+    "authorize_fix",
     "authorize_hint",
     "bundled_authorize_value",
     "check_authorization",
@@ -59,8 +60,20 @@ def check_authorization(
     raise AuthorizationRefused(msg)
 
 
+def authorize_fix(value: str) -> str:
+    """The one wording for "name the fix" wherever a caller must pass ``--authorize``.
+
+    Capitalised: every call site interpolates this straight after a sentence
+    that already ends in a full stop (typically "... See SECURITY.md."), so
+    this reads as its own sentence, not a dangling clause. ``authorize_hint``
+    and the two bundled-target call sites in ``cli.py`` all route through this
+    one function so the wording cannot drift between them.
+    """
+    return f"Pass --authorize {value}."
+
+
 def authorize_hint(target_file: Path) -> str | None:
-    """``"pass --authorize <value>"`` for a custom target file, or ``None``.
+    """The ``--authorize`` fix sentence for a custom target file, or ``None``.
 
     Uses the same chain as the scaffold's "next:" line (load the file, build
     its spec, derive the required value), so the hint cannot drift from the
@@ -76,7 +89,7 @@ def authorize_hint(target_file: Path) -> str | None:
         spec = build_target_spec(tf)
     except Exception:
         return None
-    return f"pass --authorize {required_authorization(family=spec.family, scope=tf.scope)}"
+    return authorize_fix(required_authorization(family=spec.family, scope=tf.scope))
 
 
 def bundled_authorize_value(target: str) -> str:
