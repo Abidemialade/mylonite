@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ROADMAP.md` lays out the road to 1.0.** Every release from 0.10.2 to 1.1
   with what it adds and a target month, what 1.0 promises, what it leaves out,
   and what comes after it.
+- **`mylonite demo` reads cleanly in an 80-column terminal.** The table used
+  to need 126 columns; at 80 it cut the weakness IDs to nothing and the verdict
+  cells to `v…` and `✓ c…`. Below its full width the table now drops the
+  taxonomy column for a legend underneath, keeps the ID and verdict cells whole,
+  and breaks a long weakness name after a hyphen. The headline puts the count
+  (`reference app: 5 exploits on vulnerable, 0 on guarded`) on its own line, the
+  suggested commands each sit on their own line so they copy whole, and the
+  recording date and model move to a line under `mode: replay (offline)`. A
+  wide terminal still gets the one-line table. Output layout only: the results,
+  exit codes and flags are unchanged.
 
 ### Fixed
 
