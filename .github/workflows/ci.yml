@@ -25,6 +25,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides whether a pull request touches anything but docs. A docs-only PR
+  # still runs the full suite once (3.12 on Linux), because many tests read the
+  # README, CHANGELOG and docs/; it skips the 3.11/3.13 legs and Windows, which
+  # a docs change cannot affect differently. Pushes to main and release runs
+  # (workflow_call) always run everything.
+  #
+  # Steps are skipped rather than whole jobs: a skipped MATRIX job reports one
+  # unexpanded check ("test"), so the required "test (3.11)" would never report
+  # and would block the merge.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the changed files
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=false
+          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          [ -z "$changed" ] && code=true
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/*|mkdocs.yml|LICENSE|NOTICE|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+          done <<< "$changed"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Changed files:"; echo "$changed"; echo "code=$code"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -121,34 +164,47 @@ jobs:
         run: pytest tests/test_docs_consistency.py -q
 
   test:
+    needs: changes
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
+    env:
+      # 3.12 always runs; the other legs only when code changed (see `changes`).
+      RUN_TESTS: ${{ needs.changes.outputs.code == 'true' || matrix.python-version == '3.12' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN_TESTS != 'true'
+        run: echo "Docs-only change; the 3.12 leg runs the suite."
+      - if: env.RUN_TESTS == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - if: env.RUN_TESTS == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+      - if: env.RUN_TESTS == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            reference_targets/mcp_kitchen_sink/pyproject.toml
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install -e ./reference_targets/mcp_kitchen_sink
+        if: env.RUN_TESTS == 'true'
+        run: uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
       # Parallel across the runner's cores; `worksteal` rebalances the few slow
       # tests (each starts a fresh gate run) instead of queueing them on one
       # worker. Coverage is measured on the 3.12 leg only, the one that uploads it.
       - name: Pytest
-        if: matrix.python-version == '3.12'
+        if: env.RUN_TESTS == 'true' && matrix.python-version == '3.12'
         run: pytest -n auto --dist worksteal --cov=mylonite --cov-report=xml --cov-report=term-missing
       - name: Pytest
-        if: matrix.python-version != '3.12'
+        if: env.RUN_TESTS == 'true' && matrix.python-version != '3.12'
         run: pytest -n auto --dist worksteal
       - name: Precision/recall corpus (differential oracle)
+        if: env.RUN_TESTS == 'true'
         # Measures the oracle's FP/FN against the seeded kitchen-sink twins
         # (offline, no LLM). The asserted numbers live in tests/corpus; this
         # surfaces the measured precision/recall/FPR and the report artefact.
@@ -167,21 +223,33 @@ jobs:
           path: corpus_report.json
 
   test-windows:
+    needs: changes
     runs-on: windows-latest
+    env:
+      RUN_TESTS: ${{ needs.changes.outputs.code }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: env.RUN_TESTS != 'true'
+        run: echo "Docs-only change; the Linux 3.12 leg runs the suite."
+      - if: env.RUN_TESTS == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - if: env.RUN_TESTS == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-          cache: pip
+      - if: env.RUN_TESTS == 'true'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            reference_targets/mcp_kitchen_sink/pyproject.toml
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install -e ./reference_targets/mcp_kitchen_sink
+        if: env.RUN_TESTS == 'true'
+        run: uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
       - name: Pytest
+        if: env.RUN_TESTS == 'true'
         run: pytest -n auto --dist worksteal
 
   # The zero-key on-ramp, exercised unskipped on every PR.
