@@ -55,11 +55,17 @@ _TEASER: Final[str] = (
     "vulnerable/guarded oracle. Turn one into a gating test:\n"
     "  mylonite gate reference:vulnerable"
 )
+#: Each command is one line with no shell continuation: a trailing backslash
+#: works in bash but not in PowerShell or cmd. A Windows console renders one
+#: column narrower than COLUMNS, so every line stays within 79 columns: the
+#: scaffold command is 78 on its own, so these two commands carry no indent,
+#: and the API-key notes sit on the lead-in lines rather than after them.
 _NEXT_STEP: Final[str] = (
-    "Try it on your own app (docs/test-your-app.md):\n"
-    "  mylonite scan --command python --arg server.py \\\n"
-    "    --scaffold app.yaml --scope my-app            # no API key\n"
-    "  mylonite scan --target-file app.yaml --authorize my-app  # needs an API key"
+    "Try it on your own app (docs/test-your-app.md).\n"
+    "Make a target file (no API key):\n"
+    "mylonite scan --command python --arg app.py --scaffold app.yaml --scope my-app\n"
+    "Scan it (needs an API key):\n"
+    "mylonite scan --target-file app.yaml --authorize my-app"
 )
 
 #: Joins the replay mode label to its fixture provenance ("replay (offline); recorded
