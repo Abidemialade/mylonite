@@ -41,6 +41,7 @@ from mylonite.demo import (
     LiteLLMRecorder,
     packaged_fixture_dir,
 )
+from mylonite.demo.render import MODE_PROVENANCE_SEP
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.providers import provider_from_model
 from mylonite.scan.wiring import build_scan, note_id_counter
@@ -139,7 +140,7 @@ def _replay_mode_label() -> str:
         )
         if text
     ]
-    return f"{label}; {' '.join(parts)}" if parts else label
+    return f"{label}{MODE_PROVENANCE_SEP}{' '.join(parts)}" if parts else label
 
 
 class DemoFixtureError(FixtureError):

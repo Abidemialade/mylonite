@@ -59,8 +59,14 @@ _NEXT_STEP: Final[str] = (
     "Try it on your own app (docs/test-your-app.md):\n"
     "  mylonite scan --command python --arg server.py \\\n"
     "    --scaffold app.yaml --scope my-app            # no API key\n"
-    "  mylonite scan --target-file app.yaml --authorize my-app"
+    "  mylonite scan --target-file app.yaml --authorize my-app  # needs an API key"
 )
+
+#: Joins the replay mode label to its fixture provenance ("replay (offline); recorded
+#: <date> against <model>"). The runner builds the label with it and
+#: :func:`render_demo` splits on it to print the provenance on its own line, so the
+#: two cannot drift apart.
+MODE_PROVENANCE_SEP: Final[str] = "; "
 
 _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]
 _CLEAN_MARK: Final[str] = OUTCOME_MARKS["no_finding"]
@@ -316,7 +322,7 @@ def render_demo(
     # The replay label carries "; recorded <date> against <model>", and the
     # model id is long enough to push the whole line past 80 columns. The
     # provenance goes on its own line so `mode: replay` always reads as one.
-    label, _, provenance = mode.partition("; ")
+    label, _, provenance = mode.partition(MODE_PROVENANCE_SEP)
     console_print(console, f"mode: {label} — {elapsed_s:.1f}s", highlight=False)
     if provenance:
         console_print(console, provenance, highlight=False)

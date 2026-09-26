@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 from collections.abc import Iterable, Mapping
 
+import pytest
 from rich.console import Console
 
 from mylonite.contracts._types import ScanAttempt, ScanAttemptOutcome, ScanReport
@@ -182,7 +183,7 @@ def test_render_clean_differential() -> None:
     # "python server.py" string would be exec'd as one literal filename.
     assert "mylonite scan --command python --arg server.py \\" in lines
     assert "--scaffold app.yaml --scope my-app            # no API key" in lines
-    assert "mylonite scan --target-file app.yaml --authorize my-app" in lines
+    assert "mylonite scan --target-file app.yaml --authorize my-app  # needs an API key" in lines
     assert "Try it on your own app (docs/test-your-app.md):" in lines
     assert "mode: replay (offline)" in output
     assert "0.8s" in output
@@ -593,9 +594,10 @@ def test_the_pattern_ids_match_the_catalogue() -> None:
 # --- an 80-column terminal ---------------------------------------------------
 #
 # The launch post sends newcomers to `mylonite demo` in whatever terminal they
-# have open, and the default is 80 columns. The table used to need 124: at 80
-# Rich cut the weakness IDs to nothing and the verdict cells to `v…` / `✓ c…`,
-# which leaves the one table the demo exists to show unreadable.
+# have open, and the default is 80 columns. The full table needs 126 on the
+# shipped run, and below that Rich used to cut the weakness IDs to nothing and
+# the verdict cells to `v…` / `✓ c…`. The renderer now switches layout whenever
+# the full table does not fit, a width it computes from the cells.
 
 _RECORDED_MODE = (
     "replay (offline); recorded 2026-09-14 against ollama_chat/qwen3:4b-instruct-2507-q4_K_M"
@@ -637,13 +639,14 @@ def test_demo_readable_at_80_columns() -> None:
         for line in text.splitlines()
     )
     # Each command intact on one line, so a reader can copy it.
-    assert "mylonite scan --target-file app.yaml --authorize my-app" in text
+    assert "mylonite scan --target-file app.yaml --authorize my-app  # needs an API key" in text
+    assert "# no API key" in text
     assert "mylonite gate reference:vulnerable" in text
     assert "--scaffold app.yaml --scope my-app" in text
     assert all(len(line) <= 80 for line in text.splitlines()), text
 
 
-def test_the_taxonomy_moves_to_a_legend_below_124_columns() -> None:
+def test_the_taxonomy_moves_to_a_legend_when_the_full_table_does_not_fit() -> None:
     """The IDs are kept, one line per weakness, rather than squeezed into a cell."""
     from mylonite.demo.render import _taxonomy_cell
 
@@ -675,3 +678,54 @@ def test_a_live_mode_label_stays_on_one_line() -> None:
     lines = [line.strip() for line in _render_at(80, mode="live (anthropic/m)").splitlines()]
 
     assert "mode: live (anthropic/m) — 0.4s" in lines
+
+
+def test_the_real_replay_label_puts_its_provenance_on_its_own_line(tmp_path, monkeypatch) -> None:
+    """Ties the runner's label to the renderer's split: both use one separator."""
+    import json
+
+    from mylonite.demo import runner as runner_mod
+
+    for variant in ("vulnerable", "guarded"):
+        (tmp_path / variant).mkdir()
+        (tmp_path / variant / "_meta.json").write_text(
+            json.dumps({"recorded_at": "2026-09-14", "model": "ollama_chat/some-long-model-id"}),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(runner_mod, "packaged_fixture_dir", lambda: tmp_path)
+
+    lines = [
+        line.strip() for line in _render_at(80, mode=runner_mod._replay_mode_label()).splitlines()
+    ]
+
+    assert "mode: replay (offline) — 0.4s" in lines
+    assert "recorded 2026-09-14 against ollama_chat/some-long-model-id" in lines
+
+
+def _full_table_width() -> int:
+    """Width of the one-line table, read off a render with room to spare."""
+    top = next(line for line in _render_at(240).splitlines() if line.startswith("┌──────────┬"))
+    return len(top)
+
+
+@pytest.mark.parametrize("offset", [0, -1, None])
+def test_no_cell_is_cut_either_side_of_the_layout_switch(offset: int | None) -> None:
+    """At the computed threshold, one column below it, and at 60 columns."""
+    threshold = _full_table_width()
+    width = 60 if offset is None else threshold + offset
+    text = _render_at(width)
+
+    assert "…" not in text
+    # The full table carries the taxonomy in its rows; the narrow one moves it out.
+    assert ("LLM01" in _row(text, "W1")) is (offset == 0)
+    expected = {
+        "W1": ("⚠ NO VERDICT", "✓ clean"),
+        "W2": ("✗ FOUND", "✓ clean (1/3)"),
+        "W3": ("✗ FOUND", "✓ clean"),
+        "W4": ("✗ FOUND", "✓ clean"),
+    }
+    for weakness, verdicts in expected.items():
+        cells = [c.strip() for c in _row(text, weakness).split("│") if c.strip()]
+        assert tuple(cells[-2:]) == verdicts, cells
+    headline = [line.strip() for line in text.splitlines()]
+    assert "reference app: 3 exploits on vulnerable, 0 on guarded" in headline
