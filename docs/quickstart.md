@@ -1,5 +1,18 @@
 # Quickstart
 
+## See it work first
+
+With [uv](https://docs.astral.sh/uv/) installed, one command runs the demo with no API key
+and nothing to install or configure:
+
+```bash
+uvx --python 3.12 --from "mylonite[demo]" mylonite demo
+```
+
+`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. CI runs
+this command on Linux and Windows in an 80-column terminal on every pull request. To keep
+Mylonite installed instead, use `pip` as below.
+
 ## Install
 
 Requires **Python 3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14

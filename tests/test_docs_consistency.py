@@ -322,6 +322,19 @@ def test_control_config_synthetic_accepts_a_control_list_not_a_bool() -> None:
 
 # --- README vs the code it describes ---------------------------------------
 
+#: The zero-install route. CI's `demo` job runs the same command from the
+#: local checkout (`--from ".[demo]"`) on Linux and Windows at 80 columns, so
+#: this string is what the README promises and the job is what proves it.
+UVX_DEMO = 'uvx --python 3.12 --from "mylonite[demo]" mylonite demo'
+
+
+def test_readme_has_uvx_one_liner() -> None:
+    assert UVX_DEMO in (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_quickstart_has_uvx_one_liner() -> None:
+    assert UVX_DEMO in (_DOCS_DIR / "quickstart.md").read_text(encoding="utf-8")
+
 
 def test_readme_does_not_overstate_the_api_key_requirement() -> None:
     """The README said scanning "needs an LLM API key", full stop.

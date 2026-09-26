@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `scripts/check_prose.py` checks the pull-request title (Conventional
     Commits), the required description sections, and flags machine-sounding
     phrases in changed Markdown lines.
+- **Run the demo with one command and nothing installed.** With
+  [uv](https://docs.astral.sh/uv/) on your machine,
+  `uvx --python 3.12 --from "mylonite[demo]" mylonite demo` runs the offline
+  demo in a throwaway environment, no API key needed. It is the first command
+  in the README's "Try it" and in `docs/quickstart.md`; `pip install
+  "mylonite[demo]"` stays the route for keeping Mylonite installed. The CI
+  `demo` job now runs this command from the checkout on Linux and Windows in
+  an 80-column terminal, and fails if the output drops the finding count, the
+  `mode: replay` line, or cuts anything short with `…`. `--python 3.12` keeps
+  uv off Python 3.14, which Mylonite does not support yet.
 
 ### Changed
 

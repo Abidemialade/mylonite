@@ -262,7 +262,18 @@ jobs:
   # widening that skip - re-record instead:
   #   python scripts/record_demo_fixtures.py     (needs a provider key)
   demo:
-    runs-on: ubuntu-latest
+    # Linux and Windows: the README's first command is a uvx one-liner, and
+    # Windows is where a console encoding or a wrap would break it for a user.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash on Windows, so `set -o pipefail`, `tee` and `grep` below mean
+        # the same thing on both runners.
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -271,47 +282,37 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install via the [demo] extra, against the PUBLISHED reference app
-        # Deliberately NOT `pip install -e ./reference_targets/mcp_kitchen_sink`.
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
+      - name: Install uv
+        run: python -m pip install "uv==0.12.19"
+      - name: Run the offline demo through uvx (no API key set)
+        # The README's one-liner, run from this checkout instead of PyPI. uvx
+        # builds `.[demo]` into a throwaway environment, and the `[demo]` extra's
+        # `==` pin pulls the PUBLISHED mcp-kitchen-sink wheel -- the same
+        # property the pip install step below relies on (see its comment).
+        # `--python 3.12` keeps uv off 3.14, which requires-python excludes.
         #
-        # The replay cache key folds in `tools`, and those tool schemas come from
-        # mcp-kitchen-sink. Installing the local editable copy would validate the
-        # fixtures against the working tree -- which is never what a user has.
-        # `pip install ".[demo]"` resolves the `==` pin and pulls the PUBLISHED
-        # wheel, so this job reproduces the actual `pip install "mylonite[demo]"`
-        # experience the README puts first.
-        #
-        # That closes the more likely break. The `==` pin defends against a
-        # FUTURE kitchen-sink release; it cannot defend against the local and
-        # published 0.1.0 being different bytes, which is what happens the first
-        # time someone edits a tool description in reference_targets/ without a
-        # version bump. Under this job that lands as a red demo here instead of a
-        # 100% fixture miss for every user of the extra.
-        #
-        # The `test` and `test-windows` jobs still install the local editable
-        # copy, so ordinary development of the reference target is unaffected.
-        run: |
-          python -m pip install --upgrade pip
-          pip install ".[demo]"
-          python -c "import mcp_kitchen_sink, importlib.metadata as m; print('kitchen-sink', m.version('mcp-kitchen-sink'), 'from', mcp_kitchen_sink.__file__)"
-      - name: Run the offline demo (no API key set)
         # No provider key in the environment on purpose: if replay ever fell
         # through to a live call, this step must fail rather than quietly spend.
         #
-        # `pipefail` is load-bearing: without it `mylonite demo | tee` reports
+        # `pipefail` is load-bearing: without it `uvx ... | tee` reports
         # tee's exit status, so a demo that FAILED would be recorded as passing
         # and this whole job would become decorative.
         #
-        # COLUMNS is load-bearing too: Rich wraps to the terminal width, and the
-        # headline the next step greps for ("N exploits on vulnerable, M on
-        # guarded") is long enough to be split across lines at the default width.
+        # COLUMNS=80 is the claim under test: a default terminal. The demo puts
+        # the headline ("reference app: N exploits on vulnerable, M on guarded")
+        # and the `mode: replay` line on lines of their own and truncates
+        # nothing, so the next step's greps must hold at 80 columns. This used to
+        # be 200 only to keep Rich from wrapping the headline; an 80-column run
+        # that needs a wider terminal to pass is now a failure.
         env:
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
-          COLUMNS: "200"
+          COLUMNS: "80"
         run: |
           set -o pipefail
-          mylonite demo | tee demo-output.txt
+          uvx --python 3.12 --from ".[demo]" mylonite demo | tee demo-output.txt
       - name: The vulnerable twin must actually find something
         # Exit code alone is not enough. The staleness guard detects fixture
         # MISSES, not SILENCE: if drift ever made the vulnerable variant issue
@@ -332,7 +333,42 @@ jobs:
             echo "::error::demo did not report replay mode; it may have attempted a live call."
             exit 1
           fi
+          # An ellipsis means Rich cut a cell to fit 80 columns. `-F` matches the
+          # UTF-8 bytes literally (the demo forces UTF-8 stdout), which does not
+          # depend on the runner's locale -- Git Bash on Windows included.
+          if grep -Fq '…' demo-output.txt; then
+            echo "::error::demo output is truncated at 80 columns (found an ellipsis)."
+            grep -Fn '…' demo-output.txt
+            exit 1
+          fi
+      - name: Install via the [demo] extra, against the PUBLISHED reference app
+        # Linux only: this install exists for the missing-fixture check below,
+        # which needs the fixtures at a known site-packages path.
+        if: runner.os == 'Linux'
+        # Deliberately NOT `pip install -e ./reference_targets/mcp_kitchen_sink`.
+        #
+        # The replay cache key folds in `tools`, and those tool schemas come from
+        # mcp-kitchen-sink. Installing the local editable copy would validate the
+        # fixtures against the working tree -- which is never what a user has.
+        # `pip install ".[demo]"` resolves the `==` pin and pulls the PUBLISHED
+        # wheel, so this job reproduces the actual `pip install "mylonite[demo]"`
+        # experience the README offers.
+        #
+        # That closes the more likely break. The `==` pin defends against a
+        # FUTURE kitchen-sink release; it cannot defend against the local and
+        # published 0.1.0 being different bytes, which is what happens the first
+        # time someone edits a tool description in reference_targets/ without a
+        # version bump. Under this job that lands as a red demo here instead of a
+        # 100% fixture miss for every user of the extra.
+        #
+        # The `test` and `test-windows` jobs still install the local editable
+        # copy, so ordinary development of the reference target is unaffected.
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[demo]"
+          python -c "import mcp_kitchen_sink, importlib.metadata as m; print('kitchen-sink', m.version('mcp-kitchen-sink'), 'from', mcp_kitchen_sink.__file__)"
       - name: A missing fixture must fail loudly, not render a clean result
+        if: runner.os == 'Linux'
         env:
           ANTHROPIC_API_KEY: ""
         run: |
