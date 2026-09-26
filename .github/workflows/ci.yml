@@ -184,16 +184,13 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - if: env.RUN_TESTS == 'true'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            reference_targets/mcp_kitchen_sink/pyproject.toml
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
       - name: Install
         if: env.RUN_TESTS == 'true'
-        run: uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
       # Parallel across the runner's cores; `worksteal` rebalances the few slow
       # tests (each starts a fresh gate run) instead of queueing them on one
       # worker. Coverage is measured on the 3.12 leg only, the one that uploads it.
@@ -238,16 +235,13 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - if: env.RUN_TESTS == 'true'
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            reference_targets/mcp_kitchen_sink/pyproject.toml
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
       - name: Install
         if: env.RUN_TESTS == 'true'
-        run: uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
       - name: Pytest
         if: env.RUN_TESTS == 'true'
         run: pytest -n auto --dist worksteal
