@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `no LLM credential configured` error: `--model ollama_chat/llama3.2:3b`
   (no key needed, see `docs/self-hosted-models.md`), and, on `scan` only,
   `--dry-run` to preview the run with no LLM calls at all.
+- **`--max-llm-calls`'s help no longer calls it a cap.** `scan` and `gate`
+  now describe it as a budget and point at `docs/ci-gating.md` for the worst
+  case: every seed keeps a floor of it, so a large tool surface can spend
+  well past the flag value. The code comment in `scan/_llm.py` and the
+  wording in `docs/reading-results.md`, `docs/cli-reference.md` and
+  `docs/contributing/writing-style.md` match. The flag's default and
+  behaviour are unchanged.
 
 ## [0.10.1] - 2026-09-25
 

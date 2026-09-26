@@ -651,17 +651,10 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
     return LLMPolicy(**kwargs)
 
 
-# The local-model route out of a missing-key EXIT_CONFIG: named here, once,
-# so every call site (and `docs/self-hosted-models.md`, which this string
-# must stay byte-identical with) agrees on the one model string. Every
-# command that reaches `_require_llm_configured_or_exit` offers this line.
-_LOCAL_MODEL_HINT = (
+_LOCAL_MODEL_HINT = (  # keep in sync with docs/self-hosted-models.md
     "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
     "(needs Ollama running; see docs/self-hosted-models.md)."
 )
-
-# Only `scan` has `--dry-run` (a run that makes no LLM call at all), so only
-# its caller passes `dry_run_flag=True` to append this second line.
 _DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
 
 
@@ -669,23 +662,12 @@ def _require_llm_configured_or_exit(
     *models: str, provider: str | None = None, dry_run_flag: bool = False
 ) -> None:
     """Pre-flight :func:`~mylonite.config.require_llm_configured` for every
-    resolved model a live run will actually call (planner/customiser/judge
-    can each be a different provider — see ``scan``'s ``_resolve_role_model``)
-    — ``EXIT_CONFIG`` before any adapter/subprocess/engine work starts,
-    naming every way to set a credential, instead of a scan/gate/validate/
-    ablate run burning a full attempt (spinning up an MCP subprocess, etc.)
-    one attempt at a time before a missing key surfaces buried in a report.
-
-    This is the ONE place the deleted ``MyloniteSettings.require_llm()``'s
-    "no default provider, fail loudly" invariant (CLAUDE.md) is actually
-    enforced as a pre-flight, not just as a later per-attempt diagnosis.
-
-    ``dry_run_flag`` is a per-command CAPABILITY, not the run's own
-    ``--dry-run`` value (a live ``--dry-run`` never reaches this function at
-    all — every caller short-circuits before it). Pass ``True`` only from
-    the one command that actually has the flag (``scan``), so the appended
-    hint never tells a ``gate``/``validate``/``ablate`` user to pass an
-    option that command doesn't accept.
+    resolved model a live run will call (planner/customiser/judge can each
+    use a different provider), exiting ``EXIT_CONFIG`` before any adapter/
+    subprocess/engine work starts rather than burning a full scan/gate/
+    validate/ablate attempt first. The ONE place the deleted
+    ``MyloniteSettings.require_llm()`` "no default provider" invariant
+    (CLAUDE.md) is enforced as a pre-flight, not a per-attempt diagnosis.
     """
     from mylonite.config import LLMNotConfiguredError, require_llm_configured
 
@@ -697,10 +679,7 @@ def _require_llm_configured_or_exit(
         try:
             require_llm_configured(model=m, provider=provider)
         except LLMNotConfiguredError as exc:
-            lines = [str(exc), _LOCAL_MODEL_HINT]
-            if dry_run_flag:
-                lines.append(_DRY_RUN_HINT)
-            echo_err("\n".join(lines))
+            echo_err(f"{exc}\n{_LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
@@ -1102,7 +1081,8 @@ def scan(
         int | None,
         typer.Option(
             "--max-llm-calls",
-            help="Process-wide LLM call cap for this scan.",
+            help="LLM call budget for this scan. Not a hard ceiling: each seed keeps "
+            "a small floor, so the worst case is higher (see docs/ci-gating.md).",
             show_default=str(_DEFAULT_MAX_LLM_CALLS),
         ),
     ] = None,
@@ -3475,7 +3455,8 @@ def gate(
         int | None,
         typer.Option(
             "--max-llm-calls",
-            help="Process-wide LLM call cap for the scan phase.",
+            help="LLM call budget for the scan phase. Not a hard ceiling: each seed "
+            "keeps a small floor, so the worst case is higher (see docs/ci-gating.md).",
             show_default=str(_DEFAULT_MAX_LLM_CALLS),
         ),
     ] = None,

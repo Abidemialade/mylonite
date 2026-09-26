@@ -5,7 +5,7 @@ Closes the two issues the eng review surfaced:
 * **A1 — budget leak.** Every LLM call in the scan loop (customiser, judge,
   in-process planner) routes through ``litellm_json_call`` /
   ``litellm_json_call_async``. The wrapper increments a single
-  ``LiteLLMCallCounter`` so ``--max-llm-calls`` is a real cap, not just a
+  ``LiteLLMCallCounter`` so ``--max-llm-calls`` is a real budget, not just a
   count of orchestration calls.
 * **C1 — DRY.** Customiser and Judge both did "LiteLLM call → expect JSON →
   ``try/except`` parse → fallback." Folded here into one helper with a sync

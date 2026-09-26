@@ -86,7 +86,7 @@ only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
 ### What a run spent
 
-`scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` cap
+`scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget
 in force, and the tokens the provider reported:
 
 ```

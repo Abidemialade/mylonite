@@ -281,6 +281,25 @@ def test_scan_has_no_runs_flag() -> None:
     )
 
 
+def test_max_llm_calls_help_does_not_claim_a_cap() -> None:
+    """`--max-llm-calls`'s own help text must call it a budget, not a cap:
+    every seed keeps a floor of it (see docs/ci-gating.md), so the engine can
+    spend well past the flag value -- calling it a "cap" overstates the
+    guarantee.
+
+    Reads the option's own ``.help`` straight off the live Click command,
+    never a fixed-width slice of ``--help`` output -- a slice can bleed into
+    the NEXT option's text and pass or fail for the wrong reason.
+    """
+    tree = _click_command_tree()
+    for cmd_name in ("scan", "gate"):
+        cmd = tree.commands[cmd_name]
+        opt = next(p for p in cmd.params if "--max-llm-calls" in getattr(p, "opts", []))
+        help_text = (opt.help or "").lower()
+        assert "budget" in help_text, f"{cmd_name} --max-llm-calls help: {opt.help!r}"
+        assert "cap" not in help_text, f"{cmd_name} --max-llm-calls help: {opt.help!r}"
+
+
 def test_control_config_synthetic_accepts_a_control_list_not_a_bool() -> None:
     """Regression guard for docs/target-file.md's `control_config.synthetic`
     example, which used to be `synthetic: true` -- `ControlConfig.synthetic`
