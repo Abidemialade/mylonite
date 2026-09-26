@@ -37,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A missing `--authorize` now tells you the value to pass.** `scan`, `gate`
+  and `ablate` read the target file and end the error with, for example,
+  `pass --authorize my-app`: the target's `scope`, or its family when it
+  declares no scope. A bundled target such as `mcp:filesystem:/tmp/sandbox`
+  gets `pass --authorize /tmp/sandbox`. The `--authorize` help on `scan`,
+  `validate`, `gate` and `ablate` states the same rule, and the examples in
+  `docs/cli-reference.md`, `docs/http-agent.md` and `docs/test-your-app.md`
+  now use the value their own scaffold step produces. The exit code is
+  unchanged.
 - **The README and the verification page quote the current results.** The
   InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
   recall, recorded as unresolved because it rests on 7 successful attacks), and

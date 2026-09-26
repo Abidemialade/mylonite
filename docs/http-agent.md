@@ -36,7 +36,7 @@ file by hand:
 ## The target file
 
 ```yaml
-family: my-http-agent
+family: my-agent
 transport: rest
 weakness_classes: [W2]
 request:
@@ -61,7 +61,7 @@ request:
 ## Run it
 
 ```bash
-mylonite scan --target-file my-http-agent.yaml --authorize my-http-agent
+mylonite scan --target-file my-agent.yaml --authorize my-agent
 ```
 
 `--authorize` is mandatory, as for every real target: you assert you own or are
@@ -70,7 +70,7 @@ the flow is the same as any target — `generate` emits the regression test,
 `validate` proves it, `gate` opens the PR:
 
 ```bash
-mylonite gate --target-file my-http-agent.yaml --authorize my-http-agent
+mylonite gate --target-file my-agent.yaml --authorize my-agent
 ```
 
 ## Notes

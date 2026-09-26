@@ -5208,3 +5208,66 @@ def test_every_command_shares_one_default_model() -> None:
         "the documented default is Haiku (docs/quickstart.md, docs/validation.md); "
         "changing it means changing those pages and the published cost guidance too"
     )
+
+
+# --- 0.10.2 / M02: every missing --authorize error names the exact value ---
+
+
+def _custom_target(tmp_path: Path, body: str) -> Path:
+    p = tmp_path / "t.yaml"
+    p.write_text(body, encoding="utf-8")
+    return p
+
+
+def test_scan_missing_authorize_prints_required_value(tmp_path: Path) -> None:
+    p = _custom_target(tmp_path, "family: acme\nscope: my-app\ncommand: python\nargs: [-m, srv]\n")
+    result = runner.invoke(app, ["scan", "--target-file", str(p)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize my-app" in (result.stderr or result.output)
+
+
+def test_scan_missing_authorize_falls_back_to_family(tmp_path: Path) -> None:
+    p = _custom_target(tmp_path, "family: acme\ncommand: python\nargs: [-m, srv]\n")
+    result = runner.invoke(app, ["scan", "--target-file", str(p)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize acme" in (result.stderr or result.output)
+
+
+def test_scan_missing_authorize_with_unreadable_file_keeps_plain_message(tmp_path: Path) -> None:
+    """A missing file gets no hint (Task 2 owns that case) and the same exit code."""
+    result = runner.invoke(app, ["scan", "--target-file", str(tmp_path / "nope.yaml")])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--authorize is required for custom targets. See SECURITY.md." in out
+    assert "pass --authorize" not in out
+
+
+@pytest.mark.parametrize("cmd", ["gate", "ablate"])
+def test_other_commands_print_required_value(tmp_path: Path, cmd: str) -> None:
+    p = _custom_target(tmp_path, "family: acme\nscope: my-app\ncommand: python\nargs: [-m, srv]\n")
+    result = runner.invoke(app, [cmd, "--target-file", str(p)])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize my-app" in (result.stderr or result.output)
+
+
+@pytest.mark.parametrize("cmd", ["scan", "gate"])
+def test_bundled_target_missing_authorize_prints_scope(cmd: str) -> None:
+    result = runner.invoke(app, [cmd, "mcp:filesystem:/tmp/sandbox"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize /tmp/sandbox" in (result.stderr or result.output)
+
+
+def test_bundled_stateless_target_missing_authorize_prints_family() -> None:
+    result = runner.invoke(app, ["scan", "mcp:fetch"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize fetch" in (result.stderr or result.output)
+
+
+def test_authorize_help_says_which_value_to_pass() -> None:
+    root = typer.main.get_command(app)
+    for cmd in ("scan", "gate", "validate", "ablate"):
+        param = next(p for p in root.commands[cmd].params if p.name == "authorize")
+        assert param.help == (
+            "Must equal the target's scope, or its family when it declares no scope. "
+            "Asserts you own the target; see SECURITY.md."
+        ), cmd

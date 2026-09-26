@@ -80,7 +80,8 @@ Run the exploit-finding loop against a target.
 reference app builds), or `mcp:custom` with `--command`/`--arg`. Omit when using `--target-file`
 (your own MCP app). Non-reference targets need `--authorize`.
 
-Key options: `--target-file PATH`, `--authorize NAME`, `--model` (any LiteLLM
+Key options: `--target-file PATH`, `--authorize NAME` (must equal the target's `scope`,
+or its family when it declares no scope; a missing value prints the one to pass), `--model` (any LiteLLM
 provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`,
 `--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
@@ -100,8 +101,8 @@ commented starter `target.yaml` with suggested `weakness_classes` and auto-detec
 with `--target-file`.
 
 ```bash
-mylonite scan --command python --arg my_server.py --scaffold app.yaml   # generate the target file
-mylonite scan --target-file app.yaml --authorize custom                 # then scan it
+mylonite scan --command python --arg my_server.py --scaffold app.yaml --scope my-app  # generate the target file
+mylonite scan --target-file app.yaml --authorize my-app                                # then scan it
 ```
 
 ## `generate` — emit the regression test
@@ -165,7 +166,8 @@ commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
 `--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
 where `--workflows` defaulted on and the branch and commit happened on every run.
 
-Options: `target` or `--target-file`; `--authorize`; `--open-pr` (create the branch,
+Options: `target` or `--target-file`; `--authorize` (the target's `scope`, or its family
+when it declares no scope); `--open-pr` (create the branch,
 commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
 a `provider/model` prefix); `--out PATH`; `--max-llm-calls`;
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
@@ -207,7 +209,8 @@ the claim a load-bearing row earns (see
 [Which claim you earned](reading-results.md#which-claim-you-earned)).
 
 Options: `--target-file PATH` (**required** — there is no positional target form, and the
-bundled `reference:*` targets are not accepted); `--authorize`; `--controls W2,W3,W4`;
+bundled `reference:*` targets are not accepted); `--authorize` (the target's `scope`, or
+its family when it declares no scope); `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
 `--max-seeds N`; `--model` (any LiteLLM provider via a `provider/model` prefix).
 
