@@ -38,7 +38,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-import litellm
 from pydantic import BaseModel
 
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
@@ -683,6 +682,8 @@ def _supported_response_mode(model: str) -> str | None:
     — never an error. The prompt already asks for JSON, and the tolerant parser
     still runs, so degrading is safe.
     """
+    import litellm
+
     try:
         if litellm.supports_response_schema(model=model):
             return "json_schema"
@@ -742,6 +743,8 @@ def litellm_json_call(
     ``timeout_s`` tighter.
     """
     _bump(caller)
+    import litellm  # deferred: seconds to import; the keyless gate path never needs it
+
     fn = completion_fn or litellm.completion
     messages: list[dict[str, str]] = []
     if system is not None:
@@ -789,6 +792,8 @@ async def litellm_json_call_async(
     ``litellm_json_call``'s docstring.
     """
     _bump(caller)
+    import litellm  # deferred: seconds to import; the keyless gate path never needs it
+
     fn = completion_fn or litellm.acompletion
     messages: list[dict[str, str]] = []
     if system is not None:
@@ -864,6 +869,8 @@ async def litellm_tool_call_async(
     see ``_sanitised_tools``'s docstring.
     """
     _bump(caller)
+    import litellm  # deferred: seconds to import; the keyless gate path never needs it
+
     fn = completion_fn or litellm.acompletion
     policy = active_policy()
     call_kwargs: dict[str, Any] = {**policy.kwargs(), "model": model, "messages": messages}
@@ -907,6 +914,8 @@ def litellm_text_call(
     never break PR-body assembly.
     """
     _bump(caller)
+    import litellm  # deferred: seconds to import; the keyless gate path never needs it
+
     fn = completion_fn or litellm.completion
     messages: list[dict[str, str]] = []
     if system is not None:

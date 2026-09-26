@@ -11,10 +11,9 @@ for non-LiteLLM exceptions or future type renames.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Literal
-
-import litellm
 
 from mylonite.scan.providers import env_vars_for
 
@@ -47,7 +46,15 @@ def _detail(exc: BaseException) -> str:
 
 
 def _isinstance_litellm(exc: BaseException, *names: str) -> bool:
-    """isinstance against LiteLLM exception types, tolerant of missing names."""
+    """isinstance against LiteLLM exception types, tolerant of missing names.
+
+    Reads LiteLLM from ``sys.modules`` rather than importing it: if LiteLLM was
+    never loaded, nothing could have raised one of its exceptions, and importing
+    it here would cost every caller several seconds.
+    """
+    litellm = sys.modules.get("litellm")
+    if litellm is None:
+        return False
     for name in names:
         cls = getattr(litellm, name, None)
         if isinstance(cls, type) and isinstance(exc, cls):
