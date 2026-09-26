@@ -298,7 +298,8 @@ jobs:
         #
         # `pipefail` is load-bearing: without it `uvx ... | tee` reports
         # tee's exit status, so a demo that FAILED would be recorded as passing
-        # and this whole job would become decorative.
+        # and this whole job would become decorative. It is set explicitly so the
+        # step does not depend on the runner's default shell flags.
         #
         # COLUMNS=80 is the claim under test: a default terminal. The demo puts
         # the headline ("reference app: N exploits on vulnerable, M on guarded")
@@ -367,6 +368,27 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[demo]"
           python -c "import mcp_kitchen_sink, importlib.metadata as m; print('kitchen-sink', m.version('mcp-kitchen-sink'), 'from', mcp_kitchen_sink.__file__)"
+      - name: The pip route must find something too
+        # Positive control for the check below: the documented `pip install`
+        # route has to work before a failing demo there can mean anything. If
+        # this install broke for an unrelated reason, the missing-fixture check
+        # would go green for the wrong reason.
+        if: runner.os == 'Linux'
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+          COLUMNS: "80"
+        run: |
+          if ! mylonite demo > pip-demo.txt; then
+            echo "::error::demo failed after pip install \".[demo]\" with every fixture present."
+            sed -n '1,40p' pip-demo.txt
+            exit 1
+          fi
+          if ! grep -Eq '[1-9][0-9]* exploits on vulnerable' pip-demo.txt; then
+            echo "::error::the pip-installed demo did not report a non-zero finding count on the VULNERABLE twin."
+            sed -n '1,40p' pip-demo.txt
+            exit 1
+          fi
       - name: A missing fixture must fail loudly, not render a clean result
         if: runner.os == 'Linux'
         env:

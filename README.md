@@ -171,8 +171,9 @@ never need a model at all, and `demo` replays recorded responses rather than cal
 uvx --python 3.12 --from "mylonite[demo]" mylonite demo
 ```
 
-`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. CI runs
-this command on Linux and Windows in an 80-column terminal on every pull request.
+`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. On every pull
+request, CI builds Mylonite from source and runs this command against that build, on
+Linux and Windows, in an 80-column terminal.
 
 With the `[demo]` extra already installed (see [Install](#install)), the same demo is:
 

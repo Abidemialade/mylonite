@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   demo in a throwaway environment, no API key needed. It is the first command
   in the README's "Try it" and in `docs/quickstart.md`; `pip install
   "mylonite[demo]"` stays the route for keeping Mylonite installed. The CI
-  `demo` job now runs this command from the checkout on Linux and Windows in
+  `demo` job now builds Mylonite from source and runs this command on Linux and Windows in
   an 80-column terminal, and fails if the output drops the finding count, the
   `mode: replay` line, or cuts anything short with `…`. `--python 3.12` keeps
   uv off Python 3.14, which Mylonite does not support yet.
