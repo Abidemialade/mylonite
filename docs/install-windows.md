@@ -17,6 +17,8 @@ py -3.14 -m venv .venv
 python --version   # 3.14.x
 ```
 
+Any of 3.11–3.14 works: `py -3.12 -m venv .venv` is fine too.
+
 All commands below assume this venv is active.
 
 ## 2. Clone with the schannel TLS backend (corporate proxy)

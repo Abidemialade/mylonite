@@ -107,6 +107,9 @@ dev = [
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.22",
+    # tests/test_python_support.py checks requires-python with SpecifierSet;
+    # declared here rather than relied on through pytest.
+    "packaging>=24.0",
 ]
 # The reference target `mcp_kitchen_sink` (a deliberately-vulnerable but FULLY MOCKED
 # in-process server — no real I/O, can't bind a network) is NOT a base dependency:
