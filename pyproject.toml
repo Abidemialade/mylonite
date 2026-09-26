@@ -136,8 +136,12 @@ dev = [
 # `read_note`'s output and every tool-schema hash derived from it. The demo
 # fixtures were re-recorded against it, so this pin and those fixtures moved
 # together, exactly as the paragraph above requires.
+#
+# 0.2.1 changes metadata only (the Python 3.14 classifier): tools, descriptions
+# and schemas are byte-identical to 0.2.0, so the same fixtures still match and
+# no re-record was needed.
 demo = [
-    "mcp-kitchen-sink==0.2.0",
+    "mcp-kitchen-sink==0.2.1",
 ]
 docs = [
     "mkdocs>=1.6",

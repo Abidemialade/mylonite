@@ -16,7 +16,8 @@
 > named 0.1.0 anyone running `pip install "mylonite[demo]"` would have received
 > the 0.1.0 wheel and missed every fixture. CI's `demo` job installs the
 > published wheel precisely to catch that, and it was red until 0.2.0 shipped.
-> The root `pyproject.toml` now pins `mcp-kitchen-sink==0.2.0`.
+> The root `pyproject.toml` now pins `mcp-kitchen-sink==0.2.1` (0.2.0's code with
+> the 3.14 classifier).
 >
 > The base `pip install mylonite` is unaffected and **never** pulls this
 > deliberately-vulnerable agent — that invariant is preserved.

@@ -27,7 +27,7 @@ updates:
       # CallToolResult.isError -> is_error, streamablehttp_client ->
       # streamable_http_client, and ClientSession(read_timeout_seconds=) moved
       # from timedelta to float. It also swaps httpx for httpx2. Adopting it is
-      # blocked on the published mcp-kitchen-sink==0.2.0, which pins mcp<2.0 in
+      # blocked on the published mcp-kitchen-sink==0.2.1, which pins mcp<2.0 in
       # immutable PyPI metadata — widening only the root package would make
       # `pip install "mylonite[demo]"` unresolvable (the extra pins
       # mcp-kitchen-sink exactly, so its mcp<2.0 constraint is binding). See
