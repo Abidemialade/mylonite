@@ -24,7 +24,8 @@ python scripts/prepare_release.py --check 0.8.0
 ## What the automation checks for you
 
 A pushed `vX.Y.Z` tag runs `gate → ci → build → testpypi → pypi →
-github-release`. Everything irreversible is downstream of the first two.
+github-release`, with `pypi-smoke` running alongside `github-release` once
+`pypi` finishes. Everything irreversible is downstream of the first two.
 
 | Gate | What it refuses |
 |---|---|
@@ -42,6 +43,23 @@ Two things worth knowing about the gate:
 - It reports **every** problem it finds, not just the first.
 - It runs **before** the build. A PyPI upload cannot be undone and a version
   number cannot be reused, so nothing reaches PyPI on a tag the gate rejects.
+
+### After publishing: `pypi-smoke`
+
+Everything above is checked against a local build or TestPyPI. `pypi-smoke`
+is the first thing that checks the artifact PyPI actually served: on Linux and
+Windows, it installs `mylonite[demo]==X.Y.Z` straight from PyPI with `uvx`
+and runs `mylonite demo`, then asserts the same three things the PR `demo`
+job does — a non-zero finding count on the vulnerable twin, `mode: replay`,
+and no `…` truncation at 80 columns. A short retry loop absorbs PyPI index
+lag right after upload; it does not absorb a genuinely broken demo, and the
+job fails if every attempt does.
+
+It depends only on `publish-pypi` and `github-release` does not depend on it
+in turn, so a slow index or a flaky runner here reports on its own without
+holding up the release notes. Treat a red `pypi-smoke` as urgent — it means
+the just-published release doesn't actually work for a new user — but not as
+something to block the tag on retroactively.
 
 ### Tag format
 
