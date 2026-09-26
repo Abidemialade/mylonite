@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A writing style guide, enforced in CI.** `docs/contributing/writing-style.md`
+  sets one voice for the README, docs, changelog, commits and pull requests:
+  lead with what changes for the reader, show the proof, state limits once.
+  A new `Docs and writing` job checks every pull request:
+  - `scripts/check_docs_sync.py` fails when code changes without a
+    `CHANGELOG.md` entry, or when a user-facing module changes without its doc
+    page (for example `cli.py` without `docs/cli-reference.md`). A change that
+    needs no docs opts out with a reasoned `Docs-Impact: none - ...` line.
+  - `scripts/check_prose.py` checks the pull-request title (Conventional
+    Commits), the required description sections, and flags machine-sounding
+    phrases in changed Markdown lines.
+
+### Changed
+
+- **The pull-request template asks for what reviewers need.** Summary, changes,
+  how it was tested, docs and changelog, and security impact, with the summary
+  and testing sections required.
+- **`ROADMAP.md` lays out the road to 1.0.** Every release from 0.10.2 to 1.1
+  with what it adds and a target month, what 1.0 promises, what it leaves out,
+  and what comes after it.
+
+### Fixed
+
+- **The README and the verification page quote the current results.** The
+  InjecAgent data-stealing figure now matches the 0.10.0 run (F1 0.833 at 0.714
+  recall, recorded as unresolved because it rests on 7 successful attacks), and
+  both pages date the figures to 14 September 2026 and point at
+  `verification/results/0.10.0/`.
+
 ## [0.10.1] - 2026-09-25
 
 ### Added
@@ -4072,7 +4103,6 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
 - Iterative LLM payload refinement (failure → refine → retry) — a later release.
 - `mylonite init` config scaffold — later DX polish.
 - Community attack-pattern registry contribution flow — a later release.
-- Hosted CI / dashboards / compliance evidence packs — a later release.
 
 ## [0.1.0] - 2026-06-09
 

@@ -6,6 +6,10 @@
 .claude/*
 !.claude/hooks/
 !.claude/settings.json
+# Local-only Claude Code writing hook; CI's docs-and-writing job is the
+# enforcement that counts.
+.claude/hooks/enforce_writing.py
+.claude/hooks/enforce-writing.sh
 
 # Python
 __pycache__/

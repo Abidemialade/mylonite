@@ -1,0 +1,53 @@
+name: Docs and writing
+
+# Keeps the docs in step with the code and the prose in the project's voice.
+# The rules live in docs/contributing/writing-style.md; the checks are
+# scripts/check_docs_sync.py and scripts/check_prose.py. Contributors can run
+# them locally before pushing, but this job is the one that counts.
+
+on:
+  pull_request:
+    branches: [main]
+    # "edited" re-runs the check when the title or description is fixed;
+    # "labeled"/"unlabeled" pick up the no-docs label.
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-and-writing:
+    # Dependabot's bump PRs have a fixed, machine-written format.
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    env:
+      # Untrusted PR text is passed through the environment, never interpolated
+      # into a script, so a crafted title or body cannot inject shell.
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Docs match the code
+        run: |
+          python scripts/check_docs_sync.py \
+            --base "origin/${BASE_REF}" \
+            --pr-body-env PR_BODY \
+            --labels-env PR_LABELS
+      - name: Title, description and changed prose
+        run: |
+          python scripts/check_prose.py \
+            --diff-base "origin/${BASE_REF}" \
+            --pr-title-env PR_TITLE \
+            --pr-body-env PR_BODY

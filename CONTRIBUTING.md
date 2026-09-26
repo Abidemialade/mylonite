@@ -95,7 +95,20 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
 - **Tests.** New code lands with tests. Bug fixes land with a regression test.
 - **Docs.** Public API additions update `docs/` and the relevant module
   docstrings.
-- **Changelog.** User-visible changes update `CHANGELOG.md`.
+- **Changelog.** User-visible changes update `CHANGELOG.md` under
+  `## [Unreleased]`.
+- **Writing.** Docs, changelog entries, commit messages and pull requests
+  follow [the writing style guide](docs/contributing/writing-style.md): lead
+  with what changes for the reader, show the proof, state limits once.
+- **Docs stay in sync.** The `Docs and writing` CI job fails when code changes
+  without a changelog entry, when a user-facing module changes without its doc
+  page, or when the title or description misses the required format. If a
+  change needs no docs, say why in the description:
+  `Docs-Impact: none - <reason>`. Run the same checks locally with
+  `python scripts/check_docs_sync.py --base origin/main` and
+  `python scripts/check_prose.py --diff-base origin/main`. `Docs and writing`
+  is a required check, and maintainers do not use an admin merge to get past it
+  while it is red: fix the cause, or add the opt-out line with a real reason.
 - **Contract changes** (touching any file under `src/mylonite/contracts/`)
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.

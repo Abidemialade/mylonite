@@ -9,14 +9,9 @@ trigger where it should land. This is a tracking doc, not a roadmap — see
 
 Twelve defects were fixed for 0.8.5 (see `CHANGELOG.md`). Four related items were
 deliberately left out, each because it is a **new capability or a contract change**
-rather than a fix, and the release was scoped to fixes only.
+rather than a fix, and the release was scoped to fixes only. One of them, the
+`launch_failure` outcome, shipped in 0.10.0 (issue #144); the other three remain.
 
-- **A `launch_failure` value on `ScanAttemptOutcome`.** A launch that never started is
-  now classified and reported as `launch_failure` in the attempt's reason, but the
-  `outcome` literal is still `skipped_planner_failure` — the honest value would be a new
-  enum member, and `ScanAttemptOutcome` lives in `contracts/_types.py`. *Trigger:* the
-  next contract-change issue and `CONTRACT_VERSION` bump per `GOVERNANCE.md`; batch it
-  with any other queued contract work rather than bumping for one enum value.
 - **`primary_tools` as a real seed filter.** It is accepted, validated and round-tripped
   but has **zero readers** in `src/`. The false "narrows seed selection" claim has been
   removed from `docs/target-file.md` and the scaffold comment; the field itself is kept
@@ -242,8 +237,8 @@ security posture than letting it define an attack.
 *Effort:* M (human) / S (with CC). *Priority:* P2. *Depends on:* the extensible
 attack-family filter landing first. *Trigger:* batch with the next
 `contract-change` issue and `CONTRACT_VERSION` bump per `GOVERNANCE.md`,
-alongside the queued `ScanAttemptOutcome` enum item above — one comment clock,
-not two.
+alongside the `SupportsAttackSession` decision below — one comment clock, not
+two.
 
 ## `SupportsAttackSession` has no in-tree consumer (contract-change)
 
@@ -254,7 +249,7 @@ and exported from `mylonite.contracts`, but nothing in `src/` calls it since the
 driver may depend on it.
 
 *Trigger:* decide keep-or-deprecate in the next `contract-change` issue, batched
-with the two items above — one comment clock. Keeping it costs little; removing
+with the predicate item above — one comment clock. Keeping it costs little; removing
 it is a major `TargetAdapter` bump and needs a deprecation cycle.
 
 ## Rejected (recorded so they aren't re-raised)
