@@ -10,8 +10,9 @@ scan, and gate.
 > target file and change nothing in your app.
 
 > **Authorisation.** Mylonite finds and reproduces working exploits, so every
-> non-reference target requires an explicit `--authorize <you>` flag asserting you
-> control the target. See [Security](security.md). Never point it at an app you don't own.
+> non-reference target requires an explicit `--authorize` flag asserting you
+> control the target. Its value is the target's `scope`, or its family when it
+> declares no scope; leave it off and Mylonite prints the value to pass. See [Security](security.md). Never point it at an app you don't own.
 
 ## 1. Scaffold a target file
 

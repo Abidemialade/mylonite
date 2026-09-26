@@ -175,8 +175,12 @@ def test_cli_epilog_examples_were_actually_collected() -> None:
         ("ci-gating.md / cli.py root epilog scaffold-then-gate chain", "custom", None, "custom"),
         # docs/target-file.md's full annotated example: `scope: tenant-a`.
         ("target-file.md scope: tenant-a example", "my-app", "tenant-a", "tenant-a"),
-        # docs/http-agent.md: `family: my-http-agent`, no scope.
-        ("http-agent.md family: my-http-agent example", "my-http-agent", None, "my-http-agent"),
+        # docs/http-agent.md: `--scaffold my-agent.yaml` writes `family: my-agent`
+        # (the file stem), no scope; the hand-written file uses the same family.
+        ("http-agent.md family: my-agent example", "my-agent", None, "my-agent"),
+        # docs/cli-reference.md: `--scaffold app.yaml --scope my-app`, then every
+        # scan/validate/gate/ablate example passes `--authorize my-app`.
+        ("cli-reference.md --scope my-app scaffold chain", "custom", "my-app", "my-app"),
     ],
 )
 def test_documented_authorize_examples_match_the_target(
@@ -192,6 +196,39 @@ def test_documented_authorize_examples_match_the_target(
     future doc edit reintroduces that mismatch.
     """
     check_authorization(family=family, scope=scope, authorize=authorize, command="scan")
+
+
+_AUTHORIZE_RE = re.compile(r"--authorize\s+(\S+)")
+
+
+def test_http_agent_doc_authorizes_the_scaffolded_family() -> None:
+    """`scan --scaffold my-agent.yaml --rest-url ...` names the family after the
+    file stem, so every `--authorize` on the page must be `my-agent`."""
+    text = (_DOCS_DIR / "http-agent.md").read_text(encoding="utf-8")
+    assert "--scaffold my-agent.yaml" in text
+    assert "family: my-agent\n" in text
+    values = set(_AUTHORIZE_RE.findall(text))
+    assert values == {"my-agent"}, values
+    check_authorization(family="my-agent", scope=None, authorize="my-agent", command="scan")
+
+
+def test_cli_reference_authorize_examples_match_the_scaffold() -> None:
+    """The scaffold example sets `--scope my-app`; every `--target-file app.yaml`
+    example on the page must then authorize `my-app`, not `custom`."""
+    text = (_DOCS_DIR / "cli-reference.md").read_text(encoding="utf-8")
+    assert "--scaffold app.yaml --scope my-app" in text
+    values = {
+        m.group(1)
+        for line in text.splitlines()
+        if "--target-file app.yaml" in line
+        for m in _AUTHORIZE_RE.finditer(line)
+    }
+    assert values == {"my-app"}, values
+
+
+def test_test_your_app_doc_has_no_placeholder_authorize() -> None:
+    text = (_DOCS_DIR / "test-your-app.md").read_text(encoding="utf-8")
+    assert "--authorize <you>" not in text
 
 
 def test_no_stale_mylonite_validated_path_in_docs() -> None:

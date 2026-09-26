@@ -9,6 +9,8 @@ document being authorized.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from mylonite._authz import AuthorizationRefused, check_authorization, required_authorization
@@ -66,3 +68,52 @@ def test_error_names_the_command() -> None:
     with pytest.raises(AuthorizationRefused) as exc:
         check_authorization(family="fetch", scope=None, authorize=None, command="validate")
     assert "validate" in str(exc.value)
+
+
+# --- authorize_hint / bundled_authorize_value (0.10.2 / M02) ---
+
+
+def test_authorize_hint_names_the_scope(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_hint
+
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\nscope: my-app\ncommand: python\nargs: []\n", encoding="utf-8")
+    assert authorize_hint(p) == "pass --authorize my-app"
+
+
+def test_authorize_hint_falls_back_to_family(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_hint
+
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\ncommand: python\nargs: []\n", encoding="utf-8")
+    assert authorize_hint(p) == "pass --authorize acme"
+
+
+def test_authorize_hint_is_none_for_missing_or_invalid_file(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_hint
+
+    assert authorize_hint(tmp_path / "missing.yaml") is None
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("not: [valid\n", encoding="utf-8")
+    assert authorize_hint(bad) is None
+    wrong_shape = tmp_path / "shape.yaml"
+    wrong_shape.write_text("family: acme\n", encoding="utf-8")
+    assert authorize_hint(wrong_shape) is None
+
+
+@pytest.mark.parametrize(
+    "target,expected",
+    [
+        ("mcp:filesystem:/tmp/sandbox", "/tmp/sandbox"),
+        ("mcp:github:octo/repo", "octo/repo"),
+        ("mcp:fetch", "fetch"),
+        # fetch does not require a scope, so a label still authorizes by family,
+        # exactly as _build_adapter_for_mcp checks it.
+        ("mcp:fetch:label", "fetch"),
+        ("mcp:filesystem", "<scope>"),
+    ],
+)
+def test_bundled_authorize_value(target: str, expected: str) -> None:
+    from mylonite._authz import bundled_authorize_value
+
+    assert bundled_authorize_value(target) == expected

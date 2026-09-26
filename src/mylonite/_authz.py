@@ -15,7 +15,15 @@ sets ``requires_scope: false``.
 
 from __future__ import annotations
 
-__all__ = ["AuthorizationRefused", "check_authorization", "required_authorization"]
+from pathlib import Path
+
+__all__ = [
+    "AuthorizationRefused",
+    "authorize_hint",
+    "bundled_authorize_value",
+    "check_authorization",
+    "required_authorization",
+]
 
 
 class AuthorizationRefused(ValueError):
@@ -49,3 +57,44 @@ def check_authorization(
         f"got {authorize!r}. See SECURITY.md."
     )
     raise AuthorizationRefused(msg)
+
+
+def authorize_hint(target_file: Path) -> str | None:
+    """``"pass --authorize <value>"`` for a custom target file, or ``None``.
+
+    Uses the same chain as the scaffold's "next:" line (load the file, build
+    its spec, derive the required value), so the hint cannot drift from the
+    check that later enforces it. Returns ``None`` when the file is missing or
+    does not load: the caller reports that case on its own.
+    """
+    # Imported lazily: the target-file loader pulls in pydantic/yaml and the
+    # MCP registry, which the authorization rule itself does not need.
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+    try:
+        tf = load_target_file(target_file)
+        spec = build_target_spec(tf)
+    except Exception:
+        return None
+    return f"pass --authorize {required_authorization(family=spec.family, scope=tf.scope)}"
+
+
+def bundled_authorize_value(target: str) -> str:
+    """The ``--authorize`` value a bundled ``mcp:<family>[:<scope>]`` target needs.
+
+    Mirrors the check in ``cli._build_adapter_for_mcp``: a family that requires
+    a scope is authorized by that scope, every other family by its name. A
+    scope-requiring family given without a scope yields ``"<scope>"``, since no
+    value can authorize it until a scope is named.
+    """
+    from mylonite.plugins._mcp.target_registry import BUNDLED_TARGETS
+
+    parts = target.split(":", 2)
+    family = parts[1] if len(parts) > 1 else target
+    scope = parts[2] if len(parts) == 3 else None
+    spec = BUNDLED_TARGETS.get(family)
+    if spec is not None and not spec.requires_scope:
+        return family
+    if scope:
+        return scope
+    return "<scope>" if spec is not None else family

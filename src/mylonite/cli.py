@@ -30,7 +30,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn, TypeVar
 
 import typer
 from rich.console import Console
@@ -735,6 +735,20 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
     return family, scope
 
 
+def _missing_authorize(msg: str, target_file: Path | None) -> NoReturn:
+    """Report a missing ``--authorize`` for a custom target, naming the value it needs.
+
+    The hint is omitted when there is no readable target file (``mcp:custom``
+    inline flags, or a file that does not load), and the exit code is the same
+    either way.
+    """
+    from mylonite._authz import authorize_hint
+
+    hint = authorize_hint(target_file) if target_file is not None else None
+    echo_err(f"{msg} {hint}." if hint else msg)
+    raise typer.Exit(code=EXIT_CONFIG)
+
+
 def _enforce_custom_authorize(
     family: str,
     scope: str | None,
@@ -874,9 +888,10 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     epilog=(
         "Examples:\n\n"
         "`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n"
-        "`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app.\n\n"
-        "`mylonite scan --command python --arg server.py --scaffold app.yaml` -- introspect\n"
-        "a server and write a starter target.yaml (no LLM call, no attack).\n\n"
+        "`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n"
+        "-- introspect a server and write a starter target.yaml (no LLM call, no attack).\n\n"
+        "`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app\n"
+        "(--authorize equals the scope the scaffold wrote).\n\n"
         "Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable."
     )
 )
@@ -1077,7 +1092,10 @@ def scan(
         str | None,
         typer.Option(
             "--authorize",
-            help="Required for non-reference targets; assert ownership of the target.",
+            help=(
+                "Must equal the target's scope, or its family when it declares no scope. "
+                "Asserts you own the target; see SECURITY.md."
+            ),
         ),
     ] = None,
     purpose: Annotated[
@@ -1251,8 +1269,9 @@ def scan(
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
-            echo_err("--authorize is required for custom targets. See SECURITY.md.")
-            raise typer.Exit(code=EXIT_CONFIG)
+            _missing_authorize(
+                "--authorize is required for custom targets. See SECURITY.md.", target_file
+            )
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file
 
@@ -1392,9 +1411,11 @@ def scan(
         report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
+            from mylonite._authz import bundled_authorize_value
+
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md."
+                f"See SECURITY.md. pass --authorize {bundled_authorize_value(target)}."
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
@@ -2616,9 +2637,8 @@ def validate(
         typer.Option(
             "--authorize",
             help=(
-                "Required for a CUSTOM target (--target-file); assert ownership of the "
-                "target. validate live-drives it — including sending real attack payloads. "
-                "Not required for reference:* targets (bundled, safe-by-construction)."
+                "Must equal the target's scope, or its family when it declares no scope. "
+                "Asserts you own the target; see SECURITY.md."
             ),
         ),
     ] = None,
@@ -3273,7 +3293,9 @@ def _post_gate_annotations(
     epilog=(
         "Examples:\n\n"
         "`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n"
-        "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes test + workflows).\n\n"
+        "`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n"
+        "-- write the target file first; its scope is the --authorize value below.\n\n"
+        "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n"
         "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh."
     )
 )
@@ -3311,7 +3333,10 @@ def gate(
         str | None,
         typer.Option(
             "--authorize",
-            help="Required for non-reference targets; assert ownership of the target.",
+            help=(
+                "Must equal the target's scope, or its family when it declares no scope. "
+                "Asserts you own the target; see SECURITY.md."
+            ),
         ),
     ] = None,
     purpose: Annotated[
@@ -3614,8 +3639,9 @@ def gate(
         # Custom-target on-ramp — enforce --authorize BEFORE loading the file,
         # exactly as scan does.
         if not authorize:
-            echo_err("--authorize is required for custom targets. See SECURITY.md.")
-            raise typer.Exit(code=EXIT_CONFIG)
+            _missing_authorize(
+                "--authorize is required for custom targets. See SECURITY.md.", target_file
+            )
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
@@ -3647,9 +3673,11 @@ def gate(
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
+            from mylonite._authz import bundled_authorize_value
+
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                "See SECURITY.md."
+                f"See SECURITY.md. pass --authorize {bundled_authorize_value(target)}."
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter_factory = functools.partial(
@@ -4058,7 +4086,11 @@ def ablate(
     authorize: Annotated[
         str | None,
         typer.Option(
-            "--authorize", help="Required: assert ownership of the target. See SECURITY.md."
+            "--authorize",
+            help=(
+                "Must equal the target's scope, or its family when it declares no scope. "
+                "Asserts you own the target; see SECURITY.md."
+            ),
         ),
     ] = None,
     controls: Annotated[
@@ -4181,8 +4213,9 @@ def ablate(
         echo_err("ablate requires --target-file (the app whose controls you want to score).")
         raise typer.Exit(code=EXIT_CONFIG)
     if not authorize:
-        echo_err("--authorize is required to ablate a custom target. See SECURITY.md.")
-        raise typer.Exit(code=EXIT_CONFIG)
+        _missing_authorize(
+            "--authorize is required to ablate a custom target. See SECURITY.md.", target_file
+        )
     if iterations < 1:
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
