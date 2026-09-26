@@ -198,6 +198,22 @@ def test_scan_reference_vulnerable_no_key_exits_config(tmp_path: Path) -> None:
     assert "ANTHROPIC_API_KEY" in out
 
 
+def test_scan_missing_key_offers_local_model_and_dry_run(tmp_path: Path) -> None:
+    """`scan`'s missing-key message must offer both ways past it: a local
+    model (no key needed) and, since `scan` is the one command with
+    `--dry-run`, a way to preview the run with no LLM calls at all."""
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--output-dir", str(tmp_path), "--max-llm-calls", "5"],
+    )
+
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "ollama_chat/" in out
+    assert "docs/self-hosted-models.md" in out
+    assert "--dry-run" in out
+
+
 # ---------------------------------------------------------------------------
 # gate -- EXIT_CONFIG (2), as of T14
 # ---------------------------------------------------------------------------
@@ -228,6 +244,27 @@ def test_gate_reference_vulnerable_no_key_exits_config(tmp_path: Path) -> None:
     )
     out = result.stderr or result.output
     assert "no LLM credential configured" in out
+
+
+def test_gate_missing_key_offers_local_model_not_dry_run(tmp_path: Path) -> None:
+    """`gate` has no `--dry-run` of its own, so its missing-key message must
+    offer the local-model route but never suggest a flag that doesn't exist
+    on this command."""
+    result = runner.invoke(
+        app,
+        [
+            "gate",
+            "reference:vulnerable",
+            "--out",
+            str(tmp_path / "gate"),
+            "--no-workflows",
+        ],
+    )
+
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "ollama_chat/" in out
+    assert "--dry-run" not in out
 
 
 # ---------------------------------------------------------------------------

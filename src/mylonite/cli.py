@@ -651,7 +651,23 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
     return LLMPolicy(**kwargs)
 
 
-def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -> None:
+# The local-model route out of a missing-key EXIT_CONFIG: named here, once,
+# so every call site (and `docs/self-hosted-models.md`, which this string
+# must stay byte-identical with) agrees on the one model string. Every
+# command that reaches `_require_llm_configured_or_exit` offers this line.
+_LOCAL_MODEL_HINT = (
+    "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
+    "(needs Ollama running; see docs/self-hosted-models.md)."
+)
+
+# Only `scan` has `--dry-run` (a run that makes no LLM call at all), so only
+# its caller passes `dry_run_flag=True` to append this second line.
+_DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
+
+
+def _require_llm_configured_or_exit(
+    *models: str, provider: str | None = None, dry_run_flag: bool = False
+) -> None:
     """Pre-flight :func:`~mylonite.config.require_llm_configured` for every
     resolved model a live run will actually call (planner/customiser/judge
     can each be a different provider — see ``scan``'s ``_resolve_role_model``)
@@ -663,6 +679,13 @@ def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -
     This is the ONE place the deleted ``MyloniteSettings.require_llm()``'s
     "no default provider, fail loudly" invariant (CLAUDE.md) is actually
     enforced as a pre-flight, not just as a later per-attempt diagnosis.
+
+    ``dry_run_flag`` is a per-command CAPABILITY, not the run's own
+    ``--dry-run`` value (a live ``--dry-run`` never reaches this function at
+    all — every caller short-circuits before it). Pass ``True`` only from
+    the one command that actually has the flag (``scan``), so the appended
+    hint never tells a ``gate``/``validate``/``ablate`` user to pass an
+    option that command doesn't accept.
     """
     from mylonite.config import LLMNotConfiguredError, require_llm_configured
 
@@ -674,7 +697,10 @@ def _require_llm_configured_or_exit(*models: str, provider: str | None = None) -
         try:
             require_llm_configured(model=m, provider=provider)
         except LLMNotConfiguredError as exc:
-            echo_err(str(exc))
+            lines = [str(exc), _LOCAL_MODEL_HINT]
+            if dry_run_flag:
+                lines.append(_DRY_RUN_HINT)
+            echo_err("\n".join(lines))
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
@@ -1492,6 +1518,7 @@ def scan(
             effective_customiser_model,
             effective_judge_model,
             provider=provider,
+            dry_run_flag=True,
         )
 
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
@@ -2272,7 +2299,7 @@ def _validate_custom(
         echo_err(
             "no provider reachable — set ANTHROPIC_API_KEY, or pass "
             "--model provider/modelname for another LiteLLM provider (e.g. "
-            "--model openai/gpt-4o)."
+            "--model openai/gpt-4o).\n" + _LOCAL_MODEL_HINT
         )
         raise typer.Exit(code=EXIT_PROVIDER)
 

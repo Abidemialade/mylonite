@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recall, recorded as unresolved because it rests on 7 successful attacks), and
   both pages date the figures to 14 September 2026 and point at
   `verification/results/0.10.0/`.
+- **A missing LLM key now points at a way to run without one.** `scan`,
+  `gate`, `validate` and `ablate` all append the same two lines to their
+  `no LLM credential configured` error: `--model ollama_chat/llama3.2:3b`
+  (no key needed, see `docs/self-hosted-models.md`), and, on `scan` only,
+  `--dry-run` to preview the run with no LLM calls at all.
 
 ## [0.10.1] - 2026-09-25
 
