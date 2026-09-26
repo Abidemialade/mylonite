@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The gate workflows and the gate action install a pinned release.** The
+  workflows `mylonite gate --workflows` writes now run
+  `pip install "mylonite==X.Y.Z"` with the version that wrote them, instead of
+  whatever PyPI serves on the day the job runs. `--workflows` is still off by
+  default. `gate-action/action.yml` installs the release its tag names, so
+  `Abidemialade/mylonite/gate-action@vX.Y.Z` runs `mylonite==X.Y.Z`;
+  `docs/ci-gating.md` now shows a release tag instead of `@main`.
+  `scripts/prepare_release.py` bumps both pins with the version, and the release
+  job refuses a tag whose pins do not match. The discovery workflow also passes
+  `vars.MYLONITE_AUTHORIZE` through an environment variable rather than pasting
+  it into the shell command, so a value holding a quote or `;` stays one
+  argument.
 - **Committed gate tests start about 4 seconds faster.** Importing
   `mylonite.testkit` no longer loads LiteLLM, which a replayed gate test never
   calls: the import drops from about 5.2 s to 0.3 s. LiteLLM now loads on the

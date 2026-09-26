@@ -37,9 +37,12 @@ runs:
     - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ inputs.python-version }}
+    # Pinned to the release whose tag this action is referenced by
+    # (gate-action@vX.Y.Z installs mylonite==X.Y.Z). scripts/prepare_release.py
+    # bumps it with __version__, and the release gate refuses a mismatch.
     - name: Install mylonite
       shell: bash
-      run: pip install "mylonite"
+      run: pip install "mylonite==0.10.1"
     - name: Run mylonite gate
       shell: bash
       # Inputs travel through env, never through `${{ }}` inside `run:`. GitHub

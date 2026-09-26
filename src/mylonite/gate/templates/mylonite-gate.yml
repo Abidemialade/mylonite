@@ -29,6 +29,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install mylonite + pytest
-        run: pip install "mylonite" pytest
+        run: pip install "mylonite==__MYLONITE_VERSION__" pytest
       - name: Run the committed gate test
         run: pytest __GATE_DIR__ -q -ra

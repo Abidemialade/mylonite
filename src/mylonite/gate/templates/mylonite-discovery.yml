@@ -25,8 +25,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install mylonite + pytest
-        run: pip install "mylonite" pytest
+        run: pip install "mylonite==__MYLONITE_VERSION__" pytest
       - name: Discover -> generate -> validate -> open gating PR
+        # The variable travels through env, not an expression inside `run:`:
+        # GitHub pastes an expression into the script text before bash parses
+        # it, so a value holding a quote or `;` would become shell syntax.
+        env:
+          MYLONITE_AUTHORIZE: ${{ vars.MYLONITE_AUTHORIZE }}
         run: >
           mylonite gate --target-file __GATE_DIR__/target.yaml
-          --authorize "${{ vars.MYLONITE_AUTHORIZE }}" --open-pr
+          --authorize "$MYLONITE_AUTHORIZE" --open-pr

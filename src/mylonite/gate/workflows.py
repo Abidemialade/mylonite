@@ -6,6 +6,7 @@ import importlib.resources as ir
 from pathlib import Path
 
 from mylonite.layout import DEFAULT_LAYOUT
+from mylonite.version import __version__
 
 _TEMPLATES = ("mylonite-gate.yml", "mylonite-discovery.yml")
 
@@ -28,10 +29,17 @@ def write_workflows(
     * ``__GATE_DIR__`` -> ``gate_dir`` (posix-style) — the ``gate --out``
       directory the committed test / target.yaml actually live under;
       defaults to :data:`mylonite.layout.DEFAULT_LAYOUT`'s gate dir.
+    * ``__MYLONITE_VERSION__`` -> this package's ``__version__``, so the
+      workflows install the release that wrote them rather than whatever PyPI
+      serves on the day the job runs.
 
     Returns the written paths.
     """
-    tokens = {"__RUNS_ON__": runs_on, "__GATE_DIR__": Path(gate_dir).as_posix()}
+    tokens = {
+        "__RUNS_ON__": runs_on,
+        "__GATE_DIR__": Path(gate_dir).as_posix(),
+        "__MYLONITE_VERSION__": __version__,
+    }
     dest = repo_root / ".github" / "workflows"
     dest.mkdir(parents=True, exist_ok=True)
     base = ir.files("mylonite.gate") / "templates"

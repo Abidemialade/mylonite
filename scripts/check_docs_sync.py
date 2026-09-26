@@ -3,8 +3,8 @@
 
 Two rules, both from ``docs/contributing/writing-style.md``:
 
-1. A change under ``src/`` or a reference target's package needs a
-   ``CHANGELOG.md`` entry.
+1. A change under ``src/``, a reference target's package or the reusable
+   ``gate-action/`` needs a ``CHANGELOG.md`` entry.
 2. A change to a user-facing module needs its doc page, for example
    ``src/mylonite/cli.py`` needs ``docs/cli-reference.md``.
 
@@ -35,7 +35,7 @@ from dataclasses import dataclass
 CHANGELOG = "CHANGELOG.md"
 
 # Paths whose changes are user-visible enough to need a changelog entry.
-CODE_PREFIXES = ("src/mylonite/", "reference_targets/mcp_kitchen_sink/src/")
+CODE_PREFIXES = ("src/mylonite/", "reference_targets/mcp_kitchen_sink/src/", "gate-action/")
 
 # Generated or non-behavioural files under the code prefixes.
 CODE_EXEMPT = (
@@ -62,6 +62,7 @@ DOC_RULES: tuple[DocRule, ...] = (
         "the target.yaml schema",
     ),
     DocRule("src/mylonite/gate/", ("docs/ci-gating.md",), "the gate command and CI workflows"),
+    DocRule("gate-action/", ("docs/ci-gating.md",), "the reusable gate action"),
     DocRule("src/mylonite/report/", ("docs/reading-results.md",), "report formats"),
     DocRule("src/mylonite/testkit/", ("docs/validation.md",), "the pytest gate"),
     DocRule(

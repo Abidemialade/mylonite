@@ -109,8 +109,14 @@ scaffolded workflows:
   also needs a repository **variable** — `vars.MYLONITE_AUTHORIZE` — set to
   the same value your own `--authorize` would need (the target's declared
   `scope`, or its `family` if no scope is declared; see
-  [target.yaml](target-file.md)); the workflow passes it straight through to
-  `mylonite gate --authorize`.
+  [target.yaml](target-file.md)); the workflow passes it to
+  `mylonite gate --authorize` through an environment variable, so a value
+  holding a quote or `;` stays one argument.
+
+Both workflows install the Mylonite release that wrote them:
+`pip install "mylonite==X.Y.Z"`, where `X.Y.Z` is the version that ran
+`gate --workflows`. A new Mylonite release never changes what your CI runs until
+you change that line, or re-run `gate --workflows` with the new version.
 
 ### Prerequisites `gate --open-pr` assumes
 
@@ -145,17 +151,20 @@ precondition is fixed.
 ### The reusable Action
 
 ```yaml
-- uses: Abidemialade/mylonite/gate-action@main
+- uses: Abidemialade/mylonite/gate-action@v0.10.1
   with:
     target-file: .mylonite/gate/target.yaml
     authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
     open-pr: "true"
 ```
 
-**Not yet pinned to a stable release.** `gate-action` (`gate-action/action.yml`
-in this repo) has no tagged release yet — `@main` tracks the tip of the
-default branch. For a reproducible pin, reference a specific commit SHA
-instead of `@main` until a versioned tag exists.
+**The tag is the release.** The action lives in this repository
+(`gate-action/action.yml`), so every Mylonite release tag `vX.Y.Z` is also an
+action tag, and `gate-action@vX.Y.Z` installs exactly `mylonite==X.Y.Z`. Tags
+before v0.10.2 predate the pin and install the latest release. To upgrade,
+change the tag. `scripts/prepare_release.py` bumps the action's pin and
+the tag on this page with the version, and the release job refuses a tag whose
+pin does not match.
 
 ## Other CI systems (Jenkins, GitLab, …)
 
