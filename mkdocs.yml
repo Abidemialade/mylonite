@@ -37,6 +37,7 @@ exclude_docs: |
 not_in_nav: |
   /contributing/live-e2e-tests.md
   /contributing/releasing.md
+  /contributing/writing-style.md
   /reviews/2026-08-06-0.7.7-honest-results-review.md
   /reviews/2026-08-06-0.7.8-correct-twins-review.md
   /reviews/2026-08-07-0.7.10-close-the-loop-review.md

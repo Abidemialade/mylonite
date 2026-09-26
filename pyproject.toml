@@ -235,6 +235,8 @@ ignore = ["E501"]  # ruff format handles long lines
 # reference_targets/mcp_kitchen_sink/tests/, a separate nested pytest suite.
 "**/tests/**" = ["S101", "S603", "S607", "S108", "S105"]
 "scripts/**" = ["S101", "S603", "S607"]
+# The Claude Code hooks shell out to git by design, like the dev scripts.
+".claude/hooks/**" = ["S101", "S603", "S607"]
 # S110/S112 here are the documented "best-effort, absence is non-fatal" /
 # "sparse grid, missing combos expected" fallbacks already explained inline —
 # not silent-and-unexplained swallowing.
