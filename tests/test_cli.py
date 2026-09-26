@@ -5288,7 +5288,7 @@ def test_scan_missing_authorize_with_missing_file_suggests_scaffold(tmp_path: Pa
     out = result.stderr or result.output
     assert "--authorize is required for custom targets. See SECURITY.md." in out
     assert "--scaffold" in out and "nope.yaml" in out
-    assert "pass --authorize" not in out
+    assert "Pass --authorize" not in out
 
 
 def test_scan_missing_authorize_with_invalid_file_keeps_plain_message(tmp_path: Path) -> None:
@@ -5300,7 +5300,7 @@ def test_scan_missing_authorize_with_invalid_file_keeps_plain_message(tmp_path: 
     out = result.stderr or result.output
     assert "--authorize is required for custom targets. See SECURITY.md." in out
     assert "--scaffold" not in out
-    assert "pass --authorize" not in out
+    assert "Pass --authorize" not in out
 
 
 @pytest.mark.parametrize(
@@ -5360,14 +5360,6 @@ def test_scan_inline_mcp_custom_missing_authorize_falls_back_to_custom() -> None
     assert "--authorize custom" in (result.stderr or result.output)
 
 
-def test_gate_inline_mcp_custom_missing_authorize_falls_back_to_custom() -> None:
-    """`gate` has no --scope flag for inline mcp:custom, so the hint is always
-    the literal family name -- unlike scan, which can derive a scope."""
-    result = runner.invoke(app, ["gate", "mcp:custom"])
-    assert result.exit_code == EXIT_CONFIG
-    assert "--authorize custom" in (result.stderr or result.output)
-
-
 @pytest.mark.parametrize("cmd", ["gate", "ablate"])
 def test_other_commands_print_required_value(tmp_path: Path, cmd: str) -> None:
     p = _custom_target(tmp_path, "family: acme\nscope: my-app\ncommand: python\nargs: [-m, srv]\n")
@@ -5411,3 +5403,53 @@ def test_validate_authorize_help_notes_reference_targets_need_none() -> None:
     assert param.help.startswith(_AUTHORIZE_HELP_BASE)
     assert param.help != _AUTHORIZE_HELP_BASE
     assert "reference:" in param.help
+
+
+# --- 0.10.2 final review: a target file that exists but names a missing
+# system_prompt_file is not a missing target file ---
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["check", "--target-file", "{p}"],
+        ["ablate", "--target-file", "{p}", "--authorize", "my-app"],
+    ],
+)
+def test_missing_system_prompt_file_is_not_reported_as_missing_target(
+    tmp_path: Path, argv: list[str]
+) -> None:
+    p = _custom_target(
+        tmp_path,
+        "family: acme\nscope: my-app\ncommand: python\nargs: [-m, srv]\n"
+        "system_prompt_file: prompt.txt\n",
+    )
+    result = runner.invoke(app, [a.format(p=p) for a in argv])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--scaffold" not in out
+    assert "target file not found" not in out
+    assert "prompt.txt" in out
+
+
+def test_gate_inline_mcp_custom_missing_authorize_points_at_target_file() -> None:
+    """gate refuses inline mcp:custom whatever --authorize says, so the missing-
+    --authorize error must not suggest a value that only leads to that refusal."""
+    result = runner.invoke(app, ["gate", "mcp:custom"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "Pass --authorize" not in out
+    assert "--target-file" in out
+    refused = runner.invoke(app, ["gate", "mcp:custom", "--authorize", "custom"])
+    assert refused.exit_code == EXIT_CONFIG
+    assert "inline mcp:custom flags are not wired in `gate`" in (refused.stderr or refused.output)
+    assert "inline mcp:custom flags are not wired in `gate`" in out
+
+
+@pytest.mark.parametrize("cmd", ["scan", "gate"])
+def test_bundled_scoped_target_without_scope_prints_the_command_form(cmd: str) -> None:
+    result = runner.invoke(app, [cmd, "mcp:filesystem"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "Pass --authorize <scope>" not in out
+    assert "Name a scope: mcp:filesystem:<scope> --authorize <scope>." in out
