@@ -16,7 +16,7 @@ This guide covers:
 
 Requirements:
 
-- Python 3.11+ (3.11 / 3.12 / 3.13 are CI-tested; 3.14 should work)
+- Python 3.11–3.14 (all four are CI-tested)
 - `git`
 - Optionally `bun` for some auxiliary scripts
 
@@ -46,7 +46,7 @@ debugging one failing test.
 
 In CI, a pull request that changes only docs (`docs/`, top-level Markdown,
 `mkdocs.yml`, the issue and PR templates) runs the suite once, on Linux with
-Python 3.12. Any other change also runs 3.11, 3.13 and Windows.
+Python 3.12. Any other change also runs 3.11, 3.13, 3.14 and Windows.
 
 `pre-commit run --all-files` runs all of the above plus file hygiene.
 

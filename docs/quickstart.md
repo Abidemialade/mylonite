@@ -6,19 +6,16 @@ With [uv](https://docs.astral.sh/uv/) installed, one command runs the demo with 
 and nothing to install or configure:
 
 ```bash
-uvx --python 3.12 --from "mylonite[demo]" mylonite demo
+uvx --from "mylonite[demo]" mylonite demo
 ```
 
-`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. On every pull
-request, CI builds Mylonite from source and runs this command against that build, on
-Linux and Windows, in an 80-column terminal. To keep
-Mylonite installed instead, use `pip` as below.
+On every pull request, CI builds Mylonite from source and runs this command against that
+build on Python 3.14, on Linux and Windows, in an 80-column terminal. To keep Mylonite
+installed instead, use `pip` as below.
 
 ## Install
 
-Requires **Python 3.11–3.13** — `litellm` (the model-agnostic LLM layer) has no 3.14
-wheels yet, so create your virtualenv with a 3.11–3.13 interpreter. The `mylonite` CLI is
-on PyPI:
+Requires **Python 3.11–3.14**. The `mylonite` CLI is on PyPI:
 
 ```bash
 pip install mylonite                 # the CLI that scans your app

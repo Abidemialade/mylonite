@@ -153,7 +153,7 @@ pip install mylonite                      # the CLI, from PyPI
 pip install "mylonite[demo]"              # ...plus the bundled practice app
 ```
 
-Python 3.11–3.13. (3.14 is not supported yet: `litellm` caps itself below it.)
+Python 3.11–3.14.
 
 The `[demo]` extra installs the bundled practice app, and you need it for **any**
 `reference:...` command — `demo`, `check reference:...` and `scan reference:...` alike.
@@ -168,12 +168,11 @@ never need a model at all, and `demo` replays recorded responses rather than cal
 **No API key, no install, one command** (needs [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uvx --python 3.12 --from "mylonite[demo]" mylonite demo
+uvx --from "mylonite[demo]" mylonite demo
 ```
 
-`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. On every pull
-request, CI builds Mylonite from source and runs this command against that build, on
-Linux and Windows, in an 80-column terminal.
+On every pull request, CI builds Mylonite from source and runs this command against that
+build on Python 3.14, on Linux and Windows, in an 80-column terminal.
 
 With the `[demo]` extra already installed (see [Install](#install)), the same demo is:
 

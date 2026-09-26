@@ -181,9 +181,11 @@ jobs:
       ANTHROPIC_API_KEY: ""
       OPENAI_API_KEY: ""
     steps:
+      # The newest supported Python, so the one-liner is proven where a new
+      # user is most likely to be. uvx runs on the interpreter on PATH.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       # uv comes from PyPI at a pinned version: the repository's Actions
       # policy allows only GitHub-owned actions, so there is no setup-uv step.
       - name: Install uv
@@ -202,7 +204,7 @@ jobs:
           set -o pipefail
           v="${RELEASE_TAG#v}"
           for i in 1 2 3 4 5; do
-            uvx --python 3.12 --no-cache --from "mylonite[demo]==$v" mylonite demo | tee out.txt && break
+            uvx --no-cache --from "mylonite[demo]==$v" mylonite demo | tee out.txt && break
             if [ "$i" = 5 ]; then
               echo "::error::demo failed against mylonite[demo]==$v from PyPI after 5 attempts."
               exit 1

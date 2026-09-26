@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mylonite installs and runs on Python 3.14.** `requires-python` is now
+  `>=3.11,<3.15`: litellm 1.93.0 and later support 3.14, and on 3.14 pip
+  resolves one of those. CI runs the test suite on 3.11, 3.12, 3.13 and 3.14,
+  and the `demo` and `pypi-smoke` jobs run the uvx one-liner on 3.14. The
+  "unsupported Python" note that `mylonite` printed on 3.14 now appears only
+  on 3.15 and later.
 - **A writing style guide, enforced in CI.** `docs/contributing/writing-style.md`
   sets one voice for the README, docs, changelog, commits and pull requests:
   lead with what changes for the reader, show the proof, state limits once.
@@ -22,14 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     phrases in changed Markdown lines.
 - **Run the demo with one command and nothing installed.** With
   [uv](https://docs.astral.sh/uv/) on your machine,
-  `uvx --python 3.12 --from "mylonite[demo]" mylonite demo` runs the offline
+  `uvx --from "mylonite[demo]" mylonite demo` runs the offline
   demo in a throwaway environment, no API key needed. It is the first command
   in the README's "Try it" and in `docs/quickstart.md`; `pip install
   "mylonite[demo]"` stays the route for keeping Mylonite installed. The CI
   `demo` job now builds Mylonite from source and runs this command on Linux and Windows in
   an 80-column terminal, and fails if the output drops the finding count, the
-  `mode: replay` line, or cuts anything short with `…`. `--python 3.12` keeps
-  uv off Python 3.14, which Mylonite does not support yet.
+  `mode: replay` line, or cuts anything short with `…`. It needs no
+  `--python` flag: every Python uv picks from 3.11 to 3.14 is supported.
 - **A post-release job proves the demo works from PyPI, not just from source.**
   `release.yml`'s new `pypi-smoke` job runs after `publish-pypi`: on Linux and
   Windows it installs `mylonite[demo]==X.Y.Z` with `uvx` straight from PyPI and

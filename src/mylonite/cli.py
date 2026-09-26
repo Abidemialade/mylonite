@@ -205,12 +205,12 @@ def _configure_stdio_encoding() -> None:
 
 
 def _warn_unsupported_python() -> None:
-    """S4: a clear note on Python 3.14+, where litellm has no wheels yet."""
-    if sys.version_info >= (3, 14):
+    """S4: a clear note on Python 3.15+, which litellm (capped <3.15) rejects."""
+    if sys.version_info >= (3, 15):
         echo_err(
-            "note: Mylonite supports Python 3.11-3.13. litellm has no 3.14 wheels "
-            "yet, so live LLM calls may fail to import on this interpreter - use a "
-            "3.11-3.13 virtualenv for scan/validate."
+            "note: Mylonite supports Python 3.11-3.14. litellm caps Python below "
+            "3.15, so live LLM calls may fail to import on this interpreter - use a "
+            "3.11-3.14 virtualenv for scan/validate."
         )
 
 

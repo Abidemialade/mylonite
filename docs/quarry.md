@@ -38,7 +38,7 @@ if it FAILS on the vulnerable build and PASSES on the guarded one. See
 
 ## Try it
 
-Requires **Python 3.11–3.13**. No cloning, and the first two steps need no API key:
+Requires **Python 3.11–3.14**. No cloning, and the first two steps need no API key:
 
 ```bash
 pip install "mylonite[demo]"
