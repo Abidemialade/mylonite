@@ -145,6 +145,89 @@ jobs:
           path: dist/
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
+  pypi-smoke:
+    # Everything above this point can be, and has been, tested against a
+    # local build or TestPyPI. Nothing before now has proven that the demo the
+    # README tells a new user to run actually works against what PyPI just
+    # served the world -- index propagation lag, a Trusted Publishing
+    # misconfiguration, or a `[demo]` extra that resolves differently off
+    # PyPI than it did from the checkout would all be invisible otherwise.
+    #
+    # This mirrors ci.yml's `demo` job (same matrix, same 80-column check,
+    # same greps) with one deliberate difference: `--from` names the
+    # published `mylonite[demo]==X.Y.Z`, not `.[demo]` from a checkout, so a
+    # green run here means the artifact on PyPI -- not the source tree --
+    # produces the finding count and the replay-mode line a user would see.
+    #
+    # Independent of `github-release` on purpose: a slow PyPI index or a
+    # transient runner problem here must not hold up the release notes.
+    name: Demo from PyPI
+    needs: publish-pypi
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        # Git Bash on Windows, so `set -o pipefail`, `tee` and `grep` below
+        # mean the same thing on both runners -- see ci.yml's `demo` job.
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      COLUMNS: "80"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # uv comes from PyPI at a pinned version: the repository's Actions
+      # policy allows only GitHub-owned actions, so there is no setup-uv step.
+      - name: Install uv
+        run: python -m pip install "uv==0.12.19"
+      - name: Run the offline demo through uvx, against the published release
+        # The retry loop covers PyPI index lag after a Trusted Publishing
+        # upload, not a broken demo: each attempt's output goes to out.txt
+        # only via `tee`, so a failed attempt's partial or empty output is
+        # overwritten by the next attempt rather than read by the greps
+        # below. `break` only fires on success, so if all five attempts fail,
+        # the loop falls through with the last (failing) attempt's exit
+        # status still live and the `set -o pipefail` run stops here -- the
+        # job fails instead of silently grepping stale or missing output.
+        run: |
+          set -o pipefail
+          v="${RELEASE_TAG#v}"
+          for i in 1 2 3 4 5; do
+            uvx --python 3.12 --no-cache --from "mylonite[demo]==$v" mylonite demo | tee out.txt && break
+            if [ "$i" = 5 ]; then
+              echo "::error::demo failed against mylonite[demo]==$v from PyPI after 5 attempts."
+              exit 1
+            fi
+            sleep 30
+          done
+      - name: The vulnerable twin must actually find something
+        # Same assertions as ci.yml's `demo` job -- see its comments for why
+        # exit code alone is not enough and why a stray ellipsis means the
+        # 80-column output was cut.
+        run: |
+          if ! grep -Eq '[1-9][0-9]* exploits on vulnerable' out.txt; then
+            echo "::error::demo did not report a non-zero finding count on the VULNERABLE twin."
+            sed -n '1,40p' out.txt
+            exit 1
+          fi
+          if ! grep -q "mode: replay" out.txt; then
+            echo "::error::demo did not report replay mode; it may have attempted a live call."
+            exit 1
+          fi
+          if grep -Fq '…' out.txt; then
+            echo "::error::demo output is truncated at 80 columns (found an ellipsis)."
+            grep -Fn '…' out.txt
+            exit 1
+          fi
+
   github-release:
     # A pushed tag alone does NOT show up as a GitHub Release (a separate
     # feature from tags) -- without this job, `gh release list` / the

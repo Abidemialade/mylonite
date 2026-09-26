@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an 80-column terminal, and fails if the output drops the finding count, the
   `mode: replay` line, or cuts anything short with `…`. `--python 3.12` keeps
   uv off Python 3.14, which Mylonite does not support yet.
+- **A post-release job proves the demo works from PyPI, not just from source.**
+  `release.yml`'s new `pypi-smoke` job runs after `publish-pypi`: on Linux and
+  Windows it installs `mylonite[demo]==X.Y.Z` with `uvx` straight from PyPI and
+  runs the same checks as the PR `demo` job (a non-zero finding count on the
+  vulnerable twin, `mode: replay`, no truncation at 80 columns), retrying a
+  few times to ride out PyPI index lag. It reports independently and never
+  blocks `github-release`. See "After publishing: `pypi-smoke`" in
+  `docs/contributing/releasing.md`.
 
 ### Changed
 
