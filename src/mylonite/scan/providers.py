@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import re
 
-import litellm
-
 # Default API-key env var(s) per provider. Bedrock uses the AWS credential
 # chain (two vars); local servers (ollama/vllm) and a litellm proxy need none.
 # This is the "explicit map" layer: it stays a CLOSED, hand-maintained set
@@ -108,6 +106,8 @@ def provider_from_model(model: str, declared: str | None = None) -> str | None:
         return _normalise_provider(declared)
     if "/" in model:
         return _normalise_provider(model.split("/", 1)[0])
+    import litellm  # deferred: several seconds to import, needed only here
+
     try:
         provider = litellm.get_llm_provider(model=model)[1]
     except Exception:

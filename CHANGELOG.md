@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Committed gate tests start about 4 seconds faster.** Importing
+  `mylonite.testkit` no longer loads LiteLLM, which a replayed gate test never
+  calls: the import drops from about 5.2 s to 0.3 s. LiteLLM now loads on the
+  first real model call. The project's own test suite runs in about half the
+  time as a result, since its slowest tests each start a fresh gate run.
 - **The pull-request template asks for what reviewers need.** Summary, changes,
   how it was tested, docs and changelog, and security impact, with the summary
   and testing sections required.
