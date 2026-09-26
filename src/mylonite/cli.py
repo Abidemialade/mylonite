@@ -735,6 +735,19 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
     return family, scope
 
 
+def _exit_if_missing_target_file(exc: Exception, target_file: Path) -> None:
+    """Exit with the ``--scaffold`` fix when ``exc`` is a missing target file.
+
+    Shared by every ``load_target_file``/``build_target_spec`` catch site in this
+    module (``scan``, ``generate``, ``validate``, ``gate``, ``ablate``, ``check``)
+    so the fix can't drift between them. Returns normally (does nothing) for any
+    other exception, so the caller's own generic ``echo_exc`` fallback still runs.
+    """
+    if isinstance(exc, FileNotFoundError):
+        echo_err(missing_target_file_message(target_file))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
 def _missing_authorize(
     msg: str, target_file: Path | None, *, inline_scope: str | None = None
 ) -> NoReturn:
@@ -1301,9 +1314,7 @@ def scan(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:  # YAML / validation errors → exit 2
-                if isinstance(exc, FileNotFoundError):
-                    echo_err(missing_target_file_message(target_file))
-                    raise typer.Exit(code=EXIT_CONFIG) from exc
+                _exit_if_missing_target_file(exc, target_file)
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             # --weakness-class used to be a silent no-op alongside
@@ -1922,9 +1933,11 @@ def _emit_generated_test(
             try:
                 build_target_spec(load_target_file(target_file))  # validate before copying
             except Exception as exc:
-                if isinstance(exc, FileNotFoundError):
-                    echo_err(missing_target_file_message(target_file))
-                    raise typer.Exit(code=EXIT_CONFIG) from exc
+                # Defensive: callers of _emit_generated_test already validate this
+                # exact target_file up front (generate's pre-loop check below, or
+                # the caller passing an already-validated `validated_target_files`
+                # cache), so FileNotFoundError should not reach here in practice.
+                _exit_if_missing_target_file(exc, target_file)
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             if validated_target_files is not None:
@@ -2133,9 +2146,7 @@ def generate(
         try:
             build_target_spec(load_target_file(target_file))
         except Exception as exc:
-            if isinstance(exc, FileNotFoundError):
-                echo_err(missing_target_file_message(target_file))
-                raise typer.Exit(code=EXIT_CONFIG) from exc
+            _exit_if_missing_target_file(exc, target_file)
             echo_exc(f"invalid --target-file {target_file}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         validated_target_files.add(target_file.resolve())
@@ -2230,9 +2241,7 @@ def _validate_custom(
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
-        if isinstance(exc, FileNotFoundError):
-            echo_err(missing_target_file_message(target_file))
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _exit_if_missing_target_file(exc, target_file)
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
@@ -3684,9 +3693,7 @@ def gate(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:
-                if isinstance(exc, FileNotFoundError):
-                    echo_err(missing_target_file_message(target_file))
-                    raise typer.Exit(code=EXIT_CONFIG) from exc
+                _exit_if_missing_target_file(exc, target_file)
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             custom_spec = build_target_spec(tf)
@@ -4279,9 +4286,7 @@ def ablate(
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
-        if isinstance(exc, FileNotFoundError):
-            echo_err(missing_target_file_message(target_file))
-            raise typer.Exit(code=EXIT_CONFIG) from exc
+        _exit_if_missing_target_file(exc, target_file)
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
@@ -4594,9 +4599,7 @@ def check(
             tf = load_target_file(target_file)
             spec = build_target_spec(tf)
         except Exception as exc:
-            if isinstance(exc, FileNotFoundError):
-                echo_err(missing_target_file_message(target_file))
-                raise typer.Exit(code=EXIT_CONFIG) from exc
+            _exit_if_missing_target_file(exc, target_file)
             echo_exc(f"could not load {target_file}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         target_registry.clear_runtime_targets()

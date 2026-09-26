@@ -1901,6 +1901,23 @@ def test_generate_custom_invalid_target_file_exit_2(tmp_path: Path) -> None:
     assert "invalid --target-file" in (result.stderr or result.output)
 
 
+def test_generate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:
+    """`generate`'s up-front --target-file check (before the exploit loop) points at
+    --scaffold for a path that doesn't exist, same as scan/gate/check (0.10.2 / M02)."""
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    missing = tmp_path / "missing.yaml"
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(
+        app,
+        ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(missing)],
+    )
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--scaffold" in out and missing.name in out
+
+
 def test_env_file_overrides_ambient_key_with_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2580,6 +2597,25 @@ def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> N
     result = runner.invoke(app, ["validate", str(out_dir)])
     assert result.exit_code == EXIT_CONFIG
     assert "--authorize" in (result.stderr or result.output)
+
+
+def test_validate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:
+    """`validate`'s custom-target route (`_validate_custom`) points a missing
+    --target-file at --scaffold, same as scan/generate/gate/check (0.10.2 / M02).
+    An explicit --target-file always wins over the co-located target.yaml, and the
+    load failure is checked before --authorize, so no --authorize is needed here."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    missing = tmp_path / "missing.yaml"
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--target-file", str(missing)])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--scaffold" in out and missing.name in out
 
 
 # ---------------------------------------------------------------------------
@@ -5271,6 +5307,20 @@ def test_missing_target_file_suggests_scaffold(tmp_path: Path, argv: list[str]) 
     assert result.exit_code == EXIT_CONFIG
     out = result.stderr or result.output
     assert "--scaffold" in out and p.name in out
+
+
+def test_ablate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:
+    """`ablate`'s own --target-file load (after the --authorize gate) also points a
+    missing file at --scaffold. --authorize is supplied so ablate's authorize gate
+    (checked BEFORE the file load, and which also names --scaffold for a missing
+    file) doesn't pre-empt this -- --authorize being present here exercises
+    ablate's own load_target_file catch site specifically, not the shared
+    _missing_authorize path already covered above."""
+    missing = tmp_path / "missing.yaml"
+    result = runner.invoke(app, ["ablate", "--target-file", str(missing), "--authorize", "x"])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--scaffold" in out and missing.name in out
 
 
 def test_missing_target_file_message_names_the_file_and_the_fix(tmp_path: Path) -> None:
