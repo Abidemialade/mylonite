@@ -17,9 +17,11 @@ seed catalogue; only the human-readable weakness names (from
 
 from __future__ import annotations
 
+import textwrap
 from collections.abc import Iterable
 from typing import Final, get_args
 
+from rich.cells import cell_len
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -37,21 +39,27 @@ SAFETY_BANNER: Final[str] = (
 )
 """Bolded part of the safety banner; ``(see SECURITY.md).`` is appended unbolded."""
 
+#: Two lines, not one: the first is the result and fits an 80-column terminal on
+#: its own, so CI's grep for "N exploits on vulnerable" never meets a wrap.
 _HEADLINE_TEMPLATE: Final[str] = (
-    "reference app: {n_vuln} exploits on vulnerable, {n_guard} on guarded — this "
-    "differential is the oracle that validates every generated regression test"
+    "reference app: {n_vuln} exploits on vulnerable, {n_guard} on guarded\n"
+    "this differential is the oracle that validates every generated regression test"
 )
 _GUARDED_FINDING_NOTE: Final[str] = (
     "⚠ unexpected finding on the guarded build — LLM-judge noise or a real bug"
 )
+#: Every command sits on its own indented line, under 80 columns, so a reader
+#: can copy it whole instead of stitching it back together across a wrap.
 _TEASER: Final[str] = (
     "Each finding becomes a committed regression test, validated against this same "
-    "vulnerable/guarded oracle. Turn one into a gating test: mylonite gate reference:vulnerable"
+    "vulnerable/guarded oracle. Turn one into a gating test:\n"
+    "  mylonite gate reference:vulnerable"
 )
 _NEXT_STEP: Final[str] = (
-    "Try it on YOUR app next: mylonite scan --command python --arg server.py --scaffold "
-    "app.yaml --scope my-app (free, no API key), then mylonite scan --target-file app.yaml "
-    "--authorize my-app (needs an LLM API key) — details: docs/test-your-app.md"
+    "Try it on your own app (docs/test-your-app.md):\n"
+    "  mylonite scan --command python --arg server.py \\\n"
+    "    --scaffold app.yaml --scope my-app            # no API key\n"
+    "  mylonite scan --target-file app.yaml --authorize my-app"
 )
 
 _FOUND_MARK: Final[str] = OUTCOME_MARKS["finding"]
@@ -274,27 +282,26 @@ def render_demo(
         console, Panel(f"[bold]{SAFETY_BANNER}[/bold] (see SECURITY.md).", border_style="yellow")
     )
 
-    table = Table(
-        title="the reference app — vulnerable vs guarded build",
-        title_justify="left",
-        show_lines=False,
-    )
-    table.add_column("weakness", no_wrap=True)
-    table.add_column("name", no_wrap=True)
-    table.add_column("taxonomy (OWASP LLM / ASI / ATLAS)", no_wrap=True)
-    table.add_column("vulnerable", no_wrap=True)
-    table.add_column("guarded", no_wrap=True)
-
-    for weakness in _WEAKNESS_ORDER:
-        pattern_ids = _WEAKNESS_PATTERNS[weakness]
-        table.add_row(
+    rows = [
+        (
             weakness,
             _WEAKNESS_NAMES[weakness],
             _taxonomy_cell(weakness),
-            _styled(_aggregate_mark(vulnerable, pattern_ids)),
-            _styled(_aggregate_mark(guarded, pattern_ids)),
+            _aggregate_mark(vulnerable, _WEAKNESS_PATTERNS[weakness]),
+            _aggregate_mark(guarded, _WEAKNESS_PATTERNS[weakness]),
         )
-    console_print(console, table)
+        for weakness in _WEAKNESS_ORDER
+    ]
+    widths = [
+        max(cell_len(cell) for cell in column) for column in zip(_COLUMNS, *rows, strict=True)
+    ]
+    # Rich spends one border per column plus one, and one space of padding on
+    # each side of every cell.
+    wide = console.width >= sum(widths) + 3 * len(widths) + 1
+    if wide:
+        _print_wide_table(console, rows)
+    else:
+        _print_narrow_table(console, rows, widths)
 
     n_vuln = vulnerable.report.findings_count
     n_guard = guarded.report.findings_count
@@ -306,4 +313,65 @@ def render_demo(
     _print_coverage_note(console, vulnerable, guarded)
     console_print(console, _TEASER, highlight=False)
     console_print(console, _NEXT_STEP, highlight=False)
-    console_print(console, f"mode: {mode} — {elapsed_s:.1f}s", highlight=False)
+    # The replay label carries "; recorded <date> against <model>", and the
+    # model id is long enough to push the whole line past 80 columns. The
+    # provenance goes on its own line so `mode: replay` always reads as one.
+    label, _, provenance = mode.partition("; ")
+    console_print(console, f"mode: {label} — {elapsed_s:.1f}s", highlight=False)
+    if provenance:
+        console_print(console, provenance, highlight=False)
+
+
+_TABLE_TITLE: Final[str] = "the reference app — vulnerable vs guarded build"
+_COLUMNS: Final[tuple[str, ...]] = (
+    "weakness",
+    "name",
+    "taxonomy (OWASP LLM / ASI / ATLAS)",
+    "vulnerable",
+    "guarded",
+)
+
+_Row = tuple[Weakness, str, str, str, str]
+
+
+def _print_wide_table(console: Console, rows: list[_Row]) -> None:
+    """Every column on one line: the layout for a terminal the table fits in."""
+    table = Table(title=_TABLE_TITLE, title_justify="left", show_lines=False)
+    for header in _COLUMNS:
+        table.add_column(header, no_wrap=True)
+    for weakness, name, taxonomy, vuln_mark, guard_mark in rows:
+        table.add_row(weakness, name, taxonomy, _styled(vuln_mark), _styled(guard_mark))
+    console_print(console, table)
+
+
+def _print_narrow_table(console: Console, rows: list[_Row], widths: list[int]) -> None:
+    """The layout for a terminal narrower than the full table, 80 columns included.
+
+    Rich shrinks a table that does not fit by cutting every cell to an ellipsis,
+    which turned the weakness IDs into nothing and the verdicts into ``v…``. So
+    the taxonomy leaves the table for a legend underneath, the verdict and ID
+    columns are held at their full width, and only the name gives way -- broken
+    after a hyphen, since the names are single hyphenated words that Rich would
+    otherwise split mid-word.
+    """
+    weakness_w, name_w, _, vuln_w, guard_w = widths
+    # Four columns: five borders and two spaces of padding per column.
+    name_room = console.width - (weakness_w + vuln_w + guard_w) - 3 * 4 - 1
+    table = Table(title=_TABLE_TITLE, title_justify="left", show_lines=False)
+    table.add_column(_COLUMNS[0], no_wrap=True, min_width=weakness_w)
+    table.add_column(_COLUMNS[1], no_wrap=False, ratio=1, overflow="fold")
+    table.add_column(_COLUMNS[3], no_wrap=True, min_width=vuln_w)
+    table.add_column(_COLUMNS[4], no_wrap=True, min_width=guard_w)
+    for weakness, name, _taxonomy, vuln_mark, guard_mark in rows:
+        if name_room < name_w:
+            name = "\n".join(textwrap.wrap(name, width=max(name_room, 1), break_on_hyphens=True))
+        table.add_row(weakness, name, _styled(vuln_mark), _styled(guard_mark))
+    console_print(console, table)
+
+    legend = Table.grid(padding=(0, 2))
+    legend.add_column(no_wrap=True)
+    legend.add_column()
+    for weakness, _name, taxonomy, _vuln, _guard in rows:
+        legend.add_row(weakness, taxonomy)
+    console_print(console, "taxonomy (OWASP LLM / ASI / ATLAS):", highlight=False)
+    console_print(console, legend, highlight=False)

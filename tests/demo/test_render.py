@@ -151,11 +151,13 @@ def test_render_clean_differential() -> None:
     assert "Never point Mylonite at a system you don't own or operate" in output
     assert "(see SECURITY.md)" in output
 
-    # Headline computed from the actual ScanResults.
+    # Headline computed from the actual ScanResults: the count on a line of its
+    # own, so CI's grep for it never meets a wrap.
+    lines = [line.strip() for line in output.splitlines()]
+    assert "reference app: 2 exploits on vulnerable, 0 on guarded" in lines
     assert (
-        "reference app: 2 exploits on vulnerable, 0 on guarded — this differential "
-        "is the oracle that validates every generated regression test"
-    ) in output
+        "this differential is the oracle that validates every generated regression test"
+    ) in lines
     assert "unexpected finding on the guarded build" not in output
 
     # Per-weakness table: names + taxonomy IDs from the seed catalogue.
@@ -173,15 +175,15 @@ def test_render_clean_differential() -> None:
     # Teaser, next step, and footer.
     assert (
         "Each finding becomes a committed regression test, validated against this "
-        "same vulnerable/guarded oracle. Turn one into a gating test: "
-        "mylonite gate reference:vulnerable"
+        "same vulnerable/guarded oracle. Turn one into a gating test:"
     ) in output
+    assert "mylonite gate reference:vulnerable" in lines
     # `--command` takes the executable and `--arg` each argument; a single
     # "python server.py" string would be exec'd as one literal filename.
-    assert "mylonite scan --command python --arg server.py --scaffold app.yaml" in output
-    assert "mylonite scan --target-file app.yaml --authorize my-app" in output
-    assert "needs an LLM API key" in output
-    assert "docs/test-your-app.md" in output
+    assert "mylonite scan --command python --arg server.py \\" in lines
+    assert "--scaffold app.yaml --scope my-app            # no API key" in lines
+    assert "mylonite scan --target-file app.yaml --authorize my-app" in lines
+    assert "Try it on your own app (docs/test-your-app.md):" in lines
     assert "mode: replay (offline)" in output
     assert "0.8s" in output
 
@@ -375,8 +377,16 @@ def test_no_coverage_note_when_every_seed_was_exercised() -> None:
 
 
 def _row(output: str, weakness: str) -> str:
-    """The one rendered table row for ``weakness``, box-drawing and all."""
-    rows = [line for line in output.splitlines() if line.lstrip("│ ").startswith(f"{weakness} ")]
+    """The one rendered table row for ``weakness``, box-drawing and all.
+
+    Only lines inside the table's box count: below the full table's width the
+    taxonomy legend also starts its lines with the weakness ID.
+    """
+    rows = [
+        line
+        for line in output.splitlines()
+        if line.startswith("│") and line.lstrip("│ ").startswith(f"{weakness} ")
+    ]
     assert len(rows) == 1, f"expected exactly one {weakness} row, got {rows}"
     return rows[0]
 
@@ -578,3 +588,90 @@ def test_the_pattern_ids_match_the_catalogue() -> None:
         f"drifted from SEED_CATALOGUE: missing {sorted(catalogue - set(_ALL_PATTERNS))}, "
         f"stale {sorted(set(_ALL_PATTERNS) - catalogue)}"
     )
+
+
+# --- an 80-column terminal ---------------------------------------------------
+#
+# The launch post sends newcomers to `mylonite demo` in whatever terminal they
+# have open, and the default is 80 columns. The table used to need 124: at 80
+# Rich cut the weakness IDs to nothing and the verdict cells to `v…` / `✓ c…`,
+# which leaves the one table the demo exists to show unreadable.
+
+_RECORDED_MODE = (
+    "replay (offline); recorded 2026-09-14 against ollama_chat/qwen3:4b-instruct-2507-q4_K_M"
+)
+
+
+def _shipped_shape() -> tuple[ScanResult, ScanResult]:
+    """Every mark the shipped demo prints, including the widest (`✓ clean (1/3)`)."""
+    vulnerable = _result(
+        "reference:vulnerable",
+        _outcomes({_W2[0]: "finding", _W3[0]: "finding", _W4[0]: "finding"}),
+        no_verdict=list(_W1),
+    )
+    guarded = _result("reference:guarded", _outcomes(), no_verdict=[_W2[1], _W2[2]])
+    return vulnerable, guarded
+
+
+def _render_at(width: int, *, mode: str = _RECORDED_MODE) -> str:
+    vulnerable, guarded = _shipped_shape()
+    console = Console(
+        file=io.StringIO(), width=width, record=True, force_terminal=False, color_system=None
+    )
+    render_demo(vulnerable, guarded, mode=mode, elapsed_s=0.4, console=console)
+    return console.export_text()
+
+
+def test_demo_readable_at_80_columns() -> None:
+    import re
+
+    text = _render_at(80)
+
+    assert "…" not in text
+    for weakness in ("W1", "W2", "W3", "W4"):
+        assert _row(text, weakness)
+    for mark in ("FOUND", "clean (1/3)", "NO VERDICT"):
+        assert mark in text
+    assert any(
+        re.fullmatch(r"reference app: \d+ exploits on vulnerable, \d+ on guarded", line.strip())
+        for line in text.splitlines()
+    )
+    # Each command intact on one line, so a reader can copy it.
+    assert "mylonite scan --target-file app.yaml --authorize my-app" in text
+    assert "mylonite gate reference:vulnerable" in text
+    assert "--scaffold app.yaml --scope my-app" in text
+    assert all(len(line) <= 80 for line in text.splitlines()), text
+
+
+def test_the_taxonomy_moves_to_a_legend_below_124_columns() -> None:
+    """The IDs are kept, one line per weakness, rather than squeezed into a cell."""
+    from mylonite.demo.render import _taxonomy_cell
+
+    text = _render_at(80)
+
+    assert "LLM01" not in _row(text, "W1")
+    lines = [line.strip() for line in text.splitlines()]
+    for weakness in ("W1", "W2", "W3", "W4"):
+        assert f"{weakness}  {_taxonomy_cell(weakness)}" in lines, text  # type: ignore[arg-type]
+
+
+def test_a_wide_terminal_keeps_the_taxonomy_column() -> None:
+    text = _render_at(130)
+
+    assert "LLM01" in _row(text, "W1")
+    assert "taxonomy (OWASP LLM / ASI / ATLAS)" in text
+    assert "…" not in text
+
+
+def test_the_mode_line_puts_the_recording_provenance_on_its_own_line() -> None:
+    """CI greps `mode: replay`; the long model id no longer pushes it to a wrap."""
+    lines = [line.strip() for line in _render_at(80).splitlines()]
+
+    assert "mode: replay (offline) — 0.4s" in lines
+    assert "recorded 2026-09-14 against ollama_chat/qwen3:4b-instruct-2507-q4_K_M" in lines
+
+
+def test_a_live_mode_label_stays_on_one_line() -> None:
+    lines = [line.strip() for line in _render_at(80, mode="live (anthropic/m)").splitlines()]
+
+    assert "mode: live (anthropic/m) — 0.4s" in lines
