@@ -70,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   taxonomy column for a legend underneath, keeps the ID and verdict cells whole,
   and breaks a long weakness name after a hyphen. The headline puts the count
   (`reference app: 5 exploits on vulnerable, 0 on guarded`) on its own line, the
-  suggested commands each sit on their own line so they copy whole, and the
-  recording date and model move to a line under `mode: replay (offline)`. A
+  suggested commands each sit whole on one line within 79 columns, so they
+  paste into bash, PowerShell or cmd alike, and the recording date and model move to a line under `mode: replay (offline)`. A
   wide terminal still gets the one-line table. Output layout only: the results,
   exit codes and flags are unchanged.
 

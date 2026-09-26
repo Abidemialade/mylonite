@@ -23,6 +23,11 @@ from mylonite.demo.render import render_demo
 from mylonite.scan.coverage import NO_ADJUDICATOR
 from mylonite.scan.engine import ScanResult
 
+# The two next-step commands, each whole on one line so it pastes into bash,
+# PowerShell or cmd alike.
+_SCAFFOLD_CMD = "mylonite scan --command python --arg app.py --scaffold app.yaml --scope my-app"
+_SCAN_CMD = "mylonite scan --target-file app.yaml --authorize my-app"
+
 # The nine kitchen-sink pattern_ids, grouped by seeded weakness (must match
 # SEED_CATALOGUE / reference_targets/mcp_kitchen_sink/seeds/seeds.yaml) --
 # `test_the_pattern_ids_match_the_catalogue` below fails if they drift.
@@ -180,11 +185,12 @@ def test_render_clean_differential() -> None:
     ) in output
     assert "mylonite gate reference:vulnerable" in lines
     # `--command` takes the executable and `--arg` each argument; a single
-    # "python server.py" string would be exec'd as one literal filename.
-    assert "mylonite scan --command python --arg server.py \\" in lines
-    assert "--scaffold app.yaml --scope my-app            # no API key" in lines
-    assert "mylonite scan --target-file app.yaml --authorize my-app  # needs an API key" in lines
-    assert "Try it on your own app (docs/test-your-app.md):" in lines
+    # "python app.py" string would be exec'd as one literal filename.
+    assert _SCAFFOLD_CMD in lines
+    assert "Make a target file (no API key):" in lines
+    assert _SCAN_CMD in lines
+    assert "Scan it (needs an API key):" in lines
+    assert "Try it on your own app (docs/test-your-app.md)." in lines
     assert "mode: replay (offline)" in output
     assert "0.8s" in output
 
@@ -624,10 +630,12 @@ def _render_at(width: int, *, mode: str = _RECORDED_MODE) -> str:
     return console.export_text()
 
 
-def test_demo_readable_at_80_columns() -> None:
+@pytest.mark.parametrize("width", [80, 79])
+def test_demo_readable_at_80_columns(width: int) -> None:
+    """79 too: a Windows console renders one column narrower than COLUMNS."""
     import re
 
-    text = _render_at(80)
+    text = _render_at(width)
 
     assert "…" not in text
     for weakness in ("W1", "W2", "W3", "W4"):
@@ -638,12 +646,16 @@ def test_demo_readable_at_80_columns() -> None:
         re.fullmatch(r"reference app: \d+ exploits on vulnerable, \d+ on guarded", line.strip())
         for line in text.splitlines()
     )
-    # Each command intact on one line, so a reader can copy it.
-    assert "mylonite scan --target-file app.yaml --authorize my-app  # needs an API key" in text
-    assert "# no API key" in text
-    assert "mylonite gate reference:vulnerable" in text
-    assert "--scaffold app.yaml --scope my-app" in text
-    assert all(len(line) <= 80 for line in text.splitlines()), text
+    # Each command whole on one line, so a reader can copy it into any shell:
+    # no trailing backslash continuation, which PowerShell and cmd reject.
+    lines = [line.strip() for line in text.splitlines()]
+    assert _SCAFFOLD_CMD in lines
+    assert _SCAN_CMD in lines
+    assert "mylonite gate reference:vulnerable" in lines
+    assert not any(line.endswith("\\") for line in lines), text
+    assert "Make a target file (no API key):" in lines
+    assert "Scan it (needs an API key):" in lines
+    assert all(len(line) <= width for line in text.splitlines()), text
 
 
 def test_the_taxonomy_moves_to_a_legend_when_the_full_table_does_not_fit() -> None:

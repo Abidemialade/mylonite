@@ -193,10 +193,11 @@ jobs:
         # upload, not a broken demo: each attempt's output goes to out.txt
         # only via `tee`, so a failed attempt's partial or empty output is
         # overwritten by the next attempt rather than read by the greps
-        # below. `break` only fires on success, so if all five attempts fail,
-        # the loop falls through with the last (failing) attempt's exit
-        # status still live and the `set -o pipefail` run stops here -- the
-        # job fails instead of silently grepping stale or missing output.
+        # below. `pipefail` makes the pipeline report the demo's exit status,
+        # not `tee`'s, so `break` only fires when the demo succeeded. After the
+        # fifth failed attempt the explicit `exit 1` fails the step with an
+        # error line, instead of the greps below reading stale or missing
+        # output; earlier failures wait 30 seconds and retry.
         run: |
           set -o pipefail
           v="${RELEASE_TAG#v}"
