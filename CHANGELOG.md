@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `demo` job now builds Mylonite from source and runs this command on Linux and Windows in
   an 80-column terminal, and fails if the output drops the finding count, the
   `mode: replay` line, or cuts anything short with `…`. It needs no
-  `--python` flag: every Python uv picks from 3.11 to 3.14 is supported.
+  `--python` flag: Mylonite now supports Python 3.14 as well.
 - **A post-release job proves the demo works from PyPI, not just from source.**
   `release.yml`'s new `pypi-smoke` job runs after `publish-pypi`: on Linux and
   Windows it installs `mylonite[demo]==X.Y.Z` with `uvx` straight from PyPI and
