@@ -90,13 +90,19 @@ def _pr_title(command: str) -> str | None:
     return next(g for g in match.groups() if g is not None)
 
 
-def _pr_body(project: Path, command: str) -> str:
+def _pr_body(project: Path, command: str) -> str | None:
+    """The PR description, or None when its --body-file can't be read from here.
+
+    A path built from shell-local variables ("$DIR/body.md"), stdin ("-") or a
+    file that doesn't exist can't be resolved from the command text. Returning
+    None leaves the body to CI, rather than reporting every section as missing.
+    """
     match = re.search(r"""--body-file(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))""", command)
     if match:
-        path = Path(next(g for g in match.groups() if g is not None))
+        raw = next(g for g in match.groups() if g is not None)
+        path = Path(os.path.expandvars(raw)).expanduser()
         path = path if path.is_absolute() else project / path
-        if path.exists():
-            return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8") if path.is_file() else None
     return command  # inline --body or heredoc: the command text carries it
 
 
@@ -128,14 +134,18 @@ def run(payload: dict[str, Any]) -> list[str]:
         texts = [*docs.commit_messages(base), command]
         if pr:
             body = _pr_body(project, command)
-            texts.append(body)
+            if body is not None:
+                texts.append(body)
             if pr.group(1) == "create":
                 title = _pr_title(command)
                 if title is not None:
                     problems += [
                         f.render() for f in prose.check_pr_title(title) if f.severity == "error"
                     ]
-                problems += [f.render() for f in prose.check_pr_body(body) if f.severity == "error"]
+                if body is not None:
+                    problems += [
+                        f.render() for f in prose.check_pr_body(body) if f.severity == "error"
+                    ]
         problems += [p.message for p in docs.check(changed, texts)]
         problems += [
             f.render() for f in prose.lint_diff(prose.added_markdown_lines(base, cwd=project))

@@ -245,3 +245,35 @@ def test_hook_reads_pr_titles() -> None:
     assert hook._pr_title('gh pr create --title "fix(scan): x" --body-file b.md') == "fix(scan): x"
     assert hook._pr_title("gh pr create -t 'feat: y'") == "feat: y"
     assert hook._pr_title("gh pr create --fill") is None
+
+
+def test_hook_reads_a_pr_body_file(tmp_path: Path) -> None:
+    body = tmp_path / "body.md"
+    body.write_text("## Summary\n\nx\n", encoding="utf-8")
+    assert hook._pr_body(tmp_path, f'gh pr create --body-file "{body}"') == "## Summary\n\nx\n"
+    assert hook._pr_body(tmp_path, "gh pr create --body-file body.md") == "## Summary\n\nx\n"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'gh pr create --title "ci: x" --body-file "$UNSET_DIR_FOR_TEST/pr.md"',
+        "gh pr create --title 'ci: x' --body-file missing.md",
+        "gh pr create --title 'ci: x' --body-file -",
+    ],
+)
+def test_hook_leaves_an_unreadable_pr_body_to_ci(
+    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A body file the hook can't resolve must not be reported as a body with
+    # every required section missing. Git is stubbed: CI checkouts are shallow.
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("UNSET_DIR_FOR_TEST", raising=False)
+    monkeypatch.setattr(hook, "_git", lambda *_args: "")
+    monkeypatch.setattr(docs, "commit_messages", lambda _base: [])
+    monkeypatch.setattr(prose, "added_markdown_lines", lambda _base, cwd=None: {})
+    modules = {"check_docs_sync": docs, "check_prose": prose}
+    monkeypatch.setattr(hook, "_load", lambda _project, name: modules[name])
+
+    assert hook._pr_body(tmp_path, command) is None
+    assert hook.run({"tool_input": {"command": command}, "cwd": str(tmp_path)}) == []
