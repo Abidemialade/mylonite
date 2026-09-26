@@ -13,6 +13,12 @@ validation report are still in `--out`).
 
 Budget exhaustion always exits `3`, whichever layer of the run observes it first.
 
+**No LLM credential configured?** `scan`, `gate`, `validate` and `ablate` all check
+every model they will call before doing any work and exit `2` naming the missing
+environment variable. The message also offers a way past it that needs no key at
+all: `--model ollama_chat/llama3.2:3b` with [Ollama running](self-hosted-models.md)
+locally, or, on `scan` only, `--dry-run` to preview the run with no LLM calls.
+
 ---
 
 ## `demo` — the reference-app playground
