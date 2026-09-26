@@ -37,7 +37,7 @@ from rich.console import Console
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
-from mylonite._cli_io import console_print, echo, echo_err, echo_exc
+from mylonite._cli_io import console_print, echo, echo_err, echo_exc, missing_target_file_message
 from mylonite._paths import safe_slug
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.exit_codes import (
@@ -735,17 +735,38 @@ def _parse_mcp_target(target: str) -> tuple[str, str | None]:
     return family, scope
 
 
-def _missing_authorize(msg: str, target_file: Path | None) -> NoReturn:
+def _missing_authorize(
+    msg: str, target_file: Path | None, *, inline_scope: str | None = None
+) -> NoReturn:
     """Report a missing ``--authorize`` for a custom target, naming the value it needs.
 
-    The hint is omitted when there is no readable target file (``mcp:custom``
-    inline flags, or a file that does not load), and the exit code is the same
-    either way.
-    """
-    from mylonite._authz import authorize_hint
+    Three cases:
 
-    hint = authorize_hint(target_file) if target_file is not None else None
-    echo_err(f"{msg} {hint}." if hint else msg)
+    - ``target_file`` does not exist: there is nothing to derive a value from,
+      so the fix is ``--scaffold`` (0.10.2 / M02), not a guessed value.
+    - ``target_file`` exists and loads: the hint names the exact required
+      value, via :func:`mylonite._authz.authorize_hint`.
+    - no ``target_file`` at all (``mcp:custom`` given inline): derive the
+      value the same way :func:`_target_file_from_flags` builds the spec that
+      will later be checked — ``inline_scope`` (the ``--scope`` flag) if
+      given, else the literal family name ``"custom"``. ``gate`` has no
+      ``--scope`` flag for this route, so it always falls back to ``"custom"``.
+
+    A target file that exists but fails to load (bad YAML, wrong shape) is
+    reported with no hint at all: it is not missing, so ``--scaffold`` is not
+    the fix, and there is nothing to derive a value from either.
+    """
+    from mylonite._authz import authorize_fix, authorize_hint
+
+    if target_file is not None:
+        if not target_file.exists():
+            echo_err(f"{msg} {missing_target_file_message(target_file)}")
+            raise typer.Exit(code=EXIT_CONFIG)
+        hint = authorize_hint(target_file)
+    else:
+        value = inline_scope.strip() if inline_scope and inline_scope.strip() else "custom"
+        hint = authorize_fix(value)
+    echo_err(f"{msg} {hint}" if hint else msg)
     raise typer.Exit(code=EXIT_CONFIG)
 
 
@@ -1270,7 +1291,9 @@ def scan(
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
             _missing_authorize(
-                "--authorize is required for custom targets. See SECURITY.md.", target_file
+                "--authorize is required for custom targets. See SECURITY.md.",
+                target_file,
+                inline_scope=scope,
             )
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file
@@ -1278,6 +1301,9 @@ def scan(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:  # YAML / validation errors → exit 2
+                if isinstance(exc, FileNotFoundError):
+                    echo_err(missing_target_file_message(target_file))
+                    raise typer.Exit(code=EXIT_CONFIG) from exc
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             # --weakness-class used to be a silent no-op alongside
@@ -1411,11 +1437,11 @@ def scan(
         report_target_id = target
     elif target.startswith("mcp:"):
         if not authorize:
-            from mylonite._authz import bundled_authorize_value
+            from mylonite._authz import authorize_fix, bundled_authorize_value
 
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                f"See SECURITY.md. pass --authorize {bundled_authorize_value(target)}."
+                f"See SECURITY.md. {authorize_fix(bundled_authorize_value(target))}"
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter = _build_adapter_for_mcp(target, authorize, effective_planner_model)
@@ -1896,6 +1922,9 @@ def _emit_generated_test(
             try:
                 build_target_spec(load_target_file(target_file))  # validate before copying
             except Exception as exc:
+                if isinstance(exc, FileNotFoundError):
+                    echo_err(missing_target_file_message(target_file))
+                    raise typer.Exit(code=EXIT_CONFIG) from exc
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             if validated_target_files is not None:
@@ -2104,6 +2133,9 @@ def generate(
         try:
             build_target_spec(load_target_file(target_file))
         except Exception as exc:
+            if isinstance(exc, FileNotFoundError):
+                echo_err(missing_target_file_message(target_file))
+                raise typer.Exit(code=EXIT_CONFIG) from exc
             echo_exc(f"invalid --target-file {target_file}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         validated_target_files.add(target_file.resolve())
@@ -2198,6 +2230,9 @@ def _validate_custom(
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
+        if isinstance(exc, FileNotFoundError):
+            echo_err(missing_target_file_message(target_file))
+            raise typer.Exit(code=EXIT_CONFIG) from exc
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
@@ -2638,7 +2673,8 @@ def validate(
             "--authorize",
             help=(
                 "Must equal the target's scope, or its family when it declares no scope. "
-                "Asserts you own the target; see SECURITY.md."
+                "Asserts you own the target; see SECURITY.md. Not needed for a "
+                "reference:* target."
             ),
         ),
     ] = None,
@@ -3648,6 +3684,9 @@ def gate(
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:
+                if isinstance(exc, FileNotFoundError):
+                    echo_err(missing_target_file_message(target_file))
+                    raise typer.Exit(code=EXIT_CONFIG) from exc
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
             custom_spec = build_target_spec(tf)
@@ -3673,11 +3712,11 @@ def gate(
         routed_to = "reference"
     elif target.startswith("mcp:"):
         if not authorize:
-            from mylonite._authz import bundled_authorize_value
+            from mylonite._authz import authorize_fix, bundled_authorize_value
 
             echo_err(
                 f"--authorize is required for non-reference targets (got {target!r}). "
-                f"See SECURITY.md. pass --authorize {bundled_authorize_value(target)}."
+                f"See SECURITY.md. {authorize_fix(bundled_authorize_value(target))}"
             )
             raise typer.Exit(code=EXIT_CONFIG)
         adapter_factory = functools.partial(
@@ -4240,6 +4279,9 @@ def ablate(
         tf = load_target_file(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
+        if isinstance(exc, FileNotFoundError):
+            echo_err(missing_target_file_message(target_file))
+            raise typer.Exit(code=EXIT_CONFIG) from exc
         echo_exc(f"invalid --target-file {target_file}", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
@@ -4552,6 +4594,9 @@ def check(
             tf = load_target_file(target_file)
             spec = build_target_spec(tf)
         except Exception as exc:
+            if isinstance(exc, FileNotFoundError):
+                echo_err(missing_target_file_message(target_file))
+                raise typer.Exit(code=EXIT_CONFIG) from exc
             echo_exc(f"could not load {target_file}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
         target_registry.clear_runtime_targets()

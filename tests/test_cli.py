@@ -5233,13 +5233,78 @@ def test_scan_missing_authorize_falls_back_to_family(tmp_path: Path) -> None:
     assert "--authorize acme" in (result.stderr or result.output)
 
 
-def test_scan_missing_authorize_with_unreadable_file_keeps_plain_message(tmp_path: Path) -> None:
-    """A missing file gets no hint (Task 2 owns that case) and the same exit code."""
-    result = runner.invoke(app, ["scan", "--target-file", str(tmp_path / "nope.yaml")])
+def test_scan_missing_authorize_with_missing_file_suggests_scaffold(tmp_path: Path) -> None:
+    """A target file that does not exist gets the --scaffold fix, not a guessed value."""
+    missing = tmp_path / "nope.yaml"
+    result = runner.invoke(app, ["scan", "--target-file", str(missing)])
     assert result.exit_code == EXIT_CONFIG
     out = result.stderr or result.output
     assert "--authorize is required for custom targets. See SECURITY.md." in out
+    assert "--scaffold" in out and "nope.yaml" in out
     assert "pass --authorize" not in out
+
+
+def test_scan_missing_authorize_with_invalid_file_keeps_plain_message(tmp_path: Path) -> None:
+    """A target file that EXISTS but fails to load still gets no hint and no scaffold
+    pitch — it is not missing, so --scaffold is not the fix; the YAML itself is."""
+    bad = _custom_target(tmp_path, "not: [valid\n")
+    result = runner.invoke(app, ["scan", "--target-file", str(bad)])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--authorize is required for custom targets. See SECURITY.md." in out
+    assert "--scaffold" not in out
+    assert "pass --authorize" not in out
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["scan", "--target-file", "{p}", "--authorize", "x"],
+        ["scan", "--target-file", "{p}"],  # no --authorize: still names the fix
+        ["gate", "--target-file", "{p}", "--authorize", "x"],
+        ["check", "--target-file", "{p}"],
+    ],
+)
+def test_missing_target_file_suggests_scaffold(tmp_path: Path, argv: list[str]) -> None:
+    p = tmp_path / "missing.yaml"
+    result = runner.invoke(app, [a.format(p=p) for a in argv])
+    assert result.exit_code == EXIT_CONFIG
+    out = result.stderr or result.output
+    assert "--scaffold" in out and p.name in out
+
+
+def test_missing_target_file_message_names_the_file_and_the_fix(tmp_path: Path) -> None:
+    from mylonite._cli_io import missing_target_file_message
+
+    p = tmp_path / "app.yaml"
+    msg = missing_target_file_message(p)
+    assert "app.yaml" in msg
+    assert "target file not found" in msg
+    assert "--scaffold app.yaml" in msg
+    assert "--rest-url" in msg
+    assert "docs/target-file.md" in msg
+
+
+def test_scan_inline_mcp_custom_missing_authorize_prints_scope() -> None:
+    """`mcp:custom` given inline (no --target-file) derives the same value the
+    real check will require: --scope if given, else the literal family 'custom'."""
+    result = runner.invoke(app, ["scan", "mcp:custom", "--command", "python", "--scope", "my-app"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize my-app" in (result.stderr or result.output)
+
+
+def test_scan_inline_mcp_custom_missing_authorize_falls_back_to_custom() -> None:
+    result = runner.invoke(app, ["scan", "mcp:custom", "--command", "python"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize custom" in (result.stderr or result.output)
+
+
+def test_gate_inline_mcp_custom_missing_authorize_falls_back_to_custom() -> None:
+    """`gate` has no --scope flag for inline mcp:custom, so the hint is always
+    the literal family name -- unlike scan, which can derive a scope."""
+    result = runner.invoke(app, ["gate", "mcp:custom"])
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize custom" in (result.stderr or result.output)
 
 
 @pytest.mark.parametrize("cmd", ["gate", "ablate"])
@@ -5263,11 +5328,25 @@ def test_bundled_stateless_target_missing_authorize_prints_family() -> None:
     assert "--authorize fetch" in (result.stderr or result.output)
 
 
+_AUTHORIZE_HELP_BASE = (
+    "Must equal the target's scope, or its family when it declares no scope. "
+    "Asserts you own the target; see SECURITY.md."
+)
+
+
 def test_authorize_help_says_which_value_to_pass() -> None:
     root = typer.main.get_command(app)
-    for cmd in ("scan", "gate", "validate", "ablate"):
+    for cmd in ("scan", "gate", "ablate"):
         param = next(p for p in root.commands[cmd].params if p.name == "authorize")
-        assert param.help == (
-            "Must equal the target's scope, or its family when it declares no scope. "
-            "Asserts you own the target; see SECURITY.md."
-        ), cmd
+        assert param.help == _AUTHORIZE_HELP_BASE, cmd
+
+
+def test_validate_authorize_help_notes_reference_targets_need_none() -> None:
+    """validate is the one command reference:* targets can reach without
+    --authorize at all (0.10.2 / M02): its help says so, the others don't need
+    to (they gate every target, bundled or custom)."""
+    root = typer.main.get_command(app)
+    param = next(p for p in root.commands["validate"].params if p.name == "authorize")
+    assert param.help.startswith(_AUTHORIZE_HELP_BASE)
+    assert param.help != _AUTHORIZE_HELP_BASE
+    assert "reference:" in param.help
