@@ -165,13 +165,22 @@ never need a model at all, and `demo` replays recorded responses rather than cal
 
 ## Try it
 
-**No API key, one command:**
+**No API key, no install, one command** (needs [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uvx --python 3.12 --from "mylonite[demo]" mylonite demo
+```
+
+`--python 3.12` keeps uv off Python 3.14, which Mylonite does not support yet. CI runs
+this command on Linux and Windows in an 80-column terminal on every pull request.
+
+With the `[demo]` extra already installed (see [Install](#install)), the same demo is:
 
 ```bash
 mylonite demo
 ```
 
-That runs the comparison against the bundled practice app — deliberately insecure, runs
+Either way, that runs the comparison against the bundled practice app — deliberately insecure, runs
 in-process, opens no network ports — and prints what got through on the unguarded build
 next to what was stopped on the guarded one. Same attacks, two builds, different outcomes.
 **That contrast is the point of the tool.**
