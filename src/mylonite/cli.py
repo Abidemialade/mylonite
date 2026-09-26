@@ -2275,13 +2275,7 @@ def _validate_custom(
     reachable = _provider_preflight_direct(
         provider, model, timeout_s=iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S
     )
-    if not reachable:
-        echo_err(
-            "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-            "--model provider/modelname for another LiteLLM provider (e.g. "
-            "--model openai/gpt-4o).\n" + _LOCAL_MODEL_HINT
-        )
-        raise typer.Exit(code=EXIT_PROVIDER)
+    _exit_if_provider_unreachable(reachable)
 
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
@@ -2465,6 +2459,17 @@ def _render_recommendation_panel(rec: Any, console: Console | None = None) -> No
     for p in rec.prescriptions:
         ctl_table.add_row(p.tier, _safe(p.headline))
     console_print(console, ctl_table)
+
+
+def _exit_if_provider_unreachable(reachable: bool) -> None:
+    """Shared by both `validate` branches so this message can't drift."""
+    if reachable:
+        return
+    echo_err(
+        "no provider reachable — set ANTHROPIC_API_KEY, or pass --model provider/modelname "
+        "for another LiteLLM provider (e.g. --model openai/gpt-4o).\n" + _LOCAL_MODEL_HINT
+    )
+    raise typer.Exit(code=EXIT_PROVIDER)
 
 
 def _provider_preflight_direct(provider: str, model: str, *, timeout_s: float) -> bool:
@@ -2860,13 +2865,7 @@ def validate(
         except (ModuleNotFoundError, ImportError) as exc:
             _exit_if_missing_kitchen_sink(exc)
             raise
-        if not reachable:
-            echo_err(
-                "no provider reachable — set ANTHROPIC_API_KEY, or pass "
-                "--model provider/modelname for another LiteLLM provider (e.g. "
-                "--model openai/gpt-4o)."
-            )
-            raise typer.Exit(code=EXIT_PROVIDER)
+        _exit_if_provider_unreachable(reachable)
 
         # DCR-0007: `fast` was previously accepted by this command but silently
         # dropped on the reference branch — a reference-target `--fast` was a

@@ -18,6 +18,9 @@ every model they will call before doing any work and exit `2` naming the missing
 environment variable. The message also offers a way past it that needs no key at
 all: `--model ollama_chat/llama3.2:3b` with [Ollama running](self-hosted-models.md)
 locally, or, on `scan` only, `--dry-run` to preview the run with no LLM calls.
+`validate`'s exit `4` (a credential IS set but the provider can't be reached, on
+either the custom-target or the reference-target path) points at the same
+local model.
 
 ---
 
