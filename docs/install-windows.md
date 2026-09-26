@@ -3,22 +3,21 @@
 Mylonite runs on Windows, but a few platform defaults bite. This page collects
 the friction points so a Windows install takes minutes, not half an hour.
 
-## 1. Pick a supported Python (3.11–3.13, not 3.14)
+## 1. Pick a supported Python (3.11–3.14)
 
-Mylonite requires `>=3.11,<3.14`. The upper bound tracks **litellm**, which has
-no installable wheel on Python 3.14 yet — so if your system default is 3.14 the
-install fails with a confusing resolver error.
+Mylonite requires `>=3.11,<3.15`. The upper bound tracks **litellm**, which
+declares `<3.15`, so on a newer Python the install fails with a resolver error.
 
-Install Python 3.12 (or 3.11/3.13) and invoke it explicitly via the `py`
-launcher:
+If you have more than one Python installed, pick a supported one explicitly
+with the `py` launcher:
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python --version   # 3.12.x
+python --version   # 3.14.x
 ```
 
-All commands below assume this 3.12 venv is active.
+All commands below assume this venv is active.
 
 ## 2. Clone with the schannel TLS backend (corporate proxy)
 

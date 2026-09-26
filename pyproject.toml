@@ -11,11 +11,11 @@ name = "mylonite"
 dynamic = ["version"]
 description = "Open-source AI-layer security testing — probes your AI agent for weaknesses and writes a validated regression test for each one it finds, gating CI."
 readme = "README.md"
-# Upper bound tracks litellm: litellm>=1.83.8 declares Requires-Python
-# >=3.10,<3.14, so there is no installable litellm on 3.14. Declaring the
+# Upper bound tracks litellm's own: litellm>=1.93.0 declares Requires-Python
+# >=3.10,<3.15, so there is no installable litellm on 3.15 yet. Declaring the
 # bound turns a confusing resolver error into a clear "unsupported Python".
-# Revisit when litellm supports 3.14 (see the litellm pin below).
-requires-python = ">=3.11,<3.14"
+# Raise it when litellm raises its cap (see the litellm pin below).
+requires-python = ">=3.11,<3.15"
 license = { file = "LICENSE" }
 authors = [
     { name = "Abidemi Alade", email = "hello.mylonite@gmail.com" },
@@ -44,6 +44,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
@@ -52,7 +53,7 @@ dependencies = [
     "typer>=0.12",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "litellm>=1.83.10",  # >=1.83.10 fixes CVE-2026-40217; caps Python <3.14 (see requires-python)
+    "litellm>=1.83.10",  # >=1.83.10 fixes CVE-2026-40217; on 3.14 the resolver needs >=1.93.0 (declares <3.15)
     "jsonschema>=4.22",
     # Rescues non-strict JSON (trailing commas, single quotes, Python literals)
     # that non-Claude / local models emit — fallback after strict parsing.

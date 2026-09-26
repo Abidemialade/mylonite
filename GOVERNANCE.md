@@ -24,6 +24,7 @@ enforced server-side rather than by a workflow.
 It requires: one approving review, code-owner review, stale-review dismissal on
 push, approval of the last push, resolved conversations, linear history, and the
 `lint` / `typecheck` / `test (3.11–3.13)` / `precommit` / `security` checks.
+CI also runs a `test (3.14)` leg; making it required is a ruleset change.
 `.github/CODEOWNERS` is a single catch-all, so code-owner review applies to every
 path.
 

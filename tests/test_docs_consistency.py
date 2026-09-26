@@ -323,9 +323,10 @@ def test_control_config_synthetic_accepts_a_control_list_not_a_bool() -> None:
 # --- README vs the code it describes ---------------------------------------
 
 #: The zero-install route. CI's `demo` job runs the same command from the
-#: local checkout (`--from ".[demo]"`) on Linux and Windows at 80 columns, so
-#: this string is what the README promises and the job is what proves it.
-UVX_DEMO = 'uvx --python 3.12 --from "mylonite[demo]" mylonite demo'
+#: local checkout (`--from ".[demo]"`) on Linux and Windows at 80 columns, on
+#: Python 3.14, so this string is what the README promises and the job is what
+#: proves it. No `--python`: every Python uv might pick (3.11-3.14) is supported.
+UVX_DEMO = 'uvx --from "mylonite[demo]" mylonite demo'
 
 
 def test_readme_has_uvx_one_liner() -> None:

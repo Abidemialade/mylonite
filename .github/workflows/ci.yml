@@ -27,8 +27,8 @@ concurrency:
 jobs:
   # Decides whether a pull request touches anything but docs. A docs-only PR
   # still runs the full suite once (3.12 on Linux), because many tests read the
-  # README, CHANGELOG and docs/; it skips the 3.11/3.13 legs and Windows, which
-  # a docs change cannot affect differently. Pushes to main and release runs
+  # README, CHANGELOG and docs/; it skips the other Python legs and Windows,
+  # which a docs change cannot affect differently. Pushes to main and release runs
   # (workflow_call) always run everything.
   #
   # Steps are skipped rather than whole jobs: a skipped MATRIX job reports one
@@ -169,7 +169,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     env:
       # 3.12 always runs; the other legs only when code changed (see `changes`).
       RUN_TESTS: ${{ needs.changes.outputs.code == 'true' || matrix.python-version == '3.12' }}
@@ -278,9 +278,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The newest supported Python, so the one-liner is proven where a new
+      # user is most likely to be. uvx runs on the interpreter on PATH.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       # uv comes from PyPI at a pinned version: the repository's Actions policy
       # allows only GitHub-owned actions, so there is no setup-uv step.
@@ -291,7 +293,6 @@ jobs:
         # builds `.[demo]` into a throwaway environment, and the `[demo]` extra's
         # `==` pin pulls the PUBLISHED mcp-kitchen-sink wheel -- the same
         # property the pip install step below relies on (see its comment).
-        # `--python 3.12` keeps uv off 3.14, which requires-python excludes.
         #
         # No provider key in the environment on purpose: if replay ever fell
         # through to a live call, this step must fail rather than quietly spend.
@@ -313,7 +314,7 @@ jobs:
           COLUMNS: "80"
         run: |
           set -o pipefail
-          uvx --python 3.12 --from ".[demo]" mylonite demo | tee demo-output.txt
+          uvx --from ".[demo]" mylonite demo | tee demo-output.txt
       - name: The vulnerable twin must actually find something
         # Exit code alone is not enough. The staleness guard detects fixture
         # MISSES, not SILENCE: if drift ever made the vulnerable variant issue
