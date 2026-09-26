@@ -139,8 +139,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           pip install -e ./reference_targets/mcp_kitchen_sink
+      # Parallel across the runner's cores; `worksteal` rebalances the few slow
+      # tests (each starts a fresh gate run) instead of queueing them on one
+      # worker. Coverage is measured on the 3.12 leg only, the one that uploads it.
       - name: Pytest
-        run: pytest --cov=mylonite --cov-report=xml --cov-report=term-missing
+        if: matrix.python-version == '3.12'
+        run: pytest -n auto --dist worksteal --cov=mylonite --cov-report=xml --cov-report=term-missing
+      - name: Pytest
+        if: matrix.python-version != '3.12'
+        run: pytest -n auto --dist worksteal
       - name: Precision/recall corpus (differential oracle)
         # Measures the oracle's FP/FN against the seeded kitchen-sink twins
         # (offline, no LLM). The asserted numbers live in tests/corpus; this
@@ -175,7 +182,7 @@ jobs:
           pip install -e ".[dev]"
           pip install -e ./reference_targets/mcp_kitchen_sink
       - name: Pytest
-        run: pytest
+        run: pytest -n auto --dist worksteal
 
   # The zero-key on-ramp, exercised unskipped on every PR.
   #
