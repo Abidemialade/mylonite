@@ -37,8 +37,12 @@ Run the local quality gates the same way CI does:
 ruff check .
 ruff format --check .
 mypy src
-pytest --cov=mylonite
+pytest -n auto --dist worksteal --cov=mylonite
 ```
+
+`-n auto` runs the suite across your CPU cores (it takes about a third of the
+serial time). Plain `pytest` still works, and is easier to read when you are
+debugging one failing test.
 
 `pre-commit run --all-files` runs all of the above plus file hygiene.
 

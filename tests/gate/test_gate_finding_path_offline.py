@@ -106,10 +106,14 @@ class _RecordingPrFn:
         return SimpleNamespace(opened=False, branch=None)
 
 
-@pytest.fixture
-def gate_run(tmp_path: Path) -> tuple[Any, Path, _RecordingPrFn]:
-    """Run the real gate finding path once, offline, into ``tmp_path``."""
-    out_dir = tmp_path / "gate"
+@pytest.fixture(scope="module")
+def gate_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[Any, Path, _RecordingPrFn]:
+    """Run the real gate finding path once, offline, and share it.
+
+    Module-scoped because the run takes about 9 s and every test below only
+    reads its result and output directory; none of them writes to it.
+    """
+    out_dir = tmp_path_factory.mktemp("gate-finding-path") / "gate"
     open_pr_fn = _RecordingPrFn()
     meta = _differential_meta()
     exploit = _committed_exploit()

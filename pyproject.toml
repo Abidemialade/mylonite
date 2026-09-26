@@ -101,6 +101,8 @@ dev = [
     # list to avoid a duplicate/drift-prone pin.
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",
+    # Parallel test runs (`pytest -n auto`); CI uses it to keep PR checks short.
+    "pytest-xdist>=3.6",
     "pre-commit>=3.7",
     "types-PyYAML>=6.0",
     "types-jsonschema>=4.22",
