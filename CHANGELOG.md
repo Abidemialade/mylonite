@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The practice app, `mcp-kitchen-sink`, moves to 0.2.1 and declares Python
+  3.14.** 0.2.1 changes package metadata only: the tools, their descriptions and
+  schemas are identical to 0.2.0, so the demo's recorded fixtures still match.
+  It has installed on 3.14 all along (its `requires-python` has no upper bound);
+  the classifier now says so on PyPI.
+
 ## [0.10.2] - 2026-09-26
 
 No behaviour change for existing setups: exit codes, flag defaults and the order
