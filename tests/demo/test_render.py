@@ -623,8 +623,15 @@ def _shipped_shape() -> tuple[ScanResult, ScanResult]:
 
 def _render_at(width: int, *, mode: str = _RECORDED_MODE) -> str:
     vulnerable, guarded = _shipped_shape()
+    # legacy_windows=False: on Windows, Rich otherwise swaps the table's heavy
+    # header box for a light one, so Windows and Linux would draw different borders.
     console = Console(
-        file=io.StringIO(), width=width, record=True, force_terminal=False, color_system=None
+        file=io.StringIO(),
+        width=width,
+        record=True,
+        force_terminal=False,
+        color_system=None,
+        legacy_windows=False,
     )
     render_demo(vulnerable, guarded, mode=mode, elapsed_s=0.4, console=console)
     return console.export_text()
@@ -716,8 +723,15 @@ def test_the_real_replay_label_puts_its_provenance_on_its_own_line(tmp_path, mon
 
 def _full_table_width() -> int:
     """Width of the one-line table, read off a render with room to spare."""
-    top = next(line for line in _render_at(240).splitlines() if line.startswith("┌──────────┬"))
-    return len(top)
+    # The table's top border: a line that opens with a box corner and carries a
+    # column junction (the safety panel above it has corners but no junctions).
+    # Any box style matches, so the check holds whichever one Rich draws.
+    top = next(
+        line
+        for line in _render_at(240).splitlines()
+        if line[:1] in "┌┏╭╔+" and any(j in line for j in "┬┳╦+")
+    )
+    return len(top.rstrip())
 
 
 @pytest.mark.parametrize("offset", [0, -1, None])
