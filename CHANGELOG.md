@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Exit codes, flags and scan outcomes are unchanged.
+## [0.10.3] - 2026-09-27
+
+Scanning an MCP server you build and control no longer stalls on an unexplained
+error: Mylonite names the credential variables a target file needs, and a
+remote 401/403 names the host and the fix. Target-file copies now also mask a
+credential in a URL's query string. Exit codes, flags and scan outcomes are
+unchanged.
 
 ### Fixed
 
@@ -4300,7 +4306,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/Abidemialade/mylonite/compare/v0.9.0...v0.10.0
