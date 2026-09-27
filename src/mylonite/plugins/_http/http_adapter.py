@@ -379,17 +379,19 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
                     "you scan. See docs/http-agent.md."
                 )
             if response.status_code >= 400:
+                # Host only, for the same reason as the 401/403 branch above:
+                # this message reaches the console and scan_report.json.
                 raise RuntimeError(
-                    f"HTTP agent at {req.url} returned {response.status_code} "
+                    f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
                     f"(method {req.method.upper()}). Check the url/method/body in the target "
-                    "file's request block — the attack payload never reached the agent."
+                    "file's request block - the attack payload never reached the agent."
                 )
             async for chunk in response.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_RESPONSE_BYTES:
                     raise RuntimeError(
-                        f"HTTP agent at {req.url} returned a response over the "
-                        f"{_MAX_RESPONSE_BYTES}-byte cap — refusing to buffer it "
+                        f"HTTP agent at {_host_only(req.url)} returned a response over the "
+                        f"{_MAX_RESPONSE_BYTES}-byte cap - refusing to buffer it "
                         "wholesale into memory (check the endpoint isn't streaming "
                         "an unbounded body)."
                     )
@@ -398,7 +400,7 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         reply = _extract_reply(raw_text, req.response_path)
         if not reply.strip():
             raise RuntimeError(
-                f"HTTP agent at {req.url} returned a 200 with an empty/blank reply — check "
+                f"HTTP agent at {_host_only(req.url)} returned a 200 with an empty/blank reply - check "
                 "the url and response_path; the attack payload may not have reached the agent "
                 "(an empty reply must not be judged as a clean scan)."
             )

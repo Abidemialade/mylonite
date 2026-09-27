@@ -7,6 +7,8 @@ into the adapter (its ``_ensure_client`` seam returns the pre-set ``_client``).
 from __future__ import annotations
 
 import asyncio
+import http.server
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -344,6 +346,112 @@ def test_invoke_401_prints_host_only_not_the_urls_query_string_secret() -> None:
     assert "SECRET" not in message
     assert "key=" not in message
     assert "?" not in message  # no query string at all
+
+
+class _ServerErrorHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.send_response(500)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"boom")
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass  # keep test output quiet
+
+
+def test_invoke_500_prints_host_only_not_the_urls_query_string_secret() -> None:
+    """The generic >= 400 branch must not print `req.url` verbatim either: a
+    key in the query string would reach the console and scan_report.json."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ServerErrorHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = target_registry.RequestSpec(
+            url=f"http://127.0.0.1:{server.server_port}/chat?key=SECRET",
+            body='{"prompt": "{prompt}"}',
+            response_path="reply",
+        )
+        spec = target_registry.TargetSpec(
+            family="queryagent500",
+            command="",
+            args_template=(),
+            scope_validator=lambda _s: None,
+            default_system_prompt="You are a support agent.",
+            requires_scope=False,
+            weakness_classes=("W2",),
+            transport="rest",
+            request=request,
+        )
+        target_registry.clear_runtime_targets()
+        target_registry.register_target(spec)
+
+        adapter = HTTPAgentAdapter(family="queryagent500")
+        adapter._client = httpx.AsyncClient(trust_env=False)
+        try:
+            with pytest.raises(RuntimeError, match="returned 500") as excinfo:
+                asyncio.run(adapter.invoke(_payload("hi")))
+        finally:
+            asyncio.run(adapter.close())
+            target_registry.clear_runtime_targets()
+    finally:
+        server.shutdown()
+        server.server_close()
+    message = str(excinfo.value)
+    assert "127.0.0.1" in message  # host present
+    assert "SECRET" not in message
+    assert "key=" not in message
+    assert "?" not in message  # no query string at all
+    assert message.isascii()
+
+
+@pytest.mark.parametrize(
+    ("reply", "match"),
+    [("x" * 1000, "byte cap"), ("   ", "empty/blank reply")],
+    ids=["oversized", "blank"],
+)
+def test_invoke_other_errors_print_host_only(
+    monkeypatch: pytest.MonkeyPatch, reply: str, match: str
+) -> None:
+    """The byte-cap and empty-reply messages share the same exposure as the
+    status branches: never print the url's query string."""
+    from mylonite.plugins._http import http_adapter
+
+    monkeypatch.setattr(http_adapter, "_MAX_RESPONSE_BYTES", 100)
+    request = target_registry.RequestSpec(
+        url="https://agent.example/chat?key=SECRET",
+        body='{"prompt": "{prompt}"}',
+        response_path="reply",
+    )
+    spec = target_registry.TargetSpec(
+        family="queryagentbody",
+        command="",
+        args_template=(),
+        scope_validator=lambda _s: None,
+        default_system_prompt="You are a support agent.",
+        requires_scope=False,
+        weakness_classes=("W2",),
+        transport="rest",
+        request=request,
+    )
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"reply": reply})
+
+    adapter = HTTPAgentAdapter(family="queryagentbody")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match=match) as excinfo:
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+        target_registry.clear_runtime_targets()
+    message = str(excinfo.value)
+    assert "agent.example" in message
+    assert "SECRET" not in message
+    assert "key=" not in message
+    assert "?" not in message
 
 
 def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:
