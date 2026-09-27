@@ -335,7 +335,6 @@ filterwarnings = [
     # still fail the build.
     "ignore:unclosed <memoryobjectreceivestream:ResourceWarning",
 ]
-# everywhere else.
 
 [tool.coverage.run]
 source = ["mylonite"]

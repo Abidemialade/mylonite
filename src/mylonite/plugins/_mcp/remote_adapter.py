@@ -212,6 +212,11 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
         # handshake would have completed just fine.
         try:
             return await super().describe()
+        except ImportError:
+            # A missing dependency is a configuration error; the engine
+            # re-raises it on purpose, so it must not become
+            # AdapterDescribeFailed here.
+            raise
         except Exception as exc:
             host = _host_only(self._spec.url)
             # Real local servers (both sse and http/streamable-HTTP) DO
