@@ -413,7 +413,7 @@ class ScanOutcome:
         return self.abort is None and self.coverage is Coverage.EXERCISED and self.findings == 0
 
     @classmethod
-    def from_report(cls, report: ScanReport) -> ScanOutcome:
+    def from_report(cls, report: ScanReport, *, abort_detail: str | None = None) -> ScanOutcome:
         """The ONE place that turns a ``ScanReport`` into a verdict.
 
         Raises :class:`ValueError` with an actionable message if
@@ -423,6 +423,14 @@ class ScanOutcome:
         future typo. A bare ``ValueError: 'x' is not a valid AbortReason``
         would be undiagnosable once ``ScanReport``s are routinely loaded back
         off disk; naming the field and the known-good values here is not.
+
+        ``abort_detail`` — pass ``ScanResult.abort_detail`` when the caller has
+        one (a live scan) — replaces the generic per-``abort``-reason text
+        with a target-specific, already-safe explanation (e.g. a remote
+        target's host and HTTP status; see ``AdapterDescribeFailed``). Omit
+        it (the default) for a ``ScanReport`` reconstructed from disk, which
+        never carries it — the generic text is the best available there,
+        exactly as before this parameter existed.
         """
         if report.aborted:
             try:
@@ -492,7 +500,7 @@ class ScanOutcome:
 
         if abort is not None:
             exit_code = _EXIT_CODE_BY_ABORT[abort]
-            operator_message = _OPERATOR_MESSAGE_BY_ABORT[abort]
+            operator_message = abort_detail or _OPERATOR_MESSAGE_BY_ABORT[abort]
         elif incomplete and report.findings_count == 0:
             # No formal AbortReason was recorded, yet coverage never reached
             # EXERCISED (PARTIAL or NOT_EXERCISED) and nothing was found. Must

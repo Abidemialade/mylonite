@@ -39,7 +39,7 @@ from mylonite.scan._llm import (
     llm_scope,
     seed_scope,
 )
-from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.coverage import NO_VERDICT_EVIDENCE_KEYS, AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
@@ -205,6 +205,15 @@ class ScanResult:
     #: ScanReport's schema. ``None`` when the result was reconstructed from a
     #: persisted ``scan_report.json``: an unknown spend is not a zero spend.
     llm_spend: LLMSpend | None = None
+    #: An operator-ready, pre-redacted explanation of a ``describe_failed``
+    #: abort, when the target adapter raised ``AdapterDescribeFailed`` (see
+    #: that class's docstring). ``None`` for every other abort reason, for a
+    #: describe() failure the adapter didn't specifically explain, and for a
+    #: result reconstructed from a persisted ``scan_report.json`` — like
+    #: ``descriptor``/``llm_spend``, this is NOT part of ScanReport's schema,
+    #: so it costs no compat event. Consumed by ``ScanOutcome.from_report``'s
+    #: ``abort_detail`` kwarg to replace the generic per-abort-reason text.
+    abort_detail: str | None = None
 
 
 @dataclass
@@ -334,6 +343,13 @@ class ScanEngine:
                 # handler this way.
                 logger.error("ScanEngine: adapter.describe() raised: %s", type(exc).__name__)
                 aborted = AbortReason.DESCRIBE_FAILED
+                # A target adapter that already produced an operator-ready,
+                # pre-redacted explanation (host + status + fix, for a remote
+                # target — see MCPRemoteAdapter.describe()) is used verbatim;
+                # any OTHER exception type keeps today's generic message,
+                # unchanged. See AdapterDescribeFailed's docstring for why
+                # this can't just be `str(exc)` for every adapter.
+                abort_detail = str(exc) if isinstance(exc, AdapterDescribeFailed) else None
                 return self._finalize(
                     attempts,
                     exploits,
@@ -341,6 +357,7 @@ class ScanEngine:
                     time.monotonic() - start,
                     module_ids,
                     llm_spend=counter.spend(),
+                    abort_detail=abort_detail,
                 )
 
             # Resolve seeds against the seeds THIS RUN actually has, not the
@@ -550,6 +567,7 @@ class ScanEngine:
         fallback_breakdown: dict[str, int] | None = None,
         descriptor: TargetDescriptor | None = None,
         llm_spend: LLMSpend | None = None,
+        abort_detail: str | None = None,
     ) -> ScanResult:
         report = ScanReport(
             target_id=self._config.target_id,
@@ -570,6 +588,7 @@ class ScanEngine:
             exploits=self._stamp_exec_context(exploits),
             descriptor=descriptor,
             llm_spend=llm_spend,
+            abort_detail=abort_detail,
         )
 
     def _stamp_exec_context(self, exploits: list[ExploitRecord]) -> list[ExploitRecord]:

@@ -1598,7 +1598,7 @@ def scan(
     # verbatim from this exact block.
     from mylonite.scan.coverage import ScanOutcome
 
-    outcome = ScanOutcome.from_report(result.report)
+    outcome = ScanOutcome.from_report(result.report, abort_detail=result.abort_detail)
     if outcome.operator_message:
         echo_err(outcome.operator_message)
     raise typer.Exit(code=outcome.exit_code)
@@ -3835,7 +3835,7 @@ def gate(
         # The typed verdict for "did this scan actually run" (A1 fix) — carried
         # alongside the exploits so run_gate can tell a genuine clean scan apart
         # from one that never meaningfully ran (e.g. provider_unreachable).
-        outcome = ScanOutcome.from_report(result.report)
+        outcome = ScanOutcome.from_report(result.report, abort_detail=result.abort_detail)
         # Enrich compliance (derive NIST) once so both the emitted test and the PR
         # carry it.
         exploits = [_map_compliance(ex) for ex in result.exploits]

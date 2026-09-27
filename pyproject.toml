@@ -280,6 +280,18 @@ python_files = ["test_*.py"]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:litellm.*",
+    # The installed mcp SDK's `streamablehttp_client` (the name
+    # `remote_adapter._open_remote_session` calls for `transport: http`) emits
+    # this on every real call, pointing at a same-package rename
+    # (`streamable_http_client`) -- migrating is a separate, larger change
+    # than this task's scope (the new name wants an `httpx.AsyncClient`
+    # instead of `headers=`). Matched on the message, not the module: the
+    # `@deprecated` decorator raises it from inside `contextlib`, not from
+    # `mcp.client.streamable_http`, so a module-scoped filter never matches
+    # it. Only test_remote_adapter.py's real-server tests exercise this call
+    # for real (existing tests stub `_open_remote_session` entirely), so this
+    # was never visible under `filterwarnings=error` before.
+    "ignore:Use .streamable_http_client. instead\\.:DeprecationWarning",
     # Unclosed-socket ResourceWarning from the third-party async/subprocess stack.
     #
     # Symptom: an intermittent, order-dependent failure in which whichever test
@@ -300,6 +312,16 @@ filterwarnings = [
     # genuine unclosed resource introduced by this project still fails the build.
     "ignore:unclosed <socket:ResourceWarning",
     "ignore:unclosed event loop:ResourceWarning",
+    # Same "not ours to close" shape as the two entries above, from the same
+    # third-party async stack: the mcp SDK's sse_client/streamablehttp_client
+    # open an anyio memory-object stream pair as part of their OWN task
+    # group's setup, and when that setup itself fails (e.g. the peer rejects
+    # the connection with a 401/403 before the client ever gets a `streams`
+    # tuple to close), anyio's stream finalizer can still warn on garbage
+    # collection. Only test_remote_adapter.py's real-401/403-server tests
+    # exercise this failure-during-connect path for real, so it was never
+    # visible under `filterwarnings=error` before.
+    "ignore:unclosed <memoryobjectreceivestream:ResourceWarning",
 ]
 
 [tool.coverage.run]

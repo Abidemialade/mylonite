@@ -37,6 +37,27 @@ class AdapterInvocationSkipped(RuntimeError):
         self.attempt_metadata = attempt_metadata or {}
 
 
+class AdapterDescribeFailed(RuntimeError):
+    """Raised by ``TargetAdapter.describe()`` with an operator-ready message.
+
+    A transport that already knows enough to explain WHY describing the
+    target failed — a rejected remote connection's host and HTTP status, for
+    example — raises this instead of letting the raw underlying exception
+    (which can embed a full URL with a query string, or a launch command)
+    reach the operator unfiltered. ScanEngine uses this exception's message
+    verbatim as the abort detail shown to the operator; any OTHER exception
+    type falls back to the existing generic "could not describe the target"
+    text, unchanged (see ``ScanEngine.run()``).
+
+    The raising adapter is responsible for the message being safe to print
+    as-is: host only, never a header value, never a full URL with a query
+    string.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
 class SeedArmUnavailable(RuntimeError):
     """Raised by a TargetAdapter when a seed's required setup arm cannot be planted.
 

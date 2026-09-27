@@ -96,7 +96,7 @@ family: my-remote-app
 transport: sse                 # stdio (default) | sse | http (streamable-HTTP)
 url: https://app.example.com/mcp
 headers:                       # optional; may carry auth
-  Authorization: Bearer my-token
+  Authorization: Bearer ${MY_TOKEN}
 weakness_classes: [W2, W4]
 seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 ```
@@ -104,6 +104,16 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 - `url` is required for `sse`/`http` and rejected for `stdio`.
 - `headers` are passed to the transport but **never logged and never shown** in the target
   descriptor (only the host appears). A target file keeps tokens out of shell history.
+- Reference the token with `${VAR}`, as above, and export it before you scan
+  (`export MY_TOKEN='...'` / `$env:MY_TOKEN = '...'`) — the same `${VAR}` mechanism the REST
+  adapter's `request.headers` uses (see [`docs/http-agent.md`](http-agent.md)). Mylonite
+  expands it from your shell's environment and never writes the literal value to the file.
+- If the server rejects the request with 401 or 403, `scan` names the host and the status
+  and points at this section — for example: `the server at app.example.com rejected the
+  request (401). Set the token in headers: in the target file, e.g. Authorization: Bearer
+  ${MY_TOKEN}, and export MY_TOKEN before you scan.` See
+  [Known limitations](limitations.md) for what this does not (yet) cover — a static token
+  only, no OAuth sign-in.
 - `command`/`args`/`env` and the server-layer `vulnerable_launch`/`control_env` toggles do
   not apply to remote targets and are ignored.
 - Everything else (`seed_arm`, `effect_probe`, `weakness_classes`, `control_config`) works
