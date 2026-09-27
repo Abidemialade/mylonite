@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the classifier now says so on PyPI. `pip install "mylonite[demo]"` and the
   `uvx` one-liner now install 0.2.1.
 
+- **`docs/limitations.md` now states what Mylonite supports today, up front.**
+  MCP servers you build and control, over stdio or remote (`sse`/`http`) with a
+  static token from `headers:`. OAuth sign-in servers and servers behind an
+  enterprise gateway are not supported yet; both are on the roadmap. A new
+  wiring caveat says how to confirm a target file's `seed_arm` and
+  `effect_probe` are wired to the right tools before trusting a clean result.
+  See [Known limitations](docs/limitations.md).
+
 ### Fixed
 
 - **A target file that holds secrets now tells you which variables to set.**
