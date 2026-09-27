@@ -357,6 +357,7 @@ async def test_describe_names_the_status_and_the_fix_on_a_real_401_403_server(
         assert "token=" not in message
     finally:
         server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.parametrize("transport", ["sse", "http"])
@@ -384,6 +385,7 @@ async def test_attempt_level_401_is_not_classified_as_a_planner_failure(
         assert "token=" not in reason
     finally:
         server.shutdown()
+        server.server_close()
 
 
 async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow() -> None:
@@ -421,6 +423,7 @@ async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow
         assert "headers" in message
     finally:
         server.shutdown()
+        server.server_close()
 
 
 async def test_describe_success_sends_no_extra_request() -> None:
@@ -492,6 +495,7 @@ async def test_preflight_auth_status_does_not_wait_on_a_streaming_success_body()
         assert status is None  # 200 is not an auth rejection
     finally:
         server.shutdown()
+        server.server_close()
 
 
 def test_remote_classify_failure_recognises_a_401_inside_an_exception_group() -> None:
@@ -538,3 +542,24 @@ async def test_describe_falls_back_to_generic_message_when_no_status_anywhere() 
         assert "url and headers" in message  # the generic remote message
     finally:
         server.shutdown()
+        server.server_close()
+
+
+async def test_describe_lets_an_import_error_through_unwrapped() -> None:
+    """A missing dependency is a configuration error the engine re-raises on
+    purpose; describe() must not turn it into AdapterDescribeFailed."""
+    _register_remote("remote-import-error")
+    adapter = MCPRemoteAdapter(family="remote-import-error", scope=None)
+
+    async def _missing_dependency(*_a: Any, **_kw: Any) -> Any:
+        raise ImportError("no module named 'optional_dep'")
+        yield  # pragma: no cover - never reached; makes this an async generator
+
+    async def _no_preflight(*_a: Any, **_kw: Any) -> Any:
+        raise AssertionError("the preflight must not run for an ImportError")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(remote_adapter, "_open_remote_session", asynccontextmanager(_missing_dependency))
+        mp.setattr(adapter, "_preflight_auth_status", _no_preflight)
+        with pytest.raises(ImportError, match="optional_dep"):
+            await adapter.describe()
