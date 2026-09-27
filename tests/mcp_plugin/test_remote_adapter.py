@@ -320,14 +320,30 @@ def _register_remote_at(port: int, *, transport: str, family: str, path: str = "
 async def test_describe_names_the_status_and_the_fix_on_a_real_401_403_server(
     transport: str, status: int
 ) -> None:
+    """The real handshake's own ExceptionGroup walk finds this status
+    directly (confirmed against a real server for both transports) — the
+    preflight must never even run here. Proven by making
+    ``_preflight_auth_status`` itself raise if ``describe()`` calls it (NOT
+    by mocking ``httpx.AsyncClient`` globally — the mcp SDK's own
+    sse_client/streamablehttp_client construct their real connection through
+    the SAME shared ``httpx`` module, so that mock would break the real
+    handshake this test needs to stay real)."""
     server = _run_rejecting_server(status)
     try:
         family = f"remote-auth-describe-{transport}-{status}"
         _register_remote_at(server.server_port, transport=transport, family=family)
         adapter = MCPRemoteAdapter(family=family, scope=None)
 
-        with pytest.raises(AdapterDescribeFailed) as excinfo:
-            await adapter.describe()
+        async def _no_preflight(*_a: Any, **_kw: Any) -> int | None:
+            raise AssertionError(
+                "the real handshake's own error already carried the status; "
+                "the preflight must not run"
+            )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(MCPRemoteAdapter, "_preflight_auth_status", _no_preflight)
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
 
         message = str(excinfo.value)
         assert f"127.0.0.1:{server.server_port}" in message  # host, named
@@ -374,10 +390,13 @@ async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow
     """Required behaviour #4: when the real SDK connection fails WITHOUT
     surfacing a recoverable HTTP status (simulated here — the mocked
     ``_open_remote_session`` raises a bare, unrelated error, standing in for
-    a streamable-HTTP peer that just closes the connection), the standalone
-    authenticated preflight request must still catch the 401 and report it,
-    rather than falling through to the generic "adapter.describe() failed"
-    message."""
+    a streamable-HTTP peer that just closes the connection), ``describe()``
+    falls back to ONE preflight request and reports the 401 it gets, rather
+    than falling through to the generic "adapter.describe() failed"
+    message. The preflight runs here only because the real error's own
+    ExceptionGroup walk found nothing (see the sibling real-server test,
+    which asserts the preflight does NOT run when the real error already
+    carries the status)."""
     server = _run_rejecting_server(401)
     try:
         family = "remote-auth-preflight"
@@ -404,14 +423,26 @@ async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow
         server.shutdown()
 
 
-async def test_describe_preflight_is_silent_on_success() -> None:
-    """No preflight output on success: a non-401/403 preflight response must
-    not raise, log, or otherwise surface anything — describe() proceeds to
-    the real handshake exactly as before this feature existed."""
+async def test_describe_success_sends_no_extra_request() -> None:
+    """Fix round 1: the preflight moved to the failure path only. A
+    successful ``describe()`` (the common case — `scan`, `check`, auto-wire,
+    `--scaffold`) must send ZERO extra requests: an unconditional
+    pre-handshake preflight would have made an unrelated bare GET part of
+    every remote target's first contact, and could falsely abort a
+    POST-only / streamable-HTTP-only server that answers 403 to a plain GET
+    (an API-Gateway-style policy) even though the real handshake would have
+    completed fine. Proven the same way as the sibling test: making
+    ``_preflight_auth_status`` itself raise if ``describe()`` ever calls
+    it."""
     _register_remote()  # unroutable URL; the real handshake below is faked
     adapter = MCPRemoteAdapter(family="remote-app", scope=None)
+
+    async def _no_extra_request(*_a: Any, **_kw: Any) -> int | None:
+        raise AssertionError("a successful describe() must not run the preflight")
+
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(remote_adapter, "_open_remote_session", _fake_remote_open)
+        mp.setattr(MCPRemoteAdapter, "_preflight_auth_status", _no_extra_request)
         descriptor = await adapter.describe()
     assert descriptor.tools[0].name == "do_thing"
 
@@ -438,9 +469,11 @@ class _StreamingSuccessHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-async def test_describe_preflight_does_not_wait_on_a_streaming_success_body() -> None:
-    """The preflight against a real, actively-streaming 200 must return well
-    inside its own timeout budget, not block for the body's lifetime."""
+async def test_preflight_auth_status_does_not_wait_on_a_streaming_success_body() -> None:
+    """The preflight (now only reachable from describe()'s failure path, but
+    tested directly here) against a real, actively-streaming 200 must return
+    well inside its own timeout budget, not block for the body's lifetime,
+    and must report "not an auth rejection" (``None``)."""
     import time
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StreamingSuccessHandler)
@@ -452,10 +485,11 @@ async def test_describe_preflight_does_not_wait_on_a_streaming_success_body() ->
         adapter = MCPRemoteAdapter(family=family, scope=None)
 
         start = time.monotonic()
-        await asyncio.wait_for(adapter._preflight_auth_check(), timeout=3.0)
+        status = await asyncio.wait_for(adapter._preflight_auth_status(), timeout=3.0)
         elapsed = time.monotonic() - start
 
         assert elapsed < 3.0  # never actually reached the wait_for timeout
+        assert status is None  # 200 is not an auth rejection
     finally:
         server.shutdown()
 
@@ -471,3 +505,36 @@ def test_remote_classify_failure_recognises_a_401_inside_an_exception_group() ->
     inner = httpx.HTTPStatusError("401", request=response.request, response=response)
     wrapped = ExceptionGroup("unhandled errors in a TaskGroup", [inner])
     assert MCPRemoteAdapter._classify_failure(wrapped) == "launch_failure"
+
+
+async def test_describe_falls_back_to_generic_message_when_no_status_anywhere() -> None:
+    """Neither the real error (a bare, unrelated exception) nor the preflight
+    (a real server that answers 200, not 401/403) carries a status — the
+    generic url/headers message is the correct fallback, not a fabricated
+    auth message."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StreamingSuccessHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        family = "remote-no-status-anywhere"
+        _register_remote_at(server.server_port, transport="sse", family=family)
+        adapter = MCPRemoteAdapter(family=family, scope=None)
+
+        async def _swallowing_open_remote_session(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("connection closed")
+            yield  # pragma: no cover - never reached; makes this an async generator
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                remote_adapter,
+                "_open_remote_session",
+                asynccontextmanager(_swallowing_open_remote_session),
+            )
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
+
+        message = str(excinfo.value)
+        assert "rejected the request" not in message  # not the auth message
+        assert "url and headers" in message  # the generic remote message
+    finally:
+        server.shutdown()

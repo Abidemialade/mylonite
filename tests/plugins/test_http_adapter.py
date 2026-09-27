@@ -304,6 +304,48 @@ def test_invoke_403_also_names_request_headers() -> None:
         asyncio.run(adapter.close())
 
 
+def test_invoke_401_prints_host_only_not_the_urls_query_string_secret() -> None:
+    """Fix round 1: `request.url` can carry a secret as a query-string token
+    (a common shape for an API-key-in-the-URL provider) — the 401/403
+    message must print the host only, never `req.url` verbatim, same reason
+    the remote MCP adapter's descriptor is host-only."""
+    request = target_registry.RequestSpec(
+        url="https://agent.example/chat?key=SECRET",
+        body='{"prompt": "{prompt}"}',
+        response_path="reply",
+    )
+    spec = target_registry.TargetSpec(
+        family="queryagent",
+        command="",
+        args_template=(),
+        scope_validator=lambda _s: None,
+        default_system_prompt="You are a support agent.",
+        requires_scope=False,
+        weakness_classes=("W2",),
+        transport="rest",
+        request=request,
+    )
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(spec)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="unauthorized")
+
+    adapter = HTTPAgentAdapter(family="queryagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 401") as excinfo:
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+        target_registry.clear_runtime_targets()
+    message = str(excinfo.value)
+    assert "agent.example" in message  # host present
+    assert "SECRET" not in message
+    assert "key=" not in message
+    assert "?" not in message  # no query string at all
+
+
 def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:
     """A 4xx/5xx (misconfigured endpoint) must fail loud, not be judged as a reply."""
     _register_rest()

@@ -312,17 +312,30 @@ filterwarnings = [
     # genuine unclosed resource introduced by this project still fails the build.
     "ignore:unclosed <socket:ResourceWarning",
     "ignore:unclosed event loop:ResourceWarning",
-    # Same "not ours to close" shape as the two entries above, from the same
-    # third-party async stack: the mcp SDK's sse_client/streamablehttp_client
-    # open an anyio memory-object stream pair as part of their OWN task
-    # group's setup, and when that setup itself fails (e.g. the peer rejects
-    # the connection with a 401/403 before the client ever gets a `streams`
-    # tuple to close), anyio's stream finalizer can still warn on garbage
-    # collection. Only test_remote_adapter.py's real-401/403-server tests
-    # exercise this failure-during-connect path for real, so it was never
-    # visible under `filterwarnings=error` before.
+    # A THIRD "not ours to close" ResourceWarning, same third-party async
+    # stack as the two entries above: the mcp SDK's
+    # sse_client/streamablehttp_client open an anyio memory-object stream pair
+    # as part of their OWN task group's setup, and when that setup itself
+    # fails (e.g. the peer rejects the connection with a 401/403 before the
+    # client ever gets a `streams` tuple to close), anyio's stream finalizer
+    # can still warn on garbage collection — at a time of the GC's choosing,
+    # which can be well after the test that triggered it has finished. That
+    # timing is exactly why this can't be scoped to
+    # `tests/mcp_plugin/test_remote_adapter.py` with a per-test/per-module
+    # `pytest.mark.filterwarnings` the way it might look like it should be:
+    # tried that first, and a delayed collection at the pytest SESSION's own
+    # teardown (outside any per-test filter's scope) still failed the run
+    # with `PytestUnraisableExceptionWarning` inside an `ExceptionGroup`
+    # despite every individual test passing — the identical failure mode the
+    # two sibling entries above already exist to prevent. Only
+    # `test_remote_adapter.py`'s real-401/403-server tests exercise this
+    # failure-during-connect path for real today. REVISIT this entry (and
+    # this comment) if Mylonite ever opens its own anyio memory-object
+    # streams — currently it never does — since a leak from OUR code should
+    # still fail the build.
     "ignore:unclosed <memoryobjectreceivestream:ResourceWarning",
 ]
+# everywhere else.
 
 [tool.coverage.run]
 source = ["mylonite"]

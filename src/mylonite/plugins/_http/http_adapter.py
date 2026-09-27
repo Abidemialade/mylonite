@@ -27,6 +27,7 @@ import httpx
 from mylonite.contracts import AdapterResponse, Payload, TargetDescriptor
 from mylonite.contracts.target_adapter import AsyncTargetAdapterBase
 from mylonite.plugins._mcp import target_registry
+from mylonite.plugins._mcp.remote_adapter import _host_only
 from mylonite.scan.llm_types import CompletionFn
 
 #: Cap on a black-box HTTP agent's reply body (DCR-0013). An agent's reply is
@@ -367,9 +368,12 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
             # an attempt error (never a clean pass). A well-behaved agent
             # returns 200 with any refusal in the body.
             if response.status_code in (401, 403):
+                # Host only, never req.url verbatim — a REST target's url can
+                # carry a query-string token (e.g. ?key=SECRET), same reason
+                # the remote MCP adapter's descriptor is host-only.
                 raise RuntimeError(
-                    f"HTTP agent at {req.url} returned {response.status_code} "
-                    f"(method {req.method.upper()}) — the server rejected the request. "
+                    f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
+                    f"(method {req.method.upper()}) - the server rejected the request. "
                     "Set the token in request.headers in the target file, e.g. "
                     "`Authorization: Bearer ${MY_TOKEN}`, and export MY_TOKEN before "
                     "you scan. See docs/http-agent.md."
