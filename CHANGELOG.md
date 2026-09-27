@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable nothing had mentioned. See
   [Secrets stay out of the file](docs/target-file.md#secrets-stay-out-of-the-file).
 
+- **A remote server that rejects your credentials now says so.** Scanning a
+  `transport: sse` or `http` target whose server answers 401 or 403 used to
+  read as "could not describe the target... check the command" (there is no
+  command for a remote target) or as a generic planner failure. Both now name
+  the host and the status and point at the fix: set the token in `headers:`,
+  e.g. `Authorization: Bearer ${MY_TOKEN}`, and export `MY_TOKEN` before you
+  scan. A streamable-HTTP server that closes the connection without
+  surfacing the status is caught by a lightweight authenticated preflight
+  request instead. The REST adapter's (`transport: rest`) equivalent message
+  now names `request.headers`, where its token belongs, instead of only
+  url/method/body. No header value or full URL is ever printed. See
+  [Remote targets](docs/target-file.md#remote-targets-sse-http) and
+  [Known limitations](docs/limitations.md).
+
 ## [0.10.2] - 2026-09-26
 
 No behaviour change for existing setups: exit codes, flag defaults and the order

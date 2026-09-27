@@ -154,6 +154,23 @@ Concretely, what that does and does not mean:
 If you are evaluating Mylonite as a dependency in a security pipeline, weigh that
 accordingly — and consider pinning a version.
 
+## 7. Remote authentication is static tokens only
+
+A remote target (`transport: sse` or `http`) authenticates with a fixed value in
+`headers:` — a bearer token or API key you export as an environment variable and
+reference with `${VAR}` (see the "Remote targets" section of the
+[`target.yaml` reference](target-file.md)).
+
+**Supported:** a static header token, read from your shell's environment and never
+written to the target file. A server that rejects it reports the host and the status —
+401 or 403 — and names the fix.
+
+**Not supported yet:** an OAuth 2.1 sign-in-and-refresh flow. A token that expires
+mid-run has no automatic renewal: the next request gets a 401 and `scan` reports it the
+same way a wrong token from the start would, pointing at `headers:` rather than at "the
+token expired". If your server needs OAuth today, mint a long-lived static token for
+Mylonite's own use, where the provider supports one.
+
 ## Reporting something missing
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented

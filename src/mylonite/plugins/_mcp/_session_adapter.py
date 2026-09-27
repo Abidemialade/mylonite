@@ -547,7 +547,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 except Exception:
                     where = ""
             raise AdapterInvocationSkipped(
-                f"{reason} on {payload.pattern_id}{where}: {redact(repr(exc))}",
+                f"{reason} on {payload.pattern_id}{where}: {self._skip_exception_detail(exc)}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
@@ -985,6 +985,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         if "Connect" in name or "Init" in name:
             return "init_failure"
         return "planner_exception"
+
+    def _skip_exception_detail(self, exc: BaseException) -> str:
+        """Free text appended to a skipped attempt's reason, describing ``exc``.
+
+        Default: the redacted exception repr — unchanged behaviour from
+        before this hook existed. A subclass overrides this when it can say
+        something more specific and ALREADY SAFE than a raw exception repr
+        (see ``MCPRemoteAdapter``'s 401/403 case, whose repr can embed a full
+        URL with a query string)."""
+        return redact(repr(exc))
 
 
 class _RecordingServerShim:

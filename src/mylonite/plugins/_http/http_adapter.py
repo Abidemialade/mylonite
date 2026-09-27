@@ -366,6 +366,14 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
             # endpoint must NOT read as a clean scan. The engine records this as
             # an attempt error (never a clean pass). A well-behaved agent
             # returns 200 with any refusal in the body.
+            if response.status_code in (401, 403):
+                raise RuntimeError(
+                    f"HTTP agent at {req.url} returned {response.status_code} "
+                    f"(method {req.method.upper()}) — the server rejected the request. "
+                    "Set the token in request.headers in the target file, e.g. "
+                    "`Authorization: Bearer ${MY_TOKEN}`, and export MY_TOKEN before "
+                    "you scan. See docs/http-agent.md."
+                )
             if response.status_code >= 400:
                 raise RuntimeError(
                     f"HTTP agent at {req.url} returned {response.status_code} "

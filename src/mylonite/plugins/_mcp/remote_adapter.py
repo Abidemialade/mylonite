@@ -26,12 +26,75 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from urllib.parse import urlsplit
 
+import httpx
 from mcp import ClientSession
 
+from mylonite.contracts import TargetDescriptor
 from mylonite.plugins._mcp._session_adapter import (
     DEFAULT_MCP_READ_TIMEOUT,
     MCPSessionAdapterBase,
 )
+from mylonite.scan._types import AdapterDescribeFailed
+
+#: Time budget for the standalone preflight request (see
+#: ``MCPRemoteAdapter._preflight_auth_check``) — short, because this is a
+#: single best-effort request that must never become the slow part of a scan.
+_PREFLIGHT_TIMEOUT_S = 5.0
+
+#: Status codes this task treats as "rejected credentials", per the brief.
+_AUTH_REJECTED_STATUSES = frozenset({401, 403})
+
+
+def _find_auth_status(exc: BaseException) -> int | None:
+    """Walk ``ExceptionGroup``s and ``__cause__``/``__context__`` chains for
+    an ``httpx.HTTPStatusError`` whose status is 401 or 403, and return it.
+
+    The mcp SDK's ``sse_client``/``streamablehttp_client`` run their read
+    loop inside an anyio task group, so a rejected connection surfaces
+    wrapped in an ``ExceptionGroup`` around the real ``httpx.HTTPStatusError``
+    rather than as that exception directly — a name-only check on the
+    top-level exception (what ``_classify_failure`` did before this) never
+    recognises that shape.
+    """
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, httpx.HTTPStatusError):
+            status = int(current.response.status_code)
+            if status in _AUTH_REJECTED_STATUSES:
+                return status
+        stack.extend(getattr(current, "exceptions", None) or ())
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None:
+            stack.append(current.__context__)
+    return None
+
+
+def _auth_rejected_message(host: str, status: int) -> str:
+    """The operator-facing fix text for a remote target that rejected
+    credentials — identical wording for a first-contact ``describe()``
+    failure and an in-flight attempt (required behaviour #2)."""
+    return (
+        f"the server at {host} rejected the request ({status}). Set the token in "
+        "`headers:` in the target file, e.g. `Authorization: Bearer ${MY_TOKEN}`, "
+        "and export MY_TOKEN before you scan. See docs/target-file.md."
+    )
+
+
+def _describe_failure_message(host: str) -> str:
+    """The generic (non-auth) remote describe() failure — about the url and
+    headers, never the stdio-flavoured "command" wording (required
+    behaviour #1)."""
+    return (
+        f"could not describe the remote target at {host} (adapter.describe() "
+        "failed); nothing was scanned. Check the url and headers in the target "
+        "file, and connectivity to the server."
+    )
 
 
 def _host_only(url: str | None) -> str:
@@ -136,11 +199,75 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             "Fresh connection per invocation."
         )
 
+    async def describe(self) -> TargetDescriptor:
+        # Required behaviour #4: the real handshake below can fail without
+        # ever surfacing a recoverable HTTP status (streamable-HTTP can just
+        # close the connection) — one lightweight authenticated request first
+        # recovers a 401/403 that the SDK would otherwise swallow. Anything
+        # else about this request (a non-401/403 status, a network error, an
+        # endpoint that doesn't accept a plain GET at all) is not this
+        # check's business and is silently ignored.
+        await self._preflight_auth_check()
+        try:
+            return await super().describe()
+        except Exception as exc:
+            host = _host_only(self._spec.url)
+            status = _find_auth_status(exc)
+            message = (
+                _auth_rejected_message(host, status)
+                if status is not None
+                else _describe_failure_message(host)
+            )
+            raise AdapterDescribeFailed(message) from exc
+
+    async def _preflight_auth_check(self) -> None:
+        """One request to the URL with the configured headers, used only to
+        report a swallowed 401/403 early (required behaviour #4). No output
+        on success — including on any non-auth failure, which this check has
+        no opinion about.
+
+        Reads only the RESPONSE HEADERS (``client.stream()``, never
+        ``client.get()``) and never the body. A real SSE endpoint answers 200
+        with a body that streams indefinitely; ``.get()`` waits for that body
+        to finish (or, worse, never technically times out — each keep-alive
+        chunk resets httpx's per-read timeout) before returning, which would
+        turn every successful remote scan's first contact into an open-ended
+        hang. Exiting the ``async with`` block below closes the stream as
+        soon as the status is read, before any body arrives.
+        """
+        if not self._spec.url:
+            return
+        try:
+            async with (
+                httpx.AsyncClient(timeout=_PREFLIGHT_TIMEOUT_S) as client,
+                client.stream(
+                    "GET", self._spec.url, headers=self._spec.headers or None
+                ) as response,
+            ):
+                status = response.status_code
+        except Exception:
+            return
+        if status in _AUTH_REJECTED_STATUSES:
+            raise AdapterDescribeFailed(_auth_rejected_message(_host_only(self._spec.url), status))
+
     @staticmethod
     def _classify_failure(exc: BaseException) -> str:
+        # A rejected connection reuses the existing "launch_failure" reason —
+        # the closest non-planner classification that already exists (no new
+        # outcome enum value; required behaviour #2) — rather than the
+        # default "planner_exception", which told the operator their planner
+        # had broken when the real cause was a rejected remote credential.
+        if _find_auth_status(exc) is not None:
+            return "launch_failure"
         name = type(exc).__name__
         if name in {"ConnectError", "ConnectTimeout", "ReadTimeout", "PoolTimeout"}:
             return "init_failure"
         if name in {"HTTPStatusError", "RemoteProtocolError"}:
             return "mcp_protocol_error"
         return MCPSessionAdapterBase._classify_failure(exc)
+
+    def _skip_exception_detail(self, exc: BaseException) -> str:
+        status = _find_auth_status(exc)
+        if status is not None:
+            return _auth_rejected_message(_host_only(self._spec.url), status)
+        return super()._skip_exception_detail(exc)

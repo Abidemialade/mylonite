@@ -11,6 +11,9 @@ server or network is needed.
 
 from __future__ import annotations
 
+import asyncio
+import http.server
+import threading
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -18,11 +21,13 @@ from typing import Any
 import pytest
 from mcp.types import Tool as MCPTool
 
+from mylonite.contracts import Payload
 from mylonite.plugins._mcp import remote_adapter, target_registry
 from mylonite.plugins._mcp.factory import build_mcp_adapter
 from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter, _host_only
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
 from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped
 
 
 class _FakeSession:
@@ -263,3 +268,206 @@ def test_target_file_validates_transport() -> None:
     spec = build_target_spec(tf)
     assert spec.transport == "http"
     assert spec.url == "https://h/mcp"
+
+
+# --- Task 3: a remote 401/403 names the fix, on both first contact and an ------
+# --- in-flight attempt, against a REAL local server (not a stubbed session). ---
+
+
+class _AuthRejectingHandler(http.server.BaseHTTPRequestHandler):
+    """Answers every request with a fixed HTTP status, no MCP semantics."""
+
+    status = 401
+
+    def _reject(self) -> None:
+        self.send_response(self.status)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"unauthorized")
+
+    def do_GET(self) -> None:
+        self._reject()
+
+    def do_POST(self) -> None:
+        self._reject()
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass  # keep test output quiet
+
+
+def _run_rejecting_server(status: int) -> http.server.ThreadingHTTPServer:
+    handler = type("_Handler", (_AuthRejectingHandler,), {"status": status})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _register_remote_at(port: int, *, transport: str, family: str, path: str = "/mcp") -> None:
+    target_registry.clear_runtime_targets()
+    tf = TargetFile(
+        family=family,
+        transport=transport,  # type: ignore[arg-type]
+        url=f"http://127.0.0.1:{port}{path}?token=SECRET",
+        headers={"Authorization": "Bearer SUPERSECRET"},
+        weakness_classes=["W4"],
+    )
+    target_registry.register_target(build_target_spec(tf))
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+@pytest.mark.parametrize("status", [401, 403])
+async def test_describe_names_the_status_and_the_fix_on_a_real_401_403_server(
+    transport: str, status: int
+) -> None:
+    server = _run_rejecting_server(status)
+    try:
+        family = f"remote-auth-describe-{transport}-{status}"
+        _register_remote_at(server.server_port, transport=transport, family=family)
+        adapter = MCPRemoteAdapter(family=family, scope=None)
+
+        with pytest.raises(AdapterDescribeFailed) as excinfo:
+            await adapter.describe()
+
+        message = str(excinfo.value)
+        assert f"127.0.0.1:{server.server_port}" in message  # host, named
+        assert str(status) in message  # status code, named
+        assert "headers" in message  # names the fix location
+        assert "Authorization" in message and "Bearer" in message  # names the shape
+        assert "command" not in message  # not the stdio-flavoured wording
+        # never the header value or the URL's query string
+        assert "SUPERSECRET" not in message
+        assert "SECRET" not in message
+        assert "token=" not in message
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+async def test_attempt_level_401_is_not_classified_as_a_planner_failure(
+    transport: str,
+) -> None:
+    server = _run_rejecting_server(401)
+    try:
+        family = f"remote-auth-invoke-{transport}"
+        _register_remote_at(server.server_port, transport=transport, family=family)
+        adapter = MCPRemoteAdapter(family=family, scope=None)
+        payload = Payload(pattern_id="p", channel="tool-result", body="x")
+
+        with pytest.raises(AdapterInvocationSkipped) as excinfo:
+            await adapter.invoke(payload)
+
+        reason = excinfo.value.reason
+        assert excinfo.value.attempt_metadata["reason"] != "planner_exception"
+        assert excinfo.value.attempt_metadata["reason"] != "skipped_planner_failure"
+        assert "401" in reason
+        assert "headers" in reason
+        assert "Authorization" in reason and "Bearer" in reason
+        assert "SUPERSECRET" not in reason
+        assert "SECRET" not in reason
+        assert "token=" not in reason
+    finally:
+        server.shutdown()
+
+
+async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow() -> None:
+    """Required behaviour #4: when the real SDK connection fails WITHOUT
+    surfacing a recoverable HTTP status (simulated here — the mocked
+    ``_open_remote_session`` raises a bare, unrelated error, standing in for
+    a streamable-HTTP peer that just closes the connection), the standalone
+    authenticated preflight request must still catch the 401 and report it,
+    rather than falling through to the generic "adapter.describe() failed"
+    message."""
+    server = _run_rejecting_server(401)
+    try:
+        family = "remote-auth-preflight"
+        _register_remote_at(server.server_port, transport="sse", family=family)
+        adapter = MCPRemoteAdapter(family=family, scope=None)
+
+        async def _swallowing_open_remote_session(*_a: Any, **_kw: Any) -> Any:
+            raise RuntimeError("connection closed")
+            yield  # pragma: no cover - never reached; makes this an async generator
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                remote_adapter,
+                "_open_remote_session",
+                asynccontextmanager(_swallowing_open_remote_session),
+            )
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
+
+        message = str(excinfo.value)
+        assert "401" in message
+        assert "headers" in message
+    finally:
+        server.shutdown()
+
+
+async def test_describe_preflight_is_silent_on_success() -> None:
+    """No preflight output on success: a non-401/403 preflight response must
+    not raise, log, or otherwise surface anything — describe() proceeds to
+    the real handshake exactly as before this feature existed."""
+    _register_remote()  # unroutable URL; the real handshake below is faked
+    adapter = MCPRemoteAdapter(family="remote-app", scope=None)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(remote_adapter, "_open_remote_session", _fake_remote_open)
+        descriptor = await adapter.describe()
+    assert descriptor.tools[0].name == "do_thing"
+
+
+class _StreamingSuccessHandler(http.server.BaseHTTPRequestHandler):
+    """A real SSE endpoint's shape: 200, then a body that never finishes on
+    its own. Used to prove the preflight reads only the response HEADERS —
+    ``client.get()`` would wait for this body (or hang indefinitely, since
+    each keep-alive chunk resets httpx's per-read timeout) before returning."""
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        try:
+            for _ in range(50):
+                self.wfile.write(b": keep-alive\n\n")
+                self.wfile.flush()
+                threading.Event().wait(0.2)
+        except Exception:  # noqa: S110 - the client closes the stream early; that's the test
+            pass
+
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+async def test_describe_preflight_does_not_wait_on_a_streaming_success_body() -> None:
+    """The preflight against a real, actively-streaming 200 must return well
+    inside its own timeout budget, not block for the body's lifetime."""
+    import time
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _StreamingSuccessHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        family = "remote-auth-preflight-streaming-success"
+        _register_remote_at(server.server_port, transport="sse", family=family)
+        adapter = MCPRemoteAdapter(family=family, scope=None)
+
+        start = time.monotonic()
+        await asyncio.wait_for(adapter._preflight_auth_check(), timeout=3.0)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 3.0  # never actually reached the wait_for timeout
+    finally:
+        server.shutdown()
+
+
+def test_remote_classify_failure_recognises_a_401_inside_an_exception_group() -> None:
+    """The mcp SDK's sse_client/streamablehttp_client run their read loop in
+    an anyio task group, so a rejected connection surfaces wrapped in an
+    ExceptionGroup rather than as the httpx.HTTPStatusError directly -- the
+    existing name-only classifier never recognised that shape."""
+    import httpx
+
+    response = httpx.Response(401, request=httpx.Request("GET", "http://h/mcp"))
+    inner = httpx.HTTPStatusError("401", request=response.request, response=response)
+    wrapped = ExceptionGroup("unhandled errors in a TaskGroup", [inner])
+    assert MCPRemoteAdapter._classify_failure(wrapped) == "launch_failure"

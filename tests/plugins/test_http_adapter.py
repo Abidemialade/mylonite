@@ -268,6 +268,42 @@ def test_invoke_raises_when_response_exceeds_the_size_cap(monkeypatch: pytest.Mo
         asyncio.run(adapter.close())
 
 
+def test_invoke_401_names_request_headers_not_url_method_body() -> None:
+    """Task 3: a rejected credential must point at `request.headers` — the
+    field the token belongs in — not the generic url/method/body wording,
+    which never mentioned headers at all."""
+    _register_rest(headers={"Authorization": "Bearer SUPERSECRET"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text="unauthorized")
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 401") as excinfo:
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+    message = str(excinfo.value)
+    assert "request.headers" in message
+    assert "SUPERSECRET" not in message
+
+
+def test_invoke_403_also_names_request_headers() -> None:
+    _register_rest()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="forbidden")
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match="returned 403"):
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+
+
 def test_invoke_raises_on_non_2xx_so_misconfig_never_reads_clean() -> None:
     """A 4xx/5xx (misconfigured endpoint) must fail loud, not be judged as a reply."""
     _register_rest()
