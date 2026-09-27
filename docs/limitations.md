@@ -7,6 +7,24 @@ are scattered across four files, so they are collected here.
 Nothing on this page is a surprise to the maintainer, and nothing here is being worked
 around quietly. Where a limitation is deliberate, it says so and says what would change it.
 
+## What Mylonite supports today
+
+**Supported:** an MCP server you build and control, reached over stdio, or remote
+(`transport: sse` or `http`) authenticated with a static token you export as an
+environment variable and reference from `headers:` in `target.yaml` (see
+[Remote targets](target-file.md#remote-targets-sse-http)).
+
+**Not supported yet:** a server that requires an OAuth 2.1 sign-in flow (dynamic client
+registration, token refresh — see the remote-authentication note below for what that
+means for a token that expires mid-run), or a server reached through an enterprise
+gateway. Both are on the roadmap.
+
+**Wiring caveat:** a clean result assumes the target file's `seed_arm` and
+`effect_probe` are wired to the right tools. Until the planned wiring self-test ships,
+confirm the wiring yourself: run the scan against a copy of your server where you know
+an attack lands, or call the `effect_probe` tool by hand and check it returns the
+planted marker.
+
 ## 1. On a single-build app, the strong claim is not available
 
 This is the most important one, and it is structural rather than a bug.
@@ -165,11 +183,12 @@ reference with `${VAR}` (see the "Remote targets" section of the
 written to the target file. A server that rejects it reports the host and the status —
 401 or 403 — and names the fix.
 
-**Not supported yet:** an OAuth 2.1 sign-in-and-refresh flow. A token that expires
-mid-run has no automatic renewal: the next request gets a 401 and `scan` reports it the
-same way a wrong token from the start would, pointing at `headers:` rather than at "the
-token expired". If your server needs OAuth today, mint a long-lived static token for
-Mylonite's own use, where the provider supports one.
+**Not supported yet:** an OAuth 2.1 sign-in-and-refresh flow, or a server reached
+through an enterprise gateway. A token that expires mid-run has no automatic renewal:
+the next request gets a 401 and `scan` reports it the same way a wrong token from the
+start would, pointing at `headers:` rather than at "the token expired". If your server
+needs OAuth today, mint a long-lived static token for Mylonite's own use, where the
+provider supports one.
 
 ## Reporting something missing
 
