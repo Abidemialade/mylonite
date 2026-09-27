@@ -148,15 +148,36 @@ def looks_like_api_key(value: str) -> bool:
     return len(v) >= 32 and " " not in v and "/" not in v and "\\" not in v
 
 
+#: A query-parameter NAME that is, as a whole, a credential name. Matched with
+#: ``fullmatch`` (case-insensitive), unlike the substring :func:`_key_looks_secret`
+#: rule used for ``env`` keys: a query string routinely carries harmless names
+#: that merely contain ``token`` or ``key`` (``max_tokens``, ``tokenizer``,
+#: ``page_token``, ``sort_key``), and masking those breaks a working REST
+#: target's copies. A word prefix is allowed only before an unambiguous
+#: credential name (``x_api_key``, ``client_secret``, ``db_password``); bare
+#: ``token``, ``key`` and ``sig`` match only on their own.
+_QUERY_CREDENTIAL_NAME: Final = re.compile(
+    r"token|key|sig|signature|auth"
+    r"|(?:access|auth|refresh|id|session|bearer)[_-]?token"
+    r"|(?:[a-z0-9]+[_-])?"
+    r"(?:api[_-]?key|apikey|secret|password|passwd|pwd|credentials?)",
+    re.IGNORECASE,
+)
+
+
 def redact_url_query(url: str) -> str:
     """Mask each credential-shaped query-string VALUE in ``url``.
 
     The one rule every target-file writer uses for a URL's query string (the
     ``scan --scaffold --rest-url`` path and :func:`redact_target_yaml`'s ``url``
-    and ``request.url``). A value is masked when its parameter NAME is a
-    credential name (:func:`_key_looks_secret`: ``api_key``, ``token``, ...) or
-    the value itself looks like an API key (:func:`looks_like_api_key`, which
-    also catches an opaque token under a name like ``sig``).
+    and ``request.url``). A value is masked when its parameter NAME, as a
+    whole, is a credential name (:data:`_QUERY_CREDENTIAL_NAME`: ``api_key``,
+    ``access_token``, ``key``, ``sig``, ...; ``max_tokens`` or ``page_token``
+    are not) or the value itself looks like an API key
+    (:func:`looks_like_api_key`, which catches an opaque token under any name).
+
+    Only ``&`` separates parameters; a legacy ``;`` separator is not parsed,
+    so ``a=1;key=x`` is one parameter named ``a``.
 
     A masked value becomes the literal :data:`REDACTION_PLACEHOLDER`, not a
     ``${VAR}`` reference: ``url`` never expands variables, by design (see
@@ -180,7 +201,10 @@ def redact_url_query(url: str) -> str:
             eq
             and value
             and value != REDACTION_PLACEHOLDER
-            and (_key_looks_secret(unquote_plus(name)) or looks_like_api_key(unquote_plus(value)))
+            and (
+                _QUERY_CREDENTIAL_NAME.fullmatch(unquote_plus(name).strip()) is not None
+                or looks_like_api_key(unquote_plus(value))
+            )
         ):
             pairs.append(f"{name}={REDACTION_PLACEHOLDER}")
             changed = True

@@ -45,8 +45,10 @@ Exit codes, flags and scan outcomes are unchanged.
   `scan --scaffold` could write a token in `url` or `request.url` as given,
   for example `?key=<token>`: only a few parameter names and provider-key
   prefixes were caught. Each copy now writes
-  `***REDACTED***` in its place when the parameter has a credential name or
-  the value is shaped like an API key; other parameters stay as written.
+  `***REDACTED***` in its place when the parameter's whole name is a
+  credential name (`api_key`, `access_token`, `key`, `sig`, ...) or the value
+  is shaped like an API key; other parameters, such as `max_tokens`, stay as
+  written.
   `url` reads no variables, so the note the command prints names the masked
   field (`url` or `request.url`) and asks you to put the value back. To keep
   copies runnable, send the token in `headers:` as a `${VAR}` reference. See
