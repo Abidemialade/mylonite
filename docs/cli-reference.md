@@ -125,7 +125,7 @@ to the file. The file gets a `${MYLONITE_TARGET_ENV_GITHUB_TOKEN}` placeholder, 
 scaffold prints the variable to set, before its `next:` line, in both shell forms:
 
 ```text
-note: secrets were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
+note: secrets in headers and env were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
   bash/zsh:
     export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'
   PowerShell:

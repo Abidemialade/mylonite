@@ -49,8 +49,8 @@ def env_notice_lines(text: str, target: Path) -> list[str]:
     refs = target_env_refs(text)
     if refs:
         lines.append(
-            f"note: secrets were kept out of {target}. It reads them from these "
-            "environment variables; set them before you use the file:"
+            f"note: secrets in headers and env were kept out of {target}. It reads them "
+            "from these environment variables; set them before you use the file:"
         )
         lines.append("  bash/zsh:")
         lines.extend(f"    {posix_export_line(var, key)}" for var, key in refs)

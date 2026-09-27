@@ -82,7 +82,7 @@ def test_notice_is_empty_without_placeholders() -> None:
 def test_notice_names_both_shell_forms_and_never_the_secret() -> None:
     text = redact_target_yaml(f"family: myapp\nenv:\n  GITHUB_TOKEN: {_SECRET}\n")
     block = "\n".join(env_notice_lines(text, Path("app.yaml")))
-    assert "secrets were kept out of app.yaml" in block
+    assert "secrets in headers and env were kept out of app.yaml" in block
     assert "export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'" in block
     assert "$env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'" in block
     assert _SECRET not in block
