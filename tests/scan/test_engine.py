@@ -23,7 +23,13 @@ from mylonite.scan._llm import (
     active_counter,
     litellm_tool_call_async,
 )
-from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable, Verdict
+from mylonite.scan._types import (
+    AdapterDescribeFailed,
+    AdapterInvocationSkipped,
+    SeedArmUnavailable,
+    Verdict,
+)
+from mylonite.scan.coverage import ScanOutcome
 from mylonite.scan.diagnostics import Diagnosis
 from mylonite.scan.engine import ScanConfig, ScanEngine
 from mylonite.scan.seeds import SEED_CATALOGUE
@@ -731,6 +737,38 @@ async def test_engine_describe_failure_aborts_describe_failed() -> None:
     result = await engine.run()
     assert result.report.aborted == "describe_failed"
     assert result.report.attempts == []
+
+
+class _DescribeFailedAdapterStub(_AdapterStub):
+    async def describe(self) -> TargetDescriptor:
+        raise AdapterDescribeFailed("target.example returned 401 - set the token in headers")
+
+
+@pytest.mark.asyncio
+async def test_engine_describe_failed_detail_reaches_the_operator_message() -> None:
+    """An adapter's AdapterDescribeFailed text travels through
+    ScanResult.abort_detail into ScanOutcome.operator_message, and the exit
+    code is the same as for any other describe failure."""
+    message = "target.example returned 401 - set the token in headers"
+    kwargs: dict[str, Any] = {
+        "config": _config(),
+        "attack_modules": [_ModuleStub([_payload_from_seed_index(0)])],
+        "customiser": _CustomiserStub(),
+        "judge": _JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    }
+    result = await ScanEngine(adapter=_DescribeFailedAdapterStub(), **kwargs).run()
+    generic = await ScanEngine(adapter=_AdapterStub(raise_describe=True), **kwargs).run()
+
+    assert result.report.aborted == "describe_failed"
+    assert result.abort_detail == message
+    assert generic.abort_detail is None
+
+    outcome = ScanOutcome.from_report(result.report, abort_detail=result.abort_detail)
+    generic_outcome = ScanOutcome.from_report(generic.report, abort_detail=generic.abort_detail)
+    assert outcome.exit_code == generic_outcome.exit_code
+    assert outcome.operator_message is not None
+    assert message in outcome.operator_message
+    assert message not in (generic_outcome.operator_message or "")
 
 
 @pytest.mark.asyncio
