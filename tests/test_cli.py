@@ -5148,6 +5148,26 @@ def test_scan_scaffold_rest_redacts_credential_shaped_query_param(tmp_path: Path
     assert sentinel not in written
 
 
+def test_scan_scaffold_rest_masks_short_value_under_credential_name(tmp_path: Path) -> None:
+    """The --rest-url path has no later shape sweep for a short value, so the
+    name rule alone must mask ``api_token=short1`` in the written file."""
+    import yaml
+
+    from mylonite._redaction import REDACTION_PLACEHOLDER
+
+    out = tmp_path / "creds.yaml"
+    result = runner.invoke(
+        app,
+        ["scan", "--scaffold", str(out), "--rest-url", "https://h/chat?api_token=short1&page=2"],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    written = out.read_text(encoding="utf-8")
+    assert "short1" not in written
+    assert yaml.safe_load(written)["request"]["url"] == (
+        f"https://h/chat?api_token={REDACTION_PLACEHOLDER}&page=2"
+    )
+
+
 def test_scan_scaffold_rest_query_masking_uses_the_shared_rule(tmp_path: Path) -> None:
     """0.10.3 Task 5: the REST scaffold masks through the same helper every
     target-file copy uses, so a plain parameter keeps its exact spelling."""
