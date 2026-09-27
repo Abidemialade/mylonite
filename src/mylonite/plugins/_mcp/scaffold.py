@@ -409,31 +409,6 @@ def _scaffold_target_file(
 _RESERVED_FAMILIES = frozenset({"filesystem", "fetch", "github", "target", "app"})
 
 
-def _redact_credential_shaped_query_params(url: str) -> str:
-    """Mask any query-string parameter VALUE that looks like a live credential.
-
-    ``dump_target_file``/``redact_target_yaml``'s generic sweep already masks a
-    value keyed by a RECOGNISED credential name (``api_key=``, ``token=``,
-    ``secret=``, ...) or matching a known provider-key prefix (``sk-``,
-    ``AKIA``, ...). This closes the residual gap for an opaque,
-    key-name-agnostic token under a non-standard param name (e.g. a webhook
-    signing secret passed as ``?sig=<opaque>``), mirroring the broader
-    :func:`mylonite._redaction.looks_like_api_key` heuristic that ``--env``
-    values already get via ``redact_env``/``_is_secret_env`` (DCR-0002).
-    """
-    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
-    from mylonite._redaction import REDACTION_PLACEHOLDER, looks_like_api_key
-
-    parts = urlsplit(url)
-    if not parts.query:
-        return url
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    masked = [(k, REDACTION_PLACEHOLDER if looks_like_api_key(v) else v) for k, v in pairs]
-    new_query = urlencode(masked)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
-
-
 def _redact_credential_shaped_json_body(body: str) -> str:
     """Mask any JSON string leaf that looks like a live credential (DCR-0002).
 
@@ -442,7 +417,7 @@ def _redact_credential_shaped_json_body(body: str) -> str:
     only rewrites it when something was actually masked, so a non-JSON or
     already-clean body is returned byte-for-byte unchanged (never reformatted
     for no reason). Uses the same :func:`~mylonite._redaction.looks_like_api_key`
-    heuristic as :func:`_redact_credential_shaped_query_params` — the
+    heuristic as :func:`mylonite._redaction.redact_url_query` — the
     ``{prompt}`` placeholder itself is far too short to ever match it.
     """
     import json
@@ -504,7 +479,9 @@ def _scaffold_rest_target_file(
     # made from this scaffold path — so redacting rest_url/rest_body BEFORE
     # construction is safe and closes the credential-in-URL leak (DCR-0002)
     # at the source, on top of dump_target_file's own generic redaction pass.
-    safe_url = _redact_credential_shaped_query_params(rest_url)
+    from mylonite._redaction import redact_url_query
+
+    safe_url = redact_url_query(rest_url)
     safe_body = _redact_credential_shaped_json_body(body)
 
     try:

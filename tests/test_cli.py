@@ -5148,6 +5148,25 @@ def test_scan_scaffold_rest_redacts_credential_shaped_query_param(tmp_path: Path
     assert sentinel not in written
 
 
+def test_scan_scaffold_rest_query_masking_uses_the_shared_rule(tmp_path: Path) -> None:
+    """0.10.3 Task 5: the REST scaffold masks through the same helper every
+    target-file copy uses, so a plain parameter keeps its exact spelling."""
+    import yaml
+
+    from mylonite._redaction import REDACTION_PLACEHOLDER, redact_url_query
+
+    sentinel = "zzsentinelvalue1234567890abcdef1234567890"
+    url = f"https://api.example.com/chat?session_ref={sentinel}&q=a%20b"
+    out = tmp_path / "creds.yaml"
+    result = runner.invoke(app, ["scan", "--scaffold", str(out), "--rest-url", url])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    written_url = yaml.safe_load(out.read_text(encoding="utf-8"))["request"]["url"]
+    assert written_url == redact_url_query(url)
+    assert (
+        written_url == f"https://api.example.com/chat?session_ref={REDACTION_PLACEHOLDER}&q=a%20b"
+    )
+
+
 def test_scan_scaffold_rest_rejects_body_without_placeholder(tmp_path: Path) -> None:
     out = tmp_path / "bad.yaml"
     result = runner.invoke(

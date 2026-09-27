@@ -13,7 +13,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mylonite._redaction import REDACTION_PLACEHOLDER, redact_target_yaml, target_env_refs
+from mylonite._redaction import (
+    REDACTION_PLACEHOLDER,
+    redact_target_yaml,
+    target_env_refs,
+    target_masked_fields,
+)
 
 __all__ = [
     "echo_env_notice",
@@ -57,9 +62,11 @@ def env_notice_lines(text: str, target: Path) -> list[str]:
         lines.append("  PowerShell:")
         lines.extend(f"    {powershell_env_line(var, key)}" for var, key in refs)
     if REDACTION_PLACEHOLDER in text:
+        fields = target_masked_fields(text)
+        where = f" ({', '.join(fields)})" if fields else ""
         lines.append(
-            f"note: some values in {target} are masked as {REDACTION_PLACEHOLDER} and "
-            "no variable restores them; edit the file to put them back before you use it."
+            f"note: some values in {target}{where} are masked as {REDACTION_PLACEHOLDER} "
+            "and no variable restores them; edit the file to put them back before you use it."
         )
     return lines
 

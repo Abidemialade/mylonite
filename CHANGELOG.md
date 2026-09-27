@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Messages and docs only: exit codes, flags and scan outcomes are unchanged.
+Exit codes, flags and scan outcomes are unchanged.
 
 ### Fixed
 
@@ -39,6 +39,18 @@ Messages and docs only: exit codes, flags and scan outcomes are unchanged.
   `scan_report.json`. No header value or full URL is ever printed. See
   [Remote targets](docs/target-file.md#remote-targets-sse-http) and
   [Known limitations](docs/limitations.md).
+
+- **Target-file copies now also mask a credential in a URL's query string.**
+  The scan-directory copy, `generate`'s copy, `gate`'s copy and
+  `scan --scaffold` could write a token in `url` or `request.url` as given,
+  for example `?key=<token>`: only a few parameter names and provider-key
+  prefixes were caught. Each copy now writes
+  `***REDACTED***` in its place when the parameter has a credential name or
+  the value is shaped like an API key; other parameters stay as written.
+  `url` reads no variables, so the note the command prints names the masked
+  field (`url` or `request.url`) and asks you to put the value back. To keep
+  copies runnable, send the token in `headers:` as a `${VAR}` reference. See
+  [Secrets stay out of the file](docs/target-file.md#secrets-stay-out-of-the-file).
 
 - **`docs/reading-results.md` had the wrong exit code for a finding.** It said
   `scan` exits 1 when a weakness lands; `scan` exits 0 there, same as

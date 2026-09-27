@@ -40,8 +40,10 @@ __all__ = [
     "redact_env",
     "redact_exception",
     "redact_target_yaml",
+    "redact_url_query",
     "redact_value",
     "target_env_refs",
+    "target_masked_fields",
     "target_yaml_env_ref_name",
 ]
 
@@ -144,6 +146,49 @@ def looks_like_api_key(value: str) -> bool:
         return True
     # A long, whitespace-free, mostly-key-charset token is plausibly a key.
     return len(v) >= 32 and " " not in v and "/" not in v and "\\" not in v
+
+
+def redact_url_query(url: str) -> str:
+    """Mask each credential-shaped query-string VALUE in ``url``.
+
+    The one rule every target-file writer uses for a URL's query string (the
+    ``scan --scaffold --rest-url`` path and :func:`redact_target_yaml`'s ``url``
+    and ``request.url``). A value is masked when its parameter NAME is a
+    credential name (:func:`_key_looks_secret`: ``api_key``, ``token``, ...) or
+    the value itself looks like an API key (:func:`looks_like_api_key`, which
+    also catches an opaque token under a name like ``sig``).
+
+    A masked value becomes the literal :data:`REDACTION_PLACEHOLDER`, not a
+    ``${VAR}`` reference: ``url`` never expands variables, by design (see
+    ``CREDENTIAL_TOP_LEVEL_SECTIONS``). The URL is edited in place, never
+    re-encoded, so every other parameter, the path and the fragment stay
+    byte-for-byte as written.
+    """
+    from urllib.parse import unquote_plus
+
+    if not isinstance(url, str):
+        return url
+    base, hash_sep, fragment = url.partition("#")
+    head, q_sep, query = base.partition("?")
+    if not q_sep or not query:
+        return url
+    pairs: list[str] = []
+    changed = False
+    for pair in query.split("&"):
+        name, eq, value = pair.partition("=")
+        if (
+            eq
+            and value
+            and value != REDACTION_PLACEHOLDER
+            and (_key_looks_secret(unquote_plus(name)) or looks_like_api_key(unquote_plus(value)))
+        ):
+            pairs.append(f"{name}={REDACTION_PLACEHOLDER}")
+            changed = True
+        else:
+            pairs.append(pair)
+    if not changed:
+        return url
+    return f"{head}?{'&'.join(pairs)}{hash_sep}{fragment}"
 
 
 def redact(text: str) -> str:
@@ -497,6 +542,12 @@ def redact_target_yaml(text: str) -> str:
     rule) and explicitly skips the fields already replaced with a ``${VAR}``
     reference above — running the key-name rule over them would clobber a
     correct ``${VAR}`` reference with a bare, non-runnable placeholder.
+
+    ``url`` and ``request.url`` also go through :func:`redact_url_query`, so a
+    credential in a query string (``?api_key=...``, or an opaque token under
+    any name) becomes the literal :data:`REDACTION_PLACEHOLDER`. ``url`` expands
+    no ``${VAR}``, so that value cannot be restored from the environment; the
+    writer's notice names the field (:func:`target_masked_fields`).
     """
     import yaml
 
@@ -526,6 +577,14 @@ def redact_target_yaml(text: str) -> str:
     env = data.get(CREDENTIAL_ENV_FIELD)
     if isinstance(env, dict):
         data[CREDENTIAL_ENV_FIELD] = redact_env(env)
+
+    # A credential in a URL's query string: masked in place with the literal
+    # placeholder (url expands no ${VAR}); other parameters stay as written.
+    if isinstance(data.get("url"), str):
+        data["url"] = redact_url_query(data["url"])
+    request = data.get("request")
+    if isinstance(request, dict) and isinstance(request.get("url"), str):
+        request["url"] = redact_url_query(request["url"])
 
     already_masked = set(CREDENTIAL_TOP_LEVEL_SECTIONS) | {CREDENTIAL_ENV_FIELD}
     for key, val in list(data.items()):
@@ -578,6 +637,35 @@ def target_env_refs(text: str) -> list[tuple[str, str]]:
 
     _walk(data)
     return list(found.items())
+
+
+def target_masked_fields(text: str) -> list[str]:
+    """Return the dotted path (``url``, ``request.url``, ...) of each field in a
+    WRITTEN target file whose value holds :data:`REDACTION_PLACEHOLDER`, in file
+    order. Only the field names come back, never a value, so a writer can say
+    where to put a masked value back without printing it.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return []
+    found: list[str] = []
+
+    def _walk(node: object, path: str) -> None:
+        if isinstance(node, str):
+            if REDACTION_PLACEHOLDER in node and path and path not in found:
+                found.append(path)
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item, path)
+
+    _walk(data, "")
+    return found
 
 
 def _redact_remaining(value: object) -> object:

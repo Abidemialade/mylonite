@@ -190,8 +190,10 @@ start would, pointing at `headers:` rather than at "the token expired". If your 
 needs OAuth today, mint a long-lived static token for Mylonite's own use, where the
 provider supports one.
 
-A token in the url's query string (`url` or `request.url`) is copied into every target
-file Mylonite writes as written; put it in a header instead.
+A token in the url's query string (`url` or `request.url`) is masked as `***REDACTED***`
+in every target file Mylonite writes, and `url` reads no variables, so those copies need
+the value put back by hand. Put the token in `headers:` as a `${VAR}` reference to keep
+the copies runnable.
 
 ## Reporting something missing
 
