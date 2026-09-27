@@ -734,3 +734,33 @@ def test_redact_target_yaml_keeps_non_credential_query_unchanged() -> None:
     assert data["url"] == url
     assert data["request"]["url"] == url
     assert REDACTION_PLACEHOLDER not in out
+
+
+def test_redact_url_query_keeps_names_that_only_contain_a_credential_word() -> None:
+    """Fix round 1: the name rule is a whole-name match, so harmless parameters
+    such as ``max_tokens`` or ``page_token`` survive in a REST target's copies."""
+    from mylonite._redaction import redact_url_query
+
+    url = "https://h/chat?max_tokens=512&tokenizer=x&page_token=abc&sort_key=name&model=m"
+    assert redact_url_query(url) == url
+
+
+@pytest.mark.parametrize(
+    "pair",
+    ["access_token=zz", "key=short1", "sig=ab12", "token=t", "X-Api-Key=k", "client_secret=s"],
+)
+def test_redact_url_query_masks_whole_credential_names(pair: str) -> None:
+    from mylonite._redaction import redact_url_query
+
+    name = pair.split("=", 1)[0]
+    assert redact_url_query(f"https://h/chat?page=2&{pair}") == (
+        f"https://h/chat?page=2&{name}={REDACTION_PLACEHOLDER}"
+    )
+
+
+def test_redact_target_yaml_keeps_max_tokens_in_request_url() -> None:
+    import yaml
+
+    url = "https://h/chat?max_tokens=512&tokenizer=gpt2&page_token=abc"
+    out = redact_target_yaml(f"family: app\nrequest:\n  url: {url}\n")
+    assert yaml.safe_load(out)["request"]["url"] == url
