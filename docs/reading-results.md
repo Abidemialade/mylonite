@@ -187,7 +187,7 @@ This is near-free at generation time and is the foundation of audit/compliance r
 | Code | Meaning |
 |------|---------|
 | 0 | success / the test is kept |
-| 1 | findings were reported (`check --enforce`, and `scan` when weaknesses land) |
+| 1 | `check --enforce`: structural findings present |
 | 2 | config or usage error (incl. an empty scan — never reads as a clean pass) |
 | 3 | LLM-call budget exceeded |
 | 4 | provider unreachable |
@@ -195,6 +195,13 @@ This is near-free at generation time and is the foundation of audit/compliance r
 | 6 | `gate`: the test generator returned nothing |
 | 7 | `gate`: the validator returned nothing |
 | 8 | `gate`: the git/gh step failed (findings and report still written to `--out`) |
+
+`scan` on its own exits `0` even when it finds weaknesses — a scan's job is to report,
+not to gate. Finding something is only a red build once you route it through a command
+that treats a finding as a failure: [`mylonite gate`](ci-gating.md) (fails the run on a
+kept finding) or `check --enforce` above. The committed gate test in a `generate`-emitted
+directory is the other path: run it under `pytest` and it fails on a landed attack the
+same way any other regression test would.
 
 A clean exit `0` means the run actually happened — an aborted or empty scan exits
 non-zero so a misconfiguration can never masquerade as "all clear".

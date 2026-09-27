@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Remote targets](docs/target-file.md#remote-targets-sse-http) and
   [Known limitations](docs/limitations.md).
 
+- **`docs/reading-results.md` had the wrong exit code for a finding.** It said
+  `scan` exits 1 when a weakness lands; `scan` exits 0 there, same as
+  `docs/cli-reference.md` already said — a finding is only a red build once
+  you route it through `mylonite gate` or a committed gate test, or run
+  `check --enforce`, which is the only command exit code 1 belongs to. The
+  page now says so and points CI users at `gate` or the gate test.
+
 ## [0.10.2] - 2026-09-26
 
 No behaviour change for existing setups: exit codes, flag defaults and the order
