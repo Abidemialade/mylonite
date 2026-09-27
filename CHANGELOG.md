@@ -7,22 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The practice app, `mcp-kitchen-sink`, moves to 0.2.1 and declares Python
-  3.14.** 0.2.1 changes package metadata only: the tools, their descriptions and
-  schemas are identical to 0.2.0, so the demo's recorded fixtures still match.
-  It has installed on 3.14 all along (its `requires-python` has no upper bound);
-  the classifier now says so on PyPI. `pip install "mylonite[demo]"` and the
-  `uvx` one-liner now install 0.2.1.
-
-- **`docs/limitations.md` now states what Mylonite supports today, up front.**
-  MCP servers you build and control, over stdio or remote (`sse`/`http`) with a
-  static token from `headers:`. OAuth sign-in servers and servers behind an
-  enterprise gateway are not supported yet; both are on the roadmap. A new
-  wiring caveat says how to confirm a target file's `seed_arm` and
-  `effect_probe` are wired to the right tools before trusting a clean result.
-  See [Known limitations](docs/limitations.md).
+Messages and docs only: exit codes, flags and scan outcomes are unchanged.
 
 ### Fixed
 
@@ -49,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   close the connection without one) does a single extra request with the
   same headers recover it. The REST adapter's (`transport: rest`) equivalent
   message now names `request.headers`, where its token belongs, instead of
-  only url/method/body. No header value or full URL is ever printed. See
+  only url/method/body. Its other error messages print the host only too, so a
+  key in `request.url`'s query string no longer reaches the console or
+  `scan_report.json`. No header value or full URL is ever printed. See
   [Remote targets](docs/target-file.md#remote-targets-sse-http) and
   [Known limitations](docs/limitations.md).
 
@@ -59,6 +46,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you route it through `mylonite gate` or a committed gate test, or run
   `check --enforce`, which is the only command exit code 1 belongs to. The
   page now says so and points CI users at `gate` or the gate test.
+
+### Changed
+
+- **The practice app, `mcp-kitchen-sink`, moves to 0.2.1 and declares Python
+  3.14.** 0.2.1 changes package metadata only: the tools, their descriptions and
+  schemas are identical to 0.2.0, so the demo's recorded fixtures still match.
+  It has installed on 3.14 all along (its `requires-python` has no upper bound);
+  the classifier now says so on PyPI. `pip install "mylonite[demo]"` and the
+  `uvx` one-liner now install 0.2.1.
+
+- **`docs/limitations.md` now states what Mylonite supports today, up front.**
+  MCP servers you build and control, over stdio or remote (`sse`/`http`) with a
+  static token from `headers:`. OAuth sign-in servers and servers behind an
+  enterprise gateway are not supported yet; both are on the roadmap. A new
+  wiring caveat says how to confirm a target file's `seed_arm` and
+  `effect_probe` are wired to the right tools before trusting a clean result.
+  See [Known limitations](docs/limitations.md).
 
 ## [0.10.2] - 2026-09-26
 
