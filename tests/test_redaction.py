@@ -737,19 +737,35 @@ def test_redact_target_yaml_keeps_non_credential_query_unchanged() -> None:
 
 
 def test_redact_url_query_keeps_names_that_only_contain_a_credential_word() -> None:
-    """Fix round 1: the name rule is a whole-name match, so harmless parameters
-    such as ``max_tokens`` or ``page_token`` survive in a REST target's copies."""
+    """A short list of known-harmless names (``max_tokens``, ``page_token``, ...)
+    and ``key`` inside another word survive in a REST target's copies."""
     from mylonite._redaction import redact_url_query
 
-    url = "https://h/chat?max_tokens=512&tokenizer=x&page_token=abc&sort_key=name&model=m"
+    url = (
+        "https://h/chat?max_tokens=512&tokenizer=x&page_token=abc&sort_key=name"
+        "&keyword=foo&monkey=1&model=m"
+    )
     assert redact_url_query(url) == url
 
 
 @pytest.mark.parametrize(
     "pair",
-    ["access_token=zz", "key=short1", "sig=ab12", "token=t", "X-Api-Key=k", "client_secret=s"],
+    [
+        "api_token=short1",
+        "private_token=p1",
+        "secret_key=s1",
+        "access_key=a1",
+        "private_key=k1",
+        "access_token=zz",
+        "key=short1",
+        "sig=ab12",
+        "token=t",
+        "x-api-key=k",
+        "X-Api-Key=k",
+        "client_secret=s",
+    ],
 )
-def test_redact_url_query_masks_whole_credential_names(pair: str) -> None:
+def test_redact_url_query_masks_credential_names(pair: str) -> None:
     from mylonite._redaction import redact_url_query
 
     name = pair.split("=", 1)[0]

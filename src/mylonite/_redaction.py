@@ -148,21 +148,47 @@ def looks_like_api_key(value: str) -> bool:
     return len(v) >= 32 and " " not in v and "/" not in v and "\\" not in v
 
 
-#: A query-parameter NAME that is, as a whole, a credential name. Matched with
-#: ``fullmatch`` (case-insensitive), unlike the substring :func:`_key_looks_secret`
-#: rule used for ``env`` keys: a query string routinely carries harmless names
-#: that merely contain ``token`` or ``key`` (``max_tokens``, ``tokenizer``,
-#: ``page_token``, ``sort_key``), and masking those breaks a working REST
-#: target's copies. A word prefix is allowed only before an unambiguous
-#: credential name (``x_api_key``, ``client_secret``, ``db_password``); bare
-#: ``token``, ``key`` and ``sig`` match only on their own.
-_QUERY_CREDENTIAL_NAME: Final = re.compile(
-    r"token|key|sig|signature|auth"
-    r"|(?:access|auth|refresh|id|session|bearer)[_-]?token"
-    r"|(?:[a-z0-9]+[_-])?"
-    r"(?:api[_-]?key|apikey|secret|password|passwd|pwd|credentials?)",
-    re.IGNORECASE,
+#: Query-parameter names that contain a credential word but are known to be
+#: harmless request options (pagination cursors, sampling limits, sort fields).
+#: Masking them would break a working REST target's copies. Kept short and
+#: explicit: any other name holding a credential word is masked (safe default).
+_QUERY_HARMLESS_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "max_tokens",
+        "max_new_tokens",
+        "tokenizer",
+        "tokens",
+        "num_tokens",
+        "page_token",
+        "next_token",
+        "continuation_token",
+        "sort_key",
+        "order_key",
+        "partition_key",
+        "keyword",
+        "keywords",
+    }
 )
+
+#: Words that mark a credential only as a whole ``_``/``-``-separated part of a
+#: name (``key``, ``secret_key``, ``x-sig``), never inside another word
+#: (``monkey``, ``keyword``, ``design``).
+_QUERY_CREDENTIAL_PARTS: Final[frozenset[str]] = frozenset({"key", "sig", "signature"})
+
+
+def _query_name_looks_secret(name: str) -> bool:
+    """True when a decoded query-parameter NAME signals a credential.
+
+    Safe by default: the substring rule :func:`_key_looks_secret` (``token``,
+    ``secret``, ``api_key``, ``password``, ...) plus ``key``/``sig``/
+    ``signature`` as a separated part, minus :data:`_QUERY_HARMLESS_NAMES`.
+    """
+    lowered = name.strip().lower()
+    if lowered in _QUERY_HARMLESS_NAMES:
+        return False
+    if _key_looks_secret(lowered):
+        return True
+    return any(part in _QUERY_CREDENTIAL_PARTS for part in re.split(r"[_-]", lowered))
 
 
 def redact_url_query(url: str) -> str:
@@ -170,11 +196,12 @@ def redact_url_query(url: str) -> str:
 
     The one rule every target-file writer uses for a URL's query string (the
     ``scan --scaffold --rest-url`` path and :func:`redact_target_yaml`'s ``url``
-    and ``request.url``). A value is masked when its parameter NAME, as a
-    whole, is a credential name (:data:`_QUERY_CREDENTIAL_NAME`: ``api_key``,
-    ``access_token``, ``key``, ``sig``, ...; ``max_tokens`` or ``page_token``
-    are not) or the value itself looks like an API key
-    (:func:`looks_like_api_key`, which catches an opaque token under any name).
+    and ``request.url``). A value is masked when its parameter NAME holds a
+    credential word (:func:`_query_name_looks_secret`: ``api_token``,
+    ``secret_key``, ``access_key``, ``key``, ``sig``, ...; a few named
+    exceptions such as ``max_tokens`` and ``page_token`` are not) or the value
+    itself looks like an API key (:func:`looks_like_api_key`, which catches an
+    opaque token under any name).
 
     Only ``&`` separates parameters; a legacy ``;`` separator is not parsed,
     so ``a=1;key=x`` is one parameter named ``a``.
@@ -202,7 +229,7 @@ def redact_url_query(url: str) -> str:
             and value
             and value != REDACTION_PLACEHOLDER
             and (
-                _QUERY_CREDENTIAL_NAME.fullmatch(unquote_plus(name).strip()) is not None
+                _query_name_looks_secret(unquote_plus(name))
                 or looks_like_api_key(unquote_plus(value))
             )
         ):

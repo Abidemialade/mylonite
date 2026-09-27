@@ -193,10 +193,10 @@ or `DB_PASSWORD`, or a value shaped like an API key), becomes a `${MYLONITE_TARG
 placeholder. Plain values such as `LOG_LEVEL: debug` stay as written.
 
 A credential in the query string of `url` or `request.url` is masked too. A parameter
-whose whole name is a credential name (`api_key`, `access_token`, `key`, `sig`,
-`client_secret`, ...), or whose value is shaped like an API key, becomes
-`***REDACTED***`. Other parameters stay as written, including names that only contain
-such a word, like `max_tokens` or `page_token`. `url` reads no
+with a credential name (`api_token`, `access_key`, `client_secret`, `key`, `sig`, ...),
+or whose value is shaped like an API key, becomes `***REDACTED***`. Other parameters
+stay as written, and so do a few named exceptions that are request options, such as
+`max_tokens`, `page_token` and `sort_key`. `url` reads no
 variables, so a masked copy won't connect until you put the value back; the note the
 writing command prints names each masked field, such as `request.url`. Keep copies
 runnable by sending the token in `headers:` as a `${VAR}` reference instead.
