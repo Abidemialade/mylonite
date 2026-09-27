@@ -395,7 +395,9 @@ def _scaffold_target_file(
             "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
         )
     from mylonite._authz import required_authorization
+    from mylonite._target_env import echo_env_notice
 
+    echo_env_notice(yaml_text, output)
     echo_err(
         "  next: fill in the seed_arm (how to plant untrusted content) and the "
         "effect_probe (how to confirm damage), then run "
@@ -522,6 +524,10 @@ def _scaffold_rest_target_file(
         "# on the reply. This file is runnable as-is; edit the request block to match your\n"
         "# endpoint (auth goes in request.headers — never logged). See docs/http-agent.md.\n\n"
     )
-    output.write_text(header + dump_target_file(tf), encoding="utf-8")
+    from mylonite._target_env import echo_env_notice
+
+    text = header + dump_target_file(tf)
+    output.write_text(text, encoding="utf-8")
     echo(f"wrote runnable HTTP-agent target -> {output}")
+    echo_env_notice(text, output)
     echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")

@@ -120,6 +120,23 @@ mylonite scan --command python --arg my_server.py --scaffold app.yaml --scope my
 mylonite scan --target-file app.yaml --authorize my-app                                # then scan it
 ```
 
+A secret passed with `--env` (for example `--env GITHUB_TOKEN=ghp_...`) is not written
+to the file. The file gets a `${MYLONITE_TARGET_ENV_GITHUB_TOKEN}` placeholder, and
+scaffold prints the variable to set, before its `next:` line, in both shell forms:
+
+```text
+note: secrets were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
+  bash/zsh:
+    export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'
+  PowerShell:
+    $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'
+```
+
+Set it before `check`, `scan` or `gate` loads the file; an unset one stops the load with
+exit code 2 and the same `export` line. The scan-directory copy, `generate`'s copy and
+`gate`'s copy print the same note. See
+[Secrets stay out of the file](target-file.md#secrets-stay-out-of-the-file).
+
 ## `generate` — emit the regression test
 
 Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no

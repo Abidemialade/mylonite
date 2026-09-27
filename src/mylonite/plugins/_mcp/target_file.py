@@ -281,23 +281,48 @@ _VAR_REF_PATTERN: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def _expand_dict_block(
-    block: dict[str, Any], path: str, missing: list[tuple[str, str]]
+    block: dict[str, Any], path: str, missing: list[tuple[str, str, str | None]]
 ) -> dict[str, Any]:
     """Expand every ``${VAR}`` reference in the STRING values of one flat dict
     (a ``headers`` / ``request.headers`` / ``env`` block), appending any
-    unresolved reference to ``missing`` as ``(field_path, var_name)``."""
+    unresolved reference to ``missing`` as ``(field_path, var_name, key)``.
+    ``key`` is the field's key when the reference is its whole value (so the
+    variable holds that key's value, e.g. ``GITHUB_TOKEN``), else ``None``."""
 
-    def _sub(match: re.Match[str]) -> str:
-        name = match.group(1)
-        value = os.environ.get(name)
-        if value is None:
-            missing.append((path, name))
-            return match.group(0)
-        return value
+    def _expand(key: str, value: str) -> str:
+        whole = _VAR_REF_PATTERN.fullmatch(value.strip()) is not None
 
-    return {
-        k: (_VAR_REF_PATTERN.sub(_sub, v) if isinstance(v, str) else v) for k, v in block.items()
-    }
+        def _sub(match: re.Match[str]) -> str:
+            name = match.group(1)
+            resolved = os.environ.get(name)
+            if resolved is None:
+                missing.append((f"{path}.{key}", name, key if whole else None))
+                return match.group(0)
+            return resolved
+
+        return _VAR_REF_PATTERN.sub(_sub, value)
+
+    return {k: (_expand(str(k), v) if isinstance(v, str) else v) for k, v in block.items()}
+
+
+def _missing_env_message(missing: list[tuple[str, str, str | None]]) -> str:
+    """Name each unset variable, the field it fills, and the line that sets it."""
+    from mylonite._target_env import posix_export_line, powershell_env_line
+
+    seen: dict[str, str | None] = {}
+    for _, name, key in missing:
+        seen.setdefault(name, key)
+    fields = "; ".join(f"{p} -> ${{{n}}}" for p, n, _ in missing)
+    lines = [
+        "target file references undefined environment variable(s): "
+        f"{', '.join(seen)} (fields: {fields}). Mylonite does not run with a "
+        "missing credential. Set each one to the real value, then retry:",
+        "  bash/zsh:",
+        *(f"    {posix_export_line(n, k)}" for n, k in seen.items()),
+        "  PowerShell:",
+        *(f"    {powershell_env_line(n, k)}" for n, k in seen.items()),
+    ]
+    return "\n".join(lines)
 
 
 def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
@@ -334,7 +359,7 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     string, ``None``, or leave the literal unexpanded ``${VAR}`` text in place
     and let a broken credential reach the target launch.
     """
-    missing: list[tuple[str, str]] = []
+    missing: list[tuple[str, str, str | None]] = []
 
     for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
         block = data.get(section)
@@ -353,15 +378,7 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
         data[CREDENTIAL_ENV_FIELD] = _expand_dict_block(env, CREDENTIAL_ENV_FIELD, missing)
 
     if missing:
-        var_names = ", ".join(sorted({name for _, name in missing}))
-        detail = "; ".join(f"{p} -> ${{{n}}}" for p, n in missing)
-        msg = (
-            "target file references undefined environment variable(s): "
-            f"{var_names} (fields: {detail}). Set them in the environment before "
-            "loading this target file — mylonite will not silently proceed with "
-            "an empty or missing credential."
-        )
-        raise ValueError(msg)
+        raise ValueError(_missing_env_message(missing))
     return data
 
 

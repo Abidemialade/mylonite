@@ -41,6 +41,7 @@ __all__ = [
     "redact_exception",
     "redact_target_yaml",
     "redact_value",
+    "target_env_refs",
     "target_yaml_env_ref_name",
 ]
 
@@ -538,6 +539,45 @@ def redact_target_yaml(text: str) -> str:
         data[key] = _redact_remaining(val)
 
     return _REDACTION_BANNER + yaml.safe_dump(data, sort_keys=True, default_flow_style=False)
+
+
+#: A whole-value ``${MYLONITE_TARGET_...}`` placeholder, as
+#: :func:`redact_target_yaml` / :func:`redact_env` write it.
+_TARGET_ENV_REF: Final = re.compile(r"\$\{(MYLONITE_TARGET_[A-Za-z0-9_]+)\}")
+
+
+def target_env_refs(text: str) -> list[tuple[str, str]]:
+    """Return ``(variable, original_key)`` for each ``${MYLONITE_TARGET_...}``
+    placeholder in a WRITTEN target file, in file order, each variable once.
+
+    Read back from the text itself rather than re-running the masking rules, so
+    what the CLI tells the user to set is exactly what the file references
+    (``redact_target_yaml``, ``redact_env`` and ``dump_target_file`` all produce
+    input for this). A hand-written ``${MY_TOKEN}`` is not listed: only
+    placeholders Mylonite wrote carry the ``MYLONITE_TARGET_`` prefix. Text that
+    does not parse as YAML yields ``[]``; it cannot be loaded either.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return []
+    found: dict[str, str] = {}
+
+    def _walk(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if isinstance(value, str):
+                match = _TARGET_ENV_REF.fullmatch(value.strip())
+                if match is not None:
+                    found.setdefault(match.group(1), str(key))
+            else:
+                _walk(value)
+
+    _walk(data)
+    return list(found.items())
 
 
 def _redact_remaining(value: object) -> object:

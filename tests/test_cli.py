@@ -2529,6 +2529,116 @@ def test_generate_colocated_target_yaml_has_no_auth_header(tmp_path: Path) -> No
     assert reloaded.url == "https://example.invalid/mcp"
 
 
+_TASK1_SECRET = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234"
+_TASK1_EXPORT = "export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'"
+
+
+def test_scan_dir_target_copy_names_credential_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.10.3: the scan-dir target.yaml copy tells the user which variable
+    holds the masked --env secret."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    async def _fake_run(self: Any) -> Any:
+        return _canned_scan_result("mcp:myapp", findings=1)
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "mcp:custom",
+            "--command",
+            "python",
+            "--env",
+            f"GITHUB_TOKEN={_TASK1_SECRET}",
+            "--weakness-class",
+            "W2",
+            "--authorize",
+            "custom",
+            "--output-dir",
+            str(tmp_path / "scans"),
+            "--allow-no-seed-arm",
+        ],
+    )
+    target_registry.clear_runtime_targets()
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert _TASK1_EXPORT in result.stderr
+    assert _TASK1_SECRET not in result.output
+
+
+def test_generate_target_copy_names_credential_vars(tmp_path: Path) -> None:
+    """0.10.3: generate's co-located target.yaml copy names the variables."""
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(
+        _MINIMAL_TARGET_YAML + f"env:\n  GITHUB_TOKEN: {_TASK1_SECRET}\n", encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            str(exploit_json),
+            "--out",
+            str(tmp_path / "gen"),
+            "--target-file",
+            str(target_yaml),
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert _TASK1_EXPORT in result.stderr
+    assert _TASK1_SECRET not in result.output
+
+
+def test_gate_target_copy_names_credential_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.10.3: the target.yaml copy gate writes for its PR names the variables."""
+    from mylonite.gate import pr as pr_mod
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target = tmp_path / "app.yaml"
+    target.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n"
+        f"env:\n  GITHUB_TOKEN: {_TASK1_SECRET}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MYLONITE_TARGET_ENV_GITHUB_TOKEN", "unused")
+
+    class _ReachedEnd(Exception):
+        pass
+
+    def _stub(**kwargs: Any) -> Any:
+        out_dir = tmp_path / "gate-out"
+        out_dir.mkdir()
+        kwargs["open_pr_fn"](
+            out_dir=out_dir,
+            exploit=SimpleNamespace(pattern_id="pid"),
+            report=None,
+            body="",
+            open_pr=False,
+        )
+        raise _ReachedEnd()
+
+    monkeypatch.setattr("mylonite.gate.run_gate", _stub)
+    monkeypatch.setattr(pr_mod, "open_or_print_pr", lambda *a, **k: SimpleNamespace(opened=False))
+    result = runner.invoke(
+        app,
+        ["gate", "--target-file", str(target), "--authorize", "myapp", "--no-workflows"],
+    )
+    assert isinstance(result.exception, _ReachedEnd), result.output
+    assert _TASK1_EXPORT in result.stderr
+    assert _TASK1_SECRET not in (tmp_path / "gate-out" / "target.yaml").read_text(encoding="utf-8")
+
+
 def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
     """generate without --target-file picks up target.yaml from the scan dir."""
     import yaml
