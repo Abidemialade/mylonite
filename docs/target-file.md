@@ -190,8 +190,14 @@ Every target file Mylonite writes keeps the secrets in `headers`, `request.heade
 `generate` puts next to the test and the copy `gate` commits. Each value in `headers`
 and `request.headers`, and each secret-looking `env` value (a key such as `GITHUB_TOKEN`
 or `DB_PASSWORD`, or a value shaped like an API key), becomes a `${MYLONITE_TARGET_...}`
-placeholder. Plain values such as `LOG_LEVEL: debug` stay as written. A token in the
-url's query string is copied as written; put it in a header instead.
+placeholder. Plain values such as `LOG_LEVEL: debug` stay as written.
+
+A credential in the query string of `url` or `request.url` is masked too: a parameter
+with a credential name (`api_key`, `token`, `secret`, ...) or a value shaped like an API
+key becomes `***REDACTED***`, and the other parameters stay as written. `url` reads no
+variables, so a masked copy won't connect until you put the value back; the note the
+writing command prints names each masked field, such as `request.url`. Keep copies
+runnable by sending the token in `headers:` as a `${VAR}` reference instead.
 
 ```yaml
 env:

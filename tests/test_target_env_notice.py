@@ -143,3 +143,32 @@ def test_load_error_names_variable_key_and_export_form(
     assert "GITHUB_TOKEN" in msg
     assert "export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'" in msg
     assert msg.isascii()
+
+
+# --- query-string credentials (0.10.3 Task 5) ---------------------------------
+
+_QS_SECRET = "0123456789abcdef" * 2  # 32 hex chars: shaped like an API key
+
+
+def test_write_redacted_target_masks_query_credential_and_names_the_field(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from mylonite._redaction import REDACTION_PLACEHOLDER
+
+    dest = tmp_path / "target.yaml"
+    write_redacted_target(
+        dest,
+        "family: myapp\n"
+        "transport: rest\n"
+        "request:\n"
+        f"  url: https://h/chat?api_key={_QS_SECRET}&page=2\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n',
+    )
+    written = dest.read_text(encoding="utf-8")
+    assert _QS_SECRET not in written
+    assert f"api_key={REDACTION_PLACEHOLDER}&page=2" in written
+    err = capsys.readouterr().err
+    assert _SECRET not in err and _QS_SECRET not in err
+    assert f"masked as {REDACTION_PLACEHOLDER}" in err
+    assert "(request.url)" in err
+    assert err.isascii()

@@ -677,3 +677,60 @@ def test_target_file_without_var_refs_loads_unchanged(tmp_path: Path) -> None:
     assert tf.command == "python"
     assert tf.args == ["-m", "srv"]
     assert tf.env == {"LOG_LEVEL": "debug"}
+
+
+# --- query-string credentials in url / request.url (0.10.3 Task 5) ----------
+
+_QS_SECRET = "0123456789abcdef" * 2  # 32 hex chars: shaped like an API key
+
+
+def test_redact_url_query_masks_by_name_and_shape_keeps_the_rest() -> None:
+    from mylonite._redaction import redact_url_query
+
+    url = f"https://h/mcp?api_key=abc&sig={_QS_SECRET}&page=2&q=a%20b+c#frag"
+    assert redact_url_query(url) == (
+        f"https://h/mcp?api_key={REDACTION_PLACEHOLDER}&sig={REDACTION_PLACEHOLDER}"
+        "&page=2&q=a%20b+c#frag"
+    )
+
+
+def test_redact_url_query_leaves_a_plain_query_byte_for_byte() -> None:
+    from mylonite._redaction import redact_url_query
+
+    for url in (
+        "https://h/mcp?page=2&sort=desc&flag&q=a%20b+c",
+        "https://h/mcp",
+        "https://h/mcp?",
+        "not a url",
+    ):
+        assert redact_url_query(url) == url
+
+
+@pytest.mark.parametrize("prefix", ["", "request:\n  "])
+def test_redact_target_yaml_masks_query_credential_in_url(prefix: str) -> None:
+    import yaml
+
+    indent = "  " if prefix else ""
+    src = (
+        "family: app\n"
+        f"{prefix}url: https://h/mcp?api_key={_QS_SECRET}&sig={_QS_SECRET}&page=2\n"
+        + (f"{indent}body: '{{prompt}}'\n" if prefix else "")
+    )
+    out = redact_target_yaml(src)
+    assert _QS_SECRET not in out
+    data = yaml.safe_load(out)
+    url = data["request"]["url"] if prefix else data["url"]
+    assert url == (
+        f"https://h/mcp?api_key={REDACTION_PLACEHOLDER}&sig={REDACTION_PLACEHOLDER}&page=2"
+    )
+
+
+def test_redact_target_yaml_keeps_non_credential_query_unchanged() -> None:
+    import yaml
+
+    url = "https://h/mcp?page=2&sort=desc&q=a%20b+c"
+    out = redact_target_yaml(f"family: app\nurl: {url}\nrequest:\n  url: {url}\n")
+    data = yaml.safe_load(out)
+    assert data["url"] == url
+    assert data["request"]["url"] == url
+    assert REDACTION_PLACEHOLDER not in out
