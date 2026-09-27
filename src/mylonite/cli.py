@@ -1552,7 +1552,8 @@ def scan(
         _exit_if_missing_kitchen_sink(exc)
         raise
 
-    from mylonite._redaction import redact, redact_target_yaml
+    from mylonite._redaction import redact
+    from mylonite._target_env import write_redacted_target
 
     if not dry_run:
         from mylonite.scan.artefacts import render_summary, write_artefacts
@@ -1569,9 +1570,7 @@ def scan(
         # credentials, and the scan dir is one the operator is told to commit
         # (DCR-0006).
         if custom_target_yaml is not None:
-            (scan_dir / "target.yaml").write_text(
-                redact_target_yaml(custom_target_yaml), encoding="utf-8"
-            )
+            write_redacted_target(scan_dir / "target.yaml", custom_target_yaml)
         echo(redact(render_summary(result)))
         echo(f"Artefacts: {scan_dir}")
         # "Next:" hint — point at the very next command so the flow is self-guiding.
@@ -1863,6 +1862,7 @@ def _emit_generated_test(
     behaviour.
     """
     from mylonite._redaction import redact_target_yaml, redact_value
+    from mylonite._target_env import echo_env_notice
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -1955,19 +1955,17 @@ def _emit_generated_test(
         # DCR-0013: read + redact at most once per unique target file, cached
         # across every finding in a multi-finding loop (see the cache's
         # docstring above) instead of redoing this on every single finding.
-        if redacted_target_cache is not None and resolved_target_file in redacted_target_cache:
-            redacted_target_text = redacted_target_cache[resolved_target_file]
+        cached = (redacted_target_cache or {}).get(resolved_target_file)
+        if cached is not None:
+            redacted_target_text = cached
         else:
             redacted_target_text = redact_target_yaml(target_file.read_text(encoding="utf-8"))
             if redacted_target_cache is not None:
                 redacted_target_cache[resolved_target_file] = redacted_target_text
         colocated_target.write_text(redacted_target_text, encoding="utf-8")
         echo(f"Wrote target:  {colocated_target}")
-        echo_err(
-            "note: credential-shaped values in the copied target.yaml were masked. "
-            "Restore them from your secret store (or reference them via env) before "
-            "running the emitted test."
-        )
+        if cached is None:  # one notice per target file, not one per finding
+            echo_env_notice(redacted_target_text, colocated_target)
     elif is_custom:
         echo("")
         echo_err(
@@ -4012,7 +4010,7 @@ def gate(
             return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
 
     def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
-        from mylonite._redaction import redact_target_yaml
+        from mylonite._target_env import write_redacted_target
         from mylonite.gate.workflows import write_workflows
 
         repo_root = Path.cwd()
@@ -4022,9 +4020,7 @@ def gate(
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
             # credential from request.headers/env into that history (DCR-0019).
-            (out_dir / "target.yaml").write_text(
-                redact_target_yaml(target_file.read_text(encoding="utf-8")), encoding="utf-8"
-            )
+            write_redacted_target(out_dir / "target.yaml", target_file.read_text(encoding="utf-8"))
         paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
         pr = pr_mod.open_or_print_pr(
             paths,

@@ -173,6 +173,50 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 > "...", SSL_CERT_FILE: "..." }` — without them the launch can fail with a TLS/registry
 > error that looks unrelated to Mylonite.
 
+## Secrets stay out of the file
+
+Every target file Mylonite writes keeps your secrets out of it: `scan --scaffold`, the
+copy saved in the scan directory, the copy `generate` puts next to the test and the copy
+`gate` commits. Each value in `headers` and `request.headers`, and each secret-looking
+`env` value (a key such as `GITHUB_TOKEN` or `DB_PASSWORD`, or a value shaped like an
+API key), becomes a `${MYLONITE_TARGET_...}` placeholder. Plain values such as
+`LOG_LEVEL: debug` stay as written.
+
+```yaml
+env:
+  GITHUB_TOKEN: ${MYLONITE_TARGET_ENV_GITHUB_TOKEN}
+  LOG_LEVEL: debug
+```
+
+Whichever command wrote the file prints the variables to set, with the key each one
+stands for. The secret itself is never printed:
+
+```text
+note: secrets were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
+  bash/zsh:
+    export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'
+  PowerShell:
+    $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'
+```
+
+Set each variable to the real value in the shell that runs Mylonite, then use the file:
+
+```bash
+export MYLONITE_TARGET_ENV_GITHUB_TOKEN='ghp_...'
+mylonite check --target-file app.yaml
+```
+
+To keep the values in a `.env` file instead, load it into your shell first
+(`set -a; . ./.env; set +a` in bash or zsh). Mylonite's own `--env-file` flag reads only
+provider API-key names, so it does not pick these up. In CI, set them as secrets on the
+job.
+
+If a variable is unset, loading the file stops with exit code 2 and names the variable,
+the key it holds and the `export` line to run. Mylonite never starts your server with an
+empty credential. Placeholders are expanded only inside `env`, `headers` and
+`request.headers`, so `${...}` text elsewhere in the file, such as a template-injection
+payload in `system_prompt`, is left alone.
+
 ## The boundary controls fail closed
 
 The four boundary controls the adapter-boundary shim synthesizes (W1 description

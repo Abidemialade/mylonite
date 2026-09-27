@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the classifier now says so on PyPI. `pip install "mylonite[demo]"` and the
   `uvx` one-liner now install 0.2.1.
 
+### Fixed
+
+- **A target file that holds secrets now tells you which variables to set.**
+  `scan --scaffold` keeps a secret `--env` value out of the file as a
+  `${MYLONITE_TARGET_ENV_<KEY>}` placeholder, as before, and now prints each
+  variable with the key it stands for, as an `export` line and a PowerShell
+  `$env:` line, before its `next:` line. The secret itself is never printed.
+  The scan-directory copy, `generate`'s copy and `gate`'s copy print the same
+  note. When a variable is still unset, `check`, `scan` and `gate` stop with
+  exit code 2 as before, and the message now names the key and the `export`
+  line to run. Until now the first run of the documented next step failed on a
+  variable nothing had mentioned. See
+  [Secrets stay out of the file](docs/target-file.md#secrets-stay-out-of-the-file).
+
 ## [0.10.2] - 2026-09-26
 
 No behaviour change for existing setups: exit codes, flag defaults and the order
