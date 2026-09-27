@@ -36,11 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command for a remote target) or as a generic planner failure. Both now name
   the host and the status and point at the fix: set the token in `headers:`,
   e.g. `Authorization: Bearer ${MY_TOKEN}`, and export `MY_TOKEN` before you
-  scan. A streamable-HTTP server that closes the connection without
-  surfacing the status is caught by a lightweight authenticated preflight
-  request instead. The REST adapter's (`transport: rest`) equivalent message
-  now names `request.headers`, where its token belongs, instead of only
-  url/method/body. No header value or full URL is ever printed. See
+  scan. A successful scan sends no extra request: only when the real
+  connection error doesn't carry a status at all (a streamable-HTTP peer can
+  close the connection without one) does a single extra request with the
+  same headers recover it. The REST adapter's (`transport: rest`) equivalent
+  message now names `request.headers`, where its token belongs, instead of
+  only url/method/body. No header value or full URL is ever printed. See
   [Remote targets](docs/target-file.md#remote-targets-sse-http) and
   [Known limitations](docs/limitations.md).
 

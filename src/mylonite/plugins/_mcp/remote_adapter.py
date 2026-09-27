@@ -200,19 +200,32 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
         )
 
     async def describe(self) -> TargetDescriptor:
-        # Required behaviour #4: the real handshake below can fail without
-        # ever surfacing a recoverable HTTP status (streamable-HTTP can just
-        # close the connection) — one lightweight authenticated request first
-        # recovers a 401/403 that the SDK would otherwise swallow. Anything
-        # else about this request (a non-401/403 status, a network error, an
-        # endpoint that doesn't accept a plain GET at all) is not this
-        # check's business and is silently ignored.
-        await self._preflight_auth_check()
+        # The preflight below (required behaviour #4) runs ONLY on this
+        # failure path, and only when the real handshake's own error didn't
+        # already carry a recoverable status — never unconditionally before
+        # every describe(). A successful describe() (the common case: `scan`,
+        # `check`, auto-wire, `--scaffold`) sends zero extra requests. Running
+        # it up front, on every call, would have made an unrelated bare GET
+        # part of every remote target's first contact — a POST-only /
+        # streamable-HTTP-only server that answers 403 to a plain GET (an
+        # API-Gateway-style policy) would then falsely abort a scan the real
+        # handshake would have completed just fine.
         try:
             return await super().describe()
         except Exception as exc:
             host = _host_only(self._spec.url)
+            # Real local servers (both sse and http/streamable-HTTP) DO
+            # surface the status this way — the mcp SDK's read loop runs in
+            # an anyio task group, so it arrives wrapped in an ExceptionGroup,
+            # not as the bare httpx.HTTPStatusError, which is why this needs
+            # the walk in _find_auth_status rather than a name check.
             status = _find_auth_status(exc)
+            if status is None:
+                # Only reached when the real error truly didn't carry a
+                # status at all (a streamable-HTTP peer can close the
+                # connection without ever telling the SDK why) — the one case
+                # the preflight exists for.
+                status = await self._preflight_auth_status()
             message = (
                 _auth_rejected_message(host, status)
                 if status is not None
@@ -220,23 +233,27 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             )
             raise AdapterDescribeFailed(message) from exc
 
-    async def _preflight_auth_check(self) -> None:
-        """One request to the URL with the configured headers, used only to
-        report a swallowed 401/403 early (required behaviour #4). No output
-        on success — including on any non-auth failure, which this check has
-        no opinion about.
+    async def _preflight_auth_status(self) -> int | None:
+        """One request to the URL with the configured headers, run ONLY from
+        ``describe()``'s failure path (see the comment there) — never
+        unconditionally, so a successful describe() sends no extra request.
+
+        Returns the status when it's 401/403, else ``None`` — a non-auth
+        response (2xx, 404, 405 — this endpoint may not accept a bare GET at
+        all), a network error, or a timeout is not this check's business and
+        is silently swallowed; the caller falls back to the generic message.
 
         Reads only the RESPONSE HEADERS (``client.stream()``, never
         ``client.get()``) and never the body. A real SSE endpoint answers 200
         with a body that streams indefinitely; ``.get()`` waits for that body
         to finish (or, worse, never technically times out — each keep-alive
         chunk resets httpx's per-read timeout) before returning, which would
-        turn every successful remote scan's first contact into an open-ended
-        hang. Exiting the ``async with`` block below closes the stream as
-        soon as the status is read, before any body arrives.
+        turn this into an open-ended hang on a healthy server. Exiting the
+        ``async with`` block below closes the stream as soon as the status is
+        read, before any body arrives.
         """
         if not self._spec.url:
-            return
+            return None
         try:
             async with (
                 httpx.AsyncClient(timeout=_PREFLIGHT_TIMEOUT_S) as client,
@@ -246,9 +263,8 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             ):
                 status = response.status_code
         except Exception:
-            return
-        if status in _AUTH_REJECTED_STATUSES:
-            raise AdapterDescribeFailed(_auth_rejected_message(_host_only(self._spec.url), status))
+            return None
+        return status if status in _AUTH_REJECTED_STATUSES else None
 
     @staticmethod
     def _classify_failure(exc: BaseException) -> str:
