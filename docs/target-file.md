@@ -185,12 +185,13 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 
 ## Secrets stay out of the file
 
-Every target file Mylonite writes keeps your secrets out of it: `scan --scaffold`, the
-copy saved in the scan directory, the copy `generate` puts next to the test and the copy
-`gate` commits. Each value in `headers` and `request.headers`, and each secret-looking
-`env` value (a key such as `GITHUB_TOKEN` or `DB_PASSWORD`, or a value shaped like an
-API key), becomes a `${MYLONITE_TARGET_...}` placeholder. Plain values such as
-`LOG_LEVEL: debug` stay as written.
+Every target file Mylonite writes keeps the secrets in `headers`, `request.headers` and
+`env` out of it: `scan --scaffold`, the copy saved in the scan directory, the copy
+`generate` puts next to the test and the copy `gate` commits. Each value in `headers`
+and `request.headers`, and each secret-looking `env` value (a key such as `GITHUB_TOKEN`
+or `DB_PASSWORD`, or a value shaped like an API key), becomes a `${MYLONITE_TARGET_...}`
+placeholder. Plain values such as `LOG_LEVEL: debug` stay as written. A token in the
+url's query string is copied as written; put it in a header instead.
 
 ```yaml
 env:
@@ -202,7 +203,7 @@ Whichever command wrote the file prints the variables to set, with the key each 
 stands for. The secret itself is never printed:
 
 ```text
-note: secrets were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
+note: secrets in headers and env were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
   bash/zsh:
     export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'
   PowerShell:
