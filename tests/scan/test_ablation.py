@@ -129,7 +129,7 @@ def test_redundancy_mode_distinguishes_redundant_from_theater() -> None:
     assert by["W4"] == "theater"
 
 
-# -- sequential ordering (0.10.4, item 13): a target with an effect_probe -----
+# -- sequential ordering (0.10.4): a target with an effect_probe -----
 # -- shares one persistent store across legs -- concurrent raw/guarded scans --
 # -- against it let one leg's effect be credited to the other. run_control_-- --
 # -- ablation(..., sequential=True) must run every pair/triple one leg at a ----

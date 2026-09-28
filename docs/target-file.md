@@ -144,15 +144,16 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
   was *defended* (e.g. queued for approval), not a success. Choose `expect_marker` as a
   value **the agent's own call carries** — the recipient address, a row it wrote, or
   `{payload}` — not a status word the target itself would print regardless of who acted.
-  A fixed status word like `status=sent` can only be tied to an attempt through a tool
-  listed in `control_config.consequential_tools` (or `egress_tools`); with neither
-  declared, `scan`, `validate` and `check` print a warning, because on a catalogue seed
-  that effect can read `"unattributed"` but may never read `"true"`, so `validate` cannot
-  keep the finding. (A synthesised seed can carry a classifier-inferred consequential
-  tool and still reach `"true"` without a declaration — the warning is a conservative
-  check on `expect_marker` alone, not proof the seed can never confirm.) A marker shaped
-  like an email address (`x@y.z`) or a URL (containing `://`) is exempt from the
-  warning: it is assumed to be carried by the agent's call. See
+  A fixed status word like `status=sent` can only be tied to an attempt through the tool
+  the seed names as its consequential or egress tool, and only synthesised seeds name
+  one. A tool declared under `control_config.consequential_tools` can link only
+  synthesised seeds; catalogue seeds, which `validate` re-drives, never link through it.
+  So `scan`, `validate` and `check` warn on a fixed marker whatever `control_config`
+  declares: on a catalogue seed that effect can read `"unattributed"` but never
+  `"true"`, and `validate` cannot keep the finding. The dependable fix is a marker the
+  agent's own call carries. A marker shaped like an email address (`x@y.z`) or a URL
+  (containing `://`) is exempt from the warning: it is assumed to be carried by the
+  agent's call. See
   [Effect attribution](#effect-attribution) below for what confirms an effect and what
   `"unattributed"` means.
 - **`control_config`** (`ControlConfig`) — tells the synthetic guarded build which tools
@@ -218,8 +219,9 @@ falls into one of:
 - **`"errored"`** — the baseline or the post-drive read itself raised or timed out.
 
 This is what stops a target whose state outlives one run — a file, a database, a memory
-store, any remote server — from letting an earlier or concurrent attempt's write count as
-this attempt's proof. It costs one extra read-only call to the verify tool per attempt
+store, any remote server — from letting an earlier attempt's write count as this
+attempt's proof. A concurrent attempt's write can't be told apart this way, so on a
+target with an `effect_probe`, Mylonite runs attempts one at a time. It costs one extra read-only call to the verify tool per attempt
 with a declared `verify_tool`; nothing sent to the model changes.
 
 ## Secrets stay out of the file

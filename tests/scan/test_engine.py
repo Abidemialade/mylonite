@@ -1693,6 +1693,77 @@ async def test_engine_concurrency_bounded_across_payloads_and_flakiness_runs() -
     )
 
 
+class _OrderRecordingAdapter:
+    """Records ``("enter"|"exit", n)`` around every ``invoke`` and the peak in flight.
+
+    ``declares_effect_probe`` mirrors the MCP session adapter's property: a
+    target whose effect probe reads shared state that another attempt can change.
+    """
+
+    def __init__(self, *, declares_effect_probe: bool) -> None:
+        self.declares_effect_probe = declares_effect_probe
+        self.events: list[tuple[str, int]] = []
+        self._current = 0
+        self._n = 0
+        self.peak_concurrent = 0
+
+    async def describe(self) -> TargetDescriptor:
+        return TargetDescriptor(target_id="stub-target", kind="mcp", system_prompt="x", tools=[])
+
+    async def invoke(self, payload: Payload) -> AdapterResponse:
+        del payload
+        self._n += 1
+        n = self._n
+        self.events.append(("enter", n))
+        self._current += 1
+        self.peak_concurrent = max(self.peak_concurrent, self._current)
+        try:
+            await asyncio.sleep(0.02)
+            return _ok_response()
+        finally:
+            self._current -= 1
+            self.events.append(("exit", n))
+
+    async def close(self) -> None:
+        return None
+
+
+def _three_payload_engine(adapter: _OrderRecordingAdapter) -> ScanEngine:
+    config = _config(runs=3).model_copy(update={"max_concurrent": 3})
+    return ScanEngine(
+        config=config,
+        adapter=adapter,
+        attack_modules=[
+            _ModuleStub([_payload_from_seed_index(i) for i in range(3)]),
+        ],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+
+
+async def test_engine_runs_one_attempt_at_a_time_on_a_target_with_an_effect_probe() -> None:
+    """A probed target's effect check reads shared state, so a concurrent
+    attempt's change can't be told apart from this attempt's. The engine
+    therefore never has two ``invoke`` calls in flight on such a target, even
+    with ``max_concurrent=3`` and ``runs=3`` (the passes share the semaphore)."""
+    adapter = _OrderRecordingAdapter(declares_effect_probe=True)
+    await _three_payload_engine(adapter).run()
+
+    assert len(adapter.events) == 2 * 9  # 3 payloads x 3 runs, enter + exit each
+    assert adapter.peak_concurrent == 1
+    for i in range(0, len(adapter.events), 2):
+        enter, exit_ = adapter.events[i], adapter.events[i + 1]
+        assert enter[0] == "enter" and exit_ == ("exit", enter[1]), adapter.events
+
+
+async def test_engine_keeps_concurrency_on_a_target_without_an_effect_probe() -> None:
+    adapter = _OrderRecordingAdapter(declares_effect_probe=False)
+    await _three_payload_engine(adapter).run()
+
+    assert len(adapter.events) == 2 * 9
+    assert adapter.peak_concurrent > 1
+
+
 @pytest.mark.asyncio
 async def test_engine_wall_clock_timeout_aborts_with_partial_results() -> None:
     """A wall-clock budget that elapses mid-scan → aborted='wall_clock_timeout'."""

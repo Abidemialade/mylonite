@@ -35,14 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM judge, and `validate`'s effect leg now needs at least one `"true"` run
   to keep a result, with its detail line stating how many runs were
   confirmed from the target's state versus from the attempt's own actions.
-  `ablate` runs a probed target's raw and guarded legs one after the other
-  instead of concurrently. `scan`, `validate` and `check` warn when
-  `expect_marker` is a fixed value, is not shaped like an email address or a
-  URL, and `control_config` declares no `consequential_tools` or
-  `egress_tools`: such an effect can read `"unattributed"` but may never read
-  `"true"` unless the seed itself names the tool, so `validate` cannot keep
-  it. The warning names the fix: a marker the agent's call carries, such as
-  the recipient address, or a declared consequential tool. Each attempt with
+  On a target that declares an `effect_probe`, `scan`, `gate` and `ablate`
+  now run one attempt at a time, whatever `--max-concurrent` says, as
+  `validate` already did: a concurrent attempt's change to shared state can't
+  be told apart from this attempt's, so it could be credited as `"true"` or
+  turn a real effect into `"false"`. Targets without a probe keep their
+  concurrency. `scan`, `validate` and `check` warn when `expect_marker` is a
+  fixed value not shaped like an email address or a URL: only synthesised
+  seeds name the tool that links such a marker, and a tool declared under
+  `control_config.consequential_tools` does not reach catalogue seeds, so on
+  those the effect can read `"unattributed"` but never `"true"`, and
+  `validate` cannot keep it. The warning names the dependable fix: a marker
+  the agent's own call carries, such as the recipient address. Each attempt with
   a declared `verify_tool` makes one extra read-only call to it; the
   recorded setup trace and everything sent to the model are unchanged.
 

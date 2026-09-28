@@ -288,6 +288,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return dict(self._launch_env)
         return dict(self._spec.extra_env)
 
+    @property
+    def declares_effect_probe(self) -> bool:
+        """True when the target declares an ``effect_probe``.
+
+        The probe reads state every attempt shares, and the attribution rule in
+        :meth:`_run_effect_probe` compares that state before and after this
+        attempt. A concurrent attempt's change can't be told apart from this
+        attempt's, so the scan engine runs one attempt at a time on such a target.
+        """
+        return self._spec.effect_probe is not None
+
     def _target_id(self) -> str:
         if self._scope is None:
             return f"mcp:{self._family}"

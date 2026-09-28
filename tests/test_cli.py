@@ -360,7 +360,7 @@ def test_check_reports_structural_findings_and_exits_zero(
     assert "6 structural finding(s) across 3 tool(s)." in out
 
 
-def test_check_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+def test_check_warns_about_a_fixed_marker_the_agent_does_not_carry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
@@ -1059,7 +1059,7 @@ _STATUS_WORD_PROBE_YAML = (
 _STATUS_WORD_WARNING = "never read 'true'"
 
 
-def test_scan_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+def test_scan_warns_about_a_fixed_marker_the_agent_does_not_carry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from mylonite.plugins._mcp import target_registry
@@ -2757,7 +2757,7 @@ def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> N
     assert "--authorize" in (result.stderr or result.output)
 
 
-def test_validate_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+def test_validate_warns_about_a_fixed_marker_the_agent_does_not_carry(
     tmp_path: Path,
 ) -> None:
     """The warning is printed as soon as the target file loads, before the
