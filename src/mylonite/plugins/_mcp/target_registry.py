@@ -430,6 +430,13 @@ BUNDLED_TARGETS: dict[str, TargetSpec] = {
         requires_scope=True,
         args_with_scope=False,  # github MCP server takes config via env vars, not args
         primary_tools=("get_issue", "create_issue", "add_issue_comment"),
+        # #184: the real server reads its token from this exact env var. The
+        # ${VAR} reference is resolved from the parent shell at launch time
+        # (plugins._mcp.target_file.expand_env_block, called from
+        # _session_adapter._effective_env) -- never inherited wholesale, and
+        # never logged (its key name matches the secret-key pattern
+        # _redaction._key_looks_secret already masks by).
+        extra_env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"},
     ),
 }
 

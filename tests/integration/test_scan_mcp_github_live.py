@@ -1,8 +1,8 @@
 """Live end-to-end scan against the real GitHub MCP server.
 
-Gated behind ``MYLONITE_LIVE_E2E=1`` AND requires both ``GITHUB_TOKEN`` and
-``MYLONITE_TEST_GITHUB_REPO`` env vars. The repo MUST be a throwaway —
-this test creates real issues in it.
+Gated behind ``MYLONITE_LIVE_E2E=1`` AND requires both
+``GITHUB_PERSONAL_ACCESS_TOKEN`` and ``MYLONITE_TEST_GITHUB_REPO`` env vars.
+The repo MUST be a throwaway — this test creates real issues in it.
 
 After the test, the issues are NOT auto-closed (the MCP server doesn't
 expose ``close_issue`` in v1; teardown is the user's responsibility).
@@ -11,7 +11,7 @@ Limit: max 3 issues created per run.
 Run with:
 
     npm install -g @modelcontextprotocol/server-github
-    export GITHUB_TOKEN=ghp_throwaway_token
+    export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_throwaway_token
     export MYLONITE_TEST_GITHUB_REPO=myhandle/mylonite-test-repo
     MYLONITE_LIVE_E2E=1 pytest tests/integration/test_scan_mcp_github_live.py -v
 """
@@ -40,8 +40,10 @@ pytestmark = pytest.mark.skipif(
 async def test_live_scan_mcp_github_finds_exploit(tmp_path: Path) -> None:
     if shutil.which("npx") is None:
         pytest.skip("npx not available — install Node.js to run the github MCP server")
-    if not os.environ.get("GITHUB_TOKEN"):
-        pytest.skip("GITHUB_TOKEN not set — required for the live github MCP server")
+    if not os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"):
+        pytest.skip(
+            "GITHUB_PERSONAL_ACCESS_TOKEN not set — required for the live github MCP server"
+        )
     repo = os.environ.get("MYLONITE_TEST_GITHUB_REPO")
     if not repo:
         pytest.skip("MYLONITE_TEST_GITHUB_REPO not set — required as scope")

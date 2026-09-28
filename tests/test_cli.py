@@ -1096,6 +1096,46 @@ def test_scan_mcp_github_rejects_missing_slash() -> None:
     assert "owner/repo" in (result.stderr or result.output)
 
 
+def test_scan_mcp_github_fails_fast_when_the_token_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#184: a missing GITHUB_PERSONAL_ACCESS_TOKEN fails before any subprocess
+    launch, naming the variable to set -- not a deep subprocess/session failure."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
+    result = runner.invoke(
+        app,
+        ["scan", "mcp:github:myhandle/myrepo", "--authorize", "myhandle/myrepo", "--dry-run"],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "GITHUB_PERSONAL_ACCESS_TOKEN" in out
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_mcp_github_token_value_never_reaches_dry_run_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#184: the token is never written or logged -- a --dry-run with a real
+    value set must not echo it anywhere in the console output."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)  # dry-run still describe()s the target
+    secret = "ghp_" + "x" * 36  # pragma: allowlist secret
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", secret)
+    result = runner.invoke(
+        app,
+        ["scan", "mcp:github:myhandle/myrepo", "--authorize", "myhandle/myrepo", "--dry-run"],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_SUCCESS, out
+    assert secret not in out
+    target_registry.clear_runtime_targets()
+
+
 def test_scan_custom_target_requires_authorize(tmp_path: Path) -> None:
     p = tmp_path / "t.yaml"
     p.write_text("family: acme\ncommand: python\nargs: [-m, srv]\n", encoding="utf-8")

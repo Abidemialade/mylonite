@@ -267,9 +267,13 @@ class FetchMCPAdapter(MCPStdioAdapter):
 class GitHubMCPAdapter(MCPStdioAdapter):
     """Bundled github MCP target.
 
-    Scope is ``owner/repo``. The CLI passes the user-supplied GITHUB_TOKEN
-    via ``extra_env`` in the live e2e tests; the unit tests sidestep that
-    via the ``_fake_open`` patch.
+    Scope is ``owner/repo``. The bundled ``TargetSpec`` declares
+    ``extra_env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"}``
+    (#184) — ``_session_adapter.MCPSessionAdapterBase._effective_env`` expands
+    that reference from the PARENT SHELL's own ``GITHUB_PERSONAL_ACCESS_TOKEN``
+    before the server is spawned, the same ``${VAR}`` mechanism a custom target
+    file's ``env:`` block uses. An unset variable is refused up front, before
+    any subprocess launches (``cli_targets._build_adapter_for_mcp``).
     """
 
     def __init__(

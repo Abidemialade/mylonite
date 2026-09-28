@@ -325,6 +325,25 @@ def _missing_env_message(missing: list[tuple[str, str, str | None]]) -> str:
     return "\n".join(lines)
 
 
+def expand_env_block(block: dict[str, str], *, path: str = "env") -> dict[str, str]:
+    """Expand ``${VAR}`` references in ``block``'s string values from
+    ``os.environ``, raising ``ValueError`` naming every unresolved reference.
+
+    Factored out of :func:`_expand_env_refs` so a launch env that doesn't
+    come from a LOADED target file resolves through the exact same
+    mechanism (and produces the exact same missing-variable message) as a
+    custom target file's own ``env:`` block. Currently used by the bundled
+    ``mcp:github`` spec's ``GITHUB_PERSONAL_ACCESS_TOKEN`` (#184): the
+    bundled ``TargetSpec`` is a plain module-level dict, never loaded via
+    :func:`load_target_file`, so it needs its own expansion call.
+    """
+    missing: list[tuple[str, str, str | None]] = []
+    expanded = _expand_dict_block(block, path, missing)
+    if missing:
+        raise ValueError(_missing_env_message(missing))
+    return expanded
+
+
 def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     """Expand ``${VAR}`` references from ``os.environ`` — ONLY within the
     credential-bearing fields ``redact_target_yaml`` actually masks: the

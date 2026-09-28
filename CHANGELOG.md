@@ -73,6 +73,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite scan reference:vulnerable --dry-run --weakness-class W4` now
   lists only the W4 seed(s). A custom target's own declared classes are
   unaffected.
+- **`mylonite scan mcp:github:<owner/repo>` can now actually receive a
+  token.** The bundled spec had no `extra_env`, the stdio launch allowlist
+  deliberately withholds secrets, and `--env` only applied to `mcp:custom`
+  — so a spawned `mcp:github` server never got a credential no matter what
+  the operator set. The bundled spec now declares
+  `extra_env={"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"}`
+  (the exact variable the real GitHub MCP server reads), resolved from the
+  parent shell through the same `${VAR}` expansion a custom target file's
+  `env:` block already uses. An unset variable fails fast, before any
+  subprocess launches, naming it. The token is never logged or written —
+  it matches the credential-key pattern every other secret-shaped `env`
+  value is already masked by.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is
