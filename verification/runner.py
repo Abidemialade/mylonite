@@ -182,30 +182,46 @@ def _cmd_layer1_emit(args: argparse.Namespace) -> int:
     print(f"wrote {len(written)} target files -> {out}")
     for p in written:
         print(f"  - {p.name}")
-    # `scan` has no --json flag; it writes into a timestamped subdirectory under
-    # --output-dir. The Layer 1 scorer globs `{family}*.json`, so the bundle has
-    # to be lifted out and named for its family. Printing an invocation that does
-    # not parse leaves the operator stuck at exactly the point they are furthest
-    # from a working run (issue #138), which is why
-    # tests/test_docs_consistency.py now parses the commands in this file too.
+    # `scan` has no --json flag; it writes scan_report.json + one exploit_*.json
+    # per finding into a timestamped subdirectory under --output-dir. The Layer 1
+    # scorer reads the WHOLE directory (#136 follow-up): scan_report.json alone
+    # can prove a challenge was exercised, but never WHICH weakness it found --
+    # that comes from the exploit files. Printing an invocation that does not
+    # parse, or a copy step that drops the exploit files, leaves the operator
+    # stuck at exactly the point they are furthest from a working run (issue
+    # #138), which is why tests/test_docs_consistency.py parses the `mylonite`
+    # commands in this file too.
     print("next: start the DVMCP servers, then for each target file:")
     print("  mylonite scan --target-file <t> --authorize <scope> --output-dir <dir>")
-    print(f"  cp <dir>/*/scan_report.json {out}/../<family>.json")
+    print(
+        "  copy the WHOLE scan directory (scan_report.json AND every exploit_*.json) "
+        "under the challenge's family name:"
+    )
+    print(f"    bash/zsh:    cp -r <dir>/<timestamp>/ {out}/../<family>/")
+    print(f"    PowerShell:  Copy-Item -Recurse <dir>/<timestamp> {out}/../<family>")
     print(f"then score them: python -m verification.runner layer1 score --reports {out}/..")
     return 0
 
 
 def _cmd_layer1_score(args: argparse.Namespace) -> int:
-    rows, _matrix, report = layer1_run.score_reports(Path(args.reports))
+    try:
+        rows, _matrix, report = layer1_run.score_reports(Path(args.reports))
+    except layer1_run.ScanDirIntegrityError as exc:
+        print(f"layer1 score: {exc}", file=sys.stderr)
+        return 2
     out = Path(args.out) if args.out else _REPORTS / "layer1_dvmcp.json"
     write_report(out, report)
     print(f"scored {len(rows)} in-scope challenges -> {out}")
+    recall = report["recall"]
+    recall_text = f"{recall:.1%}" if recall is not None else "n/a (0 exercised)"
     print(
-        f"  recall: {report['recall']:.1%}  ({report['found']} found / {report['missed']} missed)"
+        f"  recall: {recall_text}  "
+        f"({report['found']} found / {report['missed']} missed / "
+        f"{report['untested_challenges']} untested)"
     )
-    for r in rows:
-        mark = "OK " if r.detected_exploited else "MISS"
-        print(f"  [{mark}] {r.variant}: {r.detail}")
+    for row in report["per_challenge"]:
+        mark = "UNTESTED" if row["untested"] else ("OK " if row["found"] else "MISS")
+        print(f"  [{mark}] {row['challenge']}: {row['detail']}")
     return 0
 
 

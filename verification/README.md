@@ -97,8 +97,11 @@ python -m verification.runner layer1 fetch --include-unlicensed
 # 3. emit a Mylonite target.yaml per in-scope challenge (reads each port from server.py)
 python -m verification.runner layer1 emit-targets
 
-# 4. scan each, yourself (Mylonite connects over SSE; runs=5 recommended):
-#    mylonite scan --target-file <t>.yaml --authorize <family> --json verification/reports/dvmcp/<family>.json
+# 4. scan each, yourself (Mylonite connects over SSE; runs=5 recommended),
+#    then copy the WHOLE scan directory under the target's family name --
+#    scan_report.json alone has no per-attempt weakness class (#136):
+#    mylonite scan --target-file <t>.yaml --authorize <family> --output-dir <dir>
+#    cp -r <dir>/<timestamp>/ verification/reports/dvmcp/<family>/
 
 # 5. score recall vs DVMCP's documented weaknesses
 python -m verification.runner layer1 score --reports verification/reports/dvmcp
@@ -109,6 +112,14 @@ python -m verification.runner layer1 score --reports verification/reports/dvmcp
 > is not redistribution. The `--include-unlicensed` gate forces an explicit opt-in.
 > (An earlier research pass named DVAA as the Layer-1 target — verified wrong: DVAA
 > is A2A-only with no MCP endpoint and no license. See `SOURCE.md`.)
+>
+> **Report shape (#136).** The scorer reads the whole scan directory
+> `--output-dir` writes: `scan_report.json` for which challenges were
+> exercised, and the co-located `exploit_*.json` files (resolved through
+> `mylonite.gate.mitigation.weakness_class_for`) for which weakness class each
+> found. A bare copy of `scan_report.json`, with no `exploit_*.json` beside
+> it, is refused with a named error rather than silently scored as a miss --
+> see `verification/_scan_dir.py`.
 
 ## Honesty caveats (read before citing a number)
 

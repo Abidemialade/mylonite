@@ -20,9 +20,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (schema 1.1, additive). The published 0.9.0 "0/8" figure is left as
   recorded, with a note added in `README.md`, `verification/FINDINGS.md` and
   `docs/verification.md` (#136): no per-attempt artefact survives from that
-  run, and the harness had a second defect (`found` reads 0 from a bare
-  `scan_report.json` regardless of what fired) that this fix does not touch,
-  so 0/8 is stated as unmeasured rather than as a confirmed negative result.
+  run, so 0/8 is stated as unmeasured rather than as a confirmed negative
+  result.
+- **The Layer 1 scorer now resolves `found` from a real scan directory
+  instead of a bare `scan_report.json`, which never carried a per-attempt
+  weakness class.** `verification/runner.py`'s documented workflow told an
+  operator to copy only `scan_report.json`, so every real Layer 1 campaign's
+  `found` count read 0 regardless of what the scan actually found — a second
+  defect behind the unmeasured 0.9.0 figure, on top of the untested-as-missed
+  one above. A new `verification/_scan_dir.py` reads the whole scan
+  directory `mylonite scan`'s `--output-dir` writes: `scan_report.json` for
+  which challenges were exercised, and the co-located `exploit_*.json` files
+  — resolved through `mylonite.gate.mitigation.weakness_class_for`, the same
+  function the JSON finding bundle and the gate PR body use — for which
+  weakness class each one found. A bare `scan_report.json` copy with no
+  exploit files is refused with a named error
+  (`ScanDirIntegrityError`) instead of silently scored `found=0`, as is a
+  directory whose report claims a finding but has no matching exploit file.
+  `verification/runner.py` now prints the `cp -r`/`Copy-Item -Recurse`
+  instruction to copy the whole directory. Layer 1 recall is measurable
+  again; 0.9.0's figure stays recorded as unmeasured (#136 follow-up).
 
 ### Documentation
 

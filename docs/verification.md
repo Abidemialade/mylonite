@@ -60,13 +60,19 @@ scanned over SSE (the remote adapter), same model:
   `SeedArmUnavailable` — Mylonite's attack patterns were shaped around the bundled kitchen-sink's
   tool surface and didn't fit a different server. Synthesising the probe for each target's
   *introspected* tool surface fixed that.
-- **Recall is unmeasured.** The published 0.9.0 figure read 0/8, but the harness that
-  produced it had two defects that could each force a miss regardless of what the scan
-  actually found: the scorer folded any untested challenge into "missed" instead of
-  reporting it separately (fixed, issue #136), and the documented campaign workflow
-  saves a report with no per-attempt weakness class, so the found count reads 0 whatever
-  the scan did (still open). Treat 0/8 as unmeasured, not as evidence either way, until
-  Layer 1 is re-run.
+- **Recall is now measurable; the published 0.9.0 figure stays unmeasured.** The
+  harness that produced 0.9.0's 0/8 had two defects that could each force a miss
+  regardless of what the scan actually found: the scorer folded any untested
+  challenge into "missed" instead of reporting it separately, and the documented
+  campaign workflow saved a bare `scan_report.json`, which carries no per-attempt
+  weakness class, so the found count read 0 whatever the scan did. Both are fixed
+  (issue #136): the scorer reports `exercised_challenges`/`untested_challenges`
+  separately, and it reads the whole scan directory `mylonite scan`'s
+  `--output-dir` writes — `scan_report.json` plus the `exploit_*.json` files the
+  weakness class actually comes from. A bare-report copy is refused with a named
+  error instead of silently scored `found=0`. 0.9.0's figure is left as recorded
+  and stays unmeasured; a fresh run with the fixed harness would produce a
+  trustworthy number.
 
 ## Layer 2 — academic benchmarks, judge verification
 
@@ -141,8 +147,9 @@ AgentDojo's oracle did not (`verification/reports/layer2-agentdojo.json`):
 
 **Open / honest gaps:**
 
-- No model-fooling catch on an external app is currently measurable: DVMCP recall is
-  unmeasured pending a harness fix, not a clean negative (see the Layer 1 caveat above).
+- No model-fooling catch confirmed on an external app: DVMCP recall is measurable again
+  (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not been
+  re-run yet (see the Layer 1 note above).
 - Judge ≠ AgentDojo oracle (F1 0.41) — a semantic mismatch still to investigate.
 - No external *defended* server for a true external precision number.
 - Samples are small, and the hosted-model layers use one model; the opt-in

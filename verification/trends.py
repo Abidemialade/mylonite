@@ -69,6 +69,22 @@ _LAYER_FILES = {
     "layer3": "layer3-precision.json",
 }
 
+#: Layers whose committed number is known to be unreliable for a reason that
+#: has nothing to do with what the release actually measured -- a harness
+#: defect discovered after the fact. Rendered as this annotation instead of
+#: the (technically present, but misleading) number, so the table cannot be
+#: read as "this release measured a clean 0%" when the real story is that the
+#: harness could not have told a miss from an untested challenge, or (0.9.0's
+#: case) could not have told what a challenge found even when it fired.
+#:
+#: Keyed by ``(mylonite_version, layer_key)``. Remove an entry once the
+#: affected layer has been RE-MEASURED with the fixed harness and a new
+#: result is committed that supersedes it -- this is a record of a known-bad
+#: historical number, not a permanent asterisk.
+_KNOWN_DEFECTIVE: dict[tuple[str, str], str] = {
+    ("0.9.0", "layer1"): "unmeasured (harness defect, see FINDINGS.md)",
+}
+
 _SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
 
 #: The command that regenerates TRENDS.md, quoted verbatim in its own header
@@ -115,7 +131,10 @@ def _fmt_ratio(value: Any) -> str:
     return f"{value * 100:.1f}%"
 
 
-def _render_layer1(version_dir: Path, meta: dict[str, Any]) -> str:
+def _render_layer1(version_dir: Path, meta: dict[str, Any], version: str) -> str:
+    known_defective = _KNOWN_DEFECTIVE.get((version, "layer1"))
+    if known_defective is not None:
+        return known_defective
     if _layer_status(meta, "layer1") != "ran":
         return "not run"
     try:
@@ -211,7 +230,7 @@ def render_trends(results_root: Path) -> str:
         model = str(meta.get("model", "?"))
         row = (
             f"| {version} | {_render_date(meta)} | {model} "
-            f"| {_render_layer1(entry, meta)} "
+            f"| {_render_layer1(entry, meta, version)} "
             f"| {_render_judge_f1(entry, meta, 'layer2-agentdojo')} "
             f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-dh')} "
             f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-ds')} "
