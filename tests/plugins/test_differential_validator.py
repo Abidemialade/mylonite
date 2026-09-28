@@ -19,12 +19,14 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import time
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from rich.console import Console
 
 from mylonite.contracts import (
     AdapterResponse,
@@ -1885,6 +1887,62 @@ def test_an_llm_decided_unattributed_run_does_not_count_toward_the_effect_leg() 
     assert effect.passed is False
     assert effect.metric == 0.5
     assert report.kept is False
+
+
+# --- render.py's remediation-selection string coupling (fix round 1) --------
+#
+# `_render_validation_report` (report/render.py) picks a specific remediation
+# for a failed "effect" leg by matching a substring of THIS validator's own
+# detail wording. These two drive the REAL DifferentialValidator (not a
+# hand-built ValidationOutcome) through `_render_validation_report`, so a
+# future wording change in either file that breaks the coupling fails here,
+# not just in the hand-built render.py unit tests in tests/test_cli.py.
+
+
+def test_render_validation_report_unattributed_remediation_via_the_real_validator() -> None:
+    """from_state == 0 (every firing run is "unattributed"): the printed
+    remediation is the specific "target keeps state between attempts" text."""
+    from mylonite.report.render import _render_validation_report
+
+    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
+    effect = _outcome(report, "effect")
+    assert effect.passed is False
+    assert "0 confirmed from the target's state" in effect.detail
+
+    buf = io.StringIO()
+    console = Console(file=buf, width=200)
+    _render_validation_report(report, console=console)
+    out = buf.getvalue()
+    assert "REJECTED" in out
+    assert "keeps state between attempts" in out
+    assert "none reached a confirmed" in out
+
+
+def test_render_validation_report_does_not_overclaim_via_the_real_validator() -> None:
+    """Reproduces the reviewer's repro: 3 runs (true, unattributed decided by
+    the LLM judge so it doesn't count, false-non-finding), threshold 3 -- the
+    effect leg fails on COUNT (1/3), not because nothing was confirmed:
+    from_state == 1. The printed remediation must be the generic fallback,
+    never the "none reached a confirmed 'true'" claim, which would be false
+    here."""
+    from mylonite.report.render import _render_validation_report
+
+    report = _validate_with_runs(
+        [_run("true"), _run("unattributed", mechanism="llm"), _run("false", finding=False)],
+        iterations=3,
+        vuln_threshold=3,
+    )
+    effect = _outcome(report, "effect")
+    assert effect.passed is False
+    assert "1 confirmed from the target's state" in effect.detail
+
+    buf = io.StringIO()
+    console = Console(file=buf, width=200)
+    _render_validation_report(report, console=console)
+    out = buf.getvalue()
+    assert "REJECTED" in out
+    assert "none reached a confirmed" not in out
+    assert "keeps state between attempts" not in out
 
 
 def test_run_custom_iteration_records_the_real_effect_value_for_a_non_finding() -> None:

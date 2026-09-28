@@ -212,15 +212,19 @@ attribution is per attempt, not per ordering, but a report that reasons about th
 sequence (rather than each attempt's own trace) should account for it.
 
 **A default deferral word inside an unrelated call's result excludes that call.** The set
-of "this attempt's own executed calls" drops a call whose result text contains a default
-deferral word (e.g. `"pending"`) as well as one that matches the target's own
+of "this attempt's own executed calls" (E) drops a call whose result text contains a
+built-in default deferral word (e.g. `"pending"`) or one that matches the target's own
 `deferred_markers`. If a real, undeferred effect's result text happens to contain one of
 those words for an unrelated reason (e.g. `"2 pending"` in an otherwise-successful
-response), that call is excluded from linking, and a genuine effect can read `"false"`.
-Avoid a `verify_tool` or a linked call whose success text plausibly contains a default
-deferral word. `deferred_markers` in the target file apply only to the probe's own
-deferral check (step 3 of the rule); the default deferral words apply to this
-executed-call filtering, a separate check.
+response), that call is excluded from E, and a genuine effect can read `"false"`. Avoid a
+`verify_tool` or a linked call whose success text plausibly contains a default deferral
+word. `deferred_markers` in the target file feed **both** checks: this executed-call
+filter, and the separate deferral-growth check (step 3 of the rule, which decides
+`"false"` when a declared marker's count grew from before the attempt to after). The
+built-in default deferral words feed **only** the executed-call filter — step 3 never
+sees them, so a default word growing in the verify output does not by itself mean
+"defended". A different mechanism from the silent drop below, but the same landing spot:
+`false`.
 
 **A silent drop reads `"false"`, as it did in 0.10.3** — the linked call replied with
 success, but the marker never appears in the target's state, before or after. This is
