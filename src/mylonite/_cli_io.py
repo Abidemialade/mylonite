@@ -19,8 +19,16 @@ import typer
 from rich.console import Console
 
 from mylonite._redaction import redact, redact_exception
+from mylonite.exit_codes import EXIT_CONFIG
 
-__all__ = ["console_print", "echo", "echo_err", "echo_exc", "missing_target_file_message"]
+__all__ = [
+    "_exit_if_missing_target_file",
+    "console_print",
+    "echo",
+    "echo_err",
+    "echo_exc",
+    "missing_target_file_message",
+]
 
 
 def echo(message: str = "", *, err: bool = False) -> None:
@@ -81,3 +89,18 @@ def missing_target_file_message(path: Path) -> str:
         f"  mylonite scan --command python --arg server.py --scaffold {name} --scope my-app\n"
         f"(an HTTP agent: --rest-url URL --scaffold {name}). See docs/target-file.md."
     )
+
+
+def _exit_if_missing_target_file(exc: Exception, target_file: Path) -> None:
+    """Exit with the ``--scaffold`` fix when ``exc`` is a missing target file.
+
+    Shared by every ``load_target_file``/``build_target_spec`` catch site
+    across the CLI (``scan``, ``generate``, ``validate``, ``gate``, ``ablate``,
+    ``check``) so the fix can't drift between them. Returns normally (does
+    nothing) for any other exception -- including a missing file the target
+    file itself names, such as ``system_prompt_file`` -- so the caller's
+    ``echo_exc`` fallback runs.
+    """
+    if isinstance(exc, FileNotFoundError) and not target_file.exists():
+        echo_err(missing_target_file_message(target_file))
+        raise typer.Exit(code=EXIT_CONFIG) from exc

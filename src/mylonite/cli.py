@@ -36,7 +36,14 @@ from rich.console import Console
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
-from mylonite._cli_io import console_print, echo, echo_err, echo_exc, missing_target_file_message
+from mylonite._cli_io import (
+    _exit_if_missing_target_file,
+    console_print,
+    echo,
+    echo_err,
+    echo_exc,
+    missing_target_file_message,
+)
 from mylonite.exit_codes import (
     EXIT_BUDGET,
     EXIT_CONFIG,
@@ -740,20 +747,6 @@ def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
             "`pip install mcp-kitchen-sink`, or from a checkout "
             "`pip install -e ./reference_targets/mcp_kitchen_sink`."
         )
-        raise typer.Exit(code=EXIT_CONFIG) from exc
-
-
-def _exit_if_missing_target_file(exc: Exception, target_file: Path) -> None:
-    """Exit with the ``--scaffold`` fix when ``exc`` is a missing target file.
-
-    Shared by every ``load_target_file``/``build_target_spec`` catch site in this
-    module (``scan``, ``generate``, ``validate``, ``gate``, ``ablate``, ``check``)
-    so the fix can't drift between them. Returns normally (does nothing) for any
-    other exception -- including a missing file the target file itself names,
-    such as ``system_prompt_file`` -- so the caller's ``echo_exc`` fallback runs.
-    """
-    if isinstance(exc, FileNotFoundError) and not target_file.exists():
-        echo_err(missing_target_file_message(target_file))
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 

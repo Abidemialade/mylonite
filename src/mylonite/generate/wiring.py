@@ -15,7 +15,7 @@ from typing import Any
 
 import typer
 
-from mylonite._cli_io import echo, echo_err, echo_exc
+from mylonite._cli_io import _exit_if_missing_target_file, echo, echo_err, echo_exc
 from mylonite._paths import safe_slug
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.exit_codes import EXIT_CONFIG
@@ -249,7 +249,6 @@ def _emit_generated_test(
     """
     from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite._target_env import echo_env_notice
-    from mylonite.cli import _exit_if_missing_target_file
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
