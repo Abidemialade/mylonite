@@ -1,0 +1,1333 @@
+{
+  "commands": {
+    "ablate": {
+      "epilog": null,
+      "help": "Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).\n\nFor each control, toggle it (on vs off, or all-minus-c with --redundancy)\nagainst its weakness's attack (model held constant) and report whether it\nactually carries the security. LIVE: launches the target's MCP server + provider.",
+      "name": "ablate",
+      "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Must equal the target's scope, or its family when it declares no scope. Asserts you own the target; see SECURITY.md.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Comma-separated weakness classes to ablate (e.g. W2,W3,W4). Default: the target's declared controls, else all implemented controls matching its weakness_classes.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "controls",
+          "opts": [
+            "--controls"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that CRAFTS/REFINES attack payloads. Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "customiser_model",
+          "opts": [
+            "--customiser-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "1",
+          "envvar": null,
+          "help": "Scans per control per side (raw/guarded). Default 1.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "iterations",
+          "opts": [
+            "--iterations"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that JUDGES whether an attack landed. Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "judge_model",
+          "opts": [
+            "--judge-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "2",
+          "envvar": null,
+          "help": "Max kitchen-sink seeds per weakness to probe. Default 2.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "max_seeds",
+          "opts": [
+            "--max-seeds"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": null,
+          "is_flag": false,
+          "multiple": false,
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that DRIVES the agent-under-test (the planner) while scoring controls. Defaults to --model. Same three-role split as `scan`/`gate`/`validate`.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "planner_model",
+          "opts": [
+            "--planner-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Toggle each control OFF against the FULL set (all-minus-c) instead of on-vs-off, so the matrix tells 'redundant' (another control covers the weakness) from 'theater'.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "redundancy",
+          "opts": [
+            "--redundancy"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A declarative mylonite.yaml run config (target_file / authorize / provider / model / the role models). Auto-discovered from ./mylonite.yaml when present; an explicit flag always wins.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "run_config_path",
+          "opts": [
+            "--config"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Custom-target YAML (required): the app to ablate.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        }
+      ]
+    },
+    "check": {
+      "epilog": null,
+      "help": "Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.\n\nConnects to the target ONCE (`describe()` — exactly what `scan --scaffold`\nalready does) and reports structural exposure from the tool schemas alone:\nconsequential tools with no approval-shaped sibling, descriptions that\nsteer the agent, tools taking an apparent network destination, content-\nprocessing tools that could carry an indirect-injection payload, unpinned\ntool descriptions (rug-pull exposure), and which weakness classes the\nsurface suggests. Every finding is a HINT to confirm, never a verdict —\nthe differential oracle (`scan`/`gate`) is what proves an attack actually\nlands. Belongs in CI stage 1, next to lint: cheap enough to run on every\npush, unlike the live stages that spend LLM budget.",
+      "name": "check",
+      "params": [
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Exit 1 on substantive W1-W4 structural findings, instead of reporting and exiting 0. The 'unpinned descriptions' advisory (which fires on every tool of every server on first contact) does NOT gate, so this is adoptable as a CI stage from day one.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "enforce",
+          "opts": [
+            "--enforce"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A declarative mylonite.yaml run config. Fills --target-file when you omit it; auto-discovered from ./mylonite.yaml when present; an explicit flag always wins.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "run_config_path",
+          "opts": [
+            "--config"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "`reference:vulnerable` / `reference:guarded`, or use --target-file.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target",
+          "opts": [
+            "target"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Custom-target YAML: the app to check.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        }
+      ]
+    },
+    "demo": {
+      "epilog": null,
+      "help": "Run the zero-config reference-app playground: vulnerable vs guarded differential.\n\nDefault is offline replay of recorded fixtures - no network, no API key,\ndeterministic. `--live` makes real calls against the in-process reference\nagent (two variants, ~2 min). The recorded model is self-hosted, so a live\nrun costs nothing but needs that model served locally; `--provider`/`--model`\npoint it at a hosted one instead.\n\nBody lives in `mylonite.demo.cli_entry`, which documents the replay\ninvariant that keeps this command independent of the environment.",
+      "name": "demo",
+      "params": [
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Make real LLM calls instead of replaying recorded fixtures.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "live",
+          "opts": [
+            "--live"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Model. --live only; replay is pinned to the recorded one.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "LiteLLM provider. --live only; replay is pinned.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "provider",
+          "opts": [
+            "--provider"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        }
+      ]
+    },
+    "gate": {
+      "epilog": "Examples:\n\n`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- write the target file first; its scope is the --authorize value below.\n\n`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh.",
+      "help": "Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline.",
+      "name": "gate",
+      "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Must equal the target's scope, or its family when it declares no scope. Asserts you own the target; see SECURITY.md.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that CRAFTS/REFINES attack payloads (the red-team / attacker side). Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "customiser_model",
+          "opts": [
+            "--customiser-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Skip the differential leg for a custom target (no boundary-guarded twin). Faster/cheaper but a WEAKER guarantee — the kept test no longer proves the safeguard, not the model, carries the security.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "fast",
+          "opts": [
+            "--fast"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "3",
+          "envvar": null,
+          "help": "Differential iterations for the validation leg (default 3). The kept verdict then reflects reproducibility across runs — the guarded side must resist every run and the attack must fire in all but one. Pass 1 for the fastest, weakest gate (fire once).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "iterations",
+          "opts": [
+            "--iterations"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that JUDGES whether an attack landed. Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "judge_model",
+          "opts": [
+            "--judge-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Append a labelled, unverified LLM fix suggestion to the PR body.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "llm_enrich",
+          "opts": [
+            "--llm-enrich"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "LLM call budget for the scan phase. Not a hard ceiling: each seed keeps a small floor, so the worst case is higher (see docs/ci-gating.md).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "max_llm_calls",
+          "opts": [
+            "--max-llm-calls"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Model identifier passed to LiteLLM.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Push a branch and open the gating PR via gh (opt-in).",
+          "is_flag": true,
+          "multiple": false,
+          "name": "open_pr",
+          "opts": [
+            "--open-pr"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Output directory for gate artefacts (default: the resolved layout's gate dir, normally .mylonite/gate — see mylonite.yaml `root:` / MYLONITE_ROOT).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "out",
+          "opts": [
+            "--out"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that DRIVES the agent-under-test (the planner). Defaults to --model. Same three-role split as `scan` — see its --planner-model help for the rationale.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "planner_model",
+          "opts": [
+            "--planner-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "For a black-box HTTP (rest) target: run the input data-framing ('spotlighting') differential to measure whether that input defence is load-bearing. Opt-in; otherwise a rest target is gated by stability + effect + consensus.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "prove_input_control",
+          "opts": [
+            "--prove-input-control"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "One-line description of what the app is for; tailors the probes to the app's domain. Overrides 'purpose' in the target file.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "purpose",
+          "opts": [
+            "--purpose"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Mint a unique exfil destination per run so the finding proves the control/target stops exfil to ANY attacker destination, not just the demo address (avoids 'teaching to the test'). Defaults ON for a live custom target (--target-file); the reference target never randomizes.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "randomize_exfil",
+          "opts": [
+            "--randomize-exfil"
+          ],
+          "required": false,
+          "secondary_opts": [
+            "--no-randomize-exfil"
+          ],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A declarative mylonite.yaml run config (target_file / authorize / provider / model / budget) — the same one `scan` reads. Auto-discovered from ./mylonite.yaml when present; an explicit flag always wins.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "run_config_path",
+          "opts": [
+            "--config"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "'ubuntu-latest'",
+          "envvar": null,
+          "help": "GitHub runner label for the scaffolded workflows; use a self-hosted label for in-perimeter MCP backends.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "runs_on",
+          "opts": [
+            "--runs-on"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Target ID: 'reference:vulnerable' / 'reference:guarded', a bundled 'mcp:<family>[:<scope>]', or 'mcp:custom'. Omit when using --target-file. Non-reference targets require --authorize.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target",
+          "opts": [
+            "target"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Scaffold .github/workflows/ gate + discovery templates into the repository. Off by default — this writes files you did not ask for.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "workflows",
+          "opts": [
+            "--workflows"
+          ],
+          "required": false,
+          "secondary_opts": [
+            "--no-workflows"
+          ],
+          "type": "BoolParamType"
+        }
+      ]
+    },
+    "generate": {
+      "epilog": null,
+      "help": "Emit a pytest regression test from a confirmed exploit.\n\nOffline and deterministic — no LLM call. Reads an ``exploit_*.json`` (written\nby ``mylonite scan``), renders a testkit-based pytest file, and writes it next\nto a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a\nCUSTOM target, pass ``--target-file`` so the target YAML is co-located as\n``target.yaml`` (the live test needs it). With ``--prove-control`` the emitted\ntest asserts the control is load-bearing (``assert_control_holds``) rather than\njust that the target resists. Prints what to run next.",
+      "name": "generate",
+      "params": [
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Use the newest scan under the resolved scans dir.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "latest",
+          "opts": [
+            "--latest"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Output dir for the emitted test (default .mylonite/generated/<slug>/).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "out",
+          "opts": [
+            "--out"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Emit a control-efficacy test (assert_control_holds) that proves the control blocking this finding is load-bearing — the attack lands without it and is resisted with it — instead of the standard resists/guard test. Custom targets only (needs --target-file); a reference or non-controllable finding falls back to the standard test.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "prove_control",
+          "opts": [
+            "--prove-control"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "An exploit_*.json file OR a scan dir containing one. Omit and pass --latest to use the newest scan under .mylonite/scans/.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "scan_path",
+          "opts": [
+            "scan_path"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "The directory `scan --output-dir` wrote to, when using --latest (default: the resolved layout's scans dir, normally .mylonite/scans). An INPUT — where --latest searches for a scan to read, not where this command writes; for the emitted test's output dir see --out. Ignored if you pass SCAN_PATH explicitly instead of --latest.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "scans_dir",
+          "opts": [
+            "--scans-dir"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "For a CUSTOM target: the same target YAML you scanned. Co-located next to the emitted test as target.yaml so the live test can re-drive your real app out of the box.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        }
+      ]
+    },
+    "plugins": {
+      "epilog": null,
+      "help": "List installed extension plugins across all five contract groups.\n\nDiscovers every registered plugin via its PyPI entry point, which also runs\nthe contract-version compatibility check (a major mismatch is refused here\nrather than failing silently mid-run). Attack modules are additionally *run*\nby ``scan``/``gate``; for the target-adapter, test-generator, validator and\ncompliance-mapper contracts Mylonite uses its bundled reference\nimplementation, and selecting a third-party one for those is not yet exposed\non the CLI (see docs/plugin-authoring.md).",
+      "name": "plugins",
+      "params": []
+    },
+    "report": {
+      "epilog": "Examples:\n\n`mylonite report .mylonite/scans/<dir>` -- terminal trust panel (offline, no LLM).\n\n`mylonite report <dir> --sarif out.sarif` -- GitHub code scanning (Security tab + PR checks).\n\n`mylonite report <dir> --json finding.json` -- machine-readable bundle (dashboards/SIEM/bots).",
+      "help": "Render a saved scan or validation as a trust panel (offline, no LLM).\n\nA clean, screenshot-able \"why you can trust this\" readout. For a validation it\nshows the verdict, the gating formula with\nlive per-leg marks, the fires/resists reproducibility counts, the per-seed\nkill matrix, and the compliance tags. For a scan it shows the findings,\ncoverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no\nloadable artefact is found.",
+      "name": "report",
+      "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Also write a machine-readable JSON finding bundle (severity, compliance, localization, differential proof, proven control) for dashboards / SIEM / bots. Takes a PATH.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "json_bundle",
+          "opts": [
+            "--json"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Also write a SARIF 2.1.0 file for GitHub code scanning (the Security tab + PR checks). Each result carries severity, compliance tags, and the differential proof (fired N/N, resisted M/M). Takes a PATH.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "sarif",
+          "opts": [
+            "--sarif"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A scan dir, a generated/validated dir, or a scan_report.json / validation_report.json. Renders the trust panel for whichever it finds.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target",
+          "opts": [
+            "target"
+          ],
+          "required": true,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        }
+      ]
+    },
+    "scan": {
+      "epilog": "Examples:\n\n`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- introspect a server and write a starter target.yaml (no LLM call, no attack).\n\n`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app\n(--authorize equals the scope the scaffold wrote).\n\nExit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable.",
+      "help": "Run the exploit-finding loop against a target.\n\nExit codes: 0 ok; 2 config/usage error (incl. nothing scanned); 3 budget\nexceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an\naborted/empty scan exits non-zero so it never reads as a clean pass.",
+      "name": "scan",
+      "params": [
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Scan a custom target that declares an indirect-injection weakness class (e.g. W2) without a seed_arm. Those seeds will report NOT TESTED rather than block the scan. Off by default so a misconfig never reads as clean.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "allow_no_seed_arm",
+          "opts": [
+            "--allow-no-seed-arm"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — a server arg (repeatable, in order).",
+          "is_flag": false,
+          "multiple": true,
+          "name": "arg",
+          "opts": [
+            "--arg"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Must equal the target's scope, or its family when it declares no scope. Asserts you own the target; see SECURITY.md.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — the MCP server launch command.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "command",
+          "opts": [
+            "--command"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that CRAFTS/REFINES attack payloads (the red-team / attacker side). Defaults to --model. Mylonite separates three model roles: planner (the agent under test), customiser (the attacker), and judge (the verdict) -- set them independently to mix a strong attacker against a cheaper target, etc.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "customiser_model",
+          "opts": [
+            "--customiser-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Enumerate seeds; skip customisation + invocation.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — a KEY=VALUE env var for the server (repeatable).",
+          "is_flag": false,
+          "multiple": true,
+          "name": "env",
+          "opts": [
+            "--env"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "With --scaffold, overwrite the output file if it exists.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "force",
+          "opts": [
+            "--force"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that JUDGES whether an attack landed (the LLM-judge leg, used only when the deterministic predicate is inconclusive). Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "judge_model",
+          "opts": [
+            "--judge-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "3",
+          "envvar": null,
+          "help": "Max concurrent in-flight seeds.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "max_concurrent",
+          "opts": [
+            "--max-concurrent"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "LLM call budget for this scan. Not a hard ceiling: each seed keeps a small floor, so the worst case is higher (see docs/ci-gating.md).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "max_llm_calls",
+          "opts": [
+            "--max-llm-calls"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Model identifier passed to LiteLLM.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Root directory for scan artefacts (default: the resolved layout's scans dir, normally .mylonite/scans — see mylonite.yaml `root:` / MYLONITE_ROOT).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "output_dir",
+          "opts": [
+            "--output-dir"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that DRIVES the agent-under-test (the planner). Defaults to --model. An aligned planner refuses injection even on a vulnerable target; point this at a representatively exploitable model to keep the attack class testable.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "planner_model",
+          "opts": [
+            "--planner-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — a primary tool name (repeatable).",
+          "is_flag": false,
+          "multiple": true,
+          "name": "primary_tool",
+          "opts": [
+            "--primary-tool"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "One-line description of what the app is for (e.g. 'an email-triage assistant that can send replies'). Tailors the probes to the app's domain. Overrides 'purpose' in the target file; persisted for a custom target so generate/validate reuse it.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "purpose",
+          "opts": [
+            "--purpose"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Mint a unique exfil destination per run instead of the demo address, so a finding proves the target leaks to ANY attacker destination (generalizes) rather than only the one literal address (avoids 'teaching to the test'). Defaults ON for live custom-target scans; the reference/replay path never randomizes. Matches generate/validate/gate's own default (A5).",
+          "is_flag": true,
+          "multiple": false,
+          "name": "randomize_exfil",
+          "opts": [
+            "--randomize-exfil"
+          ],
+          "required": false,
+          "secondary_opts": [
+            "--no-randomize-exfil"
+          ],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "With --scaffold --rest-url: the request body template (must contain a {prompt} placeholder). Default: '{\"prompt\": \"{prompt}\"}'.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "rest_body",
+          "opts": [
+            "--rest-body"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "With --scaffold --rest-url: dotted path into the JSON reply to extract the agent's response (e.g. choices.0.message.content). Omit to use the whole body.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "rest_response_path",
+          "opts": [
+            "--rest-response-path"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "With --scaffold: write a RUNNABLE HTTP-agent (transport: rest) target for this endpoint instead of introspecting an MCP server. No --command needed. Pair with --rest-body / --rest-response-path. See docs/http-agent.md.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "rest_url",
+          "opts": [
+            "--rest-url"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A declarative mylonite.yaml run config (target_file / authorize / provider / model / max_llm_calls). Fills any flag you omit; an explicit flag always wins.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "run_config_path",
+          "opts": [
+            "--config"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Scaffold mode: introspect the MCP server (via --command, no LLM call, no attack) and write a commented starter target.yaml to this PATH instead of scanning. Fill in seed_arm/effect_probe, then scan with --target-file.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "scaffold",
+          "opts": [
+            "--scaffold"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — optional scope label (must match --authorize).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "scope",
+          "opts": [
+            "--scope"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — the target's system prompt (inline).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "system_prompt",
+          "opts": [
+            "--system-prompt"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — read the system prompt from a file.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "system_prompt_file",
+          "opts": [
+            "--system-prompt-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Target ID: 'reference:vulnerable' / 'reference:guarded' (the bundled twins), or 'mcp:custom' with --command/--arg flags. Omit when using --target-file (your own MCP app). Non-reference targets require --authorize.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target",
+          "opts": [
+            "target"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Path to a custom-target YAML (declares command/args/weakness_classes/seed_arm).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "mcp:custom — a weakness class the target exposes, e.g. W2/W4 (repeatable).",
+          "is_flag": false,
+          "multiple": true,
+          "name": "weakness_class",
+          "opts": [
+            "--weakness-class"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        }
+      ]
+    },
+    "validate": {
+      "epilog": "Examples:\n\n`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the validation engine).\n\n`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\nExit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected).",
+      "help": "Run a generated test through the differential-oracle validator (LIVE).\n\nRuns LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM\n(Haiku), plus the metamorphic re-drives, and needs a provider\n(ANTHROPIC_API_KEY). The LLM calls and tokens it used are printed when it\nfinishes. Validates the ACTUAL committed test on disk (no\nre-emit), then — on a clean discriminating run — RECORDS the canonical guarded\nfixtures into the generated dir's ``fixtures/`` and runs that on-disk test\noffline as a full-pass build, so the command leaves a ready-to-commit,\nreplayable test + fixtures behind. Renders a per-leg report (build /\ndifferential / flakiness / metamorphic) with the mutation score and the kept\nverdict. Exit 0 when the test is kept, 5 when it is cleanly rejected, 4 with\nno provider.",
+      "name": "validate",
+      "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Must equal the target's scope, or its family when it declares no scope. Asserts you own the target; see SECURITY.md. Not needed for a reference:* target.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that CRAFTS/REFINES attack payloads. Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "customiser_model",
+          "opts": [
+            "--customiser-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "For a CUSTOM target: skip the differential leg (the boundary-guarded twin). Faster/cheaper (~half the live runs) but a WEAKER guarantee: kept = build ∧ stability ∧ effect ∧ consensus, without proving the safeguard carries the security. Also overrides --prove-input-control (never re-enables the differential it just skipped). For a REFERENCE target: the twin-vs-twin differential itself isn't optional, so this instead reduces the metamorphic robustness check to a single perturbation strategy (still gates kept, just cheaper/less thorough).",
+          "is_flag": true,
+          "multiple": false,
+          "name": "fast",
+          "opts": [
+            "--fast"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "120.0",
+          "envvar": null,
+          "help": "Per-scan wall-clock budget (seconds) for a CUSTOM-target run. A stuck or slow real target aborts that run cleanly instead of hanging open-ended; the loop still completes and reports. Defaults to a sane non-zero bound (DCR-0010) — a CI job must not be able to hang indefinitely just because this flag was left unset; pass a larger value for a target known to need more time.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "iteration_timeout",
+          "opts": [
+            "--iteration-timeout"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "FloatParamType"
+        },
+        {
+          "default": "5",
+          "envvar": null,
+          "help": "Differential/flakiness iterations (each runs both twins). Default 5.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "iterations",
+          "opts": [
+            "--iterations"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "IntParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that JUDGES whether an attack landed. Defaults to --model.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "judge_model",
+          "opts": [
+            "--judge-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Model for the live validation run.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Override the model that DRIVES the agent-under-test (the planner). Defaults to --model. Same three-role split as `scan`/`gate`.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "planner_model",
+          "opts": [
+            "--planner-model"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "For a black-box HTTP (rest) target: run an input data-framing ('spotlighting') differential — raw vs a build that wraps the payload as untrusted data — to measure whether that input defence is load-bearing. Opt-in; otherwise a rest target is gated by stability + effect + consensus. --fast takes precedence: it skips the differential leg outright and makes this a no-op.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "prove_input_control",
+          "opts": [
+            "--prove-input-control"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Mint a unique exfil destination per run instead of the demo address, so the run proves the control/target stops exfil to ANY attacker destination (generalizes) rather than blocking one literal address (avoids 'teaching to the test'). Defaults ON for live custom-target runs; the reference/replay path never randomizes.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "randomize_exfil",
+          "opts": [
+            "--randomize-exfil"
+          ],
+          "required": false,
+          "secondary_opts": [
+            "--no-randomize-exfil"
+          ],
+          "type": "BoolParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "A declarative mylonite.yaml run config (provider / model / the role models). Auto-discovered from ./mylonite.yaml when present; an explicit flag always wins.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "run_config_path",
+          "opts": [
+            "--config"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "The dir (or test file) emitted by `mylonite generate`. Runs the differential-oracle validator LIVE by default — real LLM calls (Haiku): ~5 iterations x 2 twins plus metamorphic re-drives; the LLM calls and tokens used are printed when it finishes. Needs a provider (ANTHROPIC_API_KEY).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target",
+          "opts": [
+            "target"
+          ],
+          "required": true,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Required when validating a test for a CUSTOM target: the same target YAML you scanned. The validator re-drives the REAL target (N runs + multi-judge consensus + effect probe) instead of the bundled twin, so the test fails when YOUR app regresses.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "target_file",
+          "opts": [
+            "--target-file"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "TyperPath"
+        }
+      ]
+    },
+    "version": {
+      "epilog": null,
+      "help": "Print the installed Mylonite version.",
+      "name": "version",
+      "params": []
+    }
+  },
+  "root": {
+    "epilog": "Examples:\n\n`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml` -- scaffold a target.yaml.\n\n`mylonite gate --target-file app.yaml --authorize custom --open-pr` -- scan to a gating PR.\n\nDocs: https://abidemialade.github.io/mylonite/ -- run 'mylonite COMMAND --help' for any command.",
+    "help": "Mylonite -- AI-layer security testing.\n\nFinds app-specific weaknesses in your AI agent's attack surface (system prompt, tool/function schemas, MCP tools), proves each one with a differential oracle, and writes the pytest regression test that gates CI.",
+    "name": "mylonite",
+    "params": [
+      {
+        "default": "None",
+        "envvar": null,
+        "help": "Read an API key from a file (a bare key or a dotenv KEY=VALUE line).",
+        "is_flag": false,
+        "multiple": false,
+        "name": "api_key_file",
+        "opts": [
+          "--api-key-file"
+        ],
+        "required": false,
+        "secondary_opts": [],
+        "type": "TyperPath"
+      },
+      {
+        "default": "None",
+        "envvar": null,
+        "help": "Load provider API-key vars from a .env file (only known key names).",
+        "is_flag": false,
+        "multiple": false,
+        "name": "env_file",
+        "opts": [
+          "--env-file"
+        ],
+        "required": false,
+        "secondary_opts": [],
+        "type": "TyperPath"
+      }
+    ]
+  }
+}
