@@ -101,7 +101,10 @@ and proves the finding *differentially* by default — the emitted test gates on
 ## 5. Keep it honest over time
 
 - **`mylonite ablate --target-file app.yaml --authorize my-app`** — score each safeguard:
-  load-bearing, security theater, or (with `--redundancy`) redundant.
+  load-bearing, security theater, or (with `--redundancy`) redundant, plus two honesty
+  outcomes: no-attack (the attack itself never reproduced, so there's nothing to
+  attribute) and inconclusive (a leg of the comparison never produced a trustworthy
+  result).
 - **When you change models** — re-validate the committed test with the new
   `--planner-model` before you ship. See [Re-validate on a new model](model-upgrade.md).
 

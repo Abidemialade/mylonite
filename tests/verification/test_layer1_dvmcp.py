@@ -84,6 +84,113 @@ def test_score_reports_reads_directory(tmp_path: Path) -> None:
     assert report["found"] == 1
 
 
+# --- #136: untested is not missed ------------------------------------------
+
+
+def test_is_exercised_reads_attempt_outcomes(tmp_path: Path) -> None:
+    exercised = tmp_path / "exercised.json"
+    exercised.write_text(json.dumps({"attempts": [{"outcome": "no_finding"}]}), encoding="utf-8")
+    assert layer1_run.is_exercised(exercised) is True
+
+    all_skipped = tmp_path / "skipped.json"
+    all_skipped.write_text(
+        json.dumps(
+            {
+                "attempts": [
+                    {"outcome": "skipped_planner_no_engagement"},
+                    {"outcome": "skipped_payload_not_delivered"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert layer1_run.is_exercised(all_skipped) is False
+
+    # legacy finding-only bundle (no "attempts" key at all): a real finding
+    # cannot exist without an exercised attempt, so it still counts.
+    legacy_with_finding = tmp_path / "legacy_finding.json"
+    legacy_with_finding.write_text(
+        json.dumps({"findings": [{"weakness_class": "W1"}]}), encoding="utf-8"
+    )
+    assert layer1_run.is_exercised(legacy_with_finding) is True
+
+    # legacy bundle with nothing in it at all: unresolvable -> not exercised
+    # (fail toward "don't know", never toward "tested and clean").
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps({"findings": []}), encoding="utf-8")
+    assert layer1_run.is_exercised(empty) is False
+
+
+def test_score_reports_marks_missing_report_as_untested_not_missed(tmp_path: Path) -> None:
+    # No report at all for any in-scope challenge.
+    _rows, matrix, report = layer1_run.score_reports(tmp_path)
+    assert report["in_scope_challenges"] == 8
+    assert report["exercised_challenges"] == 0
+    assert report["untested_challenges"] == 8
+    assert report["found"] == 0
+    # Nothing was exercised, so "missed" (exercised-but-not-found) is 0, not 8.
+    assert report["missed"] == 0
+    assert matrix.tp == 0
+    assert matrix.fn == 0
+    # Recall is undefined with zero exercised challenges, not a spurious 1.0/0.0.
+    assert report["recall"] is None
+    for row in report["per_challenge"]:
+        assert row["untested"] is True
+        assert row["found"] is False
+
+
+def test_score_reports_marks_all_skipped_report_as_untested_not_missed(tmp_path: Path) -> None:
+    # Challenge 3's report exists but every attempt was skipped -- exercised
+    # nothing. This must NOT count as a miss.
+    (tmp_path / "dvmcp-c3.json").write_text(
+        json.dumps(
+            {
+                "attempts": [
+                    {"outcome": "skipped_planner_no_engagement"},
+                    {"outcome": "not_applicable"},
+                ],
+                "findings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Challenge 2 is genuinely exercised and clean (no_finding).
+    (tmp_path / "dvmcp-c2.json").write_text(
+        json.dumps({"attempts": [{"outcome": "no_finding"}], "findings": []}),
+        encoding="utf-8",
+    )
+    # Challenge 4 is genuinely exercised and flags its expected weakness.
+    (tmp_path / "dvmcp-c4.json").write_text(
+        json.dumps(
+            {
+                "attempts": [{"outcome": "finding"}],
+                "findings": [{"weakness_class": "W1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _rows, matrix, report = layer1_run.score_reports(tmp_path)
+
+    assert report["in_scope_challenges"] == 8
+    assert report["exercised_challenges"] == 2  # c2, c4 -- NOT c3
+    assert report["untested_challenges"] == 6  # c1, c3, c5, c6, c7, c10
+    assert report["found"] == 1  # c4
+    assert report["missed"] == 1  # c2 (exercised, not found)
+    assert report["recall"] == pytest.approx(0.5)  # 1 found / 2 exercised
+    assert matrix.tp == 1
+    assert matrix.fn == 1
+
+    by_cid = {row["challenge"]: row for row in report["per_challenge"]}
+    assert by_cid["challenge3"]["untested"] is True
+    assert by_cid["challenge3"]["found"] is False
+    assert by_cid["challenge2"]["untested"] is False
+    assert by_cid["challenge2"]["found"] is False
+    assert by_cid["challenge4"]["untested"] is False
+    assert by_cid["challenge4"]["found"] is True
+    # a never-reported challenge is untested too
+    assert by_cid["challenge1"]["untested"] is True
+
+
 def test_fetch_dvmcp_requires_optin() -> None:
     # No network: the gate raises before any clone.
     with pytest.raises(RuntimeError, match="no LICENSE"):

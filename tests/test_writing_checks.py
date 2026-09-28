@@ -185,6 +185,17 @@ def test_gate_action_needs_changelog_and_ci_gating_page() -> None:
     assert not docs.check(["gate-action/action.yml", "CHANGELOG.md", "docs/ci-gating.md"])
 
 
+def test_verification_harness_needs_changelog_and_verification_page() -> None:
+    """The harness drives the published numbers, so a change to it is user-facing too."""
+    problems = docs.check(["verification/layer1_runnable/run.py"])
+    assert len(problems) == 2
+    assert "CHANGELOG.md" in problems[0].message
+    assert "docs/verification.md" in problems[1].message
+    assert not docs.check(
+        ["verification/layer1_runnable/run.py", "CHANGELOG.md", "docs/verification.md"]
+    )
+
+
 def test_opt_out_needs_a_real_reason() -> None:
     change = ["src/mylonite/cli.py"]
     assert not docs.check(change, ["Docs-Impact: none - internal refactor, no flag changes"])

@@ -35,7 +35,12 @@ from dataclasses import dataclass
 CHANGELOG = "CHANGELOG.md"
 
 # Paths whose changes are user-visible enough to need a changelog entry.
-CODE_PREFIXES = ("src/mylonite/", "reference_targets/mcp_kitchen_sink/src/", "gate-action/")
+CODE_PREFIXES = (
+    "src/mylonite/",
+    "reference_targets/mcp_kitchen_sink/src/",
+    "gate-action/",
+    "verification/",
+)
 
 # Generated or non-behavioural files under the code prefixes.
 CODE_EXEMPT = (
@@ -74,6 +79,11 @@ DOC_RULES: tuple[DocRule, ...] = (
         "src/mylonite/taxonomy/data/",
         ("src/mylonite/taxonomy/data/SOURCE.md", "docs/standards-mapping.md"),
         "the bundled threat taxonomy",
+    ),
+    DocRule(
+        "verification/",
+        ("docs/verification.md",),
+        "the third-party verification harness and its published numbers",
     ),
 )
 

@@ -227,7 +227,7 @@ def test_layer_allowlists_match_the_builders(tmp_path: Path) -> None:
     rows = [
         CaseResult(
             weakness="W1",
-            variant="c1",
+            variant="challenge1",
             expected_exploited=True,
             detected_exploited=True,
             detail="flagged W1",
@@ -235,7 +235,7 @@ def test_layer_allowlists_match_the_builders(tmp_path: Path) -> None:
     ]
     matrix = confusion_matrix(rows)
 
-    layer1 = build_recall_report(rows, matrix)
+    layer1 = build_recall_report(rows, matrix, exercised={1}, untested=set())
     validate_fields(layer1, allowed=LAYER1_FIELDS, where="layer1-recall")
     for row in layer1["per_challenge"]:
         validate_fields(row, allowed=LAYER1_PER_CHALLENGE_FIELDS, where="layer1.per_challenge")

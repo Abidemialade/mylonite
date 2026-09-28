@@ -53,7 +53,7 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > | Judge agreement (InjecAgent `dh`) | **F1 1.000** | precision 1.0, recall 1.0, ASR 9% |
 > | Judge agreement (InjecAgent `ds`) | **F1 0.400** | precision 1.0, **recall 0.25**, ASR 8% |
 > | Precision (`reference:guarded`) | **0 FP / 7 probes** | 1 of 8 probes not exercised, excluded |
-> | Recall (DVMCP) | **0/8** | 9 exercised attempts across all 8 challenges |
+> | Recall (DVMCP) | **0/8** | 9 exercised attempts across all 8 challenges, scored by a version of the scorer that folded any untested challenge into "missed" instead of reporting it separately (issue #136, fixed since; this historical result is left as recorded) |
 >
 > **AgentDojo agreement held steady** (0.41 → 0.412) across the releases since June.
 > Nothing in that window targeted judge agreement, so stability is the expected
@@ -72,11 +72,23 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > **Read the DVMCP 0/8 as a floor, not a clean recall figure.** Every challenge was
 > genuinely exercised this time (9 attempts; the first attempt at this run had 3
 > challenges with *zero* exercised attempts because the target generator inferred the
-> wrong weakness classes). But the Layer 1 scorer still counts an untested challenge
-> as a miss, and `crosswalk.yaml` maps challenges 3 and 7 to **W3** although neither
-> server exposes an egress tool — so W3 is unmeasurable there by construction and
-> still scored against recall. Tracked in
-> [issue #136](https://github.com/Abidemialade/mylonite/issues/136).
+> wrong weakness classes). The Layer 1 scorer now reports `exercised_challenges` and
+> `untested_challenges` separately instead of folding an untested challenge into
+> `missed` ([issue #136](https://github.com/Abidemialade/mylonite/issues/136), fixed).
+>
+> Two follow-ups from that same investigation are still open, and need a
+> pre-registration amendment before they change the numbers:
+>
+> - `crosswalk.yaml` maps challenges 3 and 7 to **W3**, although neither server
+>   exposes an egress tool — so W3 is unmeasurable there by construction and is
+>   still scored against recall. Under review.
+> - The scorer's `found` count comes from a `report --json` finding bundle
+>   (`weakness_class` per finding); a copied `scan_report.json` alone — which is
+>   what the harness's own printed workflow tells an operator to save — carries
+>   `attempts` (which the scorer now reads for `exercised`) but no per-attempt
+>   weakness class, so `found` cannot be derived from it alone. A real campaign
+>   needs both artefacts folded together for `found` to be meaningful; see
+>   `verification/layer1_runnable/run.py`'s module docstring.
 
 ## The one-line result
 
@@ -162,7 +174,7 @@ while AgentDojo's oracle asks *"was this exact injection goal achieved?"* They a
 **different definitions of success**, and the moderate agreement quantifies the
 gap. Don't cite 0.41 as "the judge is 41% good" — cite it as "Mylonite's
 effect-based judge and AgentDojo's exact-goal oracle agree moderately; investigate
-the disagreements (`layer2_agentdojo.json`) before trusting either as a drop-in for
+the disagreements (`layer2-agentdojo.json`) before trusting either as a drop-in for
 the other."
 
 **FP triage (all 15 classified — none is a judge bug).** Every disagreement where

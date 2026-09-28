@@ -124,9 +124,10 @@ jobs:
 
 Mylonite's scaffolded `mylonite-gate.yml`/`mylonite-discovery.yml` workflows
 (see [CI gating](ci-gating.md)) default to a small **hosted** model
-(`gpt-4o-mini`/`claude-haiku-4-5`-class), not a self-hosted 3B model, even
-though the 3B path is cheaper and needs no external API key. A 3B model's
-quality ceiling measurably degrades both roles Mylonite's LLM calls play:
+(`claude-haiku-4-5-20251001`, the only default in the code), not a self-hosted
+3B model, even though the 3B path is cheaper and needs no external API key. A
+3B model's quality ceiling measurably degrades both roles Mylonite's LLM
+calls play:
 
 - **The planner** (`scan.llm_planner.LLMPlanner`) drives the agent-under-test
   through tool-calling — a weaker model follows instructions and invokes

@@ -238,12 +238,15 @@ def validate_fields(payload: dict[str, Any], *, allowed: frozenset[str], where: 
 # --------------------------------------------------------------------------- #
 
 #: ``verification/layer1_runnable/run.py`` -> ``build_recall_report``.
+#: 1.1 (#136): ``exercised_challenges``/``untested_challenges`` added.
 LAYER1_FIELDS: Final = frozenset(
     {
         "schema_version",
         "layer",
         "target",
         "in_scope_challenges",
+        "exercised_challenges",
+        "untested_challenges",
         "recall",
         "found",
         "missed",
@@ -253,7 +256,10 @@ LAYER1_FIELDS: Final = frozenset(
 )
 
 #: ``build_recall_report``'s ``per_challenge`` rows. ``detail`` is free text.
-LAYER1_PER_CHALLENGE_FIELDS: Final = frozenset({"challenge", "weakness", "found", "detail"})
+#: 1.1 (#136): ``untested`` added.
+LAYER1_PER_CHALLENGE_FIELDS: Final = frozenset(
+    {"challenge", "weakness", "found", "untested", "detail"}
+)
 
 #: ``verification/report.py`` -> ``build_report``. Note that ``build_report``
 #: ends with ``**(extra or {})``, an open-ended injection point: whatever a

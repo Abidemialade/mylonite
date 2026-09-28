@@ -15,8 +15,10 @@ A GitHub-hosted runner can't reach services behind your corporate gate. Options:
 
 - **Self-hosted runner (recommended).** Set `runs-on` to a self-hosted runner
   inside your perimeter — Mylonite scaffolds the workflows with a `--runs-on`
-  you choose (`mylonite gate --runs-on "[self-hosted, linux]"`). The runner
-  reaches your internal backends; nothing leaves the network.
+  you choose (`mylonite gate --target-file target.yaml --authorize my-app
+  --workflows --runs-on "[self-hosted, linux]"`; `--runs-on` writes nothing
+  without `--workflows`). The runner reaches your internal backends; nothing
+  leaves the network.
 - **Staging or mock backend.** Mylonite tests the *AI layer* (system prompt,
   tool schemas, planning loop), not your backend data. Point `target.yaml`'s
   `env` at a CI-reachable staging or stubbed backend — the exploit is about
