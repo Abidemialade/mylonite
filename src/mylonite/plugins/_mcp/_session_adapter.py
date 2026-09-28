@@ -604,7 +604,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # that the generic effect-aware predicate reads.
                 "effect_trace": json.dumps(planner_calls),
                 "effect_confirmed": effect_confirmed,
-                # R3 (#181a): lets the judge name WHICH verify_tool errored when
+                # #181a: lets the judge name WHICH verify_tool errored when
                 # effect_confirmed=='errored', instead of a bare "the probe failed".
                 "effect_probe_verify_tool": (
                     self._spec.effect_probe.verify_tool
@@ -821,7 +821,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         result = await self._bounded(session.call_tool(arm.tool, rendered))
         setup_calls.append({"tool": arm.tool, "args": sorted(rendered)})
         content = str(getattr(result, "content", "") or "")
-        # R5 (#181d): a plant call that itself failed (isError=True — bad args,
+        # #181d: a plant call that itself failed (isError=True — bad args,
         # a full store, a permission error) used to be treated as a successful
         # plant. The recall step then naturally found nothing, and the attempt
         # was misreported as "payload not delivered" (a drive/recall-wiring
@@ -1306,7 +1306,7 @@ class _MCPAttackSession:
                 baseline_content=baseline,
                 planner_calls=planner_calls,
             )
-            # R3 (#181a): parity with single-shot invoke() — the judge names
+            # #181a: parity with single-shot invoke() — the judge names
             # which verify_tool errored when effect_confirmed=='errored'.
             metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
         if recording.listed_tool_names is not None:

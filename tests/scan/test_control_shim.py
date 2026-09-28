@@ -1008,7 +1008,7 @@ def test_trifecta_lines_are_ascii_and_suggest_a_declaration() -> None:
     assert "private_tools: [read_note]" in text
 
 
-# --- R4 (#181c): check's wiring-names diff ----------------------------------
+# --- #181c: check's wiring-names diff ----------------------------------
 
 
 class _WiringFakeTool:

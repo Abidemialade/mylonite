@@ -109,7 +109,7 @@ def _fake_descriptor_with_tools() -> Any:
         system_prompt="x",
         tools=[
             ToolSpec(name="read_note", description="read a stored note", json_schema={}),
-            # A genuine store->recall pair (R2c/#181b: the scaffold's own
+            # A genuine store->recall pair (#181b: the scaffold's own
             # coverability gate drops W2 from the suggestion unless a
             # plant/recall pair — or a content-processing tool — is actually
             # on the surface; read_note alone is only the recall half).
@@ -423,7 +423,7 @@ def test_check_trifecta_advisory_never_gates_enforce(
         # An approval sibling for post_update (shares the "post" token, and
         # its name carries an approval hint) — this is what keeps post_update
         # out of the W4 row now, a REAL wiring rather than declaring a
-        # phantom tool name the surface doesn't have (R4/#181c now flags
+        # phantom tool name the surface doesn't have (#181c now flags
         # exactly that as a structural finding of its own).
         ("confirm_post", "Confirm a pending status update.", {"id": {"type": "string"}}),
     ]
@@ -467,7 +467,7 @@ def test_check_enforce_exits_findings_code_when_issues_found(
 def test_check_flags_a_misspelled_verify_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """R4 (#181c): a typo'd effect_probe.verify_tool means the probe silently
+    """#181c: a typo'd effect_probe.verify_tool means the probe silently
     never fires at scan time. `check` catches it structurally, no key needed."""
     _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
     target_file = _write_check_target(tmp_path, extra="effect_probe:\n  verify_tool: list_outbx\n")
@@ -1130,7 +1130,7 @@ def _patch_fake_mcp_session(monkeypatch: pytest.MonkeyPatch) -> None:
 
         async def list_tools(self) -> Any:
             # `send_email` is here so the bundled catalogue's literal-keyed W4
-            # seed (#211/R1) stays applicable to this fixture — these tests
+            # seed (#211) stays applicable to this fixture — these tests
             # declare `weakness_classes: [W4]` and previously relied on that
             # seed reaching ANY target regardless of its tool surface, which
             # is exactly the bug #211 fixed.
@@ -1154,7 +1154,7 @@ def _patch_fake_mcp_session(monkeypatch: pytest.MonkeyPatch) -> None:
 def _patch_fake_mcp_session_with_one_tool(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     """Like ``_patch_fake_mcp_session``, but the described surface is a single
     tool with no egress/consequential/content-store shape at all — used to
-    exercise R2's pre-flight refusal for a class this surface cannot cover."""
+    exercise the #181b pre-flight refusal for a class this surface cannot cover."""
     from contextlib import asynccontextmanager
 
     from mylonite.plugins._mcp import stdio_adapter
@@ -1179,7 +1179,7 @@ def _patch_fake_mcp_session_with_one_tool(monkeypatch: pytest.MonkeyPatch, name:
 def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """R2 (#181b): a declared W3 on a surface with no egress-shaped tool would
+    """#181b: a declared W3 on a surface with no egress-shaped tool would
     run zero seeds — refused loudly, before the LLM-configured check even
     runs (no provider key set here at all)."""
     from mylonite.plugins._mcp import target_registry
@@ -2893,7 +2893,7 @@ def test_gate_target_copy_names_credential_vars(
 def test_gate_refuses_before_run_gate_when_a_class_is_uncoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """R2 (#181b): `gate` gets the same pre-flight refusal as `scan` — before
+    """#181b: `gate` gets the same pre-flight refusal as `scan` — before
     `run_gate` (and therefore before any LLM spend)."""
     from contextlib import asynccontextmanager
 

@@ -216,7 +216,7 @@ def test_seeds_for_descriptor_drops_no_setup_seed_when_literal_tool_absent() -> 
 
 
 def test_seeds_for_descriptor_keeps_no_setup_seed_when_tool_surface_unknown() -> None:
-    """R1: an EMPTY/unknown tool surface must never be read as 'this tool is
+    """#211: an EMPTY/unknown tool surface must never be read as 'this tool is
     absent' — the no_setup kitchen seed still reaches an arbitrary custom
     target with no introspected tools at all (unchanged from before #211)."""
     got = seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W4"]))
