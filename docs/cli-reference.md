@@ -248,6 +248,12 @@ its family when it declares no scope); `--controls W2,W3,W4`;
 `--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
 `--max-seeds N`; `--model` (any LiteLLM provider via a `provider/model` prefix).
 
+On a target that declares an `effect_probe`, the raw and guarded legs of each
+comparison run one after the other instead of at the same time, so slower is the
+cost of a correct read on a target whose evidence lives in state the two legs
+would otherwise share (a file, a database, a remote server). A target with no
+`effect_probe` keeps running its legs at the same time.
+
 ```bash
 mylonite ablate --target-file app.yaml --authorize my-app --controls W2,W4 --redundancy
 ```

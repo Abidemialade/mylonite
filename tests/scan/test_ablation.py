@@ -129,6 +129,99 @@ def test_redundancy_mode_distinguishes_redundant_from_theater() -> None:
     assert by["W4"] == "theater"
 
 
+# -- sequential ordering (0.10.4, item 13): a target with an effect_probe -----
+# -- shares one persistent store across legs -- concurrent raw/guarded scans --
+# -- against it let one leg's effect be credited to the other. run_control_-- --
+# -- ablation(..., sequential=True) must run every pair/triple one leg at a ----
+# -- time; a target with no probe keeps the concurrent path. ------------------
+
+
+def test_sequential_true_runs_pair_legs_with_no_overlap() -> None:
+    """Record enter/exit per leg: with sequential=True, one leg's exit must
+    always precede the next leg's enter -- never interleaved."""
+    import time
+
+    events: list[tuple[str, str]] = []
+
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
+        label = "raw" if applied == () else "guarded"
+        events.append(("enter", label))
+        time.sleep(0.02)
+        events.append(("exit", label))
+        return RESISTED
+
+    run_control_ablation(
+        controls=["W2"],
+        seeds_by_weakness={"W2": ["s"]},
+        scan_fires=scan_fires,
+        sequential=True,
+    )
+    assert len(events) == 4
+    # Every leg's own enter/exit pair must be adjacent -- no other leg's
+    # enter lands between them.
+    for i in range(0, len(events), 2):
+        assert events[i] == ("enter", events[i][1])
+        assert events[i + 1] == ("exit", events[i][1])
+
+
+def test_sequential_true_runs_triple_legs_with_no_overlap_redundancy_mode() -> None:
+    import time
+
+    events: list[tuple[str, str]] = []
+
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
+        if applied == ():
+            label = "raw"
+        elif applied == ("W2", "W3"):
+            label = "full"
+        else:
+            label = "minus_c"
+        events.append(("enter", label))
+        time.sleep(0.02)
+        events.append(("exit", label))
+        return RESISTED
+
+    run_control_ablation(
+        controls=["W2"],
+        seeds_by_weakness={"W2": ["s"]},
+        scan_fires=scan_fires,
+        redundancy=True,
+        all_controls=["W2", "W3"],
+        sequential=True,
+    )
+    assert len(events) == 6
+    for i in range(0, len(events), 2):
+        assert events[i] == ("enter", events[i][1])
+        assert events[i + 1] == ("exit", events[i][1])
+
+
+def test_sequential_false_is_the_default_and_keeps_legs_concurrent() -> None:
+    """Without sequential=True (a target that declares no effect_probe), the
+    two legs still run concurrently: both must be in flight before either
+    finishes."""
+    import time
+
+    events: list[tuple[str, str]] = []
+
+    def scan_fires(applied: tuple[str, ...], pattern_id: str) -> FireOutcome:
+        label = "raw" if applied == () else "guarded"
+        events.append(("enter", label))
+        time.sleep(0.05)
+        events.append(("exit", label))
+        return RESISTED
+
+    run_control_ablation(
+        controls=["W2"],
+        seeds_by_weakness={"W2": ["s"]},
+        scan_fires=scan_fires,
+    )
+    enters = [e for e in events if e[0] == "enter"]
+    exits = [e for e in events if e[0] == "exit"]
+    assert len(enters) == 2 and len(exits) == 2
+    # The second leg's enter beat the first leg's exit -- they overlapped.
+    assert events.index(enters[1]) < events.index(exits[0])
+
+
 def test_seeds_for_weaknesses_multi_and_excludes_family() -> None:
     out = seeds_for_weaknesses(["W2", "W3"], max_per_weakness=2)
     assert 1 <= len(out["W2"]) <= 2  # W2 has several kitchen-sink seeds, capped
