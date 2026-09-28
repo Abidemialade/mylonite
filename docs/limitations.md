@@ -19,13 +19,20 @@ registration, token refresh — see the remote-authentication note below for wha
 means for a token that expires mid-run), or a server reached through an enterprise
 gateway. Both are on the roadmap.
 
-**Wiring caveat:** a clean result assumes the target file's `seed_arm` and
-`effect_probe` are wired to the right tools. Until the planned wiring self-test ships,
-confirm the wiring yourself: run the scan against a copy of your server where you know
-an attack lands, and check that the exploit records `effect_confirmed: "true"`. The
-probe reads the verify tool before and after the agent runs and only counts a NEW,
-attributed marker, so calling the tool by hand and seeing it return the marker does not
-confirm the wiring — the marker may already have been there from an earlier run.
+**Wiring caveat:** `mylonite check` flags a `seed_arm.tool`, `effect_probe.verify_tool` or
+`control_config` name that isn't among the server's described tools — a typo or a stale
+name from a copied target file — before you ever spend an LLM call. A `seed_arm` plant
+call or an `effect_probe` verify call that the server itself refuses (errors) is also
+caught: the attempt is reported as a plant failure or an undecided (NOT TESTED) result,
+never as a clean pass. What's left, and what the planned wiring self-test (plant a
+harmless canary, confirm the probe sees it) still closes: a `verify_tool` that exists,
+never errors, but reads the *wrong* store — a name that happens to be valid but isn't
+the one the seed actually affects. Until that ships, confirm end-to-end wiring yourself:
+run the scan against a copy of your server where you know an attack lands, and check that
+the exploit records `effect_confirmed: "true"`. The probe reads the verify tool before
+and after the agent runs and only counts a NEW, attributed marker, so calling the tool by
+hand and seeing it return the marker does not confirm the wiring — the marker may already
+have been there from an earlier run.
 
 ## 1. On a single-build app, the strong claim is not available
 

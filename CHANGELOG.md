@@ -62,6 +62,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `verification/` rule to `DOC_RULES` in `scripts/check_docs_sync.py`,
   mapping changes there to `docs/verification.md`, so a future harness change
   is caught the same way a `cli.py` change already is.
+- **A scan that declares a class the server can't express now stops before
+  running, names the class, and says the fix — instead of quietly running
+  seeds that could never test anything.** Custom-target scans could exit 2
+  ("coverage was incomplete") no matter how well the target was wired,
+  because a bundled seed hard-keyed to a literal tool (`send_email`,
+  `web_fetch`) was scheduled on servers that never had that tool. `scan` and
+  `gate` on a `--target-file`/custom target now refuse before any LLM call
+  when a declared `weakness_classes` entry has zero seeds it could ever run,
+  naming the class, why, and the fix ("W2 declared but this server has no
+  tool that can store content for a later recall — remove W2 from
+  weakness_classes, or declare a seed_arm"); `--dry-run` downgrades this to a
+  warning so it stays informative rather than blocking. A class covered only
+  by honest NOT TESTED attempts under `--allow-no-seed-arm` is left alone —
+  that flag's behaviour is unchanged. `mylonite scan --scaffold` now only
+  suggests a class its own introspected surface can actually cover, so a
+  fresh scaffold no longer hands out a target.yaml that immediately trips
+  this refusal.
+- **`mylonite check` now flags a `seed_arm`/`effect_probe`/`control_config`
+  wiring name that isn't on the server**, the same way it already flags
+  unapproved sinks and unpinned descriptions — no LLM call, no key. A
+  misspelled `verify_tool` or a stale `seed_arm.tool` used to mean the plant
+  or the effect probe silently never fired; this is now a structural finding
+  that counts toward `check --enforce`.
+- **A declared `effect_probe` whose verify call itself errors no longer falls
+  through to a clean verdict.** The judge now returns a no-verdict result
+  (the attempt reads `undecided`, i.e. NOT TESTED) naming the `verify_tool`
+  that errored, instead of letting the predicate or the LLM judge decide on
+  no real signal.
+- **A `seed_arm` plant call that fails is now reported as a plant failure**,
+  naming the server's own error, instead of the misleading "payload not
+  delivered" (which pointed at the recall/drive wiring, not the actual cause).
+- **The NOT TESTED summary now names the dominant cause and its remedy**,
+  instead of always suggesting provider credentials. A run with seeds that
+  had no matching tool now says so; credentials are mentioned only when
+  attempts actually failed on a provider call.
+
 ### Internal
 
 - `cli.py` is a thin shell again. It sat one line under its 4,750-line size

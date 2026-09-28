@@ -53,6 +53,23 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     stalls usually means the first step failed, or `--max-llm-calls` was too tight
     for the number of seeds (the summary names any seed that never started).
 
+When coverage is incomplete and nothing was found, the summary's hint line names the
+NOT TESTED cause that accounts for most of the untested attempts, and its remedy — not
+a fixed "check your provider credentials" regardless of what actually happened:
+
+```text
+error: coverage was incomplete or absent and nothing was found, but the scan was never
+formally aborted (...). This is NOT a clean result — 3 of 3 untested attempt(s) had no
+seed_arm to plant the payload — declare a seed_arm in the target file (see
+docs/target-file.md), then re-run.
+```
+
+Credentials are named only when attempts actually failed on a provider call
+(`outcome: error`, or a no-verdict attempt whose LLM call itself raised). A run whose
+`llm:` line shows dozens of successful provider calls will never get that hint. When no
+single cause accounts for most of the untested attempts, the hint falls back to the
+generic wording above.
+
 ```
 leg          result   metric  detail
 build        pass      -      offline pass with fixtures
@@ -95,13 +112,14 @@ When the target file declares an `effect_probe`, every attempt records an
 | `true` | the probe saw a NEW marker after the agent ran, and this attempt's own trace carries it (or the declared consequential/egress tool) — end-to-end, attributed confirmation. |
 | `false` | nothing links this attempt to a change: it did nothing, the change isn't new, a deferral marker (e.g. `"queued for approval"`) grew, or a linked call reported success while the marker never appeared, before or after. |
 | `unattributed` | the state change, or its absence, could not be tied to this attempt — an idempotent write, a delete, a bounded output window that slid, or a change another attempt made while this one only made an unrelated call. Not final: the attempt-scoped predicate decides the finding from this attempt's own trace, then the LLM judge if the predicate can't. |
-| `errored` | the baseline or the post-drive read to the verify tool itself raised or timed out. |
+| `errored` | the baseline or the post-drive read to the verify tool itself raised or timed out. Final, but not as a verdict: the attempt is reported as a no-verdict result (`undecided`, i.e. NOT TESTED — see the table above) naming the `verify_tool` that errored, so a broken probe can never fall through to the predicate or the LLM judge and read as a clean pass. |
 | `unprobed` | no `effect_probe` is declared, or this attempt has no recorded evidence. |
 
-Only `true` and `false` are final on their own; `unattributed`, `errored` and `unprobed`
-fall through to the predicate and then the LLM judge, the same ladder every other
-attempt follows. See [Effect attribution](target-file.md#effect-attribution) for how the
-value is decided.
+`true` and `false` are final because they carry a real verdict; `errored` is final for the
+opposite reason — nothing was confirmed, so nothing is decided. `unattributed` and
+`unprobed` are the two values that still fall through to the predicate and then the LLM
+judge, the same ladder every other attempt follows. See [Effect
+attribution](target-file.md#effect-attribution) for how the value is decided.
 
 ### What a run spent
 
