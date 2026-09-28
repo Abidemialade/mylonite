@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--weakness-class`, the message says to drop it from the flag. `gate`'s refusal of a W2
   target without a `seed_arm` now says to run `scan` first and use the `target.yaml` it
   writes, since only `scan` auto-wires a `seed_arm`.
+- **A malformed `--model` now fails once, with one message, instead of
+  printing about 12 KB of repeated provider errors.** `not-a-real/model`
+  passed the cheap `<provider>/<model>` prefix check and was only rejected
+  deep inside the scan/gate/validate/ablate loop — once per seed, per role —
+  each repeating LiteLLM's "Provider List" banner and a traceback. Every
+  model `scan`/`gate`/`validate`/`ablate` resolves (planner/customiser/judge)
+  is now checked against LiteLLM's own provider registry once, before any
+  seed runs, and a bad value exits with `invalid --model '<value>': ...
+  Check --model.` A non-recoverable provider error's log line is also capped
+  to a short summary, with the full detail moved to DEBUG (it was already
+  capped for the analogous recoverable-error case).
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is

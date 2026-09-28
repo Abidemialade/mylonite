@@ -143,6 +143,60 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
     return base + _EXTRA_ENV_VARS.get(p, ())
 
 
+def model_is_routable(model: str, *, api_base: str | None = None) -> bool:
+    """True if LiteLLM's OWN resolver, ``litellm.get_llm_provider``, can route
+    ``model`` at all -- called on the FULL string, unlike
+    :func:`provider_from_model`'s cheap ``<word>/<word>`` prefix-trust
+    shortcut (used elsewhere for lightweight provider derivation), which
+    treats ANY slash-shaped string as a valid provider prefix and never
+    catches a typo like ``not-a-real/model`` (#207).
+
+    ``api_base`` mirrors the kwarg :class:`~mylonite.scan.llm_policy.LLMPolicy`
+    sends to the real ``litellm.completion`` call, so a self-hosted/gateway
+    model that only resolves with an ``api_base`` set (e.g. a bare OpenAI-
+    compatible model id behind a local proxy) is not rejected here either.
+    """
+    import litellm  # deferred: several seconds to import, needed only here
+
+    try:
+        litellm.get_llm_provider(model=model, api_base=api_base)
+    except Exception:
+        return False
+    return True
+
+
+def preflight_model_or_exit(*models: str, api_base: str | None = None) -> None:
+    """Resolve every distinct model in ``models`` against LiteLLM's provider
+    registry ONCE, before any seed/live call runs -- exits ``EXIT_CONFIG``
+    with ONE message naming the first unroutable value if LiteLLM itself
+    would reject it.
+
+    Before this pre-flight, a bad ``--model`` shaped like ``provider/model``
+    (so it passed ``ModelRef.parse``'s cheap prefix check) only failed deep
+    inside the scan/gate/validate/ablate loop, inside
+    ``mylonite.scan._llm._classify_or_swallow`` -- once per seed, per role,
+    each repeating LiteLLM's own "Provider List" banner and a traceback
+    (~12 KB before the one useful line for a 3-call scan). Calling this once,
+    for every role model a command resolved, turns that into a single clean
+    failure at CLI-argument time.
+    """
+    import typer
+
+    from mylonite._cli_io import echo_err
+    from mylonite.exit_codes import EXIT_CONFIG
+    from mylonite.scan.diagnostics import _BAD_REQUEST_REMEDY
+
+    seen: set[str] = set()
+    for model in models:
+        if not model or model in seen:
+            continue
+        seen.add(model)
+        if model_is_routable(model, api_base=api_base):
+            continue
+        echo_err(f"invalid --model {model!r}: {_BAD_REQUEST_REMEDY}")
+        raise typer.Exit(code=EXIT_CONFIG)
+
+
 def looks_like_provider_env_var(key: str) -> bool:
     """True if ``key`` is a recognised provider credential/config env var --
     pattern-based, not a closed allowlist.

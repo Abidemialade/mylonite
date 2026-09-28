@@ -95,6 +95,7 @@ from mylonite.scan.assembly import (
     select_attack_modules,
 )
 from mylonite.scan.control_shim import _check_description_pins, _has_approval_sibling
+from mylonite.scan.providers import preflight_model_or_exit
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import _classify_tools as _classify_tools  # re-export (tests)
 from mylonite.scan.tool_roles import (
@@ -706,15 +707,17 @@ _DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
 
 
 def _require_llm_configured_or_exit(
-    *models: str, provider: str | None = None, dry_run_flag: bool = False
+    *models: str,
+    provider: str | None = None,
+    dry_run_flag: bool = False,
+    api_base: str | None = None,
 ) -> None:
-    """Pre-flight :func:`~mylonite.config.require_llm_configured` for every
-    resolved model a live run will call (planner/customiser/judge can each
-    use a different provider), exiting ``EXIT_CONFIG`` before any adapter/
-    subprocess/engine work starts rather than burning a full scan/gate/
-    validate/ablate attempt first. The ONE place the deleted
-    ``MyloniteSettings.require_llm()`` "no default provider" invariant
-    (CLAUDE.md) is enforced as a pre-flight, not a per-attempt diagnosis.
+    """Pre-flight every resolved model a live run will call, exiting
+    ``EXIT_CONFIG`` before any adapter/subprocess/engine/seed work starts.
+    The ONE place BOTH ``require_llm_configured`` (credential presence --
+    the deleted ``MyloniteSettings.require_llm()`` invariant) and
+    ``preflight_model_or_exit`` (#207: can LiteLLM actually route this
+    model?) run, shared by scan/validate/gate/ablate.
     """
     from mylonite.config import LLMNotConfiguredError, require_llm_configured
 
@@ -728,6 +731,7 @@ def _require_llm_configured_or_exit(
         except LLMNotConfiguredError as exc:
             echo_err(f"{exc}\n{_LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
             raise typer.Exit(code=EXIT_CONFIG) from exc
+    preflight_model_or_exit(*models, api_base=api_base)
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -1365,6 +1369,7 @@ def scan(
             effective_judge_model,
             provider=provider,
             dry_run_flag=True,
+            api_base=effective_policy.api_base,
         )
 
     # #181b: a declared class this surface can never cover — refuse before any
@@ -1751,7 +1756,11 @@ def _validate_custom(
     # authorize check above for the same DCR-0008 reason that preflight is:
     # authorization gates every live-driving action, even one this static.
     _require_llm_configured_or_exit(
-        planner_model or model, customiser_model or model, judge_model or model, provider=provider
+        planner_model or model,
+        customiser_model or model,
+        judge_model or model,
+        provider=provider,
+        api_base=policy.api_base if policy is not None else None,
     )
 
     # DCR-0008: fail fast on an unreachable provider with a distinct exit 4 —
@@ -2344,6 +2353,7 @@ def validate(
             effective_customiser_model,
             effective_judge_model,
             provider=provider,
+            api_base=effective_policy.api_base,
         )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
@@ -3182,6 +3192,7 @@ def gate(
         effective_customiser_model,
         effective_judge_model,
         provider=provider,
+        api_base=effective_policy.api_base,
     )
 
     # DCR-0010: the actual adapter object is constructed here, only after the
@@ -3515,6 +3526,7 @@ def ablate(
         effective_customiser_model,
         effective_judge_model,
         provider=provider,
+        api_base=effective_policy.api_base,
     )
 
     # Server-layer mode: the target bakes its guards into the server (toggled by

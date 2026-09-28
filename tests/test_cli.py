@@ -4616,11 +4616,11 @@ def test_validate_custom_runs_differential_by_default(
     gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
     target_registry.clear_runtime_targets()
     try:
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=False, authorize="myapp")
+        _validate_custom(gen, tf, 1, "anthropic", "anthropic/m", fast=False, authorize="myapp")
         assert captured["guarded_adapter_factory"] is not None  # differential ON by default
         assert captured["control_weakness"] == "W2"
         captured.clear()
-        _validate_custom(gen, tf, 1, "anthropic", "m", fast=True, authorize="myapp")
+        _validate_custom(gen, tf, 1, "anthropic", "anthropic/m", fast=True, authorize="myapp")
         assert captured["guarded_adapter_factory"] is None  # --fast skips the differential
     finally:
         target_registry.clear_runtime_targets()
@@ -4677,17 +4677,17 @@ def test_validate_custom_threads_role_models_and_policy(
             tf,
             1,
             "anthropic",
-            "m",
+            "anthropic/m",
             fast=True,
             authorize="myapp",
-            planner_model="planner-x",
-            customiser_model="customiser-y",
-            judge_model="judge-z",
+            planner_model="anthropic/planner-x",
+            customiser_model="anthropic/customiser-y",
+            judge_model="anthropic/judge-z",
             policy=custom_policy,
         )
-        assert captured["planner_model"] == "planner-x"
-        assert captured["customiser_model"] == "customiser-y"
-        assert captured["judge_model"] == "judge-z"
+        assert captured["planner_model"] == "anthropic/planner-x"
+        assert captured["customiser_model"] == "anthropic/customiser-y"
+        assert captured["judge_model"] == "anthropic/judge-z"
         assert seen_policy_during_validate == [custom_policy]
     finally:
         target_registry.clear_runtime_targets()
@@ -5356,7 +5356,7 @@ def test_gate_and_validate_produce_identical_twin_plans(
         )
         gen = SimpleNamespace(exploit=exploit)
         _validate_custom(
-            gen, target_yaml, 1, "anthropic", "m", fast=False, authorize="myapp-server"
+            gen, target_yaml, 1, "anthropic", "anthropic/m", fast=False, authorize="myapp-server"
         )
         validate_raw_env = validate_captured["target_adapter_factory"]()._launch_env
         validate_guarded_env = validate_captured["guarded_adapter_factory"]()._launch_env
