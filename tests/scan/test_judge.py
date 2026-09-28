@@ -96,7 +96,7 @@ async def test_effect_probe_false_is_not_a_finding_no_llm() -> None:
 
 @pytest.mark.asyncio
 async def test_effect_probe_errored_is_no_verdict_not_a_clean_pass() -> None:
-    """R3 (#181a): effect_confirmed='errored' means the declared effect_probe's
+    """#181a: effect_confirmed='errored' means the declared effect_probe's
     verify_tool call itself failed — the target was never actually checked.
     Falling through to the predicate/LLM judge let this render as a clean
     'no_finding' (indistinguishable from a genuine resisted attack). It must

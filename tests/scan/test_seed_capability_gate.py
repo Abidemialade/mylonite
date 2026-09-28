@@ -64,7 +64,7 @@ def test_the_two_paths_no_longer_both_defer() -> None:
     assert seeds_for_descriptor(d), "so the fallback must not also defer"
 
 
-def test_target_that_cannot_plant_still_gets_no_planting_seed() -> None:
+def test_target_that_cannot_plant_gets_w2_seeds_that_report_not_tested() -> None:
     """DCR-0031's real invariant survives, refined by #181b: a target with no
     way to plant must never be handed a planting seed that FAILS SILENTLY.
     It may still be handed the deliberate W2 placeholder(s) (so
