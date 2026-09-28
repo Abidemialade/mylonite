@@ -1302,6 +1302,17 @@ def scan(
             else dump_target_file(tf)
         )
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
+        # R2 (#181b): a declared class this surface can never cover would run
+        # zero seeds and either abort no_payloads or silently vanish from a
+        # multi-class scan — refuse loudly before any LLM spend instead.
+        from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
+
+        refuse_uncoverable_weakness_classes(
+            tf,
+            adapter,
+            allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect,
+            dry_run=dry_run,
+        )
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
@@ -3164,6 +3175,11 @@ def gate(
     # DCR-0010: the actual adapter object is constructed here, only after the
     # LLM-configured check above has passed.
     adapter = adapter_factory()
+    # R2 (#181b): same pre-flight refusal as `scan` — a no-op when `tf` is
+    # None (the bundled `mcp:`/`reference:` routes declare no weakness_classes).
+    from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
+
+    refuse_uncoverable_weakness_classes(tf, adapter)
 
     # --- collaborators injected into run_gate, built by the gate/wiring.py
     # factories (moved out of this command body in #91's thin-shell refactor;
@@ -3706,6 +3722,7 @@ def check(
         outbound_tool_names,
         trifecta_legs,
         untrusted_content_tool_names,
+        unwired_tool_names,
     )
 
     _config_path, rc = _discover_run_config(run_config_path, command="check")
@@ -3770,6 +3787,11 @@ def check(
     steering = instruction_bearing_tools(tools)
     processors = content_processor_tools(tools)
     unpinned = _check_description_pins(tools, cc)
+    # R4 (#181c): a misspelled/stale seed_arm.tool, effect_probe.verify_tool
+    # or control_config tool-name field silently never fires at scan time —
+    # this diffs the target file's own wiring against the described tools,
+    # no LLM call needed.
+    wiring_issues = unwired_tool_names(tf, tools)
     # Derived from THIS command's own findings above, not a second,
     # independently-worded call to _suggest_weakness_classes (scan
     # --scaffold's own broader onboarding heuristic, a deliberately wider net
@@ -3835,6 +3857,16 @@ def check(
             rich_escape(f"{len(unpinned)} tool(s) — see below for digests to pin"),
             "not pinned",
         )
+    if wiring_issues:
+        # Unlike "unpinned descriptions", this GATES --enforce (see below):
+        # a wiring name that names no real tool is a defect, not a hint.
+        findings += len(wiring_issues)
+        for field, name in wiring_issues:
+            table.add_row(
+                "Target-file wiring names a tool not on the server",
+                rich_escape(f"{field}: {name!r}"),
+                "not on the described tool surface",
+            )
 
     if findings == 0:
         echo("no structural exposure found on this tool surface.")

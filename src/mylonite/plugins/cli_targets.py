@@ -194,3 +194,67 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     # Unreachable — the registry check above already gated unknown families.
     echo_err(f"no subclass wired for family {family!r}")
     raise typer.Exit(code=EXIT_CONFIG)
+
+
+def refuse_uncoverable_weakness_classes(
+    target_file: Any,
+    adapter: Any,
+    *,
+    allow_no_seed_arm: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Pre-flight refusal (R2/#181b): before any LLM call, refuse a scan/gate
+    of a custom target whose declared ``weakness_classes`` include one this
+    target's introspected tool surface cannot cover AT ALL — i.e. would
+    produce ZERO attempts, never any (honest NOT TESTED) attempt at all.
+
+    ``allow_no_seed_arm=True`` (the operator passed ``--allow-no-seed-arm``,
+    accepting ``target_file.validate_for_scan``'s offer to run anyway) exempts
+    the indirect-injection-only classes (W2) from THIS refusal too: the
+    operator already explicitly opted into running those seeds uncovered
+    rather than being blocked, and this must not silently re-impose the exact
+    block they opted out of. Any OTHER uncoverable class (e.g. W3/W4 for an
+    unrelated reason) still refuses.
+
+    ``dry_run=True`` downgrades the refusal to a warning, exactly like
+    ``validate_for_scan``'s own dry-run downgrade: a dry run only enumerates
+    seeds (no clean/finding verdict to mislead), so it stays informative
+    rather than blocking.
+
+    Mirrors ``target_file.validate_for_scan``'s pattern: print an actionable
+    message before any LLM spend. A no-op when the target declares no
+    ``weakness_classes`` at all (the legacy family-mapping targets are
+    unaffected) or when introspection itself fails — a failure there is left
+    for the normal describe() call later in the run to report, with its own,
+    more specific diagnosis.
+    """
+    if not getattr(target_file, "weakness_classes", None):
+        return
+    import asyncio
+
+    from mylonite.scan.seeds import seed_coverage
+
+    try:
+        descriptor = asyncio.run(asyncio.wait_for(adapter.describe(), timeout=20))
+    except Exception:
+        return
+    uncoverable = seed_coverage(descriptor).uncoverable
+    if allow_no_seed_arm:
+        from mylonite.plugins._mcp.target_file import _INDIRECT_ONLY_WEAKNESS_CLASSES
+
+        uncoverable = {
+            w: reason
+            for w, reason in uncoverable.items()
+            if w not in _INDIRECT_ONLY_WEAKNESS_CLASSES
+        }
+    if not uncoverable:
+        return
+    level = "warning" if dry_run else "error"
+    echo_err(
+        f"{level}: this target declares weakness class(es) its tool surface cannot cover "
+        "at all (every attempt for them would never run):"
+    )
+    for weakness, reason in sorted(uncoverable.items()):
+        echo_err(f"  {weakness}: {reason}")
+    if not dry_run:
+        raise typer.Exit(code=EXIT_CONFIG)
