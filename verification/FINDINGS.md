@@ -53,7 +53,7 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > | Judge agreement (InjecAgent `dh`) | **F1 1.000** | precision 1.0, recall 1.0, ASR 9% |
 > | Judge agreement (InjecAgent `ds`) | **F1 0.400** | precision 1.0, **recall 0.25**, ASR 8% |
 > | Precision (`reference:guarded`) | **0 FP / 7 probes** | 1 of 8 probes not exercised, excluded |
-> | Recall (DVMCP) | **0/8** | 9 exercised attempts across all 8 challenges, scored by a version of the scorer that folded any untested challenge into "missed" instead of reporting it separately (issue #136, fixed since; this historical result is left as recorded) |
+> | Recall (DVMCP) | **unmeasured** | published as 0/8 at the time; see the note below |
 >
 > **AgentDojo agreement held steady** (0.41 → 0.412) across the releases since June.
 > Nothing in that window targeted judge agreement, so stability is the expected
@@ -69,26 +69,25 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > data-stealing split. That recall gap on `ds` is the most actionable weakness on this
 > page.
 >
-> **Read the DVMCP 0/8 as a floor, not a clean recall figure.** Every challenge was
-> genuinely exercised this time (9 attempts; the first attempt at this run had 3
-> challenges with *zero* exercised attempts because the target generator inferred the
-> wrong weakness classes). The Layer 1 scorer now reports `exercised_challenges` and
-> `untested_challenges` separately instead of folding an untested challenge into
-> `missed` ([issue #136](https://github.com/Abidemialade/mylonite/issues/136), fixed).
+> **Treat the DVMCP 0/8 as unmeasured, not as evidence either way.** The harness that
+> produced it had two defects that could each force a miss regardless of what the scan
+> actually found: the scorer folded any untested challenge into `missed` instead of
+> reporting it separately (fixed,
+> [issue #136](https://github.com/Abidemialade/mylonite/issues/136)), and the documented
+> campaign workflow saves a `scan_report.json` copy that carries no per-attempt weakness
+> class, so `found` reads 0 whatever the scan did (still open — a real campaign needs both
+> a `scan_report.json` and a `report --json` finding bundle folded together for `found` to
+> be meaningful; see `verification/layer1_runnable/run.py`'s module docstring). The
+> retrospective observation at the time was that every challenge was genuinely exercised
+> (9 attempts; the first attempt at this run had 3 challenges with *zero* exercised
+> attempts, because the target generator inferred the wrong weakness classes) — that
+> observation stands as a record of what was seen, but no per-attempt artefact survives
+> from that run to independently verify it, and it does not resolve the `found`-count
+> defect above. Layer 1 needs a re-run before recall is a number anyone can act on.
 >
-> Two follow-ups from that same investigation are still open, and need a
-> pre-registration amendment before they change the numbers:
->
-> - `crosswalk.yaml` maps challenges 3 and 7 to **W3**, although neither server
->   exposes an egress tool — so W3 is unmeasurable there by construction and is
->   still scored against recall. Under review.
-> - The scorer's `found` count comes from a `report --json` finding bundle
->   (`weakness_class` per finding); a copied `scan_report.json` alone — which is
->   what the harness's own printed workflow tells an operator to save — carries
->   `attempts` (which the scorer now reads for `exercised`) but no per-attempt
->   weakness class, so `found` cannot be derived from it alone. A real campaign
->   needs both artefacts folded together for `found` to be meaningful; see
->   `verification/layer1_runnable/run.py`'s module docstring.
+> A separate, still-open question from that same investigation: `crosswalk.yaml` maps
+> challenges 3 and 7 to **W3**, although neither server exposes an egress tool — so W3 is
+> unmeasurable there by construction and is still scored against recall. Under review.
 
 ## The one-line result
 
@@ -148,12 +147,13 @@ still single-model.**
 
 - **Coverage: 8/8 attempted** (before the Gap-1 fix, **all 8 skipped** with
   `SeedArmUnavailable` — the seeds didn't fit a non-kitchen-sink tool surface).
-- **Recall: 0/8.** Haiku resisted every model-fooling attack, including c3's
-  unguarded `file_manager` (it declined to misuse it). Honest read: coverage went
-  **0 → 100%**; recall is 0 because *this model* resists, not because Mylonite
-  can't test. c3 (an app-flaw) needs the model to *agree* to over-reach, which a
-  robust model won't — unlike the `reference:vulnerable` W4 server flaw, which
-  lands regardless.
+- **Recall is unmeasured.** The published figure read 0/8, but the harness that
+  produced it had two defects that could each force a miss regardless of what the scan
+  actually found: the scorer folded any untested challenge into "missed" instead of
+  reporting it separately (fixed, issue #136), and the documented campaign workflow
+  saves a report with no per-attempt weakness class, so the found count reads 0
+  whatever the scan did (still open). See the 0.9.0 note above; treat 0/8 as unmeasured
+  until Layer 1 is re-run.
 
 ## Layer 2 — academic benchmarks, judge verification
 
@@ -219,8 +219,8 @@ broad cross-model number still needs non-Claude provider keys (absent here).
 - Judge positive-class verified on real third-party positives (AgentDojo).
 
 **Open / honest gaps:**
-- No model-fooling catch on an external app (every robust-model injection resisted).
-- DVMCP recall is 0 with Haiku (weaker models / app-flaw challenges would differ).
+- No model-fooling catch on an external app is currently measurable: DVMCP recall is
+  unmeasured pending a harness fix, not a clean negative (see the Layer 1 note above).
 - Judge ≠ AgentDojo oracle (F1 0.41) — semantic-mismatch to investigate.
 - No external *defended* server for a true external precision number.
 - Samples are small + Claude-only; the opt-in `verification.yml` workflow runs larger N.
