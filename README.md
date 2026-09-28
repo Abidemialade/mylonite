@@ -82,10 +82,12 @@ benchmarks. The harness is in this repository and you can run it yourself.
 
 Published for the same reason the positive ones are.
 
-- **0 out of 8 found** on one external challenge set (DVMCP, using Claude Haiku 4.5). The
-  published 0.9.0 scorer counted challenges the scan never actually exercised as misses
-  rather than as untested (issue #136); it now reports the two separately, and the
-  recall figure over the challenges genuinely exercised stays 0.
+- **DVMCP recall is unmeasured, not a result.** The published 0.9.0 figure read 0/8, but
+  the harness that produced it had two defects that could each force a miss regardless of
+  what the scan actually found: the scorer folded any untested challenge into "missed"
+  instead of reporting it separately (fixed, issue #136), and the documented campaign
+  workflow saves a report with no per-attempt weakness class, so the found count reads 0
+  whatever the scan did (still open). Treat 0/8 as unmeasured until Layer 1 is re-run.
 - **On InjecAgent** (100 cases per split, using a local `llama3.2:3b`) the judge scored
   **F1 1.000** on the direct-harm split and **F1 0.833 at 0.714 recall** on the
   data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests
@@ -94,8 +96,6 @@ Published for the same reason the positive ones are.
 - **Judge agreement of F1 0.41** against AgentDojo's own labels. Mylonite's judge asks "did
   harm actually happen?"; AgentDojo asks "was the exact goal achieved?". Some of that gap
   is a genuine difference in question, which we have not resolved.
-- **No model-fooling weakness found in an external app.** A robust model resisted every
-  generic injection. The one thing that landed was a flaw in how the app was built.
 
 ### Current limits
 

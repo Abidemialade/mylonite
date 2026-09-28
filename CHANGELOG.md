@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separately; recall is computed over exercised challenges only, and is
   `null` rather than a spurious 1.0 when nothing has been exercised yet
   (schema 1.1, additive). The published 0.9.0 "0/8" figure is left as
-  recorded, with a caveat added in `README.md`, `verification/FINDINGS.md`
-  and `docs/verification.md` (#136).
+  recorded, with a note added in `README.md`, `verification/FINDINGS.md` and
+  `docs/verification.md` (#136): no per-attempt artefact survives from that
+  run, and the harness had a second defect (`found` reads 0 from a bare
+  `scan_report.json` regardless of what fired) that this fix does not touch,
+  so 0/8 is stated as unmeasured rather than as a confirmed negative result.
 
 ### Documentation
 

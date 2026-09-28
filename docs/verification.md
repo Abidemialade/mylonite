@@ -60,15 +60,13 @@ scanned over SSE (the remote adapter), same model:
   `SeedArmUnavailable` — Mylonite's attack patterns were shaped around the bundled kitchen-sink's
   tool surface and didn't fit a different server. Synthesising the probe for each target's
   *introspected* tool surface fixed that.
-- **Recall: 0/8.** Haiku resisted every model-fooling attack, including an unguarded
-  `file_manager` (it declined to misuse it). Honest read: coverage went **0 → 100%**;
-  recall is 0 because *this model* resists, not because Mylonite can't test. An app-flaw
-  challenge needs the model to *agree* to over-reach, which a robust model won't — unlike
-  the `reference:vulnerable` W4 server flaw, which lands regardless.
-- **Caveat on the published 0.9.0 figure.** The scorer that produced it counted a
-  challenge with zero exercised attempts as a miss rather than as untested (issue #136).
-  It now reports the two separately, and recall over challenges genuinely exercised is
-  unchanged at 0.
+- **Recall is unmeasured.** The published 0.9.0 figure read 0/8, but the harness that
+  produced it had two defects that could each force a miss regardless of what the scan
+  actually found: the scorer folded any untested challenge into "missed" instead of
+  reporting it separately (fixed, issue #136), and the documented campaign workflow
+  saves a report with no per-attempt weakness class, so the found count reads 0 whatever
+  the scan did (still open). Treat 0/8 as unmeasured, not as evidence either way, until
+  Layer 1 is re-run.
 
 ## Layer 2 — academic benchmarks, judge verification
 
@@ -143,8 +141,8 @@ AgentDojo's oracle did not (`verification/reports/layer2-agentdojo.json`):
 
 **Open / honest gaps:**
 
-- No model-fooling catch on an external app — every robust-model injection resisted.
-- DVMCP recall is 0 with Haiku (weaker models / app-flaw challenges would differ).
+- No model-fooling catch on an external app is currently measurable: DVMCP recall is
+  unmeasured pending a harness fix, not a clean negative (see the Layer 1 caveat above).
 - Judge ≠ AgentDojo oracle (F1 0.41) — a semantic mismatch still to investigate.
 - No external *defended* server for a true external precision number.
 - Samples are small, and the hosted-model layers use one model; the opt-in
