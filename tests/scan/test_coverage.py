@@ -428,6 +428,133 @@ class TestUnknownAbortReason:
         assert "budget_exceeded" in str(excinfo.value)
 
 
+# --- #212: the NOT TESTED hint names the DOMINANT cause, not always credentials --
+
+
+def test_dominant_cause_no_seed_arm_does_not_blame_credentials() -> None:
+    """3 of 3 attempts had no seed_arm — the hint must name THAT, and must not
+    suggest checking provider credentials (nothing called a provider here)."""
+    report = _report(
+        attempts=[
+            _attempt("skipped_no_seed_arm"),
+            _attempt("skipped_no_seed_arm", seed_id="s2"),
+            _attempt("skipped_no_seed_arm", seed_id="s3"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "seed_arm" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+    assert "This is NOT a clean result" in outcome.operator_message
+
+
+def test_dominant_cause_not_applicable_names_the_seed_mismatch() -> None:
+    report = _report(
+        attempts=[
+            _attempt("not_applicable"),
+            _attempt("not_applicable", seed_id="s2"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "doesn't fit" in outcome.operator_message or "doesn't expose" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+
+
+def test_dominant_cause_launch_failure_names_the_command() -> None:
+    report = _report(
+        attempts=[_attempt("launch_failure"), _attempt("launch_failure", seed_id="s2")],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "command:" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+
+
+def test_dominant_cause_payload_not_delivered_names_seed_arm_wiring() -> None:
+    report = _report(
+        attempts=[
+            _attempt("skipped_payload_not_delivered"),
+            _attempt("skipped_payload_not_delivered", seed_id="s2"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "seed_arm" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+
+
+def test_dominant_cause_no_engagement_names_the_model() -> None:
+    report = _report(
+        attempts=[
+            _attempt("skipped_planner_no_engagement"),
+            _attempt("skipped_planner_no_engagement", seed_id="s2"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "tool calls" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+
+
+def test_dominant_cause_undecided_from_effect_probe_error_names_the_probe() -> None:
+    """An `undecided` attempt whose fallback_cause is the R3 effect-probe-errored
+    marker (not a provider call raising) must point at the effect_probe, not
+    at credentials."""
+    report = _report(
+        attempts=[
+            _attempt("undecided", judge_evidence={"fallback_cause": "effect_probe_errored"}),
+            _attempt(
+                "undecided",
+                seed_id="s2",
+                judge_evidence={"fallback_cause": "effect_probe_errored"},
+            ),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "effect_probe" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+
+
+def test_dominant_cause_undecided_from_call_raised_does_blame_credentials() -> None:
+    """An `undecided` attempt whose fallback_cause is call_raised (the LLM call
+    itself threw) IS a real provider-call failure — credentials is the right hint."""
+    report = _report(
+        attempts=[
+            _attempt("undecided", judge_evidence={"fallback_cause": "call_raised"}),
+            _attempt("undecided", seed_id="s2", judge_evidence={"fallback_cause": "call_raised"}),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "credentials" in outcome.operator_message
+
+
+def test_no_dominant_cause_falls_back_to_generic_wording() -> None:
+    """No single cause accounts for a majority — generic wording, not a
+    misleadingly specific single-cause hint."""
+    report = _report(
+        attempts=[
+            _attempt("not_applicable"),
+            _attempt("skipped_no_seed_arm", seed_id="s2"),
+            _attempt("launch_failure", seed_id="s3"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "This is NOT a clean result" in outcome.operator_message
+    assert "credentials" in outcome.operator_message  # the generic fallback wording
+
+
 def test_budget_exceeded_has_an_actionable_operator_message() -> None:
     """The most likely abort should not be the least explained.
 

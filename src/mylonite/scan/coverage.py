@@ -349,13 +349,123 @@ _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
 # `test_findings_still_exit_success_at_this_layer`).
 _EXIT_INCOMPLETE_NO_ABORT: Final = EXIT_CONFIG
 
-_INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE: Final = (
-    "error: coverage was incomplete or absent and nothing was found, but the scan "
-    "was never formally aborted (e.g. too few applicable attempts to trip the "
-    "provider-failure-threshold abort). This is NOT a clean result — check each "
-    "attempt's verdict_reason/error_detail (a common cause is missing or invalid "
-    "provider credentials), then re-run."
+# --- #212: name the DOMINANT cause of an incomplete-coverage report ---------
+#
+# The old message was a fixed string that always pointed at provider
+# credentials, whichever attempts were actually NOT_TESTED. Measured against
+# the official git/sqlite/markitdown-mcp servers, the real causes were seeds
+# with no matching tool and undelivered plants — runs whose `llm:` line showed
+# dozens of SUCCESSFUL provider calls. Credentials are the right hint only
+# when attempts actually failed ON A PROVIDER CALL: `outcome == "error"` (the
+# adapter/engine raised) or a no-verdict `undecided` attempt whose
+# `fallback_cause` is `FALLBACK_CALL_RAISED` (the LLM call itself threw — as
+# opposed to `unparseable_output`, where the call succeeded and only its text
+# was unusable, which is not a credentials problem).
+#
+# Each remaining bucket keys off `ScanAttemptOutcome` literals from
+# `scan/engine.py`; see that module for exactly which branch produces each one.
+_PROVIDER_ERROR_BUCKET: Final = "provider_error"
+
+_BUCKET_REMEDY: Final[dict[str, str]] = {
+    _PROVIDER_ERROR_BUCKET: (
+        "failed on provider calls — check each attempt's verdict_reason/error_detail "
+        "(a common cause is missing or invalid provider credentials)"
+    ),
+    "launch_failure": (
+        "never launched the target — check the target file's command:/args: and that "
+        "the server actually starts"
+    ),
+    "skipped_no_seed_arm": (
+        "had no seed_arm to plant the payload — declare a seed_arm in the target file "
+        "(see docs/target-file.md)"
+    ),
+    "skipped_payload_not_delivered": (
+        "planted a payload the planner never retrieved — check the seed_arm's "
+        "args_template/id_key and the drive's recall wiring"
+    ),
+    "skipped_planner_no_engagement": (
+        "got no tool calls from the model at all — check the target's purpose/"
+        "system_prompt and that the planner model is tool-capable"
+    ),
+    "not_applicable": (
+        "targeted a capability this surface doesn't expose — the seed doesn't fit "
+        "this target; check weakness_classes and the target's tool surface"
+    ),
+    "undecided": (
+        "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided "
+        "them; check the effect_probe wiring"
+    ),
+    "skipped_planner_failure": (
+        "failed before the attack could be delivered — check the target/model connectivity"
+    ),
+    "skipped_invalid_metadata": (
+        "had invalid seed metadata — this looks like an internal catalogue defect; "
+        "please file an issue"
+    ),
+    "skipped_unknown_seed": (
+        "could not be resolved from the seed catalogue — this looks like an internal "
+        "defect; please file an issue"
+    ),
+}
+
+_GENERIC_INCOMPLETE_COVERAGE_REMEDY: Final = (
+    "check each attempt's verdict_reason/error_detail (a common cause is missing or "
+    "invalid provider credentials)"
 )
+
+
+def _not_tested_cause_bucket(attempt: object) -> str | None:
+    """The #212 bucket a NOT_TESTED attempt falls into, or ``None`` for an
+    attempt that isn't NOT_TESTED at all."""
+    outcome = str(getattr(attempt, "outcome", "") or "")
+    if ATTEMPT_CLASS.get(outcome) is not AttemptClass.NOT_TESTED:
+        return None
+    if outcome == "error":
+        return _PROVIDER_ERROR_BUCKET
+    if outcome == "undecided":
+        from mylonite.scan._llm import FALLBACK_CALL_RAISED
+
+        evidence = getattr(attempt, "judge_evidence", None) or {}
+        if evidence.get("fallback_cause") == FALLBACK_CALL_RAISED:
+            return _PROVIDER_ERROR_BUCKET
+        return "undecided"
+    return str(outcome)
+
+
+def _incomplete_coverage_no_abort_message(report: ScanReport) -> str:
+    """The #212 fix: name the DOMINANT NOT_TESTED cause and its remedy, rather
+    than always pointing at provider credentials. Falls back to generic
+    wording when no single cause accounts for a majority of the NOT_TESTED
+    attempts. "This is NOT a clean result" is load-bearing wording — kept
+    verbatim, per the brand rule that a check that could not run is never a
+    pass.
+    """
+    buckets: dict[str, int] = {}
+    total_not_tested = 0
+    for attempt in report.attempts:
+        bucket = _not_tested_cause_bucket(attempt)
+        if bucket is None:
+            continue
+        total_not_tested += 1
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+
+    prefix = (
+        "error: coverage was incomplete or absent and nothing was found, but the scan "
+        "was never formally aborted (e.g. too few applicable attempts to trip the "
+        "provider-failure-threshold abort). This is NOT a clean result — "
+    )
+    if not buckets:
+        return prefix + _GENERIC_INCOMPLETE_COVERAGE_REMEDY + ", then re-run."
+
+    dominant_bucket, dominant_count = max(buckets.items(), key=lambda kv: kv[1])
+    if dominant_count <= total_not_tested / 2:
+        return prefix + _GENERIC_INCOMPLETE_COVERAGE_REMEDY + ", then re-run."
+
+    remedy = _BUCKET_REMEDY.get(dominant_bucket, _GENERIC_INCOMPLETE_COVERAGE_REMEDY)
+    return (
+        f"{prefix}{dominant_count} of {total_not_tested} untested attempt(s) {remedy}, then re-run."
+    )
+
 
 #: The same coverage gap, but the scan DID find something. Not an error — the
 #: finding is real evidence and the exit code stays 0 — so this is a caveat, not
@@ -507,7 +617,7 @@ class ScanOutcome:
             # not be indistinguishable from a genuine clean pass — see the
             # "Untrustworthy-without-a-formal-abort" note above.
             exit_code = _EXIT_INCOMPLETE_NO_ABORT
-            operator_message = _INCOMPLETE_COVERAGE_NO_ABORT_MESSAGE
+            operator_message = _incomplete_coverage_no_abort_message(report)
         else:
             # `findings_count > 0` still exits 0 — scan's documented convention
             # is that finding something is not, by itself, a failure (see
