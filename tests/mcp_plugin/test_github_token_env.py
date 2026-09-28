@@ -43,12 +43,72 @@ def test_github_effective_env_raises_a_named_error_when_the_token_is_unset(
         adapter._effective_env()
 
 
-def test_a_caller_supplied_launch_env_is_not_expanded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``launch_env`` (ablation / --prove-control) already holds CONCRETE
-    values, never a ``${VAR}`` template -- it must pass through unexpanded,
-    including when it happens to contain a literal ``${...}``-shaped string
-    (an attacker-controlled payload, say)."""
+def test_a_caller_supplied_launch_env_is_also_expanded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix round 1: ``launch_env`` is NOT always concrete -- every real caller
+    that constructs one (``factory.build_adapter_for_spec``, the ONLY path
+    gate's re-drive twin and ablation both go through) builds it from
+    ``TargetSpec.launch_env()``, which is just ``dict(self.extra_env)`` --
+    still carrying the SAME unexpanded ``${VAR}`` template the base
+    (non-launch_env) branch already expands. The previous "launch_env is
+    already concrete" assumption was wrong and left gate's guarded/raw twin
+    receiving the literal string ``${GITHUB_PERSONAL_ACCESS_TOKEN}``."""
+    monkeypatch.setenv(
+        "GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_realvalue123"
+    )  # pragma: allowlist secret
+    adapter = GitHubMCPAdapter(scope="myhandle/myrepo", planner_timeout_s=5.0)
+    adapter._launch_env = {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"}
+    assert adapter._effective_env() == {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_realvalue123"}
+
+
+def test_a_caller_supplied_launch_env_still_raises_when_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
     adapter = GitHubMCPAdapter(scope="myhandle/myrepo", planner_timeout_s=5.0)
-    adapter._launch_env = {"GITHUB_PERSONAL_ACCESS_TOKEN": "${NOT_A_REAL_VAR}"}
-    assert adapter._effective_env() == {"GITHUB_PERSONAL_ACCESS_TOKEN": "${NOT_A_REAL_VAR}"}
+    adapter._launch_env = {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"}
+    with pytest.raises(ValueError, match="GITHUB_PERSONAL_ACCESS_TOKEN"):
+        adapter._effective_env()
+
+
+def test_build_adapter_for_spec_github_twin_resolves_the_real_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#184 fix round 1: the exact repro -- ``build_adapter_for_spec(resolve_
+    target('github', 'o/r'), ...)._effective_env()`` used to return the
+    literal ``${GITHUB_PERSONAL_ACCESS_TOKEN}`` because gate/wiring.py builds
+    both re-drive twins through ``build_adapter_for_spec``, which always
+    passes ``launch_env=spec.launch_env(...)`` -- the SAME unexpanded
+    template, not a caller-supplied concrete value."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.factory import build_adapter_for_spec
+
+    monkeypatch.setenv(
+        "GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_realvalue123"
+    )  # pragma: allowlist secret
+    spec = target_registry.resolve_target("github", "o/r")
+    adapter = build_adapter_for_spec(spec, scope="o/r", model="m")
+    assert adapter._effective_env() == {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_realvalue123"}
+
+
+def test_gate_re_drive_twin_raw_and_guarded_both_resolve_the_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulates gate/wiring.py's ``_factory``/``_guarded`` closures (~362/370):
+    both the raw and the boundary-guarded twin are built through
+    ``build_adapter_for_spec`` with a ``LaunchIntent`` -- neither must ever
+    see the unexpanded template."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
+
+    monkeypatch.setenv(
+        "GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_realvalue123"
+    )  # pragma: allowlist secret
+    spec = target_registry.resolve_target("github", "o/r")
+
+    raw = build_adapter_for_spec(spec, scope="o/r", model="m", intent=LaunchIntent())
+    assert raw._effective_env() == {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_realvalue123"}
+
+    guarded = build_adapter_for_spec(
+        spec, scope="o/r", model="m", intent=LaunchIntent(disable_controls=())
+    )
+    assert guarded._effective_env() == {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_realvalue123"}
