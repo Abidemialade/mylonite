@@ -1786,3 +1786,128 @@ def test_validated_model_stamp_names_every_role_when_they_differ() -> None:
     assert validated_model_stamp("new", "old", "old") == (
         "validated against model: new  (customiser: old, judge: old)"
     )
+
+
+# --- effect attribution: "unattributed" in the effect leg -------------------------
+#
+# The adapter reports ``effect_confirmed="unattributed"`` when the target's state
+# changed but the change cannot be tied to this attempt's own calls. The effect
+# leg counts such a run only when the attempt-scoped predicate decided it (the
+# attempt's own executed calls prove the action), never when the LLM judge did,
+# and it requires at least one run confirmed end-to-end from state ("true").
+
+
+def _validate_with_runs(
+    runs: list[_CustomRun], *, iterations: int = 2, vuln_threshold: int = 2
+) -> Any:
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    it = iter(runs)
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        return next(it)
+
+    validator = DifferentialValidator(
+        iterations=iterations,
+        vuln_threshold=vuln_threshold,
+        completion_fn=_cust_completion,
+        run_build=False,
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        mp.setattr(DifferentialValidator, "_multi_judge_consensus", lambda self, r, p: 1.0)
+        return validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+
+def _run(effect: str, *, finding: bool = True, mechanism: str | None = "predicate") -> _CustomRun:
+    return _CustomRun(
+        finding=finding, effect_confirmed=effect, response=None, verdict_mechanism=mechanism
+    )
+
+
+def test_all_unattributed_runs_are_not_report_only() -> None:
+    """A declared probe that answered "unattributed" on every run DID run: the
+    effect leg must gate, never drop into the "no effect_probe declared" branch."""
+    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
+    effect = _outcome(report, "effect")
+    assert effect.report_only is False
+    assert "effect" in report.gating_legs
+    assert "no effect_probe declared" not in effect.detail
+
+
+def test_all_unattributed_non_findings_are_not_report_only() -> None:
+    report = _validate_with_runs(
+        [_run("unattributed", finding=False), _run("unattributed", finding=False)]
+    )
+    effect = _outcome(report, "effect")
+    assert effect.report_only is False
+    assert effect.passed is False
+
+
+def test_effect_leg_needs_at_least_one_run_confirmed_from_state() -> None:
+    """Predicate-decided "unattributed" runs meet the count, but without one
+    "true" the end-to-end effect was never observed, so the leg fails."""
+    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
+    effect = _outcome(report, "effect")
+    assert effect.passed is False
+    assert report.kept is False
+    assert "0 confirmed from the target's state" in effect.detail
+    assert "at least one" in effect.detail
+
+
+def test_one_true_plus_a_predicate_decided_unattributed_passes_the_effect_leg() -> None:
+    report = _validate_with_runs([_run("true"), _run("unattributed")])
+    effect = _outcome(report, "effect")
+    assert effect.passed is True
+    assert effect.metric == 1.0
+    assert "1 confirmed from the target's state" in effect.detail
+    assert "1 from the attempt's own actions" in effect.detail
+    assert report.kept is True
+
+
+def test_an_llm_decided_unattributed_run_does_not_count_toward_the_effect_leg() -> None:
+    report = _validate_with_runs([_run("true"), _run("unattributed", mechanism="llm")])
+    effect = _outcome(report, "effect")
+    assert effect.passed is False
+    assert effect.metric == 0.5
+    assert report.kept is False
+
+
+def test_run_custom_iteration_records_the_real_effect_value_for_a_non_finding() -> None:
+    """A defended run's effect value ("false") comes from the judge evidence, not
+    a hard-coded "unprobed"."""
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+    )
+    run = validator._run_custom_iteration(
+        _FakeCustomAdapter("false"), "excessive-agency-send-email-direct-unconfirmed"
+    )
+    assert run.finding is False
+    assert run.effect_confirmed == "false"
+    assert run.verdict_mechanism == "predicate"
+
+
+def test_run_custom_iteration_records_the_mechanism_for_an_unattributed_finding() -> None:
+    class _UnattributedButExecuted(_FakeCustomAdapter):
+        async def invoke(self, payload: Any) -> AdapterResponse:
+            return AdapterResponse(
+                payload_pattern_id=payload.pattern_id,
+                raw_response="sent",
+                tool_calls=["send_email"],
+                metadata={
+                    "effect_confirmed": "unattributed",
+                    "effect_trace": '[{"tool": "send_email", "is_error": false}]',
+                },
+            )
+
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+    )
+    run = validator._run_custom_iteration(
+        _UnattributedButExecuted("unattributed"), "excessive-agency-send-email-direct-unconfirmed"
+    )
+    assert run.finding is True
+    assert run.effect_confirmed == "unattributed"
+    assert run.verdict_mechanism == "predicate"
