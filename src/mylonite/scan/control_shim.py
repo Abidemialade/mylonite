@@ -1299,7 +1299,7 @@ def unwired_tool_names(target_file: Any, tools: list[Any]) -> list[tuple[str, st
     """``(field, name)`` for every tool name a target file WIRES (``seed_arm.tool``,
     ``effect_probe.verify_tool``, every ``control_config`` tool-name field, and
     ``control_config.description_pins`` keys) that is NOT among the server's
-    described tools (R4/#181c).
+    described tools (#181c).
 
     A misspelled ``verify_tool`` or a stale ``seed_arm.tool`` (the server was
     renamed, or the target file was copied from another app) means the
@@ -1341,3 +1341,44 @@ def unwired_tool_names(target_file: Any, tools: list[Any]) -> list[tuple[str, st
             if name and name not in described:
                 out.append(("control_config.description_pins", name))
     return out
+
+
+def coverable_weakness_classes(candidate_classes: Any, tools: list[Any]) -> list[str]:
+    """Gate a candidate weakness-class suggestion set through
+    ``scan.seeds.seed_coverage`` so a class the tool surface can't actually
+    be tested for is never suggested (#181b).
+
+    `mylonite check` used to hard-code ``{"W1", "W2"}`` as an unconditional
+    baseline suggestion — any tool-using agent risks smuggling/injection in
+    principle — regardless of whether W2 was actually testable (no
+    store-and-recall pair, no content-processing tool). `scan` would then
+    refuse a target.yaml built from exactly that suggestion. This is the
+    same gate ``scan --scaffold``'s own ``_suggest_weakness_classes`` applies
+    to ITS candidate set (a different, independently-motivated heuristic —
+    keyword-blob matching on tool names/descriptions, appropriate for "what
+    should this target declare" rather than "what does this report's own
+    table say"); the GATING mechanism is shared here so it can't drift
+    between the two call sites.
+
+    ``can_plant_untrusted_content`` is guessed the same way the scaffold
+    guesses it: from whether the tool surface has a detectable plant/recall
+    pair, so a genuine W2 candidate is never wrongly dropped merely because
+    no ``seed_arm`` has been declared yet.
+    """
+    from mylonite.contracts import TargetDescriptor
+    from mylonite.scan.seeds import seed_coverage
+    from mylonite.scan.tool_roles import _classify_tools
+
+    classes = sorted(set(candidate_classes))
+    if not classes:
+        return []
+    roles = _classify_tools(tools)
+    candidate = TargetDescriptor(
+        target_id="mcp:check",
+        kind="mcp",
+        tools=list(tools),
+        weakness_classes=classes,
+        can_plant_untrusted_content=bool(roles.seed_arm_tool and roles.retrieve_tool),
+    )
+    uncoverable = set(seed_coverage(candidate).uncoverable)
+    return sorted(set(classes) - uncoverable)

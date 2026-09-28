@@ -71,15 +71,17 @@ def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
     * W3 (SSRF / unrestricted egress): a tool taking a URL/endpoint-shaped input.
     * W4 (unconfirmed consequential action): a tool that mutates external state.
 
-    R2c (#181b): the raw keyword-blob hints above are then gated through the
-    SAME coverability helper (``scan.seeds.seed_coverage``) the engine's own
-    seed selection uses, so the scaffold never writes a class the engine
-    could never cover for this exact surface — that used to hand a fresh
-    ``mylonite scan --scaffold`` user a target.yaml that immediately hit the
-    R2 pre-flight refusal on first run. The coverability check assumes the
-    seed_arm THIS scaffold is about to suggest (a detected plant/recall pair)
-    gets declared, so a genuine W2 candidate is never wrongly dropped just
-    because the operator hasn't pasted the seed_arm block in yet.
+    #181b: the raw keyword-blob hints above are then gated through
+    ``control_shim.coverable_weakness_classes`` — the SAME coverability
+    check ``mylonite check``'s own suggestion line uses, so the two can't
+    drift — which itself uses ``scan.seeds.seed_coverage``, the engine's own
+    seed selection. This is what stops the scaffold writing a class the
+    engine could never cover for this exact surface: that used to hand a
+    fresh ``mylonite scan --scaffold`` user a target.yaml that immediately
+    hit the pre-flight refusal on first run. The coverability check assumes
+    the seed_arm THIS scaffold is about to suggest (a detected plant/recall
+    pair) gets declared, so a genuine W2 candidate is never wrongly dropped
+    just because the operator hasn't pasted the seed_arm block in yet.
     """
     suggestions: set[str] = set()
     if tools:
@@ -112,23 +114,9 @@ def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
     if not suggestions:
         return []
 
-    from mylonite.contracts import TargetDescriptor
-    from mylonite.scan.seeds import seed_coverage
+    from mylonite.scan.control_shim import coverable_weakness_classes
 
-    roles = _classify_tools(tools)
-    candidate = TargetDescriptor(
-        target_id="mcp:custom",
-        kind="mcp",
-        tools=list(tools),
-        weakness_classes=sorted(suggestions),
-        # Assume the seed_arm THIS scaffold is about to suggest (below) gets
-        # declared — a detected plant/recall pair makes W2 coverable once the
-        # operator pastes it in, and the suggestion must reflect that outcome,
-        # not the pre-seed_arm state this exact call is trying to fill in.
-        can_plant_untrusted_content=bool(roles.seed_arm_tool and roles.retrieve_tool),
-    )
-    uncoverable = set(seed_coverage(candidate).uncoverable)
-    return sorted(suggestions - uncoverable)
+    return coverable_weakness_classes(suggestions, tools)
 
 
 def _target_file_from_flags(

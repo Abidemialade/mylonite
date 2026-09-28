@@ -1302,9 +1302,7 @@ def scan(
             else dump_target_file(tf)
         )
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
-        # R2 (#181b): a declared class this surface can never cover would run
-        # zero seeds and either abort no_payloads or silently vanish from a
-        # multi-class scan — refuse loudly before any LLM spend instead.
+        # #181b: a declared class this surface can never cover — refuse before any LLM spend.
         from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
 
         refuse_uncoverable_weakness_classes(
@@ -3175,8 +3173,7 @@ def gate(
     # DCR-0010: the actual adapter object is constructed here, only after the
     # LLM-configured check above has passed.
     adapter = adapter_factory()
-    # R2 (#181b): same pre-flight refusal as `scan` — a no-op when `tf` is
-    # None (the bundled `mcp:`/`reference:` routes declare no weakness_classes).
+    # #181b: same pre-flight refusal as `scan` — a no-op when `tf` is None.
     from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
 
     refuse_uncoverable_weakness_classes(tf, adapter)
@@ -3719,6 +3716,7 @@ def check(
     from mylonite.report.render import trifecta_lines
     from mylonite.scan.control_shim import (
         consequential_tool_names,
+        coverable_weakness_classes,
         outbound_tool_names,
         trifecta_legs,
         untrusted_content_tool_names,
@@ -3787,25 +3785,18 @@ def check(
     steering = instruction_bearing_tools(tools)
     processors = content_processor_tools(tools)
     unpinned = _check_description_pins(tools, cc)
-    # R4 (#181c): a misspelled/stale seed_arm.tool, effect_probe.verify_tool
-    # or control_config tool-name field silently never fires at scan time —
-    # this diffs the target file's own wiring against the described tools,
-    # no LLM call needed.
+    # #181c: a misspelled/stale wiring name silently never fires at scan time.
     wiring_issues = unwired_tool_names(tf, tools)
-    # Derived from THIS command's own findings above, not a second,
-    # independently-worded call to _suggest_weakness_classes (scan
-    # --scaffold's own broader onboarding heuristic, a deliberately wider net
-    # over description/schema text — good for "what should I set up a target
-    # file to test", wrong for "what does this report's own table say").
-    # Reusing egress/unapproved_sinks directly means the suggestion line can
-    # never disagree with the table printed above it, unlike a second
-    # heuristic pass with its own separately-drifting hint vocabulary.
+    # Derived from THIS command's own findings above (never disagrees with the
+    # table), not scan --scaffold's separate, wider keyword heuristic. #181b:
+    # then gated through the same coverability check `scan` itself applies,
+    # so this line never suggests a class `scan` would then refuse to run.
     suggested_set = {"W1", "W2"}  # baseline: any tool-using agent risks smuggling/injection
     if egress:
         suggested_set.add("W3")
     if unapproved_sinks:
         suggested_set.add("W4")
-    suggested = sorted(suggested_set)
+    suggested = coverable_weakness_classes(suggested_set, tools)
 
     findings = 0
     table = Table(title=f"Structural check — {len(tools)} tools discovered")
@@ -3858,8 +3849,7 @@ def check(
             "not pinned",
         )
     if wiring_issues:
-        # Unlike "unpinned descriptions", this GATES --enforce (see below):
-        # a wiring name that names no real tool is a defect, not a hint.
+        # Unlike "unpinned descriptions", this gates --enforce: a name with no real tool is a defect.
         findings += len(wiring_issues)
         for field, name in wiring_issues:
             table.add_row(
