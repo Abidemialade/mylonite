@@ -597,7 +597,43 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
                 "counts), but prefer a marker the agent must PRODUCE by acting (e.g. the "
                 "recipient of a forwarded message, a row it wrote) for a sharper signal."
             )
+    # A fixed marker (no {payload}) that is not an address the agent's call
+    # carries can only be tied to an attempt through a declared tool. With none
+    # declared, the effect check can say "unattributed" but never "true", and
+    # `validate` needs at least one "true" to keep a finding.
+    if probe is not None and probe.expect_marker and "{payload}" not in probe.expect_marker:
+        from mylonite.scan.tool_classifier import looks_like_destination
+
+        marker = probe.expect_marker
+        cc = tf.control_config
+        declared = cc is not None and bool(cc.consequential_tools or cc.egress_tools)
+        if not declared and "@" not in marker and not looks_like_destination(marker):
+            warnings.append(
+                f"effect_probe.expect_marker {marker!r} is a fixed value, and "
+                "control_config declares no consequential_tools. An effect counts for "
+                "an attempt only when one of its own calls carries the marker or is a "
+                "declared tool, so this effect can read 'unattributed' but never read "
+                "'true', and `validate` cannot keep the finding. Use a marker the "
+                "agent's call carries (for example the recipient address, or "
+                "'{payload}'), or declare the tool that performs the action under "
+                "control_config.consequential_tools."
+            )
     return warnings
+
+
+def load_target_file_and_warn(path: Path) -> TargetFile:
+    """Load a target file and print its :func:`effect_probe_warnings` to stderr.
+
+    For commands that load a target file and run it as written (``validate``,
+    ``check``). ``scan`` prints the same warnings itself after it adjusts the
+    target (merged weakness classes, an auto-wired seed_arm).
+    """
+    from mylonite._cli_io import echo_err
+
+    tf = load_target_file(path)
+    for warning in effect_probe_warnings(tf):
+        echo_err(f"warning: {warning}")
+    return tf
 
 
 def needs_seed_arm_autowire(tf: TargetFile) -> bool:
