@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An effect is now credited only to the attempt that caused it.** On a
+  target whose state outlives a run (a file, a database, a memory store, any
+  remote server), the `effect_probe` check used to credit an attempt with a
+  change an earlier or concurrent attempt left behind. That produced false
+  findings in `scan` and false leaks in `validate`, where a guarded run could
+  read the unguarded runs' email as its own. The probe now reads the verify
+  tool before and after the agent runs, and confirms an effect only when it is
+  new and one of this attempt's own executed calls names the marker or is the
+  scenario's consequential or egress tool. An attempt that did nothing reads
+  `false`. When the state changed but cannot be tied to this attempt (an
+  idempotent write, a delete, a bounded output window), `effect_confirmed` is
+  the new value `"unattributed"` in `exploit_*.json`. A probe with no
+  `expect_marker` now follows the same rule instead of confirming every
+  attempt, and a deferral marker counts only when it is new. Each attempt with
+  a declared `verify_tool` makes one extra read-only call to it; the recorded
+  setup trace and everything sent to the model are unchanged.
+
 ## [0.10.3] - 2026-09-27
 
 Scanning an MCP server you build and control no longer stalls on an unexplained

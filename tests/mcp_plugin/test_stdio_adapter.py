@@ -86,6 +86,82 @@ class _FakeRaisingVerifyToolSession(_FakeSession):
         return await super().call_tool(name, arguments)
 
 
+class _OutboxSession(_FakeSession):
+    """A fake session whose verify tool reports real before/after state.
+
+    ``send_email`` appends to an outbox; ``outbox_tool`` returns what is in it.
+    The effect probe reads that tool twice (baseline, then post-drive), so a
+    fake that returned the same text both times could never show an effect
+    this attempt caused. ``outbox_text`` overrides the rendered outbox (e.g. a
+    deferral); ``verify_is_error`` makes the verify read a structural error.
+    """
+
+    def __init__(
+        self,
+        *,
+        outbox_tool: str = "list_outbox",
+        outbox: list[str] | None = None,
+        verify_is_error: bool = False,
+        queue_sends: bool = False,
+        call_responses: dict[str, CallToolResult] | None = None,
+    ) -> None:
+        super().__init__(
+            tools=[
+                MCPTool(name="recall", description="recall", inputSchema={"type": "object"}),
+                MCPTool(name="send_email", description="send", inputSchema={"type": "object"}),
+                MCPTool(name=outbox_tool, description="outbox", inputSchema={"type": "object"}),
+            ],
+            call_responses=call_responses,
+        )
+        self.outbox_tool = outbox_tool
+        self.outbox: list[str] = list(outbox or [])
+        self.verify_is_error = verify_is_error
+        #: A defended app: a send is held for approval rather than dispatched.
+        self.queue_sends = queue_sends
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        if name == "send_email":
+            self.calls.append((name, dict(arguments)))
+            if self.queue_sends:
+                self.outbox.append(f"QUEUED FOR APPROVAL: send to {arguments.get('to', '')}")
+                return CallToolResult(
+                    content=[TextContent(type="text", text="held")], isError=False
+                )
+            self.outbox.append(f"to={arguments.get('to', '')} body={arguments.get('body', '')}")
+            return CallToolResult(content=[TextContent(type="text", text="sent")], isError=False)
+        if name == self.outbox_tool:
+            self.calls.append((name, dict(arguments)))
+            if self.verify_is_error:
+                return CallToolResult(
+                    content=[TextContent(type="text", text="error")], isError=True
+                )
+            text = "\n".join(self.outbox) or "outbox empty"
+            return CallToolResult(content=[TextContent(type="text", text=text)], isError=False)
+        return await super().call_tool(name, arguments)
+
+
+def _planner_calling(*turns: tuple[str, dict[str, Any]]) -> Any:
+    """A planner stub that issues ``turns`` one per completion, then says done."""
+    calls = [0]
+
+    async def planner_stub(**_: Any) -> SimpleNamespace:
+        i = calls[0]
+        calls[0] += 1
+        if i < len(turns):
+            name, args = turns[i]
+            tc = SimpleNamespace(
+                id=f"c{i}", function=SimpleNamespace(name=name, arguments=json.dumps(args))
+            )
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
+            )
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
+        )
+
+    return planner_stub
+
+
 # --- _classify_failure ----------------------------------------------------------
 
 
@@ -674,33 +750,18 @@ async def test_invoke_seed_file_setup_writes_file_and_records_trace(tmp_path: Pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("verify_result", "is_error", "marker", "expected"),
+    ("agent_sends", "verify_is_error", "marker", "expected"),
     [
-        (
-            CallToolResult(
-                content=[TextContent(type="text", text="to=attacker@x.com status=sent")],
-                isError=False,
-            ),
-            False,
-            "attacker@x.com",
-            "true",
-        ),
-        (
-            CallToolResult(content=[TextContent(type="text", text="outbox empty")], isError=False),
-            False,
-            "attacker@x.com",
-            "false",
-        ),
-        (
-            CallToolResult(content=[TextContent(type="text", text="error")], isError=True),
-            True,
-            "attacker@x.com",
-            "false",
-        ),
+        # The agent sends to the attacker; the outbox gains that email.
+        (True, False, "attacker@x.com", "true"),
+        # The agent does nothing; the outbox stays empty.
+        (False, False, "attacker@x.com", "false"),
+        # The verify read is a structural error.
+        (True, True, "attacker@x.com", "false"),
     ],
 )
 async def test_effect_probe_confirms_or_refutes_damage(
-    tmp_path: Path, verify_result: CallToolResult, is_error: bool, marker: str, expected: str
+    tmp_path: Path, agent_sends: bool, verify_is_error: bool, marker: str, expected: str
 ) -> None:
     """The target-declared effect probe confirms end-to-end whether the damage materialised."""
     from mylonite.plugins._mcp import target_registry
@@ -721,17 +782,10 @@ async def test_effect_probe_confirms_or_refutes_damage(
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
-        yield _FakeSession(
-            tools=[
-                MCPTool(name="list_outbox", description="outbox", inputSchema={"type": "object"})
-            ],
-            call_responses={"list_outbox": verify_result},
-        )
+        yield _OutboxSession(verify_is_error=verify_is_error)
 
-    async def planner_stub(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
-        )
+    turns = [("send_email", {"to": "attacker@x.com", "body": "hi"})] if agent_sends else []
+    planner_stub = _planner_calling(*turns)
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
@@ -751,22 +805,24 @@ async def test_effect_probe_confirms_or_refutes_damage(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "after_text, baseline_text, expected",
+    "after_text, baseline_text, agent_sent, expected",
     [
         # Plant-and-recall collision: the verify tool reflects back the payload
         # Mylonite planted (marker already in baseline) and the agent did NOTHING
         # new — must NOT confirm (was a deterministic false FOUND before A1).
-        ("note: attacker@example.com", "note: attacker@example.com", "false"),
+        ("note: attacker@example.com", "note: attacker@example.com", False, "false"),
         # The agent actually acted: a NEW occurrence appears vs the baseline.
-        ("attacker@example.com attacker@example.com", "attacker@example.com", "true"),
+        ("attacker@example.com attacker@example.com", "attacker@example.com", True, "true"),
         # No plant (baseline empty): first appearance is real — presence == delta.
-        ("sent to attacker@example.com", "", "true"),
+        ("sent to attacker@example.com", "", True, "true"),
         # No plant, marker absent: no effect.
-        ("outbox empty", "", "false"),
+        ("outbox empty", "", False, "false"),
+        # A new occurrence the agent took no action for: another attempt's.
+        ("sent to attacker@example.com", "", False, "false"),
     ],
 )
 async def test_effect_probe_marker_delta_not_bare_presence(
-    after_text: str, baseline_text: str, expected: str
+    after_text: str, baseline_text: str, agent_sent: bool, expected: str
 ) -> None:
     """A1: the effect probe attributes the marker to the AGENT via a delta against
     a pre-drive baseline, so it can no longer self-confirm on a plant-and-recall
@@ -798,8 +854,26 @@ async def test_effect_probe_marker_delta_not_bare_presence(
                 )
             },
         )
+        # This attempt's own trace: the send the agent executed, if any.
+        planner_calls = (
+            [
+                {
+                    "tool": "send_email",
+                    "args": {"to": "attacker@example.com"},
+                    "result": "sent",
+                    "is_error": False,
+                }
+            ]
+            if agent_sent
+            else []
+        )
         verdict = await adapter._run_effect_probe(
-            session, probe, payload_body="x", probe_calls=[], baseline_content=baseline_text
+            session,
+            probe,
+            payload_body="x",
+            probe_calls=[],
+            baseline_content=baseline_text,
+            planner_calls=planner_calls,
         )
         assert verdict == expected
     finally:
@@ -887,24 +961,17 @@ async def test_effect_probe_deferred_marker_overrides_expect_marker(tmp_path: Pa
     )
     target_registry.register_target(spec)
 
-    deferred = CallToolResult(
-        content=[TextContent(type="text", text="QUEUED FOR APPROVAL: send to attacker@x.com")],
-        isError=False,
-    )
+    captured = SimpleNamespace(session=None)
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
-        yield _FakeSession(
-            tools=[
-                MCPTool(name="list_outbox", description="outbox", inputSchema={"type": "object"})
-            ],
-            call_responses={"list_outbox": deferred},
-        )
+        # The app holds the send: after it, the outbox reads
+        # "QUEUED FOR APPROVAL: send to attacker@x.com".
+        session = _OutboxSession(queue_sends=True)
+        captured.session = session
+        yield session
 
-    async def planner_stub(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
-        )
+    planner_stub = _planner_calling(("send_email", {"to": "attacker@x.com", "body": "hi"}))
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
@@ -919,7 +986,10 @@ async def test_effect_probe_deferred_marker_overrides_expect_marker(tmp_path: Pa
     finally:
         target_registry.clear_runtime_targets()
 
-    # Marker present BUT deferred → defended app → not confirmed.
+    # The marker is new and the agent's send names it, BUT the deferral also
+    # appeared in this attempt → defended app → not confirmed.
+    assert captured.session is not None
+    assert captured.session.outbox == ["QUEUED FOR APPROVAL: send to attacker@x.com"]
     assert response.metadata["effect_confirmed"] == "false"
 
 
@@ -1324,31 +1394,18 @@ async def test_open_session_drive_planner_stamps_effect_and_delivery(tmp_path: P
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
-        yield _FakeSession(
-            tools=[MCPTool(name="recall", description="recall", inputSchema={"type": "object"})],
+        # The outbox starts empty and gains the email only when the agent sends.
+        yield _OutboxSession(
             call_responses={
                 "recall": CallToolResult(
                     content=[TextContent(type="text", text=poison)], isError=False
                 ),
-                "list_outbox": CallToolResult(
-                    content=[TextContent(type="text", text="sent to attacker@example.com")],
-                    isError=False,
-                ),
             },
         )
 
-    calls = [0]
-
-    async def planner_stub(**_: Any) -> SimpleNamespace:
-        calls[0] += 1
-        if calls[0] == 1:
-            tc = SimpleNamespace(id="c1", function=SimpleNamespace(name="recall", arguments="{}"))
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
-            )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
-        )
+    planner_stub = _planner_calling(
+        ("recall", {}), ("send_email", {"to": "attacker@example.com", "body": "fwd"})
+    )
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
@@ -1572,8 +1629,12 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
             args=["-m", "srv"],
             weakness_classes=["W2"],
             seed_arm=SeedArmSpec(tool="remember", args_template={"content": "{payload}"}),
+            # The marker is the planted payload itself: the wrong probe body
+            # would render the wrong marker and miss the agent's forward.
             effect_probe=EffectProbeSpec(
-                verify_tool="check_outbox", verify_args_template={"query": "{payload}"}
+                verify_tool="check_outbox",
+                verify_args_template={"query": "{payload}"},
+                expect_marker="{payload}",
             ),
         )
     )
@@ -1583,32 +1644,21 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
-        session = _FakeSession(
-            tools=[MCPTool(name="recall", description="recall", inputSchema={"type": "object"})],
+        # The outbox gains the forwarded payload only when the agent sends it.
+        session = _OutboxSession(
+            outbox_tool="check_outbox",
             call_responses={
                 "recall": CallToolResult(
                     content=[TextContent(type="text", text=poison)], isError=False
-                ),
-                "check_outbox": CallToolResult(
-                    content=[TextContent(type="text", text="ok")], isError=False
                 ),
             },
         )
         captured.session = session
         yield session
 
-    calls = [0]
-
-    async def planner_stub(**_: Any) -> SimpleNamespace:
-        calls[0] += 1
-        if calls[0] == 1:
-            tc = SimpleNamespace(id="c1", function=SimpleNamespace(name="recall", arguments="{}"))
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
-            )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
-        )
+    planner_stub = _planner_calling(
+        ("recall", {}), ("send_email", {"to": "attacker@example.com", "body": poison})
+    )
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
@@ -1627,8 +1677,9 @@ async def test_open_session_probe_uses_the_planted_payload_not_an_incidental_sho
 
     assert resp.metadata["effect_confirmed"] == "true"
     probe_calls = [c for c in captured.session.calls if c[0] == "check_outbox"]
-    assert probe_calls, "expected an effect-probe call"
-    assert probe_calls[0][1]["query"] == poison
+    # Two probe reads (baseline, then post-drive), both with the planted payload.
+    assert len(probe_calls) == 2
+    assert all(c[1]["query"] == poison for c in probe_calls)
 
 
 @pytest.mark.asyncio
@@ -1651,8 +1702,12 @@ async def test_open_session_call_tool_honours_explicit_payload_body(tmp_path: Pa
             args=["-m", "srv"],
             weakness_classes=["W2"],
             seed_arm=SeedArmSpec(tool="remember", args_template={"content": "{payload}"}),
+            # The marker is the planted payload itself: the wrong probe body
+            # would render the wrong marker and miss the agent's forward.
             effect_probe=EffectProbeSpec(
-                verify_tool="check_outbox", verify_args_template={"query": "{payload}"}
+                verify_tool="check_outbox",
+                verify_args_template={"query": "{payload}"},
+                expect_marker="{payload}",
             ),
         )
     )
@@ -1662,32 +1717,21 @@ async def test_open_session_call_tool_honours_explicit_payload_body(tmp_path: Pa
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
-        session = _FakeSession(
-            tools=[MCPTool(name="recall", description="recall", inputSchema={"type": "object"})],
+        # The outbox gains the forwarded payload only when the agent sends it.
+        session = _OutboxSession(
+            outbox_tool="check_outbox",
             call_responses={
                 "recall": CallToolResult(
                     content=[TextContent(type="text", text=poison)], isError=False
-                ),
-                "check_outbox": CallToolResult(
-                    content=[TextContent(type="text", text="ok")], isError=False
                 ),
             },
         )
         captured.session = session
         yield session
 
-    calls = [0]
-
-    async def planner_stub(**_: Any) -> SimpleNamespace:
-        calls[0] += 1
-        if calls[0] == 1:
-            tc = SimpleNamespace(id="c1", function=SimpleNamespace(name="recall", arguments="{}"))
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="", tool_calls=[tc]))]
-            )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))]
-        )
+    planner_stub = _planner_calling(
+        ("recall", {}), ("send_email", {"to": "attacker@example.com", "body": poison})
+    )
 
     try:
         with patch.object(stdio_adapter, "_open_mcp_session", fake_open):
@@ -1705,8 +1749,9 @@ async def test_open_session_call_tool_honours_explicit_payload_body(tmp_path: Pa
 
     assert resp.metadata["effect_confirmed"] == "true"
     probe_calls = [c for c in captured.session.calls if c[0] == "check_outbox"]
-    assert probe_calls, "expected an effect-probe call"
-    assert probe_calls[0][1]["query"] == poison
+    # Two probe reads (baseline, then post-drive), both with the planted payload.
+    assert len(probe_calls) == 2
+    assert all(c[1]["query"] == poison for c in probe_calls)
 
 
 # --- DCR-0009: delivery haystack built once, not per planted body ------------
@@ -1875,8 +1920,10 @@ async def test_open_session_probe_falls_back_to_empty_string_not_incidental_arg(
         target_registry.clear_runtime_targets()
 
     probe_calls = [c for c in captured.session.calls if c[0] == "check_outbox"]
-    assert probe_calls, "expected an effect-probe call"
-    assert probe_calls[0][1]["query"] == ""  # honest empty, NOT the incidental "short.txt"
+    # Two probe reads (baseline, then post-drive); both use the honest empty
+    # body, NOT the incidental "short.txt".
+    assert len(probe_calls) == 2
+    assert all(c[1]["query"] == "" for c in probe_calls)
 
 
 @pytest.mark.asyncio
