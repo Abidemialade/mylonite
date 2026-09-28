@@ -1,0 +1,16 @@
+
+ Usage: mylonite plugins [OPTIONS]
+
+ List installed extension plugins across all five contract groups.
+
+ Discovers every registered plugin via its PyPI entry point, which also runs
+ the contract-version compatibility check (a major mismatch is refused here
+ rather than failing silently mid-run). Attack modules are additionally *run*
+ by ``scan``/``gate``; for the target-adapter, test-generator, validator and
+ compliance-mapper contracts Mylonite uses its bundled reference
+ implementation, and selecting a third-party one for those is not yet exposed
+ on the CLI (see docs/plugin-authoring.md).
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ --help          Show this message and exit.                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

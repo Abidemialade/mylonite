@@ -1,0 +1,31 @@
+
+ Usage: mylonite [OPTIONS] COMMAND [ARGS]...
+
+ Mylonite -- AI-layer security testing.
+
+ Finds app-specific weaknesses in your AI agent's attack surface (system prompt, tool/function schemas, MCP tools),
+ proves each one with a differential oracle, and writes the pytest regression test that gates CI.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ --api-key-file        PATH  Read an API key from a file (a bare key or a dotenv KEY=VALUE line).                    │
+│ --env-file            PATH  Load provider API-key vars from a .env file (only known key names).                     │
+│ --help                      Show this message and exit.                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Commands ──────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ version   Print the installed Mylonite version.                                                                     │
+│ plugins   List installed extension plugins across all five contract groups.                                         │
+│ scan      Run the exploit-finding loop against a target.                                                            │
+│ demo      Run the zero-config reference-app playground: vulnerable vs guarded differential.                         │
+│ generate  Emit a pytest regression test from a confirmed exploit.                                                   │
+│ validate  Run a generated test through the differential-oracle validator (LIVE).                                    │
+│ report    Render a saved scan or validation as a trust panel (offline, no LLM).                                     │
+│ gate      Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline.                         │
+│ ablate    Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).                     │
+│ check     Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.                     │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ Examples:
+ `mylonite scan reference:vulnerable` -- run the attack suite against a target.
+ `mylonite scan --command python --arg server.py --scaffold app.yaml` -- scaffold a target.yaml.
+ `mylonite gate --target-file app.yaml --authorize custom --open-pr` -- scan to a gating PR.
+ Docs: https://abidemialade.github.io/mylonite/ -- run 'mylonite COMMAND --help' for any command.

@@ -1,0 +1,32 @@
+
+ Usage: mylonite ablate [OPTIONS]
+
+ Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).
+
+ For each control, toggle it (on vs off, or all-minus-c with --redundancy)
+ against its weakness's attack (model held constant) and report whether it
+ actually carries the security. LIVE: launches the target's MCP server + provider.
+
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ --target-file             PATH     Custom-target YAML (required): the app to ablate.                                │
+│ --authorize               TEXT     Must equal the target's scope, or its family when it declares no scope. Asserts  │
+│                                    you own the target; see SECURITY.md.                                             │
+│ --controls                TEXT     Comma-separated weakness classes to ablate (e.g. W2,W3,W4). Default: the         │
+│                                    target's declared controls, else all implemented controls matching its           │
+│                                    weakness_classes.                                                                │
+│ --iterations              INTEGER  Scans per control per side (raw/guarded). Default 1. [default: 1]                │
+│ --model                   TEXT                                                                                      │
+│ --planner-model           TEXT     Override the model that DRIVES the agent-under-test (the planner) while scoring  │
+│                                    controls. Defaults to --model. Same three-role split as                          │
+│                                    `scan`/`gate`/`validate`.                                                        │
+│ --customiser-model        TEXT     Override the model that CRAFTS/REFINES attack payloads. Defaults to --model.     │
+│ --judge-model             TEXT     Override the model that JUDGES whether an attack landed. Defaults to --model.    │
+│ --config                  PATH     A declarative mylonite.yaml run config (target_file / authorize / provider /     │
+│                                    model / the role models). Auto-discovered from ./mylonite.yaml when present; an  │
+│                                    explicit flag always wins.                                                       │
+│ --redundancy                       Toggle each control OFF against the FULL set (all-minus-c) instead of on-vs-off, │
+│                                    so the matrix tells 'redundant' (another control covers the weakness) from       │
+│                                    'theater'.                                                                       │
+│ --max-seeds               INTEGER  Max kitchen-sink seeds per weakness to probe. Default 2. [default: 2]            │
+│ --help                             Show this message and exit.                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

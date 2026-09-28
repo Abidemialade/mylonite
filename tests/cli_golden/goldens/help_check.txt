@@ -1,0 +1,28 @@
+
+ Usage: mylonite check [OPTIONS] [TARGET]
+
+ Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.
+
+ Connects to the target ONCE (`describe()` — exactly what `scan --scaffold`
+ already does) and reports structural exposure from the tool schemas alone:
+ consequential tools with no approval-shaped sibling, descriptions that
+ steer the agent, tools taking an apparent network destination, content-
+ processing tools that could carry an indirect-injection payload, unpinned
+ tool descriptions (rug-pull exposure), and which weakness classes the
+ surface suggests. Every finding is a HINT to confirm, never a verdict —
+ the differential oracle (`scan`/`gate`) is what proves an attack actually
+ lands. Belongs in CI stage 1, next to lint: cheap enough to run on every
+ push, unlike the live stages that spend LLM budget.
+
+┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│   target      [TARGET]  `reference:vulnerable` / `reference:guarded`, or use --target-file.                         │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ --target-file        PATH  Custom-target YAML: the app to check.                                                    │
+│ --enforce                  Exit 1 on substantive W1-W4 structural findings, instead of reporting and exiting 0. The │
+│                            'unpinned descriptions' advisory (which fires on every tool of every server on first     │
+│                            contact) does NOT gate, so this is adoptable as a CI stage from day one.                 │
+│ --config             PATH  A declarative mylonite.yaml run config. Fills --target-file when you omit it;            │
+│                            auto-discovered from ./mylonite.yaml when present; an explicit flag always wins.         │
+│ --help                     Show this message and exit.                                                              │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

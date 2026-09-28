@@ -1,0 +1,99 @@
+
+ Usage: mylonite scan [OPTIONS] [TARGET]
+
+ Run the exploit-finding loop against a target.
+
+ Exit codes: 0 ok; 2 config/usage error (incl. nothing scanned); 3 budget
+ exceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an
+ aborted/empty scan exits non-zero so it never reads as a clean pass.
+
+┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│   target      [TARGET]  Target ID: 'reference:vulnerable' / 'reference:guarded' (the bundled twins), or             │
+│                         'mcp:custom' with --command/--arg flags. Omit when using --target-file (your own MCP app).  │
+│                         Non-reference targets require --authorize.                                                  │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ --target-file                                   PATH     Path to a custom-target YAML (declares                     │
+│                                                          command/args/weakness_classes/seed_arm).                   │
+│ --command                                       TEXT     mcp:custom — the MCP server launch command.                │
+│ --arg                                           TEXT     mcp:custom — a server arg (repeatable, in order).          │
+│ --env                                           TEXT     mcp:custom — a KEY=VALUE env var for the server            │
+│                                                          (repeatable).                                              │
+│ --scope                                         TEXT     mcp:custom — optional scope label (must match              │
+│                                                          --authorize).                                              │
+│ --system-prompt                                 TEXT     mcp:custom — the target's system prompt (inline).          │
+│ --system-prompt-file                            PATH     mcp:custom — read the system prompt from a file.           │
+│ --primary-tool                                  TEXT     mcp:custom — a primary tool name (repeatable).             │
+│ --weakness-class                                TEXT     mcp:custom — a weakness class the target exposes, e.g.     │
+│                                                          W2/W4 (repeatable).                                        │
+│ --scaffold                                      PATH     Scaffold mode: introspect the MCP server (via --command,   │
+│                                                          no LLM call, no attack) and write a commented starter      │
+│                                                          target.yaml to this PATH instead of scanning. Fill in      │
+│                                                          seed_arm/effect_probe, then scan with --target-file.       │
+│ --force                                                  With --scaffold, overwrite the output file if it exists.   │
+│ --rest-url                                      TEXT     With --scaffold: write a RUNNABLE HTTP-agent (transport:   │
+│                                                          rest) target for this endpoint instead of introspecting an │
+│                                                          MCP server. No --command needed. Pair with --rest-body /   │
+│                                                          --rest-response-path. See docs/http-agent.md.              │
+│ --rest-body                                     TEXT     With --scaffold --rest-url: the request body template      │
+│                                                          (must contain a {prompt} placeholder). Default:            │
+│                                                          '{"prompt": "{prompt}"}'.                                  │
+│ --rest-response-path                            TEXT     With --scaffold --rest-url: dotted path into the JSON      │
+│                                                          reply to extract the agent's response (e.g.                │
+│                                                          choices.0.message.content). Omit to use the whole body.    │
+│ --model                                         TEXT     Model identifier passed to LiteLLM.                        │
+│ --planner-model                                 TEXT     Override the model that DRIVES the agent-under-test (the   │
+│                                                          planner). Defaults to --model. An aligned planner refuses  │
+│                                                          injection even on a vulnerable target; point this at a     │
+│                                                          representatively exploitable model to keep the attack      │
+│                                                          class testable.                                            │
+│ --customiser-model                              TEXT     Override the model that CRAFTS/REFINES attack payloads     │
+│                                                          (the red-team / attacker side). Defaults to --model.       │
+│                                                          Mylonite separates three model roles: planner (the agent   │
+│                                                          under test), customiser (the attacker), and judge (the     │
+│                                                          verdict) -- set them independently to mix a strong         │
+│                                                          attacker against a cheaper target, etc.                    │
+│ --judge-model                                   TEXT     Override the model that JUDGES whether an attack landed    │
+│                                                          (the LLM-judge leg, used only when the deterministic       │
+│                                                          predicate is inconclusive). Defaults to --model.           │
+│ --max-llm-calls                                 INTEGER  LLM call budget for this scan. Not a hard ceiling: each    │
+│                                                          seed keeps a small floor, so the worst case is higher (see │
+│                                                          docs/ci-gating.md).                                        │
+│                                                          [default: (50)]                                            │
+│ --max-concurrent                                INTEGER  Max concurrent in-flight seeds. [default: 3]               │
+│ --output-dir                                    PATH     Root directory for scan artefacts (default: the resolved   │
+│                                                          layout's scans dir, normally .mylonite/scans — see         │
+│                                                          mylonite.yaml `root:` / MYLONITE_ROOT).                    │
+│ --config                                        PATH     A declarative mylonite.yaml run config (target_file /      │
+│                                                          authorize / provider / model / max_llm_calls). Fills any   │
+│                                                          flag you omit; an explicit flag always wins.               │
+│ --dry-run                                                Enumerate seeds; skip customisation + invocation.          │
+│ --allow-no-seed-arm                                      Scan a custom target that declares an indirect-injection   │
+│                                                          weakness class (e.g. W2) without a seed_arm. Those seeds   │
+│                                                          will report NOT TESTED rather than block the scan. Off by  │
+│                                                          default so a misconfig never reads as clean.               │
+│ --authorize                                     TEXT     Must equal the target's scope, or its family when it       │
+│                                                          declares no scope. Asserts you own the target; see         │
+│                                                          SECURITY.md.                                               │
+│ --purpose                                       TEXT     One-line description of what the app is for (e.g. 'an      │
+│                                                          email-triage assistant that can send replies'). Tailors    │
+│                                                          the probes to the app's domain. Overrides 'purpose' in the │
+│                                                          target file; persisted for a custom target so              │
+│                                                          generate/validate reuse it.                                │
+│ --randomize-exfil       --no-randomize-exfil             Mint a unique exfil destination per run instead of the     │
+│                                                          demo address, so a finding proves the target leaks to ANY  │
+│                                                          attacker destination (generalizes) rather than only the    │
+│                                                          one literal address (avoids 'teaching to the test').       │
+│                                                          Defaults ON for live custom-target scans; the              │
+│                                                          reference/replay path never randomizes. Matches            │
+│                                                          generate/validate/gate's own default (A5).                 │
+│ --help                                                   Show this message and exit.                                │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ Examples:
+ `mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.
+ `mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app` -- introspect a server and write
+ a starter target.yaml (no LLM call, no attack).
+ `mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app (--authorize equals the scope the
+ scaffold wrote).
+ Exit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable.
