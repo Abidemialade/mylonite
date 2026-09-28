@@ -64,6 +64,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diagnosis for a target that was simply still starting up. A timeout now
   exits with its own message ("timed out after 20s starting or describing
   the server (first-run npx or uvx downloads can be slow)") instead.
+- **`scan --weakness-class` now filters `reference:*` and bundled
+  `mcp:<family>` seeds too**, instead of silently doing nothing there. The
+  flag was read only in the custom-target branch (which already merges it
+  into the target's declared `weakness_classes`); a reference or bundled
+  target's seed list — including the one the budget-exhausted message
+  recommends narrowing with `--weakness-class` — ignored it entirely.
+  `mylonite scan reference:vulnerable --dry-run --weakness-class W4` now
+  lists only the W4 seed(s). A custom target's own declared classes are
+  unaffected.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is
