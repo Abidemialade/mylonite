@@ -168,14 +168,17 @@ def test_seeds_for_descriptor_matches_legacy_family_mapping(target_id: str) -> N
 
 
 def test_seeds_for_descriptor_weakness_classes_reports_not_tested_when_uncoverable() -> None:
-    """DCR-0031: an arbitrary custom target (no tool surface for synthesis, and a
-    family that doesn't match any bundled catalogue's applicable_targets) must NOT
-    fall back to a kitchen-sink seed whose setup='seed_note' it has no equivalent
-    for — that used to silently fail instead of honestly reporting NOT TESTED.
-    A seed_note-setup W2 seed plants into infrastructure this target lacks, so
-    it is honestly excluded (unlike a no_setup seed — see the sibling test)."""
+    """DCR-0031/#181b: an arbitrary custom target (no tool surface for
+    synthesis, and a family that doesn't match any bundled catalogue's
+    applicable_targets) declaring W2 with no plant capability gets the
+    kitchen-sink W2 seeds SCHEDULED as a deliberate placeholder (not
+    silently dropped to zero) -- they hit SeedArmUnavailable at runtime and
+    report NOT TESTED honestly, which is what lets --allow-no-seed-arm's
+    documented promise hold. `seed_coverage(...).uncoverable` still names W2
+    (see the coverability tests below), so the pre-flight refusal — the
+    OTHER half of this honesty guarantee — still fires without that flag."""
     got = seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W2"]))
-    assert got == []
+    assert got and all(s.weakness == "W2" and s.setup == "seed_note" for s in got)
 
 
 def test_seeds_for_descriptor_no_setup_kitchen_seed_still_reaches_any_target() -> None:
@@ -252,7 +255,11 @@ def test_seed_coverage_reports_uncoverable_w2_with_a_fix() -> None:
     """#181b: the coverability helper names the class, why, and the fix — the
     exact reason the pre-flight refusal message is built from. Tools exist
     (so the reason is the W2-specific one, not the generic "no tools" case)
-    but none of them can store content for a later recall."""
+    but none of them can store content for a later recall. `seeds` is NOT
+    empty -- the W2 placeholder still gets scheduled (it will honestly
+    report NOT TESTED under --allow-no-seed-arm rather than the class
+    silently vanishing) -- but the class is uncoverable regardless, because
+    that placeholder is not real coverage."""
     from mylonite.contracts._types import ToolSpec
     from mylonite.scan.seeds import seed_coverage
 
@@ -263,8 +270,11 @@ def test_seed_coverage_reports_uncoverable_w2_with_a_fix() -> None:
         tools=[ToolSpec(name="get_status", description="read-only status check")],
     )
     coverage = seed_coverage(d)
-    assert coverage.seeds == ()
+    assert [s.pattern_id for s in coverage.seeds] == ["indirect-injection-note-body-tool-chain"]
     assert "W2" in coverage.uncoverable
+    reason = coverage.uncoverable["W2"]
+    assert "store content for a later recall" in reason
+    assert "seed_arm" in reason
     reason = coverage.uncoverable["W2"]
     assert "store content for a later recall" in reason
     assert "seed_arm" in reason

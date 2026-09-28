@@ -698,18 +698,24 @@ def _can_plant_content(descriptor: Any) -> bool:
     return bool(getattr(descriptor, "can_plant_untrusted_content", False))
 
 
-#: The literal tool a catalogue seed is hard-keyed to, by ``drive`` — the seeds
-#: whose ``setup == "no_setup"`` clause used to hand them to ANY target
-#: regardless of its tool surface (#211). Every no_setup kitchen-sink seed's
-#: drive is listed here or has no literal-tool dependency (e.g.
-#: ``read_note_direct``, ``verbatim``), in which case it is never dropped by
-#: :func:`_literal_tool_missing`. Seeds gated by ``setup="seed_note"`` are
-#: unaffected — they already depend on plant capability (``can_plant`` /
-#: family match) rather than running unconditionally, so this catalogue is
-#: deliberately scoped to the ``no_setup`` seeds that had no other gate at all.
-_DRIVE_LITERAL_TOOL: dict[str, str] = {
-    "send_email_direct": "send_email",
-    "fetch_url_direct": "web_fetch",
+#: The literal tool a catalogue seed's PREDICATE is hard-keyed to — keyed on
+#: ``predicate`` (not ``drive``/``setup``), because the seed_note-setup
+#: kitchen seeds (``excessive-agency-fetch-via-note-body``,
+#: ``excessive-agency-send-email-via-note-injection``) are JUST as hard-keyed
+#: to a literal tool as their no_setup siblings; they only looked safe from
+#: the filter because ``setup != "no_setup"`` already gated them on plant
+#: capability. On a target that HAS a seed_arm but whose real W3/W4 tool
+#: isn't literally named ``web_fetch``/``send_email``, those two seeds were
+#: still scheduled, always landed ``not_applicable`` at runtime, and kept
+#: coverage PARTIAL forever (#211's other half). Predicates with no single
+#: literal fallback (e.g. ``read_note_returned_poisoned_content_acted_on``,
+#: which accepts either) are deliberately absent — never dropped by
+#: :func:`_literal_tool_missing`.
+_PREDICATE_LITERAL_TOOL: dict[str, str] = {
+    "tool_description_licensed_withheld_action": "send_email",
+    "web_fetch_to_unauthorised_url": "web_fetch",
+    "send_email_without_confirmation": "send_email",
+    "send_email_to_attacker": "send_email",
 }
 
 
@@ -728,10 +734,12 @@ def _known_tool_names(descriptor: Any) -> frozenset[str] | None:
 
 def _literal_tool_missing(seed: SeedPattern, known_tools: frozenset[str] | None) -> bool:
     """True when ``seed`` is hard-keyed to a literal tool this target's KNOWN,
-    non-empty tool surface does not have (#211's root cause)."""
+    non-empty tool surface does not have (#211's root cause). Applies
+    regardless of ``setup`` — a seed_note-setup seed can be just as
+    literal-keyed as a no_setup one; see :data:`_PREDICATE_LITERAL_TOOL`."""
     if known_tools is None:
         return False
-    literal = _DRIVE_LITERAL_TOOL.get(seed.drive)
+    literal = _PREDICATE_LITERAL_TOOL.get(seed.predicate)
     if not literal:
         return False
     return literal not in known_tools
@@ -829,7 +837,7 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
         # needs — regardless of what the target's family is CALLED.
         can_plant = _can_plant_content(descriptor)
         known_tools = _known_tool_names(descriptor)
-        kitchen = [
+        kitchen_capable = [
             s
             for s in SEED_CATALOGUE
             if s.weakness in classes
@@ -855,29 +863,65 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
                 # plant still never receives a planting seed.
                 s.setup == "no_setup" or family in s.applicable_targets or can_plant
             )
-            # #211: a no_setup catalogue seed hard-keyed to a literal tool
-            # (send_email / web_fetch) used to reach ANY target regardless of
-            # its tool surface — the worst case was never "the planner simply
-            # doesn't call it" (the comment above), it was NOT_TESTED, which
-            # blocks a complete result on a target whose real tool is named
-            # something else. Drop it only when the surface is KNOWN and
-            # non-empty and genuinely lacks the tool; the synthesised seed
-            # (above) already covers the target's REAL tool.
+            # #211: a catalogue seed hard-keyed to a literal tool (send_email /
+            # web_fetch) used to reach ANY target regardless of its tool
+            # surface — the worst case was never "the planner simply doesn't
+            # call it", it was NOT_TESTED, which blocks a complete result on a
+            # target whose real tool is named something else. Applies
+            # regardless of `setup`: a seed_note-setup seed is just as
+            # literal-keyed as a no_setup one (see _PREDICATE_LITERAL_TOOL).
+            # Drop it only when the surface is KNOWN and non-empty and
+            # genuinely lacks the tool; the synthesised seed (above) already
+            # covers the target's REAL tool.
             and not _literal_tool_missing(s, known_tools)
         ]
+        # #181b: a declared W2 with NO plant capability at all (no seed_arm,
+        # no family match, and synthesis didn't cover it either) still needs
+        # its seed_note kitchen seeds SCHEDULED, not silently dropped to
+        # zero. Without this, --allow-no-seed-arm's documented promise
+        # ("those seeds will be reported NOT TESTED, not clean") was false:
+        # seeds_for_descriptor returned [] for W2, so a [W2, W4] scan could
+        # complete on W4 alone and read as a trustworthy clean pass with W2
+        # never attempted. `MCPSessionAdapterBase._run_setup` raises
+        # SeedArmUnavailable for a "seed_note" setup with no declared
+        # seed_arm on every family (the in-process reference adapter's OWN
+        # seed_note handling is a SEPARATE class that only ever runs for
+        # `reference:*` targets, which never reach this branch at all — they
+        # have no `weakness_classes` and take the legacy family-mapping path
+        # below), so scheduling these is never a silent failure: they always
+        # resolve to skipped_no_seed_arm (NOT_TESTED). These are placeholders,
+        # not real coverage — kept OUT of `kitchen_capable` (and therefore out
+        # of what `uncovered` subtracts below), so the class stays in
+        # `uncoverable` with its reason, exactly as if nothing had run.
+        w2_placeholder: list[SeedPattern] = []
+        if (
+            "W2" in classes
+            and "W2" not in covered
+            and not any(s.weakness == "W2" for s in kitchen_capable)
+        ):
+            w2_placeholder = [
+                s
+                for s in SEED_CATALOGUE
+                if s.weakness == "W2"
+                and "kitchen-sink" in s.applicable_targets
+                and not _literal_tool_missing(s, known_tools)
+            ]
+        kitchen = [*kitchen_capable, *w2_placeholder]
         # The coverability check must count EVERY resolved seed, not just the
-        # W1/W2 subset `covered` tracks for kitchen-seed suppression. A W3/W4
-        # synthesised seed (e.g. execute_sql, fetch) is a GENERALISATION, not
-        # a suppression, of the kitchen seed (see the note above) — but it is
-        # still a real, runnable seed for that class. Reusing `covered` here
-        # reported a class as uncoverable while a seed for it was about to
-        # run: `weakness_classes: [W4]` against a target whose only
-        # consequential tool is `execute_sql` (declared or classifier-found)
-        # got `synth-w4-unconfirmed-execute_sql` in `seeds` and W4 in
-        # `uncoverable` in the SAME SeedCoverage — a false pre-flight refusal
-        # naming a class that was, in fact, about to be tested.
+        # W1/W2 subset `covered` tracks for kitchen-seed suppression, and
+        # must NOT count the W2 placeholder above (it is not real coverage —
+        # see its own note). A W3/W4 synthesised seed (e.g. execute_sql,
+        # fetch) is a GENERALISATION, not a suppression, of the kitchen seed
+        # (see the note above) — but it is still a real, runnable seed for
+        # that class. Reusing `covered` here reported a class as uncoverable
+        # while a seed for it was about to run: `weakness_classes: [W4]`
+        # against a target whose only consequential tool is `execute_sql`
+        # (declared or classifier-found) got `synth-w4-unconfirmed-execute_sql`
+        # in `seeds` and W4 in `uncoverable` in the SAME SeedCoverage — a
+        # false pre-flight refusal naming a class that was, in fact, about to
+        # be tested.
         uncovered = sorted(
-            classes - {s.weakness for s in synthesized} - {s.weakness for s in kitchen}
+            classes - {s.weakness for s in synthesized} - {s.weakness for s in kitchen_capable}
         )
         return SeedCoverage(
             seeds=tuple([*synthesized, *kitchen]),

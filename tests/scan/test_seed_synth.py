@@ -161,24 +161,50 @@ def test_seeds_for_descriptor_uses_synthesis_not_kitchen_sink() -> None:
 def test_seeds_for_descriptor_falls_back_when_no_channel() -> None:
     """DCR-0031: W2 declared but NO content-processor and NO store+recall -> nothing
     to synthesise. An arbitrary custom target's family ("custom-app") does not match
-    any bundled catalogue's applicable_targets, so the kitchen-sink W2 seeds (whose
-    setup='seed_note' this target has no equivalent for) do NOT silently fill in —
-    the honest result is NOT TESTED (empty), not a seed that would silently fail."""
+    any bundled catalogue's applicable_targets, so a kitchen-sink W2 seed whose
+    setup='seed_note' this target has no equivalent for does NOT silently fail
+    when it runs — it hits SeedArmUnavailable and reports NOT TESTED (#181b: this
+    is now scheduled deliberately, as a placeholder, so --allow-no-seed-arm's
+    promise that these seeds "will be reported NOT TESTED, not clean" is kept
+    rather than the class silently vanishing to zero seeds). The class stays
+    `uncoverable` regardless — see scan/test_seeds.py's SeedCoverage tests."""
     tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
     selected = seeds.seeds_for_descriptor(_descriptor(["W2"], tools))
-    assert selected == []
+    assert [s.pattern_id for s in selected] == ["indirect-injection-note-body-tool-chain"]
 
 
 def test_seeds_for_descriptor_kitchen_sink_fallback_when_family_matches() -> None:
     """The positive case: when the target's family genuinely IS 'kitchen-sink'
     (it really does have the store->recall shape this fallback assumes), the
-    kitchen-sink W2 seeds correctly fill the gap."""
-    tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
+    kitchen-sink W2 seeds correctly fill the gap. `send_email` is on the
+    surface (as it genuinely is on the real kitchen-sink server) so the
+    literal-tool filter (#211) doesn't additionally drop the send_email-keyed
+    seeds -- see the sibling test below for that case."""
+    tools = [
+        _tool("ping", "Health check.", {"type": "object", "properties": {}}),
+        _tool("send_email", "Send an email.", {"type": "object", "properties": {}}),
+    ]
     descriptor = SimpleNamespace(
         target_id="mcp:kitchen-sink:scope", weakness_classes=["W2"], tools=tools, kind="mcp"
     )
     selected = seeds.seeds_for_descriptor(descriptor)
     assert any(s.pattern_id == "indirect-injection-note-body-direct" for s in selected)
+
+
+def test_seeds_for_descriptor_kitchen_sink_fallback_drops_literal_seed_without_the_tool() -> None:
+    """Same family-match fallback, but the surface genuinely has no
+    send_email: the two send_email-literal-keyed W2 seeds are dropped
+    (#211), while the broader tool-chain seed (no single literal fallback)
+    still fills the gap."""
+    tools = [_tool("ping", "Health check.", {"type": "object", "properties": {}})]
+    descriptor = SimpleNamespace(
+        target_id="mcp:kitchen-sink:scope", weakness_classes=["W2"], tools=tools, kind="mcp"
+    )
+    selected = seeds.seeds_for_descriptor(descriptor)
+    ids = {s.pattern_id for s in selected}
+    assert "indirect-injection-note-body-direct" not in ids
+    assert "indirect-injection-note-body-roleplay" not in ids
+    assert "indirect-injection-note-body-tool-chain" in ids
 
 
 # --- black-box HTTP agent (transport: rest) ----------------------------------
