@@ -70,7 +70,7 @@ def test_error_names_the_command() -> None:
     assert "validate" in str(exc.value)
 
 
-# --- authorize_hint / bundled_authorize_value (0.10.2 / M02) ---
+# --- authorize_hint / bundled_authorize_value (0.10.2) ---
 
 
 def test_authorize_hint_names_the_scope(tmp_path: Path) -> None:
@@ -120,7 +120,7 @@ def test_bundled_authorize_value(target: str, expected: str) -> None:
 
 
 # --- authorize_fix: the one wording, shared by authorize_hint and cli.py's two
-# bundled-target inline call sites (0.10.2 / M02 controller polish) ---
+# bundled-target inline call sites (0.10.2) ---
 
 
 def test_authorize_fix_is_capitalised_and_ends_with_a_full_stop() -> None:

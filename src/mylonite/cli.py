@@ -762,7 +762,7 @@ def _missing_authorize(
     Three cases:
 
     - ``target_file`` does not exist: there is nothing to derive a value from,
-      so the fix is ``--scaffold`` (0.10.2 / M02), not a guessed value.
+      so the fix is ``--scaffold`` (0.10.2), not a guessed value.
     - ``target_file`` exists and loads: the hint names the exact required
       value, via :func:`mylonite._authz.authorize_hint`.
     - no ``target_file`` at all (``mcp:custom`` given inline): derive the

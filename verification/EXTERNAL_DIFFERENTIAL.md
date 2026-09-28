@@ -64,7 +64,7 @@ control-shim guarded build stages/blocks it; the gap holds 5/5; a validated regr
 is emitted. Because W4 is about the *app's dispatch behavior*, not the model falling for an
 injection, this fires regardless of planner-model robustness.
 
-### Second proof (M03): two official reference servers, same W4 class
+### Second proof: two official reference servers, same W4 class
 
 The second external proof repeats the W4 class on two servers from the official MCP reference
 repository (github.com/modelcontextprotocol/servers, MIT / Apache-2.0), with exact versions
