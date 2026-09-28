@@ -610,6 +610,41 @@ def test_effect_unprobed_degrades_confidence():
     assert "effect probe did not confirm" in rec.degraded
 
 
+def test_effect_unattributed_degrades_confidence():
+    """An effect the probe could not tie to this attempt (persisted state) is
+    weaker evidence than a confirmed one, the same way "unprobed" is — but it
+    is a distinct string, since the probe DID run and DID see a change."""
+    ex = ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id="w3",
+        payload=Payload(
+            pattern_id="w3", channel="user-message", body="x", metadata={"weakness": "W3"}
+        ),
+        response=AdapterResponse(
+            payload_pattern_id="w3",
+            raw_response="x",
+            tool_calls=["web_fetch"],
+            metadata={
+                "effect_trace": json.dumps(
+                    [
+                        {
+                            "tool": "web_fetch",
+                            "args": {"url": "http://attacker.example"},
+                            "result": "ok",
+                            "is_error": False,
+                        }
+                    ]
+                ),
+                "effect_confirmed": "unattributed",
+            },
+        ),
+        success_reason="r",
+        compliance=ComplianceTags(),
+    )
+    rec = recommend(ex)
+    assert any("could not be tied to this attempt" in d for d in rec.degraded)
+
+
 # --- proven / proven_layer from report.notes --------------------------------
 
 

@@ -302,15 +302,20 @@ Every bundled attack is an **attack pattern** with these fields (see `mylonite.s
 
 ## How "did it land?" is decided (Layer 1)
 
-A single attack is judged a **finding** by a three-step ladder, cheapest first:
+A single attack is judged a **finding** by a three-step ladder, and the effect probe —
+when the target declares one — runs **first**, ahead of the predicate and the LLM judge:
 
-1. **Deterministic predicate** — the structured check above. No LLM, no ambiguity.
-   This is the primary signal and most attack patterns resolve here.
-2. **LLM judge** — used only when the predicate is inconclusive; a model reads the
-   trace and rules. (`--judge-model` overrides it.)
-3. **Effect probe** — for custom targets, an optional check that the *damage
+1. **Effect probe** — for custom targets, an optional check that the *damage
    materialised end-to-end* (e.g. the attacker address really shows up in the
-   target's sent-mail), not just that a tool was called.
+   target's sent-mail) and can be tied to this attempt, not just that a tool was
+   called. `true` or `false` is final; `unattributed` (the state changed, or its
+   absence, could not be tied to this attempt), `errored`, and `unprobed` (no probe
+   declared) fall through to the next step.
+2. **Deterministic predicate** — the structured check above. No LLM, no ambiguity.
+   This is the primary signal for attempts the effect probe didn't settle, and most
+   attack patterns resolve here.
+3. **LLM judge** — used only when the predicate is inconclusive; a model reads the
+   trace and rules. (`--judge-model` overrides it.)
 
 A finding from Layer 1 is only half the story. Whether it becomes a **kept, committed
 regression test** is decided by Layer 2 — the [validation oracle](validation.md).

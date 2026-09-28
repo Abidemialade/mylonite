@@ -180,12 +180,38 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             )
         else:
             diff_remediation = "differential fail: no discriminating power between the twins."
+        # The effect leg fails this way only when the target's own state
+        # persists between attempts: every firing run's damage was real, by
+        # the attempt's own actions, but none of them was confirmed from the
+        # target's state itself, and the leg needs at least one. The generic
+        # "did not confirm the damage" line would read as no damage at all,
+        # which is wrong here and points at the wrong fix (declare a probe,
+        # when one already ran).
+        effect_remediation = (
+            "effect fail: the target's effect probe did not confirm the damage materialised."
+        )
+        for outcome in report.outcomes:
+            if (
+                outcome.stage == "effect"
+                and not outcome.passed
+                and "could not be tied to that attempt" in outcome.detail
+            ):
+                effect_remediation = (
+                    "effect fail: the target keeps state between attempts, so the effect "
+                    "probe could not tie the damage to that attempt (an idempotent write, "
+                    "a delete, another attempt's write) - the verdict for those runs came "
+                    "from the attempt's own actions, not a confirmed state change, and none "
+                    "reached a confirmed 'true'. Re-run with fresh state before the "
+                    "`validate` command, or use a marker built from {payload}, to get at "
+                    "least one run confirmed from the target's state."
+                )
+                break
         _remediation = {
             "build": "build fail: emitted test didn't collect; re-run `mylonite generate`.",
             "differential": diff_remediation,
             "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
             "stability": "stability fail: the attack did not reproduce against the real target.",
-            "effect": "effect fail: the target's effect probe did not confirm the damage materialised.",
+            "effect": effect_remediation,
             "consensus": "consensus fail: judges disagreed the effect was real; add an effect_probe.",
             # DCR-0007: a metamorphic-only failure (every other leg passes) is a
             # documented gating leg that can REJECT a report on its own (see the

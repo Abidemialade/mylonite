@@ -623,11 +623,11 @@ class DifferentialValidator(ValidatorBase):
             runs.append(self._run_custom_iteration(target, pattern_id))
         fired = sum(1 for r in runs if r.finding)
         # A firing run counts toward the effect leg when the probe confirmed the
-        # effect from the target's state ("true"), or when the state changed but
-        # could not be tied to this attempt ("unattributed") AND the predicate,
-        # which reads only this attempt's own executed calls, decided it. An
-        # LLM-decided "unattributed" run does not count: nothing structural
-        # links it to the effect.
+        # effect from the target's state ("true"), or when the state change, or
+        # its absence, could not be tied to this attempt ("unattributed") AND the
+        # predicate, which reads only this attempt's own executed calls, decided
+        # it. An LLM-decided "unattributed" run does not count: nothing
+        # structural links it to the effect.
         from_state = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
         from_actions = sum(
             1
@@ -663,11 +663,11 @@ class DifferentialValidator(ValidatorBase):
             # effect was observed at least once; the attempt-scoped runs only
             # add to a count that already rests on one real observation.
             detail = (
-                f"the target's effect probe confirmed the damage materialised "
-                f"end-to-end {effect_yes}/{n} runs (need >= {self._vuln_threshold}): "
+                f"{effect_yes}/{n} runs showed the damage (need >= {self._vuln_threshold}): "
                 f"{from_state} confirmed from the target's state, {from_actions} from "
-                "the attempt's own actions (the state changed but could not be tied "
-                "to that attempt, and the predicate showed it performed the action)"
+                "the attempt's own actions, where the state change (or its absence) "
+                "could not be tied to that attempt but the predicate showed it "
+                "performed the action"
             )
             if from_state == 0:
                 detail += (
@@ -848,7 +848,7 @@ class DifferentialValidator(ValidatorBase):
         )
         notes = (
             f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "
-            f"effect-probe confirmed {effect_yes}/{n}, consensus={agree:.2f}; "
+            f"{effect_yes}/{n} runs showed the damage, consensus={agree:.2f}; "
             f"{'KEPT' if kept else 'REJECTED'} (kept = {' AND '.join(legs)})."
             + twin_note
             + notes_tail
@@ -911,6 +911,12 @@ class DifferentialValidator(ValidatorBase):
         evidence = dict(attempt.judge_evidence) if attempt is not None else {}
         mechanism = attempt.verdict_mechanism if attempt is not None else None
         if result.exploits:
+            # `attempt` (from result.report.attempts) and `exploits[0]` are
+            # assumed to be the SAME attempt: this engine runs with
+            # max_concurrent=1 and a single pattern_id_filter, so one iteration
+            # drives exactly one seed to at most one finding. If a future
+            # change lets an iteration drive more than one attempt, match them
+            # by payload instead of indexing exploits[0].
             response = result.exploits[0].response
             return _CustomRun(
                 finding=True,

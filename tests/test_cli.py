@@ -2915,6 +2915,46 @@ def test_render_validation_report_gives_remediation_for_metamorphic_only_failure
     assert "metamorphic" in out.lower()
 
 
+def test_render_validation_report_effect_remediation_names_the_unattributed_cause(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed effect leg where every firing run was 'unattributed' (no run
+    was confirmed from the target's state) gets its own remediation text, not
+    the generic "did not confirm the damage" line -- it should say the target
+    keeps state between attempts and that the verdict came from the attempt's
+    own actions, not a confirmed state change."""
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="effect",
+                passed=False,
+                detail=(
+                    "2/2 runs showed the damage (need >= 3): 0 confirmed from the "
+                    "target's state, 2 from the attempt's own actions, where the "
+                    "state change (or its absence) could not be tied to that "
+                    "attempt but the predicate showed it performed the action; no "
+                    "run was confirmed from the target's state, and at least one "
+                    "is required"
+                ),
+                metric=0.67,
+            ),
+        ],
+        kept=False,
+        gating_legs=["build", "effect"],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    assert "REJECTED" in out
+    assert "keeps state between attempts" in out
+    assert "attempt's own actions" in out
+    assert "did not confirm the damage materialised" not in out
+
+
 # ---------------------------------------------------------------------------
 # PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
 # ---------------------------------------------------------------------------

@@ -115,6 +115,20 @@ Every validation reports three headline figures.
   `effect_probe` for a KEPT test backed by real damage confirmation. The **differential**
   leg contributes only when a guarded twin is inferable (a server-layer control or a
   synthesised boundary shim).
+
+  **How the effect leg counts.** A firing run counts toward it when the probe confirmed
+  the effect from the target's own state (`effect_confirmed: "true"`), or when the state
+  change, or its absence, could not be tied to that attempt
+  (`"unattributed"`) **and** the attempt-scoped predicate — which reads only that
+  attempt's own trace — decided the run. The leg also needs **at least one** `"true"` run,
+  so the end-to-end effect was observed from the target's own state at least once; a run
+  set that is all `"unattributed"` cannot pass on its own. This is why a stateful target
+  — a file, a database, a memory store, any remote server, where a guarded run can
+  otherwise inherit an unguarded run's write — now validates correctly: a guarded attempt
+  the guard blocked reads `"false"`, not a leftover `"true"` from an earlier run.
+  Consensus re-judges an `"unattributed"` run with the exploit's `predicate` metadata; a
+  scan-written exploit always carries it, so this only matters for a hand-built
+  `ExploitRecord`.
 - **Reproducibility fraction** — the flakiness-stage metric,
   `min(vulnerable fires, guarded resists) / iterations`. How dependably the
   test discriminates run-to-run; `1.0` means it fired and resisted on every

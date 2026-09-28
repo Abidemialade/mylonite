@@ -8,8 +8,9 @@ test, and where each piece lives. If you want to *extend* Mylonite, pair this wi
 
 Everything in Mylonite answers one of two questions:
 
-- **Layer 1 — "did the attack land?"** (is one attempt a *finding*) → a deterministic
-  **predicate**, then an **LLM judge** if inconclusive, then an **effect probe**. See
+- **Layer 1 — "did the attack land?"** (is one attempt a *finding*) → an **effect probe**
+  first, when the target declares one (final on `true`/`false`), then a deterministic
+  **predicate**, then an **LLM judge** if inconclusive. See
   [Weakness classes](weakness-classes.md#how-did-it-land-is-decided-layer-1).
 - **Layer 2 — "is the finding worth a committed test that gates CI?"** (is it *kept*) →
   the **differential oracle**. See [The validation engine](validation.md).
@@ -28,7 +29,8 @@ target ──> scan (Layer 1) ──> generate ──> validate (Layer 2) ──
   judge, with the scan-time flakiness filter and the LLM-call budget).
 - **`seeds.py`** / **`predicates.py`** — the bundled attack seeds (W1–W4) and the
   deterministic success predicates.
-- **`judge.py`** — the Layer-1 success ladder (predicate → LLM judge → effect probe).
+- **`judge.py`** — the Layer-1 success ladder (effect probe first, then predicate, then
+  LLM judge).
 - **`seed_synth.py`** — descriptor-driven seed synthesis: builds attack seeds for the
   channels a target's *introspected tool surface* actually supports (a direct-content
   tool, a poisoned tool description, …), so a target that doesn't match the bundled
