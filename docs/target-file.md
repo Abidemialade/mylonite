@@ -127,7 +127,7 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 ## MCP session timeout
 
 `timeout_s` (optional; `stdio`/`sse`/`http` only — a `rest` target uses
-[`request.timeout_s`](http-agent.md#requesttimeout_s) instead) overrides BOTH the
+[`request.timeout_s`](http-agent.md#the-target-file) instead) overrides BOTH the
 planner's per-turn budget and the MCP `ClientSession`'s read timeout, which otherwise
 default to 60 seconds each. Raise it for a target that legitimately takes longer per
 turn — a local model, a slow server, or a first-run `npx`/`uvx` download. A timeout
