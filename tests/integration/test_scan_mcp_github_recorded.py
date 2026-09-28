@@ -145,8 +145,15 @@ async def _judge_low_confidence(**kwargs: Any) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_scan_mcp_github_finds_create_issue_exploit(tmp_path: Path) -> None:
+async def test_scan_mcp_github_finds_create_issue_exploit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """v0.2.2 acceptance criterion 3 — github produces ≥1 finding naming create_issue."""
+    # #184: the bundled spec's extra_env now references ${GITHUB_PERSONAL_ACCESS_TOKEN};
+    # _effective_env() expands it even though _open_mcp_session itself is faked below.
+    monkeypatch.setenv(
+        "GITHUB_PERSONAL_ACCESS_TOKEN", "ghp_recordedtest"
+    )  # pragma: allowlist secret
 
     @asynccontextmanager
     async def fake_open(*args: Any, **kwargs: Any):
