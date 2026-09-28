@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-09-28
+
+This release makes `scan` and `validate` trustworthy on MCP servers that keep
+state between runs, such as files, databases, memory stores and remote servers.
+An effect now counts only for the attempt that caused it. A guarded run can no
+longer inherit an unguarded run's damage and read as a leak, and one scenario's
+write can no longer confirm another. Exit codes, flags and the replay format
+match 0.10.3. On a target that declares an `effect_probe`, attempts run one at
+a time.
+
 ### Fixed
 
 - **An effect is now credited only to the attempt that caused it, so stateful
@@ -4349,7 +4359,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.4...HEAD
+[0.10.4]: https://github.com/Abidemialade/mylonite/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/Abidemialade/mylonite/compare/v0.10.0...v0.10.1
