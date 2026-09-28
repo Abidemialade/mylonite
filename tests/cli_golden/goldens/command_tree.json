@@ -1084,7 +1084,7 @@
         {
           "default": "None",
           "envvar": null,
-          "help": "mcp:custom — a weakness class the target exposes, e.g. W2/W4 (repeatable).",
+          "help": "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). mcp:custom adds it to weakness_classes; any other target filters which seeds run.",
           "is_flag": false,
           "multiple": true,
           "name": "weakness_class",
