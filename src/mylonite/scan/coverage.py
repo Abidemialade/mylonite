@@ -365,12 +365,47 @@ _EXIT_INCOMPLETE_NO_ABORT: Final = EXIT_CONFIG
 # Each remaining bucket keys off `ScanAttemptOutcome` literals from
 # `scan/engine.py`; see that module for exactly which branch produces each one.
 _PROVIDER_ERROR_BUCKET: Final = "provider_error"
+#: `outcome == "error"` whose `error_detail` names an exception class that
+#: ISN'T a recognised provider/LiteLLM failure — e.g. a target subprocess
+#: crash (engine.py's `adapter.invoke` catch-all). Distinct from
+#: `_PROVIDER_ERROR_BUCKET`: mentioning credentials here would send the
+#: operator to debug the wrong thing.
+_GENERIC_ERROR_BUCKET: Final = "generic_error"
+_UNDECIDED_EFFECT_PROBE_BUCKET: Final = "undecided_effect_probe_errored"
+_UNDECIDED_UNPARSEABLE_JUDGE_BUCKET: Final = "undecided_unparseable_judge_output"
+_UNDECIDED_NO_ADJUDICATOR_BUCKET: Final = "undecided_no_adjudicator"
+
+#: Exception class NAMES (``type(exc).__name__``, the only thing
+#: `ScanAttempt.error_detail` carries for an `outcome == "error"` attempt —
+#: see engine.py's `except Exception as exc: ... error_detail=type(exc).__name__`)
+#: that indicate the raise was a genuine provider/LiteLLM failure. Sourced
+#: from the same LiteLLM exception names `scan.diagnostics.classify_provider_error`
+#: checks via `isinstance`, plus Mylonite's own `NonRecoverableProviderError`
+#: (scan/_llm.py's T4 re-raise for a non-recoverable provider category) —
+#: a `classify_provider_error`-style isinstance check isn't available here
+#: because only the class NAME survives onto the persisted attempt, not the
+#: exception instance.
+_PROVIDER_EXCEPTION_TYPE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "NonRecoverableProviderError",
+        "AuthenticationError",
+        "RateLimitError",
+        "Timeout",
+        "APIConnectionError",
+        "ServiceUnavailableError",
+        "ContextWindowExceededError",
+        "BadRequestError",
+        "PermissionDeniedError",
+        "NotFoundError",
+    }
+)
 
 _BUCKET_REMEDY: Final[dict[str, str]] = {
     _PROVIDER_ERROR_BUCKET: (
         "failed on provider calls — check each attempt's verdict_reason/error_detail "
         "(a common cause is missing or invalid provider credentials)"
     ),
+    _GENERIC_ERROR_BUCKET: "raised an error — see each attempt's verdict_reason/error_detail",
     "launch_failure": (
         "never launched the target — check the target file's command:/args: and that "
         "the server actually starts"
@@ -391,9 +426,21 @@ _BUCKET_REMEDY: Final[dict[str, str]] = {
         "targeted a capability this surface doesn't expose — the seed doesn't fit "
         "this target; check weakness_classes and the target's tool surface"
     ),
+    _UNDECIDED_EFFECT_PROBE_BUCKET: (
+        "reached no verdict because the declared effect_probe's verify call errored — "
+        "check the effect_probe wiring (verify_tool, verify_args_template)"
+    ),
+    _UNDECIDED_UNPARSEABLE_JUDGE_BUCKET: (
+        "reached no verdict because the LLM judge call succeeded but its output wasn't "
+        "usable — check the judge model (--judge-model)"
+    ),
+    _UNDECIDED_NO_ADJUDICATOR_BUCKET: (
+        "reached no verdict because the deterministic predicate was inconclusive and no "
+        "LLM judge was configured to fall back to — set a judge model, or accept this as "
+        "an intentional predicate-only run"
+    ),
     "undecided": (
-        "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided "
-        "them; check the effect_probe wiring"
+        "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"
     ),
     "skipped_planner_failure": (
         "failed before the attack could be delivered — check the target/model connectivity"
@@ -421,13 +468,28 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
     if ATTEMPT_CLASS.get(outcome) is not AttemptClass.NOT_TESTED:
         return None
     if outcome == "error":
-        return _PROVIDER_ERROR_BUCKET
+        error_detail = str(getattr(attempt, "error_detail", "") or "")
+        if error_detail in _PROVIDER_EXCEPTION_TYPE_NAMES:
+            return _PROVIDER_ERROR_BUCKET
+        return _GENERIC_ERROR_BUCKET
     if outcome == "undecided":
-        from mylonite.scan._llm import FALLBACK_CALL_RAISED
+        from mylonite.scan._llm import FALLBACK_CALL_RAISED, FALLBACK_UNPARSEABLE
 
         evidence = getattr(attempt, "judge_evidence", None) or {}
-        if evidence.get("fallback_cause") == FALLBACK_CALL_RAISED:
+        cause = evidence.get("fallback_cause")
+        if cause == FALLBACK_CALL_RAISED:
             return _PROVIDER_ERROR_BUCKET
+        if cause == FALLBACK_UNPARSEABLE:
+            return _UNDECIDED_UNPARSEABLE_JUDGE_BUCKET
+        # judge.py's own literal (scan.judge.FALLBACK_EFFECT_PROBE_ERRORED) is
+        # not imported here — coverage.py must not import judge.py (judge.py
+        # already imports NO_ADJUDICATOR from here; that would cycle) — so
+        # this is matched by value, which is fine: the string is a stable,
+        # documented cross-module contract, like FALLBACK_CALL_RAISED itself.
+        if cause == "effect_probe_errored":
+            return _UNDECIDED_EFFECT_PROBE_BUCKET
+        if evidence.get("no_adjudicator") == NO_ADJUDICATOR:
+            return _UNDECIDED_NO_ADJUDICATOR_BUCKET
         return "undecided"
     return str(outcome)
 

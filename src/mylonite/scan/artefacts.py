@@ -372,15 +372,26 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     if report.inconclusive_attempts:
         judged = sum(1 for a in report.attempts if a.verdict_mechanism == "llm")
         denom = judged or report.inconclusive_attempts
+        # #212: not every inconclusive cause is a failed LLM CALL — an errored
+        # effect_probe reaches this same tally (its judge_fallback_cause is
+        # "effect_probe_errored", stamped as fallback_breakdown's
+        # "judge_effect_probe_errored" key), and that is a probe read
+        # failure, never an "unparseable/failed LLM output".
+        only_effect_probe_errors = set(report.fallback_breakdown) <= {"judge_effect_probe_errored"}
+        cause_label = (
+            "effect_probe errored, the effect could not be confirmed"
+            if only_effect_probe_errors
+            else "unparseable/failed LLM output, or an effect_probe errored"
+        )
         line = (
             f"judge: {report.inconclusive_attempts}/{denom} attempts inconclusive "
-            f"(unparseable/failed LLM output) - {report.fallback_breakdown}"
+            f"({cause_label}) - {report.fallback_breakdown}"
         )
         # A scan where every judged attempt fell back found nothing because it
         # could not judge; it must not read as clean.
         style = "bold red" if report.inconclusive_attempts >= denom else "yellow"
         console_print(console, f"[{style}]{line}[/{style}]")
-    # R7: a customiser fallback means a seed body was NOT refined for this target
+    # A customiser fallback means a seed body was NOT refined for this target
     # (raw seed used) — surface it so a low-quality plant isn't invisible.
     customiser_fallbacks = report.fallback_breakdown.get("customiser_fallback", 0)
     if customiser_fallbacks:

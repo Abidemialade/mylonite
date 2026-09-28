@@ -33,6 +33,7 @@ def _attempt(
     *,
     seed_id: str = "s1",
     judge_evidence: dict[str, str] | None = None,
+    error_detail: str | None = None,
 ) -> ScanAttempt:
     return ScanAttempt(
         seed_id=seed_id,
@@ -41,6 +42,7 @@ def _attempt(
         verdict_mechanism=None,
         verdict_reason=None,
         judge_evidence=judge_evidence or {},
+        error_detail=error_detail,
     )
 
 
@@ -503,7 +505,7 @@ def test_dominant_cause_no_engagement_names_the_model() -> None:
 
 
 def test_dominant_cause_undecided_from_effect_probe_error_names_the_probe() -> None:
-    """An `undecided` attempt whose fallback_cause is the R3 effect-probe-errored
+    """An `undecided` attempt whose fallback_cause is the effect-probe-errored
     marker (not a provider call raising) must point at the effect_probe, not
     at credentials."""
     report = _report(
@@ -530,6 +532,76 @@ def test_dominant_cause_undecided_from_call_raised_does_blame_credentials() -> N
         attempts=[
             _attempt("undecided", judge_evidence={"fallback_cause": "call_raised"}),
             _attempt("undecided", seed_id="s2", judge_evidence={"fallback_cause": "call_raised"}),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "credentials" in outcome.operator_message
+
+
+def test_dominant_cause_undecided_unparseable_judge_output_names_the_judge_model() -> None:
+    """A judge call that SUCCEEDED but returned unusable output is not a
+    credentials problem, and is a different fix from "check the
+    effect_probe" -- it points at the judge model."""
+    report = _report(
+        attempts=[
+            _attempt("undecided", judge_evidence={"fallback_cause": "unparseable_output"}),
+            _attempt(
+                "undecided", seed_id="s2", judge_evidence={"fallback_cause": "unparseable_output"}
+            ),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "judge model" in outcome.operator_message or "judge-model" in outcome.operator_message
+    assert "credentials" not in outcome.operator_message
+    assert "effect_probe" not in outcome.operator_message
+
+
+def test_dominant_cause_undecided_no_adjudicator_is_not_a_defect() -> None:
+    """A predicate that was inconclusive with the LLM judge disabled (routine
+    in the demo's own wiring) must not be worded like a provider failure or
+    an effect_probe defect."""
+    from mylonite.scan.coverage import NO_ADJUDICATOR
+
+    report = _report(
+        attempts=[
+            _attempt("undecided", judge_evidence={"no_adjudicator": NO_ADJUDICATOR}),
+            _attempt("undecided", seed_id="s2", judge_evidence={"no_adjudicator": NO_ADJUDICATOR}),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "credentials" not in outcome.operator_message
+    assert "no LLM judge was configured" in outcome.operator_message
+
+
+def test_dominant_cause_generic_error_does_not_blame_credentials() -> None:
+    """outcome == 'error' with no provider-shaped error_detail (a target
+    subprocess crash, not a provider call) must not suggest credentials."""
+    report = _report(
+        attempts=[
+            _attempt("error", error_detail="BrokenPipeError"),
+            _attempt("error", seed_id="s2", error_detail="RuntimeError"),
+        ],
+        findings_count=0,
+    )
+    outcome = ScanOutcome.from_report(report)
+    assert outcome.operator_message is not None
+    assert "credentials" not in outcome.operator_message
+    assert "error_detail" in outcome.operator_message
+
+
+def test_dominant_cause_provider_error_via_error_detail_blames_credentials() -> None:
+    """outcome == 'error' whose error_detail names a real provider/LiteLLM
+    exception class IS a provider-call failure — credentials is the right hint."""
+    report = _report(
+        attempts=[
+            _attempt("error", error_detail="AuthenticationError"),
+            _attempt("error", seed_id="s2", error_detail="AuthenticationError"),
         ],
         findings_count=0,
     )

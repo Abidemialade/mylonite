@@ -331,6 +331,38 @@ def test_render_summary_surfaces_inconclusive_rate() -> None:
     assert "1/1" in summary
 
 
+def test_render_summary_effect_probe_errored_is_worded_correctly_not_llm_output() -> None:
+    """#212: an errored effect_probe reaches the same inconclusive tally as a
+    failed LLM judge call, but it is a probe read failure, not an
+    "unparseable/failed LLM output" — the line must say so."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="s",
+                pattern_id="s",
+                outcome="undecided",
+                verdict_mechanism="predicate",
+                verdict_reason="effect probe verify_tool 'list_outbox' call errored",
+                judge_evidence={"fallback_cause": "effect_probe_errored"},
+            )
+        ],
+        findings_count=0,
+        inconclusive_attempts=1,
+        fallback_breakdown={"judge_effect_probe_errored": 1},
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert "1/1" in summary
+    assert "effect_probe errored" in summary
+    assert "unparseable" not in summary
+    assert "failed LLM output" not in summary
+
+
 def test_render_summary_ascii_safe_is_pure_ascii() -> None:
     """Issue #9: ascii_safe output must encode to ASCII so a non-UTF-8 console can't crash."""
     summary = render_summary(_result(findings=1), ascii_safe=True)
