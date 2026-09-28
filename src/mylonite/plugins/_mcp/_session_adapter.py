@@ -604,6 +604,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # that the generic effect-aware predicate reads.
                 "effect_trace": json.dumps(planner_calls),
                 "effect_confirmed": effect_confirmed,
+                # R3 (#181a): lets the judge name WHICH verify_tool errored when
+                # effect_confirmed=='errored', instead of a bare "the probe failed".
+                "effect_probe_verify_tool": (
+                    self._spec.effect_probe.verify_tool
+                    if self._spec.effect_probe is not None and self._spec.effect_probe.verify_tool
+                    else ""
+                ),
                 "payload_delivered": payload_delivered,
                 "sandbox_diff": json.dumps(sandbox_diff),
                 "seeded_artefact_id": seeded_artefact_id or "",
@@ -1289,6 +1296,9 @@ class _MCPAttackSession:
                 baseline_content=baseline,
                 planner_calls=planner_calls,
             )
+            # R3 (#181a): parity with single-shot invoke() — the judge names
+            # which verify_tool errored when effect_confirmed=='errored'.
+            metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
         if recording.listed_tool_names is not None:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
         return AdapterResponse(
