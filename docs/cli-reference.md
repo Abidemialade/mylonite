@@ -120,8 +120,9 @@ For a custom target: `--command`, `--arg`,
 For a custom/`--target-file` target, `scan` (and `gate`) refuses before any LLM call if
 a declared `weakness_classes` entry has zero seeds this surface could ever run — see
 [Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
-`--dry-run` downgrades the refusal to a warning; `--allow-no-seed-arm` keeps its own
-behaviour for the class it already covers.
+`--dry-run` downgrades the refusal to a warning; `--allow-no-seed-arm` exempts a
+declared W2 with no `seed_arm` from the refusal and proceeds, with its seeds scheduled
+and each one honestly reporting NOT TESTED.
 
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a

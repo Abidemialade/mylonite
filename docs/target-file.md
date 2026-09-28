@@ -203,10 +203,14 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 
 Declaring a class in `weakness_classes` is a promise: Mylonite tests it. Before either
 `scan` or `gate` spends an LLM call, it checks whether your target's introspected tool
-surface can actually produce even one seed for every declared class. If a class would
-run zero seeds — no bundled seed's literal tool is on the surface, no store-and-recall
-pair or content-processing tool exists for W2, no egress-shaped tool for W3, no
-consequential tool for W4 — the run refuses outright and names each one:
+surface can actually produce even one seed for every declared class. A class can be
+covered by more than one mechanism — the bundled catalogue seed for a literally-named
+tool (`send_email`, `web_fetch`), or a seed synthesised for your target's OWN tool
+(classifier-found, e.g. `execute_sql`, or declared via `control_config.egress_tools` /
+`control_config.consequential_tools`) — so W3/W4 refuse only when NEITHER exists: no
+egress-shaped tool at all for W3, no consequential tool at all for W4. W2 refuses only
+when there is no store-and-recall pair AND no content-processing tool. If a class would
+run zero seeds either way, the run refuses outright and names each one:
 
 ```text
 error: this target declares weakness class(es) its tool surface cannot cover at all
@@ -222,10 +226,13 @@ suggests a class it already confirmed is coverable for the surface it just intro
 so a fresh scaffold's target.yaml never trips this refusal on first run.
 
 `--dry-run` downgrades the refusal to a warning — a dry run only enumerates seeds, so it
-stays informative instead of blocking. A class you've explicitly accepted running
-uncovered via `--allow-no-seed-arm` is not re-blocked here; that flag's own behaviour
-(those seeds report NOT TESTED, not clean) is unchanged. `gate` gets the same refusal,
-with no `--dry-run` equivalent to downgrade it.
+stays informative instead of blocking. A W2 class you've explicitly accepted running
+uncovered via `--allow-no-seed-arm` is not re-blocked here — the run proceeds, its
+kitchen-sink seeds are still scheduled, and each one hits the target and reports
+`skipped_no_seed_arm` (NOT TESTED), which forces the scan's overall coverage to PARTIAL
+rather than letting it read as a trustworthy clean pass. `gate` gets the same refusal,
+with no `--dry-run` equivalent to downgrade it and no `--allow-no-seed-arm` flag of its
+own — an uncoverable class always refuses there.
 
 This is a different check from `mylonite check`, which needs a live tool surface and no
 LLM call: it diffs `seed_arm.tool`, `effect_probe.verify_tool` and every
