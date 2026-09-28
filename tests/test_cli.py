@@ -1903,7 +1903,7 @@ def test_generate_custom_invalid_target_file_exit_2(tmp_path: Path) -> None:
 
 def test_generate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:
     """`generate`'s up-front --target-file check (before the exploit loop) points at
-    --scaffold for a path that doesn't exist, same as scan/gate/check (0.10.2 / M02)."""
+    --scaffold for a path that doesn't exist, same as scan/gate/check (0.10.2)."""
     exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
     _write_custom_exploit_json(exploit_json)
     missing = tmp_path / "missing.yaml"
@@ -2722,7 +2722,7 @@ def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> N
 
 def test_validate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:
     """`validate`'s custom-target route (`_validate_custom`) points a missing
-    --target-file at --scaffold, same as scan/generate/gate/check (0.10.2 / M02).
+    --target-file at --scaffold, same as scan/generate/gate/check (0.10.2).
     An explicit --target-file always wins over the co-located target.yaml, and the
     load failure is checked before --authorize, so no --authorize is needed here."""
     out_dir = tmp_path / "gen"
@@ -5406,7 +5406,7 @@ def test_every_command_shares_one_default_model() -> None:
     )
 
 
-# --- 0.10.2 / M02: every missing --authorize error names the exact value ---
+# --- 0.10.2: every missing --authorize error names the exact value ---
 
 
 def _custom_target(tmp_path: Path, body: str) -> Path:
@@ -5545,7 +5545,7 @@ def test_authorize_help_says_which_value_to_pass() -> None:
 
 def test_validate_authorize_help_notes_reference_targets_need_none() -> None:
     """validate is the one command reference:* targets can reach without
-    --authorize at all (0.10.2 / M02): its help says so, the others don't need
+    --authorize at all (0.10.2): its help says so, the others don't need
     to (they gate every target, bundled or custom)."""
     root = typer.main.get_command(app)
     param = next(p for p in root.commands["validate"].params if p.name == "authorize")
