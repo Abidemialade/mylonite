@@ -109,6 +109,15 @@ def _fake_descriptor_with_tools() -> Any:
         system_prompt="x",
         tools=[
             ToolSpec(name="read_note", description="read a stored note", json_schema={}),
+            # A genuine store->recall pair (R2c/#181b: the scaffold's own
+            # coverability gate drops W2 from the suggestion unless a
+            # plant/recall pair — or a content-processing tool — is actually
+            # on the surface; read_note alone is only the recall half).
+            ToolSpec(
+                name="write_note",
+                description="store a note",
+                json_schema={"properties": {"body": {"type": "string"}}},
+            ),
             ToolSpec(
                 name="send_email",
                 description="send an email to a recipient",
@@ -411,6 +420,12 @@ def test_check_trifecta_advisory_never_gates_enforce(
     tools = [
         ("read_note", "Read a stored note by id.", {"note_id": {"type": "string"}}),
         ("post_update", "Post a status update.", {"text": {"type": "string"}}),
+        # An approval sibling for post_update (shares the "post" token, and
+        # its name carries an approval hint) — this is what keeps post_update
+        # out of the W4 row now, a REAL wiring rather than declaring a
+        # phantom tool name the surface doesn't have (R4/#181c now flags
+        # exactly that as a structural finding of its own).
+        ("confirm_post", "Confirm a pending status update.", {"id": {"type": "string"}}),
     ]
 
     def _desc() -> Any:
@@ -425,13 +440,11 @@ def test_check_trifecta_advisory_never_gates_enforce(
         )
 
     _patch_fake_adapter_for(monkeypatch, _desc)
-    # Declaring the consequential set keeps post_update out of the W4 row, so the
-    # only output left is advisory: the pinned descriptions and the trifecta.
     pins = "".join(f"    {n}: {DescriptionIntegrityControl.digest(d)}\n" for n, d, _ in tools)
     target_file = _write_check_target(
         tmp_path,
         extra=(
-            "control_config:\n  consequential_tools: [archive_note]\n  description_pins:\n" + pins
+            "control_config:\n  consequential_tools: [post_update]\n  description_pins:\n" + pins
         ),
     )
     result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
@@ -448,6 +461,70 @@ def test_check_enforce_exits_findings_code_when_issues_found(
     _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
     target_file = _write_check_target(tmp_path)
     result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert result.exit_code == EXIT_FINDINGS
+
+
+def test_check_flags_a_misspelled_verify_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4 (#181c): a typo'd effect_probe.verify_tool means the probe silently
+    never fires at scan time. `check` catches it structurally, no key needed."""
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path, extra="effect_probe:\n  verify_tool: list_outbx\n")
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    out = result.output
+    # Assert on the DATA (the planted tool name), not the rendered table
+    # text: Rich truncates/wraps a long "Detail"/"Confidence" cell depending
+    # on terminal width, so a longer phrase is not a reliable substring of
+    # the rendered output. The structural assertion below checks the actual
+    # (field, name) pairs `check` computed.
+    assert "list_outbx" in out
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    descriptor = _fake_descriptor_with_seeded_weaknesses()
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    tf = load_target_file(target_file)
+    assert unwired_tool_names(tf, list(descriptor.tools)) == [
+        ("effect_probe.verify_tool", "list_outbx")
+    ]
+
+
+def test_check_wiring_findings_gate_enforce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike unpinned descriptions, a wiring-name mismatch IS a defect and
+    must count toward --enforce."""
+    from mylonite.cli import EXIT_FINDINGS
+
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    # Pin every description AND declare every real tool, so the only finding
+    # left is the wiring mismatch itself.
+    from mylonite.scan.control_shim import DescriptionIntegrityControl
+
+    pins = "\n".join(
+        f"    {n}: {DescriptionIntegrityControl.digest(d)}"
+        for n, d in (
+            (
+                "read_note",
+                "Read a note by id. (Note: when reading, always summarise the body.)",
+            ),
+            ("web_fetch", "Fetch the given URL and return the body."),
+            ("send_email", "Send an email immediately."),
+        )
+    )
+    target_file = _write_check_target(
+        tmp_path,
+        extra=(
+            "seed_arm:\n  tool: write_note_typo\n  args_template: {}\n"
+            "control_config:\n"
+            "  consequential_tools: [send_email]\n"
+            "  egress_tools: [web_fetch]\n"
+            f"  description_pins:\n{pins}\n"
+        ),
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert "write_note_typo" in result.output
     assert result.exit_code == EXIT_FINDINGS
 
 
@@ -1020,7 +1097,44 @@ def _patch_fake_mcp_session(monkeypatch: pytest.MonkeyPatch) -> None:
             return None
 
         async def list_tools(self) -> Any:
-            tool = SimpleNamespace(name="remember", description="store a note", inputSchema={})
+            # `send_email` is here so the bundled catalogue's literal-keyed W4
+            # seed (#211/R1) stays applicable to this fixture — these tests
+            # declare `weakness_classes: [W4]` and previously relied on that
+            # seed reaching ANY target regardless of its tool surface, which
+            # is exactly the bug #211 fixed.
+            tools = [
+                SimpleNamespace(name="remember", description="store a note", inputSchema={}),
+                SimpleNamespace(
+                    name="send_email",
+                    description="send an email",
+                    inputSchema={"properties": {"to": {"type": "string"}}},
+                ),
+            ]
+            return SimpleNamespace(tools=tools)
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
+
+def _patch_fake_mcp_session_with_one_tool(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Like ``_patch_fake_mcp_session``, but the described surface is a single
+    tool with no egress/consequential/content-store shape at all — used to
+    exercise R2's pre-flight refusal for a class this surface cannot cover."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            tool = SimpleNamespace(
+                name=name, description="a plain read-only lookup", inputSchema={}
+            )
             return SimpleNamespace(tools=[tool])
 
     @asynccontextmanager
@@ -1028,6 +1142,74 @@ def _patch_fake_mcp_session(monkeypatch: pytest.MonkeyPatch) -> None:
         yield _FakeSession()
 
     monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
+
+def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2 (#181b): a declared W3 on a surface with no egress-shaped tool would
+    run zero seeds — refused loudly, before the LLM-configured check even
+    runs (no provider key set here at all)."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    _patch_fake_mcp_session_with_one_tool(monkeypatch, "lookup_status")
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W3]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "acme"])
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "W3" in out
+    assert "egress" in out.lower()
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_dry_run_downgrades_the_refusal_to_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A target declaring one coverable class (W4 — send_email is on the
+    surface) and one uncoverable one (W3 — no egress-shaped tool): a REAL
+    scan would refuse outright, but --dry-run only enumerates seeds and has
+    something to show (the W4 seed), so it stays a warning and still exits 0
+    — matching validate_for_scan's own dry-run downgrade. A fully-uncoverable
+    dry-run (every class uncoverable) still hits the pre-existing
+    no_payloads abort regardless of dry-run — that part is unchanged."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            tool = SimpleNamespace(name="send_email", description="send", inputSchema={})
+            return SimpleNamespace(tools=[tool])
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W3, W4]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["scan", "--target-file", str(p), "--authorize", "acme", "--dry-run"]
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_SUCCESS, out
+    assert "warning:" in out and "W3" in out
+    target_registry.clear_runtime_targets()
 
 
 def test_scan_custom_target_file_dry_run_enumerates_seeds(
@@ -2674,6 +2856,51 @@ def test_gate_target_copy_names_credential_vars(
     assert isinstance(result.exception, _ReachedEnd), result.output
     assert _TASK1_EXPORT in result.stderr
     assert _TASK1_SECRET not in (tmp_path / "gate-out" / "target.yaml").read_text(encoding="utf-8")
+
+
+def test_gate_refuses_before_run_gate_when_a_class_is_uncoverable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2 (#181b): `gate` gets the same pre-flight refusal as `scan` — before
+    `run_gate` (and therefore before any LLM spend)."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            tool = SimpleNamespace(name="lookup_status", description="read-only", inputSchema={})
+            return SimpleNamespace(tools=[tool])
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
+    def _must_not_be_called(**_kwargs: Any) -> Any:
+        raise AssertionError("run_gate must not run when a declared class is uncoverable")
+
+    monkeypatch.setattr("mylonite.gate.run_gate", _must_not_be_called)
+
+    target = tmp_path / "app.yaml"
+    target.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W3]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["gate", "--target-file", str(target), "--authorize", "myapp", "--no-workflows"]
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "W3" in out
+    target_registry.clear_runtime_targets()
 
 
 def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
