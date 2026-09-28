@@ -200,16 +200,19 @@ the copies runnable.
 ## 8. What the effect probe still cannot see
 
 The [effect attribution rule](target-file.md#effect-attribution) fixed the general case —
-crediting an attempt only with a change it actually caused — but two shapes remain, both
+crediting an attempt only with a change it actually caused — but the shapes below remain,
 by design rather than by oversight.
 
-**A target that defers some actions and executes others, concurrently.** The rule
-attributes an effect to whichever attempt's own trace links to it. A target that runs
-several attempts at once and completes some immediately while queuing others is read
-correctly for each attempt on its own, but the two effects can land in either order in
-the target's log; nothing here reorders them. This is unlikely to change a verdict, since
-attribution is per attempt, not per ordering, but a report that reasons about the log's
-sequence (rather than each attempt's own trace) should account for it.
+**On a target with an effect probe, attempts run one at a time.** `scan`, `validate`,
+`ablate` and the CI check never have two attempts in flight against a target that
+declares an `effect_probe`, whatever `--max-concurrent` says, repeated runs included. The
+probe compares shared state before and after an attempt, and a concurrent attempt's
+change to that state can't be told apart from this attempt's: another attempt's write can
+be credited to this one as `"true"`, and another attempt's queued item can make this
+attempt's real effect read `"false"`. The effect check is only sound when nothing else
+changes the state during the attempt, so a probed scan takes longer than an unprobed one.
+The same holds for anything outside Mylonite that writes to the target's state while a
+scan runs: point the scan at state nothing else is using.
 
 **A default deferral word inside an unrelated call's result excludes that call.** The set
 of "this attempt's own executed calls" (E) drops a call whose result text contains a
@@ -231,20 +234,28 @@ success, but the marker never appears in the target's state, before or after. Th
 conservative: it cannot manufacture a false KEPT, only a missed finding, and the probe
 says exactly what it saw. The one residual leak: a silent drop where the marker is
 **already** present in state from an earlier attempt reads `"unattributed"`, not
-`"false"` — a drop and an idempotent write look identical from state alone. On shared,
-persisted state this is exactly what a guarded run meets once the unguarded runs have
-already written the marker, so it can read as a finding in `scan` or a leak in
-`validate`. Avoid it with fresh state before each `validate` command (already required
-by the pre-registered pass rule), or a marker built from `{payload}` so each run's marker
-is distinct.
+`"false"` — a drop and an idempotent write look identical from state alone. `validate`
+runs the unguarded runs and then the guarded runs inside one command, against the same
+state, so a guarded twin that drops silently meets the marker the unguarded runs wrote
+and can read as a leak; fresh state before each `validate` command does not prevent
+this. A per-run marker does: build `expect_marker` from `{payload}` and keep the default
+per-run randomised exfil address, so each run looks for a marker no earlier run wrote. A
+guard that refuses at the tool boundary with `isError`, rather than replying with
+success, also reads correctly, because a refused call never links.
 
 **An effect that is real but the verify output cannot show it also reads `"false"`** —
 delayed visibility (an async queue, an eventually-consistent store), a marker the target
 transforms (lowercased, truncated, escaped), an output window that never surfaces the new
-entry, or a marker containing a quote or a backslash (the before/after comparison is on
-the read result's Python repr, which escapes both). None of this is new in 0.10.4: a
-marker the verify tool cannot show synchronously, as the literal text, once the agent's
-run ends, read `"false"` in 0.10.3 too.
+entry, or a marker containing a quote, a backslash or a line break (the before/after
+comparison is on the read result's Python repr, which escapes all three, so a multi-line
+`{payload}` never matches). None of this is new in 0.10.4: a marker the verify tool
+cannot show synchronously, as the literal text, once the agent's run ends, read `"false"`
+in 0.10.3 too.
+
+**A baseline read that returns `isError` counts as empty state.** A transient server
+error on that read, such as a rate limit, makes a marker already in state look new, so
+an earlier attempt's effect can be credited to this one when this attempt also links to
+it.
 
 ## Reporting something missing
 

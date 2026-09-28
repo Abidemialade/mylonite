@@ -85,7 +85,7 @@ def test_wrote_after_reading_silent_when_write_precedes_read() -> None:
     assert p(_payload(), resp) is None
 
 
-# --- attribution (0.10.4, item 14): the sandbox diff is shared, persistent ---
+# --- attribution (0.10.4): the sandbox diff is shared, persistent ---
 # --- state -- a concurrent attempt's plant or write must not be credited to --
 # --- this attempt. ------------------------------------------------------------
 

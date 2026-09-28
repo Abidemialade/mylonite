@@ -279,6 +279,21 @@ def _schema_attack_was_fully_delivered(payload: Payload, passes: Sequence[_Judge
     )
 
 
+def _effective_max_concurrent(config: ScanConfig, adapter: Any) -> int:
+    """The in-flight limit for this run: 1 when the target declares an effect probe.
+
+    The effect probe compares shared target state before and after an attempt.
+    A concurrent attempt's change to that state can't be told apart from this
+    attempt's: it can be credited to this attempt as ``true``, or its queued
+    item can read this attempt's real effect as ``false``. So on a probed target
+    every attempt, including each ``runs > 1`` pass (they share the one
+    semaphore), runs alone. Other targets keep ``max_concurrent``.
+    """
+    if getattr(adapter, "declares_effect_probe", False) is True:
+        return 1
+    return config.max_concurrent
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -373,7 +388,7 @@ class ScanEngine:
             self._seeds_by_id.update({s.pattern_id: s for s in seeds_for_descriptor(descriptor)})
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
-            semaphore = asyncio.Semaphore(self._config.max_concurrent)
+            semaphore = asyncio.Semaphore(_effective_max_concurrent(self._config, self._adapter))
 
             # A pattern_id uniquely identifies a seed; the same seed must run at
             # most once even if two modules emit it (belt-and-suspenders behind the

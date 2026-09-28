@@ -235,13 +235,13 @@ def test_effect_probe_warning_silent_when_probe_declared() -> None:
     """With an effect_probe declared, the effect is confirmable — no missing-probe
     warning. Uses a marker the agent must PRODUCE (not one Mylonite plants), so the
     exfil-literal collision advisory stays silent too."""
-    from mylonite.plugins._mcp.target_registry import ControlConfig, EffectProbeSpec
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
 
     tf = _tf(
         weakness_classes=["W4"],
-        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="forwarded-by-agent"),
-        # A fixed marker links only through a declared consequential tool.
-        control_config=ControlConfig(consequential_tools=("forward_message",)),
+        # A recipient the agent's own call carries, so the fixed-marker warning
+        # stays silent too.
+        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="ops@example.com"),
     )
     assert effect_probe_warnings(tf) == []
 
@@ -272,15 +272,15 @@ def _status_word_warnings(marker: str, **over: object) -> list[str]:
     return [w for w in effect_probe_warnings(tf) if "never read 'true'" in w]
 
 
-def test_effect_probe_warns_on_a_fixed_marker_with_no_declared_consequential_tool() -> None:
-    """A fixed status word the agent's call does not carry can only link through a
-    declared consequential tool. With none declared the effect can read
-    'unattributed' but may never read 'true', so `validate` cannot keep the finding
-    without one."""
+def test_effect_probe_warns_on_a_fixed_marker_the_agent_does_not_carry() -> None:
+    """A fixed status word the agent's call does not carry links only when the
+    seed names the tool, and only synthesised seeds do. On a catalogue seed the
+    effect can read 'unattributed' but never 'true', so `validate` cannot keep
+    the finding. The dependable fix is a marker the agent's own call carries."""
     warnings = _status_word_warnings("status=sent")
     assert len(warnings) == 1, warnings
     assert "'status=sent'" in warnings[0]
-    assert "consequential_tools" in warnings[0]
+    assert "synthesised" in warnings[0]
     assert "recipient" in warnings[0]
     assert warnings[0].isascii()
 
@@ -289,18 +289,22 @@ def test_effect_probe_fixed_marker_warning_silent_when_marker_uses_payload() -> 
     assert _status_word_warnings("sent: {payload}") == []
 
 
-def test_effect_probe_fixed_marker_warning_silent_when_consequential_tool_declared() -> None:
+def test_effect_probe_fixed_marker_warning_fires_even_when_consequential_tool_declared() -> None:
+    """A declared consequential tool never reaches a catalogue seed's link, so
+    it does not make the marker work there and must not silence the warning."""
     from mylonite.plugins._mcp.target_registry import ControlConfig
 
     cc = ControlConfig(consequential_tools=("send_email",))
-    assert _status_word_warnings("status=sent", control_config=cc) == []
+    warnings = _status_word_warnings("status=sent", control_config=cc)
+    assert len(warnings) == 1, warnings
+    assert "consequential_tools" in warnings[0]
 
 
-def test_effect_probe_fixed_marker_warning_silent_when_egress_tool_declared() -> None:
+def test_effect_probe_fixed_marker_warning_fires_even_when_egress_tool_declared() -> None:
     from mylonite.plugins._mcp.target_registry import ControlConfig
 
     cc = ControlConfig(egress_tools=("web_fetch",))
-    assert _status_word_warnings("status=fetched", control_config=cc) == []
+    assert len(_status_word_warnings("status=fetched", control_config=cc)) == 1
 
 
 @pytest.mark.parametrize("marker", ["ops@example.com", "https://collector.example.net/x"])
@@ -318,7 +322,7 @@ def test_effect_probe_fixed_marker_warning_fires_for_a_status_word_not_an_addres
 ) -> None:
     """A dotted or `@`-containing status word is not an email or a URL, so the
     address exemption must not swallow it: the marker still can't be tied to
-    an attempt without a declared tool. Before the exemption was tightened to
+    an attempt through the agent's own call. Before the exemption was tightened to
     a real email shape (`x@y.z`) or `://`, `looks_like_destination`'s bare-host
     heuristic and the bare `"@" in marker` check wrongly exempted all five."""
     assert len(_status_word_warnings(marker)) == 1

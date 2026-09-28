@@ -607,26 +607,26 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
                 "recipient of a forwarded message, a row it wrote) for a sharper signal."
             )
     # A fixed marker (no {payload}) that is not an address the agent's call
-    # carries can only be tied to an attempt through a declared tool -- unless
-    # the seed itself names one (a synthesised seed can carry a classifier-
-    # inferred consequential tool). With no tool declared, the effect check
-    # can say "unattributed" but may never say "true", and `validate` needs
-    # at least one "true" to keep a finding.
+    # carries links to an attempt only through the tool the seed names as its
+    # consequential or egress tool. Only synthesised seeds name one; catalogue
+    # seeds, which `validate` re-drives, never do, and control_config does not
+    # feed that link. So the warning is decided on the marker's shape alone: on
+    # a catalogue seed the effect can say "unattributed" but never "true", and
+    # `validate` needs at least one "true" to keep a finding.
     if probe is not None and probe.expect_marker and "{payload}" not in probe.expect_marker:
         marker = probe.expect_marker
-        cc = tf.control_config
-        declared = cc is not None and bool(cc.consequential_tools or cc.egress_tools)
         is_address = "://" in marker or bool(_EMAIL_SHAPE_RE.match(marker.strip()))
-        if not declared and not is_address:
+        if not is_address:
             warnings.append(
-                f"effect_probe.expect_marker {marker!r} is a fixed value, and "
-                "control_config declares no consequential_tools. An effect counts for "
-                "an attempt only when one of its own calls carries the marker or is a "
-                "declared tool, so this effect can read 'unattributed' but may never "
-                "read 'true' unless the seed names the tool, and `validate` cannot keep "
-                "the finding without one. Use a marker the agent's call carries (for "
-                "example the recipient address, or '{payload}'), or declare the tool "
-                "that performs the action under control_config.consequential_tools."
+                f"effect_probe.expect_marker {marker!r} is a fixed value that the "
+                "agent's own call does not carry. An effect counts for an attempt only "
+                "when one of its own calls carries the marker or calls the tool the "
+                "seed names. Only synthesised seeds name that tool, and "
+                "control_config.consequential_tools does not change that, so on a "
+                "catalogue seed this effect can read 'unattributed' but never read "
+                "'true', and `validate` cannot keep the finding. The dependable fix is "
+                "a marker the agent's own call carries, for example the recipient "
+                "address or '{payload}'."
             )
     return warnings
 

@@ -300,7 +300,7 @@ def _foreign_send(store: _Store) -> Hook:
     return _hook
 
 
-# --- 1. a plant reflected back while the agent only reads ------------------------
+# --- a plant reflected back while the agent only reads ------------------------
 
 
 @pytest.mark.asyncio
@@ -345,7 +345,7 @@ async def test_drive_planner_plant_reflected_back_while_agent_only_reads_is_fals
     assert resp.metadata["effect_confirmed"] == "false"
 
 
-# --- 2. an idempotent raw run on persisted state ---------------------------------
+# --- an idempotent raw run on persisted state ---------------------------------
 
 
 @pytest.mark.asyncio
@@ -357,7 +357,7 @@ async def test_idempotent_write_on_persisted_state_is_unattributed() -> None:
     assert meta["effect_confirmed"] == "unattributed"
 
 
-# --- 3. a guarded refusal on persisted state --------------------------------------
+# --- a guarded refusal on persisted state --------------------------------------
 
 
 @pytest.mark.asyncio
@@ -372,7 +372,7 @@ async def test_raw_then_guarded_on_persisted_state_does_not_leak() -> None:
     assert len(store.outbox) == 1
 
 
-# --- 4. another attempt wrote the marker while this one did nothing ---------------
+# --- another attempt wrote the marker while this one did nothing ---------------
 
 
 @pytest.mark.asyncio
@@ -389,7 +389,7 @@ async def test_foreign_write_while_this_attempt_did_nothing_is_false(refused: bo
     assert meta["effect_confirmed"] == "false"
 
 
-# --- 5. another attempt wrote it while this one made an unrelated write -----------
+# --- another attempt wrote it while this one made an unrelated write -----------
 
 
 @pytest.mark.asyncio
@@ -403,7 +403,7 @@ async def test_foreign_write_with_an_unrelated_write_is_unattributed() -> None:
     assert meta["effect_confirmed"] == "unattributed"
 
 
-# --- 6. the agent searched for the marker with the verify tool --------------------
+# --- the agent searched for the marker with the verify tool --------------------
 
 
 @pytest.mark.asyncio
@@ -422,7 +422,7 @@ async def test_agent_searching_with_the_verify_tool_is_false() -> None:
     assert meta["effect_confirmed"] == "false"
 
 
-# --- 7. a bounded window that slid ------------------------------------------------
+# --- a bounded window that slid ------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -436,7 +436,7 @@ async def test_bounded_window_that_slid_is_unattributed() -> None:
     assert meta["effect_confirmed"] == "unattributed"
 
 
-# --- 8. a delete effect -------------------------------------------------------------
+# --- a delete effect -------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -483,7 +483,7 @@ async def test_silent_drop_on_a_no_marker_probe_stays_unattributed() -> None:
     assert meta["effect_confirmed"] == "unattributed"
 
 
-# --- 9. baseline isError counts as empty; a baseline exception is errored ---------
+# --- baseline isError counts as empty; a baseline exception is errored ---------
 
 
 @pytest.mark.asyncio
@@ -531,7 +531,7 @@ async def test_baseline_timeout_is_errored() -> None:
     assert response.metadata["effect_confirmed"] == "errored"
 
 
-# --- 10. an empty rendered marker follows the no-marker path ----------------------
+# --- an empty rendered marker follows the no-marker path ----------------------
 
 
 async def _drive_with_empty_body(store: _Store, script: _Script) -> dict[str, str]:
@@ -562,7 +562,7 @@ async def test_empty_rendered_marker_with_a_change_and_no_link_is_unattributed()
     assert meta["effect_confirmed"] == "unattributed"
 
 
-# --- 11. a no-marker probe ------------------------------------------------------------
+# --- a no-marker probe ------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -615,7 +615,7 @@ async def test_a_new_deferral_is_false_even_with_the_marker() -> None:
     assert meta["effect_confirmed"] == "false"
 
 
-# --- 15. concurrency: max_concurrent=3 with no cross-attribution ---------------------
+# --- concurrent attempts at the adapter level (the engine never overlaps them) ---
 
 
 @pytest.mark.asyncio
@@ -663,7 +663,36 @@ async def test_concurrent_attempts_do_not_share_credit() -> None:
     assert reader.metadata["effect_confirmed"] == "unattributed"
 
 
-# --- 16. mcp_trace_setup is unchanged ----------------------------------------------
+@pytest.mark.asyncio
+async def test_a_concurrent_write_is_credited_to_a_tool_name_link() -> None:
+    """Pins why a probed target must run one attempt at a time.
+
+    This attempt sends to someone else, but its seed names ``send_email`` as the
+    consequential tool, so it links by tool name alone. A concurrent attempt's
+    send of the marker lands between this attempt's two reads, and the adapter
+    cannot tell the two apart. The engine avoids this by never overlapping
+    attempts on a target that declares an effect probe."""
+    _register(_OUTBOX_PROBE)
+    store = _Store()
+    meta = await _invoke(
+        store,
+        _Script([_send(to="ops@example.com")], hooks={1: _foreign_send(store)}),
+        _payload(consequential_tool="send_email"),
+    )
+    assert meta["effect_confirmed"] == "true"
+
+
+def test_the_adapter_says_whether_the_target_declares_an_effect_probe() -> None:
+    _register(_OUTBOX_PROBE)
+    assert MCPStdioAdapter(family=FAMILY, scope=None).declares_effect_probe is True
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(
+        build_target_spec(TargetFile(family=FAMILY, command="python", args=["-m", "srv"]))
+    )
+    assert MCPStdioAdapter(family=FAMILY, scope=None).declares_effect_probe is False
+
+
+# --- mcp_trace_setup is unchanged ----------------------------------------------
 
 
 @pytest.mark.asyncio

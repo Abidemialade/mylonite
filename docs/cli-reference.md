@@ -99,7 +99,10 @@ provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`
 (a budget, not a hard ceiling — every seed keeps a floor of it, so the worst
 case is higher; see [Sizing --max-llm-calls](ci-gating.md)),
-`--max-concurrent N`, `--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
+`--max-concurrent N` (capped at 1 when the target declares an `effect_probe`, since a
+concurrent attempt's change to shared state can't be told apart from this attempt's; see
+[What the effect probe still cannot see](limitations.md#8-what-the-effect-probe-still-cannot-see)),
+`--output-dir PATH`, `--config mylonite.yaml`, `--dry-run`,
 `--allow-no-seed-arm`, `--purpose "…"` (a one-line description of what the app is for;
 tailors the probes to its domain — overrides `purpose` in the target file, and is
 persisted so `generate`/`validate` reuse it); `--randomize-exfil/--no-randomize-exfil`
