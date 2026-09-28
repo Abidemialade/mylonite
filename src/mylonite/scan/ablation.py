@@ -206,16 +206,28 @@ def _run_pair(
     applied_a: tuple[str, ...],
     applied_b: tuple[str, ...],
     seed: str,
+    *,
+    sequential: bool = False,
 ) -> tuple[FireOutcome, FireOutcome]:
-    """Run two independent ``scan_fires`` calls concurrently; return their results.
+    """Run two independent ``scan_fires`` calls; return their results.
 
     ``scan_fires`` is a plain blocking callable (the engine-backed
     implementation wraps its own ``asyncio.run`` per call, and the offline
     unit tests inject a bare sync function) — kept that way so this stays a
-    drop-in replacement for the sequential form. Each call is farmed out to a
-    thread via ``asyncio.to_thread`` and awaited concurrently, bounded, inside
-    one throwaway event loop.
+    drop-in replacement for the sequential form. By default each call is
+    farmed out to a thread via ``asyncio.to_thread`` and awaited concurrently,
+    bounded, inside one throwaway event loop.
+
+    ``sequential=True`` (the target declares an ``effect_probe``) instead runs
+    ``applied_a`` to completion before starting ``applied_b`` — attribution
+    fix (0.10.4): the raw and guarded legs drive the SAME target, so if its
+    effect evidence lives in shared, persistent state (a file, a database, a
+    remote server) rather than in-process memory, running them concurrently
+    lets one leg's effect be read as the other's. A target with no probe has
+    no such shared, checkable state, so it keeps the concurrent path.
     """
+    if sequential:
+        return scan_fires(applied_a, seed), scan_fires(applied_b, seed)
 
     async def _both() -> list[FireOutcome]:
         coros = [
@@ -234,8 +246,19 @@ def _run_triple(
     applied_b: tuple[str, ...],
     applied_c: tuple[str, ...],
     seed: str,
+    *,
+    sequential: bool = False,
 ) -> tuple[FireOutcome, FireOutcome, FireOutcome]:
-    """Three-way sibling of :func:`_run_pair` for redundancy mode (raw/full/minus-c)."""
+    """Three-way sibling of :func:`_run_pair` for redundancy mode (raw/full/minus-c).
+
+    See :func:`_run_pair` for what ``sequential`` changes and why.
+    """
+    if sequential:
+        return (
+            scan_fires(applied_a, seed),
+            scan_fires(applied_b, seed),
+            scan_fires(applied_c, seed),
+        )
 
     async def _all_three() -> list[FireOutcome]:
         return await gather_bounded(
@@ -260,6 +283,7 @@ def run_control_ablation(
     progress: Callable[[str], None] | None = None,
     redundancy: bool = False,
     all_controls: list[str] | None = None,
+    sequential: bool = False,
 ) -> list[ControlContribution]:
     """Score each control's marginal contribution.
 
@@ -273,6 +297,10 @@ def run_control_ablation(
     control covers it) from 'theater'. An INCONCLUSIVE leg on either side of a
     comparison forces that control's status to ``"inconclusive"`` — a crash
     can never be counted as "fired" or "resisted".
+
+    ``sequential`` (pass ``True`` when the target declares an ``effect_probe``)
+    is forwarded to :func:`_run_pair` / :func:`_run_triple` — see their
+    docstrings for why a probed target's legs must not race each other.
     """
     results: list[ControlContribution] = []
     full = tuple(all_controls if all_controls is not None else controls)
@@ -294,7 +322,9 @@ def run_control_ablation(
                     # backed implementation wraps its own `asyncio.run`), so
                     # they are farmed out to threads and driven concurrently
                     # instead of one after another.
-                    raw_result, guard_result = _run_pair(scan_fires, (), (control,), seed)
+                    raw_result, guard_result = _run_pair(
+                        scan_fires, (), (control,), seed, sequential=sequential
+                    )
                     if raw_result is FireOutcome.FIRED:
                         raw_fired += 1
                     elif raw_result is FireOutcome.INCONCLUSIVE:
@@ -330,7 +360,7 @@ def run_control_ablation(
                 # raw / full / minus-c are three independent scans of the same
                 # seed — run them concurrently (bounded), same rationale as above.
                 raw_result, full_result, minus_result = _run_triple(
-                    scan_fires, (), full, minus_c, seed
+                    scan_fires, (), full, minus_c, seed, sequential=sequential
                 )
                 if raw_result is FireOutcome.FIRED:
                     raw_fired += 1

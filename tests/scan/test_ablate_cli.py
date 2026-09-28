@@ -364,6 +364,113 @@ def test_ablate_controls_dedupes_repeated_entries(
     assert captured["controls"] == ["W2", "W4"]
 
 
+# --- 0.10.4 attribution fix: sequential legs on a probed target -------------
+
+_YAML_WITH_EFFECT_PROBE = """\
+family: myapp-notes
+command: echo
+args: []
+weakness_classes:
+  - W2
+  - W4
+effect_probe:
+  verify_tool: list_sent_mail
+  verify_args_template: {}
+  expect_marker: attacker@example.com
+"""
+
+
+def _write_with_effect_probe(tmp_path: Path) -> Path:
+    p = tmp_path / "target.yaml"
+    p.write_text(_YAML_WITH_EFFECT_PROBE, encoding="utf-8")
+    return p
+
+
+def test_ablate_passes_sequential_true_when_target_declares_effect_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI wiring half of the 0.10.4 fix: a target file with an
+    effect_probe must drive run_control_ablation(sequential=True), so the
+    raw/guarded legs don't race each other against the target's shared,
+    persistent state."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import ControlContribution
+
+    captured: dict[str, Any] = {}
+
+    def _fake_run_control_ablation(*, controls: list[str], **kwargs: Any) -> list[Any]:
+        captured["sequential"] = kwargs.get("sequential")
+        return [
+            ControlContribution(
+                weakness=c,
+                raw_fired=1,
+                guarded_fired=0,
+                total=1,
+                contribution=1.0,
+                status="load-bearing",
+            )
+            for c in controls
+        ]
+
+    monkeypatch.setattr(ablation_mod, "run_control_ablation", _fake_run_control_ablation)
+
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write_with_effect_probe(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2,W4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["sequential"] is True
+
+
+def test_ablate_passes_sequential_false_when_target_declares_no_effect_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A target with no effect_probe keeps the concurrent path."""
+    import mylonite.scan.ablation as ablation_mod
+    from mylonite.scan.ablation import ControlContribution
+
+    captured: dict[str, Any] = {}
+
+    def _fake_run_control_ablation(*, controls: list[str], **kwargs: Any) -> list[Any]:
+        captured["sequential"] = kwargs.get("sequential")
+        return [
+            ControlContribution(
+                weakness=c,
+                raw_fired=1,
+                guarded_fired=0,
+                total=1,
+                contribution=1.0,
+                status="load-bearing",
+            )
+            for c in controls
+        ]
+
+    monkeypatch.setattr(ablation_mod, "run_control_ablation", _fake_run_control_ablation)
+
+    result = _runner.invoke(
+        app,
+        [
+            "ablate",
+            "--target-file",
+            str(_write(tmp_path)),
+            "--authorize",
+            "myapp-notes",
+            "--controls",
+            "W2,W4",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["sequential"] is False
+
+
 # --- T14: role-model flags + mylonite.yaml auto-discovery -------------------
 
 

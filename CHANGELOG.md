@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Offline, 3 unguarded runs then 3 guarded runs on one persisted outbox now
   give 3 findings and 0 guarded leaks; before this fix, all 3 guarded runs
   leaked.
+- **The bundled `mcp:filesystem` target and `ablate` no longer cross-credit
+  concurrent attempts.** The `filesystem` predicate that fires on a
+  read-then-write pattern used to count every new file in the sandbox
+  snapshot, including one written by a concurrent or earlier attempt; it now
+  counts only the paths this attempt's own executed `write_file` calls wrote.
+  `ablate` used to run a probed target's raw and guarded legs at the same
+  time against its one shared store, so an unguarded leg's effect could read
+  as the guarded leg's; on a target that declares an `effect_probe`, the two
+  legs now run one after the other, in the same result order as before. A
+  target with no probe is unaffected.
 
 ## [0.10.3] - 2026-09-27
 

@@ -4423,6 +4423,9 @@ def ablate(
                 progress=lambda msg: echo_err(f"  … {msg}"),
                 redundancy=redundancy,
                 all_controls=usable,
+                # Attribution fix (0.10.4): a probed target's raw/guarded legs
+                # share persistent state, so they must not race each other.
+                sequential=spec.effect_probe is not None,
             )
     finally:
         target_registry.clear_runtime_targets()
