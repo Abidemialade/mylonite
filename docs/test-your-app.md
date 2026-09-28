@@ -123,6 +123,15 @@ trying Mylonite against real servers:
 mylonite scan mcp:filesystem:/tmp/sandbox --authorize /tmp/sandbox
 ```
 
+`mcp:github` needs a token: export `GITHUB_PERSONAL_ACCESS_TOKEN` (the exact variable
+the real GitHub MCP server reads) before you scan — an unset value fails fast, naming it,
+before any subprocess launches.
+
+```bash
+export GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
+mylonite scan mcp:github:myhandle/my-repo --authorize myhandle/my-repo
+```
+
 > These bundled families are **attack-only** today (they scan but don't yet route
 > through the differential oracle); routing them through the on-ramp so they can emit a
 > gating test is planned. For a CI-gating test against a real app, use `--target-file`.

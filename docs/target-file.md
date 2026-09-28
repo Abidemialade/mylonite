@@ -316,6 +316,10 @@ note: secrets in headers and env were kept out of app.yaml. It reads them from t
     $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'
 ```
 
+The bundled `mcp:github` family (no target file needed) uses the same `${VAR}`
+expansion for its own fixed variable, `GITHUB_PERSONAL_ACCESS_TOKEN` — see
+[Bundled targets](test-your-app.md#bundled-targets).
+
 Set each variable to the real value in the shell that runs Mylonite, then use the file:
 
 ```bash

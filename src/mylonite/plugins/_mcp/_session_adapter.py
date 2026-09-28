@@ -283,10 +283,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
     def _effective_env(self) -> dict[str, str]:
         """Env passed to the session opener — the caller's launch_env, else the
-        spec's extra_env (byte-for-byte today's behaviour when not overridden)."""
+        spec's extra_env with any ``${VAR}`` reference expanded from the parent
+        shell (#184; same mechanism a loaded target file's own ``env:`` block
+        uses — see ``target_file.expand_env_block``). ``launch_env`` (ablation /
+        ``--prove-control``) is returned unexpanded: it already holds concrete
+        values, never a template."""
         if self._launch_env is not None:
             return dict(self._launch_env)
-        return dict(self._spec.extra_env)
+        from mylonite.plugins._mcp.target_file import expand_env_block
+
+        return expand_env_block(dict(self._spec.extra_env))
 
     @property
     def declares_effect_probe(self) -> bool:

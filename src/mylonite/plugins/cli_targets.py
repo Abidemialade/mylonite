@@ -180,8 +180,20 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
 
     # Step 3: registry resolution (validates scope shape).
     try:
-        target_registry.resolve_target(family, scope)
+        spec = target_registry.resolve_target(family, scope)
     except (target_registry.InvalidTargetScope, target_registry.UnknownTargetFamily) as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+    # #184: a bundled spec (currently only `github`) may declare an extra_env
+    # entry as a ${VAR} reference into the parent shell -- resolve it now,
+    # before any subprocess is spawned, so a missing credential fails once
+    # with a named message instead of a deep async describe()/spawn failure.
+    from mylonite.plugins._mcp.target_file import expand_env_block
+
+    try:
+        expand_env_block(dict(spec.extra_env))
+    except ValueError as exc:
         echo_err(str(exc))
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
