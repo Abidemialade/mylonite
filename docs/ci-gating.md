@@ -157,7 +157,7 @@ precondition is fixed.
 ### The reusable Action
 
 ```yaml
-- uses: Abidemialade/mylonite/gate-action@v0.10.3
+- uses: Abidemialade/mylonite/gate-action@v0.10.4
   with:
     target-file: .mylonite/gate/target.yaml
     authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
