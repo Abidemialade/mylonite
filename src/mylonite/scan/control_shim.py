@@ -38,7 +38,7 @@ import json
 import logging
 import secrets
 from dataclasses import dataclass
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Final, Protocol, runtime_checkable
 
 from mylonite.scan._control_primitives import (
     host_allowed,
@@ -1225,3 +1225,57 @@ def trifecta_legs(
         private_tools=tuple(sorted(set(private_tools))),
         private_markers=tuple(private_markers),
     )
+
+
+#: Tool-NAME fragments suggesting a confirm/approval step. Mirrors the
+#: vocabulary `ConfirmGateControl`'s own confirm-token flow uses (`confirm_send`
+#: in the reference app), broadened for a static, cross-target discovery check.
+_APPROVAL_NAME_HINTS: Final = ("confirm", "approve", "authorize", "authorise", "verify")
+
+
+def _has_approval_sibling(tools: list[Any], sink_name: str) -> bool:
+    """True if some OTHER tool looks like a confirm/approval step FOR `sink_name`
+    specifically — sharing at least one meaningful name TOKEN with it (e.g.
+    `confirm_send` / `send_email` both contain "send"), not just any
+    approval-shaped name anywhere on the surface.
+
+    An earlier version silenced the finding target-wide the moment ANY tool
+    matched an approval hint — so an unrelated `verify_email_format` helper
+    (a plain validator, nothing to do with `send_email`) suppressed the
+    finding for every consequential tool on the surface. Token-overlap is a
+    coarse pairing signal (there is no stronger static one — the real
+    pairing is a runtime property `ConfirmGateControl` proves, not a naming
+    convention), but it is a real signal, not none at all: it rejects an
+    approval-shaped tool that shares NOTHING with the sink's own name.
+    """
+    from mylonite.scan.tool_roles import _tokens
+
+    sink_tokens = _tokens(sink_name)
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        if not name or name == sink_name:
+            continue
+        if not any(hint in name.lower() for hint in _APPROVAL_NAME_HINTS):
+            continue
+        if _tokens(name) & sink_tokens:
+            return True
+    return False
+
+
+def _check_description_pins(tools: list[Any], control_config: Any | None) -> list[tuple[str, str]]:
+    """``(tool_name, digest)`` for every tool description NOT already pinned.
+
+    Reuses `DescriptionIntegrityControl.digest` — the exact hash the W1
+    control computes at call time — so a digest reported here can be pasted
+    straight into `control_config.description_pins` and take effect unchanged.
+    """
+    pins: dict[str, str] = getattr(control_config, "description_pins", None) or {}
+    out: list[tuple[str, str]] = []
+    for tool in tools:
+        name = getattr(tool, "name", "") or ""
+        description = getattr(tool, "description", "") or ""
+        if not name or not description:
+            continue
+        if name not in pins:
+            out.append((name, DescriptionIntegrityControl.digest(description)))
+    return out
