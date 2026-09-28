@@ -238,8 +238,11 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 
 ## `ablate` — score the safeguards
 
-Toggle each AI safeguard and report which are **load-bearing**, **security theater**, or
-**redundant**. See [the control-efficacy check](validation.md#the-control-efficacy-check).
+Toggle each AI safeguard and report which are **load-bearing**, **security theater**,
+**redundant**, **no-attack** (the attack itself never reproduced, so there's nothing to
+attribute), or **inconclusive** (a leg of the comparison never produced a trustworthy
+result — a crash, a provider outage, a target that failed to launch). See
+[the control-efficacy check](validation.md#the-control-efficacy-check).
 Under the matrix, `guarded side:` names what played the guarded side — your own
 server-layer control (via `control_env`) or Mylonite's boundary control — together with
 the claim a load-bearing row earns (see

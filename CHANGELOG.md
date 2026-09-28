@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Layer 1 (DVMCP) verification scorer no longer counts an untested
+  challenge as a miss.** A challenge with no report, or whose report shows
+  zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is
+  excluded from the confusion matrix entirely, mirroring the completed-probe
+  filter `layer3_production/run.py` already used. `layer1-recall.json`
+  reports `exercised_challenges`, `untested_challenges`, `found` and `missed`
+  separately; recall is computed over exercised challenges only, and is
+  `null` rather than a spurious 1.0 when nothing has been exercised yet
+  (schema 1.1, additive). The published 0.9.0 "0/8" figure is left as
+  recorded, with a caveat added in `README.md`, `verification/FINDINGS.md`
+  and `docs/verification.md` (#136).
+
+### Documentation
+
+- Corrected several verification-numbers contradictions between `README.md`,
+  `docs/limitations.md` and `docs/verification.md`: the InjecAgent
+  data-stealing figure in `docs/limitations.md` now reads F1 0.833 at 0.714
+  recall (was a stale 0.9.0 figure), and its opening claim that every number
+  is Haiku-only from June–July now names InjecAgent's `llama3.2:3b` run and
+  the correct 25 June–14 September span. Fixed the `layer2-agentdojo.json`
+  filename in `docs/verification.md` and `verification/FINDINGS.md`. Fixed
+  `docs/install-windows.md`'s claim that CI is Linux-only (there is a
+  `test-windows` job and a Windows demo leg). Dropped `gpt-4o-mini` from
+  `docs/self-hosted-models.md` in favour of the only default the code
+  actually ships, `claude-haiku-4-5-20251001`. Added the required
+  `--workflows` flag to the `--runs-on` example in
+  `docs/enterprise-networking.md`. Listed all 5 `ablate` outcomes
+  (load-bearing, security theater, redundant, no-attack, inconclusive) in
+  `docs/test-your-app.md` and `docs/cli-reference.md`, matching
+  `scan/ablation.py` and `README.md`.
+- Added a `verification/` rule to `DOC_RULES` in `scripts/check_docs_sync.py`,
+  mapping changes there to `docs/verification.md`, so a future harness change
+  is caught the same way a `cli.py` change already is.
+
 ## [0.10.4] - 2026-09-28
 
 This release makes `scan` and `validate` trustworthy on MCP servers that keep

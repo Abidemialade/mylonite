@@ -82,7 +82,10 @@ benchmarks. The harness is in this repository and you can run it yourself.
 
 Published for the same reason the positive ones are.
 
-- **0 out of 8 found** on one external challenge set (DVMCP, using Claude Haiku 4.5).
+- **0 out of 8 found** on one external challenge set (DVMCP, using Claude Haiku 4.5). The
+  published 0.9.0 scorer counted challenges the scan never actually exercised as misses
+  rather than as untested (issue #136); it now reports the two separately, and the
+  recall figure over the challenges genuinely exercised stays 0.
 - **On InjecAgent** (100 cases per split, using a local `llama3.2:3b`) the judge scored
   **F1 1.000** on the direct-harm split and **F1 0.833 at 0.714 recall** on the
   data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests

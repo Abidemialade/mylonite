@@ -51,9 +51,11 @@ cannot be verified. Tracked in [`TODOS.md`](https://github.com/Abidemialade/mylo
 
 ## 2. The external evidence base is essentially one model
 
-Every number in [Independent verification](verification.md) comes from **Claude Haiku 4.5** —
-the single hosted provider these runs used — at small sample sizes, cost-bounded, run in
-June–July 2026. Those remain the only *external* (third-party target) results.
+Most numbers in [Independent verification](verification.md) come from **Claude Haiku 4.5**,
+the planner/judge for the DVMCP and precision layers, at small sample sizes, cost-bounded.
+The InjecAgent judge-agreement layer is the exception: it runs against a self-hosted
+`llama3.2:3b`. The runs span **25 June to 14 September 2026**. Those remain the only
+*external* (third-party target) results.
 
 ### What a second model actually showed
 
@@ -117,9 +119,11 @@ the misses. In summary:
 - **0/8 recall on DVMCP** — coverage went 0 → 100% (all 8 challenges attempted), but Haiku
   resisted every model-fooling attack.
 - **On InjecAgent** (100 cases per split, `llama3.2:3b`) judge agreement scored
-  **F1 1.000** on the direct-harm split and **F1 0.400 at 0.25 recall** on the
-  data-stealing split. The gap between the two splits is the finding, so both are
-  recorded rather than either alone.
+  **F1 1.000** on the direct-harm split and **F1 0.833 at 0.714 recall** on the
+  data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests
+  on only 7 attacks that succeeded, so it is unresolved at this sample size, not an
+  improvement. The gap between the two splits is the finding, so both are recorded
+  rather than either alone.
 - **LLM-judge agreement F1 of 0.41** against independent labels.
 - Against that: a **KEPT external differential** on a third-party MCP email server (fired
   5/5 raw, leaked 0/5 guarded), in a run whose guarded side is Mylonite's boundary control

@@ -68,7 +68,9 @@ $env:PYTHONUTF8 = "1"
 ```
 
 Add it to your profile (or set it as a user environment variable) to make it permanent.
-CI runs on Linux and never catches encoding issues like this, so they only show up locally.
+CI does run a Windows job (`test-windows`, plus a Windows leg of the offline demo), so an
+encoding regression should be caught there too — but if you hit one locally that CI missed,
+it is worth filing, since Windows-only failures are the easiest class to miss in review.
 
 ## 5. Verify
 

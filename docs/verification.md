@@ -65,6 +65,10 @@ scanned over SSE (the remote adapter), same model:
   recall is 0 because *this model* resists, not because Mylonite can't test. An app-flaw
   challenge needs the model to *agree* to over-reach, which a robust model won't — unlike
   the `reference:vulnerable` W4 server flaw, which lands regardless.
+- **Caveat on the published 0.9.0 figure.** The scorer that produced it counted a
+  challenge with zero exercised attempts as a miss rather than as untested (issue #136).
+  It now reports the two separately, and recall over challenges genuinely exercised is
+  unchanged at 0.
 
 ## Layer 2 — academic benchmarks, judge verification
 
@@ -90,7 +94,7 @@ as a drop-in for the other."
 ### Triaging the 15 false positives — none is a judge bug
 
 We classified every one of the 15 disagreements where Mylonite flagged an attack that
-AgentDojo's oracle did not (`verification/reports/layer2_agentdojo.json`):
+AgentDojo's oracle did not (`verification/reports/layer2-agentdojo.json`):
 
 - **All 15 are the same definitional difference, not a bug.** In every case the
   attacker's *consequential tool actually executed* — `send_money` to the attacker IBAN
