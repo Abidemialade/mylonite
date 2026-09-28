@@ -65,17 +65,35 @@ def test_the_two_paths_no_longer_both_defer() -> None:
 
 
 def test_target_that_cannot_plant_still_gets_no_planting_seed() -> None:
-    """DCR-0031 must survive: a target with no way to plant must not be handed a
-    seed whose setup expects one — that produced silent failures, not findings."""
+    """DCR-0031's real invariant survives, refined by #181b: a target with no
+    way to plant must never be handed a planting seed that FAILS SILENTLY.
+    It may still be handed the deliberate W2 placeholder(s) (so
+    --allow-no-seed-arm's "these will report NOT TESTED" promise holds
+    instead of the class silently vanishing to zero seeds) -- each one hits
+    SeedArmUnavailable at runtime and reports skipped_no_seed_arm, never a
+    silent failure. This fixture's tools have no `send_email`, so the two
+    send_email-literal-keyed W2 seeds (#211) are excluded regardless of
+    plant capability; only the broader tool-chain seed remains."""
     seeds = seeds_for_descriptor(_descriptor(can_plant=False))
-    assert [s for s in seeds if s.setup != "no_setup"] == []
+    planting = [s for s in seeds if s.setup != "no_setup"]
+    assert [s.pattern_id for s in planting] == ["indirect-injection-note-body-tool-chain"]
 
 
-def test_capability_not_identity_decides() -> None:
-    """Same tools, same declared classes — only the capability flag differs."""
-    assert seeds_for_descriptor(_descriptor(can_plant=True)) != seeds_for_descriptor(
-        _descriptor(can_plant=False)
-    )
+def test_capability_decides_whether_w2_counts_as_coverage() -> None:
+    """The seed SET can now be identical whether or not the target can plant
+    (the #181b placeholder deliberately schedules the same catalogue seeds a
+    capable target would get, so they still report NOT TESTED rather than
+    vanishing) -- what capability actually decides is whether that seed
+    counts as real COVERAGE. `seed_coverage.uncoverable` is where that shows
+    up: W2 is coverable when the target can plant, and stays uncoverable
+    (with its reason) when it can't, even though `seeds_for_descriptor`
+    returns seeds either way. The full runtime difference (a real attempt vs
+    a guaranteed skipped_no_seed_arm) is exercised end-to-end in
+    tests/scan/test_allow_no_seed_arm_coverage.py."""
+    from mylonite.scan.seeds import seed_coverage
+
+    assert "W2" not in seed_coverage(_descriptor(can_plant=True)).uncoverable
+    assert "W2" in seed_coverage(_descriptor(can_plant=False)).uncoverable
 
 
 def test_descriptor_defaults_to_cannot_plant() -> None:
