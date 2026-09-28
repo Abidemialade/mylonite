@@ -858,7 +858,11 @@ def scan(
         list[str] | None,
         typer.Option(
             "--weakness-class",
-            help="mcp:custom — a weakness class the target exposes, e.g. W2/W4 (repeatable).",
+            help=(
+                "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). "
+                "mcp:custom adds it to weakness_classes; any other target filters "
+                "which seeds run."
+            ),
         ),
     ] = None,
     scaffold: Annotated[
@@ -1436,6 +1440,7 @@ def scan(
     )
 
     from mylonite.scan._llm import llm_scope
+    from mylonite.scan.seeds import weakness_class_scope
 
     try:
         # T14: activates effective_policy (mylonite.yaml/env-resolved
@@ -1445,7 +1450,10 @@ def scan(
         # contextvar context into the coroutine it schedules, so entering
         # this scope BEFORE asyncio.run (rather than inside ScanEngine.run,
         # which separately owns the budget-counter scope) is sufficient.
-        with llm_scope(policy=effective_policy):
+        # #205: weakness_class_scope is a no-op for a custom target (its own
+        # declared weakness_classes branch is unaffected) -- only filters the
+        # reference:*/bundled mcp:<family> fallback selection.
+        with weakness_class_scope(weakness_class), llm_scope(policy=effective_policy):
             result = asyncio.run(engine.run())
     except (ModuleNotFoundError, ImportError) as exc:
         # `scan reference:*` lazily imports the bundled reference target inside the

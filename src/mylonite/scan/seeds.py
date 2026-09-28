@@ -18,6 +18,9 @@ so this file has no runtime dependency on the predicate implementations.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -779,6 +782,33 @@ def _uncoverable_reason(weakness: str, descriptor: Any) -> str:
     return f"{weakness} declared but not coverable from this target's surface"
 
 
+#: #205: `--weakness-class` scope for `seed_coverage`'s LEGACY (bundled/
+#: reference) fallback branch only -- the declared-`weakness_classes` branch
+#: above already filters on the target's OWN declaration and must not be
+#: double-filtered. A contextvar (mirroring `scan._llm.llm_scope`) rather
+#: than a parameter on `seeds_for_descriptor`/`seed_coverage`: both attack
+#: modules call those through the `seeds` module namespace with a single
+#: fixed `(descriptor)` signature (part of the plugin-patchable call shape),
+#: so widening it would ripple into the AttackModule contract. Default None
+#: (no filter) keeps every existing call site byte-for-byte unchanged.
+_weakness_filter_var: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "_weakness_filter_var", default=None
+)
+
+
+@contextlib.contextmanager
+def weakness_class_scope(classes: Iterable[str] | None) -> Iterator[None]:
+    """Scope ``--weakness-class`` for the legacy seed-selection path (#205).
+
+    A no-op (``classes`` empty/None) leaves every existing caller unaffected.
+    """
+    token = _weakness_filter_var.set(frozenset(classes) if classes else None)
+    try:
+        yield
+    finally:
+        _weakness_filter_var.reset(token)
+
+
 @dataclass(frozen=True)
 class SeedCoverage:
     """The result of resolving seeds for one descriptor: what will run, and
@@ -929,6 +959,9 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
         )
     family = target_family(descriptor.target_id)
     seeds = tuple(s for s in SEED_CATALOGUE if family in s.applicable_targets)
+    weakness_filter = _weakness_filter_var.get()
+    if weakness_filter:
+        seeds = tuple(s for s in seeds if s.weakness in weakness_filter)
     return SeedCoverage(seeds=seeds, uncoverable={})
 
 

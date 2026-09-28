@@ -167,6 +167,53 @@ def test_seeds_for_descriptor_matches_legacy_family_mapping(target_id: str) -> N
     assert seeds_for_descriptor(_descriptor(target_id)) == legacy
 
 
+def test_weakness_class_scope_filters_the_legacy_reference_and_bundled_path() -> None:
+    """#205: `--weakness-class` used to be a silent no-op on `reference:*` /
+    bundled `mcp:<family>` targets -- only the declared-`weakness_classes`
+    (custom-target) branch read it. `weakness_class_scope` filters the
+    LEGACY fallback branch (the one `_descriptor` with no weakness_classes
+    takes) down to the requested classes."""
+    from mylonite.scan.seeds import weakness_class_scope
+
+    descriptor = _descriptor("reference:vulnerable")
+    with weakness_class_scope(["W4"]):
+        filtered = seeds_for_descriptor(descriptor)
+    assert filtered, "expected at least one W4 seed"
+    assert {s.weakness for s in filtered} == {"W4"}
+
+    # Scope exits cleanly: the next call (no scope) sees every seed again.
+    assert seeds_for_descriptor(descriptor) == [
+        s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
+    ]
+
+
+def test_weakness_class_scope_is_a_no_op_when_empty() -> None:
+    from mylonite.scan.seeds import weakness_class_scope
+
+    descriptor = _descriptor("reference:vulnerable")
+    with weakness_class_scope(None):
+        assert seeds_for_descriptor(descriptor) == [
+            s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
+        ]
+    with weakness_class_scope([]):
+        assert seeds_for_descriptor(descriptor) == [
+            s for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
+        ]
+
+
+def test_weakness_class_scope_does_not_affect_the_declared_classes_branch() -> None:
+    """A custom target that already declares `weakness_classes` must not be
+    double-filtered -- that branch has its OWN class-driven selection and is
+    untouched by #205 (only the legacy fallback is in scope)."""
+    from mylonite.scan.seeds import weakness_class_scope
+
+    descriptor = _descriptor("mcp:custom", weakness_classes=["W2", "W4"])
+    with weakness_class_scope(["W4"]):
+        filtered = {s.weakness for s in seeds_for_descriptor(descriptor)}
+    without_scope = {s.weakness for s in seeds_for_descriptor(descriptor)}
+    assert filtered == without_scope
+
+
 def test_seeds_for_descriptor_weakness_classes_reports_not_tested_when_uncoverable() -> None:
     """DCR-0031/#181b: an arbitrary custom target (no tool surface for
     synthesis, and a family that doesn't match any bundled catalogue's

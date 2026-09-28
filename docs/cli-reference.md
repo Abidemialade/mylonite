@@ -114,8 +114,10 @@ persisted so `generate`/`validate` reuse it); `--randomize-exfil/--no-randomize-
 (mint a unique exfil address per run so a finding proves the target leaks to ANY
 attacker destination, not one demo literal — **defaults ON for live custom-target
 scans**, off for the reference/replay path; matches `generate`/`validate`/`gate`).
-For a custom target: `--command`, `--arg`,
-`--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
+`--weakness-class W2` (repeatable; on `reference:*` and a bundled `mcp:<family>` this
+filters which seeds run — on a custom target it adds to the target file's declared
+`weakness_classes`). For a custom target: `--command`, `--arg`,
+`--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`.
 
 For a custom/`--target-file` target, `scan` (and `gate`) refuses before any LLM call if
 a declared `weakness_classes` entry has zero seeds this surface could ever run — see
