@@ -1,4 +1,4 @@
-"""R2 (#181b): the pre-flight refusal, and its --allow-no-seed-arm exemption.
+"""#181b: the pre-flight refusal, and its --allow-no-seed-arm exemption.
 
 Unit-level (not through the full CLI): a fake adapter stands in for the
 live ``describe()`` call, so these pin the refusal's own decision logic

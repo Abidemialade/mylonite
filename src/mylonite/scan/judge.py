@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 #: Distinct from FALLBACK_CALL_RAISED/FALLBACK_UNPARSEABLE (scan/_llm.py):
 #: this fallback_cause means a DECLARED effect_probe's verify_tool call
-#: itself errored (R3/#181a), not a judge-LLM-call degradation. Deliberately
-#: its own literal so R6's dominant-cause hint (scan/coverage.py) never
+#: itself errored (#181a), not a judge-LLM-call degradation. Deliberately
+#: its own literal so the dominant-cause hint (scan/coverage.py, #212) never
 #: attributes this to provider credentials — the provider was never called.
 FALLBACK_EFFECT_PROBE_ERRORED: Final = "effect_probe_errored"
 
@@ -450,7 +450,7 @@ class SuccessJudge:
                 mechanism="predicate",
             )
         if effect_confirmed == "errored":
-            # R3 (#181a): a DECLARED effect_probe whose verify_tool call itself
+            # #181a: a DECLARED effect_probe whose verify_tool call itself
             # failed (bad tool name, timeout, target crash) proved nothing —
             # the effect was never actually checked. Falling through to the
             # predicate/LLM judge let a miswired probe read as a clean

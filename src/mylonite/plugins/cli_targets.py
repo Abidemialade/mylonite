@@ -203,7 +203,7 @@ def refuse_uncoverable_weakness_classes(
     allow_no_seed_arm: bool = False,
     dry_run: bool = False,
 ) -> None:
-    """Pre-flight refusal (R2/#181b): before any LLM call, refuse a scan/gate
+    """Pre-flight refusal (#181b): before any LLM call, refuse a scan/gate
     of a custom target whose declared ``weakness_classes`` include one this
     target's introspected tool surface cannot cover AT ALL — i.e. would
     produce ZERO attempts, never any (honest NOT TESTED) attempt at all.

@@ -1,4 +1,4 @@
-"""R5 (#181d): a failed seed_arm PLANT call must be named as a plant failure,
+"""#181d: a failed seed_arm PLANT call must be named as a plant failure,
 not misreported as "payload not delivered".
 
 Before this fix, ``_run_seed_arm`` ignored ``result.isError`` on the plant
