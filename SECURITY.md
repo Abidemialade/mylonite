@@ -80,7 +80,7 @@ The project enforces the following non-negotiables:
      `--authorize` must equal for a custom target.
    - **Bundled targets** (`mcp:filesystem`, `mcp:fetch`, `mcp:github`) — driven
      only by `scan`/`gate`, via a separate inline check in
-     `_build_adapter_for_mcp` (`cli.py`) against `target_registry.BUNDLED_TARGETS`,
+     `_build_adapter_for_mcp` (`mylonite.plugins.cli_targets`) against `target_registry.BUNDLED_TARGETS`,
      a hardcoded dict defined in source, not a user-editable document. The
      DCR-0008 vulnerability class — a target smuggling a downgrade instruction
      into the very document being authorized — does not apply to data the
