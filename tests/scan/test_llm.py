@@ -858,6 +858,44 @@ def test_a_recoverable_call_failure_logs_one_line_not_a_traceback(caplog: Any) -
     assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
 
 
+def test_a_non_recoverable_call_failure_caps_the_error_log_line(caplog: Any) -> None:
+    """#207: the non-recoverable branch logged ``diagnosis.detail`` (the
+    RAW, untruncated exception text) at ERROR -- unlike the recoverable
+    branch above, which was already capped for this exact bug. The engine
+    catches ``NonRecoverableProviderError`` per payload, so an uncapped line
+    here repeats once per seed per role -- most of the 12 KB a bad --model
+    used to print. The cap mirrors the recoverable branch: a short ERROR
+    line, the full detail only at DEBUG.
+    """
+    import logging
+
+    long_detail = "BadRequestError: " + ("x" * 500)
+
+    def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError(long_detail)
+
+    with (
+        caplog.at_level(logging.DEBUG, logger="mylonite.scan._llm"),
+        pytest.raises(NonRecoverableProviderError) as excinfo,
+    ):
+        litellm_json_call(
+            model="stub",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="test",
+            completion_fn=stub,
+        )
+    assert excinfo.value.diagnosis.category == "bad_request"
+
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1, [r.getMessage() for r in errors]
+    assert len(errors[0].getMessage()) < 300, errors[0].getMessage()
+    assert errors[0].exc_info is None
+    # the full traceback is still available to anyone who asks for DEBUG
+    assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
+
+
 # --- spend: token capture and the command-level usage tally ------------------
 
 

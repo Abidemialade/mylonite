@@ -582,12 +582,20 @@ def _classify_or_swallow(
     """
     diagnosis = classify_provider_error(exc, provider=provider_from_model(model))
     if diagnosis.category in _NON_RECOVERABLE_CATEGORIES:
+        # #207: this used to log `diagnosis.detail` (the RAW, untruncated
+        # exception text) — unlike the recoverable branch below, which was
+        # already capped for this exact bug. The engine catches
+        # NonRecoverableProviderError per payload, so an uncapped line here
+        # repeated once per seed per role: most of the ~12 KB a single bad
+        # --model printed before the one useful line. Same shape as the
+        # recoverable branch: a short ERROR line, the full traceback at DEBUG.
         logger.error(
             "%s: LiteLLM completion raised a non-recoverable [%s] error: %s",
             caller,
             diagnosis.category,
-            diagnosis.detail,
+            _exc_detail(exc, limit=200),
         )
+        logger.debug("%s: full traceback for the failure above", caller, exc_info=exc)
         _mark_failure()
         raise NonRecoverableProviderError(diagnosis, caller=caller) from exc
     # ONE legible line, not a stack trace. This fires once per caller per seed

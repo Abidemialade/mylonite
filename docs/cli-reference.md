@@ -127,6 +127,13 @@ after the provider key and model checks: a missing key never spawns the target. 
 server can't be described in time, the run exits 2 with that reason instead of skipping
 the check.
 
+Every model `scan` resolves (`--model`/`--planner-model`/`--customiser-model`/
+`--judge-model`) is checked against LiteLLM's own provider registry once, before any
+seed runs (also true of `gate`/`validate`/`ablate`). A value LiteLLM can't route —
+including one shaped like `provider/model` with an unknown provider, e.g.
+`not-a-real/model` — exits 2 with one message naming the value and `--model`, instead
+of a live call failing (and repeating) once per seed.
+
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
 commented starter `target.yaml` with suggested `weakness_classes` and auto-detected
