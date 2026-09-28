@@ -1,7 +1,7 @@
-"""R2c (#181b): `mylonite scan --scaffold` must not suggest a weakness class
-its own tool surface can't cover — otherwise a fresh scaffold user's first
-`scan` immediately hits the R2 pre-flight refusal on the very target.yaml
-the scaffold just handed them.
+"""#181b: `mylonite scan --scaffold` must not suggest a weakness class its
+own tool surface can't cover — otherwise a fresh scaffold user's first
+`scan` immediately hits the pre-flight refusal on the very target.yaml the
+scaffold just handed them.
 
 `_suggest_weakness_classes`'s raw keyword-blob hints are gated through the
 same `scan.seeds.seed_coverage` helper the engine's seed selection uses.
@@ -53,10 +53,13 @@ def test_w2_kept_via_a_content_processor_tool_with_no_seed_arm_at_all() -> None:
 
 
 def test_w3_dropped_when_no_tool_is_actually_egress_shaped() -> None:
-    """A tool whose description merely CONTAINS an egress-hint substring
-    (naive keyword match) but whose schema/name the stricter live classifier
-    does not recognise as a destination-taking tool."""
-    tools = [_tool("get_webhook_status", "Reports whether the webhook config is valid.")]
+    """A tool whose DESCRIPTION merely CONTAINS an egress-hint substring
+    (the naive scaffold heuristic matches name+description) but whose NAME
+    and schema the stricter live classifier (tool_classifier.destination_tools,
+    which matches only the tool's own name and its parameter names/schema
+    defaults, never free-text description) does not recognise as a
+    destination-taking tool."""
+    tools = [_tool("get_status", "Reports whether the webhook endpoint is configured.")]
     got = _suggest_weakness_classes(tools)
     assert "W3" not in got
 
@@ -69,3 +72,18 @@ def test_w4_dropped_when_no_tool_is_actually_consequential() -> None:
 
 def test_no_tools_suggests_nothing() -> None:
     assert _suggest_weakness_classes([]) == []
+
+
+def test_w3_and_w4_kept_when_the_tools_are_named_differently_from_the_literals() -> None:
+    """A class covered ONLY by a synthesised seed (non-literal tool name) must
+    still be suggested — the coverability gate must count synthesised seeds
+    for W3/W4, not just the W1/W2 suppression subset it uses internally."""
+    tools = [
+        _tool(
+            "execute_sql", "Run a SQL query against the database.", {"query": {"type": "string"}}
+        ),
+        _tool("fetch", "Fetch a resource.", {"url": {"type": "string"}}),
+    ]
+    got = _suggest_weakness_classes(tools)
+    assert "W3" in got
+    assert "W4" in got

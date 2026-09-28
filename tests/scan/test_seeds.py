@@ -287,6 +287,79 @@ def test_seed_coverage_empty_when_every_declared_class_has_a_seed() -> None:
     assert coverage.seeds
 
 
+def test_seed_coverage_w4_covered_by_a_synthesised_seed_is_not_uncoverable() -> None:
+    """A class covered ONLY by a synthesised W3/W4 seed (a non-literal tool
+    name, classifier-detected) must not also appear in `uncoverable` — that
+    was a false pre-flight refusal naming a class a seed was about to test."""
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.seeds import seed_coverage
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W4"],
+        tools=[ToolSpec(name="execute_sql", description="run a query")],
+    )
+    coverage = seed_coverage(d)
+    assert coverage.uncoverable == {}
+    assert any(s.pattern_id == "synth-w4-unconfirmed-execute_sql" for s in coverage.seeds)
+
+
+def test_seed_coverage_w3_covered_by_a_synthesised_seed_is_not_uncoverable() -> None:
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.seeds import seed_coverage
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W3"],
+        tools=[
+            ToolSpec(
+                name="fetch",
+                description="fetch a url",
+                json_schema={"properties": {"url": {"type": "string"}}},
+            )
+        ],
+    )
+    coverage = seed_coverage(d)
+    assert coverage.uncoverable == {}
+    assert any(s.pattern_id == "synth-w3-egress-fetch" for s in coverage.seeds)
+
+
+def test_seed_coverage_w4_covered_via_declared_consequential_tools() -> None:
+    """Same as above, but the tool is declared rather than classifier-found —
+    the operator's explicit declaration must not change the outcome."""
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.seeds import seed_coverage
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W4"],
+        tools=[ToolSpec(name="execute_sql", description="run a query, no action-hint name")],
+        declared_consequential_tools=["execute_sql"],
+    )
+    coverage = seed_coverage(d)
+    assert coverage.uncoverable == {}
+    assert any(s.pattern_id == "synth-w4-unconfirmed-execute_sql" for s in coverage.seeds)
+
+
+def test_seed_coverage_w3_covered_via_declared_egress_tools() -> None:
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.seeds import seed_coverage
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W3"],
+        tools=[ToolSpec(name="reach_out", description="no egress-hint name at all")],
+        declared_egress_tools=["reach_out"],
+    )
+    coverage = seed_coverage(d)
+    assert coverage.uncoverable == {}
+    assert any(s.pattern_id == "synth-w3-egress-reach_out" for s in coverage.seeds)
+
+
 def test_seeds_for_descriptor_kitchen_fallback_when_family_actually_matches() -> None:
     """When the target's OWN family literally matches a catalogue seed's
     applicable_targets (e.g. a custom target genuinely named 'kitchen-sink'),
