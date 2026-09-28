@@ -62,6 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `verification/` rule to `DOC_RULES` in `scripts/check_docs_sync.py`,
   mapping changes there to `docs/verification.md`, so a future harness change
   is caught the same way a `cli.py` change already is.
+### Internal
+
+- `cli.py` is a thin shell again. It sat one line under its 4,750-line size
+  cap (#91); the gate command's four `run_gate` collaborators, the generate
+  command's emission helpers, `check`'s structural-finding helpers, and the
+  CLI's target-to-adapter routing now live in `mylonite.gate.wiring`,
+  `mylonite.generate.wiring`, `mylonite.scan.control_shim` and
+  `mylonite.plugins.cli_targets` respectively, with `cli.py` importing them
+  back and calling them unchanged. No behaviour changed — `tests/cli_golden/`
+  pins `--help` text, the reference dry-run seed listings and the `demo`
+  offline replay across the move — and `cli.py` is down to ~3,880 lines, with
+  its size cap lowered to match.
 
 ## [0.10.4] - 2026-09-28
 

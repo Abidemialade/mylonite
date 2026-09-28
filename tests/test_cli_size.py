@@ -9,6 +9,13 @@ target-file scaffolding to `mylonite.plugins._mcp.scaffold`.
 This test caps `cli.py` so the next contributor adds substantial new logic in a
 proper module rather than inlining it here. If you're over the cap, that's the
 signal to extract, not to raise the number.
+
+The "thin shell" refactor (PR 0 of the #91/#197 follow-up) cut cli.py from
+4,749 to ~3,878 LOC: the gate-command closures moved to
+`mylonite.gate.wiring`, the generate-command helpers to
+`mylonite.generate.wiring`, the `check`-command structural helpers to
+`mylonite.scan.control_shim`, and the CLI target-adapter routing to
+`mylonite.plugins.cli_targets`.
 """
 
 from __future__ import annotations
@@ -17,9 +24,10 @@ from pathlib import Path
 
 _CLI = Path(__file__).resolve().parents[1] / "src" / "mylonite" / "cli.py"
 
-# Ceiling with modest headroom over the post-#91 size (~4,634 LOC). Lower it as
-# more is extracted; do not raise it to accommodate new inlined domain logic.
-_MAX_LOC = 4_750
+# Ceiling with modest headroom over the post-thin-shell size (~3,878 LOC).
+# Lower it as more is extracted; do not raise it to accommodate new inlined
+# domain logic.
+_MAX_LOC = 3_930
 
 
 def test_cli_py_stays_under_the_fat_controller_ceiling() -> None:
