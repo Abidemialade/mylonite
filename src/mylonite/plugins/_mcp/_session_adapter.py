@@ -821,6 +821,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         result = await self._bounded(session.call_tool(arm.tool, rendered))
         setup_calls.append({"tool": arm.tool, "args": sorted(rendered)})
         content = str(getattr(result, "content", "") or "")
+        # R5 (#181d): a plant call that itself failed (isError=True — bad args,
+        # a full store, a permission error) used to be treated as a successful
+        # plant. The recall step then naturally found nothing, and the attempt
+        # was misreported as "payload not delivered" (a drive/recall-wiring
+        # message) instead of naming the real cause: the plant itself failed.
+        if getattr(result, "isError", False):
+            raise SeedArmUnavailable(
+                f"seed_arm plant call failed: {redact(_truncate_result(content, 200))}",
+                attempt_metadata={"family": self._family, "setup": "seed_arm", "tool": arm.tool},
+            )
         if arm.id_key:
             try:
                 parsed = json.loads(content)
