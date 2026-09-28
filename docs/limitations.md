@@ -22,8 +22,10 @@ gateway. Both are on the roadmap.
 **Wiring caveat:** a clean result assumes the target file's `seed_arm` and
 `effect_probe` are wired to the right tools. Until the planned wiring self-test ships,
 confirm the wiring yourself: run the scan against a copy of your server where you know
-an attack lands, or call the `effect_probe` tool by hand and check it returns the
-planted marker.
+an attack lands, and check that the exploit records `effect_confirmed: "true"`. The
+probe reads the verify tool before and after the agent runs and only counts a NEW,
+attributed marker, so calling the tool by hand and seeing it return the marker does not
+confirm the wiring — the marker may already have been there from an earlier run.
 
 ## 1. On a single-build app, the strong claim is not available
 
@@ -194,6 +196,51 @@ A token in the url's query string (`url` or `request.url`) is masked as `***REDA
 in every target file Mylonite writes, and `url` reads no variables, so those copies need
 the value put back by hand. Put the token in `headers:` as a `${VAR}` reference to keep
 the copies runnable.
+
+## 8. What the effect probe still cannot see
+
+The [effect attribution rule](target-file.md#effect-attribution) fixed the general case —
+crediting an attempt only with a change it actually caused — but two shapes remain, both
+by design rather than by oversight.
+
+**A target that defers some actions and executes others, concurrently.** The rule
+attributes an effect to whichever attempt's own trace links to it. A target that runs
+several attempts at once and completes some immediately while queuing others is read
+correctly for each attempt on its own, but the two effects can land in either order in
+the target's log; nothing here reorders them. This is unlikely to change a verdict, since
+attribution is per attempt, not per ordering, but a report that reasons about the log's
+sequence (rather than each attempt's own trace) should account for it.
+
+**A default deferral word inside an unrelated call's result excludes that call.** The set
+of "this attempt's own executed calls" drops a call whose result text contains a default
+deferral word (e.g. `"pending"`) as well as one that matches the target's own
+`deferred_markers`. If a real, undeferred effect's result text happens to contain one of
+those words for an unrelated reason (e.g. `"2 pending"` in an otherwise-successful
+response), that call is excluded from linking, and a genuine effect can read `"false"`.
+Avoid a `verify_tool` or a linked call whose success text plausibly contains a default
+deferral word. `deferred_markers` in the target file apply only to the probe's own
+deferral check (step 3 of the rule); the default deferral words apply to this
+executed-call filtering, a separate check.
+
+**A silent drop reads `"false"`, as it did in 0.10.3** — the linked call replied with
+success, but the marker never appears in the target's state, before or after. This is
+conservative: it cannot manufacture a false KEPT, only a missed finding, and the probe
+says exactly what it saw. The one residual leak: a silent drop where the marker is
+**already** present in state from an earlier attempt reads `"unattributed"`, not
+`"false"` — a drop and an idempotent write look identical from state alone. On shared,
+persisted state this is exactly what a guarded run meets once the unguarded runs have
+already written the marker, so it can read as a finding in `scan` or a leak in
+`validate`. Avoid it with fresh state before each `validate` command (already required
+by the pre-registered pass rule), or a marker built from `{payload}` so each run's marker
+is distinct.
+
+**An effect that is real but the verify output cannot show it also reads `"false"`** —
+delayed visibility (an async queue, an eventually-consistent store), a marker the target
+transforms (lowercased, truncated, escaped), an output window that never surfaces the new
+entry, or a marker containing a quote or a backslash (the before/after comparison is on
+the read result's Python repr, which escapes both). None of this is new in 0.10.4: a
+marker the verify tool cannot show synchronously, as the literal text, once the agent's
+run ends, read `"false"` in 0.10.3 too.
 
 ## Reporting something missing
 

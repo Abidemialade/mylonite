@@ -1031,6 +1031,14 @@ def recommend(
     if effect_confirmed == "unprobed":
         degraded.append("effect probe did not confirm")
         confidence = _degrade(confidence)
+    elif effect_confirmed == "unattributed":
+        # The probe ran and saw a change, but could not tie it to THIS attempt
+        # (persisted state: an idempotent write, a delete, another attempt's
+        # write) — weaker than a confirmed effect, the same way "unprobed" is,
+        # so it gets its own degrade rather than being silently treated as
+        # confirmed.
+        degraded.append("effect probe could not be tied to this attempt")
+        confidence = _degrade(confidence)
 
     proven = bool(report and report.kept)
     proven_layer: Literal["server", "boundary", "none"] = "none"

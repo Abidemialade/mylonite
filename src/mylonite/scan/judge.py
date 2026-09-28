@@ -421,8 +421,8 @@ class SuccessJudge:
         # approval / refused) yields effect_confirmed="false" → not a finding.
         #
         # Only "true" and "false" are final. "unattributed" means the state
-        # changed but the change could not be tied to this attempt's own calls
-        # (an idempotent write, a delete, a window that slid, another attempt's
+        # change, or its absence, could not be tied to this attempt (an
+        # idempotent write, a delete, a window that slid, another attempt's
         # write): it falls through to the predicate, which reads only this
         # attempt's trace, and then to the LLM judge. "errored" and "unprobed"
         # fall through the same way.

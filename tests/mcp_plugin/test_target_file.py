@@ -275,7 +275,8 @@ def _status_word_warnings(marker: str, **over: object) -> list[str]:
 def test_effect_probe_warns_on_a_fixed_marker_with_no_declared_consequential_tool() -> None:
     """A fixed status word the agent's call does not carry can only link through a
     declared consequential tool. With none declared the effect can read
-    'unattributed' but never 'true', so `validate` can never keep the finding."""
+    'unattributed' but may never read 'true', so `validate` cannot keep the finding
+    without one."""
     warnings = _status_word_warnings("status=sent")
     assert len(warnings) == 1, warnings
     assert "'status=sent'" in warnings[0]
@@ -307,6 +308,20 @@ def test_effect_probe_fixed_marker_warning_silent_for_an_address(marker: str) ->
     """A recipient or destination is what the agent's own call carries, so it
     links through that call's arguments: the fix the warning recommends."""
     assert _status_word_warnings(marker) == []
+
+
+@pytest.mark.parametrize(
+    "marker", ["email.sent", "status.ok", "report.pdf", "v1.2", "sent @ 10:00"]
+)
+def test_effect_probe_fixed_marker_warning_fires_for_a_status_word_not_an_address(
+    marker: str,
+) -> None:
+    """A dotted or `@`-containing status word is not an email or a URL, so the
+    address exemption must not swallow it: the marker still can't be tied to
+    an attempt without a declared tool. Before the exemption was tightened to
+    a real email shape (`x@y.z`) or `://`, `looks_like_destination`'s bare-host
+    heuristic and the bare `"@" in marker` check wrongly exempted all five."""
+    assert len(_status_word_warnings(marker)) == 1
 
 
 def test_effect_probe_warning_silent_for_non_effecting_weakness() -> None:

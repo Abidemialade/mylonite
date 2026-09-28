@@ -73,6 +73,12 @@ The PR body is itself a result surface (see [Reading the results](reading-result
 - **Inline annotations** — a best-effort GitHub check-run annotation on the offending
   prompt line, when the AI layer is a committed file.
 
+The recommendation's confidence is degraded, not silently kept at full strength, when the
+effect probe didn't settle the finding on its own: `unprobed` (no `effect_probe`
+declared) and `unattributed` (the state change, or its absence, could not be tied to that
+attempt — see [Effect attribution](target-file.md#effect-attribution)) each lower it one
+step, so a PR body never reads a weaker signal as a fully-confirmed one.
+
 For a custom target the gate proves the finding **differentially by default** (the
 control-efficacy check); `--fast` skips that leg for a faster, cheaper check that no
 longer proves the safeguard carries the security — a deliberate trade-off, not the

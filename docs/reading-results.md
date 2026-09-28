@@ -84,6 +84,25 @@ never ran are not counted as decided, and any attempt where neither mechanism re
 verdict is listed separately as `reached no verdict`. The line reads persisted fields
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
+### What `effect_confirmed` means
+
+When the target file declares an `effect_probe`, every attempt records an
+`effect_confirmed` value in `judge_evidence` and, for a finding, in the exploit's
+`metadata` (`exploit_*.json`):
+
+| Value | Meaning |
+|---|---|
+| `true` | the probe saw a NEW marker after the agent ran, and this attempt's own trace carries it (or the declared consequential/egress tool) — end-to-end, attributed confirmation. |
+| `false` | nothing links this attempt to a change: it did nothing, the change isn't new, a deferral marker (e.g. `"queued for approval"`) grew, or a linked call reported success while the marker never appeared, before or after. |
+| `unattributed` | the state change, or its absence, could not be tied to this attempt — an idempotent write, a delete, a bounded output window that slid, or a change another attempt made while this one only made an unrelated call. Not final: the attempt-scoped predicate decides the finding from this attempt's own trace, then the LLM judge if the predicate can't. |
+| `errored` | the baseline or the post-drive read to the verify tool itself raised or timed out. |
+| `unprobed` | no `effect_probe` is declared, or this attempt has no recorded evidence. |
+
+Only `true` and `false` are final on their own; `unattributed`, `errored` and `unprobed`
+fall through to the predicate and then the LLM judge, the same ladder every other
+attempt follows. See [Effect attribution](target-file.md#effect-attribution) for how the
+value is decided.
+
 ### What a run spent
 
 `scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget

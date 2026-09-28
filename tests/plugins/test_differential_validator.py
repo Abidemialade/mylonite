@@ -1867,6 +1867,18 @@ def test_one_true_plus_a_predicate_decided_unattributed_passes_the_effect_leg() 
     assert report.kept is True
 
 
+def test_effect_leg_detail_does_not_overclaim_end_to_end_confirmation() -> None:
+    """The wording must not say the PROBE confirmed the damage for a run that
+    was only decided by the predicate reading this attempt's own actions --
+    only the `from_state` count is an end-to-end, probe-confirmed number. It
+    must also say the mismatch is what "unattributed" means: the state
+    change, or its absence, could not be tied to the attempt."""
+    report = _validate_with_runs([_run("true"), _run("unattributed")])
+    effect = _outcome(report, "effect")
+    assert "the target's effect probe confirmed the damage materialised" not in effect.detail
+    assert "could not be tied to that attempt" in effect.detail
+
+
 def test_an_llm_decided_unattributed_run_does_not_count_toward_the_effect_leg() -> None:
     report = _validate_with_runs([_run("true"), _run("unattributed", mechanism="llm")])
     effect = _outcome(report, "effect")

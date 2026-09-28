@@ -547,6 +547,15 @@ def validate_for_scan(tf: TargetFile, *, allow_no_seed_arm: bool = False) -> lis
 # in the transcript. Without an effect_probe a real target under-detects these.
 _EFFECTFUL_WEAKNESS_CLASSES: frozenset[str] = frozenset({"W3", "W4"})
 
+# A marker shaped like this is assumed to be carried by the agent's own call
+# (a recipient address), so it is exempt from the fixed-marker warning below.
+# Deliberately narrow: `looks_like_destination` (a bare-hostname heuristic)
+# and a bare `"@" in marker` check used to exempt this too, which wrongly
+# silenced the warning for dotted status words ("email.sent", "status.ok",
+# "report.pdf", "v1.2") and an `@`-containing timestamp ("sent @ 10:00") --
+# none of those links through a call argument the way a real address does.
+_EMAIL_SHAPE_RE: Final = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 def effect_probe_warnings(tf: TargetFile) -> list[str]:
     """Non-fatal warnings: side-effecting weaknesses (W3/W4) need an ``effect_probe``.
@@ -598,25 +607,26 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
                 "recipient of a forwarded message, a row it wrote) for a sharper signal."
             )
     # A fixed marker (no {payload}) that is not an address the agent's call
-    # carries can only be tied to an attempt through a declared tool. With none
-    # declared, the effect check can say "unattributed" but never "true", and
-    # `validate` needs at least one "true" to keep a finding.
+    # carries can only be tied to an attempt through a declared tool -- unless
+    # the seed itself names one (a synthesised seed can carry a classifier-
+    # inferred consequential tool). With no tool declared, the effect check
+    # can say "unattributed" but may never say "true", and `validate` needs
+    # at least one "true" to keep a finding.
     if probe is not None and probe.expect_marker and "{payload}" not in probe.expect_marker:
-        from mylonite.scan.tool_classifier import looks_like_destination
-
         marker = probe.expect_marker
         cc = tf.control_config
         declared = cc is not None and bool(cc.consequential_tools or cc.egress_tools)
-        if not declared and "@" not in marker and not looks_like_destination(marker):
+        is_address = "://" in marker or bool(_EMAIL_SHAPE_RE.match(marker.strip()))
+        if not declared and not is_address:
             warnings.append(
                 f"effect_probe.expect_marker {marker!r} is a fixed value, and "
                 "control_config declares no consequential_tools. An effect counts for "
                 "an attempt only when one of its own calls carries the marker or is a "
-                "declared tool, so this effect can read 'unattributed' but never read "
-                "'true', and `validate` cannot keep the finding. Use a marker the "
-                "agent's call carries (for example the recipient address, or "
-                "'{payload}'), or declare the tool that performs the action under "
-                "control_config.consequential_tools."
+                "declared tool, so this effect can read 'unattributed' but may never "
+                "read 'true' unless the seed names the tool, and `validate` cannot keep "
+                "the finding without one. Use a marker the agent's call carries (for "
+                "example the recipient address, or '{payload}'), or declare the tool "
+                "that performs the action under control_config.consequential_tools."
             )
     return warnings
 

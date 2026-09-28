@@ -9,54 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **An effect is now credited only to the attempt that caused it.** On a
-  target whose state outlives a run (a file, a database, a memory store, any
-  remote server), the `effect_probe` check used to credit an attempt with a
-  change an earlier or concurrent attempt left behind. That produced false
-  findings in `scan` and false leaks in `validate`, where a guarded run could
-  read the unguarded runs' email as its own. The probe now reads the verify
-  tool before and after the agent runs, and confirms an effect only when it is
-  new and one of this attempt's own executed calls names the marker or is the
-  scenario's consequential or egress tool. An attempt that did nothing reads
-  `false`, and so does a call that replies with success while the marker is
-  absent from the target's state both before and after it (a guard that
-  silently drops the action), so that case is no longer a finding in `scan`
-  or a leak in `validate`. When the state changed but cannot be tied to this
-  attempt (an idempotent write, a delete, a bounded output window),
-  `effect_confirmed` is
-  the new value `"unattributed"` in `exploit_*.json`. A probe with no
-  `expect_marker` now follows the same rule instead of confirming every
-  attempt, and a deferral marker counts only when it is new. Each attempt with
-  a declared `verify_tool` makes one extra read-only call to it; the recorded
-  setup trace and everything sent to the model are unchanged.
-- **`validate` no longer reads an unattributed effect as proof, or as a leak.**
-  An `"unattributed"` attempt is judged by the seed's predicate, which reads
-  only that attempt's own calls, and then by the LLM judge. The effect leg
-  counts a firing run when its effect is `"true"`, or when it is
-  `"unattributed"` and the predicate decided it, and it now needs at least one
-  `"true"` run so the effect was observed end-to-end at least once. Its detail
-  line says how many runs were confirmed from the target's state and how many
-  from the attempt's own actions. A run set that is all `"unattributed"` gates
-  the leg instead of being reported as "no effect_probe declared". Every
-  attempt's `judge_evidence` now carries `effect_confirmed`, finding or not.
-  Offline, 3 unguarded runs then 3 guarded runs on one persisted outbox now
-  give 3 findings and 0 guarded leaks; before this fix, all 3 guarded runs
-  leaked. `scan`, `validate` and `check` now warn when `expect_marker` is a
-  fixed value with no `{payload}` and `control_config` declares no
-  `consequential_tools` or `egress_tools`: such an effect can read
-  `"unattributed"` but never `"true"`, so `validate` cannot keep it. The
-  warning names the fix: a marker the agent's call carries, such as the
-  recipient address, or a declared consequential tool.
-- **The bundled `mcp:filesystem` target and `ablate` no longer cross-credit
-  concurrent attempts.** The `filesystem` predicate that fires on a
-  read-then-write pattern used to count every new file in the sandbox
-  snapshot, including one written by a concurrent or earlier attempt; it now
-  counts only the paths this attempt's own executed `write_file` calls wrote.
-  `ablate` used to run a probed target's raw and guarded legs at the same
-  time against its one shared store, so an unguarded leg's effect could read
-  as the guarded leg's; on a target that declares an `effect_probe`, the two
-  legs now run one after the other, in the same result order as before. A
-  target with no probe is unaffected.
+- **An effect is now credited only to the attempt that caused it, so stateful
+  and remote targets no longer produce false leaks or false findings.** On a
+  target whose state outlives a run — a file, a database, a memory store, any
+  remote server — the `effect_probe` check, `validate`'s guarded-vs-unguarded
+  comparison, the bundled `mcp:filesystem` predicate, and `ablate`'s
+  raw-vs-guarded legs used to credit one attempt with a change an earlier,
+  concurrent, or otherwise unrelated attempt caused. A guarded attempt the
+  guard blocked could read an unguarded run's write as its own, so `validate`
+  could never keep a result; one scenario's write could "confirm" another
+  scenario that made no tool calls at all. Offline, 3 unguarded runs then 3
+  guarded runs on one persisted outbox now give 3 findings and 0 guarded
+  leaks; before this fix, all 3 guarded runs leaked.
+
+  The probe now reads the verify tool before and after the agent runs, and
+  confirms an effect for an attempt only when the marker is new since that
+  attempt's own baseline AND one of that attempt's own executed calls names
+  it or is the scenario's declared consequential or egress tool. An attempt
+  that did nothing reads `false`, and so does a linked call that replies with
+  success while the marker never appears, before or after (a silent drop),
+  same as in 0.10.3. When the state change, or its absence, cannot be tied to
+  the attempt — an idempotent write, a delete, a bounded output window that
+  slid — `effect_confirmed` reads the new value `"unattributed"`: not a
+  finding on its own, judged instead by the seed's predicate and then the
+  LLM judge, and `validate`'s effect leg now needs at least one `"true"` run
+  to keep a result, with its detail line stating how many runs were
+  confirmed from the target's state versus from the attempt's own actions.
+  `ablate` runs a probed target's raw and guarded legs one after the other
+  instead of concurrently. `scan`, `validate` and `check` warn when
+  `expect_marker` is a fixed value, is not shaped like an email address or a
+  URL, and `control_config` declares no `consequential_tools` or
+  `egress_tools`: such an effect can read `"unattributed"` but may never read
+  `"true"` unless the seed itself names the tool, so `validate` cannot keep
+  it. The warning names the fix: a marker the agent's call carries, such as
+  the recipient address, or a declared consequential tool. Each attempt with
+  a declared `verify_tool` makes one extra read-only call to it; the
+  recorded setup trace and everything sent to the model are unchanged.
 
 ## [0.10.3] - 2026-09-27
 
