@@ -46,6 +46,7 @@ request:
     Authorization: Bearer ${MY_TOKEN}
   body: '{"messages": [{"role": "user", "content": "{prompt}"}]}'
   response_path: choices.0.message.content
+  timeout_s: 30                      # optional; default 30 (see below)
 ```
 
 - **`url`** — the endpoint Mylonite posts to.
@@ -57,6 +58,10 @@ request:
   it to judge the whole response body.
 - **`headers`** — optional auth; values are never written to any log, report, or
   test artifact.
+- **`timeout_s`** — the HTTP client timeout for every call to the agent, in
+  seconds. Defaults to **30**. A local-model agent often takes longer than 30s per
+  turn; raise this if a scan fails with a timeout. The error names `request.timeout_s`
+  and its current value, so you know which field to raise.
 
 ## Run it
 

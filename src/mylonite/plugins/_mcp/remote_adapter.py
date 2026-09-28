@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 from urllib.parse import urlsplit
 
 import httpx
@@ -139,6 +140,7 @@ async def _open_remote_session(
     transport: str,
     url: str,
     headers: dict[str, str] | None,
+    read_timeout: timedelta = DEFAULT_MCP_READ_TIMEOUT,
 ) -> AsyncIterator[ClientSession]:
     """Connect to a remote MCP server and yield an initialised ``ClientSession``.
 
@@ -164,7 +166,7 @@ async def _open_remote_session(
     async with client_cm as streams:
         read_stream, write_stream = streams[0], streams[1]
         async with ClientSession(
-            read_stream, write_stream, read_timeout_seconds=DEFAULT_MCP_READ_TIMEOUT
+            read_stream, write_stream, read_timeout_seconds=read_timeout
         ) as session:
             await session.initialize()
             yield session
@@ -185,7 +187,12 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             raise ValueError(
                 f"remote target {self._family!r} has no url; transport={self._spec.transport!r}"
             )
-        return _open_remote_session(self._spec.transport, self._spec.url, self._spec.headers)
+        return _open_remote_session(
+            self._spec.transport,
+            self._spec.url,
+            self._spec.headers,
+            read_timeout=self._mcp_read_timeout,
+        )
 
     def _describe_data_sources(self) -> list[str]:
         # Host only — never the full URL with query/credentials/userinfo, never headers.

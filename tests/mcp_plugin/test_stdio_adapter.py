@@ -342,7 +342,9 @@ async def test_adapter_threads_launch_env_to_session() -> None:
     captured: dict[str, Any] = {}
 
     @asynccontextmanager
-    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+    async def _capture_open(  # type: ignore[no-untyped-def]
+        spec: Any, scope: Any, *, extra_env=None, command=None, args=None, **_kwargs: Any
+    ):
         captured["env"] = extra_env
         captured["command"] = command
         captured["args"] = args
@@ -379,7 +381,9 @@ async def test_adapter_threads_vulnerable_launch_command_and_args() -> None:
     captured: dict[str, Any] = {}
 
     @asynccontextmanager
-    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+    async def _capture_open(  # type: ignore[no-untyped-def]
+        spec: Any, scope: Any, *, extra_env=None, command=None, args=None, **_kwargs: Any
+    ):
         captured["command"] = command
         captured["args"] = args
         yield _FakeSession()
@@ -584,7 +588,9 @@ async def test_adapter_default_launch_unchanged_for_bundled_family(tmp_path: Pat
     captured: dict[str, Any] = {}
 
     @asynccontextmanager
-    async def _capture_open(spec: Any, scope: Any, *, extra_env=None, command=None, args=None):  # type: ignore[no-untyped-def]
+    async def _capture_open(  # type: ignore[no-untyped-def]
+        spec: Any, scope: Any, *, extra_env=None, command=None, args=None, **_kwargs: Any
+    ):
         captured["env"] = extra_env
         captured["command"] = command
         captured["args"] = args
@@ -1201,6 +1207,9 @@ async def test_invoke_timeout_raises_skipped_with_reason(tmp_path: Path) -> None
         with pytest.raises(AdapterInvocationSkipped) as excinfo:
             await adapter.invoke(payload)
     assert excinfo.value.attempt_metadata["reason"] == "timeout"
+    # #186: names timeout_s -- the target-file knob that raises this bound --
+    # not just a bare "timed out after Ns" with no indication what to change.
+    assert "timeout_s" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

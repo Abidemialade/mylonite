@@ -356,46 +356,59 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
         # exhaust memory on that basis alone.
         chunks: list[bytes] = []
         total = 0
-        async with client.stream(
-            req.method.upper(),
-            req.url,
-            headers=req.headers or None,
-            content=body.encode("utf-8"),
-        ) as response:
-            # Fail loud on a transport/config error (4xx/5xx) instead of judging
-            # the error body as if it were the agent's reply — a misconfigured
-            # endpoint must NOT read as a clean scan. The engine records this as
-            # an attempt error (never a clean pass). A well-behaved agent
-            # returns 200 with any refusal in the body.
-            if response.status_code in (401, 403):
-                # Host only, never req.url verbatim — a REST target's url can
-                # carry a query-string token (e.g. ?key=SECRET), same reason
-                # the remote MCP adapter's descriptor is host-only.
-                raise RuntimeError(
-                    f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
-                    f"(method {req.method.upper()}) - the server rejected the request. "
-                    "Set the token in request.headers in the target file, e.g. "
-                    "`Authorization: Bearer ${MY_TOKEN}`, and export MY_TOKEN before "
-                    "you scan. See docs/http-agent.md."
-                )
-            if response.status_code >= 400:
-                # Host only, for the same reason as the 401/403 branch above:
-                # this message reaches the console and scan_report.json.
-                raise RuntimeError(
-                    f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
-                    f"(method {req.method.upper()}). Check the url/method/body in the target "
-                    "file's request block - the attack payload never reached the agent."
-                )
-            async for chunk in response.aiter_bytes():
-                total += len(chunk)
-                if total > _MAX_RESPONSE_BYTES:
+        try:
+            async with client.stream(
+                req.method.upper(),
+                req.url,
+                headers=req.headers or None,
+                content=body.encode("utf-8"),
+            ) as response:
+                # Fail loud on a transport/config error (4xx/5xx) instead of judging
+                # the error body as if it were the agent's reply — a misconfigured
+                # endpoint must NOT read as a clean scan. The engine records this as
+                # an attempt error (never a clean pass). A well-behaved agent
+                # returns 200 with any refusal in the body.
+                if response.status_code in (401, 403):
+                    # Host only, never req.url verbatim — a REST target's url can
+                    # carry a query-string token (e.g. ?key=SECRET), same reason
+                    # the remote MCP adapter's descriptor is host-only.
                     raise RuntimeError(
-                        f"HTTP agent at {_host_only(req.url)} returned a response over the "
-                        f"{_MAX_RESPONSE_BYTES}-byte cap - refusing to buffer it "
-                        "wholesale into memory (check the endpoint isn't streaming "
-                        "an unbounded body)."
+                        f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
+                        f"(method {req.method.upper()}) - the server rejected the request. "
+                        "Set the token in request.headers in the target file, e.g. "
+                        "`Authorization: Bearer ${MY_TOKEN}`, and export MY_TOKEN before "
+                        "you scan. See docs/http-agent.md."
                     )
-                chunks.append(chunk)
+                if response.status_code >= 400:
+                    # Host only, for the same reason as the 401/403 branch above:
+                    # this message reaches the console and scan_report.json.
+                    raise RuntimeError(
+                        f"HTTP agent at {_host_only(req.url)} returned {response.status_code} "
+                        f"(method {req.method.upper()}). Check the url/method/body in the target "
+                        "file's request block - the attack payload never reached the agent."
+                    )
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_RESPONSE_BYTES:
+                        raise RuntimeError(
+                            f"HTTP agent at {_host_only(req.url)} returned a response over the "
+                            f"{_MAX_RESPONSE_BYTES}-byte cap - refusing to buffer it "
+                            "wholesale into memory (check the endpoint isn't streaming "
+                            "an unbounded body)."
+                        )
+                    chunks.append(chunk)
+        except httpx.TimeoutException as exc:
+            # #216: a bare ReadTimeout/ConnectTimeout doesn't name what timed out
+            # or how to fix it -- request.timeout_s (default 30s) is the ONE knob
+            # this adapter's HTTP client is built from (_ensure_client); a
+            # local-model agent that legitimately takes longer per turn needs it
+            # raised in the target file.
+            raise RuntimeError(
+                f"HTTP agent at {_host_only(req.url)} timed out ({type(exc).__name__}) -- "
+                f"request.timeout_s is currently {req.timeout_s}s. Raise request.timeout_s "
+                "in the target file if the agent legitimately takes longer per turn. "
+                "See docs/http-agent.md."
+            ) from exc
         raw_text = b"".join(chunks).decode("utf-8", errors="replace")
         reply = _extract_reply(raw_text, req.response_path)
         if not reply.strip():

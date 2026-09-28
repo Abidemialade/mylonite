@@ -344,6 +344,13 @@ class TargetSpec:
     # endpoint + body template; ``command``/``args``/``url`` are unused. None for
     # every MCP/stdio target, so they are unaffected.
     request: RequestSpec | None = None
+    # #186/#216: optional per-target override for the MCP session's planner
+    # timeout AND ClientSession read timeout (mirrors RequestSpec.timeout_s,
+    # the rest transport's equivalent single knob). None keeps today's fixed
+    # 60s default for both — see _session_adapter.DEFAULT_PLANNER_TIMEOUT_S /
+    # DEFAULT_MCP_READ_TIMEOUT and factory.py, which threads this value into
+    # both constructor arguments. Ignored for transport: rest (unused there).
+    timeout_s: float | None = None
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""

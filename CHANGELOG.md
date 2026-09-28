@@ -85,6 +85,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subprocess launches, naming it. The token is never logged or written —
   it matches the credential-key pattern every other secret-shaped `env`
   value is already masked by.
+- **MCP and HTTP-agent launch timeouts are now configurable and name
+  themselves.** Three previously hard-coded, unnamed timeouts: an MCP
+  target file now takes an optional `timeout_s` (mirroring `request.timeout_s`),
+  overriding both the session's per-turn planner budget and the MCP
+  `ClientSession` read timeout — both defaulted to a fixed 60s with no way
+  to raise them, so a slow local model or server turned every attempt into
+  NOT TESTED. A planner/session timeout now names `timeout_s` in its
+  message. A `rest` target's HTTP client timeout (`request.timeout_s`,
+  default 30s) is now documented (`docs/http-agent.md`, `docs/target-file.md`)
+  and a timeout there now names `request.timeout_s` and its value instead of
+  a bare `ReadTimeout`.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is

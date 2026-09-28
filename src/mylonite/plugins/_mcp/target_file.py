@@ -110,6 +110,12 @@ class TargetFile(BaseModel):
     # a fixed enum: an unrecognised value still threads through harmlessly as
     # a plain string label.
     framework: str | None = None
+    # MCP transports (stdio/sse/http) only -- mirrors RequestSpec.timeout_s
+    # (the rest transport's equivalent). Overrides BOTH the session's
+    # planner_timeout_s and the MCP ClientSession's read timeout. None
+    # (default) keeps today's fixed 60s for both, so an existing target file
+    # loads unchanged. See target_registry.TargetSpec.timeout_s.
+    timeout_s: float | None = None
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -270,6 +276,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         url=tf.url,
         headers=dict(tf.headers),
         request=tf.request,
+        timeout_s=tf.timeout_s,
     )
 
 

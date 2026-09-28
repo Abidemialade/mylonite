@@ -236,6 +236,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         model: str = DEFAULT_MODEL,
         completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
+        mcp_read_timeout_s: float | None = None,
         controls: list[BoundaryControl] | None = None,
         launch_env: dict[str, str] | None = None,
         launch_command: str | None = None,
@@ -247,6 +248,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         self._model = model
         self._completion_fn = completion_fn
         self._planner_timeout_s = planner_timeout_s
+        # #186/#216: a target file's optional timeout_s overrides the MCP
+        # session's read timeout (ClientSession(..., read_timeout_seconds=...));
+        # None keeps today's fixed DEFAULT_MCP_READ_TIMEOUT (60s).
+        self._mcp_read_timeout: timedelta = (
+            timedelta(seconds=mcp_read_timeout_s)
+            if mcp_read_timeout_s is not None
+            else DEFAULT_MCP_READ_TIMEOUT
+        )
         # Boundary controls synthesize a guarded twin of THIS real target: they
         # guard only the planner's view (see invoke()). Empty = raw target.
         self._controls: list[BoundaryControl] = controls or []
@@ -504,7 +513,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
         except TimeoutError as exc:
             raise AdapterInvocationSkipped(
-                f"planner timed out after {self._planner_timeout_s}s on {payload.pattern_id}",
+                f"planner timed out after {self._planner_timeout_s}s (timeout_s) on "
+                f"{payload.pattern_id} -- raise timeout_s in the target file if this "
+                "target legitimately needs longer per turn",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
