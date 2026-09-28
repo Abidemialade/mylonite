@@ -41,13 +41,18 @@ pip install mcp-server-email     # or: pip install -e <clone>
 # 1. scaffold a target.yaml from its live tool surface (NO LLM call, no attack, no --authorize)
 mylonite scan --command "python" --arg "-m" --arg "mcp_email_server" --scaffold email.yaml
 
-# 2. edit email.yaml: declare weakness_classes [W4], the consequential tool (send_email),
-#    and an effect_probe that confirms a dispatch. Then prove the W4 confirmation control
-#    is load-bearing (control-efficacy differential, model held constant):
-mylonite validate --target-file email.yaml --authorize mcp-email --iterations 5
-mylonite ablate   --target-file email.yaml --authorize mcp-email --controls W4
+# 2. edit email.yaml: declare weakness_classes [W4], the consequential tool (send_email)
+#    under control_config.consequential_tools, and an effect_probe that confirms a dispatch.
 
-# 3. if KEPT, the emitted test is the external-differential artifact. Commit it.
+# 3. scan, generate the test, then validate it against the same target file
+#    (control-efficacy differential, model held constant). `validate` takes the
+#    generated test directory as its first argument.
+mylonite scan --target-file email.yaml --authorize mcp-email
+mylonite generate --latest --target-file email.yaml --prove-control --out .mylonite/generated/email
+mylonite validate .mylonite/generated/email --target-file email.yaml --authorize mcp-email --iterations 5
+mylonite ablate --target-file email.yaml --authorize mcp-email --controls W4
+
+# 4. if KEPT, the emitted test is the external-differential artifact. Commit it.
 ```
 
 > **SAFETY — mandatory.** `send_email` really sends. Point it at a **sandboxed SMTP sink**
@@ -59,18 +64,28 @@ control-shim guarded build stages/blocks it; the gap holds 5/5; a validated regr
 is emitted. Because W4 is about the *app's dispatch behavior*, not the model falling for an
 injection, this fires regardless of planner-model robustness.
 
-### Secondary — W3 SSRF / unrestricted egress: official `server-fetch`
+### Second proof (M03): two official reference servers, same W4 class
 
-`@modelcontextprotocol/server-fetch` (`uvx mcp-server-fetch`). Per upstream issue **#2317**
-it does not block internal/loopback IPs by default — a publicly-disclosed SSRF surface on
-the *official* reference server (recognizable to the exact wedge).
+The second external proof repeats the W4 class on two servers from the official MCP reference
+repository (github.com/modelcontextprotocol/servers, MIT / Apache-2.0), with exact versions
+pinned. Each changes state only inside a throwaway location, and each has its own read tool,
+so an `effect_probe` can confirm the change through the server itself:
 
-```powershell
-mylonite scan --command "uvx" --arg "mcp-server-fetch" --scaffold fetch.yaml
-# edit fetch.yaml: weakness_classes [W3], egress tool = fetch, effect_probe = an internal
-# URL the guarded (host-allowlist) build must refuse. Then:
-mylonite validate --target-file fetch.yaml --authorize mcp-fetch --iterations 5
-```
+| Server | Launch (pin the version) | Consequential tools to declare | Read tool for `effect_probe` |
+|---|---|---|---|
+| `@modelcontextprotocol/server-filesystem` | `npx -y @modelcontextprotocol/server-filesystem@<version> <throwaway-dir>` | `write_file`, `edit_file`, `move_file`, `create_directory` | `read_text_file` |
+| `@modelcontextprotocol/server-memory` | `npx -y @modelcontextprotocol/server-memory@<version>`, with `MEMORY_FILE_PATH` set to a throwaway file | `create_entities`, `create_relations`, `add_observations`, `delete_entities`, `delete_observations`, `delete_relations` | `search_nodes` |
+
+Use the same command sequence as the email target above: scaffold, scan, `generate
+--prove-control`, then `validate <generated dir> --target-file ...`. Start every run from fresh
+state (a new directory or memory file), so nothing left by one run can read as another run's
+effect. The pass rule is pre-registered in `verification/` before any counted run.
+
+> **Why not `server-fetch` (W3)?** Mylonite's W3 check points at destinations that can't be
+> reached, so on the raw server the fetch fails at the network, and only calls that succeeded
+> count as evidence. Both the raw and the guarded side then read "no finding", and no
+> differential is possible. Confirming W3 on a real fetch server needs a way to observe the
+> effect, which Mylonite does not have yet.
 
 ### Defended-precision baseline (E2 — the 0-FP number)
 
@@ -115,8 +130,12 @@ python -m verification.runner layer1 fetch --include-unlicensed
 python -m verification.runner layer1 emit-targets
 
 # 4. prove the control carries security on ONE challenge (differential-by-default):
-mylonite validate --target-file verification/.cache/dvmcp/targets/c3.yaml `
-    --authorize dvmcp-c3 --iterations 5
+#    scan, generate, then validate the generated test against the same target file.
+mylonite scan --target-file verification/.cache/dvmcp/targets/c3.yaml --authorize dvmcp-c3
+mylonite generate --latest --out .mylonite/generated/dvmcp-c3 `
+    --target-file verification/.cache/dvmcp/targets/c3.yaml
+mylonite validate .mylonite/generated/dvmcp-c3 `
+    --target-file verification/.cache/dvmcp/targets/c3.yaml --authorize dvmcp-c3 --iterations 5
 
 # 5. if it KEPT, the emitted test under .mylonite/ IS the artifact. Commit it.
 ```
