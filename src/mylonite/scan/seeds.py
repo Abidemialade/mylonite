@@ -716,7 +716,7 @@ _DRIVE_LITERAL_TOOL: dict[str, str] = {
 def _known_tool_names(descriptor: Any) -> frozenset[str] | None:
     """The descriptor's introspected tool names, or ``None`` when the surface
     is unknown OR empty — in both cases a literal-tool filter must never drop
-    a seed (R1): an unknown surface must never be treated as a known-absent
+    a seed (#211): an unknown surface must never be treated as a known-absent
     one, and an empty ``tools`` list is ambiguous (e.g. a descriptor built
     without ever introspecting) rather than a confirmed empty server.
     """
@@ -865,7 +865,20 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
             # (above) already covers the target's REAL tool.
             and not _literal_tool_missing(s, known_tools)
         ]
-        uncovered = sorted(classes - covered - {s.weakness for s in kitchen})
+        # The coverability check must count EVERY resolved seed, not just the
+        # W1/W2 subset `covered` tracks for kitchen-seed suppression. A W3/W4
+        # synthesised seed (e.g. execute_sql, fetch) is a GENERALISATION, not
+        # a suppression, of the kitchen seed (see the note above) — but it is
+        # still a real, runnable seed for that class. Reusing `covered` here
+        # reported a class as uncoverable while a seed for it was about to
+        # run: `weakness_classes: [W4]` against a target whose only
+        # consequential tool is `execute_sql` (declared or classifier-found)
+        # got `synth-w4-unconfirmed-execute_sql` in `seeds` and W4 in
+        # `uncoverable` in the SAME SeedCoverage — a false pre-flight refusal
+        # naming a class that was, in fact, about to be tested.
+        uncovered = sorted(
+            classes - {s.weakness for s in synthesized} - {s.weakness for s in kitchen}
+        )
         return SeedCoverage(
             seeds=tuple([*synthesized, *kitchen]),
             uncoverable={w: _uncoverable_reason(w, descriptor) for w in uncovered},
