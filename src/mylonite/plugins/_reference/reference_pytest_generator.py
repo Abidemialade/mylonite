@@ -150,8 +150,9 @@ def test_security_{slug}() -> None:
 #: from the artefact `_emit_generated_test` writes.
 #:
 #: The trailing character is constrained the same as the leading one (must be
-#: alphanumeric, not `.`/`_`/`-`) because `_emit_generated_test` in cli.py
-#: writes the co-located exploit JSON via `safe_slug(pattern_id)`, and
+#: alphanumeric, not `.`/`_`/`-`) because `_emit_generated_test` in
+#: mylonite.generate.wiring writes the co-located exploit JSON via
+#: `safe_slug(pattern_id)`, and
 #: `safe_slug` strips trailing `.`/`_`/`-`. A pattern_id ending in one of
 #: those (e.g. "foo-") would pass this regex unstripped, so the emitted
 #: `load_exploit(here / 'exploit_foo-.json')` call would look for a file that

@@ -97,10 +97,10 @@ def authorize_hint(target_file: Path) -> str | None:
 def bundled_authorize_value(target: str) -> str:
     """The ``--authorize`` value a bundled ``mcp:<family>[:<scope>]`` target needs.
 
-    Mirrors the check in ``cli._build_adapter_for_mcp``: a family that requires
-    a scope is authorized by that scope, every other family by its name. A
-    scope-requiring family given without a scope yields ``"<scope>"``, since no
-    value can authorize it until a scope is named.
+    Mirrors the check in ``mylonite.plugins.cli_targets._build_adapter_for_mcp``:
+    a family that requires a scope is authorized by that scope, every other
+    family by its name. A scope-requiring family given without a scope yields
+    ``"<scope>"``, since no value can authorize it until a scope is named.
     """
     from mylonite.plugins._mcp.target_registry import BUNDLED_TARGETS
 
@@ -121,8 +121,9 @@ def bundled_authorize_fix(target: str) -> str:
     A scope-requiring family given without a scope cannot be authorized by any
     ``--authorize`` value alone: the target also needs its ``:<scope>`` segment.
     That case gets the whole command form, in the same ``<scope>`` wording as
-    the check in ``cli._build_adapter_for_mcp``; every other case gets
-    :func:`authorize_fix` with the value :func:`bundled_authorize_value` derives.
+    the check in ``mylonite.plugins.cli_targets._build_adapter_for_mcp``; every
+    other case gets :func:`authorize_fix` with the value
+    :func:`bundled_authorize_value` derives.
     """
     value = bundled_authorize_value(target)
     if value == "<scope>":

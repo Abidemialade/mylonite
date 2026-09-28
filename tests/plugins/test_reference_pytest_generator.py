@@ -88,10 +88,11 @@ def test_emit_refuses_hostile_pattern_id(hostile: str) -> None:
 @pytest.mark.parametrize("trailer", ["foo-", "foo_", "foo."])
 def test_emit_refuses_pattern_id_ending_in_separator(trailer: str) -> None:
     """A pattern_id ending in `.`/`_`/`-` would pass validation unstripped, but
-    `_emit_generated_test` (cli.py) writes the co-located exploit JSON via
-    `safe_slug(pattern_id)`, which STRIPS a trailing `.`/`_`/`-`. That desync
-    would make the emitted `load_exploit(here / 'exploit_foo-.json')` call
-    look for a file `safe_slug` never wrote (it writes `exploit_foo.json`).
+    `_emit_generated_test` (mylonite.generate.wiring) writes the co-located
+    exploit JSON via `safe_slug(pattern_id)`, which STRIPS a trailing
+    `.`/`_`/`-`. That desync would make the emitted
+    `load_exploit(here / 'exploit_foo-.json')` call look for a file
+    `safe_slug` never wrote (it writes `exploit_foo.json`).
     """
     with pytest.raises(UnsafeExploitRecord):
         ReferencePytestGenerator().emit(_exploit(pattern_id=trailer))
