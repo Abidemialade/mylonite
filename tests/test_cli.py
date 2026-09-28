@@ -754,6 +754,38 @@ def test_check_suggested_weakness_classes_never_contradicts_its_own_table(
     assert "Consequential action" not in table_region
 
 
+def test_check_does_not_suggest_w2_when_the_surface_cannot_test_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181b: `check` used to hard-code {"W1", "W2"} as an unconditional
+    baseline suggestion, so it could suggest declaring W2 on a surface
+    `scan` would then refuse outright (no store-and-recall pair, no
+    content-processing tool). The suggestion is now gated through the same
+    coverability check `scan` applies."""
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    def _desc() -> Any:
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="update_settings",
+                    description="Update a stored settings value.",
+                    json_schema={"properties": {"key": {"type": "string"}}},
+                )
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "'W2'" not in result.output
+    assert "'W1'" in result.output
+
+
 def test_scan_scaffold_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
