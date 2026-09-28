@@ -139,7 +139,12 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
   record's handle so it can drive a read-back.
 - **`effect_probe`** (`EffectProbeSpec`) — confirms the damage end-to-end, not just that
   a tool was called. `expect_marker` proves it fired; `deferred_markers` mean the action
-  was *defended* (e.g. queued for approval), not a success.
+  was *defended* (e.g. queued for approval), not a success. Pick a marker the agent's
+  own call carries, such as the recipient address or `{payload}`. A fixed status word
+  like `status=sent` can only be tied to an attempt through a tool listed in
+  `control_config.consequential_tools` (or `egress_tools`); with neither declared,
+  `scan`, `validate` and `check` print a warning, because that effect can never read
+  `"true"` and `validate` cannot keep the finding.
 - **`control_config`** (`ControlConfig`) — tells the synthetic guarded build which tools
   carry egress (W3), consequential actions (W4), and untrusted-data results to quarantine
   (`read_tool_names`, W2), the allowlist, which controls you've `declared`, and whether to

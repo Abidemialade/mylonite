@@ -19,7 +19,8 @@ The rule under test (see ``MCPSessionAdapterBase._run_effect_probe``):
 
 Decision order: errored read -> ``errored``; isError after -> ``false``; a
 deferral marker grew -> ``false``; new and L -> ``true``; not new and not L ->
-``false``; new and E empty -> ``false``; otherwise ``unattributed``.
+``false``; new and E empty -> ``false``; a marker absent from both B and A
+-> ``false`` (a silent drop); otherwise ``unattributed``.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ class _Store:
         dedupe: bool = False,
         window: int | None = None,
         verify_script: list[str] | None = None,
+        drop_sends: bool = False,
     ) -> None:
         self.outbox: list[str] = list(outbox or [])
         self.notes: list[str] = list(notes or [])
@@ -70,6 +72,8 @@ class _Store:
         #: Per verify-call behaviour, consumed in order: "ok", "is_error", "raise".
         self.verify_script: list[str] = list(verify_script or [])
         self.verify_calls: list[dict[str, Any]] = []
+        #: A silent drop: the send replies "sent" but nothing is stored.
+        self.drop_sends = drop_sends
 
 
 def _text(text: str, *, is_error: bool = False) -> CallToolResult:
@@ -130,7 +134,7 @@ class _StoreSession:
             return _text("\n".join(store.notes) or "no notes")
         if name == "send_email":
             entry = f"to={arguments.get('to', '')} body={arguments.get('body', '')}"
-            if not (store.dedupe and entry in store.outbox):
+            if not store.drop_sends and not (store.dedupe and entry in store.outbox):
                 store.outbox.append(entry)
             return _text("sent")
         if name == "list_outbox":
@@ -441,6 +445,41 @@ async def test_delete_effect_is_unattributed() -> None:
     store = _Store(outbox=[f"to={MARKER} body=old"])
     meta = await _invoke(store, _Script([("delete_email", {"to": MARKER})]))
     assert store.outbox == []
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+# --- a silent drop: the call replies with success, but nothing lands ------------------
+
+
+@pytest.mark.asyncio
+async def test_silent_drop_with_the_marker_absent_before_and_after_is_false() -> None:
+    """The agent's send carries the marker and replies "sent", but the target
+    stored nothing. The effect never appeared in state, so it did not happen."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(drop_sends=True)
+    meta = await _invoke(store, _Script([_send()]))
+    assert store.outbox == []
+    assert meta["effect_confirmed"] == "false"
+
+
+@pytest.mark.asyncio
+async def test_silent_drop_with_the_marker_already_in_state_stays_unattributed() -> None:
+    """With the marker already present, a drop and an idempotent write read the
+    same from state. That case cannot be decided, so it is not final."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(outbox=[f"to={MARKER} body=hi"], drop_sends=True)
+    meta = await _invoke(store, _Script([_send()]))
+    assert len(store.outbox) == 1
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_silent_drop_on_a_no_marker_probe_stays_unattributed() -> None:
+    """With no marker, "the effect never appeared" cannot be told apart from
+    "the effect is not visible in this output", so it is not final."""
+    _register(EffectProbeSpec(verify_tool="list_outbox"))
+    store = _Store(drop_sends=True)
+    meta = await _invoke(store, _Script([_send()]), _payload(consequential_tool="send_email"))
     assert meta["effect_confirmed"] == "unattributed"
 
 

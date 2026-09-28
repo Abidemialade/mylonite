@@ -360,6 +360,16 @@ def test_check_reports_structural_findings_and_exits_zero(
     assert "6 structural finding(s) across 3 tool(s)." in out
 
 
+def test_check_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    target_file = _write_check_target(tmp_path, extra=_STATUS_WORD_PROBE_YAML)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert _STATUS_WORD_WARNING in (result.stderr or result.output)
+
+
 def test_check_reports_the_lethal_trifecta_legs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1040,6 +1050,33 @@ def test_scan_custom_target_file_dry_run_enumerates_seeds(
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert "dry-run" in result.stdout or "attempts" in result.stdout
     target_registry.clear_runtime_targets()
+
+
+_STATUS_WORD_PROBE_YAML = (
+    "weakness_classes: [W4]\n"
+    "effect_probe:\n  verify_tool: list_outbox\n  expect_marker: status=sent\n"
+)
+_STATUS_WORD_WARNING = "never read 'true'"
+
+
+def test_scan_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\n" + _STATUS_WORD_PROBE_YAML,
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["scan", "--target-file", str(p), "--authorize", "acme", "--dry-run"]
+    )
+    target_registry.clear_runtime_targets()
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert _STATUS_WORD_WARNING in (result.stderr or result.output)
 
 
 def test_scan_custom_target_without_weakness_classes_is_loud(
@@ -2718,6 +2755,26 @@ def test_validate_refuses_a_custom_target_without_authorize(tmp_path: Path) -> N
     result = runner.invoke(app, ["validate", str(out_dir)])
     assert result.exit_code == EXIT_CONFIG
     assert "--authorize" in (result.stderr or result.output)
+
+
+def test_validate_warns_about_a_fixed_marker_with_no_declared_consequential_tool(
+    tmp_path: Path,
+) -> None:
+    """The warning is printed as soon as the target file loads, before the
+    --authorize refusal, so no live run is needed to see it."""
+    out_dir = tmp_path / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
+    )
+    (out_dir / "target.yaml").write_text(
+        "family: myapp\ncommand: python\nargs: [-m, my_server]\n" + _STATUS_WORD_PROBE_YAML,
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_CONFIG
+    assert _STATUS_WORD_WARNING in (result.stderr or result.output)
 
 
 def test_validate_missing_target_file_suggests_scaffold(tmp_path: Path) -> None:

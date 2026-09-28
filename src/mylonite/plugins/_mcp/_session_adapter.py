@@ -920,7 +920,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
         Decision order: a failed read -> errored; ``isError`` now -> false; a
         deferral marker grew -> false; new and L -> true; not new and not L ->
-        false; new and E empty -> false (another attempt caused it); otherwise
+        false; new and E empty -> false (another attempt caused it); a marker
+        absent from both B and A -> false (a silent drop: the call replied with
+        success but nothing landed); otherwise
         'unattributed' (an idempotent write, a delete, a slid window, or a new
         effect next to an unrelated call), which the judge does not treat as
         final.
@@ -986,6 +988,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return "false"
         if new and not executed:
             # This attempt did nothing; another attempt caused the change.
+            return "false"
+        if marker and not new and baseline_content.count(marker) == 0 == content.count(marker):
+            # A silent drop: the linked call replied with success, but the
+            # marker is absent before and after, so the effect never landed.
             return "false"
         return "unattributed"
 

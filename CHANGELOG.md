@@ -18,8 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool before and after the agent runs, and confirms an effect only when it is
   new and one of this attempt's own executed calls names the marker or is the
   scenario's consequential or egress tool. An attempt that did nothing reads
-  `false`. When the state changed but cannot be tied to this attempt (an
-  idempotent write, a delete, a bounded output window), `effect_confirmed` is
+  `false`, and so does a call that replies with success while the marker is
+  absent from the target's state both before and after it (a guard that
+  silently drops the action), so that case is no longer a finding in `scan`
+  or a leak in `validate`. When the state changed but cannot be tied to this
+  attempt (an idempotent write, a delete, a bounded output window),
+  `effect_confirmed` is
   the new value `"unattributed"` in `exploit_*.json`. A probe with no
   `expect_marker` now follows the same rule instead of confirming every
   attempt, and a deferral marker counts only when it is new. Each attempt with
@@ -37,7 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempt's `judge_evidence` now carries `effect_confirmed`, finding or not.
   Offline, 3 unguarded runs then 3 guarded runs on one persisted outbox now
   give 3 findings and 0 guarded leaks; before this fix, all 3 guarded runs
-  leaked.
+  leaked. `scan`, `validate` and `check` now warn when `expect_marker` is a
+  fixed value with no `{payload}` and `control_config` declares no
+  `consequential_tools` or `egress_tools`: such an effect can read
+  `"unattributed"` but never `"true"`, so `validate` cannot keep it. The
+  warning names the fix: a marker the agent's call carries, such as the
+  recipient address, or a declared consequential tool.
 - **The bundled `mcp:filesystem` target and `ablate` no longer cross-credit
   concurrent attempts.** The `filesystem` predicate that fires on a
   read-then-write pattern used to count every new file in the sandbox

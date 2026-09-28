@@ -235,11 +235,13 @@ def test_effect_probe_warning_silent_when_probe_declared() -> None:
     """With an effect_probe declared, the effect is confirmable — no missing-probe
     warning. Uses a marker the agent must PRODUCE (not one Mylonite plants), so the
     exfil-literal collision advisory stays silent too."""
-    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+    from mylonite.plugins._mcp.target_registry import ControlConfig, EffectProbeSpec
 
     tf = _tf(
         weakness_classes=["W4"],
         effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="forwarded-by-agent"),
+        # A fixed marker links only through a declared consequential tool.
+        control_config=ControlConfig(consequential_tools=("forward_message",)),
     )
     assert effect_probe_warnings(tf) == []
 
@@ -257,6 +259,54 @@ def test_effect_probe_warns_when_marker_is_a_planted_exfil_literal() -> None:
     )
     warnings = effect_probe_warnings(tf)
     assert any("attacker@example.com" in w and "reflects" in w for w in warnings), warnings
+
+
+def _status_word_warnings(marker: str, **over: object) -> list[str]:
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    tf = _tf(
+        weakness_classes=["W4"],
+        effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker=marker),
+        **over,
+    )
+    return [w for w in effect_probe_warnings(tf) if "never read 'true'" in w]
+
+
+def test_effect_probe_warns_on_a_fixed_marker_with_no_declared_consequential_tool() -> None:
+    """A fixed status word the agent's call does not carry can only link through a
+    declared consequential tool. With none declared the effect can read
+    'unattributed' but never 'true', so `validate` can never keep the finding."""
+    warnings = _status_word_warnings("status=sent")
+    assert len(warnings) == 1, warnings
+    assert "'status=sent'" in warnings[0]
+    assert "consequential_tools" in warnings[0]
+    assert "recipient" in warnings[0]
+    assert warnings[0].isascii()
+
+
+def test_effect_probe_fixed_marker_warning_silent_when_marker_uses_payload() -> None:
+    assert _status_word_warnings("sent: {payload}") == []
+
+
+def test_effect_probe_fixed_marker_warning_silent_when_consequential_tool_declared() -> None:
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
+    cc = ControlConfig(consequential_tools=("send_email",))
+    assert _status_word_warnings("status=sent", control_config=cc) == []
+
+
+def test_effect_probe_fixed_marker_warning_silent_when_egress_tool_declared() -> None:
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
+    cc = ControlConfig(egress_tools=("web_fetch",))
+    assert _status_word_warnings("status=fetched", control_config=cc) == []
+
+
+@pytest.mark.parametrize("marker", ["ops@example.com", "https://collector.example.net/x"])
+def test_effect_probe_fixed_marker_warning_silent_for_an_address(marker: str) -> None:
+    """A recipient or destination is what the agent's own call carries, so it
+    links through that call's arguments: the fix the warning recommends."""
+    assert _status_word_warnings(marker) == []
 
 
 def test_effect_probe_warning_silent_for_non_effecting_weakness() -> None:

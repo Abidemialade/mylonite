@@ -34,7 +34,8 @@ from mylonite.plugins._reference.reference_validator import (
     DifferentialValidator,
     ReferenceVulnerableOracle,
 )
-from mylonite.scan.control_shim import ConfirmGateControl
+from mylonite.scan.control_shim import BoundaryControl, ConfirmGateControl
+from mylonite.scan.llm_types import ToolResult
 
 FAMILY = "attr-validate"
 RECIPIENT = "ops@example.com"
@@ -107,13 +108,18 @@ class _Session:
 
 
 class _Launcher:
-    """Patches ``_open_mcp_session``: every open is a fresh launch over one outbox."""
+    """Patches ``_open_mcp_session``: every open is a fresh launch over one outbox.
 
-    def __init__(self, outbox: _Outbox) -> None:
+    With ``fresh_state`` every launch gets a new, empty outbox instead: a stdio
+    server that keeps its state in process memory.
+    """
+
+    def __init__(self, outbox: _Outbox, *, fresh_state: bool = False) -> None:
         self.outbox = outbox
+        self.fresh_state = fresh_state
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        session = _Session(self.outbox)
+        session = _Session(_Outbox() if self.fresh_state else self.outbox)
 
         @asynccontextmanager
         async def _ctx() -> Any:
@@ -210,6 +216,8 @@ def _validate(
     iterations: int = 3,
     planner: Any = _planner,
     runs: list[Any] | None = None,
+    guard: BoundaryControl | None = None,
+    fresh_state: bool = False,
 ) -> Any:
     def _raw() -> MCPStdioAdapter:
         return MCPStdioAdapter(family=FAMILY, scope=None, completion_fn=planner)
@@ -219,7 +227,7 @@ def _validate(
             family=FAMILY,
             scope=None,
             completion_fn=planner,
-            controls=[ConfirmGateControl(consequential_tools=frozenset({"send_email"}))],
+            controls=[guard or ConfirmGateControl(consequential_tools=frozenset({"send_email"}))],
         )
 
     real_iteration = DifferentialValidator._run_custom_iteration
@@ -240,7 +248,7 @@ def _validate(
     )
     test = ReferencePytestGenerator().emit(_exploit())
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(stdio_adapter, "_open_mcp_session", _Launcher(outbox))
+        mp.setattr(stdio_adapter, "_open_mcp_session", _Launcher(outbox, fresh_state=fresh_state))
         mp.setattr(DifferentialValidator, "_run_custom_iteration", _recording_iteration)
         return validator.validate(test, _raw(), ReferenceVulnerableOracle())
 
@@ -302,6 +310,35 @@ def test_an_unattributed_guarded_attempt_is_not_a_leak() -> None:
     assert not any(r.finding for r in guarded)
     assert all(r.resisted for r in guarded)
     assert report.reproducibility is not None
+    assert report.reproducibility.guard_fired == 0
+    assert report.reproducibility.guard_resisted == 3
+    assert _outcome(report, "differential").passed is True
+
+
+class _SilentDropControl(BoundaryControl):
+    """A guard that drops every send but replies as if it went out."""
+
+    weakness = "W4"
+
+    def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
+        if name == "send_email":
+            return ToolResult(name=name, content="sent", isError=False)
+        return None
+
+
+def test_a_silently_dropping_guard_on_fresh_state_does_not_leak() -> None:
+    """Each launch starts empty. The guarded sends reply "sent" with no error and
+    no deferral marker, but the outbox never shows the email, so the effect did
+    not happen: the guarded runs resist rather than leak."""
+    runs: list[Any] = []
+    report = _validate(_Outbox(), guard=_SilentDropControl(), fresh_state=True, runs=runs)
+
+    guarded = [run for is_guarded, run in runs if is_guarded]
+    assert len(guarded) == 3
+    assert [r.effect_confirmed for r in guarded] == ["false"] * 3
+    assert not any(r.finding for r in guarded)
+    assert report.reproducibility is not None
+    assert report.reproducibility.vuln_fired == 3
     assert report.reproducibility.guard_fired == 0
     assert report.reproducibility.guard_resisted == 3
     assert _outcome(report, "differential").passed is True

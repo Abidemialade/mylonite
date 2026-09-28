@@ -2229,7 +2229,7 @@ def _validate_custom(
     from mylonite.gate.mitigation import weakness_class_for
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_adapter_for_spec
-    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file_and_warn
     from mylonite.plugins._mcp.twins import plan_twins
     from mylonite.plugins._reference.reference_validator import (
         DifferentialValidator,
@@ -2243,7 +2243,7 @@ def _validate_custom(
         )
         raise typer.Exit(code=EXIT_CONFIG)
     try:
-        tf = load_target_file(target_file)
+        tf = load_target_file_and_warn(target_file)
         spec = build_target_spec(tf)
     except Exception as exc:
         _exit_if_missing_target_file(exc, target_file)
@@ -4577,7 +4577,7 @@ def check(
     """
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import build_mcp_adapter
-    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+    from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file_and_warn
     from mylonite.report.render import trifecta_lines
     from mylonite.scan.control_shim import (
         consequential_tool_names,
@@ -4604,7 +4604,7 @@ def check(
             )
             raise typer.Exit(code=EXIT_CONFIG)
         try:
-            tf = load_target_file(target_file)
+            tf = load_target_file_and_warn(target_file)
             spec = build_target_spec(tf)
         except Exception as exc:
             _exit_if_missing_target_file(exc, target_file)
