@@ -331,16 +331,42 @@ def test_write_trends_header_names_the_regenerate_command(tmp_path: Path) -> Non
 
 
 def test_render_trends_reports_numeric_layer1_recall(tmp_path: Path) -> None:
+    # A version other than 0.9.0: 0.9.0/layer1 is deliberately special-cased
+    # (see _KNOWN_DEFECTIVE) to render an "unmeasured" annotation rather than
+    # its number, so a numeric-rendering test needs an unaffected version.
+    results_root = tmp_path / "results"
+    _write_meta(
+        results_root, "0.11.0", layers={"layer1": "ran", "layer2-agentdojo": "ran", "layer3": "ran"}
+    )
+    _write_layer_summaries(results_root, "0.11.0", recall=0.75)
+
+    table = render_trends(results_root)
+
+    row = next(line for line in table.splitlines() if line.startswith("| 0.11.0"))
+    assert "75.0%" in row
+
+
+def test_render_trends_annotates_the_known_defective_0_9_0_layer1_result(
+    tmp_path: Path,
+) -> None:
+    """0.9.0's committed layer1-recall.json is left as recorded (never edited),
+    but the harness that produced it had two defects (issue #136 and its
+    follow-up) that could each force a miss regardless of what the scan
+    actually found -- so the table must not render its bare number."""
     results_root = tmp_path / "results"
     _write_meta(
         results_root, "0.9.0", layers={"layer1": "ran", "layer2-agentdojo": "ran", "layer3": "ran"}
     )
-    _write_layer_summaries(results_root, "0.9.0", recall=0.75)
+    _write_layer_summaries(results_root, "0.9.0", recall=0.0)
 
     table = render_trends(results_root)
 
     row = next(line for line in table.splitlines() if line.startswith("| 0.9.0"))
-    assert "75.0%" in row
+    cells = [c.strip() for c in row.split("|")]
+    # | Version | Date | Model | Layer1 | Layer2 AgentDojo | dh | ds | Layer3 | -> index 4
+    assert cells[4] != "0.0%"
+    assert "unmeasured" in cells[4]
+    assert "FINDINGS.md" in cells[4]
 
 
 # --- TRENDS.md is generated, so pin that it is current ----------------------

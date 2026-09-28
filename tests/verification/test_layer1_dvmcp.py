@@ -191,6 +191,112 @@ def test_score_reports_marks_all_skipped_report_as_untested_not_missed(tmp_path:
     assert by_cid["challenge1"]["untested"] is True
 
 
+# --- #136 follow-up: `found` from a real scan directory, not a bare report --
+
+
+def _write_real_scan_dir(tmp_path: Path, *, findings: int, weakness: str) -> Path:
+    """A real `write_artefacts` output for one challenge: scan_report.json +
+    one exploit per finding, stamped with `weakness` the way a real attack
+    module does (`payload.metadata["weakness"] = seed.weakness`)."""
+    from mylonite.contracts._types import (
+        AdapterResponse,
+        ComplianceTags,
+        ExploitRecord,
+        Payload,
+        ScanAttempt,
+        ScanReport,
+    )
+    from mylonite.scan.artefacts import write_artefacts
+    from mylonite.scan.engine import ScanResult
+
+    attempts = [
+        ScanAttempt(
+            seed_id=f"seed-{i}",
+            pattern_id=f"seed-{i}",
+            outcome="finding" if i < findings else "no_finding",
+            verdict_mechanism="predicate",
+            verdict_reason="caught" if i < findings else "rejected",
+        )
+        for i in range(max(findings, 1))
+    ]
+    report = ScanReport(
+        target_id="mcp:dvmcp-c4",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=attempts,
+        findings_count=findings,
+        mylonite_version="0.10.4",
+    )
+    exploits = [
+        ExploitRecord(
+            target_id="mcp:dvmcp-c4",
+            pattern_id=f"seed-{i}",
+            payload=Payload(
+                pattern_id=f"seed-{i}",
+                channel="tool-result",
+                body="x",
+                metadata={"weakness": weakness},
+            ),
+            response=AdapterResponse(payload_pattern_id=f"seed-{i}", raw_response="ok"),
+            success_reason="tool description mutated after approval",
+            compliance=ComplianceTags(owasp_llm=["LLM01"]),
+        )
+        for i in range(findings)
+    ]
+    return write_artefacts(ScanResult(report=report, exploits=exploits), tmp_path)
+
+
+def test_score_reports_resolves_found_from_a_real_scan_directory(tmp_path: Path) -> None:
+    """Challenge 4 (W1) reported as the exact directory `mylonite scan
+    --output-dir` writes, copied straight in under the family name -- the
+    workflow `verification/runner.py` now tells an operator to use."""
+    scratch = tmp_path / "scratch"
+    scan_dir = _write_real_scan_dir(scratch, findings=1, weakness="W1")
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    import shutil
+
+    shutil.copytree(scan_dir, reports_dir / "dvmcp-c4")
+
+    _rows, matrix, report = layer1_run.score_reports(reports_dir)
+    assert report["exercised_challenges"] == 1
+    assert report["found"] == 1
+    assert matrix.tp == 1
+    by_cid = {row["challenge"]: row for row in report["per_challenge"]}
+    assert by_cid["challenge4"]["found"] is True
+    assert by_cid["challenge4"]["untested"] is False
+
+
+def test_score_reports_errors_on_a_bare_scan_report_json_with_no_exploit_files(
+    tmp_path: Path,
+) -> None:
+    """The exact historical mistake (#136 follow-up): an operator copies only
+    `scan_report.json` -- which has no per-attempt weakness class -- instead
+    of the whole scan directory. That must be a loud, named error, never a
+    silent found=0."""
+    from verification._scan_dir import ScanDirIntegrityError
+
+    (tmp_path / "dvmcp-c4.json").write_text(
+        json.dumps(
+            {
+                "target_id": "mcp:dvmcp-c4",
+                "attack_modules": [],
+                "provider": "anthropic",
+                "model": "stub",
+                "elapsed_seconds": 1.0,
+                "attempts": [{"seed_id": "s", "pattern_id": "s", "outcome": "finding"}],
+                "findings_count": 1,
+                "mylonite_version": "0.10.4",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ScanDirIntegrityError, match=r"exploit_\*\.json"):
+        layer1_run.score_reports(tmp_path)
+
+
 def test_fetch_dvmcp_requires_optin() -> None:
     # No network: the gate raises before any clone.
     with pytest.raises(RuntimeError, match="no LICENSE"):

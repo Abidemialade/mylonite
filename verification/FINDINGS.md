@@ -39,11 +39,12 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > **unresolved at this sample size**, not fixed — the split gap is still the
 > finding, and settling it needs a recording large enough to measure.
 >
-> **Layer 1 was not run.** It needs the DVMCP challenge servers standing up, and
-> its scorer still counts an untested challenge as a miss while `crosswalk.yaml`
-> maps two challenges to W3 on servers exposing no egress tool (#136). Re-quoting
-> the 0/8 without fixing that would repeat a figure already known to be wrong, so
-> the layer is recorded as `not-run` rather than carried forward.
+> **Layer 1 was not run.** It needs the DVMCP challenge servers standing up, and at
+> the time its scorer still counted an untested challenge as a miss, while
+> `crosswalk.yaml` maps two challenges to W3 on servers exposing no egress tool
+> (#136 — the scorer defect is since fixed; the crosswalk question is still open).
+> Re-quoting the 0/8 without fixing that would have repeated a figure already known
+> to be wrong, so the layer is recorded as `not-run` rather than carried forward.
 >
 > ### 0.9.0, measured 2026-08-29
 >
@@ -72,18 +73,23 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > **Treat the DVMCP 0/8 as unmeasured, not as evidence either way.** The harness that
 > produced it had two defects that could each force a miss regardless of what the scan
 > actually found: the scorer folded any untested challenge into `missed` instead of
-> reporting it separately (fixed,
-> [issue #136](https://github.com/Abidemialade/mylonite/issues/136)), and the documented
-> campaign workflow saves a `scan_report.json` copy that carries no per-attempt weakness
-> class, so `found` reads 0 whatever the scan did (still open — a real campaign needs both
-> a `scan_report.json` and a `report --json` finding bundle folded together for `found` to
-> be meaningful; see `verification/layer1_runnable/run.py`'s module docstring). The
-> retrospective observation at the time was that every challenge was genuinely exercised
-> (9 attempts; the first attempt at this run had 3 challenges with *zero* exercised
-> attempts, because the target generator inferred the wrong weakness classes) — that
-> observation stands as a record of what was seen, but no per-attempt artefact survives
-> from that run to independently verify it, and it does not resolve the `found`-count
-> defect above. Layer 1 needs a re-run before recall is a number anyone can act on.
+> reporting it separately, and the documented campaign workflow saved a bare
+> `scan_report.json` copy, which carries no per-attempt weakness class, so `found` read 0
+> whatever the scan did. **Both are now fixed**
+> ([issue #136](https://github.com/Abidemialade/mylonite/issues/136)): the scorer reports
+> `exercised_challenges`/`untested_challenges` separately, and it reads the WHOLE scan
+> directory `mylonite scan`'s `--output-dir` writes — `scan_report.json` for `exercised`,
+> plus the co-located `exploit_*.json` files (resolved through
+> `mylonite.gate.mitigation.weakness_class_for`) for `found`. A bare-report copy with no
+> exploit files is refused with a named error (`verification._scan_dir.ScanDirIntegrityError`)
+> rather than silently scored `found=0`. The retrospective observation at the time was
+> that every challenge was genuinely exercised (9 attempts; the first attempt at this run
+> had 3 challenges with *zero* exercised attempts, because the target generator inferred
+> the wrong weakness classes) — that observation stands as a record of what was seen, but
+> no per-attempt artefact survives from that run to independently verify it, and a
+> genuinely exercised challenge is not the same claim as a correctly-scored one. 0.9.0's
+> figure is left as recorded and stays labelled unmeasured; Layer 1 needs a re-run with
+> the fixed harness before recall is a number anyone can act on.
 >
 > A separate, still-open question from that same investigation: `crosswalk.yaml` maps
 > challenges 3 and 7 to **W3**, although neither server exposes an egress tool — so W3 is
@@ -147,13 +153,11 @@ still single-model.**
 
 - **Coverage: 8/8 attempted** (before the Gap-1 fix, **all 8 skipped** with
   `SeedArmUnavailable` — the seeds didn't fit a non-kitchen-sink tool surface).
-- **Recall is unmeasured.** The published figure read 0/8, but the harness that
-  produced it had two defects that could each force a miss regardless of what the scan
-  actually found: the scorer folded any untested challenge into "missed" instead of
-  reporting it separately (fixed, issue #136), and the documented campaign workflow
-  saves a report with no per-attempt weakness class, so the found count reads 0
-  whatever the scan did (still open). See the 0.9.0 note above; treat 0/8 as unmeasured
-  until Layer 1 is re-run.
+- **Recall is now measurable again; the published figure stays unmeasured.** 0.9.0's
+  0/8 came from a harness with two defects that could each force a miss regardless of
+  what the scan actually found; both are fixed (issue #136) — see the 0.9.0 note above
+  for what changed and what an operator now runs. 0.9.0's figure is left as recorded and
+  stays labelled unmeasured until Layer 1 is re-run with the fixed harness.
 
 ## Layer 2 — academic benchmarks, judge verification
 
@@ -219,8 +223,9 @@ broad cross-model number still needs non-Claude provider keys (absent here).
 - Judge positive-class verified on real third-party positives (AgentDojo).
 
 **Open / honest gaps:**
-- No model-fooling catch on an external app is currently measurable: DVMCP recall is
-  unmeasured pending a harness fix, not a clean negative (see the Layer 1 note above).
+- No model-fooling catch confirmed on an external app yet: DVMCP recall is measurable
+  again (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not
+  been re-run (see the Layer 1 note above).
 - Judge ≠ AgentDojo oracle (F1 0.41) — semantic-mismatch to investigate.
 - No external *defended* server for a true external precision number.
 - Samples are small + Claude-only; the opt-in `verification.yml` workflow runs larger N.

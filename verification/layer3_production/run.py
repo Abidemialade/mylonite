@@ -31,13 +31,15 @@ from pathlib import Path
 from typing import Any
 
 from mylonite.corpus import CaseResult, confusion_matrix
+from verification._scan_dir import EXERCISED_OUTCOMES, FINDING
 
 logger = logging.getLogger(__name__)
 
-# Scan-attempt outcomes that count as a real, completed probe (a negative case on
-# a known-good target). Skips / errors are "not tested" and excluded.
-_FINDING = "finding"
-_NO_FINDING = "no_finding"
+# Scan-attempt outcomes that count as a real, completed probe (a negative case
+# on a known-good target). Skips / errors are "not tested" and excluded.
+# Single definition lives in verification._scan_dir; layer1_runnable/run.py
+# imports the same one, so "exercised" means one thing across the harness.
+_FINDING = FINDING
 
 
 def _load_scan_report(scan_dir_or_file: Path) -> dict[str, Any]:
@@ -84,7 +86,7 @@ def precision_report(scan_dir_or_file: Path, *, target_label: str = "") -> dict[
     false_positives: list[dict[str, Any]] = []
     for a in attempts:
         outcome = a.get("outcome")
-        if outcome not in (_FINDING, _NO_FINDING):
+        if outcome not in EXERCISED_OUTCOMES:
             continue  # skipped / error -> not a completed probe
         detected = outcome == _FINDING
         rows.append(
