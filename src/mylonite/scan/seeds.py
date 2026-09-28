@@ -18,14 +18,12 @@ so this file has no runtime dependency on the predicate implementations.
 
 from __future__ import annotations
 
-import logging
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite.contracts import ComplianceTags
-
-logger = logging.getLogger(__name__)
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
@@ -700,12 +698,96 @@ def _can_plant_content(descriptor: Any) -> bool:
     return bool(getattr(descriptor, "can_plant_untrusted_content", False))
 
 
-def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
-    """Resolve the seeds applicable to a target, descriptor-first.
+#: The literal tool a catalogue seed is hard-keyed to, by ``drive`` — the seeds
+#: whose ``setup == "no_setup"`` clause used to hand them to ANY target
+#: regardless of its tool surface (#211). Every no_setup kitchen-sink seed's
+#: drive is listed here or has no literal-tool dependency (e.g.
+#: ``read_note_direct``, ``verbatim``), in which case it is never dropped by
+#: :func:`_literal_tool_missing`. Seeds gated by ``setup="seed_note"`` are
+#: unaffected — they already depend on plant capability (``can_plant`` /
+#: family match) rather than running unconditionally, so this catalogue is
+#: deliberately scoped to the ``no_setup`` seeds that had no other gate at all.
+_DRIVE_LITERAL_TOOL: dict[str, str] = {
+    "send_email_direct": "send_email",
+    "fetch_url_direct": "web_fetch",
+}
 
-    The attack modules call this (through the ``seeds`` module namespace, so a
-    single patch point governs selection) instead of binding ``target_family``
-    by value.
+
+def _known_tool_names(descriptor: Any) -> frozenset[str] | None:
+    """The descriptor's introspected tool names, or ``None`` when the surface
+    is unknown OR empty — in both cases a literal-tool filter must never drop
+    a seed (R1): an unknown surface must never be treated as a known-absent
+    one, and an empty ``tools`` list is ambiguous (e.g. a descriptor built
+    without ever introspecting) rather than a confirmed empty server.
+    """
+    tools = getattr(descriptor, "tools", None) or []
+    if not tools:
+        return None
+    return frozenset(name for t in tools if (name := getattr(t, "name", "")))
+
+
+def _literal_tool_missing(seed: SeedPattern, known_tools: frozenset[str] | None) -> bool:
+    """True when ``seed`` is hard-keyed to a literal tool this target's KNOWN,
+    non-empty tool surface does not have (#211's root cause)."""
+    if known_tools is None:
+        return False
+    literal = _DRIVE_LITERAL_TOOL.get(seed.drive)
+    if not literal:
+        return False
+    return literal not in known_tools
+
+
+def _uncoverable_reason(weakness: str, descriptor: Any) -> str:
+    """A human-actionable reason ``weakness`` produced zero seeds for this
+    descriptor — the "why" half of the coverability helper (#181b)."""
+    tools = list(getattr(descriptor, "tools", None) or [])
+    if getattr(descriptor, "kind", None) == "http-agent":
+        return (
+            "this is a black-box HTTP agent with no tool surface to probe — "
+            f"remove {weakness} from weakness_classes (only W2, via direct prompt "
+            "injection, applies to a target with no tools)"
+        )
+    if not tools:
+        return (
+            f"no tool surface was introspected for this target, so {weakness} has "
+            f"nothing to probe — remove {weakness} from weakness_classes, or check "
+            "that the target launches and lists tools"
+        )
+    if weakness == "W2":
+        return (
+            "this server has no tool that can store content for a later recall — "
+            "remove W2 from weakness_classes, or declare a seed_arm"
+        )
+    if weakness == "W3":
+        return (
+            "this server has no tool that fetches an external URL/endpoint — remove "
+            "W3 from weakness_classes, or declare control_config.egress_tools naming one"
+        )
+    if weakness == "W4":
+        return (
+            "this server has no tool that changes external state — remove W4 from "
+            "weakness_classes, or declare control_config.consequential_tools naming one"
+        )
+    return f"{weakness} declared but not coverable from this target's surface"
+
+
+@dataclass(frozen=True)
+class SeedCoverage:
+    """The result of resolving seeds for one descriptor: what will run, and
+    why any declared class won't (#181b). ``seeds_for_descriptor`` and the
+    pre-flight refusal both read this SAME resolution, so they cannot drift."""
+
+    seeds: tuple[SeedPattern, ...]
+    #: weakness -> reason, one entry per declared class with ZERO seeds.
+    uncoverable: dict[str, str]
+
+
+def seed_coverage(descriptor: Any) -> SeedCoverage:
+    """Resolve seeds for ``descriptor`` AND which declared classes have none.
+
+    The single selection both :func:`seeds_for_descriptor` (what the engine
+    runs) and the pre-flight refusal / ``check`` / ``--scaffold`` (what the
+    operator is told is coverable) read — see the module's #181b note.
 
     * If ``descriptor.weakness_classes`` is non-empty, the target has *declared*
       which attack shapes it exposes (e.g. a custom MCP app opting into
@@ -746,6 +828,7 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
         # an inferable one (auto-wire) is the capability a setup!='no_setup' seed
         # needs — regardless of what the target's family is CALLED.
         can_plant = _can_plant_content(descriptor)
+        known_tools = _known_tool_names(descriptor)
         kitchen = [
             s
             for s in SEED_CATALOGUE
@@ -772,14 +855,32 @@ def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
                 # plant still never receives a planting seed.
                 s.setup == "no_setup" or family in s.applicable_targets or can_plant
             )
+            # #211: a no_setup catalogue seed hard-keyed to a literal tool
+            # (send_email / web_fetch) used to reach ANY target regardless of
+            # its tool surface — the worst case was never "the planner simply
+            # doesn't call it" (the comment above), it was NOT_TESTED, which
+            # blocks a complete result on a target whose real tool is named
+            # something else. Drop it only when the surface is KNOWN and
+            # non-empty and genuinely lacks the tool; the synthesised seed
+            # (above) already covers the target's REAL tool.
+            and not _literal_tool_missing(s, known_tools)
         ]
         uncovered = sorted(classes - covered - {s.weakness for s in kitchen})
-        if uncovered:
-            logger.info(
-                "weakness class(es) %s declared but not coverable from this target's "
-                "surface — they will report NOT TESTED",
-                uncovered,
-            )
-        return [*synthesized, *kitchen]
+        return SeedCoverage(
+            seeds=tuple([*synthesized, *kitchen]),
+            uncoverable={w: _uncoverable_reason(w, descriptor) for w in uncovered},
+        )
     family = target_family(descriptor.target_id)
-    return [s for s in SEED_CATALOGUE if family in s.applicable_targets]
+    seeds = tuple(s for s in SEED_CATALOGUE if family in s.applicable_targets)
+    return SeedCoverage(seeds=seeds, uncoverable={})
+
+
+def seeds_for_descriptor(descriptor: Any) -> list[SeedPattern]:
+    """Resolve the seeds applicable to a target, descriptor-first.
+
+    The attack modules call this (through the ``seeds`` module namespace, so a
+    single patch point governs selection) instead of binding ``target_family``
+    by value. A thin wrapper over :func:`seed_coverage` — see its docstring for
+    the selection rules; this is the "what will run" half.
+    """
+    return list(seed_coverage(descriptor).seeds)

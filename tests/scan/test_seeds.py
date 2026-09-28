@@ -189,15 +189,102 @@ def test_seeds_for_descriptor_no_setup_kitchen_seed_still_reaches_any_target() -
     assert not any(s.pattern_id == "excessive-agency-send-email-via-note-injection" for s in got)
 
 
-def test_seeds_for_descriptor_weakness_classes_logs_uncovered_classes(
+def test_seeds_for_descriptor_drops_no_setup_seed_when_literal_tool_absent() -> None:
+    """#211: a no_setup catalogue seed hard-keyed to send_email must not be
+    scheduled against a target whose KNOWN, non-empty tool surface has no
+    send_email — it would always come back NOT TESTED. The synthesised seed
+    (keyed on the target's REAL consequential tool) covers this target instead."""
+    from mylonite.contracts._types import ToolSpec
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W4"],
+        tools=[ToolSpec(name="execute_sql", description="run a query")],
+        declared_consequential_tools=["execute_sql"],
+    )
+    got = seeds_for_descriptor(d)
+    assert not any(s.pattern_id == "excessive-agency-send-email-direct-unconfirmed" for s in got), (
+        "the literal send_email seed must be dropped: this target has no send_email"
+    )
+    assert any(s.pattern_id == "synth-w4-unconfirmed-execute_sql" for s in got), (
+        "the synthesised seed, keyed on the target's real consequential tool, must remain"
+    )
+
+
+def test_seeds_for_descriptor_keeps_no_setup_seed_when_tool_surface_unknown() -> None:
+    """R1: an EMPTY/unknown tool surface must never be read as 'this tool is
+    absent' — the no_setup kitchen seed still reaches an arbitrary custom
+    target with no introspected tools at all (unchanged from before #211)."""
+    got = seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W4"]))
+    assert any(s.pattern_id == "excessive-agency-send-email-direct-unconfirmed" for s in got)
+
+
+def test_seeds_for_descriptor_keeps_no_setup_seed_when_literal_tool_present() -> None:
+    """The positive case: a target whose tool surface DOES have send_email
+    keeps the literal catalogue seed (the kitchen-sink-as-custom-target case)."""
+    from mylonite.contracts._types import ToolSpec
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W4"],
+        tools=[ToolSpec(name="send_email", description="send")],
+    )
+    got = seeds_for_descriptor(d)
+    assert any(s.pattern_id == "excessive-agency-send-email-direct-unconfirmed" for s in got)
+
+
+def test_seeds_for_descriptor_no_longer_logs_uncovered_classes(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """#181b: the uncovered-class notice used to go only to an INFO log no CLI
+    handler showed. It is now a structured return value (``seed_coverage``)
+    the pre-flight refusal reads, and nothing is logged."""
     import logging
 
     with caplog.at_level(logging.INFO, logger="mylonite.scan.seeds"):
         seeds_for_descriptor(_descriptor("mcp:acme", weakness_classes=["W2"]))
-    assert "W2" in caplog.text
-    assert "NOT TESTED" in caplog.text
+    assert caplog.text == ""
+
+
+def test_seed_coverage_reports_uncoverable_w2_with_a_fix() -> None:
+    """#181b: the coverability helper names the class, why, and the fix — the
+    exact reason the pre-flight refusal message is built from. Tools exist
+    (so the reason is the W2-specific one, not the generic "no tools" case)
+    but none of them can store content for a later recall."""
+    from mylonite.contracts._types import ToolSpec
+    from mylonite.scan.seeds import seed_coverage
+
+    d = TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        weakness_classes=["W2"],
+        tools=[ToolSpec(name="get_status", description="read-only status check")],
+    )
+    coverage = seed_coverage(d)
+    assert coverage.seeds == ()
+    assert "W2" in coverage.uncoverable
+    reason = coverage.uncoverable["W2"]
+    assert "store content for a later recall" in reason
+    assert "seed_arm" in reason
+
+
+def test_seed_coverage_derived_from_same_selection_as_seeds_for_descriptor() -> None:
+    """The two can't drift: seeds_for_descriptor is a thin wrapper over
+    seed_coverage's .seeds."""
+    from mylonite.scan.seeds import seed_coverage
+
+    d = _descriptor("mcp:acme", weakness_classes=["W4"])
+    assert list(seed_coverage(d).seeds) == seeds_for_descriptor(d)
+
+
+def test_seed_coverage_empty_when_every_declared_class_has_a_seed() -> None:
+    from mylonite.scan.seeds import seed_coverage
+
+    coverage = seed_coverage(_descriptor("mcp:acme", weakness_classes=["W4"]))
+    assert coverage.uncoverable == {}
+    assert coverage.seeds
 
 
 def test_seeds_for_descriptor_kitchen_fallback_when_family_actually_matches() -> None:
