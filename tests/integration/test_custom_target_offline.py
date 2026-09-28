@@ -244,6 +244,56 @@ async def test_describe_against_real_stdio_subprocess(
     assert "always summarise" in read_note.description
 
 
+@pytest.mark.asyncio
+async def test_seed_selection_golden_against_real_kitchen_sink_custom_target(
+    kitchen_sink_target_spec: target_registry.TargetSpec,
+) -> None:
+    """#211/R1 golden: the kitchen-sink server, loaded as a CUSTOM target file
+    exactly like ``examples/target.yaml`` (family='kitchen-sink',
+    weakness_classes declared), keeps every catalogue seed — including the
+    no_setup ones hard-keyed to send_email/web_fetch — because this target's
+    real tool surface HAS both. This is the specification #211's fix must not
+    violate: dropping a literal-tool seed only where the tool is genuinely
+    absent, which is never true here.
+    """
+    from mylonite.scan.seeds import seeds_for_descriptor
+
+    adapter = build_adapter_for_spec(
+        kitchen_sink_target_spec, scope=None, model="stub", intent=LaunchIntent()
+    )
+    try:
+        descriptor = await adapter.describe()
+    finally:
+        await adapter.close()
+
+    got_ids = sorted(s.pattern_id for s in seeds_for_descriptor(descriptor))
+    # W1's catalogue seeds are suppressed by W1 synthesis (unrelated to R1 —
+    # synthesis already covers W1 via tool-description probes on this
+    # target's real tools, per seeds_for_descriptor's "covered" rule). What
+    # R1 must NOT touch: the no_setup W3/W4 catalogue seeds, hard-keyed to
+    # web_fetch/send_email, both of which ARE on this target's surface.
+    assert got_ids == [
+        "excessive-agency-fetch-attacker-url-direct",
+        "excessive-agency-fetch-via-note-body",
+        "excessive-agency-send-email-direct-unconfirmed",
+        "excessive-agency-send-email-via-note-injection",
+        "indirect-injection-note-body-direct",
+        "indirect-injection-note-body-roleplay",
+        "indirect-injection-note-body-tool-chain",
+        "synth-w1-rug-pull",
+        "synth-w1-tool-description-read_note",
+        "synth-w1-tool-description-send_email",
+        "synth-w1-tool-description-web_fetch",
+        "synth-w3-egress-web_fetch",
+        "synth-w4-unconfirmed-send_email",
+        "synth-w4-unconfirmed-write_note",
+    ], (
+        "R1 must drop a literal-tool catalogue seed only where the literal "
+        "tool is absent from the target's surface — never true here, since "
+        "this target has both send_email and web_fetch"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test 2: one full scan/attack cycle -- spawn, describe, plant, attack, judge.
 # ---------------------------------------------------------------------------
