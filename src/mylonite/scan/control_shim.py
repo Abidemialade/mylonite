@@ -1279,3 +1279,65 @@ def _check_description_pins(tools: list[Any], control_config: Any | None) -> lis
         if name not in pins:
             out.append((name, DescriptionIntegrityControl.digest(description)))
     return out
+
+
+#: The ``control_config`` fields that name TOOLS (as opposed to
+#: ``declared``/``synthetic``/``enforcement_mode``/``approval_policy``, which
+#: name controls, not tools). Read every one so a typo anywhere in the wiring
+#: is caught, not just the ones `check`'s own findings already touch.
+_CONTROL_CONFIG_TOOL_NAME_FIELDS: tuple[str, ...] = (
+    "egress_tools",
+    "consequential_tools",
+    "read_tool_names",
+    "accepts_untrusted_tools",
+    "private_tools",
+    "destructive_tools",
+)
+
+
+def unwired_tool_names(target_file: Any, tools: list[Any]) -> list[tuple[str, str]]:
+    """``(field, name)`` for every tool name a target file WIRES (``seed_arm.tool``,
+    ``effect_probe.verify_tool``, every ``control_config`` tool-name field, and
+    ``control_config.description_pins`` keys) that is NOT among the server's
+    described tools (R4/#181c).
+
+    A misspelled ``verify_tool`` or a stale ``seed_arm.tool`` (the server was
+    renamed, or the target file was copied from another app) means the
+    declared wiring silently never fires: the plant never lands, or the
+    effect probe never confirms anything — the exact "miswired target reads
+    as clean" failure mode #181 is about. This costs no key and no LLM call
+    (``check``'s whole point — see its docstring), so it belongs here rather
+    than only being discoverable from a live scan's NOT TESTED attempts.
+
+    ``target_file`` is duck-typed (``Any``) rather than importing
+    ``mylonite.plugins._mcp.target_file.TargetFile`` — that module imports
+    from ``mylonite.scan.weakness``, and keeping this module import-free of
+    the plugin layer avoids adding a cycle for a purely structural check.
+    """
+    if target_file is None:
+        return []
+    described = {getattr(t, "name", "") for t in tools}
+    out: list[tuple[str, str]] = []
+
+    seed_arm = getattr(target_file, "seed_arm", None)
+    if seed_arm is not None:
+        name = getattr(seed_arm, "tool", "") or ""
+        if name and name not in described:
+            out.append(("seed_arm.tool", name))
+
+    effect_probe = getattr(target_file, "effect_probe", None)
+    if effect_probe is not None:
+        name = getattr(effect_probe, "verify_tool", "") or ""
+        if name and name not in described:
+            out.append(("effect_probe.verify_tool", name))
+
+    cc = getattr(target_file, "control_config", None)
+    if cc is not None:
+        for field in _CONTROL_CONFIG_TOOL_NAME_FIELDS:
+            for name in getattr(cc, field, None) or ():
+                if name and name not in described:
+                    out.append((f"control_config.{field}", name))
+        for name in getattr(cc, "description_pins", None) or {}:
+            if name and name not in described:
+                out.append(("control_config.description_pins", name))
+    return out
