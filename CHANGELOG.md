@@ -56,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Check --model.` A non-recoverable provider error's log line is also capped
   to a short summary, with the full detail moved to DEBUG (it was already
   capped for the analogous recoverable-error case).
+- **`scan`'s M3 auto-wire probe now names a timeout as a timeout, instead of
+  telling you to add a `seed_arm`.** The 20-second describe() call it makes
+  to infer a `seed_arm` from the live tool surface used to fall through to
+  the generic "declare a seed_arm" pre-flight advice on ANY failure,
+  including a slow first-run `npx`/`uvx` server download — the wrong
+  diagnosis for a target that was simply still starting up. A timeout now
+  exits with its own message ("timed out after 20s starting or describing
+  the server (first-run npx or uvx downloads can be slow)") instead.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is

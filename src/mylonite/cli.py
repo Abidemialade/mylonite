@@ -151,6 +151,11 @@ _DEFAULT_MAX_LLM_CALLS = 50
 #: explicitly for a target known to need more headroom.
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
+#: #186: bound on the M3 auto-wire describe() probe (below). A first-run
+#: npx/uvx server download can genuinely take this long, so a timeout here
+#: gets its OWN diagnosis instead of falling through to "add a seed_arm".
+_AUTOWIRE_DESCRIBE_TIMEOUT_S: Final = 20.0
+
 _T = TypeVar("_T")
 
 
@@ -1230,11 +1235,12 @@ def scan(
         # M3: auto-wire the seed_arm from the LIVE tool surface when a W2 target omits
         # it, so a real app needs near-zero config instead of the hard block below.
         # Only when a no-id recall path exists (else the plant wouldn't be delivered —
-        # the "plants but never lands" trap). Best-effort: a describe failure leaves the
-        # pre-flight block to handle it. Skipped on --dry-run / --allow-no-seed-arm.
-        # When no plantable store->recall pair exists, a content-processing tool
-        # (e.g. process_document) makes W2 testable via the direct_content channel
-        # (descriptor synthesis), so the seed-arm pre-flight must NOT block.
+        # the "plants but never lands" trap). Best-effort: a non-timeout describe
+        # failure falls back to the pre-flight block; a timeout (#186) gets its own
+        # diagnosis instead (see except below), not the seed_arm advice. Skipped on
+        # --dry-run/--allow-no-seed-arm. A content-processing tool (e.g.
+        # process_document) with no plantable pair still makes W2 testable via
+        # direct_content, so the seed-arm pre-flight must NOT block that case.
         synth_covers_indirect = False
         # A rest (HTTP-agent) target has no tool surface to introspect or plant into;
         # W2 rides in as direct prompt injection (seed_synth), so skip seed_arm
@@ -1247,7 +1253,18 @@ def scan(
         ):
             try:
                 _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
-                _descriptor = asyncio.run(asyncio.wait_for(_probe.describe(), timeout=20))
+                _descriptor = asyncio.run(
+                    asyncio.wait_for(_probe.describe(), timeout=_AUTOWIRE_DESCRIBE_TIMEOUT_S)
+                )
+            except TimeoutError:
+                # #186: a first-run npx/uvx download can legitimately take this long --
+                # must NOT fall through to the "add a seed_arm" advice below.
+                echo_err(
+                    f"auto-wire: timed out after {_AUTOWIRE_DESCRIBE_TIMEOUT_S:.0f}s "
+                    "starting or describing the server (first-run npx or uvx "
+                    "downloads can be slow)."
+                )
+                raise typer.Exit(code=EXIT_CONFIG) from None
             except Exception as exc:
                 _descriptor = None
                 echo_err(

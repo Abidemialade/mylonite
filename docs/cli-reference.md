@@ -125,7 +125,10 @@ declared W2 with no `seed_arm` from the refusal and proceeds, with its seeds sch
 and each one honestly reporting NOT TESTED. The check launches the server, so it runs
 after the provider key and model checks: a missing key never spawns the target. If the
 server can't be described in time, the run exits 2 with that reason instead of skipping
-the check.
+the check. Inferring that `seed_arm` (auto-wire) makes
+one `describe()` call to the target with a 20-second budget; a first-run `npx`/`uvx`
+server download can genuinely take that long, so a timeout there says so and exits,
+rather than the misleading "add a seed_arm" advice.
 
 Every model `scan` resolves (`--model`/`--planner-model`/`--customiser-model`/
 `--judge-model`) is checked against LiteLLM's own provider registry once, before any
