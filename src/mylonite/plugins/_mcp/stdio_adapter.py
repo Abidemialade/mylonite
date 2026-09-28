@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import timedelta
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -141,6 +142,7 @@ async def _open_mcp_session(
     extra_env: dict[str, str] | None = None,
     command: str | None = None,
     args: list[str] | None = None,
+    read_timeout: timedelta = DEFAULT_MCP_READ_TIMEOUT,
 ) -> AsyncIterator[ClientSession]:
     """Spawn the MCP server and yield an initialised ``ClientSession``.
 
@@ -169,9 +171,7 @@ async def _open_mcp_session(
     )
     async with (
         stdio_client(params) as (read_stream, write_stream),
-        ClientSession(
-            read_stream, write_stream, read_timeout_seconds=DEFAULT_MCP_READ_TIMEOUT
-        ) as session,
+        ClientSession(read_stream, write_stream, read_timeout_seconds=read_timeout) as session,
     ):
         await session.initialize()
         yield session
@@ -202,6 +202,7 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             extra_env=extra_env,
             command=command,
             args=args,
+            read_timeout=self._mcp_read_timeout,
         )
 
     def _describe_data_sources(self) -> list[str]:

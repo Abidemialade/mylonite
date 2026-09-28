@@ -17,7 +17,7 @@ import pytest
 
 from mylonite.plugins._http.http_adapter import HTTPAgentAdapter
 from mylonite.plugins._mcp import target_registry
-from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
+from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec, build_mcp_adapter
 from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
 from mylonite.plugins._mcp.target_file import LaunchOverride, TargetFile, build_target_spec
@@ -54,6 +54,49 @@ def test_dispatches_stdio_by_default() -> None:
     spec = _register_stdio()
     adapter = build_adapter_for_spec(spec, scope=None, model="m")
     assert isinstance(adapter, MCPStdioAdapter)
+
+
+def test_build_adapter_for_spec_threads_timeout_s_into_planner_and_read_timeout() -> None:
+    """#186/#216: a target file's optional timeout_s overrides BOTH the
+    session's planner_timeout_s and the MCP ClientSession's read timeout --
+    the two existing constructor arguments named in the brief."""
+    from dataclasses import replace
+    from datetime import timedelta
+
+    spec = _register_stdio()
+    spec = replace(spec, timeout_s=45.0)
+    adapter = build_adapter_for_spec(spec, scope=None, model="m")
+    assert adapter._planner_timeout_s == 45.0
+    assert adapter._mcp_read_timeout == timedelta(seconds=45.0)
+
+
+def test_build_adapter_for_spec_keeps_default_timeouts_when_unset() -> None:
+    from datetime import timedelta
+
+    from mylonite.plugins._mcp._session_adapter import (
+        DEFAULT_MCP_READ_TIMEOUT,
+        DEFAULT_PLANNER_TIMEOUT_S,
+    )
+
+    spec = _register_stdio()
+    assert spec.timeout_s is None
+    adapter = build_adapter_for_spec(spec, scope=None, model="m")
+    assert adapter._planner_timeout_s == DEFAULT_PLANNER_TIMEOUT_S
+    assert adapter._mcp_read_timeout == DEFAULT_MCP_READ_TIMEOUT
+    assert timedelta(seconds=60.0) == DEFAULT_MCP_READ_TIMEOUT
+
+
+def test_build_mcp_adapter_threads_timeout_s_too() -> None:
+    """The low-level entry point (used by cli_targets._build_adapter_for_custom)
+    must get the same timeout_s threading as build_adapter_for_spec."""
+    from dataclasses import replace
+    from datetime import timedelta
+
+    spec = _register_stdio()
+    target_registry.register_target(replace(spec, timeout_s=30.0))
+    adapter = build_mcp_adapter(family=spec.family, scope=None, model="m")
+    assert adapter._planner_timeout_s == 30.0
+    assert adapter._mcp_read_timeout == timedelta(seconds=30.0)
 
 
 def test_dispatches_sse_remote() -> None:

@@ -62,6 +62,12 @@ def build_mcp_adapter(*, family: str, scope: str | None, **kwargs: Any) -> Async
         from mylonite.plugins._http.http_adapter import HTTPAgentAdapter
 
         return HTTPAgentAdapter(family=family, scope=scope, **kwargs)
+    # #186/#216: a target's optional timeout_s overrides BOTH the session's
+    # planner_timeout_s and the MCP read timeout -- kwargs.setdefault so an
+    # explicit caller-supplied value (a role override) still wins.
+    if spec.timeout_s is not None:
+        kwargs.setdefault("planner_timeout_s", spec.timeout_s)
+        kwargs.setdefault("mcp_read_timeout_s", spec.timeout_s)
     if transport in ("sse", "http"):
         from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter
 
@@ -154,6 +160,12 @@ def build_adapter_for_spec(
     )
     launch_command = spec.launch_command(vulnerable=resolved_intent.vulnerable)
     launch_args = spec.launch_args(scope, vulnerable=resolved_intent.vulnerable)
+    # #186/#216: a target's optional timeout_s overrides BOTH the session's
+    # planner_timeout_s and the MCP read timeout.
+    timeout_kwargs: dict[str, Any] = {}
+    if spec.timeout_s is not None:
+        timeout_kwargs["planner_timeout_s"] = spec.timeout_s
+        timeout_kwargs["mcp_read_timeout_s"] = spec.timeout_s
 
     if transport in ("sse", "http"):
         from mylonite.plugins._mcp.remote_adapter import MCPRemoteAdapter
@@ -167,6 +179,7 @@ def build_adapter_for_spec(
             launch_env=launch_env,
             launch_command=launch_command,
             launch_args=launch_args,
+            **timeout_kwargs,
         )
 
     from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
@@ -180,4 +193,5 @@ def build_adapter_for_spec(
         launch_env=launch_env,
         launch_command=launch_command,
         launch_args=launch_args,
+        **timeout_kwargs,
     )

@@ -486,6 +486,28 @@ def test_invoke_raises_on_empty_200_body() -> None:
         asyncio.run(adapter.close())
 
 
+def test_invoke_timeout_names_request_timeout_s_and_its_value() -> None:
+    """#216: a bare httpx.ReadTimeout doesn't name what timed out or its
+    value -- the operator's first live scan against a slow local-model agent
+    saw a raw ReadTimeout with no indication `request.timeout_s` was the
+    knob to raise."""
+    _register_rest(timeout_s=17.5)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("simulated read timeout", request=request)
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RuntimeError, match=r"request\.timeout_s") as excinfo:
+            asyncio.run(adapter.invoke(_payload("hi")))
+    finally:
+        asyncio.run(adapter.close())
+    message = str(excinfo.value)
+    assert "17.5" in message
+    assert "agent.example" in message
+
+
 def test_headers_are_passed_but_request_object_is_the_only_carrier() -> None:
     # Declared request.headers reach the wire (auth headers ride this same path;
     # a benign custom header is used here so the test carries no secret-shaped literal).

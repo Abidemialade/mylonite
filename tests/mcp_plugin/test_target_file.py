@@ -124,6 +124,32 @@ def test_build_target_spec_shape() -> None:
     assert spec.requires_scope is True
 
 
+def test_target_file_timeout_s_defaults_to_none() -> None:
+    """#186/#216: optional, mirrors RequestSpec.timeout_s -- an existing
+    target file with no timeout_s must load unchanged (None -> today's
+    fixed 60s planner/read timeout)."""
+    assert _tf().timeout_s is None
+
+
+def test_target_file_timeout_s_round_trips_through_yaml(tmp_path: Path) -> None:
+    target = tmp_path / "t.yaml"
+    target.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\ntimeout_s: 90\n", encoding="utf-8"
+    )
+    tf = load_target_file(target)
+    assert tf.timeout_s == 90.0
+
+
+def test_build_target_spec_carries_timeout_s() -> None:
+    spec = build_target_spec(_tf(timeout_s=45.0))
+    assert spec.timeout_s == 45.0
+
+
+def test_build_target_spec_timeout_s_defaults_to_none() -> None:
+    spec = build_target_spec(_tf())
+    assert spec.timeout_s is None
+
+
 def test_build_target_spec_scope_validator_enforces_requires_scope() -> None:
     spec = build_target_spec(_tf(requires_scope=True))
     with pytest.raises(InvalidTargetScope):

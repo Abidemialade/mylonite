@@ -31,7 +31,7 @@ descriptions, every tool result, and — for a stdio target — a process on you
 | Steer a probe to a real destination | Probe destinations are RFC 2606 reserved names (`.example.net`, `.test`), which do not route | `scan/exfil.py` |
 | Inject Rich markup into the terminal report | Every target-influenced table cell is markup-escaped before rendering | `scan/artefacts.py` |
 | Turn a field value into code in the emitted test | Values are rendered as escaped Python literals, and the test's docstring is closed against embedded quotes | `plugins/_reference/reference_pytest_generator.py` |
-| Hang the run | Per-call provider timeouts, a per-scan wall-clock bound (`--iteration-timeout`) and the call budget (`--max-llm-calls`) | `scan/_llm.py`, `scan/engine.py` |
+| Hang the run | Per-call provider timeouts, the call budget (`--max-llm-calls`), and — for `validate` specifically — a per-iteration wall-clock bound (`--iteration-timeout`; `scan`/`gate`/`ablate` have no such flag). A target file's optional `timeout_s` bounds an MCP target's planner/session; `request.timeout_s` (default 30s) bounds a `rest` target's HTTP client — both name themselves in the resulting error | `scan/_llm.py`, `scan/engine.py`, `plugins/_mcp/_session_adapter.py`, `plugins/_http/http_adapter.py` |
 
 Two properties are worth stating plainly, because they follow from what the tool does:
 
