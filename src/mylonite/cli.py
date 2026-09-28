@@ -528,6 +528,29 @@ def _parse_model_ref_or_exit(model: str, provider: str | None) -> ModelRef:
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
+def _resolve_role_model(override: str | None, *, effective_model: str, provider: str | None) -> str:
+    """Role-separated model resolution shared by ``scan``/``validate``/``gate``/
+    ``ablate``: each of a command's ``--planner-model``/``--customiser-model``/
+    ``--judge-model`` overrides defaults to the command's own base model.
+
+    Validates + resolves any explicit override through ``ModelRef`` exactly
+    like ``--model`` — it drives the identical LiteLLM call path, so an
+    unroutable override must reject at CLI-argument time too, not just fail
+    later mid-scan. ``.provider`` is discarded: a role override doesn't get
+    its own env-var check, only the base model's provider feeds
+    ScanConfig/env lookups.
+
+    Was four textually-identical nested closures (one per command, each
+    closing over that command's own ``effective_model``/``provider`` locals)
+    before this dedup; ``effective_model`` and ``provider`` are now explicit
+    keyword parameters instead.
+    """
+    if not override:
+        return effective_model
+    _validate_model_string(override)
+    return _parse_model_ref_or_exit(override, provider).raw
+
+
 def _resolve_model_ref(model: str, provider: str | None) -> ModelRef:
     """``ModelRef.parse`` for a command's BASE model — see
     :func:`_parse_model_ref_or_exit` for the shared parse-or-exit behaviour.
@@ -1233,25 +1256,21 @@ def scan(
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
 
-    # Role-separated models: each defaults to the base model. Validate +
-    # resolve any explicit override through ModelRef exactly like --model —
-    # it drives the identical LiteLLM call path, so an unroutable override
-    # must reject at CLI-argument time too, not just fail later mid-scan.
-    # `.provider` is discarded: a role override doesn't get its own env-var
-    # check, only the base model's provider feeds ScanConfig/env lookups.
-    def _resolve_role_model(override: str | None) -> str:
-        if not override:
-            return effective_model
-        _validate_model_string(override)
-        return _parse_model_ref_or_exit(override, provider).raw
-
-    effective_planner_model = _resolve_role_model(planner_model)
-    effective_customiser_model = _resolve_role_model(customiser_model)
+    # Role-separated models: each defaults to the base model. See
+    # _resolve_role_model's docstring for what "resolve" means here.
+    effective_planner_model = _resolve_role_model(
+        planner_model, effective_model=effective_model, provider=provider
+    )
+    effective_customiser_model = _resolve_role_model(
+        customiser_model, effective_model=effective_model, provider=provider
+    )
     # Effective app purpose: the --purpose flag, else the target file's declared
     # purpose (resolved in the custom-target branch below). None for a reference
     # target unless the flag is set.
     effective_purpose = purpose
-    effective_judge_model = _resolve_role_model(judge_model)
+    effective_judge_model = _resolve_role_model(
+        judge_model, effective_model=effective_model, provider=provider
+    )
 
     # Scaffold mode: introspect a custom MCP server and write a starter target.yaml
     # instead of scanning. No LLM call and no attack, so it does NOT require
@@ -2368,15 +2387,15 @@ def validate(
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
 
-    def _resolve_validate_role_model(override: str | None) -> str:
-        if not override:
-            return effective_model
-        _validate_model_string(override)
-        return _parse_model_ref_or_exit(override, provider).raw
-
-    effective_planner_model = _resolve_validate_role_model(planner_model)
-    effective_customiser_model = _resolve_validate_role_model(customiser_model)
-    effective_judge_model = _resolve_validate_role_model(judge_model)
+    effective_planner_model = _resolve_role_model(
+        planner_model, effective_model=effective_model, provider=provider
+    )
+    effective_customiser_model = _resolve_role_model(
+        customiser_model, effective_model=effective_model, provider=provider
+    )
+    effective_judge_model = _resolve_role_model(
+        judge_model, effective_model=effective_model, provider=provider
+    )
 
     test_path, exploit_path = _locate_generated(target)
 
@@ -3218,15 +3237,15 @@ def gate(
 
     # Role-separated models (T14, mirroring `scan`'s _resolve_role_model):
     # each defaults to the base model.
-    def _resolve_gate_role_model(override: str | None) -> str:
-        if not override:
-            return effective_model
-        _validate_model_string(override)
-        return _parse_model_ref_or_exit(override, provider).raw
-
-    effective_planner_model = _resolve_gate_role_model(planner_model)
-    effective_customiser_model = _resolve_gate_role_model(customiser_model)
-    effective_judge_model = _resolve_gate_role_model(judge_model)
+    effective_planner_model = _resolve_role_model(
+        planner_model, effective_model=effective_model, provider=provider
+    )
+    effective_customiser_model = _resolve_role_model(
+        customiser_model, effective_model=effective_model, provider=provider
+    )
+    effective_judge_model = _resolve_role_model(
+        judge_model, effective_model=effective_model, provider=provider
+    )
 
     # --- resolve adapter (mirrors scan command routing) ---
     # 'reference:*' + --target-file is never meaningful — the reference targets
@@ -3894,15 +3913,15 @@ def ablate(
     effective_provider = ref.provider or "unknown"
     effective_model = ref.raw
 
-    def _resolve_ablate_role_model(override: str | None) -> str:
-        if not override:
-            return effective_model
-        _validate_model_string(override)
-        return _parse_model_ref_or_exit(override, provider).raw
-
-    effective_planner_model = _resolve_ablate_role_model(planner_model)
-    effective_customiser_model = _resolve_ablate_role_model(customiser_model)
-    effective_judge_model = _resolve_ablate_role_model(judge_model)
+    effective_planner_model = _resolve_role_model(
+        planner_model, effective_model=effective_model, provider=provider
+    )
+    effective_customiser_model = _resolve_role_model(
+        customiser_model, effective_model=effective_model, provider=provider
+    )
+    effective_judge_model = _resolve_role_model(
+        judge_model, effective_model=effective_model, provider=provider
+    )
 
     try:
         tf = load_target_file(target_file)
