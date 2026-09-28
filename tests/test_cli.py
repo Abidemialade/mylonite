@@ -1176,6 +1176,42 @@ def _patch_fake_mcp_session_with_one_tool(monkeypatch: pytest.MonkeyPatch, name:
     monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
 
 
+def test_scan_autowire_describe_timeout_names_the_timeout_not_seed_arm_advice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#186: the 20s auto-wire describe probe used to fall through to the
+    generic "add a seed_arm" pre-flight advice on ANY failure, including a
+    timeout -- misdiagnosing a slow first-run npx/uvx download as a missing
+    seed_arm. A timeout now names itself and exits immediately, without the
+    seed_arm advice."""
+    from contextlib import asynccontextmanager
+
+    from mylonite import cli
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setattr(cli, "_AUTOWIRE_DESCRIBE_TIMEOUT_S", 0.01)
+
+    @asynccontextmanager
+    async def _hanging_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        await asyncio.sleep(1.0)
+        yield SimpleNamespace()  # never reached
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _hanging_open)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "acme"])
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "timed out after" in out, out
+    assert "npx" in out and "uvx" in out, out
+    assert "add a seed_arm" not in out.lower(), out
+    target_registry.clear_runtime_targets()
+
+
 def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
