@@ -190,11 +190,18 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         effect_remediation = (
             "effect fail: the target's effect probe did not confirm the damage materialised."
         )
+        # Keyed on the clause `reference_validator.py` appends ONLY when
+        # from_state == 0 -- not on "could not be tied to that attempt",
+        # which appears in the detail for EVERY probed effect leg (it
+        # describes the from_actions runs) whether or not from_state is 0.
+        # Matching the wider phrase would wrongly claim "none reached a
+        # confirmed 'true'" for a leg that failed on count alone with at
+        # least one run confirmed from state.
         for outcome in report.outcomes:
             if (
                 outcome.stage == "effect"
                 and not outcome.passed
-                and "could not be tied to that attempt" in outcome.detail
+                and "no run was confirmed from the target's state" in outcome.detail
             ):
                 effect_remediation = (
                     "effect fail: the target keeps state between attempts, so the effect "

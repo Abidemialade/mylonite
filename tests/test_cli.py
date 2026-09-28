@@ -2955,6 +2955,47 @@ def test_render_validation_report_effect_remediation_names_the_unattributed_caus
     assert "did not confirm the damage materialised" not in out
 
 
+def test_render_validation_report_effect_remediation_does_not_claim_none_confirmed_when_one_was(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed effect leg where at least one run WAS confirmed from the
+    target's state (from_state >= 1), but the total is still short of the
+    threshold, must not get the "keeps state between attempts ... none
+    reached a confirmed 'true'" text -- that text is true only when
+    from_state == 0. `reference_validator.py`'s detail carries the generic
+    "could not be tied to that attempt" phrase in EVERY probed case (it
+    describes the from_actions runs), so matching on that alone -- rather
+    than on the from_state == 0 exclusive clause -- would wrongly fire the
+    unattributed remediation here too."""
+    from mylonite.cli import _render_validation_report
+    from mylonite.contracts import ValidationOutcome, ValidationReport
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+            ValidationOutcome(
+                stage="effect",
+                passed=False,
+                detail=(
+                    "1/3 runs showed the damage (need >= 3): 1 confirmed from the "
+                    "target's state, 0 from the attempt's own actions, where the "
+                    "state change (or its absence) could not be tied to that "
+                    "attempt but the predicate showed it performed the action"
+                ),
+                metric=0.33,
+            ),
+        ],
+        kept=False,
+        gating_legs=["build", "effect"],
+    )
+    _render_validation_report(report)
+    out = capsys.readouterr().out
+    assert "REJECTED" in out
+    assert "none reached a confirmed" not in out
+    assert "keeps state between attempts" not in out
+
+
 # ---------------------------------------------------------------------------
 # PR3 — correctness safeguards: a misfire / misconfig can never read as "clean".
 # ---------------------------------------------------------------------------
