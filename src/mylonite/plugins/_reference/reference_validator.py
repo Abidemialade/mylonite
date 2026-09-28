@@ -269,7 +269,9 @@ class _CustomRun:
     """Per-iteration result of re-driving a CUSTOM target (no twin)."""
 
     finding: bool
-    effect_confirmed: str  # "true" | "false" | "unprobed" | "errored"
+    #: "true" | "false" | "unattributed" | "errored" | "unprobed", read from the
+    #: attempt's judge evidence for every run, finding or not.
+    effect_confirmed: str
     response: Any
     #: Whether this run POSITIVELY demonstrated resistance (`_resisted`, which
     #: excludes an attempt that reached no verdict). Defaults False so an
@@ -279,6 +281,11 @@ class _CustomRun:
     #: resistance and reported perfect control for a twin whose every run
     #: errored.
     resisted: bool = False
+    #: Which mechanism decided the attempt ("predicate" | "llm"), or None when
+    #: no judged attempt was recorded. An "unattributed" effect counts toward
+    #: the effect leg only when the predicate, which reads this attempt's own
+    #: trace, decided it.
+    verdict_mechanism: str | None = None
 
 
 @dataclass(frozen=True)
@@ -615,8 +622,25 @@ class DifferentialValidator(ValidatorBase):
             self._progress(f"re-driving real target: stability run {i + 1}/{n}")
             runs.append(self._run_custom_iteration(target, pattern_id))
         fired = sum(1 for r in runs if r.finding)
-        effect_yes = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
-        probed = any(r.effect_confirmed in ("true", "false") for r in runs)
+        # A firing run counts toward the effect leg when the probe confirmed the
+        # effect from the target's state ("true"), or when the state changed but
+        # could not be tied to this attempt ("unattributed") AND the predicate,
+        # which reads only this attempt's own executed calls, decided it. An
+        # LLM-decided "unattributed" run does not count: nothing structural
+        # links it to the effect.
+        from_state = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
+        from_actions = sum(
+            1
+            for r in runs
+            if r.finding
+            and r.effect_confirmed == "unattributed"
+            and r.verdict_mechanism == "predicate"
+        )
+        effect_yes = from_state + from_actions
+        # "unattributed" means the declared probe ran and saw a change, so it is
+        # probed: an all-"unattributed" run set must never fall into the
+        # "no effect_probe declared" report-only branch below.
+        probed = any(r.effect_confirmed in ("true", "false", "unattributed") for r in runs)
         # A probe that raised on every run is NOT the same as no probe being
         # declared: the operator asked for end-to-end confirmation and it never
         # ran, so the leg must fail loud rather than silently auto-pass like the
@@ -635,13 +659,24 @@ class DifferentialValidator(ValidatorBase):
             metric=(fired / n) if n else 0.0,
         )
         if probed:
+            # At least one run must be confirmed from state, so the end-to-end
+            # effect was observed at least once; the attempt-scoped runs only
+            # add to a count that already rests on one real observation.
+            detail = (
+                f"the target's effect probe confirmed the damage materialised "
+                f"end-to-end {effect_yes}/{n} runs (need >= {self._vuln_threshold}): "
+                f"{from_state} confirmed from the target's state, {from_actions} from "
+                "the attempt's own actions (the state changed but could not be tied "
+                "to that attempt, and the predicate showed it performed the action)"
+            )
+            if from_state == 0:
+                detail += (
+                    "; no run was confirmed from the target's state, and at least one is required"
+                )
             effect = ValidationOutcome(
                 stage="effect",
-                passed=effect_yes >= self._vuln_threshold,
-                detail=(
-                    f"the target's effect probe confirmed the damage materialised "
-                    f"end-to-end {effect_yes}/{n} runs (need >= {self._vuln_threshold})"
-                ),
+                passed=effect_yes >= self._vuln_threshold and from_state >= 1,
+                detail=detail,
                 metric=(effect_yes / n) if n else 0.0,
             )
         elif errored:
@@ -866,19 +901,32 @@ class DifferentialValidator(ValidatorBase):
             judge_model=self._judge_model,
         )
         result = asyncio.run(engine.run())
+        # The judged attempt for this seed carries the verdict mechanism and the
+        # judge evidence, which holds the adapter's effect value for every
+        # branch, so a defended or undecided run records its real value too.
+        attempts = [a for a in result.report.attempts if a.pattern_id == pattern_id]
+        attempt = next((a for a in attempts if a.outcome == "finding"), None) or next(
+            iter(attempts), None
+        )
+        evidence = dict(attempt.judge_evidence) if attempt is not None else {}
+        mechanism = attempt.verdict_mechanism if attempt is not None else None
         if result.exploits:
             response = result.exploits[0].response
             return _CustomRun(
                 finding=True,
-                effect_confirmed=response.metadata.get("effect_confirmed", "unprobed"),
+                effect_confirmed=evidence.get(
+                    "effect_confirmed", response.metadata.get("effect_confirmed", "unprobed")
+                ),
                 response=response,
                 resisted=False,
+                verdict_mechanism=mechanism,
             )
         return _CustomRun(
             finding=False,
-            effect_confirmed="unprobed",
+            effect_confirmed=evidence.get("effect_confirmed", "unprobed"),
             response=None,
             resisted=self._resisted(result, pattern_id),
+            verdict_mechanism=mechanism,
         )
 
     @staticmethod

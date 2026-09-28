@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attempt, and a deferral marker counts only when it is new. Each attempt with
   a declared `verify_tool` makes one extra read-only call to it; the recorded
   setup trace and everything sent to the model are unchanged.
+- **`validate` no longer reads an unattributed effect as proof, or as a leak.**
+  An `"unattributed"` attempt is judged by the seed's predicate, which reads
+  only that attempt's own calls, and then by the LLM judge. The effect leg
+  counts a firing run when its effect is `"true"`, or when it is
+  `"unattributed"` and the predicate decided it, and it now needs at least one
+  `"true"` run so the effect was observed end-to-end at least once. Its detail
+  line says how many runs were confirmed from the target's state and how many
+  from the attempt's own actions. A run set that is all `"unattributed"` gates
+  the leg instead of being reported as "no effect_probe declared". Every
+  attempt's `judge_evidence` now carries `effect_confirmed`, finding or not.
+  Offline, 3 unguarded runs then 3 guarded runs on one persisted outbox now
+  give 3 findings and 0 guarded leaks; before this fix, all 3 guarded runs
+  leaked.
 
 ## [0.10.3] - 2026-09-27
 
