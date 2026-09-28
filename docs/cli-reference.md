@@ -77,9 +77,14 @@ mylonite check --target-file app.yaml --enforce   # CI gate once the surface is 
 Reports: consequential tools with no approval-shaped sibling tool, descriptions that
 steer the agent, tools taking an apparent network destination, content-processing tools
 that could carry an indirect-injection payload, unpinned tool descriptions (paste-ready
-digests for `control_config.description_pins`), and which weakness classes the surface
-suggests. Every finding is a hint to confirm, never a verdict — `scan`/`gate` are what
-prove an attack actually lands.
+digests for `control_config.description_pins`), a target-file wiring name
+(`seed_arm.tool`, `effect_probe.verify_tool`, or any `control_config` tool-name field)
+that isn't among the server's described tools — a typo or a name copied from another
+target file — and which weakness classes the surface suggests. Every finding except the
+unpinned-descriptions advisory counts toward `--enforce`, including the wiring-name one:
+a name that names no real tool means the plant or the effect probe silently never fires.
+Every finding is a hint to confirm, never a verdict — `scan`/`gate` are what prove an
+attack actually lands.
 
 ## `scan` — find weaknesses
 
@@ -112,10 +117,17 @@ scans**, off for the reference/replay path; matches `generate`/`validate`/`gate`
 For a custom target: `--command`, `--arg`,
 `--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`, `--weakness-class`.
 
+For a custom/`--target-file` target, `scan` (and `gate`) refuses before any LLM call if
+a declared `weakness_classes` entry has zero seeds this surface could ever run — see
+[Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
+`--dry-run` downgrades the refusal to a warning; `--allow-no-seed-arm` keeps its own
+behaviour for the class it already covers.
+
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
 commented starter `target.yaml` with suggested `weakness_classes` and auto-detected
-`seed_arm`/`effect_probe` candidates. Add `--force` to overwrite. Edit it, then scan
+`seed_arm`/`effect_probe` candidates — only classes the introspected surface can
+actually cover are suggested. Add `--force` to overwrite. Edit it, then scan
 with `--target-file`.
 
 ```bash
@@ -200,6 +212,11 @@ only to `--out` (normally `.mylonite/gate/`) and prints the `git`/`gh` commands 
 commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
 `--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
 where `--workflows` defaulted on and the branch and commit happened on every run.
+
+For a `--target-file` target, `gate` refuses before any LLM call if a declared
+`weakness_classes` entry has zero seeds this surface could ever run — the same
+pre-flight check `scan` runs; see
+[Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
 
 Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the

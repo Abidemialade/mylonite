@@ -199,6 +199,40 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 > "...", SSL_CERT_FILE: "..." }` — without them the launch can fail with a TLS/registry
 > error that looks unrelated to Mylonite.
 
+## Coverage: a declared class your surface can't run is refused, not silently dropped
+
+Declaring a class in `weakness_classes` is a promise: Mylonite tests it. Before either
+`scan` or `gate` spends an LLM call, it checks whether your target's introspected tool
+surface can actually produce even one seed for every declared class. If a class would
+run zero seeds — no bundled seed's literal tool is on the surface, no store-and-recall
+pair or content-processing tool exists for W2, no egress-shaped tool for W3, no
+consequential tool for W4 — the run refuses outright and names each one:
+
+```text
+error: this target declares weakness class(es) its tool surface cannot cover at all
+(every attempt for them would never run):
+  W2: this server has no tool that can store content for a later recall — remove W2
+      from weakness_classes, or declare a seed_arm
+```
+
+The fix is always one of the two named: drop the class from `weakness_classes`, or
+declare the missing piece (a `seed_arm` for W2, `control_config.egress_tools` for W3,
+`control_config.consequential_tools` for W4). `mylonite scan --scaffold` only ever
+suggests a class it already confirmed is coverable for the surface it just introspected,
+so a fresh scaffold's target.yaml never trips this refusal on first run.
+
+`--dry-run` downgrades the refusal to a warning — a dry run only enumerates seeds, so it
+stays informative instead of blocking. A class you've explicitly accepted running
+uncovered via `--allow-no-seed-arm` is not re-blocked here; that flag's own behaviour
+(those seeds report NOT TESTED, not clean) is unchanged. `gate` gets the same refusal,
+with no `--dry-run` equivalent to downgrade it.
+
+This is a different check from `mylonite check`, which needs a live tool surface and no
+LLM call: it diffs `seed_arm.tool`, `effect_probe.verify_tool` and every
+`control_config` tool-name field against the server's described tools, and flags any
+name that isn't there — a typo, or a stale name copied from another target file. Those
+findings count toward `check --enforce`, the same as an unapproved sink.
+
 ## Effect attribution
 
 An `effect_probe` reads the verify tool before the agent runs (this attempt's own
