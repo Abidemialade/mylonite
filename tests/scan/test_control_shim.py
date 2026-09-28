@@ -1006,3 +1006,98 @@ def test_trifecta_lines_are_ascii_and_suggest_a_declaration() -> None:
     assert text.isascii()
     assert "untrusted content:      read_note, web_fetch" in text
     assert "private_tools: [read_note]" in text
+
+
+# --- R4 (#181c): check's wiring-names diff ----------------------------------
+
+
+class _WiringFakeTool:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _wiring_tools(*names: str) -> list[_WiringFakeTool]:
+    return [_WiringFakeTool(n) for n in names]
+
+
+def test_unwired_tool_names_flags_a_misspelled_verify_tool() -> None:
+    from types import SimpleNamespace
+
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    tf = SimpleNamespace(
+        seed_arm=SimpleNamespace(tool="write_note"),
+        effect_probe=SimpleNamespace(verify_tool="list_outbx"),  # typo
+        control_config=None,
+    )
+    got = unwired_tool_names(tf, _wiring_tools("write_note", "read_note", "list_outbox"))
+    assert got == [("effect_probe.verify_tool", "list_outbx")]
+
+
+def test_unwired_tool_names_flags_a_stale_seed_arm_tool() -> None:
+    from types import SimpleNamespace
+
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    tf = SimpleNamespace(
+        seed_arm=SimpleNamespace(tool="remember_old"),
+        effect_probe=None,
+        control_config=None,
+    )
+    got = unwired_tool_names(tf, _wiring_tools("remember", "recall"))
+    assert got == [("seed_arm.tool", "remember_old")]
+
+
+def test_unwired_tool_names_flags_every_control_config_tool_field() -> None:
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    cc = ControlConfig(
+        egress_tools=("fetch_url",),  # typo for web_fetch
+        consequential_tools=("send_mail",),  # typo for send_email
+        read_tool_names=("read_notes",),  # typo for read_note
+        accepts_untrusted_tools=("summarise",),  # typo for summarize
+        private_tools=("get_secretz",),  # typo
+        destructive_tools=("delete_evrything",),  # typo
+        description_pins={"send_emial": "deadbeef"},  # typo
+    )
+
+    class _TF:
+        seed_arm = None
+        effect_probe = None
+        control_config = cc
+
+    got = unwired_tool_names(
+        _TF(), _wiring_tools("web_fetch", "send_email", "read_note", "summarize")
+    )
+    fields = {field for field, _name in got}
+    assert fields == {
+        "control_config.egress_tools",
+        "control_config.consequential_tools",
+        "control_config.read_tool_names",
+        "control_config.accepts_untrusted_tools",
+        "control_config.private_tools",
+        "control_config.destructive_tools",
+        "control_config.description_pins",
+    }
+
+
+def test_unwired_tool_names_empty_when_everything_matches() -> None:
+    from types import SimpleNamespace
+
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    tf = SimpleNamespace(
+        seed_arm=SimpleNamespace(tool="write_note"),
+        effect_probe=SimpleNamespace(verify_tool="list_outbox"),
+        control_config=None,
+    )
+    got = unwired_tool_names(tf, _wiring_tools("write_note", "read_note", "list_outbox"))
+    assert got == []
+
+
+def test_unwired_tool_names_none_target_file_is_a_no_op() -> None:
+    """The bundled reference route (no TargetFile) must never crash `check`."""
+    from mylonite.scan.control_shim import unwired_tool_names
+
+    assert unwired_tool_names(None, _wiring_tools("read_note")) == []
