@@ -84,7 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `env:` block already uses. An unset variable fails fast, before any
   subprocess launches, naming it. The token is never logged or written —
   it matches the credential-key pattern every other secret-shaped `env`
-  value is already masked by.
+  value is already masked by. `gate`'s and `validate`'s re-drive twins
+  (raw and boundary-guarded) went through a separate construction path
+  (`factory.build_adapter_for_spec`, which always builds `launch_env` from
+  `TargetSpec.launch_env()`) that still received the literal, unexpanded
+  `${GITHUB_PERSONAL_ACCESS_TOKEN}` string — the `${VAR}` expansion now
+  happens once, for every path, in `_effective_env`.
 - **MCP and HTTP-agent launch timeouts are now configurable and name
   themselves.** Three previously hard-coded, unnamed timeouts: an MCP
   target file now takes an optional `timeout_s` (mirroring `request.timeout_s`),

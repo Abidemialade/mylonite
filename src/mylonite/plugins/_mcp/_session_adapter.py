@@ -292,16 +292,24 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
     def _effective_env(self) -> dict[str, str]:
         """Env passed to the session opener — the caller's launch_env, else the
-        spec's extra_env with any ``${VAR}`` reference expanded from the parent
-        shell (#184; same mechanism a loaded target file's own ``env:`` block
-        uses — see ``target_file.expand_env_block``). ``launch_env`` (ablation /
-        ``--prove-control``) is returned unexpanded: it already holds concrete
-        values, never a template."""
-        if self._launch_env is not None:
-            return dict(self._launch_env)
+        spec's extra_env — with any ``${VAR}`` reference expanded from the
+        parent shell EITHER way (#184; same mechanism a loaded target file's
+        own ``env:`` block uses — see ``target_file.expand_env_block``).
+
+        Fix round 1: ``launch_env`` is NOT always a caller-supplied concrete
+        value. The ONLY real construction path (``factory.build_adapter_for_
+        spec``, used by ``scan``, and by ``gate``'s/``validate``'s raw AND
+        guarded re-drive twins) always builds it as ``spec.launch_env(...)``
+        — ``dict(self.extra_env)`` plus vulnerable/control_env toggles — the
+        SAME unexpanded template the no-launch_env branch below expands.
+        Expanding both branches here is the one place every path goes
+        through. Expansion is a no-op for a value with no ``${...}``
+        pattern, so this is safe regardless of where a value originated.
+        """
         from mylonite.plugins._mcp.target_file import expand_env_block
 
-        return expand_env_block(dict(self._spec.extra_env))
+        env = dict(self._launch_env) if self._launch_env is not None else dict(self._spec.extra_env)
+        return expand_env_block(env)
 
     @property
     def declares_effect_probe(self) -> bool:
