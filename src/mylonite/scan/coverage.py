@@ -307,7 +307,9 @@ _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
     AbortReason.BUDGET_EXCEEDED: (
         "error: scan exhausted its LLM call budget and stopped early; coverage is "
         "incomplete and the seeds that had not started were cancelled. Raise "
-        "--max-llm-calls, or narrow the scan with --weakness-class, then re-run."
+        "--max-llm-calls, or run fewer weakness classes — --weakness-class on a "
+        "reference/bundled target, weakness_classes in the target file for a "
+        "custom one — then re-run."
     ),
     AbortReason.PROVIDER_UNREACHABLE: None,
     AbortReason.NO_PAYLOADS: (

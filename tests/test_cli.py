@@ -1096,6 +1096,19 @@ def test_scan_mcp_github_rejects_missing_slash() -> None:
     assert "owner/repo" in (result.stderr or result.output)
 
 
+def test_scan_rejects_an_unknown_weakness_class_value() -> None:
+    """Fix round 1 (#205c): an unknown --weakness-class value is rejected up
+    front, before any target is touched -- not silently ignored or passed
+    through to filter/merge logic that would just treat it as never-matching."""
+    result = runner.invoke(
+        app, ["scan", "reference:vulnerable", "--weakness-class", "w9", "--dry-run"]
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "w9" in out
+    assert "--weakness-class" in out
+
+
 def test_scan_mcp_github_fails_fast_when_the_token_is_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

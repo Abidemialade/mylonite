@@ -809,6 +809,19 @@ def weakness_class_scope(classes: Iterable[str] | None) -> Iterator[None]:
         _weakness_filter_var.reset(token)
 
 
+def active_weakness_filter() -> frozenset[str] | None:
+    """The ``--weakness-class`` classes currently in scope (see
+    :func:`weakness_class_scope`), or ``None`` when no filter is active.
+
+    Lets a caller OUTSIDE this module's own filtering (e.g. ``scan/engine.py``,
+    naming the filter in a zero-payloads abort message) tell "the filter
+    matched nothing" apart from "the target declares nothing" without either
+    threading the filter through every call site or duplicating the
+    contextvar.
+    """
+    return _weakness_filter_var.get()
+
+
 @dataclass(frozen=True)
 class SeedCoverage:
     """The result of resolving seeds for one descriptor: what will run, and

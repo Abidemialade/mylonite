@@ -48,6 +48,7 @@ from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
 from mylonite.scan.seeds import (
     SEED_CATALOGUE,
     SeedPattern,
+    active_weakness_filter,
     seed_coverage,
     seeds_for_descriptor,
     target_family,
@@ -206,14 +207,17 @@ class ScanResult:
     #: ScanReport's schema. ``None`` when the result was reconstructed from a
     #: persisted ``scan_report.json``: an unknown spend is not a zero spend.
     llm_spend: LLMSpend | None = None
-    #: An operator-ready, pre-redacted explanation of a ``describe_failed``
-    #: abort, when the target adapter raised ``AdapterDescribeFailed`` (see
-    #: that class's docstring). ``None`` for every other abort reason, for a
-    #: describe() failure the adapter didn't specifically explain, and for a
-    #: result reconstructed from a persisted ``scan_report.json`` — like
-    #: ``descriptor``/``llm_spend``, this is NOT part of ScanReport's schema,
-    #: so it costs no compat event. Consumed by ``ScanOutcome.from_report``'s
-    #: ``abort_detail`` kwarg to replace the generic per-abort-reason text.
+    #: An operator-ready, pre-redacted explanation of an abort more specific
+    #: than the generic per-``AbortReason`` text: a ``describe_failed`` abort
+    #: when the target adapter raised ``AdapterDescribeFailed`` (see that
+    #: class's docstring), or a ``no_payloads`` abort caused by an active
+    #: ``--weakness-class`` filter matching nothing (#205c). ``None`` for
+    #: every other abort reason, for one of these two the engine didn't have
+    #: a more specific cause for, and for a result reconstructed from a
+    #: persisted ``scan_report.json`` — like ``descriptor``/``llm_spend``,
+    #: this is NOT part of ScanReport's schema, so it costs no compat event.
+    #: Consumed by ``ScanOutcome.from_report``'s ``abort_detail`` kwarg to
+    #: replace the generic per-abort-reason text.
     abort_detail: str | None = None
 
 
@@ -489,6 +493,7 @@ class ScanEngine:
                 # intentional scoping (stay clean+empty); but a *real* scan that
                 # produced zero payloads means no seeds were applicable to this
                 # target — that must be loud, never look like a clean pass (#3).
+                no_payloads_detail: str | None = None
                 if self._config.pattern_id_filter is None:
                     family = target_family(descriptor.target_id)
                     known = sorted({t for s in SEED_CATALOGUE for t in s.applicable_targets})
@@ -499,6 +504,16 @@ class ScanEngine:
                         known,
                     )
                     aborted = AbortReason.NO_PAYLOADS
+                    # #205c: a --weakness-class filter that matched nothing is a
+                    # DIFFERENT cause from "this target declares no weakness
+                    # classes at all" (the generic NO_PAYLOADS text) -- name it.
+                    active_filter = active_weakness_filter()
+                    if active_filter:
+                        no_payloads_detail = (
+                            f"error: --weakness-class {sorted(active_filter)} matched no "
+                            f"seeds applicable to this target ({family!r}); nothing was "
+                            "scanned. Drop or widen the filter, then re-run."
+                        )
                 return self._finalize(
                     attempts,
                     exploits,
@@ -507,6 +522,7 @@ class ScanEngine:
                     module_ids,
                     descriptor=descriptor,
                     llm_spend=counter.spend(),
+                    abort_detail=no_payloads_detail,
                 )
 
             timeout_s = self._config.wall_clock_timeout_s
@@ -546,13 +562,25 @@ class ScanEngine:
                         {p.pattern_id for p in all_payloads} - set(counter.by_seed) - completed
                     )
                     if starved:
+                        # #205: --weakness-class FILTERS a reference/bundled target's
+                        # seeds (no declared weakness_classes -- the legacy family
+                        # path) but WIDENS a custom target's (adds to its declared
+                        # weakness_classes). descriptor.weakness_classes is exactly
+                        # the signal seed_coverage itself branches on for this same
+                        # distinction, so it names the correct remedy here too.
+                        narrow_hint = (
+                            "narrow weakness_classes in the target file"
+                            if descriptor.weakness_classes
+                            else "narrow the scan with --weakness-class"
+                        )
                         logger.warning(
                             "budget exhausted after %d call(s): %d seed(s) never started "
                             "and proved NOTHING about this target: %s. Raise "
-                            "--max-llm-calls or narrow the scan with --weakness-class.",
+                            "--max-llm-calls, or %s.",
                             counter.count,
                             len(starved),
                             ", ".join(starved),
+                            narrow_hint,
                         )
                     for pending in tasks:
                         pending.cancel()

@@ -859,9 +859,10 @@ def scan(
         typer.Option(
             "--weakness-class",
             help=(
-                "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). "
-                "mcp:custom adds it to weakness_classes; any other target filters "
-                "which seeds run."
+                "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). A "
+                "custom target (--target-file, or inline mcp:custom flags) ADDS it "
+                "to weakness_classes; every other target (reference:*, a bundled "
+                "mcp:<family>) FILTERS which seeds run."
             ),
         ),
     ] = None,
@@ -1045,6 +1046,10 @@ def scan(
     exceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an
     aborted/empty scan exits non-zero so it never reads as a clean pass.
     """
+    if weakness_class:
+        from mylonite.scan.weakness import validate_weakness_class_flag_or_exit
+
+        validate_weakness_class_flag_or_exit(weakness_class)
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
     # T14: auto-discovered from ./mylonite.yaml when no --config is passed —
