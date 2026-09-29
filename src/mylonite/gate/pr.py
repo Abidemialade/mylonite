@@ -39,22 +39,22 @@ def _default_run(cmd: Sequence[str], **kwargs: Any) -> subprocess.CompletedProce
 class GatePaths:
     repo_root: Path
     gate_dir: Path
+    #: Exactly what ``git add`` stages: each KEPT finding's directory,
+    #: ``PR_BODY.md``, and any ``target.yaml`` copies — required, not a bare
+    #: sweep of ``gate_dir``, because ``gate_dir`` can hold more than the
+    #: current run's kept output. A rejected finding's evidence lives in a
+    #: SIBLING directory (never under ``gate_dir``), but ``gate_dir`` itself
+    #: can still carry a KEPT finding's directory from an earlier run against
+    #: the same ``--out`` that this run didn't touch — a directory-wide sweep
+    #: would stage that stale content too. The sole caller,
+    #: ``gate/wiring.py``'s ``open_pr_fn``, always builds this list
+    #: explicitly from the findings it actually just validated, so there is
+    #: no fallback here for an omitted value.
+    add_paths: list[Path]
     workflow_files: list[Path] = field(default_factory=list)
-    #: Exact paths ``git add`` should stage (Critical fix, round 1 of review):
-    #: each KEPT finding's directory, ``PR_BODY.md`` and ``target.yaml``copies
-    #: — never the bare ``gate_dir`` swept whole, which used to sweep in a
-    #: REJECTED finding's un-validated test too (a mixed-verdict multi-finding
-    #: run wrote every finding under ``gate_dir``, and `git add gate_dir`
-    #: cannot distinguish a kept subdirectory from a rejected one).
-    #: ``None`` (the default) falls back to the historical single-path sweep
-    #: of ``gate_dir`` — every existing single-finding caller/test keeps
-    #: working unchanged; only ``gate/wiring.py``'s multi-finding-aware
-    #: ``open_pr_fn`` passes an explicit list.
-    add_paths: list[Path] | None = None
 
     def all_paths(self) -> list[Path]:
-        base = self.add_paths if self.add_paths is not None else [self.gate_dir]
-        return [*base, *self.workflow_files]
+        return [*self.add_paths, *self.workflow_files]
 
 
 @dataclass
@@ -208,6 +208,9 @@ def open_or_print_pr(
             f"Your repository was not modified.\n"
             f"To commit them and open the gating PR, run:\n"
             f"  {manual}\n"
+            f"Stage with the command above, not `git add {paths.gate_dir}` — the "
+            f"output directory can still hold a kept finding from an earlier run "
+            f"this one didn't touch.\n"
             f"Or re-run with --open-pr to do all of it automatically.\n"
         )
         return PrResult(branch=branch, opened=False, printed_command=manual)
