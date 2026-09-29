@@ -232,7 +232,22 @@ kitchen-sink seeds are still scheduled, and each one hits the target and reports
 `skipped_no_seed_arm` (NOT TESTED), which forces the scan's overall coverage to PARTIAL
 rather than letting it read as a trustworthy clean pass. `gate` gets the same refusal,
 with no `--dry-run` equivalent to downgrade it and no `--allow-no-seed-arm` flag of its
-own — an uncoverable class always refuses there.
+own — an uncoverable class always refuses there. `gate` also has no `seed_arm`
+auto-wire: a W2 target that `scan` would wire for you refuses in `gate`. Run `scan` on it
+first; when it finds a store-and-recall pair it writes the wired target to
+`.mylonite/scans/<timestamp>/target.yaml`, and that file is the one to pass to `gate`.
+
+The check has to launch the server to see its tools, and it fails closed: if the server
+can't be described within 20 seconds (or the target's `timeout_s`, when that is larger),
+the run stops with exit 2 and says so, rather than
+starting without knowing whether every declared class can run. Re-run once (a first
+`npx`/`uvx` download is cached after that), or raise `timeout_s`. The scan engine repeats
+the same rule on the description it actually runs against: a declared class with no seed
+at all aborts the scan before any payload is sent (`no_payloads`, exit 2), so a skipped or
+failed pre-flight can never let the other classes read as a clean pass.
+
+When the refused class came from `--weakness-class` rather than the file, the message
+says so and points at the flag, since editing `weakness_classes` would not help.
 
 This is a different check from `mylonite check`, which needs a live tool surface and no
 LLM call: it diffs `seed_arm.tool`, `effect_probe.verify_tool` and every

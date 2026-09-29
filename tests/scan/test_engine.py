@@ -2050,3 +2050,65 @@ async def test_non_schema_channel_zero_engagement_is_unaffected() -> None:
     result = await engine.run()
 
     assert result.report.attempts[0].outcome == "skipped_planner_no_engagement"
+
+
+# --- a declared class with zero seeds can never read as clean ----------------
+
+
+def _w3_w4_descriptor_with_only_send_email() -> TargetDescriptor:
+    from mylonite.contracts import ToolSpec
+
+    # send_email covers W4; nothing on this surface fetches a URL, so a declared
+    # W3 resolves to ZERO seeds.
+    return TargetDescriptor(
+        target_id="mcp:acme",
+        kind="mcp",
+        system_prompt="x",
+        tools=[ToolSpec(name="send_email", description="Send an email to a recipient.")],
+        weakness_classes=["W3", "W4"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_engine_aborts_before_any_payload_when_a_declared_class_has_no_seed() -> None:
+    """The CLI refuses this target before the scan starts. If that refusal is
+    bypassed (a caller that builds the engine directly, or a describe that
+    differs from the pre-flight one), the engine must still refuse to run the
+    W4 half alone and report a clean pass with W3 never attempted."""
+    payload = _payload_from_seed_index(0)
+    adapter = _AdapterStub(_ok_response(), descriptor=_w3_w4_descriptor_with_only_send_email())
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+
+    assert adapter.invoke_call_count == 0
+    assert result.report.attempts == []
+    assert result.report.aborted == "no_payloads"
+    outcome = ScanOutcome.from_report(result.report, abort_detail=result.abort_detail)
+    assert outcome.exit_code == 2
+    assert outcome.operator_message is not None
+    assert "W3" in outcome.operator_message
+    assert "W4" not in outcome.operator_message.split("W3", 1)[0]
+
+
+@pytest.mark.asyncio
+async def test_engine_uncoverable_check_is_skipped_for_a_pattern_id_filter() -> None:
+    """A pattern_id filter is intentional scoping (validate re-drives one seed),
+    so an uncovered sibling class does not abort it."""
+    payload = _payload_from_seed_index(0)
+    adapter = _AdapterStub(_ok_response(), descriptor=_w3_w4_descriptor_with_only_send_email())
+    engine = ScanEngine(
+        config=_config(pattern_id_filter=payload.pattern_id),
+        adapter=adapter,
+        attack_modules=[_ModuleStub([payload])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(_no()),
+    )
+    result = await engine.run()
+    assert result.report.aborted is None
+    assert len(result.report.attempts) == 1

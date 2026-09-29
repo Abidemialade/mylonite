@@ -16,6 +16,7 @@ target routing.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 
 import typer
@@ -202,6 +203,9 @@ def refuse_uncoverable_weakness_classes(
     *,
     allow_no_seed_arm: bool = False,
     dry_run: bool = False,
+    timeout_s: float | None = None,
+    added_by_flag: Collection[str] = (),
+    command: str = "scan",
 ) -> None:
     """Pre-flight refusal (#181b): before any LLM call, refuse a scan/gate
     of a custom target whose declared ``weakness_classes`` include one this
@@ -221,12 +225,16 @@ def refuse_uncoverable_weakness_classes(
     seeds (no clean/finding verdict to mislead), so it stays informative
     rather than blocking.
 
-    Mirrors ``target_file.validate_for_scan``'s pattern: print an actionable
-    message before any LLM spend. A no-op when the target declares no
-    ``weakness_classes`` at all (the legacy family-mapping targets are
-    unaffected) or when introspection itself fails — a failure there is left
-    for the normal describe() call later in the run to report, with its own,
-    more specific diagnosis.
+    Fails closed: when ``describe()`` raises or runs past ``timeout_s``, the
+    coverability of the declared classes is unknown, so a real run is refused
+    with a named message rather than started on the hope that every class can
+    run. ``timeout_s`` defaults to 20 seconds, or the target's own
+    ``timeout_s`` when that is larger. ``added_by_flag`` names classes that came from ``--weakness-class``
+    rather than the file, so the fix points at the flag. ``command="gate"``
+    adds the pointer to ``scan``'s seed_arm auto-wire, which gate lacks.
+
+    A no-op when the target declares no ``weakness_classes`` at all (the
+    legacy family-mapping targets are unaffected).
     """
     if not getattr(target_file, "weakness_classes", None):
         return
@@ -234,9 +242,24 @@ def refuse_uncoverable_weakness_classes(
 
     from mylonite.scan.seeds import seed_coverage
 
+    if timeout_s is None:
+        timeout_s = max(20.0, getattr(target_file, "timeout_s", None) or 0)
+    level = "warning" if dry_run else "error"
     try:
-        descriptor = asyncio.run(asyncio.wait_for(adapter.describe(), timeout=20))
-    except Exception:
+        descriptor = asyncio.run(asyncio.wait_for(adapter.describe(), timeout=timeout_s))
+    except Exception as exc:
+        what = (
+            f"within {timeout_s:g}s"
+            if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+            else f"({type(exc).__name__})"
+        )
+        echo_err(
+            f"{level}: could not describe the server {what} to check which declared "
+            "weakness classes can run. Re-run (a first npx/uvx download is cached after "
+            "that), or raise timeout_s in the target file."
+        )
+        if not dry_run:
+            raise typer.Exit(code=EXIT_CONFIG) from exc
         return
     uncoverable = seed_coverage(descriptor).uncoverable
     if allow_no_seed_arm:
@@ -249,12 +272,28 @@ def refuse_uncoverable_weakness_classes(
         }
     if not uncoverable:
         return
-    level = "warning" if dry_run else "error"
     echo_err(
         f"{level}: this target declares weakness class(es) its tool surface cannot cover "
         "at all (every attempt for them would never run):"
     )
     for weakness, reason in sorted(uncoverable.items()):
+        if weakness in added_by_flag:
+            reason = reason.replace(
+                f"remove {weakness} from weakness_classes",
+                f"{weakness} was added by --weakness-class; drop it from the flag",
+            )
         echo_err(f"  {weakness}: {reason}")
+    if (
+        command == "gate"
+        and "W2" in uncoverable
+        and getattr(target_file, "seed_arm", None) is None
+        and getattr(target_file, "transport", None) != "rest"
+    ):
+        echo_err(
+            "  gate does not auto-wire a seed_arm; scan does. Run `mylonite scan "
+            "--target-file <this file> --authorize <family>` first. When it finds a "
+            "store->recall pair it writes the wired target to "
+            ".mylonite/scans/<timestamp>/target.yaml; pass that file to gate's --target-file."
+        )
     if not dry_run:
         raise typer.Exit(code=EXIT_CONFIG)

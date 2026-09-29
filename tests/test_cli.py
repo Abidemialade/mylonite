@@ -1180,13 +1180,12 @@ def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """#181b: a declared W3 on a surface with no egress-shaped tool would
-    run zero seeds — refused loudly, before the LLM-configured check even
-    runs (no provider key set here at all)."""
+    run zero seeds — refused loudly, before any LLM call (the key is set, so
+    the key/model pre-flight passes and the refusal is what stops the run)."""
     from mylonite.plugins._mcp import target_registry
 
     target_registry.clear_runtime_targets()
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     _patch_fake_mcp_session_with_one_tool(monkeypatch, "lookup_status")
     p = tmp_path / "t.yaml"
     p.write_text(
@@ -1198,6 +1197,77 @@ def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
     assert result.exit_code == EXIT_CONFIG, out
     assert "W3" in out
     assert "egress" in out.lower()
+    target_registry.clear_runtime_targets()
+
+
+def _patch_mcp_session_must_not_launch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every attempt to open an MCP session (i.e. launch the server)."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter
+
+    launches: list[str] = []
+
+    @asynccontextmanager
+    async def _recording_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        launches.append("launched")
+        raise AssertionError("the server must not launch before the key/model pre-flight")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _recording_open)
+    return launches
+
+
+@pytest.mark.parametrize("case", ["missing_key"])
+def test_scan_key_and_model_preflight_runs_before_the_server_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """The uncoverable-class refusal launches the server to describe it, so it
+    must run after the key/model pre-flight: a bad model or a missing key exits
+    2 without ever spawning the target."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    launches = _patch_mcp_session_must_not_launch(monkeypatch)
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "MYLONITE_MODEL", "MYLONITE_PROVIDER"):
+        monkeypatch.delenv(var, raising=False)
+    argv = ["scan", "--target-file"]
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W3]\n",
+        encoding="utf-8",
+    )
+    argv += [str(p), "--authorize", "acme"]
+    if case == "bad_model":
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        argv += ["--model", "not-a-real/model"]
+    result = runner.invoke(app, argv)
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert launches == [], out
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_refusal_names_the_flag_when_the_class_came_from_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    _patch_fake_mcp_session_with_one_tool(monkeypatch, "send_email")
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "--target-file", str(p), "--authorize", "acme", "--weakness-class", "W3"],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "W3 was added by --weakness-class" in out
     target_registry.clear_runtime_targets()
 
 
@@ -2637,12 +2707,23 @@ def _canned_scan_result(target_id: str, *, findings: int) -> Any:
     return ScanResult(report=report, exploits=[])
 
 
+def _skip_uncoverable_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For tests that stub the scan engine but launch no real server: the
+    uncoverable-class refusal describes the target and fails closed when it
+    can't, so bypass it here. Its own behaviour is pinned by the refusal tests."""
+    monkeypatch.setattr(
+        "mylonite.plugins.cli_targets.refuse_uncoverable_weakness_classes",
+        lambda *_a, **_k: None,
+    )
+
+
 def test_scan_custom_persists_target_yaml_and_next_hint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A custom scan co-locates the resolved target YAML in the scan dir
     (redaction-safe, DCR-0006) and prints a `Next: mylonite generate` hint when
     it found something."""
+    _skip_uncoverable_refusal(monkeypatch)
     import yaml
 
     from mylonite.plugins._mcp import target_registry
@@ -2700,6 +2781,7 @@ def test_scan_persisted_target_yaml_has_no_secret_env(
 ) -> None:
     """DCR-0006: `scan` must not write a credential-shaped --env value verbatim
     into the persisted scan-dir target.yaml."""
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine
 
@@ -2789,6 +2871,7 @@ def test_scan_dir_target_copy_names_credential_vars(
 ) -> None:
     """0.10.3: the scan-dir target.yaml copy tells the user which variable
     holds the masked --env secret."""
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine
 
@@ -2851,6 +2934,7 @@ def test_gate_target_copy_names_credential_vars(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """0.10.3: the target.yaml copy gate writes for its PR names the variables."""
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.gate import pr as pr_mod
 
     monkeypatch.chdir(tmp_path)
@@ -4069,6 +4153,7 @@ def test_scan_config_precedence_conformance_authorize(
 def test_custom_target_flow_needs_target_file_at_most_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.contracts._types import ScanAttempt, ScanReport
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine, ScanResult
@@ -4338,6 +4423,7 @@ def test_gate_reads_target_file_from_mylonite_yaml(
 ) -> None:
     """gate auto-discovers ./mylonite.yaml and fills target_file/authorize, so it
     no longer exits 2 'no target given' when the project config declares them."""
+    _skip_uncoverable_refusal(monkeypatch)
     monkeypatch.chdir(tmp_path)
     # T14: gate now pre-flights require_llm_configured() before run_gate is
     # even called -- run_gate itself is stubbed below, so this just needs a
@@ -4703,6 +4789,7 @@ def test_gate_reports_a_pr_failure_gracefully(
     repo, branch already exists, gh not authenticated — surfaced as a raw
     traceback AFTER 100% of the LLM spend had been paid.
     """
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.exit_codes import EXIT_PR_FAILED
     from mylonite.gate import pr as pr_mod
     from mylonite.plugins._mcp import target_registry
@@ -4763,6 +4850,7 @@ def test_gate_maps_budget_exhaustion_to_exit_budget(
     when raised inside the validator. The adapter half is fixed in
     _session_adapter's re-raise allowlist; this is the CLI half.
     """
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.exit_codes import EXIT_BUDGET
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan._llm import BudgetExceededError
@@ -4827,6 +4915,7 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
     raw adapter's ``_launch_env`` would be empty, not
     ``{"DISABLE_MARKING": "1"}``).
     """
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine
 
@@ -5214,6 +5303,7 @@ def test_gate_and_validate_produce_identical_twin_plans(
     code where the two were independently (and, for control_env, incorrectly)
     derived.
     """
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.cli import _validate_custom
     from mylonite.plugins._mcp import target_registry
     from mylonite.scan.engine import ScanEngine
@@ -5297,6 +5387,7 @@ def test_gate_fast_passes_fast_to_plan_twins_in_validate_fn(
     against a custom target: scan_fn never even imports plan_twins under
     --fast (it returns before that import), so the single captured call is
     validate_fn's own."""
+    _skip_uncoverable_refusal(monkeypatch)
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp import twins as twins_module
     from mylonite.scan.engine import ScanEngine

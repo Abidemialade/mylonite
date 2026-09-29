@@ -48,6 +48,7 @@ from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
 from mylonite.scan.seeds import (
     SEED_CATALOGUE,
     SeedPattern,
+    seed_coverage,
     seeds_for_descriptor,
     target_family,
 )
@@ -294,6 +295,29 @@ def _effective_max_concurrent(config: ScanConfig, adapter: Any) -> int:
     return config.max_concurrent
 
 
+def _declared_classes_without_seeds(descriptor: TargetDescriptor) -> dict[str, str]:
+    """Declared weakness classes this descriptor schedules no seed for at all.
+
+    Narrower than ``seed_coverage(...).uncoverable``: a class that is
+    uncoverable but still has seeds scheduled (the NOT-TESTED W2 placeholders
+    ``--allow-no-seed-arm`` opts into) produces attempts that keep coverage
+    partial, so it is not a false-clean risk and is not returned here.
+    """
+    coverage = seed_coverage(descriptor)
+    scheduled = {s.weakness for s in coverage.seeds}
+    return {w: reason for w, reason in coverage.uncoverable.items() if w not in scheduled}
+
+
+def _unseeded_abort_detail(unseeded: dict[str, str]) -> str:
+    lines = [
+        "error: this target declares weakness class(es) its tool surface cannot cover at "
+        "all, so nothing was scanned (running the rest would read as clean with these "
+        "never attempted):"
+    ]
+    lines.extend(f"  {w}: {reason}" for w, reason in sorted(unseeded.items()))
+    return "\n".join(lines)
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -386,6 +410,32 @@ class ScanEngine:
             # correctly: same weakness class, two tag sets, decided by provenance.
             # Those tags become pytest markers and SARIF tags in a consumer's repo.
             self._seeds_by_id.update({s.pattern_id: s for s in seeds_for_descriptor(descriptor)})
+
+            # #181b, engine side: a declared weakness class with ZERO scheduled
+            # seeds would let the other classes run and the scan read as clean
+            # with that class never attempted. The CLI refuses this before the
+            # scan starts; this repeats the rule on the descriptor that actually
+            # drives the run, so a bypassed or failed pre-flight can never turn
+            # into a false clean. A pattern_id filter (validate re-driving one
+            # seed) and a dry run (no verdict) are intentional scoping and exempt.
+            if self._config.pattern_id_filter is None and not self._config.dry_run:
+                unseeded = _declared_classes_without_seeds(descriptor)
+                if unseeded:
+                    logger.warning(
+                        "ScanEngine: declared weakness class(es) %s have no seed on "
+                        "this target; aborting before any payload",
+                        ", ".join(sorted(unseeded)),
+                    )
+                    return self._finalize(
+                        attempts,
+                        exploits,
+                        AbortReason.NO_PAYLOADS,
+                        time.monotonic() - start,
+                        module_ids,
+                        descriptor=descriptor,
+                        llm_spend=counter.spend(),
+                        abort_detail=_unseeded_abort_detail(unseeded),
+                    )
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(_effective_max_concurrent(self._config, self._adapter))

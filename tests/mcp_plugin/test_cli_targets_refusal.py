@@ -104,11 +104,105 @@ def test_dry_run_downgrades_to_a_warning_and_does_not_raise(
     assert "W3" in err
 
 
-def test_describe_failure_is_a_no_op_and_leaves_it_to_the_normal_describe_call() -> None:
+def test_describe_failure_fails_closed_with_a_named_message(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A describe that raises must not skip the refusal: the declared class
+    would then run zero attempts and the scan could read as clean."""
     tf = SimpleNamespace(weakness_classes=["W3"])
 
     class _FailingAdapter:
         async def describe(self) -> TargetDescriptor:
             raise RuntimeError("boom")
 
-    refuse_uncoverable_weakness_classes(tf, _FailingAdapter())  # must not raise
+    with pytest.raises(typer.Exit) as excinfo:
+        refuse_uncoverable_weakness_classes(tf, _FailingAdapter())
+    assert excinfo.value.exit_code == 2
+    err = capsys.readouterr().err
+    assert "could not describe the server" in err
+    assert "RuntimeError" in err
+    assert "timeout_s" in err
+
+
+def test_describe_timeout_fails_closed_and_names_the_budget(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import asyncio
+
+    tf = SimpleNamespace(weakness_classes=["W4"])
+
+    class _SlowAdapter:
+        async def describe(self) -> TargetDescriptor:
+            await asyncio.sleep(5)
+            raise AssertionError("unreachable")
+
+    with pytest.raises(typer.Exit) as excinfo:
+        refuse_uncoverable_weakness_classes(tf, _SlowAdapter(), timeout_s=0.05)
+    assert excinfo.value.exit_code == 2
+    err = capsys.readouterr().err
+    assert "within 0.05s" in err
+    assert "Re-run" in err
+
+
+def test_describe_failure_on_a_dry_run_is_a_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tf = SimpleNamespace(weakness_classes=["W3"])
+
+    class _FailingAdapter:
+        async def describe(self) -> TargetDescriptor:
+            raise RuntimeError("boom")
+
+    refuse_uncoverable_weakness_classes(tf, _FailingAdapter(), dry_run=True)  # must not raise
+    assert "warning: could not describe the server" in capsys.readouterr().err
+
+
+def test_a_class_added_by_the_flag_names_the_flag_not_the_file(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    tf = SimpleNamespace(weakness_classes=["W4", "W3"])
+    adapter = _FakeAdapter(
+        _descriptor(
+            weakness_classes=["W4", "W3"],
+            tools=[ToolSpec(name="send_email", description="send")],
+        )
+    )
+    with pytest.raises(typer.Exit):
+        refuse_uncoverable_weakness_classes(tf, adapter, added_by_flag=["W3"])
+    err = capsys.readouterr().err
+    assert "W3 was added by --weakness-class" in err
+    assert "remove W3 from weakness_classes" not in err
+
+
+def test_gate_w2_refusal_points_at_scans_auto_wired_target(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """gate has no seed_arm auto-wire; scan does. The refusal must say so."""
+    tf = SimpleNamespace(weakness_classes=["W2"], seed_arm=None, transport="stdio")
+    adapter = _FakeAdapter(
+        _descriptor(
+            weakness_classes=["W2"],
+            tools=[ToolSpec(name="get_status", description="read-only")],
+        )
+    )
+    with pytest.raises(typer.Exit):
+        refuse_uncoverable_weakness_classes(tf, adapter, command="gate")
+    err = capsys.readouterr().err
+    assert "mylonite scan" in err
+    assert "target.yaml" in err
+
+
+def test_describe_budget_honours_a_larger_target_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A target that sets timeout_s above 20 gets that budget for the describe
+    too, so the fix the message names (raise timeout_s) actually works."""
+    tf = SimpleNamespace(weakness_classes=["W3"], timeout_s=45.0)
+
+    class _FailingAdapter:
+        async def describe(self) -> TargetDescriptor:
+            raise TimeoutError
+
+    with pytest.raises(typer.Exit):
+        refuse_uncoverable_weakness_classes(tf, _FailingAdapter())
+    assert "within 45s" in capsys.readouterr().err
