@@ -138,7 +138,8 @@ makes up front to infer a `seed_arm` — see [CLI reference](cli-reference.md)) 
 names `timeout_s`, but its own budget is `max(20, timeout_s)`: even a smaller
 `timeout_s` never shrinks that first probe below 20 seconds. Omitting the field
 keeps today's fixed 60s default for the planner and session, so an existing target
-file loads unchanged.
+file loads unchanged. Must be greater than 0; declaring it on a `transport: rest`
+target is rejected — set `request.timeout_s` there instead.
 
 ```yaml
 timeout_s: 90

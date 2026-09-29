@@ -56,6 +56,28 @@ def test_a_provider_shaped_but_bogus_model_is_not_routable() -> None:
     assert model_is_routable("not-a-real/model") is False
 
 
+def test_model_is_routable_suppresses_litellms_provider_list_banner(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fix round 1 (#207): litellm.get_llm_provider prints a "Provider List:
+    <url>" banner to stdout on every rejection, regardless of whether the
+    caller catches the exception -- with the preflight now called once per
+    role model (not per seed/attempt), this must not print at all."""
+    assert model_is_routable("not-a-real/model") is False
+    out = capsys.readouterr().out
+    assert "Provider List" not in out
+
+
+def test_model_is_routable_restores_suppress_debug_info_afterwards() -> None:
+    """The suppression must not leak into unrelated litellm calls elsewhere
+    in the process -- restore whatever the flag was before this call."""
+    import litellm
+
+    litellm.suppress_debug_info = False
+    model_is_routable("not-a-real/model")
+    assert litellm.suppress_debug_info is False
+
+
 def test_preflight_exits_config_once_naming_the_bad_model_and_the_flag() -> None:
     with pytest.raises(typer.Exit) as excinfo:
         preflight_model_or_exit("not-a-real/model")

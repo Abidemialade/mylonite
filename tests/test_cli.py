@@ -1358,6 +1358,44 @@ def test_scan_autowire_mcperror_timeout_also_skips_the_seed_arm_advice(
     target_registry.clear_runtime_targets()
 
 
+def test_scan_bad_model_fails_before_the_autowire_probe_launches_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix round 1 (#207/#186): a bad --model used to reach the seed_arm
+    auto-wire probe first -- for a custom target needing auto-wire, that
+    meant spawning the real server (or, here, calling the session opener)
+    before the model was ever validated. The model pre-flight must run
+    BEFORE that probe, not after."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+    opened = False
+
+    @asynccontextmanager
+    async def _tracking_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        nonlocal opened
+        opened = True
+        yield SimpleNamespace()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _tracking_open)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "--target-file", str(p), "--authorize", "acme", "--model", "not-a-real/model"],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "invalid --model" in out, out
+    assert opened is False, "the auto-wire probe must not have launched the server"
+    target_registry.clear_runtime_targets()
+
+
 def test_scan_refuses_before_any_llm_call_when_a_class_is_uncoverable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -331,7 +331,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         from mylonite.plugins._mcp.target_file import expand_env_block
 
         env = dict(self._launch_env) if self._launch_env is not None else dict(self._spec.extra_env)
-        return expand_env_block(env)
+        # Fix round 1: a bundled family (e.g. github) has no target file for
+        # the default "target file references..." wording to describe.
+        subject = (
+            f"the bundled mcp:{self._family} target"
+            if self._family in target_registry.BUNDLED_TARGETS
+            else "target file"
+        )
+        return expand_env_block(env, subject=subject)
 
     @property
     def declares_effect_probe(self) -> bool:

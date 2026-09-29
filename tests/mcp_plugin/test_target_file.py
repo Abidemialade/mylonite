@@ -16,7 +16,7 @@ from mylonite.plugins._mcp.target_file import (
     payload_placement_warnings,
     resolved_system_prompt,
 )
-from mylonite.plugins._mcp.target_registry import InvalidTargetScope, SeedArmSpec
+from mylonite.plugins._mcp.target_registry import InvalidTargetScope, RequestSpec, SeedArmSpec
 
 
 @pytest.fixture(autouse=True)
@@ -148,6 +148,29 @@ def test_build_target_spec_carries_timeout_s() -> None:
 def test_build_target_spec_timeout_s_defaults_to_none() -> None:
     spec = build_target_spec(_tf())
     assert spec.timeout_s is None
+
+
+def test_target_file_rejects_a_non_positive_timeout_s() -> None:
+    """Fix round 1: timeout_s must be > 0 -- 0 or a negative value is not a
+    meaningful timeout and would either fire instantly or never."""
+    with pytest.raises(Exception, match="timeout_s"):
+        _tf(timeout_s=0)
+    with pytest.raises(Exception, match="timeout_s"):
+        _tf(timeout_s=-5)
+
+
+def test_target_file_rejects_timeout_s_on_a_rest_transport() -> None:
+    """Fix round 1: timeout_s is the MCP-transport (stdio/sse/http) knob --
+    a rest target has its own request.timeout_s. Declaring both is
+    confusing (which one applies?), so the top-level field is rejected
+    outright on transport: rest, pointing at the right one."""
+    with pytest.raises(ValueError, match=r"request\.timeout_s"):
+        _tf(
+            transport="rest",
+            command="",
+            request=RequestSpec(url="https://agent.example/chat", body='{"prompt": "{prompt}"}'),
+            timeout_s=30,
+        )
 
 
 def test_build_target_spec_scope_validator_enforces_requires_scope() -> None:
@@ -563,6 +586,30 @@ def test_infer_seed_arm_none_when_no_store_tool() -> None:
     spec, note = infer_seed_arm([_toolspec("list_files", {"path": {"type": "string"}})])
     assert spec is None
     assert "no content-storing tool" in note.lower()
+
+
+def test_expand_env_block_subject_customises_the_missing_var_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix round 1: expand_env_block's default subject ("target file") is
+    right for a LOADED target file's own env: block, but wrong for a
+    caller with no target file at all (the bundled mcp:github spec) --
+    the subject must be overridable per call."""
+    from mylonite.plugins._mcp.target_file import expand_env_block
+
+    monkeypatch.delenv("NOT_A_REAL_VAR_XYZ", raising=False)
+    with pytest.raises(ValueError, match="the bundled mcp:github target") as excinfo:
+        expand_env_block(
+            {"TOKEN": "${NOT_A_REAL_VAR_XYZ}"}, subject="the bundled mcp:github target"
+        )
+    assert "target file references" not in str(excinfo.value)
+
+
+def test_expand_env_block_default_subject_stays_target_file() -> None:
+    from mylonite.plugins._mcp.target_file import expand_env_block
+
+    with pytest.raises(ValueError, match="target file references"):
+        expand_env_block({"TOKEN": "${NOT_A_REAL_VAR_XYZ}"})
 
 
 def test_needs_seed_arm_autowire() -> None:
