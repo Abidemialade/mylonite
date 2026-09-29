@@ -23,7 +23,7 @@ from mylonite.exit_codes import (
 )
 from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_gate_pr_body
 from mylonite.generate.wiring import _slugify_pattern
-from mylonite.scan.coverage import ScanOutcome
+from mylonite.scan.coverage import AbortReason, ScanOutcome
 from mylonite.scan.llm_types import CompletionFn
 
 
@@ -223,6 +223,31 @@ def _process_one_finding(
     return _FindingOutcome(exploit=exploit, stage="kept", report=report)
 
 
+def _abort_message(outcome: ScanOutcome, budget_hint_text: str | None) -> str:
+    """The operator-facing message for an aborted scan (round-1 review,
+    Important #4). ``scan``'s own budget message ends by suggesting
+    ``--weakness-class``, which is `scan`-only — `gate` has no such flag, and
+    for a custom target the real lever is the target file's own
+    ``weakness_classes:`` key. Rather than tamper with the shared
+    ``ScanOutcome`` message text (also used verbatim by ``scan`` itself,
+    where it IS correct), `gate` prints its own self-contained message for a
+    budget abort specifically, using the hint ``gate/wiring.budget_hint()``
+    computed — the same function ``cli.py``'s own direct
+    ``BudgetExceededError`` handler calls, so both paths agree. Every other
+    abort reason's message doesn't mention a nonexistent flag, so it is
+    printed unchanged.
+    """
+    if outcome.abort is AbortReason.BUDGET_EXCEEDED and budget_hint_text:
+        return (
+            "error: gate's scan phase exhausted its LLM call budget and stopped "
+            f"early; coverage is incomplete. {budget_hint_text}"
+        )
+    return outcome.operator_message or (
+        "Mylonite gate: the scan did not complete a trustworthy run "
+        f"(coverage={outcome.coverage.name}, abort={outcome.abort}) — cannot gate."
+    )
+
+
 def run_gate(
     *,
     out_dir: Path,
@@ -236,6 +261,7 @@ def run_gate(
     mitigation_completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
     target_context: Any | None = None,
+    budget_hint_text: str | None = None,
 ) -> GateResult:
     bundle = scan_fn()
     exploits = bundle.exploits
@@ -249,12 +275,7 @@ def run_gate(
         # behaviour where a partial/aborted scan that still found something
         # before stopping is gated on that finding.
         if not bundle.outcome.trustworthy_clean:
-            message = bundle.outcome.operator_message or (
-                "Mylonite gate: the scan did not complete a trustworthy run "
-                f"(coverage={bundle.outcome.coverage.name}, abort={bundle.outcome.abort}) — "
-                "cannot gate."
-            )
-            echo(message)
+            echo(_abort_message(bundle.outcome, budget_hint_text))
             return GateResult(exit_code=bundle.outcome.exit_code, opened_pr=False, kept=None)
         echo("Mylonite gate: no exploit found — nothing to gate.")
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
@@ -305,8 +326,7 @@ def run_gate(
         # `gate` cannot silently exit 0 on a budget-exhausted run just because
         # it found something before the budget ran out.
         if bundle.outcome.abort is not None:
-            if bundle.outcome.operator_message:
-                echo(bundle.outcome.operator_message)
+            echo(_abort_message(bundle.outcome, budget_hint_text))
             result.exit_code = bundle.outcome.exit_code
         return result
 
