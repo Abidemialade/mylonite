@@ -10,6 +10,7 @@ substitute (#185).
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -175,3 +176,124 @@ def test_resolve_gate_out_dir_outside_a_repo_raises(tmp_path, monkeypatch):
         resolve_gate_out_dir(
             Path(".mylonite") / "gate", open_pr=True, workflows=False, pr_mod=pr_mod
         )
+
+
+# ---------------------------------------------------------------------------
+# Round-1 review, Critical #2: target.yaml co-located with each kept
+# multi-finding test, not just the gate root.
+# ---------------------------------------------------------------------------
+
+
+def _real_exploit(pattern_id: str):
+    """A real ExploitRecord whose pattern_id is a bundled seed, so
+    ReferencePytestGenerator can actually emit source for it."""
+    from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+
+    return ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id=pattern_id,
+        payload=Payload(pattern_id=pattern_id, channel="tool-result", body="poison"),
+        response=AdapterResponse(
+            payload_pattern_id=pattern_id, raw_response="did it", tool_calls=["remember"]
+        ),
+        success_reason="the agent stored and later acted on the planted content",
+        compliance=ComplianceTags(owasp_asi=["ASI01"]),
+    )
+
+
+def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monkeypatch):
+    """Critical #2: every KEPT finding's own directory gets a target.yaml —
+    proven by actually loading it (not just checking it exists) — because the
+    emitted test's `here = Path(__file__).parent` looks there, not at the
+    gate root. The root copy stays too, for the discovery workflow."""
+    import subprocess
+
+    from mylonite.contracts import ValidationReport
+    from mylonite.gate import pr as real_pr_mod
+    from mylonite.gate.orchestrator import ScanOutcomeBundle, run_gate
+    from mylonite.gate.wiring import make_open_pr_fn
+    from mylonite.plugins._mcp.target_file import load_target_file
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MYLONITE_TARGET_HEADERS_X_API_KEY", "test-value-not-a-real-secret")
+
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\n"
+        "weakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n"
+        "headers:\n  X-Api-Key: sk-live-abcdefghijklmnopqrstuvwxyz\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+
+    exploits = [
+        _real_exploit("indirect-injection-note-body-direct"),
+        _real_exploit("indirect-injection-note-body-roleplay"),
+    ]
+    kept_report = ValidationReport(test_filename="x.py", kept=True)
+
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest", workflows=False, target_file=target_file, pr_mod=real_pr_mod
+    )
+    out_dir = Path(".mylonite") / "gate"
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome_2(), exploits=exploits),
+        generate_fn=ReferencePytestGenerator().emit,
+        validate_fn=lambda generated: kept_report.model_copy(
+            update={"test_filename": generated.filename}
+        ),
+        open_pr_fn=open_pr_fn,
+        open_pr=False,
+    )
+
+    from mylonite.generate.wiring import _slugify_pattern
+
+    slug_a = _slugify_pattern("indirect-injection-note-body-direct")
+    slug_b = _slugify_pattern("indirect-injection-note-body-roleplay")
+
+    # Each kept finding's own directory has BOTH the emitted test AND its own
+    # target.yaml — the emitted source's `here / "target.yaml"` proves this
+    # is exactly where the test looks.
+    for slug in (slug_a, slug_b):
+        finding_dir = out_dir / slug
+        emitted = next(finding_dir.glob("test_security_*.py"))
+        assert 'here / "target.yaml"' in emitted.read_text(encoding="utf-8")
+        finding_target = finding_dir / "target.yaml"
+        assert finding_target.is_file()
+        # Redaction applies to every copy, not just the root's.
+        secret = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+        assert secret not in finding_target.read_text(encoding="utf-8")
+        loaded = load_target_file(finding_target)
+        assert loaded.family == "myapp"
+
+    # The root copy still exists too (the discovery workflow reads it).
+    assert (out_dir / "target.yaml").is_file()
+
+    # Proof, not inference: the emitted directory actually collects cleanly
+    # under pytest (no import/syntax error in either emitted test file).
+    collect = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", str(out_dir)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert collect.returncode == 0, collect.stdout + collect.stderr
+
+
+def _found_outcome_2():
+    from mylonite.scan.coverage import Coverage, ScanOutcome
+
+    return ScanOutcome(
+        coverage=Coverage.EXERCISED,
+        abort=None,
+        exercised=2,
+        not_tested=0,
+        findings=2,
+        fallbacks=0,
+        exit_code=0,
+        operator_message=None,
+    )

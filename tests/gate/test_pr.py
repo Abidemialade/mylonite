@@ -417,3 +417,66 @@ def test_resolve_repo_root_outside_a_git_repo_raises_named_error(tmp_path):
 
     with pytest.raises(GatePrError, match="not inside a git repository"):
         resolve_repo_root(cwd=outside)
+
+
+# ---------------------------------------------------------------------------
+# Round-1 review fixes: explicit add_paths, PR_BODY.md always committed
+# ---------------------------------------------------------------------------
+
+
+def test_add_paths_used_exactly_excludes_anything_not_listed(tmp_path, capsys):
+    """Critical fix: when ``add_paths`` is given, `git add`/the printed manual
+    command reference EXACTLY those paths -- not the whole gate_dir, which
+    would have swept in a sibling 'rejected/' directory too."""
+    gate_dir = tmp_path / ".mylonite" / "gate"
+    kept_dir = gate_dir / "b_pattern"
+    kept_dir.mkdir(parents=True)
+    (kept_dir / "test_security_b.py").write_text("# test\n", encoding="utf-8")
+    rejected_dir = gate_dir / "rejected" / "a_pattern"
+    rejected_dir.mkdir(parents=True)
+    (rejected_dir / "test_security_a.py").write_text("# test\n", encoding="utf-8")
+    body = gate_dir / "PR_BODY.md"
+
+    paths = GatePaths(
+        repo_root=tmp_path,
+        gate_dir=gate_dir,
+        add_paths=[kept_dir, body],
+    )
+    runner = _fake_runner_recording()
+    result = open_or_print_pr(
+        paths, branch="b", pr_title="t", pr_body="x", open_pr=False, _run=runner
+    )
+    printed = result.printed_command or ""
+    assert "b_pattern" in printed
+    assert "rejected" not in printed
+    assert "PR_BODY.md" in printed
+
+
+def test_pr_body_written_before_any_git_command(tmp_path, monkeypatch):
+    """PR_BODY.md must exist on disk before `git add` runs -- an add_paths
+    list that names it explicitly fails outright on a missing pathspec,
+    unlike the old directory-wide `git add gate_dir` sweep, which tolerated
+    the file not existing yet."""
+    import mylonite.gate.pr as prmod
+
+    monkeypatch.setattr(prmod.shutil, "which", lambda _: None)  # gh not installed
+    gate_dir = tmp_path / ".mylonite" / "gate"
+    gate_dir.mkdir(parents=True)
+    calls_before_write: list[bool] = []
+
+    def run(cmd, **kwargs):
+        if cmd[:2] == ["git", "add"]:
+            calls_before_write.append((gate_dir / "PR_BODY.md").is_file())
+
+        class _CP:
+            returncode = 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = ""
+
+        return _CP()
+
+    paths = GatePaths(repo_root=tmp_path, gate_dir=gate_dir, add_paths=[gate_dir / "PR_BODY.md"])
+    open_or_print_pr(paths, branch="b", pr_title="t", pr_body="hello", open_pr=True, _run=run)
+
+    assert (gate_dir / "PR_BODY.md").read_text(encoding="utf-8") == "hello"
+    assert calls_before_write == [True]

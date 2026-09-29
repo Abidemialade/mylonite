@@ -439,8 +439,7 @@ def _gate_branch(findings: list[tuple[Any, Any]]) -> str:
 
     No live scan id reaches this far (``run_gate`` is handed a bare
     ``ScanOutcomeBundle``, not the report's id/timestamp), so the hash is
-    always what a multi-finding run gets — the controller ruling's fallback
-    ("scan id... otherwise use the hash"). Both shapes keep the
+    always what a multi-finding run gets. Both shapes keep the
     ``mylonite/gate-`` prefix so anything that matches on it keeps working.
     """
     if len(findings) == 1:
@@ -458,7 +457,13 @@ def make_open_pr_fn(
     pr_mod: Any,
 ) -> Callable[..., Any]:
     def open_pr_fn(
-        *, out_dir: Path, findings: list[tuple[Any, Any]], body: str, open_pr: bool
+        *,
+        out_dir: Path,
+        findings: list[tuple[Any, Any]],
+        body: str,
+        open_pr: bool,
+        kept_dirs: list[Path] | None = None,
+        multi: bool = False,
     ) -> Any:
         from mylonite._redaction import target_env_refs
         from mylonite._target_env import repo_secret_lines, write_redacted_target
@@ -485,6 +490,16 @@ def make_open_pr_fn(
                 out_dir / "target.yaml", target_file.read_text(encoding="utf-8")
             )
             env_refs = target_env_refs(written_text)
+            # Critical #2 (round-1 review): the emitted test's `here =
+            # Path(__file__).parent` loads `target.yaml` from ITS OWN
+            # directory, not the gate root. A multi-finding run puts each
+            # kept test under out_dir/<slug>/, so each needs its own
+            # (already-redacted) copy too — the root copy stays for the
+            # discovery workflow's `--target-file out_dir/target.yaml`.
+            if multi and kept_dirs:
+                for finding_dir in kept_dirs:
+                    if finding_dir != out_dir:
+                        (finding_dir / "target.yaml").write_text(written_text, encoding="utf-8")
         wf_files = (
             write_workflows(
                 repo_root,
@@ -502,7 +517,21 @@ def make_open_pr_fn(
             for line in secret_lines:
                 echo_err(line)
             body = body.rstrip("\n") + "\n\n" + "\n".join(secret_lines) + "\n"
-        paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
+        # Critical #1 (round-1 review): an explicit add_paths list — never the
+        # bare gate_dir, which would sweep in a sibling `rejected/<slug>` a
+        # REJECTED finding was relocated to. The flat single-finding layout
+        # (kept_dirs is None/empty, `this_out is out_dir`) keeps the legacy
+        # whole-directory sweep — nothing but the one kept finding ever lives
+        # there.
+        add_paths: list[Path] | None = None
+        if multi and kept_dirs:
+            add_paths = list(kept_dirs)
+            if target_file is not None:
+                add_paths.append(out_dir / "target.yaml")
+            add_paths.append(out_dir / "PR_BODY.md")
+        paths = pr_mod.GatePaths(
+            repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files, add_paths=add_paths
+        )
         branch = _gate_branch(findings)
         pr_title = (
             f"Mylonite gate: {findings[0][0].pattern_id}"

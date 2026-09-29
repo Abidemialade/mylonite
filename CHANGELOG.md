@@ -13,12 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Previously it took `exploits[0]` and silently dropped the rest — a second
   real weakness never reached CI. `gate` now generates, validates, and (for
   every finding the oracle keeps) commits one test each, in deterministic
-  pattern-id order, on a single branch behind a single PR; a finding that
-  isn't kept is still named in `PR_BODY.md`, with the reason, under "Other
-  findings (not gated)". Validation cost scales with the number of findings
-  — the console prints "N findings: validating each (about Nx the
+  pattern-id order, on a single branch behind a single PR. A finding that
+  is generated and validated but not kept is written to disk for local
+  debugging — never to a path the commit touches — and is still named in
+  `PR_BODY.md`, with the actual failed validation stage and its detail, under
+  "Other findings (not gated)". Each kept finding's directory carries its own
+  copy of the redacted `target.yaml` (the emitted test loads it from there,
+  not the gate root). Validation cost scales with the number of findings —
+  the console prints "N findings: validating each (about Nx the
   single-finding validation cost)" before it starts, and the sizing box on
-  [docs/ci-gating.md](docs/ci-gating.md) explains the multiplier. The gate
+  [docs/ci-gating.md](docs/ci-gating.md) gives the per-finding cost. The gate
   branch name for exactly one kept finding is unchanged
   (`mylonite/gate-<pattern_id>`); gating several uses a short stable hash of
   the kept pattern ids (`mylonite/gate-<hash>`) instead, keeping the

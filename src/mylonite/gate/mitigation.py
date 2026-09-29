@@ -366,9 +366,10 @@ def build_gate_pr_body(
     if rejected:
         sections.append("## Other findings (not gated)")
         sections.append(
-            "_The scan turned up more than this PR gates. Each of these was generated and "
-            "validated, but the oracle did not keep it — re-run `mylonite generate` + "
-            "`mylonite validate` on the scan directory to inspect one directly._"
+            "_The scan turned up more than this PR gates. Each of these did not make it "
+            "into a kept, committed test — see the reason next to each. Re-run "
+            "`mylonite generate` + `mylonite validate` on the scan directory to inspect "
+            "one directly._"
         )
         sections.append("")
         for exploit, reason in rejected:
