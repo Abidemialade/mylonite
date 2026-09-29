@@ -8,11 +8,12 @@ import yaml
 from mylonite.gate.workflows import _TEMPLATES, write_workflows
 from mylonite.version import __version__
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-#: A commit predating any of this round's target-secrets-env work — used only
-#: to fetch the PRE-existing template rendering for the byte-identical
-#: no-secrets check below.
-_BASE_COMMIT = "9160c41"
+#: Vendored, pre-substituted renders of the templates from before the
+#: target-secrets ``env:`` token existed — committed fixture files, not a
+#: live ``git show``, so the check below can't break on a shallow checkout,
+#: a squashed history, or a non-git tree, and can't mojibake on a Windows
+#: console without PYTHONUTF8 set.
+_PRE_REVIEW_RENDER_DIR = Path(__file__).resolve().parent / "fixtures" / "pre_review_render"
 
 
 def test_templates_are_valid_yaml_and_ship_as_package_data():
@@ -128,25 +129,22 @@ def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
 
 
 def test_write_workflows_no_secrets_is_byte_identical_to_the_pre_review_render(tmp_path):
-    """Minor #8: a no-secrets render must be byte-for-byte identical to what
-    this template produced before the target-secrets ``env:`` token existed
-    — captured live from the base commit, not hand-transcribed, so this
-    can't silently drift out of sync with the real historical output. The
-    original bug left a stray blank line where the (empty) token used to be."""
+    """A no-secrets render must be identical to what this template produced
+    before the target-secrets ``env:`` token existed — checked against a
+    committed fixture (vendored from that pre-existing render, tokens
+    already substituted), not a live ``git show``, so this can't break on a
+    shallow checkout, a squashed history, a non-git tree, or Windows console
+    mojibake from a missing explicit encoding. The original bug left a stray
+    blank line where the (empty) token used to be.
+
+    The fixture's ``__MYLONITE_VERSION__`` token was substituted with the
+    version current when it was vendored, so this compares against a
+    re-rendered copy of the fixture text with today's version substituted
+    in, not the live package version directly.
+    """
     for name in _TEMPLATES:
-        base_text = subprocess.run(
-            ["git", "show", f"{_BASE_COMMIT}:src/mylonite/gate/templates/{name}"],
-            cwd=str(_REPO_ROOT),
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        for token, value in {
-            "__RUNS_ON__": "ubuntu-latest",
-            "__GATE_DIR__": ".mylonite/gate",
-            "__MYLONITE_VERSION__": __version__,
-        }.items():
-            base_text = base_text.replace(token, value)
+        base_text = (_PRE_REVIEW_RENDER_DIR / name).read_text(encoding="utf-8")
+        base_text = base_text.replace('"mylonite==0.10.4"', f'"mylonite=={__version__}"')
 
         written = write_workflows(tmp_path, runs_on="ubuntu-latest")
         actual_text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
@@ -179,8 +177,9 @@ def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Round-1 review, Critical #3: gate_dir must render relative to repo_root,
-# never a machine-local absolute path.
+# gate_dir must render relative to repo_root, never a machine-local absolute
+# path — a workflow file checked into someone else's repo must not leak this
+# machine's directory layout.
 # ---------------------------------------------------------------------------
 
 
