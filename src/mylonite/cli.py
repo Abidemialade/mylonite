@@ -151,10 +151,21 @@ _DEFAULT_MAX_LLM_CALLS = 50
 #: explicitly for a target known to need more headroom.
 _DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
-#: #186: bound on the M3 auto-wire describe() probe (below). A first-run
-#: npx/uvx server download can genuinely take this long, so a timeout here
-#: gets its OWN diagnosis instead of falling through to "add a seed_arm".
+#: #186: floor for the seed_arm auto-wire describe() probe (below). A
+#: first-run npx/uvx server download can genuinely take this long, so a
+#: timeout here gets its OWN diagnosis instead of falling through to "add a
+#: seed_arm".
 _AUTOWIRE_DESCRIBE_TIMEOUT_S: Final = 20.0
+
+
+def _autowire_budget_s(tf_timeout_s: float | None) -> float:
+    """The seed_arm auto-wire describe() budget: at least
+    ``_AUTOWIRE_DESCRIBE_TIMEOUT_S`` even when a target file's own
+    ``timeout_s`` is smaller (fix round 1, #186) -- a first-run npx/uvx
+    download needs that floor regardless of what the operator set for the
+    (larger, multi-turn) session timeout generally."""
+    return max(_AUTOWIRE_DESCRIBE_TIMEOUT_S, tf_timeout_s or 0)
+
 
 _T = TypeVar("_T")
 
@@ -1232,6 +1243,7 @@ def scan(
             needs_seed_arm_autowire,
             validate_for_scan,
         )
+        from mylonite.scan._types import AdapterDescribeFailed
 
         # The persisted target.yaml must describe the target that ACTUALLY ran.
         # Copying the source verbatim after M3 auto-wires a seed_arm (or --purpose
@@ -1260,19 +1272,28 @@ def scan(
             and not dry_run
             and not allow_no_seed_arm
         ):
+            _autowire_budget = _autowire_budget_s(tf.timeout_s)
             try:
                 _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
                 _descriptor = asyncio.run(
-                    asyncio.wait_for(_probe.describe(), timeout=_AUTOWIRE_DESCRIBE_TIMEOUT_S)
+                    asyncio.wait_for(_probe.describe(), timeout=_autowire_budget)
                 )
             except TimeoutError:
                 # #186: a first-run npx/uvx download can legitimately take this long --
                 # must NOT fall through to the "add a seed_arm" advice below.
                 echo_err(
-                    f"auto-wire: timed out after {_AUTOWIRE_DESCRIBE_TIMEOUT_S:.0f}s "
-                    "starting or describing the server (first-run npx or uvx "
-                    "downloads can be slow)."
+                    f"auto-wire: timed out after {_autowire_budget:.0f}s starting or "
+                    "describing the server (first-run npx or uvx downloads can be "
+                    "slow). Re-run once the download finishes -- it's cached after "
+                    "that -- or set timeout_s: in the target file to raise this budget."
                 )
+                raise typer.Exit(code=EXIT_CONFIG) from None
+            except AdapterDescribeFailed as exc:
+                # Fix round 1: describe() itself already produced an operator-ready
+                # explanation (e.g. an inner McpError/TimeoutError naming timeout_s --
+                # see MCPSessionAdapterBase.describe -- or a remote transport's own
+                # cause). Show it verbatim; never fall through to the seed_arm advice.
+                echo_err(f"auto-wire: {exc}")
                 raise typer.Exit(code=EXIT_CONFIG) from None
             except Exception as exc:
                 _descriptor = None

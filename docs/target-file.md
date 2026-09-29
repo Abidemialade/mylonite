@@ -130,9 +130,15 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 [`request.timeout_s`](http-agent.md#the-target-file) instead) overrides BOTH the
 planner's per-turn budget and the MCP `ClientSession`'s read timeout, which otherwise
 default to 60 seconds each. Raise it for a target that legitimately takes longer per
-turn — a local model, a slow server, or a first-run `npx`/`uvx` download. A timeout
-names `timeout_s` in the resulting error. Omitting the field keeps today's fixed 60s
-default for both, so an existing target file loads unchanged.
+turn — a local model, a slow server, or a first-run `npx`/`uvx` download. Both the
+planner-timeout error (raised mid-scan, on a slow turn) and the `describe()`-timeout
+error (raised on connect, e.g. a hung server) name `timeout_s` and its effective
+value. The one-off `seed_arm` auto-wire probe (a single `describe()` call `scan`
+makes up front to infer a `seed_arm` — see [CLI reference](cli-reference.md)) also
+names `timeout_s`, but its own budget is `max(20, timeout_s)`: even a smaller
+`timeout_s` never shrinks that first probe below 20 seconds. Omitting the field
+keeps today's fixed 60s default for the planner and session, so an existing target
+file loads unchanged.
 
 ```yaml
 timeout_s: 90

@@ -48,7 +48,7 @@ from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
-from mylonite.scan._types import AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
@@ -96,6 +96,28 @@ def _regex_search(pattern: str, text: str) -> re.Match[str] | None:
     tests; this module-level function is the natural, narrow seam.
     """
     return re.search(pattern, text)
+
+
+#: JSON-RPC error code the mcp SDK raises a timeout as (mcp.shared.session.
+#: BaseSession.send_request: ``McpError(ErrorData(code=httpx.codes.
+#: REQUEST_TIMEOUT, ...))`` when ClientSession's own read_timeout_seconds
+#: elapses waiting for a response) -- 408, spelled out rather than importing
+#: httpx here just for one constant.
+_MCP_REQUEST_TIMEOUT_CODE = 408
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    """True for a bare ``TimeoutError`` (e.g. an OUTER ``asyncio.wait_for``
+    cutting off ``describe()``/``invoke()``) or an ``McpError`` whose code
+    signals the SDK's own read timeout fired (#186 fix round 1) -- the two
+    shapes a hung/slow MCP server surfaces as, neither of which is
+    obviously "a timeout" from its type alone in the second case.
+    """
+    if isinstance(exc, TimeoutError):
+        return True
+    from mcp.shared.exceptions import McpError
+
+    return isinstance(exc, McpError) and exc.error.code == _MCP_REQUEST_TIMEOUT_CODE
 
 
 def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
@@ -327,14 +349,36 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return f"mcp:{self._family}"
         return f"mcp:{self._family}:{self._scope}"
 
+    def _timeout_s_remedy(self) -> str:
+        """The fix-hint half of a timeout message (#186 fix round 1) --
+        different wording for a bundled family (no target file exists to
+        edit) than for a custom one (declares timeout_s there)."""
+        if self._family in target_registry.BUNDLED_TARGETS:
+            return (
+                "bundled targets can't set timeout_s directly -- write a target "
+                "file for this server (see docs/target-file.md) to raise it"
+            )
+        return (
+            "raise timeout_s in the target file if this target legitimately needs longer per turn"
+        )
+
     async def describe(self) -> TargetDescriptor:
-        async with self._session(
-            extra_env=self._effective_env(),
-            command=self._launch_command,
-            args=self._launch_args,
-        ) as session:
-            shim = MCPSessionAsServerLike(session)
-            tools = _serialise_tools(await shim.list_tools())
+        try:
+            async with self._session(
+                extra_env=self._effective_env(),
+                command=self._launch_command,
+                args=self._launch_args,
+            ) as session:
+                shim = MCPSessionAsServerLike(session)
+                tools = _serialise_tools(await shim.list_tools())
+        except Exception as exc:
+            if _is_timeout_error(exc):
+                effective_s = self._mcp_read_timeout.total_seconds()
+                raise AdapterDescribeFailed(
+                    f"describe() timed out after {effective_s:.0f}s (timeout_s) -- "
+                    f"{self._timeout_s_remedy()}."
+                ) from exc
+            raise
         return TargetDescriptor(
             target_id=self._target_id(),
             kind="mcp",
@@ -522,8 +566,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         except TimeoutError as exc:
             raise AdapterInvocationSkipped(
                 f"planner timed out after {self._planner_timeout_s}s (timeout_s) on "
-                f"{payload.pattern_id} -- raise timeout_s in the target file if this "
-                "target legitimately needs longer per turn",
+                f"{payload.pattern_id} -- {self._timeout_s_remedy()}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",

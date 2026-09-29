@@ -625,6 +625,137 @@ async def test_target_id_without_scope_omits_segment() -> None:
     assert descriptor.target_id == "mcp:fetch"
 
 
+def _register_custom_stdio_family(family: str) -> None:
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    target_registry.register_target(
+        target_registry.TargetSpec(
+            family=family,
+            command="python",
+            args_template=(),
+            scope_validator=lambda _s: None,
+            default_system_prompt="x",
+            requires_scope=False,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_describe_timeout_error_becomes_adapter_describe_failed_naming_timeout_s(
+    tmp_path: Path,
+) -> None:
+    """#186 fix round 1: a bare TimeoutError from inside the session (the MCP
+    ClientSession's own read_timeout_seconds elapsing) must not reach the
+    engine as a raw, undiagnosed exception -- it becomes AdapterDescribeFailed
+    naming timeout_s and its effective (in-force) value, so the engine's
+    describe_failed operator message shows it (ScanEngine.run reads
+    AdapterDescribeFailed's message verbatim as abort_detail)."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _timing_out_open(*_a: Any, **_kw: Any):
+        raise TimeoutError("read timed out")
+        yield  # pragma: no cover - never reached
+
+    _register_custom_stdio_family("acme-custom")
+    try:
+        with patch.object(stdio_adapter, "_open_mcp_session", _timing_out_open):
+            adapter = MCPStdioAdapter(
+                family="acme-custom", scope=str(tmp_path), mcp_read_timeout_s=45.0
+            )
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    message = str(excinfo.value)
+    assert "timeout_s" in message
+    assert "45" in message
+
+
+@pytest.mark.asyncio
+async def test_describe_mcperror_timeout_code_becomes_adapter_describe_failed(
+    tmp_path: Path,
+) -> None:
+    """The SDK raises McpError(code=httpx.codes.REQUEST_TIMEOUT) -- not a
+    bare TimeoutError -- when a request exceeds ClientSession's own
+    read_timeout_seconds (mcp.shared.session.BaseSession.send_request).
+    That shape must be recognised too."""
+    from contextlib import asynccontextmanager
+
+    import httpx
+    from mcp.shared.exceptions import McpError
+    from mcp.types import ErrorData
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _timing_out_open(*_a: Any, **_kw: Any):
+        raise McpError(ErrorData(code=httpx.codes.REQUEST_TIMEOUT, message="timed out"))
+        yield  # pragma: no cover - never reached
+
+    _register_custom_stdio_family("acme-custom")
+    try:
+        with patch.object(stdio_adapter, "_open_mcp_session", _timing_out_open):
+            adapter = MCPStdioAdapter(family="acme-custom", scope=str(tmp_path))
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    assert "timeout_s" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_describe_timeout_message_points_at_the_target_file_for_a_custom_target(
+    tmp_path: Path,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _timing_out_open(*_a: Any, **_kw: Any):
+        raise TimeoutError("read timed out")
+        yield  # pragma: no cover - never reached
+
+    _register_custom_stdio_family("acme-custom")
+    try:
+        with patch.object(stdio_adapter, "_open_mcp_session", _timing_out_open):
+            adapter = MCPStdioAdapter(family="acme-custom", scope=str(tmp_path))
+            with pytest.raises(AdapterDescribeFailed) as excinfo:
+                await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    assert "target file" in str(excinfo.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_describe_timeout_message_says_bundled_targets_cannot_set_it() -> None:
+    """A bundled family (no target file at all) must not be told to edit a
+    target file it doesn't have."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _timing_out_open(*_a: Any, **_kw: Any):
+        raise TimeoutError("read timed out")
+        yield  # pragma: no cover - never reached
+
+    with patch.object(stdio_adapter, "_open_mcp_session", _timing_out_open):
+        adapter = MCPStdioAdapter(family="fetch", scope=None)
+        with pytest.raises(AdapterDescribeFailed) as excinfo:
+            await adapter.describe()
+    message = str(excinfo.value).lower()
+    assert "bundled" in message
+    assert "can't" in message or "cannot" in message
+
+
 @pytest.mark.asyncio
 async def test_invoke_happy_path_returns_adapter_response(tmp_path: Path) -> None:
     """Planner stub calls write_file once then says done; adapter records it."""
@@ -1209,7 +1340,50 @@ async def test_invoke_timeout_raises_skipped_with_reason(tmp_path: Path) -> None
     assert excinfo.value.attempt_metadata["reason"] == "timeout"
     # #186: names timeout_s -- the target-file knob that raises this bound --
     # not just a bare "timed out after Ns" with no indication what to change.
-    assert "timeout_s" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "timeout_s" in message
+    # Fix round 1: "filesystem" is a BUNDLED family (no target file) -- the
+    # remedy must not tell this operator to edit a file that doesn't exist.
+    assert "bundled" in message.lower()
+    assert "in the target file" not in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_invoke_timeout_message_points_at_the_target_file_for_a_custom_target(
+    tmp_path: Path,
+) -> None:
+    """Fix round 1 (#186): the sibling of the bundled-family case above -- a
+    CUSTOM family's planner timeout must say to raise timeout_s in the
+    target file, not the bundled-only "write a target file" wording."""
+    from mylonite.plugins._mcp import target_registry
+
+    async def slow_planner(**_: Any) -> SimpleNamespace:
+        await asyncio.sleep(10)
+        return SimpleNamespace()
+
+    _register_custom_stdio_family("acme-custom-timeout")
+    try:
+        with patch.object(stdio_adapter, "_open_mcp_session", _fake_open):
+            adapter = MCPStdioAdapter(
+                family="acme-custom-timeout",
+                scope=str(tmp_path),
+                completion_fn=slow_planner,
+                planner_timeout_s=0.1,
+            )
+            payload = Payload(
+                pattern_id="test",
+                channel="user-message",
+                body="x",
+                metadata={"setup": "no_setup", "drive": "read_file_direct", "seed_id": "test"},
+            )
+            with pytest.raises(AdapterInvocationSkipped) as excinfo:
+                await adapter.invoke(payload)
+    finally:
+        target_registry.clear_runtime_targets()
+    message = str(excinfo.value).lower()
+    assert "timeout_s" in message
+    assert "in the target file" in message
+    assert "bundled" not in message
 
 
 @pytest.mark.asyncio

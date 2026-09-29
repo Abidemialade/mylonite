@@ -110,7 +110,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message. A `rest` target's HTTP client timeout (`request.timeout_s`,
   default 30s) is now documented (`docs/http-agent.md`, `docs/target-file.md`)
   and a timeout there now names `request.timeout_s` and its value instead of
-  a bare `ReadTimeout`.
+  a bare `ReadTimeout`. The seed_arm auto-wire probe's own budget is now
+  `max(20, timeout_s)` (a smaller `timeout_s` never shrinks the first-run
+  npx/uvx download floor below 20s); its timeout message says to re-run
+  (the download is cached after that) or to set `timeout_s:`, and now
+  never falls through to the unrelated "add a seed_arm" advice for an
+  `McpError` timeout either, not just a bare `TimeoutError`. `describe()`
+  itself now maps a session timeout to a message naming `timeout_s` and
+  its effective value (was a raw, undiagnosed exception). A bundled
+  target's timeout messages (no target file to set `timeout_s` in) say so
+  plainly instead of pointing at a file that doesn't exist.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is
