@@ -209,6 +209,50 @@ def preflight_model_or_exit(*models: str, api_base: str | None = None) -> None:
         raise typer.Exit(code=EXIT_CONFIG)
 
 
+LOCAL_MODEL_HINT = (  # keep in sync with docs/self-hosted-models.md
+    "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
+    "(needs Ollama running; see docs/self-hosted-models.md)."
+)
+_DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
+
+
+def require_llm_configured_or_exit(
+    *models: str,
+    provider: str | None = None,
+    dry_run_flag: bool = False,
+    api_base: str | None = None,
+) -> None:
+    """Pre-flight every resolved model a live run will call, exiting
+    ``EXIT_CONFIG`` before any adapter/subprocess/engine/seed work starts.
+    The ONE place BOTH ``require_llm_configured`` (credential presence --
+    the deleted ``MyloniteSettings.require_llm()`` invariant) and
+    :func:`preflight_model_or_exit` (#207: can LiteLLM actually route this
+    model?) run, shared by scan/validate/gate/ablate.
+
+    Moved here from ``mylonite.cli`` (fix round 1 headroom): cli.py imports
+    it back under its original name (``_require_llm_configured_or_exit``)
+    so every existing call site and the one test that imports it directly
+    keep working unchanged.
+    """
+    import typer
+
+    from mylonite._cli_io import echo_err
+    from mylonite.config import LLMNotConfiguredError, require_llm_configured
+    from mylonite.exit_codes import EXIT_CONFIG
+
+    seen: set[str] = set()
+    for m in models:
+        if m in seen:
+            continue
+        seen.add(m)
+        try:
+            require_llm_configured(model=m, provider=provider)
+        except LLMNotConfiguredError as exc:
+            echo_err(f"{exc}\n{LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
+            raise typer.Exit(code=EXIT_CONFIG) from exc
+    preflight_model_or_exit(*models, api_base=api_base)
+
+
 def looks_like_provider_env_var(key: str) -> bool:
     """True if ``key`` is a recognised provider credential/config env var --
     pattern-based, not a closed allowlist.
