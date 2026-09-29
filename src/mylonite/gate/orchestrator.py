@@ -7,6 +7,7 @@ the Typer command supplies live ones and tests supply offline fakes.
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,10 @@ class _FindingOutcome:
     exploit: ExploitRecord
     stage: str  # "kept" | "rejected" | "generate_failed" | "validate_failed"
     report: ValidationReport | None = None
+    #: For "rejected": the first failed validation stage + its (redacted,
+    #: capped) detail — what actually goes in the PR body's rejected-findings
+    #: list. For "generate_failed"/"validate_failed": a plain description;
+    #: there is no ValidationReport to draw a stage from.
     reason: str = ""
 
 
@@ -80,6 +85,21 @@ def _write_validation_report(out_dir: Path, report: ValidationReport) -> None:
     )
 
 
+def _rejection_reason(report: ValidationReport) -> str:
+    """The first failed validation stage's detail, redacted and capped — more
+    actionable in the PR body's rejected-findings list than a bare "not kept"
+    (round-1 review, Important #6)."""
+    from mylonite._redaction import redact
+
+    failed = next((o for o in report.outcomes if not o.passed), None)
+    if failed is None:
+        return "the generated test was REJECTED (not kept)"
+    detail = redact(failed.detail or "").strip()
+    if len(detail) > 200:
+        detail = detail[:200].rstrip() + "…"
+    return f"failed the {failed.stage} stage" + (f": {detail}" if detail else "")
+
+
 @dataclass(frozen=True)
 class ScanOutcomeBundle:
     """What ``scan_fn`` hands ``run_gate``: the typed verdict AND the exploits.
@@ -95,9 +115,60 @@ class ScanOutcomeBundle:
     exploits: list[ExploitRecord]
 
 
+def _slugs_for(exploits: list[ExploitRecord]) -> list[str]:
+    """One filesystem slug per exploit, same order, with a deterministic
+    numeric suffix when two DIFFERENT pattern_ids collide after slugifying
+    (e.g. ``a.b`` and ``a_b`` both -> ``a_b``) — round-1 review, Minor #9.
+    Without this the second exploit's directory silently overwrote the
+    first's. Order is the caller's (already sorted by pattern_id), so the
+    suffix assignment is itself deterministic run to run.
+    """
+    seen: dict[str, int] = {}
+    slugs: list[str] = []
+    for exploit in exploits:
+        base = _slugify_pattern(exploit.pattern_id)
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        slugs.append(base if count == 0 else f"{base}-{count + 1}")
+    return slugs
+
+
+def _finish_unkept(
+    this_out: Path, out_dir: Path, slug: str | None, multi: bool, message: str
+) -> None:
+    """Echo the per-finding verdict, then — for a multi-finding run — relocate
+    whatever was written for a REJECTED or validate-failed finding out of the
+    committed tree (round-1 review, Critical #1).
+
+    ``git add``ing the whole gate directory used to sweep in a rejected
+    finding's un-validated test right alongside the kept ones, because every
+    finding (kept or not) was written under the same ``out_dir``. The fix
+    moves anything that didn't end up kept into ``out_dir/rejected/<slug>`` —
+    a directory ``GatePaths.add_paths`` (gate/wiring.py's ``open_pr_fn``)
+    never lists — so it can never reach a commit, while staying on disk for
+    local debugging. A no-op for the flat single-finding layout: there,
+    ``this_out is out_dir`` and a run that ends up here never reaches
+    ``open_pr_fn`` at all (every finding failed), so nothing is ever at risk
+    of being committed regardless.
+    """
+    echo(message)
+    if not multi or slug is None or not this_out.exists():
+        return
+    rejected_dir = out_dir / "rejected" / slug
+    rejected_dir.parent.mkdir(parents=True, exist_ok=True)
+    if rejected_dir.exists():
+        shutil.rmtree(rejected_dir)
+    shutil.move(str(this_out), str(rejected_dir))
+    echo(
+        f"Mylonite gate: {slug}: evidence kept at "
+        f"{rejected_dir.relative_to(out_dir)} for local debugging (not committed)."
+    )
+
+
 def _process_one_finding(
     exploit: ExploitRecord,
-    this_out: Path,
+    out_dir: Path,
+    slug: str | None,
     *,
     generate_fn: Callable[[ExploitRecord], GeneratedTest | None],
     validate_fn: Callable[[GeneratedTest], ValidationReport | None],
@@ -106,6 +177,7 @@ def _process_one_finding(
     """Generate, write, and validate ONE finding. Never raises for a per-finding
     failure (generate/validate returning ``None``) — that is recorded as a
     ``_FindingOutcome`` so one bad finding cannot hide the rest (#202)."""
+    this_out = out_dir / slug if multi and slug is not None else out_dir
     prefix = f"Mylonite gate: {exploit.pattern_id}: " if multi else "Mylonite gate: "
 
     generated = generate_fn(exploit)
@@ -125,13 +197,23 @@ def _process_one_finding(
     report = validate_fn(generated)
     if report is None:
         reason = "the validator returned nothing"
-        echo(f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate.")
+        message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."
+        _finish_unkept(this_out, out_dir, slug, multi, message)
         return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
 
     if not report.kept:
-        reason = "the generated test was REJECTED (not kept)"
-        echo(f"{prefix}{reason}." if multi else f"{prefix}{reason} — no PR opened.")
-        return _FindingOutcome(exploit=exploit, stage="rejected", report=report, reason=reason)
+        # The console line stays the historical wording; the PR-body reason
+        # (below) is the one that carries the actual failed-stage detail —
+        # keeping the two separate means neither has to compromise (round-1
+        # review, Important #6).
+        console_reason = "the generated test was REJECTED (not kept)"
+        message = (
+            f"{prefix}{console_reason}." if multi else f"{prefix}{console_reason} — no PR opened."
+        )
+        _finish_unkept(this_out, out_dir, slug, multi, message)
+        return _FindingOutcome(
+            exploit=exploit, stage="rejected", report=report, reason=_rejection_reason(report)
+        )
 
     # Persist the oracle verdict BEFORE any git contact. The generated test and
     # the exploit JSON were already on disk above, but the validation report --
@@ -185,20 +267,31 @@ def run_gate(
         n = len(sorted_exploits)
         echo(f"{n} findings: validating each (about {n}x the single-finding validation cost)")
 
-    outcomes: list[_FindingOutcome] = []
-    for exploit in sorted_exploits:
-        # With multiple findings, give each its own subdir so tests don't
-        # clobber each other; a single finding keeps the exact dir the
-        # operator chose — mirrors `generate`'s identical convention
-        # (generate/wiring.py's _resolve_exploit_paths + cli.py's `generate`).
-        this_out = out_dir / _slugify_pattern(exploit.pattern_id) if multi else out_dir
-        outcomes.append(
-            _process_one_finding(
-                exploit, this_out, generate_fn=generate_fn, validate_fn=validate_fn, multi=multi
-            )
+    # With multiple findings, give each its own subdir so tests don't clobber
+    # each other; a single finding keeps the exact dir the operator chose —
+    # mirrors `generate`'s identical convention (generate/wiring.py's
+    # _resolve_exploit_paths + cli.py's `generate`). _slugs_for de-duplicates
+    # a slug collision between two different pattern_ids (#9).
+    slugs: list[str | None] = (
+        list(_slugs_for(sorted_exploits)) if multi else [None] * len(sorted_exploits)
+    )
+    outcomes = [
+        _process_one_finding(
+            exploit, out_dir, slug, generate_fn=generate_fn, validate_fn=validate_fn, multi=multi
         )
+        for exploit, slug in zip(sorted_exploits, slugs, strict=True)
+    ]
 
     kept = [(o.exploit, o.report) for o in outcomes if o.stage == "kept" and o.report is not None]
+    # Parallel to `kept`: the exact directory `open_pr_fn` must treat as
+    # committed for that finding — never re-derived independently downstream
+    # (a naive re-slugify in wiring.py would disagree with a de-duplicated
+    # slug from _slugs_for above).
+    kept_dirs = [
+        (out_dir / slug if multi and slug is not None else out_dir)
+        for outcome, slug in zip(outcomes, slugs, strict=True)
+        if outcome.stage == "kept"
+    ]
     rejected = [(o.exploit, o.reason) for o in outcomes if o.stage != "kept"]
 
     if multi:
@@ -237,9 +330,12 @@ def run_gate(
                     rejected_count=len(rejected),
                 )
             )
-        if not multi:
-            echo("Mylonite gate: the generated test was REJECTED (not kept) — no PR opened.")
-        else:
+        # `_process_one_finding` already echoed the per-finding rejected
+        # message above; for a single exploit that IS the whole story, so
+        # printing another summary line here would just repeat it verbatim
+        # (round-1 review, Minor #7). A genuinely multi-finding run still
+        # gets an aggregate line, since its per-finding lines differ from it.
+        if multi:
             echo("Mylonite gate: no generated test was kept — no PR opened.")
         return _finish(
             GateResult(
@@ -259,7 +355,9 @@ def run_gate(
         system_prompt=system_prompt,
         target=target_context,
     )
-    pr = open_pr_fn(out_dir=out_dir, findings=kept, body=body, open_pr=open_pr)
+    pr = open_pr_fn(
+        out_dir=out_dir, findings=kept, kept_dirs=kept_dirs, body=body, open_pr=open_pr, multi=multi
+    )
     opened = bool(getattr(pr, "opened", False))
     branch = getattr(pr, "branch", None)
     return _finish(

@@ -40,9 +40,21 @@ class GatePaths:
     repo_root: Path
     gate_dir: Path
     workflow_files: list[Path] = field(default_factory=list)
+    #: Exact paths ``git add`` should stage (Critical fix, round 1 of review):
+    #: each KEPT finding's directory, ``PR_BODY.md`` and ``target.yaml``copies
+    #: — never the bare ``gate_dir`` swept whole, which used to sweep in a
+    #: REJECTED finding's un-validated test too (a mixed-verdict multi-finding
+    #: run wrote every finding under ``gate_dir``, and `git add gate_dir`
+    #: cannot distinguish a kept subdirectory from a rejected one).
+    #: ``None`` (the default) falls back to the historical single-path sweep
+    #: of ``gate_dir`` — every existing single-finding caller/test keeps
+    #: working unchanged; only ``gate/wiring.py``'s multi-finding-aware
+    #: ``open_pr_fn`` passes an explicit list.
+    add_paths: list[Path] | None = None
 
     def all_paths(self) -> list[Path]:
-        return [self.gate_dir, *self.workflow_files]
+        base = self.add_paths if self.add_paths is not None else [self.gate_dir]
+        return [*base, *self.workflow_files]
 
 
 @dataclass
@@ -161,6 +173,16 @@ def open_or_print_pr(
     except ValueError as exc:
         raise GatePrError(f"gate paths must live inside the repo root {cwd}: {exc}") from exc
 
+    # Write PR_BODY.md before any git command touches it (round-1 review fix):
+    # GatePaths.add_paths now names it as an EXPLICIT pathspec rather than
+    # relying on a directory-wide `git add gate_dir` (which tolerated the file
+    # not existing yet). The auto `--open-pr` + `gh` path below used to never
+    # write it to disk at all -- the body went straight to `gh pr create
+    # --body` -- so `git add`ing its explicit path would have failed outright
+    # on a missing pathspec. Writing it unconditionally, up front, means every
+    # path (print, degrade, full auto) commits the same PR_BODY.md.
+    body_path.write_text(pr_body, encoding="utf-8")
+
     gh_cmd = (
         f"gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)} "
         f"--title {shlex.quote(pr_title)} --body-file {shlex.quote(str(rel_body))}"
@@ -173,7 +195,6 @@ def open_or_print_pr(
         # running plain `mylonite gate` to see what it finds got a branch and a
         # commit they never asked for. Read-only is the default; the artifacts
         # are on disk and the exact command sequence is printed instead.
-        body_path.write_text(pr_body, encoding="utf-8")
         add_cmd = " ".join(shlex.quote(str(r)) for r in rels)
         manual = (
             f"git checkout -b {shlex.quote(branch)}\n"
@@ -213,8 +234,8 @@ def open_or_print_pr(
     if not gh_available(_run=_run):
         # The operator asked for the PR flow, so the commit above is what they
         # wanted; only the gh half is unavailable. Degrade to printing the
-        # remaining two steps.
-        body_path.write_text(pr_body, encoding="utf-8")
+        # remaining two steps. body_path was already written (and committed,
+        # since it's in `rels`) above.
         echo(
             f"\nGate artifacts committed to branch '{branch}'.\n"
             f"To open the gating PR, run:\n"
