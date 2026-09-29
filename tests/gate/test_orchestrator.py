@@ -98,18 +98,18 @@ def _all_errored_no_formal_abort_outcome() -> ScanOutcome:
     return ScanOutcome.from_report(report)
 
 
-def _exploit():
+def _exploit(pattern_id: str = "indirect-injection-note-body-direct"):
     return ExploitRecord(
         target_id="mcp:custom",
-        pattern_id="indirect-injection-note-body-direct",
+        pattern_id=pattern_id,
         payload=Payload(
-            pattern_id="indirect-injection-note-body-direct",
+            pattern_id=pattern_id,
             channel="user-message",
             body="injected payload body",
             metadata={},
         ),
         response=AdapterResponse(
-            payload_pattern_id="indirect-injection-note-body-direct",
+            payload_pattern_id=pattern_id,
             raw_response="agent did the thing",
             tool_calls=[],
             metadata={},
@@ -143,8 +143,10 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     def fake_validate(test):
         return report
 
-    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
-        pr_calls.update(out_dir=out_dir, body=body, open_pr=open_pr)
+    # #202: open_pr_fn now takes the whole kept-findings list, not a single
+    # (exploit, report) pair — this fake's signature mirrors that.
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
+        pr_calls.update(out_dir=out_dir, body=body, open_pr=open_pr, findings=findings)
         return "printed"
 
     result = run_gate(
@@ -184,7 +186,7 @@ def test_validation_report_is_on_disk_before_the_pr_step_runs(tmp_path):
     out_dir = tmp_path / ".mylonite" / "gate"
     seen: dict[str, bool] = {}
 
-    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
         # observed from INSIDE the PR step: the report must already be there
         seen["report_on_disk"] = (out_dir / "validation_report.json").exists()
         raise RuntimeError("git exploded")
@@ -262,7 +264,7 @@ def test_run_gate_threads_system_prompt_so_localize_resolves_a_line(tmp_path):
     def fake_validate(test):
         return report
 
-    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
         pr_calls.update(body=body)
         return "printed"
 
@@ -329,7 +331,7 @@ def test_run_gate_threads_target_context_into_the_structural_recommendation(tmp_
     def fake_validate(test):
         return report
 
-    def fake_open_pr(*, out_dir, exploit, report, body, open_pr):
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
         pr_calls.update(body=body)
         return "printed"
 
@@ -564,3 +566,280 @@ def test_run_gate_rejected_test_exits_5_no_pr(tmp_path):
     )
     assert result.exit_code == 5
     assert called["pr"] is False
+
+
+# ---------------------------------------------------------------------------
+# #202: gate every finding, not just the first
+# ---------------------------------------------------------------------------
+
+
+def _kept_report(filename: str = "test_security_x.py") -> ValidationReport:
+    return ValidationReport(
+        test_filename=filename,
+        kept=True,
+        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        mutation_score=None,
+    )
+
+
+def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
+    """Two findings ('b-pattern' kept, 'a-pattern' rejected): both are
+    generated and validated (not just exploits[0]), in deterministic
+    pattern_id order regardless of the order the scan returned them in."""
+    ex_b = _exploit("b-pattern")
+    ex_a = _exploit("a-pattern")
+    generated_order: list[str] = []
+    validated_order: list[str] = []
+
+    def fake_scan():
+        # Deliberately returned out of pattern_id order.
+        return ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex_b, ex_a])
+
+    def fake_generate(exploit):
+        generated_order.append(exploit.pattern_id)
+        return GeneratedTest(
+            framework="pytest",
+            filename=f"test_security_{exploit.pattern_id}.py",
+            source="# test\n",
+            exploit=exploit,
+        )
+
+    def fake_validate(generated):
+        validated_order.append(generated.exploit.pattern_id)
+        if generated.exploit.pattern_id == "a-pattern":
+            return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
+        return _kept_report(generated.filename)
+
+    pr_calls = {}
+
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
+        pr_calls.update(findings=findings, body=body)
+        return "printed"
+
+    out_dir = tmp_path / ".mylonite" / "gate"
+    result = run_gate(
+        out_dir=out_dir,
+        scan_fn=fake_scan,
+        generate_fn=fake_generate,
+        validate_fn=fake_validate,
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+
+    # Deterministic order: 'a-pattern' before 'b-pattern', not scan order.
+    assert generated_order == ["a-pattern", "b-pattern"]
+    assert validated_order == ["a-pattern", "b-pattern"]
+    assert result.exit_code == 0
+    assert result.kept is True
+    assert result.kept_count == 1
+    assert result.rejected_count == 1
+    # Only the kept finding reaches open_pr_fn.
+    assert [e.pattern_id for e, _r in pr_calls["findings"]] == ["b-pattern"]
+    # The rejected finding is still named in the PR body, with its reason.
+    assert "a-pattern" in pr_calls["body"]
+    assert "not kept" in pr_calls["body"].lower() or "rejected" in pr_calls["body"].lower()
+
+    # Multi-finding: each gets its own subdirectory (mirrors `generate`'s
+    # existing multi-finding convention) so the two tests can't clobber
+    # each other on disk.
+    from mylonite.generate.wiring import _slugify_pattern
+
+    assert (out_dir / _slugify_pattern("b-pattern") / "test_security_b-pattern.py").exists()
+    assert (out_dir / _slugify_pattern("b-pattern") / "validation_report.json").exists()
+    assert (out_dir / _slugify_pattern("a-pattern") / "test_security_a-pattern.py").exists()
+    # The rejected finding's own dir has no validation_report.json (nothing
+    # was kept there to persist).
+    assert not (out_dir / _slugify_pattern("a-pattern") / "validation_report.json").exists()
+
+
+def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
+    """Exactly one finding overall (even if scan_fn's list had one item) keeps
+    writing straight into out_dir — the historical, still-tested layout."""
+    ex = _exploit("solo-pattern")
+    out_dir = tmp_path / ".mylonite" / "gate"
+
+    result = run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(1), exploits=[ex]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_solo.py", source="# t\n", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report("test_security_solo.py"),
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+    assert result.exit_code == 0
+    assert (out_dir / "test_security_solo.py").exists()
+    assert not (out_dir / "solo_pattern").exists()
+
+
+def test_run_gate_prints_validating_each_and_kept_rejected_summary(tmp_path, capsys):
+    ex1, ex2 = _exploit("a-pattern"), _exploit("b-pattern")
+
+    def fake_generate(exploit):
+        return GeneratedTest(
+            framework="pytest",
+            filename=f"test_{exploit.pattern_id}.py",
+            source="# t\n",
+            exploit=exploit,
+        )
+
+    def fake_validate(generated):
+        if generated.exploit.pattern_id == "a-pattern":
+            return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
+        return _kept_report(generated.filename)
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
+        generate_fn=fake_generate,
+        validate_fn=fake_validate,
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+    out = capsys.readouterr().out
+    assert "2 findings: validating each" in out
+    assert "1 kept, 1 rejected" in out
+
+
+def test_run_gate_one_findings_generate_failure_does_not_hide_the_other(tmp_path):
+    """A generate_fn failure on ONE finding must not stop the others (#202)."""
+    ex_ok = _exploit("ok-pattern")
+    ex_bad = _exploit("zz-broken-pattern")  # sorts after ok-pattern
+    generated_calls: list[str] = []
+
+    def fake_generate(exploit):
+        generated_calls.append(exploit.pattern_id)
+        if exploit.pattern_id == "zz-broken-pattern":
+            return None
+        return GeneratedTest(
+            framework="pytest", filename="test_ok.py", source="# t\n", exploit=exploit
+        )
+
+    pr_calls = {}
+
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
+        pr_calls.update(findings=findings, body=body)
+        return "printed"
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex_bad, ex_ok]),
+        generate_fn=fake_generate,
+        validate_fn=lambda t: _kept_report("test_ok.py"),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+
+    assert generated_calls == ["ok-pattern", "zz-broken-pattern"]
+    assert result.exit_code == 0
+    assert result.kept_count == 1
+    assert result.rejected_count == 1
+    assert [e.pattern_id for e, _r in pr_calls["findings"]] == ["ok-pattern"]
+    assert "zz-broken-pattern" in pr_calls["body"]
+
+
+def test_run_gate_every_finding_fails_to_generate_exits_generate_failed(tmp_path):
+    from mylonite.gate.orchestrator import EXIT_GENERATE_FAILED
+
+    ex1, ex2 = _exploit("a-pattern"), _exploit("b-pattern")
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
+        generate_fn=lambda e: None,
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+    assert result.exit_code == EXIT_GENERATE_FAILED
+    assert result.opened_pr is False
+    assert result.kept is None
+
+
+def test_run_gate_every_finding_fails_generate_or_validate_exits_validate_failed(tmp_path):
+    """A mix of generate_failed and validate_failed, with NO finding ever
+    reaching a real (kept/rejected) verdict, still exits EXIT_VALIDATE_FAILED
+    — the single-exploit contract generalised rather than downgraded to a
+    generic EXIT_NOT_KEPT."""
+    from mylonite.gate.orchestrator import EXIT_VALIDATE_FAILED
+
+    ex1, ex2 = _exploit("a-pattern"), _exploit("b-pattern")
+
+    def fake_generate(exploit):
+        if exploit.pattern_id == "a-pattern":
+            return None
+        return GeneratedTest(framework="pytest", filename="t.py", source="x", exploit=exploit)
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
+        generate_fn=fake_generate,
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+    assert result.exit_code == EXIT_VALIDATE_FAILED
+    assert result.kept is None
+
+
+def test_run_gate_several_kept_findings_use_a_hashed_branch_name(tmp_path):
+    """Branch naming is wiring.py's job (make_open_pr_fn); this pins the
+    orchestrator's half of the contract — several kept findings all reach
+    open_pr_fn in one call, as one list, for one branch/one PR."""
+    ex1, ex2 = _exploit("a-pattern"), _exploit("b-pattern")
+    calls: list[list[str]] = []
+
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
+        calls.append([e.pattern_id for e, _r in findings])
+        return "printed"
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename=f"t_{e.pattern_id}.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report(t.filename),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    # ONE open_pr_fn call, carrying BOTH kept findings.
+    assert calls == [["a-pattern", "b-pattern"]]
+
+
+def test_run_gate_budget_abort_with_findings_still_gates_and_exits_scan_code(tmp_path):
+    """#206: a budget-exhausted scan that still turned up a finding must gate
+    it (generate/validate/open-or-print the PR), but the FINAL exit code is
+    the scan's own (3 for budget), not EXIT_SUCCESS — mirroring
+    ``ScanOutcome.from_report``'s own "abort always wins" precedence, which
+    `run_gate` used to only apply when ``exploits`` was empty."""
+    ex = _exploit("budget-pattern")
+    aborted_with_finding = ScanOutcome(
+        coverage=Coverage.PARTIAL,
+        abort=AbortReason.BUDGET_EXCEEDED,
+        exercised=1,
+        not_tested=2,
+        findings=1,
+        fallbacks=0,
+        exit_code=3,
+        operator_message="error: scan exhausted its LLM call budget...",
+    )
+    pr_called = {"called": False}
+
+    def fake_open_pr(*, out_dir, findings, body, open_pr):
+        pr_called["called"] = True
+        return "printed"
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=aborted_with_finding, exploits=[ex]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="t.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report("t.py"),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    assert pr_called["called"] is True
+    assert result.kept is True
+    assert result.exit_code == 3

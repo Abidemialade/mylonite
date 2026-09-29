@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -45,16 +46,21 @@ _GH_API_TIMEOUT_S: Final = 30.0
 
 def _post_gate_annotations(
     repo_root: Path,
-    exploit: Any,
-    report: Any,
+    findings: list[tuple[Any, Any]],
     target_file: Path | None,
     pr_mod: Any,
     *,
     gate_dir: Path,
 ) -> None:
-    """Best-effort GitHub check-run annotation for a finding that maps to a committed
-    prompt line (R4). Untestable live glue (needs a real PR + ``checks:write``); the
-    payload assembly and localization it calls are unit-tested. Never raises.
+    """Best-effort GitHub check-run annotation for every KEPT finding that maps
+    to a committed prompt line (R4). Untestable live glue (needs a real PR +
+    ``checks:write``); the payload assembly and localization it calls are
+    unit-tested. Never raises.
+
+    ``findings`` is every kept ``(exploit, report)`` pair from this gate run
+    (#202: gate no longer stops at the first finding, so annotations must not
+    either) — ``annotations_from_findings`` already accepted a sequence of
+    pairs; only this caller used to narrow it to one.
 
     ``gate_dir`` is the resolved ``gate --out`` directory — threaded through to
     :func:`mylonite.gate.annotate.post_check_run` so its scratch file lands
@@ -88,7 +94,7 @@ def _post_gate_annotations(
                     sp_text = None
 
         anns = annotations_from_findings(
-            [(exploit, report)], system_prompt=sp_path, system_prompt_text=sp_text
+            findings, system_prompt=sp_path, system_prompt_text=sp_text
         )
         if not anns:
             return
@@ -403,6 +409,47 @@ def make_validate_fn(
     return validate_fn
 
 
+def resolve_gate_out_dir(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
+    """Anchor ``out`` at the git repository root when it's relative and either
+    ``--open-pr`` or ``--workflows`` was requested (#203).
+
+    A no-op (returns ``out`` unchanged) for a plain ``gate`` run that touches
+    neither git nor ``.github/workflows/`` — that path needs no repository at
+    all, and many offline tests run it from a bare ``tmp_path`` with no `git
+    init`. An already-absolute ``out`` (an explicit ``--out``) is also left
+    alone — only the DEFAULT relative ``.mylonite/gate`` layout is anchored.
+
+    Raises :class:`mylonite.gate.pr.GatePrError` (via
+    :func:`mylonite.gate.pr.resolve_repo_root`) when the process isn't inside
+    a git repository at all — the CLI already has a handler for that
+    exception type around the run_gate call, and it must fire before any
+    scan/LLM spend happens, so this is resolved before ``scan_fn`` /
+    ``validate_fn`` / ``open_pr_fn`` are even built (they close over the
+    resolved ``out``, so building them from the wrong ``out`` would put the
+    gate artefacts and the git commit paths out of sync).
+    """
+    if not (open_pr or workflows) or out.is_absolute():
+        return out
+    return Path(pr_mod.resolve_repo_root()) / out
+
+
+def _gate_branch(findings: list[tuple[Any, Any]]) -> str:
+    """The gate branch name (#202): today's exact name for a single kept
+    finding, a stable short hash of the sorted kept pattern_ids for several.
+
+    No live scan id reaches this far (``run_gate`` is handed a bare
+    ``ScanOutcomeBundle``, not the report's id/timestamp), so the hash is
+    always what a multi-finding run gets — the controller ruling's fallback
+    ("scan id... otherwise use the hash"). Both shapes keep the
+    ``mylonite/gate-`` prefix so anything that matches on it keeps working.
+    """
+    if len(findings) == 1:
+        return f"mylonite/gate-{findings[0][0].pattern_id}"
+    pattern_ids = sorted(exploit.pattern_id for exploit, _report in findings)
+    digest = hashlib.sha256("|".join(pattern_ids).encode("utf-8")).hexdigest()[:10]
+    return f"mylonite/gate-{digest}"
+
+
 def make_open_pr_fn(
     *,
     runs_on: str,
@@ -410,23 +457,62 @@ def make_open_pr_fn(
     target_file: Path | None,
     pr_mod: Any,
 ) -> Callable[..., Any]:
-    def open_pr_fn(*, out_dir: Path, exploit: Any, report: Any, body: str, open_pr: bool) -> Any:
-        from mylonite._target_env import write_redacted_target
+    def open_pr_fn(
+        *, out_dir: Path, findings: list[tuple[Any, Any]], body: str, open_pr: bool
+    ) -> Any:
+        from mylonite._redaction import target_env_refs
+        from mylonite._target_env import repo_secret_lines, write_redacted_target
         from mylonite.gate.workflows import write_workflows
 
-        repo_root = Path.cwd()
-        wf_files = (
-            write_workflows(repo_root, runs_on=runs_on, gate_dir=out_dir) if workflows else []
-        )
+        # #203: the true git repository root, not Path.cwd() -- but ONLY when
+        # this run actually touches git or .github/workflows/ (open_pr or
+        # workflows); a plain print-mode `gate` (neither flag) needs no
+        # repository at all, mirroring resolve_gate_out_dir's identical
+        # condition so the two never anchor `out_dir` and `repo_root`
+        # differently for the same run.
+        repo_root = pr_mod.resolve_repo_root() if (open_pr or workflows) else Path.cwd()
+        # #185: write the redacted target BEFORE rendering the workflows, and
+        # read its `${MYLONITE_TARGET_...}` variables back from what was
+        # actually written -- `write_workflows` used to run first, so the
+        # scaffolded workflow's `env:` (and the console/PR-body secrets
+        # notice below) had nothing to substitute, and `load_target_file`
+        # then raised on the undefined variables in CI.
+        env_refs: list[tuple[str, str]] = []
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
             # credential from request.headers/env into that history (DCR-0019).
-            write_redacted_target(out_dir / "target.yaml", target_file.read_text(encoding="utf-8"))
+            written_text = write_redacted_target(
+                out_dir / "target.yaml", target_file.read_text(encoding="utf-8")
+            )
+            env_refs = target_env_refs(written_text)
+        wf_files = (
+            write_workflows(
+                repo_root,
+                runs_on=runs_on,
+                gate_dir=out_dir,
+                target_env_vars=[var for var, _key in env_refs],
+            )
+            if workflows
+            else []
+        )
+        secret_lines = repo_secret_lines(env_refs)
+        if secret_lines:
+            from mylonite._cli_io import echo_err
+
+            for line in secret_lines:
+                echo_err(line)
+            body = body.rstrip("\n") + "\n\n" + "\n".join(secret_lines) + "\n"
         paths = pr_mod.GatePaths(repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files)
+        branch = _gate_branch(findings)
+        pr_title = (
+            f"Mylonite gate: {findings[0][0].pattern_id}"
+            if len(findings) == 1
+            else f"Mylonite gate: {len(findings)} findings"
+        )
         pr = pr_mod.open_or_print_pr(
             paths,
-            branch=f"mylonite/gate-{exploit.pattern_id}",
-            pr_title=f"Mylonite gate: {exploit.pattern_id}",
+            branch=branch,
+            pr_title=pr_title,
             pr_body=body,
             open_pr=open_pr,
         )
@@ -435,9 +521,7 @@ def make_open_pr_fn(
         # remote MCP description/handler/return path) have no source line and ride in
         # the PR body + SARIF instead. Live-only glue; never fails the gate.
         if open_pr and getattr(pr, "opened", False):
-            _post_gate_annotations(
-                repo_root, exploit, report, target_file, pr_mod, gate_dir=out_dir
-            )
+            _post_gate_annotations(repo_root, findings, target_file, pr_mod, gate_dir=out_dir)
         return pr
 
     return open_pr_fn

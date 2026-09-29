@@ -53,6 +53,39 @@ class PrResult:
     printed_command: str | None = None
 
 
+def resolve_repo_root(*, cwd: Path | None = None, _run: Runner = _default_run) -> Path:
+    """Return the git repository root that anchors the gate output directory,
+    the scaffolded workflows, and the commit/PR flow (#203).
+
+    ``gate`` used to take ``Path.cwd()`` as the repo root outright, with no
+    upward search for ``.git`` — run from a subdirectory, ``--open-pr``
+    committed the gate output under THAT subdirectory instead of the repo
+    root, and ``--workflows`` would have put the scaffolded files at
+    ``<subdir>/.github/workflows/``, where GitHub never looks for them.
+
+    Uses ``git rev-parse --show-toplevel`` (the same ``_run`` seam every other
+    git call in this module goes through) rather than a hand-rolled upward
+    walk for ``.git``, so worktrees/submodules resolve exactly the way `git`
+    itself does. Raises :class:`GatePrError` — the same named-error type every
+    other failure in this module raises — when ``cwd`` is not inside a git
+    repository at all, so the CLI's existing ``except GatePrError`` handler
+    reports it as a clean, actionable error on exit code 8 instead of a bare
+    traceback or (worse) silently writing to the wrong place.
+    """
+    cwd = cwd if cwd is not None else Path.cwd()
+    cp = _run(["git", "rev-parse", "--show-toplevel"], cwd=str(cwd))
+    out = (getattr(cp, "stdout", "") or "").strip()
+    if getattr(cp, "returncode", 1) != 0 or not out:
+        stderr = redact((getattr(cp, "stderr", "") or "").strip())
+        raise GatePrError(
+            f"'{cwd}' is not inside a git repository (git rev-parse --show-toplevel "
+            f"failed{f': {stderr}' if stderr else ''}). `gate` resolves its output "
+            "directory and workflows relative to the repository root — run it from "
+            "inside a git repo, or `cd` to the repo's top level first."
+        )
+    return Path(out)
+
+
 def gh_available(_run: Runner = _default_run) -> bool:
     """True iff the gh CLI is installed AND authenticated."""
     if shutil.which("gh") is None:

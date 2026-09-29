@@ -1,9 +1,10 @@
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from mylonite.gate.pr import GatePaths, GatePrError, PrResult, open_or_print_pr
+from mylonite.gate.pr import GatePaths, GatePrError, PrResult, open_or_print_pr, resolve_repo_root
 
 
 def _make_artifacts(tmp_path: Path) -> GatePaths:
@@ -380,3 +381,39 @@ def test_rollback_step_failure_warns_but_does_not_replace_the_original_error(tmp
     assert "rollback" in err.lower()
     assert "mylonite/gate-fail" in err
     assert "Your local changes would be overwritten" in err
+
+
+# ---------------------------------------------------------------------------
+# #203: resolve_repo_root
+# ---------------------------------------------------------------------------
+
+
+def _git_init(repo: Path) -> None:
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+
+
+def test_resolve_repo_root_from_a_subdirectory_returns_the_top_level(tmp_path):
+    """`gate --open-pr` run from a subdirectory must anchor at the repo root,
+    not the subdirectory it happened to be invoked from (#203)."""
+    _git_init(tmp_path)
+    subdir = tmp_path / "sub" / "dir"
+    subdir.mkdir(parents=True)
+
+    root = resolve_repo_root(cwd=subdir)
+
+    assert root.resolve() == tmp_path.resolve()
+
+
+def test_resolve_repo_root_at_the_top_level_is_a_no_op(tmp_path):
+    _git_init(tmp_path)
+    assert resolve_repo_root(cwd=tmp_path).resolve() == tmp_path.resolve()
+
+
+def test_resolve_repo_root_outside_a_git_repo_raises_named_error(tmp_path):
+    """Outside a git repository entirely: a named GatePrError, not a bare
+    subprocess/CalledProcessError or a silent wrong-directory write."""
+    outside = tmp_path / "not-a-repo"
+    outside.mkdir()
+
+    with pytest.raises(GatePrError, match="not inside a git repository"):
+        resolve_repo_root(cwd=outside)

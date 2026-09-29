@@ -61,6 +61,7 @@ from mylonite.gate.wiring import (
     make_open_pr_fn,
     make_scan_fn,
     make_validate_fn,
+    resolve_gate_out_dir,
 )
 from mylonite.generate.wiring import (
     _dispatch_emit as _dispatch_emit,  # re-export (tests import from cli)
@@ -2994,6 +2995,15 @@ def gate(
     # scratch file) land instead of the historical hardcoded `.mylonite/gate`.
     layout = _layout_for(ctx, config_root=config_root)
     out = out if out is not None else layout.gate
+
+    # #203: anchor a relative --out at the git repo root, not Path.cwd(),
+    # whenever this run will touch git or .github/workflows/ — before
+    # scan_fn/validate_fn/open_pr_fn are built, since they close over `out`.
+    try:
+        out = resolve_gate_out_dir(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
+    except pr_mod.GatePrError as exc:
+        echo_err(f"\nerror: {exc}")
+        raise typer.Exit(code=EXIT_PR_FAILED) from exc
 
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)

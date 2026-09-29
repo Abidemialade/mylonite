@@ -291,7 +291,10 @@ instead.
 
 Exit codes are a documented contract (`0` success · `1` findings · `2` configuration ·
 `3` budget · `4` provider · `5` not confirmed · `6` generate failed · `7` validate failed ·
-`8` PR step failed). Full details in the [CLI reference](./docs/cli-reference.md).
+`8` PR step failed). Budget exhaustion always wins: a run that finds something AND runs
+out of `--max-llm-calls` exits `3`, not `0` — the findings are still written to disk and
+(for `gate`) still turned into a test and gated, so nothing is lost. Full details in the
+[CLI reference](./docs/cli-reference.md).
 
 Remote MCP transport (SSE / streamable-HTTP), the versioned extension points, and
 entry-point plugins are covered in the [architecture guide](./docs/architecture.md).

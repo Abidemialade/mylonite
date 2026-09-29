@@ -11,7 +11,11 @@ nothing (internal collaborator failure) · `7` `gate`: the validator returned no
 (internal collaborator failure) · `8` `gate`: the git/gh step failed (your findings and
 validation report are still in `--out`).
 
-Budget exhaustion always exits `3`, whichever layer of the run observes it first.
+Budget exhaustion always exits `3`, whichever layer of the run observes it first — and it
+wins over a finding, not the other way round: a run that finds a real weakness and then
+runs out of `--max-llm-calls` still exits `3`. On `gate`, the finding is still turned into
+a test, validated, and gated (the PR is opened or printed) before that exit code is
+returned — see [the gate page's precedence note](ci-gating.md#budget-exhaustion-and-findings).
 
 **No LLM credential configured?** `scan`, `gate`, `validate` and `ablate` all check
 every model they will call before doing any work and exit `2` naming the missing
@@ -235,6 +239,15 @@ only to `--out` (normally `.mylonite/gate/`) and prints the `git`/`gh` commands 
 commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
 `--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
 where `--workflows` defaulted on and the branch and commit happened on every run.
+Either flag resolves the repository root with `git rev-parse --show-toplevel` — so
+`gate` works from any subdirectory — and fails fast, on exit code 8, outside a git
+repository entirely.
+
+`gate` generates, validates, and (for every KEPT one) gates **every** finding the
+scan proves, not just the first — one branch, one PR, in deterministic pattern-id
+order. See [Gating every finding](ci-gating.md#gating-every-finding) for the branch
+naming, the multi-finding console output, and the budget-exhaustion-with-findings
+exit code.
 
 For a `--target-file` target, `gate` refuses before any LLM call if a declared
 `weakness_classes` entry has zero seeds this surface could ever run — the same

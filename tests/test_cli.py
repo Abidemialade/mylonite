@@ -2736,8 +2736,7 @@ def test_post_gate_annotations_passes_a_timeout_to_the_check_run_post(
 
     _post_gate_annotations(
         tmp_path,
-        SimpleNamespace(),
-        None,
+        [(SimpleNamespace(), None)],
         None,
         pr_mod,
         gate_dir=Path(".mylonite/gate"),
@@ -3222,8 +3221,7 @@ def test_gate_target_copy_names_credential_vars(
         out_dir.mkdir()
         kwargs["open_pr_fn"](
             out_dir=out_dir,
-            exploit=SimpleNamespace(pattern_id="pid"),
-            report=None,
+            findings=[(SimpleNamespace(pattern_id="pid"), None)],
             body="",
             open_pr=False,
         )

@@ -134,6 +134,16 @@ def test_gate_planner_model_override_rejects_unroutable_model(tmp_path):
     assert "can't determine a provider" in (res.stderr or res.output)
 
 
+def test_gate_open_pr_outside_a_git_repo_exits_8(tmp_path, monkeypatch):
+    """#203: `--open-pr` (default relative --out) outside a git repository is
+    a named error on exit code 8, resolved before any LLM/provider work."""
+    monkeypatch.chdir(tmp_path)  # a bare tmp_path is not a git repository
+    res = runner.invoke(app, ["gate", "reference:vulnerable", "--open-pr"])
+    assert res.exit_code == 8, res.output
+    out = res.stderr or res.output
+    assert "git repository" in out.lower()
+
+
 def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(tmp_path, monkeypatch):
     # DCR-0001: the same rejection must fire even when target_file comes from an
     # auto-discovered ./mylonite.yaml and NO --target-file flag was typed at all.

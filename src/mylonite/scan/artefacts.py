@@ -344,7 +344,16 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     table.add_column("mechanism", no_wrap=True)
     table.add_column("reason")
 
-    for attempt in report.attempts:
+    # #206: an aborted run (e.g. budget exhausted) that still found something
+    # must not bury those findings under whatever ran first — reorder the
+    # table so they lead, without changing anything about a non-aborted run.
+    rows = report.attempts
+    if report.aborted and report.findings_count:
+        from mylonite.scan.coverage import findings_first
+
+        rows = findings_first(rows)  # type: ignore[assignment]
+
+    for attempt in rows:
         mark = marks.get(attempt.outcome, attempt.outcome)
         table.add_row(
             mark,

@@ -246,3 +246,13 @@ non-zero so a misconfiguration can never masquerade as "all clear".
 Exit `0` with findings can still carry a coverage caveat: if some seeds were never
 exercised, the run reports that alongside the findings rather than letting a partial scan
 read as a complete one. Finding something does not make an incomplete scan complete.
+
+**Budget exhaustion always wins over findings.** A run that finds a real weakness AND
+exhausts `--max-llm-calls` before finishing exits `3`, not `0` — an abort is checked
+before findings, on both `scan` and `gate`. A CI wrapper that treats `3` as "infrastructure
+failure, discard the run" throws away a real finding: the findings are still written to
+disk (and, for `gate`, still turned into a test and gated — see
+[the same precedence on the gate page](ci-gating.md#budget-exhaustion-and-findings)),
+so re-running the same command picks them back up. Because the budget-exhausted case is
+the one most likely to also carry findings, the terminal trust panel leads with the
+findings, ahead of the seeds that never got to run, when both are present.

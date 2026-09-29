@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`gate` now gates every finding a scan proves, not just the first.**
+  Previously it took `exploits[0]` and silently dropped the rest — a second
+  real weakness never reached CI. `gate` now generates, validates, and (for
+  every finding the oracle keeps) commits one test each, in deterministic
+  pattern-id order, on a single branch behind a single PR; a finding that
+  isn't kept is still named in `PR_BODY.md`, with the reason, under "Other
+  findings (not gated)". Validation cost scales with the number of findings
+  — the console prints "N findings: validating each (about Nx the
+  single-finding validation cost)" before it starts, and the sizing box on
+  [docs/ci-gating.md](docs/ci-gating.md) explains the multiplier. The gate
+  branch name for exactly one kept finding is unchanged
+  (`mylonite/gate-<pattern_id>`); gating several uses a short stable hash of
+  the kept pattern ids (`mylonite/gate-<hash>`) instead, keeping the
+  `mylonite/gate-` prefix either way.
+- **`gate` now exits `3`, not `0`, when a scan both proves a finding and runs
+  out of `--max-llm-calls`.** The scan's own "abort always wins" exit code
+  used to be read only when a scan came back with zero exploits — with a
+  finding present, `gate` fell through and exited `0`, breaking the
+  documented "budget exhaustion always exits 3" contract. `gate` still
+  generates, validates, and opens/prints the PR for the proven finding; the
+  process exit code is the scan's own, and the scan's operator message is
+  echoed alongside it. `scan`'s own console summary now leads with the
+  findings, ahead of the seeds that never ran, when the run both aborted and
+  found something.
 - **A scan that declares a class the server can't express now stops before
   running, names the class, and says the fix — instead of quietly running
   seeds that could never test anything.** Custom-target scans could exit 2
@@ -47,6 +71,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--weakness-class`, the message says to drop it from the flag. `gate`'s refusal of a W2
   target without a `seed_arm` now says to run `scan` first and use the `target.yaml` it
   writes, since only `scan` auto-wires a `seed_arm`.
+- **The scaffolded gate workflow can now actually load a target with
+  secrets.** `write_workflows` used to run before the redacted `target.yaml`
+  was written, so the `${MYLONITE_TARGET_...}` placeholder names didn't exist
+  yet when the workflow was rendered — `load_target_file` then raised on the
+  undefined variables the first time the scaffolded workflow ran in CI. The
+  redacted target is now written first; the workflow gets one `env:` entry
+  per placeholder, mapped to `${{ secrets.<NAME> }}`, in the step that runs
+  `pytest`. `gate`'s console output and `PR_BODY.md` name the repository
+  secrets to add.
+- **`gate --open-pr` run from a subdirectory now resolves the real
+  repository root instead of committing under that subdirectory.** `gate`
+  used to take `Path.cwd()` as the repo root outright; run from `sub/dir` in
+  a git repo, `--open-pr` committed the gate output at
+  `sub/dir/.mylonite/gate/...` and, with `--workflows`, would have put the
+  scaffolded files at `sub/dir/.github/workflows/`, where GitHub never looks
+  for them. `gate` now resolves the root with `git rev-parse
+  --show-toplevel` and anchors the gate directory and workflows there.
+  Outside a git repository entirely, `--open-pr` now fails fast with a named
+  error on exit code 8, before any scan/LLM spend, instead of silently
+  writing to the wrong place.
+
 - **A malformed `--model` now fails once, with one message, instead of
   printing about 12 KB of repeated provider errors.** `not-a-real/model`
   passed the cheap `<provider>/<model>` prefix check and was only rejected
