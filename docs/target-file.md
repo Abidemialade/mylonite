@@ -238,10 +238,11 @@ first; when it finds a store-and-recall pair it writes the wired target to
 `.mylonite/scans/<timestamp>/target.yaml`, and that file is the one to pass to `gate`.
 
 The check has to launch the server to see its tools, and it fails closed: if the server
-can't be described within 20 seconds (or the target's `timeout_s`, when that is larger),
-the run stops with exit 2 and says so, rather than
-starting without knowing whether every declared class can run. Re-run once (a first
-`npx`/`uvx` download is cached after that), or raise `timeout_s`. The scan engine repeats
+crashes, or can't be described within 20 seconds (or the target's `timeout_s`, when that
+is larger), the run stops with exit 2 and says which, rather than starting without
+knowing whether every declared class can run. After a timeout, re-run once (a first
+`npx`/`uvx` download is cached after that) or raise `timeout_s`; after a crash, check the
+target file's `command:` and `args:`. The scan engine repeats
 the same rule on the description it actually runs against: a declared class with no seed
 at all aborts the scan before any payload is sent (`no_payloads`, exit 2), so a skipped or
 failed pre-flight can never let the other classes read as a clean pass.
