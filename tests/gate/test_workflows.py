@@ -1,11 +1,18 @@
 import importlib.resources as ir
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
-from mylonite.gate.workflows import write_workflows
+from mylonite.gate.workflows import _TEMPLATES, write_workflows
 from mylonite.version import __version__
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+#: A commit predating any of this round's target-secrets-env work — used only
+#: to fetch the PRE-existing template rendering for the byte-identical
+#: no-secrets check below.
+_BASE_COMMIT = "9160c41"
 
 
 def test_templates_are_valid_yaml_and_ship_as_package_data():
@@ -120,6 +127,33 @@ def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
     assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE"}
 
 
+def test_write_workflows_no_secrets_is_byte_identical_to_the_pre_review_render(tmp_path):
+    """Minor #8: a no-secrets render must be byte-for-byte identical to what
+    this template produced before the target-secrets ``env:`` token existed
+    — captured live from the base commit, not hand-transcribed, so this
+    can't silently drift out of sync with the real historical output. The
+    original bug left a stray blank line where the (empty) token used to be."""
+    for name in _TEMPLATES:
+        base_text = subprocess.run(
+            ["git", "show", f"{_BASE_COMMIT}:src/mylonite/gate/templates/{name}"],
+            cwd=str(_REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        for token, value in {
+            "__RUNS_ON__": "ubuntu-latest",
+            "__GATE_DIR__": ".mylonite/gate",
+            "__MYLONITE_VERSION__": __version__,
+        }.items():
+            base_text = base_text.replace(token, value)
+
+        written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+        actual_text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
+
+        assert actual_text == base_text, name
+
+
 def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
     """#185: a target with a header secret renders an env: entry mapped to a
     repository secret of the same name, in the step that runs pytest."""
@@ -142,3 +176,76 @@ def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
         "${{ secrets.MYLONITE_TARGET_HEADERS_X_API_KEY }}"
     )
     assert dstep["env"]["MYLONITE_AUTHORIZE"] == "${{ vars.MYLONITE_AUTHORIZE }}"
+
+
+# ---------------------------------------------------------------------------
+# Round-1 review, Critical #3: gate_dir must render relative to repo_root,
+# never a machine-local absolute path.
+# ---------------------------------------------------------------------------
+
+
+def test_write_workflows_relativizes_an_absolute_gate_dir(tmp_path):
+    """An absolute gate_dir under repo_root (exactly what
+    resolve_gate_out_dir produces) is rendered relative in the workflow —
+    never the machine-local absolute path."""
+    repo_root = tmp_path
+    absolute_gate_dir = repo_root / ".mylonite" / "gate"
+    written = write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=absolute_gate_dir)
+
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert str(absolute_gate_dir) not in text
+    assert "pytest .mylonite/gate -q -ra" in text
+
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    dtext = discovery.read_text(encoding="utf-8")
+    assert str(absolute_gate_dir) not in dtext
+    assert "--target-file .mylonite/gate/target.yaml" in dtext
+
+
+def test_write_workflows_relativizes_from_a_nested_absolute_gate_dir(tmp_path):
+    """Same as above but with an extra path segment, to catch an
+    accidentally-hardcoded '.mylonite/gate' rather than a genuine relativize."""
+    repo_root = tmp_path
+    absolute_gate_dir = repo_root / "custom" / "out" / "gate"
+    written = write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=absolute_gate_dir)
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert str(absolute_gate_dir) not in text
+    assert "pytest custom/out/gate -q -ra" in text
+
+
+def test_write_workflows_raises_when_gate_dir_is_outside_the_repo_root(tmp_path):
+    from mylonite.gate.pr import GatePrError
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    outside_gate_dir = tmp_path / "elsewhere" / "gate"
+
+    with pytest.raises(GatePrError, match="not inside the repository root"):
+        write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=outside_gate_dir)
+
+
+def test_write_workflows_end_to_end_from_a_subdirectory_stays_relative(tmp_path, monkeypatch):
+    """The full chain a real `gate --workflows` run from a subdirectory goes
+    through: resolve_gate_out_dir anchors --out as an ABSOLUTE path at the
+    repo root, and write_workflows must still render it relative."""
+    from mylonite.gate import pr as pr_mod
+    from mylonite.gate.wiring import resolve_gate_out_dir
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subdir = tmp_path / "sub" / "dir"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+
+    out = resolve_gate_out_dir(
+        Path(".mylonite") / "gate", open_pr=False, workflows=True, pr_mod=pr_mod
+    )
+    assert out.is_absolute()
+    root = pr_mod.resolve_repo_root()
+
+    written = write_workflows(root, gate_dir=out)
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert str(tmp_path) not in text
+    assert "pytest .mylonite/gate -q -ra" in text
