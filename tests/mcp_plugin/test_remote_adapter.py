@@ -545,6 +545,31 @@ async def test_describe_falls_back_to_generic_message_when_no_status_anywhere() 
         server.server_close()
 
 
+async def test_describe_timeout_message_survives_the_remote_override_unwrapped() -> None:
+    """#186 fix round 1: the base class's own AdapterDescribeFailed (a
+    timeout, naming timeout_s) must not be caught and REPLACED by this
+    subclass's generic except-Exception branch (which would overwrite it
+    with the host/status-shaped remote message and lose "timeout_s" and the
+    effective value entirely) -- it needs the same pass-through ImportError
+    already gets."""
+    family = "remote-timeout"
+    _register_remote_at(0, transport="sse", family=family)
+    adapter = MCPRemoteAdapter(family=family, scope=None)
+
+    async def _timing_out_open(*_a: Any, **_kw: Any) -> Any:
+        raise TimeoutError("read timed out")
+        yield  # pragma: no cover - never reached; makes this an async generator
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(remote_adapter, "_open_remote_session", asynccontextmanager(_timing_out_open))
+        with pytest.raises(AdapterDescribeFailed) as excinfo:
+            await adapter.describe()
+
+    message = str(excinfo.value)
+    assert "timeout_s" in message
+    assert "url and headers" not in message  # must not be the generic remote message
+
+
 async def test_describe_lets_an_import_error_through_unwrapped() -> None:
     """A missing dependency is a configuration error the engine re-raises on
     purpose; describe() must not turn it into AdapterDescribeFailed."""

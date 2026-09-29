@@ -1262,6 +1262,99 @@ def test_scan_autowire_describe_timeout_names_the_timeout_not_seed_arm_advice(
     assert "timed out after" in out, out
     assert "npx" in out and "uvx" in out, out
     assert "add a seed_arm" not in out.lower(), out
+    # Fix round 1: says to re-run (a first download is cached after that)
+    # or to raise timeout_s -- not just "it timed out" with no next step.
+    assert "re-run" in out.lower(), out
+    assert "timeout_s" in out, out
+    target_registry.clear_runtime_targets()
+
+
+def test_autowire_budget_floors_at_the_constant_when_target_declares_less() -> None:
+    from mylonite.cli import _AUTOWIRE_DESCRIBE_TIMEOUT_S, _autowire_budget_s
+
+    assert _autowire_budget_s(5.0) == _AUTOWIRE_DESCRIBE_TIMEOUT_S
+
+
+def test_autowire_budget_raises_above_the_constant_when_target_declares_more() -> None:
+    from mylonite.cli import _autowire_budget_s
+
+    assert _autowire_budget_s(90.0) == 90.0
+
+
+def test_autowire_budget_defaults_to_the_constant_when_unset() -> None:
+    from mylonite.cli import _AUTOWIRE_DESCRIBE_TIMEOUT_S, _autowire_budget_s
+
+    assert _autowire_budget_s(None) == _AUTOWIRE_DESCRIBE_TIMEOUT_S
+
+
+def test_scan_autowire_describe_timeout_uses_the_target_files_larger_timeout_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The EFFECTIVE budget (target file timeout_s, when it raises the floor)
+    surfaces in the message -- not the bare constant. The constant itself is
+    monkeypatched to something tiny here purely so the test doesn't need to
+    wait out a real 20s floor; timeout_s (1.5s) is what actually governs."""
+    from contextlib import asynccontextmanager
+
+    from mylonite import cli
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setattr(cli, "_AUTOWIRE_DESCRIBE_TIMEOUT_S", 0.01)
+
+    @asynccontextmanager
+    async def _hanging_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        await asyncio.sleep(3.0)
+        yield SimpleNamespace()  # never reached
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _hanging_open)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\ntimeout_s: 1.5\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "acme"])
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "timed out after 2s" in out, out  # 1.5 rounds to 2 with :.0f
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_autowire_mcperror_timeout_also_skips_the_seed_arm_advice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix round 1 (#186): an inner McpError(timeout code) -- the SDK's own
+    read_timeout_seconds firing INSIDE describe(), well before the outer
+    asyncio.wait_for's deadline -- surfaces as AdapterDescribeFailed (see
+    MCPSessionAdapterBase.describe), not a bare TimeoutError. The auto-wire
+    except clause must recognise this too and never fall through to the
+    seed_arm advice."""
+    from contextlib import asynccontextmanager
+
+    import httpx
+    from mcp.shared.exceptions import McpError
+    from mcp.types import ErrorData
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+
+    @asynccontextmanager
+    async def _mcp_timeout_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        raise McpError(ErrorData(code=httpx.codes.REQUEST_TIMEOUT, message="timed out"))
+        yield  # pragma: no cover - never reached
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _mcp_timeout_open)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["scan", "--target-file", str(p), "--authorize", "acme"])
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    assert "timeout_s" in out, out
+    assert "add a seed_arm" not in out.lower(), out
     target_registry.clear_runtime_targets()
 
 

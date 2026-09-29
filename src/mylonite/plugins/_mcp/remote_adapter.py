@@ -224,6 +224,14 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             # re-raises it on purpose, so it must not become
             # AdapterDescribeFailed here.
             raise
+        except AdapterDescribeFailed:
+            # #186 fix round 1: the base class already produced an
+            # operator-ready message (currently: a timeout naming timeout_s
+            # and its effective value) -- the except-Exception branch below
+            # would otherwise catch it too and REPLACE that message with the
+            # generic host/status-shaped remote one, losing timeout_s
+            # entirely. Same treatment as ImportError above.
+            raise
         except Exception as exc:
             host = _host_only(self._spec.url)
             # Real local servers (both sse and http/streamable-HTTP) DO
