@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Outside a git repository entirely, `--open-pr` now fails fast with a named
   error on exit code 8, before any scan/LLM spend, instead of silently
   writing to the wrong place.
+- **The scaffolded gate workflow no longer bakes in a machine-local absolute
+  path.** `gate --workflows` renders `run: pytest <gate dir>` and
+  `--target-file <gate dir>/target.yaml` from the ABSOLUTE path it anchors
+  `--out` at internally, so the committed workflow only ever worked on the
+  machine that wrote it (`run: pytest C:/Users/.../.mylonite/gate`). Both are
+  now rendered relative to the repository root, exactly like every prior
+  release rendered them. `write_workflows` also no longer leaves a stray
+  blank line when a target declares no secrets.
 - **`gate`'s out-of-budget message no longer suggests a `--weakness-classes`
   flag that doesn't exist.** `gate` has no such flag (`scan` has
   `--weakness-class`, singular; `gate` has neither). For a custom target the

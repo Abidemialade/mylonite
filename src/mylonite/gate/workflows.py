@@ -6,6 +6,7 @@ import importlib.resources as ir
 from collections.abc import Sequence
 from pathlib import Path
 
+from mylonite.gate.pr import GatePrError
 from mylonite.layout import DEFAULT_LAYOUT
 from mylonite.version import __version__
 
@@ -31,6 +32,34 @@ def _target_secrets_env_lines(target_env_vars: Sequence[str]) -> str:
     return "\n".join(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars)
 
 
+def _relative_gate_dir(repo_root: Path, gate_dir: Path) -> Path:
+    """``gate_dir`` as rendered into a workflow: always relative to
+    ``repo_root``, never a machine-local absolute path (Critical fix, round 1
+    of review). ``resolve_gate_out_dir`` anchors ``--out`` at the repo root as
+    an ABSOLUTE path so file writes land in the right place regardless of the
+    operator's cwd — but that same absolute path, rendered verbatim into
+    ``run: pytest <path>``, only ever worked on the machine that wrote it.
+    GitHub Actions checks out a FRESH clone at the repo root every run,
+    so the path a committed workflow needs is repo-root-relative.
+
+    Raises :class:`GatePrError` (exit 8, the same code every other
+    repo-boundary failure in this package uses) when ``gate_dir`` is an
+    absolute path that isn't actually under ``repo_root`` — an operator-
+    supplied ``--out`` outside the repository, which ``resolve_gate_out_dir``
+    does not touch (it only anchors the DEFAULT relative layout).
+    """
+    gate_dir = Path(gate_dir)
+    if not gate_dir.is_absolute():
+        return gate_dir
+    try:
+        return gate_dir.relative_to(repo_root)
+    except ValueError as exc:
+        raise GatePrError(
+            f"gate output directory {gate_dir} is not inside the repository root "
+            f"{repo_root} — cannot scaffold a workflow that references it."
+        ) from exc
+
+
 def write_workflows(
     repo_root: Path,
     *,
@@ -47,9 +76,13 @@ def write_workflows(
 
     * ``__RUNS_ON__`` -> ``runs_on`` — a self-hosted label (e.g.
       ``"[self-hosted, linux]"``) for in-perimeter enterprise runners.
-    * ``__GATE_DIR__`` -> ``gate_dir`` (posix-style) — the ``gate --out``
-      directory the committed test / target.yaml actually live under;
-      defaults to :data:`mylonite.layout.DEFAULT_LAYOUT`'s gate dir.
+    * ``__GATE_DIR__`` -> ``gate_dir``, relativized against ``repo_root`` and
+      rendered posix-style — the ``gate --out`` directory the committed test /
+      target.yaml actually live under, defaulting to
+      :data:`mylonite.layout.DEFAULT_LAYOUT`'s gate dir. Always relative in
+      the rendered workflow (see :func:`_relative_gate_dir`): CI checks out a
+      fresh clone, so an absolute path baked in at scaffold time would only
+      ever resolve on the machine that ran ``gate --workflows``.
     * ``__MYLONITE_VERSION__`` -> this package's ``__version__``, so the
       workflows install the release that wrote them rather than whatever PyPI
       serves on the day the job runs.
@@ -65,15 +98,22 @@ def write_workflows(
 
     Returns the written paths.
     """
-    tokens = {
+    posix_gate_dir = _relative_gate_dir(repo_root, Path(gate_dir)).as_posix()
+    inline_tokens = {
         "__RUNS_ON__": runs_on,
-        "__GATE_DIR__": Path(gate_dir).as_posix(),
+        "__GATE_DIR__": posix_gate_dir,
         "__MYLONITE_VERSION__": __version__,
-        # The templates spell these as full-line YAML comments
-        # (``#__TARGET_SECRETS_ENV__``) so the RAW, unsubstituted template
-        # stays valid YAML on its own (see test_workflows.py's
-        # test_templates_are_valid_yaml_and_ship_as_package_data) — a bare
-        # unindented token broke the surrounding block's indentation.
+    }
+    # The templates spell these as full-line YAML comments
+    # (``#__TARGET_SECRETS_ENV__``) so the RAW, unsubstituted template stays
+    # valid YAML on its own (see test_workflows.py's
+    # test_templates_are_valid_yaml_and_ship_as_package_data) — a bare
+    # unindented token broke the surrounding block's indentation. Handled
+    # separately from ``inline_tokens`` (rather than one flat dict) because an
+    # EMPTY value here must remove the whole line, newline included — a plain
+    # substring replace would leave a blank line behind, which is a real
+    # byte-for-byte regression against the pre-existing (no-secrets) render.
+    line_tokens = {
         "#__TARGET_SECRETS_ENV__": _target_secrets_env_block(target_env_vars),
         "#__TARGET_SECRETS_ENV_LINES__": _target_secrets_env_lines(target_env_vars),
     }
@@ -83,8 +123,10 @@ def write_workflows(
     written: list[Path] = []
     for name in _TEMPLATES:
         text = (base / name).read_text(encoding="utf-8")
-        for token, value in tokens.items():
+        for token, value in inline_tokens.items():
             text = text.replace(token, value)
+        for token, value in line_tokens.items():
+            text = text.replace(token, value) if value else text.replace(token + "\n", "")
         out = dest / name
         out.write_text(text, encoding="utf-8")
         written.append(out)
