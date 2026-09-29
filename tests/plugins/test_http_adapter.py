@@ -307,7 +307,7 @@ def test_invoke_403_also_names_request_headers() -> None:
 
 
 def test_invoke_401_prints_host_only_not_the_urls_query_string_secret() -> None:
-    """Fix round 1: `request.url` can carry a secret as a query-string token
+    """`request.url` can carry a secret as a query-string token
     (a common shape for an API-key-in-the-URL provider) — the 401/403
     message must print the host only, never `req.url` verbatim, same reason
     the remote MCP adapter's descriptor is host-only."""

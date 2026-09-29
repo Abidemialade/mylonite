@@ -325,7 +325,7 @@ def _missing_env_message(
     """Name each unset variable, the field it fills, and the line that sets
     it. ``subject`` is what "references" the variable(s) -- the default
     ("target file") is right for a LOADED target file's own ``env:`` block,
-    but wrong for a caller with no target file at all (fix round 1, #184:
+    but wrong for a caller with no target file at all (#184:
     the bundled ``mcp:github`` spec's ``GITHUB_PERSONAL_ACCESS_TOKEN``)."""
     from mylonite._target_env import posix_export_line, powershell_env_line
 
@@ -359,7 +359,7 @@ def expand_env_block(
     bundled ``TargetSpec`` is a plain module-level dict, never loaded via
     :func:`load_target_file`, so it needs its own expansion call.
 
-    ``subject`` (fix round 1) is forwarded to :func:`_missing_env_message` --
+    ``subject`` is forwarded to :func:`_missing_env_message` --
     override it when the caller, like the bundled families above, has no
     target file for the default "target file references..." wording to
     correctly describe.
@@ -694,8 +694,8 @@ def load_target_file_and_warn(path: Path) -> TargetFile:
 
 def needs_seed_arm_autowire(tf: TargetFile) -> bool:
     """True when the target declares an indirect-injection-only weakness (W2) but no
-    ``seed_arm`` — the case M3 auto-wires from the tool surface so a real app needs
-    near-zero config instead of a hard pre-flight block."""
+    ``seed_arm`` — the case the seed_arm auto-wire fills in from the tool surface, so
+    a real app needs near-zero config instead of a hard pre-flight block."""
     return tf.seed_arm is None and bool(set(tf.weakness_classes) & _INDIRECT_ONLY_WEAKNESS_CLASSES)
 
 

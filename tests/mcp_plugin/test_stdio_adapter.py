@@ -645,7 +645,7 @@ def _register_custom_stdio_family(family: str) -> None:
 async def test_describe_timeout_error_becomes_adapter_describe_failed_naming_timeout_s(
     tmp_path: Path,
 ) -> None:
-    """#186 fix round 1: a bare TimeoutError from inside the session (the MCP
+    """#186: a bare TimeoutError from inside the session (the MCP
     ClientSession's own read_timeout_seconds elapsing) must not reach the
     engine as a raw, undiagnosed exception -- it becomes AdapterDescribeFailed
     naming timeout_s and its effective (in-force) value, so the engine's
@@ -1342,7 +1342,7 @@ async def test_invoke_timeout_raises_skipped_with_reason(tmp_path: Path) -> None
     # not just a bare "timed out after Ns" with no indication what to change.
     message = str(excinfo.value)
     assert "timeout_s" in message
-    # Fix round 1: "filesystem" is a BUNDLED family (no target file) -- the
+    # "filesystem" is a BUNDLED family (no target file) -- the
     # remedy must not tell this operator to edit a file that doesn't exist.
     assert "bundled" in message.lower()
     assert "in the target file" not in message.lower()
@@ -1352,7 +1352,7 @@ async def test_invoke_timeout_raises_skipped_with_reason(tmp_path: Path) -> None
 async def test_invoke_timeout_message_points_at_the_target_file_for_a_custom_target(
     tmp_path: Path,
 ) -> None:
-    """Fix round 1 (#186): the sibling of the bundled-family case above -- a
+    """#186: the sibling of the bundled-family case above -- a
     CUSTOM family's planner timeout must say to raise timeout_s in the
     target file, not the bundled-only "write a target file" wording."""
     from mylonite.plugins._mcp import target_registry

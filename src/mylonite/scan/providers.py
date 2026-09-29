@@ -159,7 +159,7 @@ def model_is_routable(model: str, *, api_base: str | None = None) -> bool:
     LiteLLM prints a "Provider List: <url>" banner to STDOUT on every
     rejection -- regardless of whether the caller catches the raised
     exception -- which is exactly the noise this pre-flight exists to
-    replace with one clean line (#207 fix round 1). Suppressed here via
+    replace with one clean line (#207). Suppressed here via
     ``litellm.suppress_debug_info``, restored afterwards so the flag never
     leaks into an unrelated later call.
     """
@@ -229,7 +229,7 @@ def require_llm_configured_or_exit(
     :func:`preflight_model_or_exit` (#207: can LiteLLM actually route this
     model?) run, shared by scan/validate/gate/ablate.
 
-    Moved here from ``mylonite.cli`` (fix round 1 headroom): cli.py imports
+    Moved here from ``mylonite.cli`` (to keep cli.py under its size cap): cli.py imports
     it back under its original name (``_require_llm_configured_or_exit``)
     so every existing call site and the one test that imports it directly
     keep working unchanged.

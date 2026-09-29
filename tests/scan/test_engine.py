@@ -788,7 +788,7 @@ async def test_engine_zero_payloads_aborts_no_payloads() -> None:
 
 @pytest.mark.asyncio
 async def test_engine_zero_payloads_from_weakness_filter_names_the_filter() -> None:
-    """Fix round 1 (#205c): a --weakness-class filter that matches none of a
+    """#205c: a --weakness-class filter that matches none of a
     (reference/bundled) target's seeds must say SO, not the generic
     "declare weakness classes" advice -- that advice is for a target that
     declares NONE, the opposite situation."""
@@ -1216,7 +1216,7 @@ async def _run_starved_budget_scenario(
 async def test_starved_seed_warning_names_the_flag_for_a_reference_or_bundled_target(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Fix round 1 (#205): a target with NO declared weakness_classes (the
+    """#205: a target with NO declared weakness_classes (the
     legacy family path every reference:*/bundled mcp:<family> target takes)
     -- --weakness-class genuinely narrows there, so naming it is correct."""
     warning_text = await _run_starved_budget_scenario(caplog, weakness_classes=[])

@@ -46,7 +46,7 @@ def test_github_effective_env_raises_a_named_error_when_the_token_is_unset(
 def test_github_missing_token_message_does_not_say_target_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fix round 1: the bundled mcp:github family has no target file at all
+    """The bundled mcp:github family has no target file at all
     -- the generic custom-target-file wording ("target file references
     undefined environment variable(s)...") is actively wrong here."""
     monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
@@ -57,7 +57,7 @@ def test_github_missing_token_message_does_not_say_target_file(
 
 
 def test_a_caller_supplied_launch_env_is_also_expanded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fix round 1: ``launch_env`` is NOT always concrete -- every real caller
+    """``launch_env`` is NOT always concrete -- every real caller
     that constructs one (``factory.build_adapter_for_spec``, the ONLY path
     gate's re-drive twin and ablation both go through) builds it from
     ``TargetSpec.launch_env()``, which is just ``dict(self.extra_env)`` --
@@ -86,7 +86,7 @@ def test_a_caller_supplied_launch_env_still_raises_when_unresolvable(
 def test_build_adapter_for_spec_github_twin_resolves_the_real_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """#184 fix round 1: the exact repro -- ``build_adapter_for_spec(resolve_
+    """#184: the exact repro -- ``build_adapter_for_spec(resolve_
     target('github', 'o/r'), ...)._effective_env()`` used to return the
     literal ``${GITHUB_PERSONAL_ACCESS_TOKEN}`` because gate/wiring.py builds
     both re-drive twins through ``build_adapter_for_spec``, which always

@@ -151,7 +151,7 @@ def test_build_target_spec_timeout_s_defaults_to_none() -> None:
 
 
 def test_target_file_rejects_a_non_positive_timeout_s() -> None:
-    """Fix round 1: timeout_s must be > 0 -- 0 or a negative value is not a
+    """timeout_s must be > 0 -- 0 or a negative value is not a
     meaningful timeout and would either fire instantly or never."""
     with pytest.raises(Exception, match="timeout_s"):
         _tf(timeout_s=0)
@@ -160,7 +160,7 @@ def test_target_file_rejects_a_non_positive_timeout_s() -> None:
 
 
 def test_target_file_rejects_timeout_s_on_a_rest_transport() -> None:
-    """Fix round 1: timeout_s is the MCP-transport (stdio/sse/http) knob --
+    """timeout_s is the MCP-transport (stdio/sse/http) knob --
     a rest target has its own request.timeout_s. Declaring both is
     confusing (which one applies?), so the top-level field is rejected
     outright on transport: rest, pointing at the right one."""
@@ -541,7 +541,7 @@ def test_target_file_with_no_new_fields_is_byte_identical_round_trip(tmp_path: P
     assert reloaded.model_dump(exclude={"source_dir"}) == tf.model_dump(exclude={"source_dir"})
 
 
-# --- M3: auto-wire seed_arm from the tool surface ---------------------------
+# --- auto-wire seed_arm from the tool surface -------------------------------
 
 
 def _toolspec(name: str, props: dict, required: list | None = None):
@@ -591,7 +591,7 @@ def test_infer_seed_arm_none_when_no_store_tool() -> None:
 def test_expand_env_block_subject_customises_the_missing_var_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fix round 1: expand_env_block's default subject ("target file") is
+    """expand_env_block's default subject ("target file") is
     right for a LOADED target file's own env: block, but wrong for a
     caller with no target file at all (the bundled mcp:github spec) --
     the subject must be overridable per call."""
