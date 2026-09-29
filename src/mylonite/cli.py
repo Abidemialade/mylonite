@@ -1208,87 +1208,41 @@ def scan(
         from mylonite.plugins._mcp.target_file import (
             dump_target_file,
             effect_probe_warnings,
-            infer_seed_arm,
             needs_seed_arm_autowire,
             validate_for_scan,
         )
-        from mylonite.scan._types import AdapterDescribeFailed
+        from mylonite.plugins.cli_targets import autowire_seed_arm
 
         # The persisted target.yaml must describe the target that ACTUALLY ran.
-        # Copying the source verbatim after M3 auto-wires a seed_arm (or --purpose
+        # Copying the source verbatim after the seed_arm auto-wire (or --purpose
         # overrides the target's declared purpose) would produce a scan dir whose
         # target.yaml is missing the seed_arm the findings depended on, contradicting
         # the adjacent "reproducible from the scan dir alone" guarantee
         # (DCR-0005/0016/0006).
         tf_mutated = False
 
-        # M3: auto-wire the seed_arm from the LIVE tool surface when a W2 target omits
-        # it, so a real app needs near-zero config instead of the hard block below.
-        # Only when a no-id recall path exists (else the plant wouldn't be delivered —
-        # the "plants but never lands" trap). Best-effort: a non-timeout describe
-        # failure falls back to the pre-flight block; a timeout (#186) gets its own
-        # diagnosis instead (see except below), not the seed_arm advice. Skipped on
-        # --dry-run/--allow-no-seed-arm. A content-processing tool (e.g.
-        # process_document) with no plantable pair still makes W2 testable via
-        # direct_content, so the seed-arm pre-flight must NOT block that case.
+        # seed_arm auto-wire: infer a seed_arm from the LIVE tool surface when a
+        # W2 target omits one, so a real app needs near-zero config instead of
+        # the hard block below. Skipped on --dry-run/--allow-no-seed-arm, and
+        # for a rest (HTTP-agent) target (no tool surface to introspect or
+        # plant into -- W2 rides in as direct prompt injection instead). See
+        # cli_targets.autowire_seed_arm for the probe + inference logic itself.
         synth_covers_indirect = False
-        # A rest (HTTP-agent) target has no tool surface to introspect or plant into;
-        # W2 rides in as direct prompt injection (seed_synth), so skip seed_arm
-        # auto-wiring and let the (rest-exempt) pre-flight pass.
         if (
             tf.transport != "rest"
             and needs_seed_arm_autowire(tf)
             and not dry_run
             and not allow_no_seed_arm
         ):
-            # Fix round 1 (#207): validate the model BEFORE this probe can launch
-            # the real server -- a bad --model must not spawn a subprocess first.
+            # #207: validate the model BEFORE this probe can launch the real
+            # server -- a bad --model must not spawn a subprocess first.
             preflight_model_or_exit(effective_planner_model, api_base=effective_policy.api_base)
-            _autowire_budget = _autowire_budget_s(tf.timeout_s)
-            try:
-                _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)
-                _descriptor = asyncio.run(
-                    asyncio.wait_for(_probe.describe(), timeout=_autowire_budget)
-                )
-            except TimeoutError:
-                # #186: a first-run npx/uvx download can legitimately take this long --
-                # must NOT fall through to the "add a seed_arm" advice below.
-                echo_err(
-                    f"auto-wire: timed out after {_autowire_budget:.0f}s starting or "
-                    "describing the server (first-run npx or uvx downloads can be "
-                    "slow). Re-run once the download finishes -- it's cached after "
-                    "that -- or set timeout_s: in the target file to raise this budget."
-                )
-                raise typer.Exit(code=EXIT_CONFIG) from None
-            except AdapterDescribeFailed as exc:
-                # Fix round 1: describe() itself already produced an operator-ready
-                # explanation (e.g. an inner McpError/TimeoutError naming timeout_s --
-                # see MCPSessionAdapterBase.describe -- or a remote transport's own
-                # cause). Show it verbatim; never fall through to the seed_arm advice.
-                echo_err(f"auto-wire: {exc}")
-                raise typer.Exit(code=EXIT_CONFIG) from None
-            except Exception as exc:
-                _descriptor = None
-                echo_err(
-                    f"auto-wire: could not describe the target to infer a seed_arm "
-                    f"({type(exc).__name__}); falling back to the pre-flight check."
-                )
-            if _descriptor is not None:
-                _spec, _note = infer_seed_arm(_descriptor.tools)
-                echo_err(f"auto-wire: {_note}")
-                if _spec is not None:
-                    tf = tf.model_copy(update={"seed_arm": _spec})
-                    tf_mutated = True
-                else:
-                    from mylonite.scan.tool_roles import content_processor_tools
-
-                    if content_processor_tools(_descriptor.tools):
-                        synth_covers_indirect = True
-                        echo_err(
-                            "auto-wire: no store->recall pair, but a content-processing "
-                            "tool exposes the direct_content channel — W2 is tested via "
-                            "descriptor synthesis (no seed_arm needed)."
-                        )
+            tf, tf_mutated, synth_covers_indirect = autowire_seed_arm(
+                tf,
+                authorize,
+                effective_planner_model,
+                budget_s=_autowire_budget_s(tf.timeout_s),
+            )
 
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read

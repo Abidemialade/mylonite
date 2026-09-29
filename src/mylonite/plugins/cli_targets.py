@@ -315,3 +315,72 @@ def refuse_uncoverable_weakness_classes(
         )
     if not dry_run:
         raise typer.Exit(code=EXIT_CONFIG)
+
+
+def autowire_seed_arm(
+    tf: Any, authorize: str | None, model: str, *, budget_s: float
+) -> tuple[Any, bool, bool]:
+    """Best-effort seed_arm auto-wire: probe the live tool surface via one
+    ``describe()`` call and infer a ``seed_arm`` from it, so a real custom W2
+    target needs near-zero config instead of the hard ``validate_for_scan``
+    block. Returns ``(tf, tf_mutated, synth_covers_indirect)`` -- ``tf`` is
+    returned unchanged when nothing could be inferred.
+
+    Moved out of ``cli.py``'s ``scan()`` verbatim (fix round 1 headroom). The
+    caller is responsible for: gating on ``transport != "rest"`` /
+    ``needs_seed_arm_autowire(tf)`` / ``not dry_run`` / ``not
+    allow_no_seed_arm``, running the model pre-flight FIRST
+    (``preflight_model_or_exit`` -- a bad ``--model`` must not reach this
+    probe and launch the real server), and computing ``budget_s`` itself
+    (``_autowire_budget_s(tf.timeout_s)``, so a test's monkeypatched
+    constant still takes effect) -- this function assumes all of that
+    already happened and just runs the probe.
+    """
+    import asyncio
+
+    from mylonite.plugins._mcp.target_file import infer_seed_arm
+    from mylonite.scan._types import AdapterDescribeFailed
+    from mylonite.scan.tool_roles import content_processor_tools
+
+    tf_mutated = False
+    synth_covers_indirect = False
+    try:
+        probe = _build_adapter_for_custom(tf, authorize, model)
+        descriptor = asyncio.run(asyncio.wait_for(probe.describe(), timeout=budget_s))
+    except TimeoutError:
+        # #186: a first-run npx/uvx download can legitimately take this long --
+        # must NOT fall through to the "add a seed_arm" advice below.
+        echo_err(
+            f"auto-wire: timed out after {budget_s:.0f}s starting or "
+            "describing the server (first-run npx or uvx downloads can be "
+            "slow). Re-run once the download finishes -- it's cached after "
+            "that -- or set timeout_s: in the target file to raise this budget."
+        )
+        raise typer.Exit(code=EXIT_CONFIG) from None
+    except AdapterDescribeFailed as exc:
+        # describe() itself already produced an operator-ready explanation
+        # (e.g. an inner McpError/TimeoutError naming timeout_s -- see
+        # MCPSessionAdapterBase.describe -- or a remote transport's own
+        # cause). Show it verbatim; never fall through to the seed_arm advice.
+        echo_err(f"auto-wire: {exc}")
+        raise typer.Exit(code=EXIT_CONFIG) from None
+    except Exception as exc:
+        descriptor = None
+        echo_err(
+            f"auto-wire: could not describe the target to infer a seed_arm "
+            f"({type(exc).__name__}); falling back to the pre-flight check."
+        )
+    if descriptor is not None:
+        spec, note = infer_seed_arm(descriptor.tools)
+        echo_err(f"auto-wire: {note}")
+        if spec is not None:
+            tf = tf.model_copy(update={"seed_arm": spec})
+            tf_mutated = True
+        elif content_processor_tools(descriptor.tools):
+            synth_covers_indirect = True
+            echo_err(
+                "auto-wire: no store->recall pair, but a content-processing "
+                "tool exposes the direct_content channel — W2 is tested via "
+                "descriptor synthesis (no seed_arm needed)."
+            )
+    return tf, tf_mutated, synth_covers_indirect
