@@ -414,6 +414,16 @@ def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
     )
 
 
+def _skip_uncoverable_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For tests that stub the scan engine but launch no real server: the
+    uncoverable-class refusal describes the target and fails closed when it
+    can't, so bypass it here. Its own behaviour is pinned by the refusal tests."""
+    monkeypatch.setattr(
+        "mylonite.plugins.cli_targets.refuse_uncoverable_weakness_classes",
+        lambda *_a, **_k: None,
+    )
+
+
 # ── T12 real-CLI-layout regression ──────────────────────────────────────────
 
 
@@ -446,6 +456,7 @@ def test_generate_backfills_scan_report_into_real_cli_layout(
     reaching a clean resist proves the back-fill genuinely resolved
     (model, provider) from the copied sibling report.
     """
+    _skip_uncoverable_refusal(monkeypatch)
     target_registry.clear_runtime_targets()
 
     exploit = _exploit()  # no mylonite.exec.* metadata — pre-T12-style

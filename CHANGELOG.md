@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The pre-flight check for uncoverable weakness classes now fails closed.** When it
+  could not describe the server (a slow first `npx`/`uvx` download, a crash, a timeout),
+  it used to skip itself, and a declared class with nothing to run could let the rest of
+  the scan read as clean. `scan` and `gate` now exit 2 and name the reason and the fix
+  (re-run, or raise `timeout_s`). The scan engine repeats the check on the description it
+  runs against and aborts before any payload (`no_payloads`, exit 2) when a declared class
+  has no seed at all. `scan` also runs this check after the provider key and model checks
+  now, so a missing key never launches the server. When the refused class came from
+  `--weakness-class`, the message says to drop it from the flag. `gate`'s refusal of a W2
+  target without a `seed_arm` now says to run `scan` first and use the `target.yaml` it
+  writes, since only `scan` auto-wires a `seed_arm`.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is

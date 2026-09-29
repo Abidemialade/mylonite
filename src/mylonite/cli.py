@@ -1163,6 +1163,9 @@ def scan(
     # (below, after artefacts are written) so `generate`/`validate` can re-resolve
     # it without the operator re-passing --target-file at every step.
     custom_target_yaml: str | None = None
+    refusal_tf: Any = None
+    flag_added_classes: list[str] = []
+    synth_covers_indirect = False
     if target_file is not None or target == "mcp:custom":
         # Custom-target on-ramp (both YAML and inline flags converge here).
         if not authorize:
@@ -1185,6 +1188,7 @@ def scan(
             # Merge the flag's classes into the file's, order-stable and deduped,
             # so a documented, accepted flag actually does something.
             if weakness_class:
+                flag_added_classes = [w for w in weakness_class if w not in tf.weakness_classes]
                 merged = list(tf.weakness_classes)
                 for w in weakness_class:
                     if w not in merged:
@@ -1202,6 +1206,7 @@ def scan(
                 primary_tools=primary_tool,
                 weakness_classes=weakness_class,
             )
+            flag_added_classes = list(weakness_class or [])
         from mylonite.plugins._mcp.target_file import (
             dump_target_file,
             effect_probe_warnings,
@@ -1302,15 +1307,10 @@ def scan(
             else dump_target_file(tf)
         )
         adapter = _build_adapter_for_custom(tf, authorize, effective_planner_model)
-        # #181b: a declared class this surface can never cover — refuse before any LLM spend.
-        from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
-
-        refuse_uncoverable_weakness_classes(
-            tf,
-            adapter,
-            allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect,
-            dry_run=dry_run,
-        )
+        # #181b: the uncoverable-class refusal launches the server, so it runs
+        # below, after the LLM key/model pre-flight (a bad model or missing key
+        # must never spawn the target).
+        refusal_tf = tf
         report_target_id = f"mcp:{tf.family}" + (f":{tf.scope}" if tf.scope else "")
     elif target is None:
         echo_err("no target given. Pass a target (e.g. reference:vulnerable) or --target-file.")
@@ -1365,6 +1365,20 @@ def scan(
             effective_judge_model,
             provider=provider,
             dry_run_flag=True,
+        )
+
+    # #181b: a declared class this surface can never cover — refuse before any
+    # LLM spend, and only after the pre-flight above so a bad model or a
+    # missing key never launches the server. A no-op for non-custom targets.
+    if refusal_tf is not None:
+        from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
+
+        refuse_uncoverable_weakness_classes(
+            refusal_tf,
+            adapter,
+            allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect,
+            dry_run=dry_run,
+            added_by_flag=flag_added_classes,
         )
 
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
@@ -3176,7 +3190,7 @@ def gate(
     # #181b: same pre-flight refusal as `scan` — a no-op when `tf` is None.
     from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
 
-    refuse_uncoverable_weakness_classes(tf, adapter)
+    refuse_uncoverable_weakness_classes(tf, adapter, command="gate")
 
     # --- collaborators injected into run_gate, built by the gate/wiring.py
     # factories (moved out of this command body in #91's thin-shell refactor;

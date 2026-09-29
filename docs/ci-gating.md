@@ -35,6 +35,13 @@ mylonite scan --command "python" --arg "-m" --arg "your.server" --scaffold targe
 mylonite gate --target-file target.yaml --authorize custom --open-pr
 ```
 
+`gate` does not auto-wire a `seed_arm`. `scan` does: for a target that declares W2
+without one, `scan` looks for a store-and-recall pair on the live server and uses it.
+`gate` refuses the same target instead, because W2 has nothing to plant with. For such a
+target, run `mylonite scan --target-file target.yaml --authorize <family>` first. When it
+wires a `seed_arm`, it writes the wired target to `.mylonite/scans/<timestamp>/target.yaml`;
+pass that file to `gate --target-file`.
+
 ### What `gate` touches
 
 **By default, nothing outside its own output directory.** `gate` writes

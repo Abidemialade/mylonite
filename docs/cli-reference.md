@@ -122,7 +122,10 @@ a declared `weakness_classes` entry has zero seeds this surface could ever run �
 [Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
 `--dry-run` downgrades the refusal to a warning; `--allow-no-seed-arm` exempts a
 declared W2 with no `seed_arm` from the refusal and proceeds, with its seeds scheduled
-and each one honestly reporting NOT TESTED.
+and each one honestly reporting NOT TESTED. The check launches the server, so it runs
+after the provider key and model checks: a missing key never spawns the target. If the
+server can't be described in time, the run exits 2 with that reason instead of skipping
+the check.
 
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
@@ -218,6 +221,8 @@ For a `--target-file` target, `gate` refuses before any LLM call if a declared
 `weakness_classes` entry has zero seeds this surface could ever run — the same
 pre-flight check `scan` runs; see
 [Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
+`gate` does not auto-wire a `seed_arm` the way `scan` does, so for a W2 target without
+one, run `scan` first and pass the `target.yaml` it writes to `gate`.
 
 Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
