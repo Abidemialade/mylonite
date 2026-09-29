@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`mylonite/gate-<pattern_id>`); gating several uses a short stable hash of
   the kept pattern ids (`mylonite/gate-<hash>`) instead, keeping the
   `mylonite/gate-` prefix either way.
+- **`gate --open-pr` and `gate --workflows` now both require a git
+  repository, exiting `8` outside one.** `--workflows` alone used to write
+  the scaffolded `.github/workflows/` files relative to the current
+  directory with no repository check at all. Both flags now resolve the
+  real repository root the same way before writing anything — see the
+  `--open-pr` fix below for what that anchoring fixes.
 - **`gate` now exits `3`, not `0`, when a scan both proves a finding and runs
   out of `--max-llm-calls`.** The scan's own "abort always wins" exit code
   used to be read only when a scan came back with zero exploits — with a
