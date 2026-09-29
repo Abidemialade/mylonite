@@ -95,7 +95,11 @@ from mylonite.scan.assembly import (
     select_attack_modules,
 )
 from mylonite.scan.control_shim import _check_description_pins, _has_approval_sibling
+from mylonite.scan.providers import LOCAL_MODEL_HINT as _LOCAL_MODEL_HINT
 from mylonite.scan.providers import preflight_model_or_exit
+from mylonite.scan.providers import (
+    require_llm_configured_or_exit as _require_llm_configured_or_exit,
+)
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import _classify_tools as _classify_tools  # re-export (tests)
 from mylonite.scan.tool_roles import (
@@ -713,41 +717,6 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
     if num_retries is not None:
         kwargs["num_retries"] = num_retries
     return LLMPolicy(**kwargs)
-
-
-_LOCAL_MODEL_HINT = (  # keep in sync with docs/self-hosted-models.md
-    "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
-    "(needs Ollama running; see docs/self-hosted-models.md)."
-)
-_DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
-
-
-def _require_llm_configured_or_exit(
-    *models: str,
-    provider: str | None = None,
-    dry_run_flag: bool = False,
-    api_base: str | None = None,
-) -> None:
-    """Pre-flight every resolved model a live run will call, exiting
-    ``EXIT_CONFIG`` before any adapter/subprocess/engine/seed work starts.
-    The ONE place BOTH ``require_llm_configured`` (credential presence --
-    the deleted ``MyloniteSettings.require_llm()`` invariant) and
-    ``preflight_model_or_exit`` (#207: can LiteLLM actually route this
-    model?) run, shared by scan/validate/gate/ablate.
-    """
-    from mylonite.config import LLMNotConfiguredError, require_llm_configured
-
-    seen: set[str] = set()
-    for m in models:
-        if m in seen:
-            continue
-        seen.add(m)
-        try:
-            require_llm_configured(model=m, provider=provider)
-        except LLMNotConfiguredError as exc:
-            echo_err(f"{exc}\n{_LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
-            raise typer.Exit(code=EXIT_CONFIG) from exc
-    preflight_model_or_exit(*models, api_base=api_base)
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
