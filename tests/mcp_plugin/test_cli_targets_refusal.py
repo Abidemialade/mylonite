@@ -121,7 +121,9 @@ def test_describe_failure_fails_closed_with_a_named_message(
     err = capsys.readouterr().err
     assert "could not describe the server" in err
     assert "RuntimeError" in err
-    assert "timeout_s" in err
+    # A crash is not a slow start: point at the launch, not at timeout_s.
+    assert "command" in err
+    assert "timeout_s" not in err
 
 
 def test_describe_timeout_fails_closed_and_names_the_budget(
@@ -142,6 +144,7 @@ def test_describe_timeout_fails_closed_and_names_the_budget(
     err = capsys.readouterr().err
     assert "within 0.05s" in err
     assert "Re-run" in err
+    assert "timeout_s" in err
 
 
 def test_describe_failure_on_a_dry_run_is_a_warning(

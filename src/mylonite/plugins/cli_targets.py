@@ -248,15 +248,21 @@ def refuse_uncoverable_weakness_classes(
     try:
         descriptor = asyncio.run(asyncio.wait_for(adapter.describe(), timeout=timeout_s))
     except Exception as exc:
-        what = (
-            f"within {timeout_s:g}s"
-            if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
-            else f"({type(exc).__name__})"
-        )
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+            what = f"within {timeout_s:g}s"
+            fix = (
+                "Re-run (a first npx/uvx download is cached after that), or raise "
+                "timeout_s in the target file."
+            )
+        else:
+            what = f"({type(exc).__name__})"
+            fix = (
+                "Check that the target file's command and args start the server and "
+                "that it lists its tools, then re-run."
+            )
         echo_err(
             f"{level}: could not describe the server {what} to check which declared "
-            "weakness classes can run. Re-run (a first npx/uvx download is cached after "
-            "that), or raise timeout_s in the target file."
+            f"weakness classes can run. {fix}"
         )
         if not dry_run:
             raise typer.Exit(code=EXIT_CONFIG) from exc

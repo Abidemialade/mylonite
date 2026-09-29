@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The pre-flight check for uncoverable weakness classes now fails closed.** When it
   could not describe the server (a slow first `npx`/`uvx` download, a crash, a timeout),
   it used to skip itself, and a declared class with nothing to run could let the rest of
-  the scan read as clean. `scan` and `gate` now exit 2 and name the reason and the fix
-  (re-run, or raise `timeout_s`). The scan engine repeats the check on the description it
+  the scan read as clean. `scan` and `gate` now exit 2 and name the reason and the fix:
+  re-run or raise `timeout_s` after a timeout, check the launch command after a crash.
+  The scan engine repeats the check on the description it
   runs against and aborts before any payload (`no_payloads`, exit 2) when a declared class
   has no seed at all. `scan` also runs this check after the provider key and model checks
   now, so a missing key never launches the server. When the refused class came from
