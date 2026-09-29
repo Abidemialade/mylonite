@@ -252,9 +252,22 @@ def _process_one_finding(
 def _coverage_note(outcome: ScanOutcome) -> str:
     """One PR-body line when the scan behind this PR did not exercise every
     attempt, so a reviewer never reads the gated findings as a complete
-    result. Empty when coverage was complete."""
+    result. Empty when coverage was complete.
+
+    An abort can leave ``not_tested == 0``: a seed the scan never reached
+    was never added to ``attempts`` at all, so nothing was classified
+    NOT_TESTED, even though coverage is still PARTIAL because
+    ``abort is not None``. Naming the abort there instead of a zero count
+    avoids a note that reads as a contradiction next to a gated finding.
+    """
     if outcome.coverage is Coverage.EXERCISED:
         return ""
+    if outcome.abort is not None and outcome.not_tested == 0:
+        return (
+            "\n\n> **Coverage was incomplete.** The scan did not finish "
+            f"({outcome.abort.value}), so this PR gates what it proved before "
+            "stopping; it does not show the rest of the target is clean.\n"
+        )
     return (
         f"\n\n> **Coverage was incomplete.** {outcome.not_tested} attempt(s) were NOT "
         "TESTED, so this PR gates what the scan proved; it does not show the rest of "
