@@ -16,11 +16,11 @@ inputs:
     required: false
     default: "true"
   runs-on:
-    description: "Runner label baked into the scaffolded gate/discovery workflows (use a self-hosted label for in-perimeter MCP backends). Set the THIS job's runs-on in your own workflow separately."
+    description: "Deprecated, no effect: this action never passes --workflows, so mylonite gate has no scaffolded workflow file to put a runner label into. Kept for backward compatibility; a non-default value logs a warning."
     required: false
     default: "ubuntu-latest"
   mode:
-    description: "discovery (full scan) or gate (informational)."
+    description: "Deprecated, unused: this input is never read by the run step. Kept for backward compatibility; a non-default value logs a warning."
     required: false
     default: "discovery"
   python-version:
@@ -57,13 +57,23 @@ runs:
         AUTHORIZE: ${{ inputs.authorize }}
         MODEL: ${{ inputs.model }}
         RUNS_ON: ${{ inputs.runs-on }}
+        MODE: ${{ inputs.mode }}
         OPEN_PR: ${{ inputs.open-pr }}
       run: |
+        # #198: both `mode` and `runs-on` are deprecated. This action never
+        # passes --workflows, so --runs-on has nothing to scaffold with, and
+        # `mode` is not read at all — warn rather than silently ignore a
+        # non-default value someone set expecting it to do something.
+        if [ "$MODE" != "discovery" ]; then
+          echo "::warning::the 'mode' input is deprecated and has no effect (unused by this action)"
+        fi
+        if [ "$RUNS_ON" != "ubuntu-latest" ]; then
+          echo "::warning::the 'runs-on' input is deprecated and has no effect (this action never passes --workflows, so mylonite gate has nothing to scaffold with it)"
+        fi
         args=(
           --target-file "$TARGET_FILE"
           --authorize "$AUTHORIZE"
           --model "$MODEL"
-          --runs-on "$RUNS_ON"
         )
         # Opt-in, and only on an exact match: any other value (including the
         # empty string a caller gets from an unset variable) must not open a PR.

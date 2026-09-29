@@ -97,6 +97,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message now points at `weakness_classes:` in the target file; for a
   reference or bundled target it says plainly that `gate` has no per-class
   filter, so the only lever is `--max-llm-calls`.
+- **The reusable gate action's `mode` and `runs-on` inputs are marked
+  deprecated and warn instead of being silently ignored.** `mode` was never
+  read by the run step; `runs-on` fed `mylonite gate --runs-on`, but the
+  action never passes `--workflows`, so it had nothing to scaffold a runner
+  label into either way. Both inputs stay for backward compatibility; a
+  non-default value now logs a GitHub `::warning::` naming which input and
+  why it has no effect. The action still does not write workflow files in
+  CI.
 
 - **A malformed `--model` now fails once, with one message, instead of
   printing about 12 KB of repeated provider errors.** `not-a-real/model`
