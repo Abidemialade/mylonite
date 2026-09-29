@@ -326,7 +326,7 @@ def autowire_seed_arm(
     block. Returns ``(tf, tf_mutated, synth_covers_indirect)`` -- ``tf`` is
     returned unchanged when nothing could be inferred.
 
-    Moved out of ``cli.py``'s ``scan()`` verbatim (fix round 1 headroom). The
+    Moved out of ``cli.py``'s ``scan()`` verbatim (to keep cli.py under its size cap). The
     caller is responsible for: gating on ``transport != "rest"`` /
     ``needs_seed_arm_autowire(tf)`` / ``not dry_run`` / ``not
     allow_no_seed_arm``, running the model pre-flight FIRST

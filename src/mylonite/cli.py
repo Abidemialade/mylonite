@@ -163,11 +163,11 @@ _AUTOWIRE_DESCRIBE_TIMEOUT_S: Final = 20.0
 
 
 def _autowire_budget_s(tf_timeout_s: float | None) -> float:
-    """The seed_arm auto-wire describe() budget: at least
-    ``_AUTOWIRE_DESCRIBE_TIMEOUT_S`` even when a target file's own
-    ``timeout_s`` is smaller (fix round 1, #186) -- a first-run npx/uvx
-    download needs that floor regardless of what the operator set for the
-    (larger, multi-turn) session timeout generally."""
+    """The describe() budget for the seed_arm auto-wire probe and the
+    uncoverable-class refusal: at least ``_AUTOWIRE_DESCRIBE_TIMEOUT_S`` even
+    when a target file's own ``timeout_s`` is smaller (#186) -- a first-run
+    npx/uvx download needs that floor regardless of what the operator set for
+    the (larger, multi-turn) session timeout generally."""
     return max(_AUTOWIRE_DESCRIBE_TIMEOUT_S, tf_timeout_s or 0)
 
 
@@ -1247,7 +1247,7 @@ def scan(
         # Blocking pre-flight (PR3): a target declaring an indirect-injection-only
         # weakness class with no seed_arm would silently skip those seeds and read
         # as clean. Block a REAL scan with a fix hint unless --allow-no-seed-arm is
-        # set (or M3 auto-wired one above). A --dry-run only enumerates seeds (no
+        # set (or the auto-wire above found one). A --dry-run only enumerates seeds (no
         # clean/finding verdict to mislead), so there we downgrade the block to a warning.
         preflight_errors = validate_for_scan(
             tf, allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect
@@ -1276,7 +1276,7 @@ def scan(
         # Copy the source YAML verbatim (preserves operator comments/structure)
         # when given a file AND nothing mutated it since; otherwise serialise the
         # (possibly-mutated) target so the persisted YAML matches the target that
-        # ACTUALLY ran — a --purpose override, an M3 seed_arm auto-wire, or an
+        # ACTUALLY ran — a --purpose override, a seed_arm auto-wire, or an
         # inline mcp:custom target must all be reflected here (DCR-0005/0016/0006).
         custom_target_yaml = (
             target_file.read_text(encoding="utf-8")
@@ -1357,6 +1357,7 @@ def scan(
             allow_no_seed_arm=allow_no_seed_arm or synth_covers_indirect,
             dry_run=dry_run,
             added_by_flag=flag_added_classes,
+            timeout_s=_autowire_budget_s(refusal_tf.timeout_s),
         )
 
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
@@ -3178,7 +3179,12 @@ def gate(
     # #181b: same pre-flight refusal as `scan` — a no-op when `tf` is None.
     from mylonite.plugins.cli_targets import refuse_uncoverable_weakness_classes
 
-    refuse_uncoverable_weakness_classes(tf, adapter, command="gate")
+    refuse_uncoverable_weakness_classes(
+        tf,
+        adapter,
+        command="gate",
+        timeout_s=_autowire_budget_s(tf.timeout_s) if tf is not None else None,
+    )
 
     # --- collaborators injected into run_gate, built by the gate/wiring.py
     # factories (moved out of this command body in #91's thin-shell refactor;

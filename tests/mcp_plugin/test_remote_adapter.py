@@ -427,7 +427,7 @@ async def test_describe_preflight_catches_a_401_the_real_handshake_would_swallow
 
 
 async def test_describe_success_sends_no_extra_request() -> None:
-    """Fix round 1: the preflight moved to the failure path only. A
+    """The preflight moved to the failure path only. A
     successful ``describe()`` (the common case — `scan`, `check`, auto-wire,
     `--scaffold`) must send ZERO extra requests: an unconditional
     pre-handshake preflight would have made an unrelated bare GET part of
@@ -546,7 +546,7 @@ async def test_describe_falls_back_to_generic_message_when_no_status_anywhere() 
 
 
 async def test_describe_timeout_message_survives_the_remote_override_unwrapped() -> None:
-    """#186 fix round 1: the base class's own AdapterDescribeFailed (a
+    """#186: the base class's own AdapterDescribeFailed (a
     timeout, naming timeout_s) must not be caught and REPLACED by this
     subclass's generic except-Exception branch (which would overwrite it
     with the host/status-shaped remote message and lose "timeout_s" and the

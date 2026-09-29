@@ -1097,7 +1097,7 @@ def test_scan_mcp_github_rejects_missing_slash() -> None:
 
 
 def test_scan_rejects_an_unknown_weakness_class_value() -> None:
-    """Fix round 1 (#205c): an unknown --weakness-class value is rejected up
+    """#205c: an unknown --weakness-class value is rejected up
     front, before any target is touched -- not silently ignored or passed
     through to filter/merge logic that would just treat it as never-matching."""
     result = runner.invoke(
@@ -1262,7 +1262,7 @@ def test_scan_autowire_describe_timeout_names_the_timeout_not_seed_arm_advice(
     assert "timed out after" in out, out
     assert "npx" in out and "uvx" in out, out
     assert "add a seed_arm" not in out.lower(), out
-    # Fix round 1: says to re-run (a first download is cached after that)
+    # Says to re-run (a first download is cached after that)
     # or to raise timeout_s -- not just "it timed out" with no next step.
     assert "re-run" in out.lower(), out
     assert "timeout_s" in out, out
@@ -1323,7 +1323,7 @@ def test_scan_autowire_describe_timeout_uses_the_target_files_larger_timeout_s(
 def test_scan_autowire_mcperror_timeout_also_skips_the_seed_arm_advice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fix round 1 (#186): an inner McpError(timeout code) -- the SDK's own
+    """#186: an inner McpError(timeout code) -- the SDK's own
     read_timeout_seconds firing INSIDE describe(), well before the outer
     asyncio.wait_for's deadline -- surfaces as AdapterDescribeFailed (see
     MCPSessionAdapterBase.describe), not a bare TimeoutError. The auto-wire
@@ -1361,7 +1361,7 @@ def test_scan_autowire_mcperror_timeout_also_skips_the_seed_arm_advice(
 def test_scan_bad_model_fails_before_the_autowire_probe_launches_anything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fix round 1 (#207/#186): a bad --model used to reach the seed_arm
+    """#207/#186: a bad --model used to reach the seed_arm
     auto-wire probe first -- for a custom target needing auto-wire, that
     meant spawning the real server (or, here, calling the session opener)
     before the model was ever validated. The model pre-flight must run
@@ -1438,7 +1438,7 @@ def _patch_mcp_session_must_not_launch(monkeypatch: pytest.MonkeyPatch) -> list[
     return launches
 
 
-@pytest.mark.parametrize("case", ["missing_key"])
+@pytest.mark.parametrize("case", ["missing_key", "bad_model"])
 def test_scan_key_and_model_preflight_runs_before_the_server_launches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
@@ -1465,6 +1465,52 @@ def test_scan_key_and_model_preflight_runs_before_the_server_launches(
     out = result.stderr or result.output
     assert result.exit_code == EXIT_CONFIG, out
     assert launches == [], out
+    target_registry.clear_runtime_targets()
+
+
+@pytest.mark.parametrize(
+    ("command", "timeout_line", "expected"),
+    [
+        ("scan", "timeout_s: 45\n", 45.0),
+        ("scan", "timeout_s: 5\n", 20.0),
+        ("gate", "timeout_s: 45\n", 45.0),
+        ("gate", "", 20.0),
+    ],
+)
+def test_refusal_describe_budget_is_the_autowire_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    timeout_line: str,
+    expected: float,
+) -> None:
+    """The refusal's describe() gets the same budget as the auto-wire probe:
+    at least 20 s, or the target's timeout_s when that is larger."""
+    from mylonite.plugins._mcp import target_registry
+
+    class _Reached(Exception):
+        pass
+
+    seen: dict[str, Any] = {}
+
+    def _record(*_a: Any, **kwargs: Any) -> None:
+        seen.update(kwargs)
+        raise _Reached
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr("mylonite.plugins.cli_targets.refuse_uncoverable_weakness_classes", _record)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n" + timeout_line,
+        encoding="utf-8",
+    )
+    argv = [command, "--target-file", str(p), "--authorize", "acme"]
+    if command == "gate":
+        argv += ["--out", str(tmp_path / "gate-out")]
+    result = runner.invoke(app, argv)
+    assert isinstance(result.exception, _Reached), result.output
+    assert seen["timeout_s"] == expected
     target_registry.clear_runtime_targets()
 
 

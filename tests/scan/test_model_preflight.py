@@ -59,7 +59,7 @@ def test_a_provider_shaped_but_bogus_model_is_not_routable() -> None:
 def test_model_is_routable_suppresses_litellms_provider_list_banner(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Fix round 1 (#207): litellm.get_llm_provider prints a "Provider List:
+    """#207: litellm.get_llm_provider prints a "Provider List:
     <url>" banner to stdout on every rejection, regardless of whether the
     caller catches the exception -- with the preflight now called once per
     role model (not per seed/attempt), this must not print at all."""

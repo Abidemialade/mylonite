@@ -78,7 +78,7 @@ def test_validate_weakness_class_flag_rejects_unknown_value(
 def test_validate_weakness_class_flag_rejects_lowercase_value(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Fix round 1 (#205c): lowercase is REJECTED, not silently upper-cased --
+    """#205c: lowercase is REJECTED, not silently upper-cased --
     a typo like 'w4' must be caught, not quietly coerced."""
     with pytest.raises(typer.Exit):
         validate_weakness_class_flag_or_exit(["w4"])

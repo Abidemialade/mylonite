@@ -109,7 +109,7 @@ _MCP_REQUEST_TIMEOUT_CODE = 408
 def _is_timeout_error(exc: BaseException) -> bool:
     """True for a bare ``TimeoutError`` (e.g. an OUTER ``asyncio.wait_for``
     cutting off ``describe()``/``invoke()``) or an ``McpError`` whose code
-    signals the SDK's own read timeout fired (#186 fix round 1) -- the two
+    signals the SDK's own read timeout fired (#186) -- the two
     shapes a hung/slow MCP server surfaces as, neither of which is
     obviously "a timeout" from its type alone in the second case.
     """
@@ -318,7 +318,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         parent shell EITHER way (#184; same mechanism a loaded target file's
         own ``env:`` block uses — see ``target_file.expand_env_block``).
 
-        Fix round 1: ``launch_env`` is NOT always a caller-supplied concrete
+        ``launch_env`` is NOT always a caller-supplied concrete
         value. The ONLY real construction path (``factory.build_adapter_for_
         spec``, used by ``scan``, and by ``gate``'s/``validate``'s raw AND
         guarded re-drive twins) always builds it as ``spec.launch_env(...)``
@@ -331,7 +331,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         from mylonite.plugins._mcp.target_file import expand_env_block
 
         env = dict(self._launch_env) if self._launch_env is not None else dict(self._spec.extra_env)
-        # Fix round 1: a bundled family (e.g. github) has no target file for
+        # A bundled family (e.g. github) has no target file for
         # the default "target file references..." wording to describe.
         subject = (
             f"the bundled mcp:{self._family} target"
@@ -357,7 +357,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         return f"mcp:{self._family}:{self._scope}"
 
     def _timeout_s_remedy(self) -> str:
-        """The fix-hint half of a timeout message (#186 fix round 1) --
+        """The fix-hint half of a timeout message (#186) --
         different wording for a bundled family (no target file exists to
         edit) than for a custom one (declares timeout_s there)."""
         if self._family in target_registry.BUNDLED_TARGETS:
