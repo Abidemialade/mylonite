@@ -238,6 +238,13 @@ change the tag. `scripts/prepare_release.py` bumps the action's pin and
 the tag on this page with the version, and the release job refuses a tag whose
 pin does not match.
 
+**`mode` and `runs-on` are deprecated.** `mode` was never read; `runs-on` fed
+`--runs-on`, but the action never passes `--workflows`, so it had nothing to
+scaffold a runner label into. Both inputs still exist for backward
+compatibility — the action does not write workflow files in CI — but a
+non-default value now logs a `::warning::` in the job log instead of being
+silently accepted and silently ignored.
+
 ## Other CI systems (Jenkins, GitLab, …)
 
 The committed gate is a plain `pytest` file with no GitHub dependency, so it should run
