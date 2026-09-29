@@ -63,6 +63,7 @@ from mylonite.gate.wiring import (
     make_scan_fn,
     make_validate_fn,
     resolve_gate_out_dir_or_exit,
+    validation_cost_note,
 )
 from mylonite.generate.wiring import (
     _dispatch_emit as _dispatch_emit,  # re-export (tests import from cli)
@@ -3309,6 +3310,9 @@ def gate(
                 system_prompt=gate_system_prompt,
                 target_context=gate_target_context,
                 budget_hint_text=budget_hint(routed_to, target_file),
+                validation_cost_hint=validation_cost_note(
+                    is_reference=is_reference, iterations=iterations
+                ),
             )
     except BudgetExceededError as exc:
         # One decision, one exit code. Raised inside the validator this used to

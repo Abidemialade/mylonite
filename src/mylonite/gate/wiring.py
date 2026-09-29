@@ -410,35 +410,48 @@ def make_validate_fn(
 
 
 def resolve_gate_out_dir(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
-    """Anchor ``out`` at the git repository root when it's relative and either
-    ``--open-pr`` or ``--workflows`` was requested (#203).
+    """Anchor ``out`` at the git repository root, and confirm it stays there,
+    whenever either ``--open-pr`` or ``--workflows`` was requested.
 
     A no-op (returns ``out`` unchanged) for a plain ``gate`` run that touches
     neither git nor ``.github/workflows/`` — that path needs no repository at
     all, and many offline tests run it from a bare ``tmp_path`` with no `git
-    init`. An already-absolute ``out`` (an explicit ``--out``) is also left
-    alone — only the DEFAULT relative ``.mylonite/gate`` layout is anchored.
+    init`. A RELATIVE ``out`` (the default ``.mylonite/gate`` layout) is
+    anchored at the repository root. An already-absolute ``out`` (an
+    explicit ``--out``) is left as-is, but still checked: it must resolve
+    under the repository root, or later steps (the committed `git add`
+    paths, the workflow's rendered ``__GATE_DIR__``) could not express it
+    relative to the repo at all.
 
-    Raises :class:`mylonite.gate.pr.GatePrError` (via
-    :func:`mylonite.gate.pr.resolve_repo_root`) when the process isn't inside
-    a git repository at all — the CLI already has a handler for that
-    exception type around the run_gate call, and it must fire before any
-    scan/LLM spend happens, so this is resolved before ``scan_fn`` /
-    ``validate_fn`` / ``open_pr_fn`` are even built (they close over the
-    resolved ``out``, so building them from the wrong ``out`` would put the
-    gate artefacts and the git commit paths out of sync).
+    Raises :class:`mylonite.gate.pr.GatePrError` in both failure shapes —
+    the process isn't inside a git repository at all, or an explicit
+    absolute ``--out`` sits outside one — via
+    :func:`mylonite.gate.pr.resolve_repo_root`. This runs as a pre-flight,
+    called before ``scan_fn``/``validate_fn``/``open_pr_fn`` are even built,
+    so the failure is reported before any scan or LLM spend, not after
+    paying for the whole pipeline.
     """
-    if not (open_pr or workflows) or out.is_absolute():
+    if not (open_pr or workflows):
         return out
-    return Path(pr_mod.resolve_repo_root()) / out
+    root = Path(pr_mod.resolve_repo_root())
+    if not out.is_absolute():
+        return root / out
+    try:
+        out.relative_to(root)
+    except ValueError as exc:
+        raise pr_mod.GatePrError(
+            f"--out {out} is not inside the repository root {root} — gate cannot "
+            "commit or scaffold workflows outside the repository."
+        ) from exc
+    return out
 
 
 def resolve_gate_out_dir_or_exit(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
-    """``resolve_gate_out_dir`` wrapped in ``gate()``'s own error handling
-    (round-1 review, item #11 — moved out of ``cli.py`` so its body is one
-    line there): reports a ``GatePrError`` as the named, actionable error
-    every other repo-boundary failure in this package already is, on exit
-    code 8, instead of leaking the raw exception past the CLI layer.
+    """``resolve_gate_out_dir`` wrapped in ``gate()``'s own error handling, so
+    its call site in ``cli.py`` is one line: reports a ``GatePrError`` as the
+    named, actionable error every other repo-boundary failure in this
+    package already is, on exit code 8, instead of leaking the raw
+    exception past the CLI layer.
     """
     try:
         return resolve_gate_out_dir(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
@@ -448,9 +461,9 @@ def resolve_gate_out_dir_or_exit(out: Path, *, open_pr: bool, workflows: bool, p
 
 
 def budget_hint(routed_to: str, target_file: Path | None) -> str:
-    """The gate-specific "what to do about an exhausted budget" hint
-    (round-1 review, Important #4). ``gate`` has no ``--weakness-class(es)``
-    flag at all — that's `scan`'s (singular) — so this never suggests it.
+    """The gate-specific "what to do about an exhausted budget" hint.
+    ``gate`` has no ``--weakness-class(es)`` flag at all — that's `scan`'s
+    (singular) — so this never suggests it.
     For a custom target the real lever is the target file's own
     ``weakness_classes:`` key; for a reference or bundled target `gate` has
     no per-class filter, so the only lever is the budget itself. Reused by
@@ -461,6 +474,36 @@ def budget_hint(routed_to: str, target_file: Path | None) -> str:
     if routed_to == "custom" and target_file is not None:
         return f"Raise --max-llm-calls, or narrow the scan by editing weakness_classes: in {target_file}."
     return "Raise --max-llm-calls — gate has no per-class filter for this target."
+
+
+#: The 7 built-in deterministic metamorphic re-paraphrasing strategies the
+#: reference-target differential drives, each against both twins, on top of
+#: its `iterations` full drives — see
+#: ``reference_validator._deterministic_strategies()``, the source of truth
+#: this number is read from by inspection at call time so the two can never
+#: drift silently out of sync.
+def _reference_redrives_per_finding(iterations: int) -> int:
+    from mylonite.plugins._reference.reference_validator import _deterministic_strategies
+
+    perturbations = len(_deterministic_strategies())
+    return (iterations + perturbations) * 2
+
+
+def validation_cost_note(*, is_reference: bool, iterations: int) -> str:
+    """The per-finding validation-cost note for the console's multi-finding
+    header. The reference-target differential and the custom-target one
+    drive a genuinely different number of re-drives per finding (see
+    docs/ci-gating.md's sizing box for the full breakdown from the code),
+    so a single "about Nx" multiplier on its own doesn't say what N is a
+    multiple OF. This names it for whichever path the current run takes.
+    """
+    if is_reference:
+        redrives = _reference_redrives_per_finding(iterations)
+        return f"roughly {redrives} re-drives per finding (iterations + metamorphic, x2 twins)"
+    return (
+        f"roughly {iterations} re-drives per finding, {iterations * 2} when a control "
+        "differential applies (the default unless --fast)"
+    )
 
 
 def _gate_branch(findings: list[tuple[Any, Any]]) -> str:
@@ -493,25 +536,31 @@ def make_open_pr_fn(
         body: str,
         open_pr: bool,
         kept_dirs: list[Path] | None = None,
-        multi: bool = False,
     ) -> Any:
         from mylonite._redaction import target_env_refs
         from mylonite._target_env import repo_secret_lines, write_redacted_target
         from mylonite.gate.workflows import write_workflows
 
-        # #203: the true git repository root, not Path.cwd() -- but ONLY when
-        # this run actually touches git or .github/workflows/ (open_pr or
+        # The true git repository root, not Path.cwd() -- but ONLY when this
+        # run actually touches git or .github/workflows/ (open_pr or
         # workflows); a plain print-mode `gate` (neither flag) needs no
         # repository at all, mirroring resolve_gate_out_dir's identical
         # condition so the two never anchor `out_dir` and `repo_root`
         # differently for the same run.
         repo_root = pr_mod.resolve_repo_root() if (open_pr or workflows) else Path.cwd()
-        # #185: write the redacted target BEFORE rendering the workflows, and
-        # read its `${MYLONITE_TARGET_...}` variables back from what was
-        # actually written -- `write_workflows` used to run first, so the
-        # scaffolded workflow's `env:` (and the console/PR-body secrets
-        # notice below) had nothing to substitute, and `load_target_file`
-        # then raised on the undefined variables in CI.
+        # kept_dirs names the exact directory each finding in `findings` was
+        # written to (run_gate's own bookkeeping, never re-derived here) --
+        # `out_dir` itself for a single-finding run, `out_dir/<slug>` per
+        # finding for a multi-finding one. Falls back to `[out_dir] * n` for
+        # a caller that doesn't pass it.
+        dirs = kept_dirs if kept_dirs is not None else [out_dir] * len(findings)
+
+        # Write the redacted target BEFORE rendering the workflows, and read
+        # its `${MYLONITE_TARGET_...}` variables back from what was actually
+        # written -- rendering the workflows first left the scaffolded
+        # workflow's `env:` (and the console/PR-body secrets notice below)
+        # with nothing to substitute, and `load_target_file` then raised on
+        # the undefined variables in CI.
         env_refs: list[tuple[str, str]] = []
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
@@ -520,16 +569,15 @@ def make_open_pr_fn(
                 out_dir / "target.yaml", target_file.read_text(encoding="utf-8")
             )
             env_refs = target_env_refs(written_text)
-            # Critical #2 (round-1 review): the emitted test's `here =
-            # Path(__file__).parent` loads `target.yaml` from ITS OWN
-            # directory, not the gate root. A multi-finding run puts each
-            # kept test under out_dir/<slug>/, so each needs its own
-            # (already-redacted) copy too — the root copy stays for the
-            # discovery workflow's `--target-file out_dir/target.yaml`.
-            if multi and kept_dirs:
-                for finding_dir in kept_dirs:
-                    if finding_dir != out_dir:
-                        (finding_dir / "target.yaml").write_text(written_text, encoding="utf-8")
+            # The emitted test's `here = Path(__file__).parent` loads
+            # `target.yaml` from ITS OWN directory, not the gate root. A
+            # multi-finding run puts each kept test under out_dir/<slug>/,
+            # so each needs its own (already-redacted) copy too — the root
+            # copy stays for the discovery workflow's `--target-file
+            # out_dir/target.yaml`.
+            for finding_dir in dirs:
+                if finding_dir != out_dir:
+                    (finding_dir / "target.yaml").write_text(written_text, encoding="utf-8")
         wf_files = (
             write_workflows(
                 repo_root,
@@ -547,18 +595,29 @@ def make_open_pr_fn(
             for line in secret_lines:
                 echo_err(line)
             body = body.rstrip("\n") + "\n\n" + "\n".join(secret_lines) + "\n"
-        # Critical #1 (round-1 review): an explicit add_paths list — never the
-        # bare gate_dir, which would sweep in a sibling `rejected/<slug>` a
-        # REJECTED finding was relocated to. The flat single-finding layout
-        # (kept_dirs is None/empty, `this_out is out_dir`) keeps the legacy
-        # whole-directory sweep — nothing but the one kept finding ever lives
-        # there.
-        add_paths: list[Path] | None = None
-        if multi and kept_dirs:
-            add_paths = list(kept_dirs)
+        # An explicit list of exactly what's committed -- never the bare
+        # gate_dir, whether this is a single- or multi-finding run: a `git
+        # add` that just sweeps gate_dir wholesale would stage ANYTHING
+        # sitting there, including leftover content a previous run under the
+        # same --out never cleaned up. Listing exact per-finding files
+        # (rather than whole directories) also means a stray file left in a
+        # finding's own directory by something else can't ride along either.
+        add_paths: list[Path] = []
+        for (exploit, report), finding_dir in zip(findings, dirs, strict=True):
+            add_paths.append(finding_dir / report.test_filename)
+            add_paths.append(finding_dir / f"exploit_{exploit.pattern_id}.json")
+            add_paths.append(finding_dir / "validation_report.json")
             if target_file is not None:
-                add_paths.append(out_dir / "target.yaml")
-            add_paths.append(out_dir / "PR_BODY.md")
+                add_paths.append(finding_dir / "target.yaml")
+        if target_file is not None and out_dir not in dirs:
+            add_paths.append(out_dir / "target.yaml")
+        # The reference-target differential leg records replay fixtures for
+        # the whole run (not per finding) when it recorded any -- committed
+        # so the emitted test(s) can run offline in CI.
+        fixtures_dir = out_dir / "fixtures"
+        if fixtures_dir.is_dir():
+            add_paths.append(fixtures_dir)
+        add_paths.append(out_dir / "PR_BODY.md")
         paths = pr_mod.GatePaths(
             repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files, add_paths=add_paths
         )

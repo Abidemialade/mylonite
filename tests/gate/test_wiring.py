@@ -9,6 +9,7 @@ substitute (#185).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -77,7 +78,7 @@ def test_open_pr_fn_writes_target_before_workflows_and_threads_secret_vars(
 
     open_pr_fn(
         out_dir=out_dir,
-        findings=[(_exploit("p1"), None)],
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
         body="## What Mylonite found\n",
         open_pr=False,
     )
@@ -110,7 +111,7 @@ def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch
 
     open_pr_fn(
         out_dir=out_dir,
-        findings=[(_exploit("p1"), None)],
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
         body="## What Mylonite found\n",
         open_pr=False,
     )
@@ -132,13 +133,29 @@ def test_resolve_gate_out_dir_is_a_no_op_without_open_pr_or_workflows(tmp_path, 
     assert resolved == out
 
 
-def test_resolve_gate_out_dir_is_a_no_op_for_an_absolute_out(tmp_path):
-    """An explicit --out (already absolute) is left alone — only the default
-    relative layout is anchored at the repo root."""
+def test_resolve_gate_out_dir_is_a_no_op_for_an_absolute_out_inside_the_repo(tmp_path, monkeypatch):
+    """An explicit --out (already absolute) is returned unchanged when it's
+    inside the repository root — only the default relative layout is
+    anchored there; an absolute one is merely checked, not rewritten."""
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.chdir(tmp_path)
     out = tmp_path / "custom" / "gate"
     resolved = resolve_gate_out_dir(out, open_pr=True, workflows=False, pr_mod=pr_mod)
     assert resolved == out
+
+
+def test_resolve_gate_out_dir_raises_for_an_absolute_out_outside_the_repo(tmp_path, monkeypatch):
+    """The other half of the same check: an explicit absolute --out that
+    sits OUTSIDE the repository root must raise, not silently accept a path
+    later steps (the committed `git add` list, the workflow's __GATE_DIR__)
+    could never express relative to the repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+    outside = tmp_path / "elsewhere" / "gate"
+    with pytest.raises(pr_mod.GatePrError, match="not inside the repository root"):
+        resolve_gate_out_dir(outside, open_pr=True, workflows=False, pr_mod=pr_mod)
 
 
 def test_resolve_gate_out_dir_anchors_a_relative_out_at_the_repo_root(tmp_path, monkeypatch):
@@ -179,7 +196,8 @@ def test_resolve_gate_out_dir_outside_a_repo_raises(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Round-1 review: budget_hint, resolve_gate_out_dir_or_exit
+# budget_hint's per-routing wording, and resolve_gate_out_dir_or_exit's
+# repo-root containment check.
 # ---------------------------------------------------------------------------
 
 
@@ -237,12 +255,12 @@ def test_resolve_gate_out_dir_or_exit_outside_a_repo_exits_8(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# Round-1 review, Critical #2: target.yaml co-located with each kept
-# multi-finding test, not just the gate root.
+# target.yaml co-located with each kept multi-finding test, not just the
+# gate root.
 # ---------------------------------------------------------------------------
 
 
-def _real_exploit(pattern_id: str):
+def _real_exploit(pattern_id: str, metadata: dict[str, str] | None = None):
     """A real ExploitRecord whose pattern_id is a bundled seed, so
     ReferencePytestGenerator can actually emit source for it."""
     from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
@@ -250,7 +268,9 @@ def _real_exploit(pattern_id: str):
     return ExploitRecord(
         target_id="mcp:custom",
         pattern_id=pattern_id,
-        payload=Payload(pattern_id=pattern_id, channel="tool-result", body="poison"),
+        payload=Payload(
+            pattern_id=pattern_id, channel="tool-result", body="poison", metadata=metadata or {}
+        ),
         response=AdapterResponse(
             payload_pattern_id=pattern_id, raw_response="did it", tool_calls=["remember"]
         ),
@@ -260,10 +280,10 @@ def _real_exploit(pattern_id: str):
 
 
 def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monkeypatch):
-    """Critical #2: every KEPT finding's own directory gets a target.yaml —
-    proven by actually loading it (not just checking it exists) — because the
-    emitted test's `here = Path(__file__).parent` looks there, not at the
-    gate root. The root copy stays too, for the discovery workflow."""
+    """Every KEPT finding's own directory gets a target.yaml — proven by
+    actually loading it (not just checking it exists) — because the emitted
+    test's `here = Path(__file__).parent` looks there, not at the gate root.
+    The root copy stays too, for the discovery workflow."""
     import subprocess
 
     from mylonite.contracts import ValidationReport
@@ -338,8 +358,106 @@ def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monke
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert collect.returncode == 0, collect.stdout + collect.stderr
+
+
+def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, monkeypatch):
+    """--collect-only never enters the emitted test's body, so it can't prove
+    the target-loading path actually works. This runs the REAL emitted test
+    with MYLONITE_LIVE_TARGET=1 (a genuine `pytest` subprocess, offline: the
+    target command names a module that doesn't exist, so the run fails fast
+    at launch, before any LLM call): it must fail with evidence it actually
+    tried to launch the target (found target.yaml, went further), then --
+    once that finding's target.yaml is deleted -- fail specifically with
+    FileNotFoundError naming target.yaml.
+    """
+    import subprocess
+
+    from mylonite.contracts import ValidationReport
+    from mylonite.contracts.exec_context import ExecContext
+    from mylonite.gate import pr as real_pr_mod
+    from mylonite.gate.orchestrator import ScanOutcomeBundle, run_gate
+    from mylonite.gate.wiring import make_open_pr_fn
+    from mylonite.generate.wiring import _slugify_pattern
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.chdir(tmp_path)
+
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, no_such_srv_mod_xyz]\n"
+        "weakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    # A model/provider that needs no live key, so _resolve_exec_context
+    # resolves without a config file or an API key -- the launch failure
+    # below is fully offline.
+    metadata = ExecContext(provider="ollama", model="ollama/none").to_metadata()
+    # Two findings (multi=True) so the target.yaml under test is the
+    # PER-FINDING subdirectory copy, not the flat single-finding layout.
+    exploits = [
+        _real_exploit("indirect-injection-note-body-direct", metadata=metadata),
+        _real_exploit("indirect-injection-note-body-roleplay", metadata=metadata),
+    ]
+    kept_report = ValidationReport(test_filename="x.py", kept=True)
+
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest", workflows=False, target_file=target_file, pr_mod=real_pr_mod
+    )
+    out_dir = Path(".mylonite") / "gate"
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome_2(), exploits=exploits),
+        generate_fn=ReferencePytestGenerator().emit,
+        validate_fn=lambda generated: kept_report.model_copy(
+            update={"test_filename": generated.filename}
+        ),
+        open_pr_fn=open_pr_fn,
+        open_pr=False,
+    )
+
+    slug = _slugify_pattern("indirect-injection-note-body-direct")
+    finding_dir = out_dir / slug
+    assert (finding_dir / "target.yaml").is_file()
+
+    repo_src = str(Path(__file__).resolve().parents[2] / "src")
+    # PYTHONUTF8=1 forces the CHILD process's own stdio to UTF-8 regardless of
+    # the parent console's codepage. Without it, on a Windows console running
+    # under cp1252, the child's em-dash output round-trips as a byte this
+    # parent's encoding="utf-8" read cannot decode -- the exact class of bug
+    # this test is guarding the emitted test's target-loading path against.
+    env = {**os.environ, "MYLONITE_LIVE_TARGET": "1", "PYTHONPATH": repo_src, "PYTHONUTF8": "1"}
+
+    def _run_emitted_test() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--no-header", str(finding_dir)],
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=120,
+        )
+
+    with_target = _run_emitted_test()
+    assert with_target.returncode != 0
+    combined = with_target.stdout + with_target.stderr
+    # It got PAST the file-existence check and tried to actually launch the
+    # target -- proof the per-finding target.yaml was found and loaded.
+    assert "FileNotFoundError" not in combined
+    assert "target.yaml" not in combined or "not found" not in combined
+
+    (finding_dir / "target.yaml").unlink()
+    without_target = _run_emitted_test()
+    assert without_target.returncode != 0
+    combined_without = without_target.stdout + without_target.stderr
+    assert "FileNotFoundError" in combined_without
+    assert "target.yaml" in combined_without
 
 
 def _found_outcome_2():

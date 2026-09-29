@@ -32,14 +32,24 @@ minutes and API spend rather than seconds.
     happens *after* the scan and has no call budget of its own; on most runs it
     makes the majority of the calls.
 
-    The validator's own two stages: `iterations` full differential drives (raw
-    twin + guarded twin, so `× 2`), plus 7 built-in metamorphic re-paraphrasings
-    of the same attack — each *also* driven against both twins (another `× 2`) to
-    check the finding survives rewording, not just the literal payload. So one
-    finding costs roughly `(iterations + 7) × 2` re-drives, each itself several LLM
-    calls (customiser, planner, judge). At the default `--iterations 3` that's
-    `(3 + 7) × 2 = 20` re-drives for ONE finding — a two-finding scan is roughly
-    40, not one. Every finding a scan proves is gated now, not just the first,
+    The formula depends on which kind of target is being gated:
+
+    - **The bundled reference agent** — `iterations` full differential drives
+      (raw twin + guarded twin, so `× 2`), plus 7 built-in metamorphic
+      re-paraphrasings of the same attack — each *also* driven against both
+      twins (another `× 2`) to check the finding survives rewording, not just
+      the literal payload. So one finding costs roughly `(iterations + 7) × 2`
+      re-drives, each itself several LLM calls (customiser, planner, judge).
+      At the default `--iterations 3` that's `(3 + 7) × 2 = 20` re-drives for
+      ONE finding — a two-finding scan is roughly 40, not one.
+    - **Your own target** — there is no in-repo guarded twin and no
+      metamorphic pass, so the cost is flatter: `iterations` re-drives of the
+      real target, plus another `iterations` re-drives of a boundary-guarded
+      twin *only when* a guard adapter is configured (the default unless
+      `--fast`). At the default `--iterations 3` that's 3 re-drives per
+      finding with no guard configured, or 6 with one.
+
+    Either way, every finding a scan proves is gated now, not just the first,
     so this cost scales with findings, not just `--iterations`. Size CI
     spend against the whole `gate` run — scan plus validation — not against
     `--max-llm-calls` alone.
