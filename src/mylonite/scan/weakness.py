@@ -13,6 +13,7 @@ key set is reintroduced or if the ``Weakness`` type alias falls out of sync.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 
 
@@ -34,3 +35,24 @@ class WeaknessClass(StrEnum):
 #: All weakness-class ids as a frozenset, for membership checks
 #: (``"W2" in WEAKNESS_CLASSES``). Derived from the enum, never re-spelled.
 WEAKNESS_CLASSES: frozenset[str] = frozenset(WeaknessClass)
+
+
+def validate_weakness_class_flag_or_exit(values: Iterable[str]) -> None:
+    """CLI pre-flight for ``--weakness-class`` (#205c): exit ``EXIT_CONFIG``
+    naming any value that isn't an exact, uppercase, known class id --
+    rejects both an unknown class (``W9``) and a lowercase typo (``w4``)
+    rather than silently coercing either.
+    """
+    bad = [v for v in values if v not in WEAKNESS_CLASSES]
+    if not bad:
+        return
+    import typer
+
+    from mylonite._cli_io import echo_err
+    from mylonite.exit_codes import EXIT_CONFIG
+
+    echo_err(
+        f"--weakness-class: unknown value(s) {bad!r}; expected one of "
+        f"{sorted(str(w) for w in WEAKNESS_CLASSES)} (uppercase, e.g. W2)."
+    )
+    raise typer.Exit(code=EXIT_CONFIG)

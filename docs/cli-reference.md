@@ -115,8 +115,10 @@ persisted so `generate`/`validate` reuse it); `--randomize-exfil/--no-randomize-
 attacker destination, not one demo literal — **defaults ON for live custom-target
 scans**, off for the reference/replay path; matches `generate`/`validate`/`gate`).
 `--weakness-class W2` (repeatable; on `reference:*` and a bundled `mcp:<family>` this
-filters which seeds run — on a custom target it adds to the target file's declared
-`weakness_classes`). For a custom target: `--command`, `--arg`,
+filters which seeds run — on a custom target, `--target-file` or inline `mcp:custom`
+flags, it adds to the target file's declared `weakness_classes` instead. Unifying the
+two is a deliberate follow-up, not this release. Rejects an unknown or lowercase value,
+e.g. `w4`, naming it). For a custom target: `--command`, `--arg`,
 `--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`.
 
 For a custom/`--target-file` target, `scan` (and `gate`) refuses before any LLM call if

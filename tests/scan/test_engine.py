@@ -787,6 +787,29 @@ async def test_engine_zero_payloads_aborts_no_payloads() -> None:
 
 
 @pytest.mark.asyncio
+async def test_engine_zero_payloads_from_weakness_filter_names_the_filter() -> None:
+    """Fix round 1 (#205c): a --weakness-class filter that matches none of a
+    (reference/bundled) target's seeds must say SO, not the generic
+    "declare weakness classes" advice -- that advice is for a target that
+    declares NONE, the opposite situation."""
+    from mylonite.scan.seeds import weakness_class_scope
+
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_AdapterStub(_ok_response()),
+        attack_modules=[_ModuleStub([])],  # simulates the filter matching nothing
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with weakness_class_scope(["W3"]):
+        result = await engine.run()
+    assert result.report.aborted == "no_payloads"
+    assert result.abort_detail is not None
+    assert "W3" in result.abort_detail
+    assert "--weakness-class" in result.abort_detail
+
+
+@pytest.mark.asyncio
 async def test_engine_pattern_id_filter_none_runs_all_payloads() -> None:
     """Default ``pattern_id_filter=None`` → every payload runs (backward-compat)."""
     p0 = _payload_from_seed_index(0)
@@ -1125,6 +1148,92 @@ async def test_starved_report_excludes_a_seed_that_already_completed_with_zero_l
     warning_text = "\n".join(caplog.messages)
     assert safe_seed_id not in warning_text, "an already-completed seed must not read as starved"
     assert starved_seed_id in warning_text, "a seed that never got to run must still be named"
+
+
+async def _run_starved_budget_scenario(
+    caplog: pytest.LogCaptureFixture, *, weakness_classes: list[str]
+) -> str:
+    """Shared scaffold for the two starved-seed remedy-wording tests below:
+    one seed raises BudgetExceededError, a second never gets a chance to run
+    -- the exact shape the "budget exhausted... N seed(s) never started"
+    warning fires for. ``weakness_classes`` on the descriptor is the ONLY
+    thing that varies -- it is what a custom target declares and a
+    reference/bundled one never does (see seed_coverage's two branches)."""
+    boom_seed_id = SEED_CATALOGUE[0].pattern_id
+    starved_seed_id = SEED_CATALOGUE[1].pattern_id
+
+    def _mk(seed_id: str) -> Payload:
+        return Payload(
+            pattern_id=seed_id,
+            channel="tool-result",
+            body="x",
+            metadata={
+                "seed_id": seed_id,
+                "weakness": "W1",
+                "predicate": "x",
+                "setup": "no_setup",
+                "drive": "verbatim",
+            },
+        )
+
+    class _MixedAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target",
+                kind="mcp",
+                system_prompt="x",
+                tools=[],
+                weakness_classes=weakness_classes,
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            if payload.pattern_id == boom_seed_id:
+                await asyncio.sleep(0.02)
+                counter = active_counter()
+                if counter is not None:
+                    counter.record("adapter")
+                raise BudgetExceededError("test budget exhausted")
+            await asyncio.sleep(5)
+            return _ok_response()
+
+        async def close(self) -> None:
+            return None
+
+    engine = ScanEngine(
+        config=_config(max_llm_calls=1, customise=False),
+        adapter=_MixedAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_ModuleStub([_mk(boom_seed_id), _mk(starved_seed_id)])],
+        customiser=_CustomiserStub(),
+        judge=_JudgeStub(Verdict(success=False, reason="x", evidence={}, mechanism="llm")),
+    )
+    with caplog.at_level("WARNING", logger="mylonite.scan.engine"):
+        result = await engine.run()
+    assert result.report.aborted == "budget_exceeded"
+    return "\n".join(caplog.messages)
+
+
+@pytest.mark.asyncio
+async def test_starved_seed_warning_names_the_flag_for_a_reference_or_bundled_target(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Fix round 1 (#205): a target with NO declared weakness_classes (the
+    legacy family path every reference:*/bundled mcp:<family> target takes)
+    -- --weakness-class genuinely narrows there, so naming it is correct."""
+    warning_text = await _run_starved_budget_scenario(caplog, weakness_classes=[])
+    assert "--weakness-class" in warning_text, warning_text
+    assert "weakness_classes in the target file" not in warning_text, warning_text
+
+
+@pytest.mark.asyncio
+async def test_starved_seed_warning_names_the_target_file_for_a_custom_target(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A target that DECLARES weakness_classes (a custom target) -- here
+    --weakness-class WIDENS the seed set instead of narrowing it, so the
+    warning must not tell this operator to use the flag."""
+    warning_text = await _run_starved_budget_scenario(caplog, weakness_classes=["W1", "W4"])
+    assert "weakness_classes in the target file" in warning_text, warning_text
+    assert "--weakness-class" not in warning_text, warning_text
 
 
 @pytest.mark.asyncio

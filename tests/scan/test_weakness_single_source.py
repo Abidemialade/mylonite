@@ -12,8 +12,15 @@ import re
 from pathlib import Path
 from typing import get_args
 
+import pytest
+import typer
+
 from mylonite.scan.seeds import Weakness
-from mylonite.scan.weakness import WEAKNESS_CLASSES, WeaknessClass
+from mylonite.scan.weakness import (
+    WEAKNESS_CLASSES,
+    WeaknessClass,
+    validate_weakness_class_flag_or_exit,
+)
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "mylonite"
 
@@ -49,6 +56,34 @@ def test_severity_partition_covers_every_weakness_class() -> None:
     from mylonite.report.severity import _HIGH_BASE_SEVERITY, _MEDIUM_BASE_SEVERITY
 
     assert (_HIGH_BASE_SEVERITY | _MEDIUM_BASE_SEVERITY) == WEAKNESS_CLASSES
+
+
+def test_validate_weakness_class_flag_accepts_known_uppercase_values() -> None:
+    validate_weakness_class_flag_or_exit(["W2", "W4"])  # must not raise
+
+
+def test_validate_weakness_class_flag_rejects_unknown_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(typer.Exit) as excinfo:
+        validate_weakness_class_flag_or_exit(["W9"])
+    from mylonite.exit_codes import EXIT_CONFIG
+
+    assert excinfo.value.exit_code == EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "W9" in err
+    assert "--weakness-class" in err
+
+
+def test_validate_weakness_class_flag_rejects_lowercase_value(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fix round 1 (#205c): lowercase is REJECTED, not silently upper-cased --
+    a typo like 'w4' must be caught, not quietly coerced."""
+    with pytest.raises(typer.Exit):
+        validate_weakness_class_flag_or_exit(["w4"])
+    err = capsys.readouterr().err
+    assert "w4" in err
 
 
 def test_no_module_re_lists_the_full_key_set() -> None:

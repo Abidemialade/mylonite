@@ -72,7 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommends narrowing with `--weakness-class` — ignored it entirely.
   `mylonite scan reference:vulnerable --dry-run --weakness-class W4` now
   lists only the W4 seed(s). A custom target's own declared classes are
-  unaffected.
+  unaffected. `--weakness-class` keeps its two different meanings in this
+  release (adds on a custom target, filters everywhere else) — unifying
+  that is a separate, deliberate follow-up. `--weakness-class` now rejects
+  an unknown or lowercase value (e.g. `w4`, `W9`) up front, naming it,
+  instead of silently matching nothing; the budget-exhausted advice (both
+  the console message and the engine's own "seeds never started" warning)
+  now names the right remedy for the target kind instead of always
+  suggesting `--weakness-class`, which widens rather than narrows a custom
+  target's seed set; and a `--weakness-class` filter that matches zero
+  seeds on a reference/bundled target now says so, instead of the generic
+  "declare weakness classes" advice meant for a target that declares none.
 - **`mylonite scan mcp:github:<owner/repo>` can now actually receive a
   token.** The bundled spec had no `extra_env`, the stdio launch allowlist
   deliberately withholds secrets, and `--env` only applied to `mcp:custom`
