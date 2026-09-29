@@ -28,13 +28,21 @@ minutes and API spend rather than seconds.
 
     **The budget bounds only `gate`'s scan phase.** `--help` already says so ("LLM
     call budget for the scan phase"). Validation — re-driving each kept finding
-    across `--iterations` differential runs — happens *after* the scan and has no
-    call budget of its own; on most runs it makes the majority of the calls.
-    Roughly: `iterations × 2 legs (raw + guarded) × calls per attempt`, **per
-    finding**, now that every finding a scan proves is gated (#202), not just the
-    first. A two-finding scan at the default `--iterations 3` is roughly six
-    differential re-drives, not one. Size CI spend against the whole `gate` run —
-    scan plus validation — not against `--max-llm-calls` alone.
+    against both twins, `--iterations` times, plus a metamorphic robustness pass —
+    happens *after* the scan and has no call budget of its own; on most runs it
+    makes the majority of the calls.
+
+    The validator's own two stages: `iterations` full differential drives (raw
+    twin + guarded twin, so `× 2`), plus 7 built-in metamorphic re-paraphrasings
+    of the same attack — each *also* driven against both twins (another `× 2`) to
+    check the finding survives rewording, not just the literal payload. So one
+    finding costs roughly `(iterations + 7) × 2` re-drives, each itself several LLM
+    calls (customiser, planner, judge). At the default `--iterations 3` that's
+    `(3 + 7) × 2 = 20` re-drives for ONE finding — a two-finding scan is roughly
+    40, not one. Every finding a scan proves is gated now, not just the first,
+    so this cost scales with findings, not just `--iterations`. Size CI
+    spend against the whole `gate` run — scan plus validation — not against
+    `--max-llm-calls` alone.
 
 ```bash
 # against the bundled reference agent
