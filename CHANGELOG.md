@@ -41,7 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The scan engine repeats the check on the description it
   runs against and aborts before any payload (`no_payloads`, exit 2) when a declared class
   has no seed at all. `scan` also runs this check after the provider key and model checks
-  now, so a missing key never launches the server. When the refused class came from
+  now, so a missing key or bad model never reaches it (the separate `seed_arm` auto-wire
+  probe still runs earlier and can launch the server once with no key set — see
+  [cli-reference.md](docs/cli-reference.md)). When the refused class came from
   `--weakness-class`, the message says to drop it from the flag. `gate`'s refusal of a W2
   target without a `seed_arm` now says to run `scan` first and use the `target.yaml` it
   writes, since only `scan` auto-wires a `seed_arm`.
