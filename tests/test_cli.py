@@ -3221,7 +3221,9 @@ def test_gate_target_copy_names_credential_vars(
         out_dir.mkdir()
         kwargs["open_pr_fn"](
             out_dir=out_dir,
-            findings=[(SimpleNamespace(pattern_id="pid"), None)],
+            findings=[
+                (SimpleNamespace(pattern_id="pid"), SimpleNamespace(test_filename="test_pid.py"))
+            ],
             body="",
             open_pr=False,
         )
@@ -5102,6 +5104,59 @@ def test_gate_reports_a_pr_failure_gracefully(
     # a named, readable error — not a stack trace
     assert result.exception is None or isinstance(result.exception, SystemExit)
     assert "not a git repository" in result.output
+
+
+def test_gate_out_outside_repo_root_exits_8_before_any_scan_or_llm_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The out-dir-under-repo-root check is a pre-flight: it must fire before
+    `gate` spends a single LLM call on a scan, not after paying for one.
+
+    `ScanEngine.run` is patched to fail the test outright if it is ever
+    reached, so this proves the ordering, not just the exit code.
+    """
+    import subprocess
+
+    from mylonite.exit_codes import EXIT_PR_FAILED
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+
+    async def _fail_if_scanned(self: Any) -> Any:
+        pytest.fail("gate scanned before checking --out was inside the repository root")
+
+    monkeypatch.setattr(ScanEngine, "run", _fail_if_scanned)
+
+    target_yaml = repo / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    outside_out = tmp_path / "elsewhere" / "gate_out"
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(outside_out),
+                "--open-pr",
+            ],
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert result.exit_code == EXIT_PR_FAILED, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "not inside the repository root" in result.output
+    assert not outside_out.exists()
 
 
 def test_gate_maps_budget_exhaustion_to_exit_budget(
