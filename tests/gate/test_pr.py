@@ -420,7 +420,8 @@ def test_resolve_repo_root_outside_a_git_repo_raises_named_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Round-1 review fixes: explicit add_paths, PR_BODY.md always committed
+# git add must only ever touch an explicit, named list of paths — never a
+# whole-directory sweep — and PR_BODY.md is always among them.
 # ---------------------------------------------------------------------------
 
 

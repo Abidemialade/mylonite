@@ -646,16 +646,12 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
 
     assert (out_dir / _slugify_pattern("b-pattern") / "test_security_b-pattern.py").exists()
     assert (out_dir / _slugify_pattern("b-pattern") / "validation_report.json").exists()
-    # Critical fix (round-1 review): a REJECTED finding's test must never sit
-    # in the committed tree a whole-directory `git add` could sweep in — it's
-    # relocated to rejected/<slug>, evidence kept locally but never gated.
+    # A REJECTED finding's test must never sit anywhere under out_dir -- it's
+    # relocated to a SIBLING directory, evidence kept locally but never gated.
     assert not (out_dir / _slugify_pattern("a-pattern")).exists()
-    assert (
-        out_dir / "rejected" / _slugify_pattern("a-pattern") / "test_security_a-pattern.py"
-    ).exists()
-    assert not (
-        out_dir / "rejected" / _slugify_pattern("a-pattern") / "validation_report.json"
-    ).exists()
+    rejected_root = out_dir.parent / f"{out_dir.name}-rejected"
+    assert (rejected_root / _slugify_pattern("a-pattern") / "test_security_a-pattern.py").exists()
+    assert not (rejected_root / _slugify_pattern("a-pattern") / "validation_report.json").exists()
 
 
 def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
@@ -852,15 +848,15 @@ def test_run_gate_budget_abort_with_findings_still_gates_and_exits_scan_code(tmp
 
 
 # ---------------------------------------------------------------------------
-# Round-1 review fixes
+# What is and isn't committed: mixed kept/rejected findings
 # ---------------------------------------------------------------------------
 
 
-def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monkeypatch):
-    """Critical #1, end to end through the REAL open_pr_fn: mixed kept +
-    rejected findings, and the `git add` (or printed-manual-command) paths
-    name only the kept finding's directory, PR_BODY.md and target.yaml —
-    never anything under rejected/."""
+def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monkeypatch, capsys):
+    """End to end through the REAL open_pr_fn: mixed kept + rejected
+    findings, and the `git add` (or printed-manual-command) paths name only
+    the kept finding's files, PR_BODY.md and target.yaml — never anything
+    that belongs to the rejected finding."""
     from mylonite.gate import pr as pr_mod
     from mylonite.gate.wiring import make_open_pr_fn
 
@@ -897,15 +893,24 @@ def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monke
     manual_command_file = out_dir / "PR_BODY.md"
     assert manual_command_file.exists()
     # The rejected finding's test is on disk (for local debugging) but
-    # relocated out of the committed tree.
-    assert (out_dir / "rejected" / "a_pattern" / "test_security_a-pattern.py").exists()
+    # relocated to a sibling directory, outside the committed tree entirely.
+    rejected_root = out_dir.parent / f"{out_dir.name}-rejected"
+    assert (rejected_root / "a_pattern" / "test_security_a-pattern.py").exists()
     assert not (out_dir / "a_pattern").exists()
     assert (out_dir / "b_pattern" / "test_security_b-pattern.py").exists()
 
+    # The printed `git add` command names only the kept finding's slug --
+    # not the rejected one, even though its slug legitimately appears
+    # elsewhere in the output (the "evidence kept at ..." debug line).
+    printed = capsys.readouterr().out
+    add_line = next(line for line in printed.splitlines() if "git add" in line)
+    assert "b_pattern" in add_line
+    assert "a_pattern" not in add_line
+
 
 def test_run_gate_single_rejected_finding_prints_the_line_once(tmp_path, capsys):
-    """Minor #7: a single (non-multi) rejected finding must not print the
-    REJECTED line twice."""
+    """A single (non-multi) rejected finding must not print the REJECTED
+    line twice."""
     ex = _exploit()
     rejected = ValidationReport(test_filename="t.py", kept=False, outcomes=[])
 
@@ -924,9 +929,9 @@ def test_run_gate_single_rejected_finding_prints_the_line_once(tmp_path, capsys)
 
 
 def test_slugs_for_dedupes_colliding_pattern_ids():
-    """Minor #9: two different pattern_ids that slugify to the same string
-    (`a.b` and `a_b` both -> `a_b`) must not collide -- the second gets a
-    deterministic numeric suffix instead of silently overwriting the first."""
+    """Two different pattern_ids that slugify to the same string (`a.b` and
+    `a_b` both -> `a_b`) must not collide -- the second gets a deterministic
+    numeric suffix instead of silently overwriting the first."""
     from mylonite.gate.orchestrator import _slugs_for
 
     exploits = [_exploit("a.b"), _exploit("a_b")]
@@ -936,11 +941,11 @@ def test_slugs_for_dedupes_colliding_pattern_ids():
 
 
 def test_run_gate_budget_abort_uses_gate_specific_hint_not_scan_wording(tmp_path, capsys):
-    """Important #4 (orchestrator half): when a budget-hint is supplied,
-    `gate` never echoes the scan's own operator_message verbatim for a
-    BUDGET_EXCEEDED abort -- that message suggests --weakness-class, a flag
-    `gate` doesn't have. It prints its own self-contained message instead,
-    ending with the supplied gate-specific hint."""
+    """When a budget-hint is supplied, `gate` never echoes the scan's own
+    operator_message verbatim for a BUDGET_EXCEEDED abort -- that message
+    suggests --weakness-class, a flag `gate` doesn't have. It prints its own
+    self-contained message instead, ending with the supplied gate-specific
+    hint."""
     ex = _exploit("budget-pattern")
     aborted_with_finding = ScanOutcome(
         coverage=Coverage.PARTIAL,
@@ -997,9 +1002,9 @@ def test_run_gate_budget_abort_no_findings_uses_gate_specific_hint(tmp_path, cap
 
 
 def test_rejected_finding_reason_carries_the_failed_stage_detail(tmp_path):
-    """Important #6: the reason recorded for a REJECTED finding (used in the
-    PR body's "Other findings" list) names the first failed validation stage
-    and its detail, not a generic "not kept"."""
+    """The reason recorded for a REJECTED finding (used in the PR body's
+    "Other findings" list) names the first failed validation stage and its
+    detail, not a generic "not kept"."""
     ex = _exploit()
     rejected = ValidationReport(
         test_filename="t.py",
@@ -1041,3 +1046,37 @@ def test_rejected_finding_reason_carries_the_failed_stage_detail(tmp_path):
     )
     assert "differential" in pr_calls["body"]
     assert "guard leaked 2/3 runs" in pr_calls["body"]
+
+
+def test_rejection_reason_skips_a_failed_report_only_leg():
+    """A `report_only` outcome never decided `kept` -- a custom-target
+    effect leg with no `effect_probe` declared always fails AND is
+    report_only, so it must never be reported as the reason a finding was
+    rejected. The reason must name the first leg that actually gated the
+    verdict: stability passes, effect is report-only-and-failed, consensus
+    is the real decider."""
+    from mylonite.gate.orchestrator import _rejection_reason
+
+    report = ValidationReport(
+        test_filename="t.py",
+        kept=False,
+        outcomes=[
+            ValidationOutcome(stage="stability", passed=True, detail="3/3", metric=1.0),
+            ValidationOutcome(
+                stage="effect",
+                passed=False,
+                report_only=True,
+                detail="no effect_probe declared on the target",
+                metric=None,
+            ),
+            ValidationOutcome(
+                stage="consensus",
+                passed=False,
+                detail="adversarial multi-judge consensus = 0.20 (majority required)",
+                metric=0.2,
+            ),
+        ],
+    )
+    reason = _rejection_reason(report)
+    assert "consensus" in reason
+    assert "effect" not in reason

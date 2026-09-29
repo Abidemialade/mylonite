@@ -173,8 +173,8 @@ def open_or_print_pr(
     except ValueError as exc:
         raise GatePrError(f"gate paths must live inside the repo root {cwd}: {exc}") from exc
 
-    # Write PR_BODY.md before any git command touches it (round-1 review fix):
-    # GatePaths.add_paths now names it as an EXPLICIT pathspec rather than
+    # Write PR_BODY.md before any git command touches it:
+    # GatePaths.add_paths names it as an EXPLICIT pathspec rather than
     # relying on a directory-wide `git add gate_dir` (which tolerated the file
     # not existing yet). The auto `--open-pr` + `gh` path below used to never
     # write it to disk at all -- the body went straight to `gh pr create
