@@ -256,6 +256,15 @@ pre-flight check `scan` runs; see
 `gate` does not auto-wire a `seed_arm` the way `scan` does, so for a W2 target without
 one, run `scan` first and pass the `target.yaml` it writes to `gate`.
 
+`gate` runs its pre-flight checks in this order, all before any LLM call:
+
+1. `--out` containment: with `--open-pr` or `--workflows`, an output directory outside
+   the repository exits `8`.
+2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
+   exiting `2`.
+
+So when both kinds of problem are present, the `--out` error is the one you see first.
+
 Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
 target's `scope`, or its family when it declares no scope); `--open-pr` (create the branch,
