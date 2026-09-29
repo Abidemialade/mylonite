@@ -108,7 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--weakness-class`, singular; `gate` has neither). For a custom target the
   message now points at `weakness_classes:` in the target file; for a
   reference or bundled target it says plainly that `gate` has no per-class
-  filter, so the only lever is `--max-llm-calls`.
+  filter, so the only lever is `--max-llm-calls`. This now applies whether
+  the budget runs out before any finding is proven or mid-run with a finding
+  already gated — `gate` previously echoed `scan`'s own message verbatim in
+  the second case, which suggests `--weakness-class` (a real flag on `scan`,
+  not `gate`).
 - **The reusable gate action's `mode` and `runs-on` inputs are marked
   deprecated and warn instead of being silently ignored.** `mode` was never
   read by the run step; `runs-on` fed `mylonite gate --runs-on`, but the

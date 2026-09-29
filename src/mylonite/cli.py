@@ -57,11 +57,12 @@ from mylonite.gate.wiring import (
     _post_gate_annotations as _post_gate_annotations,  # re-export (tests import from cli)
 )
 from mylonite.gate.wiring import (
+    budget_hint,
     generate_fn,
     make_open_pr_fn,
     make_scan_fn,
     make_validate_fn,
-    resolve_gate_out_dir,
+    resolve_gate_out_dir_or_exit,
 )
 from mylonite.generate.wiring import (
     _dispatch_emit as _dispatch_emit,  # re-export (tests import from cli)
@@ -2996,14 +2997,8 @@ def gate(
     layout = _layout_for(ctx, config_root=config_root)
     out = out if out is not None else layout.gate
 
-    # #203: anchor a relative --out at the git repo root, not Path.cwd(),
-    # whenever this run will touch git or .github/workflows/ — before
-    # scan_fn/validate_fn/open_pr_fn are built, since they close over `out`.
-    try:
-        out = resolve_gate_out_dir(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
-    except pr_mod.GatePrError as exc:
-        echo_err(f"\nerror: {exc}")
-        raise typer.Exit(code=EXIT_PR_FAILED) from exc
+    # #203: anchor a relative --out at the repo root (scan_fn/open_pr_fn close over it).
+    out = resolve_gate_out_dir_or_exit(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
 
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
@@ -3313,24 +3308,14 @@ def gate(
                 mitigation_model=effective_model,
                 system_prompt=gate_system_prompt,
                 target_context=gate_target_context,
+                budget_hint_text=budget_hint(routed_to, target_file),
             )
     except BudgetExceededError as exc:
         # One decision, one exit code. Raised inside the validator this used to
         # escape uncaught and exit 1, while the same exhaustion seen first by
         # the engine exits EXIT_BUDGET. Both now report the same way.
         echo_err(f"\nerror: LLM call budget exhausted: {exc}")
-        # #204: `gate` has no `--weakness-classes` flag (that was `scan`'s,
-        # singular, and `scan`-only) -- for a custom target, point at the
-        # target file's own `weakness_classes:` key instead; for a
-        # reference/bundled target `gate` has no per-class filter at all, so
-        # the only lever is the budget itself.
-        if routed_to == "custom":
-            echo_err(
-                "Raise --max-llm-calls, or narrow the scan by editing "
-                f"weakness_classes: in {target_file}."
-            )
-        else:
-            echo_err("Raise --max-llm-calls — gate has no per-class filter for this target.")
+        echo_err(budget_hint(routed_to, target_file))
         raise typer.Exit(code=EXIT_BUDGET) from exc
     except pr_mod.GatePrError as exc:
         # The git/gh step is the LAST thing gate does, so by the time it fails

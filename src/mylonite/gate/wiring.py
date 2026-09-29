@@ -26,7 +26,7 @@ import typer
 
 from mylonite._cli_io import echo_err, echo_exc
 from mylonite.contracts.exec_context import ExecContext
-from mylonite.exit_codes import EXIT_CONFIG
+from mylonite.exit_codes import EXIT_CONFIG, EXIT_PR_FAILED
 from mylonite.gate.orchestrator import ScanOutcomeBundle
 from mylonite.generate.wiring import _dispatch_emit, _map_compliance
 from mylonite.scan.assembly import (
@@ -431,6 +431,36 @@ def resolve_gate_out_dir(out: Path, *, open_pr: bool, workflows: bool, pr_mod: A
     if not (open_pr or workflows) or out.is_absolute():
         return out
     return Path(pr_mod.resolve_repo_root()) / out
+
+
+def resolve_gate_out_dir_or_exit(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
+    """``resolve_gate_out_dir`` wrapped in ``gate()``'s own error handling
+    (round-1 review, item #11 — moved out of ``cli.py`` so its body is one
+    line there): reports a ``GatePrError`` as the named, actionable error
+    every other repo-boundary failure in this package already is, on exit
+    code 8, instead of leaking the raw exception past the CLI layer.
+    """
+    try:
+        return resolve_gate_out_dir(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
+    except pr_mod.GatePrError as exc:
+        echo_err(f"\nerror: {exc}")
+        raise typer.Exit(code=EXIT_PR_FAILED) from exc
+
+
+def budget_hint(routed_to: str, target_file: Path | None) -> str:
+    """The gate-specific "what to do about an exhausted budget" hint
+    (round-1 review, Important #4). ``gate`` has no ``--weakness-class(es)``
+    flag at all — that's `scan`'s (singular) — so this never suggests it.
+    For a custom target the real lever is the target file's own
+    ``weakness_classes:`` key; for a reference or bundled target `gate` has
+    no per-class filter, so the only lever is the budget itself. Reused by
+    both `cli.py`'s own direct ``BudgetExceededError`` handler and (via the
+    precomputed text threaded into ``run_gate``) `orchestrator.py`'s
+    abort-carrying path, so the two can never disagree.
+    """
+    if routed_to == "custom" and target_file is not None:
+        return f"Raise --max-llm-calls, or narrow the scan by editing weakness_classes: in {target_file}."
+    return "Raise --max-llm-calls — gate has no per-class filter for this target."
 
 
 def _gate_branch(findings: list[tuple[Any, Any]]) -> str:

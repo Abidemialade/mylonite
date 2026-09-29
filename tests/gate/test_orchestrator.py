@@ -935,6 +935,67 @@ def test_slugs_for_dedupes_colliding_pattern_ids():
     assert len(set(slugs)) == len(slugs)
 
 
+def test_run_gate_budget_abort_uses_gate_specific_hint_not_scan_wording(tmp_path, capsys):
+    """Important #4 (orchestrator half): when a budget-hint is supplied,
+    `gate` never echoes the scan's own operator_message verbatim for a
+    BUDGET_EXCEEDED abort -- that message suggests --weakness-class, a flag
+    `gate` doesn't have. It prints its own self-contained message instead,
+    ending with the supplied gate-specific hint."""
+    ex = _exploit("budget-pattern")
+    aborted_with_finding = ScanOutcome(
+        coverage=Coverage.PARTIAL,
+        abort=AbortReason.BUDGET_EXCEEDED,
+        exercised=1,
+        not_tested=2,
+        findings=1,
+        fallbacks=0,
+        exit_code=3,
+        operator_message="error: ... --weakness-class on a reference/bundled target ...",
+    )
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=aborted_with_finding, exploits=[ex]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="t.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report("t.py"),
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+        budget_hint_text="Raise --max-llm-calls, or narrow the scan by editing weakness_classes:.",
+    )
+    out = capsys.readouterr().out
+    assert "--weakness-class" not in out
+    assert "weakness_classes:" in out
+
+
+def test_run_gate_budget_abort_no_findings_uses_gate_specific_hint(tmp_path, capsys):
+    """Same as above but through the empty-exploits early-return branch."""
+    aborted_no_findings = ScanOutcome(
+        coverage=Coverage.NOT_EXERCISED,
+        abort=AbortReason.BUDGET_EXCEEDED,
+        exercised=0,
+        not_tested=3,
+        findings=0,
+        fallbacks=0,
+        exit_code=3,
+        operator_message="error: ... --weakness-class on a reference/bundled target ...",
+    )
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=aborted_no_findings, exploits=[]),
+        generate_fn=lambda e: None,
+        validate_fn=lambda t: None,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+        budget_hint_text="Raise --max-llm-calls — gate has no per-class filter for this target.",
+    )
+    out = capsys.readouterr().out
+    assert "--weakness-class" not in out
+    assert "no per-class filter" in out
+
+
 def test_rejected_finding_reason_carries_the_failed_stage_detail(tmp_path):
     """Important #6: the reason recorded for a REJECTED finding (used in the
     PR body's "Other findings" list) names the first failed validation stage

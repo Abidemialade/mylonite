@@ -179,6 +179,64 @@ def test_resolve_gate_out_dir_outside_a_repo_raises(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Round-1 review: budget_hint, resolve_gate_out_dir_or_exit
+# ---------------------------------------------------------------------------
+
+
+def test_budget_hint_custom_target_points_at_weakness_classes_key(tmp_path):
+    from mylonite.gate.wiring import budget_hint
+
+    target_file = tmp_path / "app.yaml"
+    hint = budget_hint("custom", target_file)
+    assert "--weakness-classes" not in hint
+    assert "--weakness-class" not in hint
+    assert "weakness_classes:" in hint
+    assert str(target_file) in hint
+
+
+def test_budget_hint_reference_target_says_no_per_class_filter():
+    from mylonite.gate.wiring import budget_hint
+
+    hint = budget_hint("reference", None)
+    assert "--weakness-class" not in hint
+    assert "weakness_classes:" not in hint
+    assert "no per-class filter" in hint
+
+
+def test_budget_hint_mcp_bundled_target_says_no_per_class_filter():
+    from mylonite.gate.wiring import budget_hint
+
+    hint = budget_hint("mcp", None)
+    assert "no per-class filter" in hint
+
+
+def test_resolve_gate_out_dir_or_exit_returns_the_resolved_path(tmp_path, monkeypatch):
+    import subprocess
+
+    from mylonite.gate.wiring import resolve_gate_out_dir_or_exit
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    monkeypatch.chdir(tmp_path)
+    resolved = resolve_gate_out_dir_or_exit(
+        Path(".mylonite") / "gate", open_pr=True, workflows=False, pr_mod=pr_mod
+    )
+    assert resolved.resolve() == (tmp_path / ".mylonite" / "gate").resolve()
+
+
+def test_resolve_gate_out_dir_or_exit_outside_a_repo_exits_8(tmp_path, monkeypatch):
+    import typer
+
+    from mylonite.gate.wiring import resolve_gate_out_dir_or_exit
+
+    monkeypatch.chdir(tmp_path)  # not a git repo
+    with pytest.raises(typer.Exit) as excinfo:
+        resolve_gate_out_dir_or_exit(
+            Path(".mylonite") / "gate", open_pr=True, workflows=False, pr_mod=pr_mod
+        )
+    assert excinfo.value.exit_code == 8
+
+
+# ---------------------------------------------------------------------------
 # Round-1 review, Critical #2: target.yaml co-located with each kept
 # multi-finding test, not just the gate root.
 # ---------------------------------------------------------------------------
