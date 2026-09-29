@@ -26,6 +26,7 @@ jobs:
           python-version: "3.12"
       - name: Install mylonite + pytest
         run: pip install "mylonite==__MYLONITE_VERSION__" pytest
+#__TARGET_SECRETS_CHECK_STEP__
       - name: Discover -> generate -> validate -> open gating PR
         # The variable travels through env, not an expression inside `run:`:
         # GitHub pastes an expression into the script text before bash parses

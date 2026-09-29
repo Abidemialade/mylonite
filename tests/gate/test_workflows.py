@@ -13,7 +13,7 @@ from mylonite.version import __version__
 #: live ``git show``, so the check below can't break on a shallow checkout,
 #: a squashed history, or a non-git tree, and can't mojibake on a Windows
 #: console without PYTHONUTF8 set.
-_PRE_REVIEW_RENDER_DIR = Path(__file__).resolve().parent / "fixtures" / "pre_review_render"
+_NO_SECRETS_RENDER_DIR = Path(__file__).resolve().parent / "fixtures" / "no_secrets_render"
 
 
 def test_templates_are_valid_yaml_and_ship_as_package_data():
@@ -128,7 +128,7 @@ def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
     assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE"}
 
 
-def test_write_workflows_no_secrets_is_byte_identical_to_the_pre_review_render(tmp_path):
+def test_write_workflows_no_secrets_is_byte_identical_to_the_vendored_render(tmp_path):
     """A no-secrets render must be identical to what this template produced
     before the target-secrets ``env:`` token existed — checked against a
     committed fixture (vendored from that pre-existing render, tokens
@@ -143,7 +143,7 @@ def test_write_workflows_no_secrets_is_byte_identical_to_the_pre_review_render(t
     in, not the live package version directly.
     """
     for name in _TEMPLATES:
-        base_text = (_PRE_REVIEW_RENDER_DIR / name).read_text(encoding="utf-8")
+        base_text = (_NO_SECRETS_RENDER_DIR / name).read_text(encoding="utf-8")
         base_text = base_text.replace('"mylonite==0.10.4"', f'"mylonite=={__version__}"')
 
         written = write_workflows(tmp_path, runs_on="ubuntu-latest")
@@ -248,3 +248,43 @@ def test_write_workflows_end_to_end_from_a_subdirectory_stays_relative(tmp_path,
     text = gate.read_text(encoding="utf-8")
     assert str(tmp_path) not in text
     assert "pytest .mylonite/gate -q -ra" in text
+
+
+@pytest.mark.parametrize(
+    ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
+)
+def test_target_secrets_are_checked_non_empty_before_the_gate_runs(tmp_path, name, job):
+    """GitHub renders a missing ``${{ secrets.X }}`` as an empty string, and an
+    empty value counts as set when the target file is expanded, so the target
+    would launch with an empty credential. Each workflow checks every target
+    secret is non-empty in its own step, before the step that runs the gate."""
+    import shutil
+
+    names = ["MYLONITE_TARGET_HEADERS_X_API_KEY", "MYLONITE_TARGET_ENV_DB_TOKEN"]
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest", target_env_vars=names)
+    doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
+    steps = doc["jobs"][job]["steps"]
+    check = steps[-2]
+    assert check["env"] == {n: f"${{{{ secrets.{n} }}}}" for n in names}
+    for n in names:
+        assert f'[ -n "${n}" ]' in check["run"]
+
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available to execute the rendered check")
+    base_env = {"PATH": __import__("os").environ.get("PATH", "")}
+    empty = subprocess.run(
+        [bash, "-c", check["run"]],
+        env={**base_env, names[0]: "set", names[1]: ""},
+        capture_output=True,
+        text=True,
+    )
+    assert empty.returncode == 1
+    assert f"::error::secret {names[1]} is empty" in empty.stdout
+    full = subprocess.run(
+        [bash, "-c", check["run"]],
+        env={**base_env, names[0]: "set", names[1]: "set"},
+        capture_output=True,
+        text=True,
+    )
+    assert full.returncode == 0, full.stdout + full.stderr
