@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mylonite._paths import PathEscapesBase, resolve_contained
 from mylonite._redaction import (
@@ -111,11 +111,13 @@ class TargetFile(BaseModel):
     # a plain string label.
     framework: str | None = None
     # MCP transports (stdio/sse/http) only -- mirrors RequestSpec.timeout_s
-    # (the rest transport's equivalent). Overrides BOTH the session's
-    # planner_timeout_s and the MCP ClientSession's read timeout. None
-    # (default) keeps today's fixed 60s for both, so an existing target file
-    # loads unchanged. See target_registry.TargetSpec.timeout_s.
-    timeout_s: float | None = None
+    # (the rest transport's equivalent, rejected together in _check below).
+    # Overrides BOTH the session's planner_timeout_s and the MCP
+    # ClientSession's read timeout. None (default) keeps today's fixed 60s
+    # for both, so an existing target file loads unchanged. `gt=0`: a
+    # non-positive value is not a meaningful timeout (fires instantly or
+    # never). See target_registry.TargetSpec.timeout_s.
+    timeout_s: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -137,6 +139,11 @@ class TargetFile(BaseModel):
                 raise ValueError(
                     "request.body must contain a {prompt} placeholder — that is where the "
                     "attack payload is substituted into the HTTP request"
+                )
+            if self.timeout_s is not None:
+                raise ValueError(
+                    "timeout_s is for MCP transports (stdio/sse/http); a rest target's "
+                    "HTTP client timeout is request.timeout_s — set that instead"
                 )
         else:  # sse | http — remote MCP
             if not self.url:
@@ -312,8 +319,14 @@ def _expand_dict_block(
     return {k: (_expand(str(k), v) if isinstance(v, str) else v) for k, v in block.items()}
 
 
-def _missing_env_message(missing: list[tuple[str, str, str | None]]) -> str:
-    """Name each unset variable, the field it fills, and the line that sets it."""
+def _missing_env_message(
+    missing: list[tuple[str, str, str | None]], *, subject: str = "target file"
+) -> str:
+    """Name each unset variable, the field it fills, and the line that sets
+    it. ``subject`` is what "references" the variable(s) -- the default
+    ("target file") is right for a LOADED target file's own ``env:`` block,
+    but wrong for a caller with no target file at all (fix round 1, #184:
+    the bundled ``mcp:github`` spec's ``GITHUB_PERSONAL_ACCESS_TOKEN``)."""
     from mylonite._target_env import posix_export_line, powershell_env_line
 
     seen: dict[str, str | None] = {}
@@ -321,7 +334,7 @@ def _missing_env_message(missing: list[tuple[str, str, str | None]]) -> str:
         seen.setdefault(name, key)
     fields = "; ".join(f"{p} -> ${{{n}}}" for p, n, _ in missing)
     lines = [
-        "target file references undefined environment variable(s): "
+        f"{subject} references undefined environment variable(s): "
         f"{', '.join(seen)} (fields: {fields}). Mylonite does not run with a "
         "missing credential. Set each one to the real value, then retry:",
         "  bash/zsh:",
@@ -332,7 +345,9 @@ def _missing_env_message(missing: list[tuple[str, str, str | None]]) -> str:
     return "\n".join(lines)
 
 
-def expand_env_block(block: dict[str, str], *, path: str = "env") -> dict[str, str]:
+def expand_env_block(
+    block: dict[str, str], *, path: str = "env", subject: str = "target file"
+) -> dict[str, str]:
     """Expand ``${VAR}`` references in ``block``'s string values from
     ``os.environ``, raising ``ValueError`` naming every unresolved reference.
 
@@ -343,11 +358,16 @@ def expand_env_block(block: dict[str, str], *, path: str = "env") -> dict[str, s
     ``mcp:github`` spec's ``GITHUB_PERSONAL_ACCESS_TOKEN`` (#184): the
     bundled ``TargetSpec`` is a plain module-level dict, never loaded via
     :func:`load_target_file`, so it needs its own expansion call.
+
+    ``subject`` (fix round 1) is forwarded to :func:`_missing_env_message` --
+    override it when the caller, like the bundled families above, has no
+    target file for the default "target file references..." wording to
+    correctly describe.
     """
     missing: list[tuple[str, str, str | None]] = []
     expanded = _expand_dict_block(block, path, missing)
     if missing:
-        raise ValueError(_missing_env_message(missing))
+        raise ValueError(_missing_env_message(missing, subject=subject))
     return expanded
 
 

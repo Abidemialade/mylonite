@@ -1272,6 +1272,9 @@ def scan(
             and not dry_run
             and not allow_no_seed_arm
         ):
+            # Fix round 1 (#207): validate the model BEFORE this probe can launch
+            # the real server -- a bad --model must not spawn a subprocess first.
+            preflight_model_or_exit(effective_planner_model, api_base=effective_policy.api_base)
             _autowire_budget = _autowire_budget_s(tf.timeout_s)
             try:
                 _probe = _build_adapter_for_custom(tf, authorize, effective_planner_model)

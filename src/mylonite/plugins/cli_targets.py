@@ -192,7 +192,7 @@ def _build_adapter_for_mcp(target: str, authorize: str | None, model: str) -> An
     from mylonite.plugins._mcp.target_file import expand_env_block
 
     try:
-        expand_env_block(dict(spec.extra_env))
+        expand_env_block(dict(spec.extra_env), subject=f"the bundled mcp:{family} target")
     except ValueError as exc:
         echo_err(str(exc))
         raise typer.Exit(code=EXIT_CONFIG) from exc

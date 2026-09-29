@@ -134,7 +134,9 @@ target with a budget of at least 20 seconds (more if the target file's `timeout_
 larger — see [target-file.md](target-file.md#mcp-session-timeout)); a first-run
 `npx`/`uvx` server download can genuinely take that long. A timeout there names
 `timeout_s` and says to re-run (the download is cached after that) or raise
-`timeout_s`, and exits — never the misleading "add a seed_arm" advice.
+`timeout_s`, and exits — never the misleading "add a seed_arm" advice. The model
+pre-flight below always runs before this probe, so a bad `--model` can't reach it
+(and launch the real server) first.
 
 Every model `scan` resolves (`--model`/`--planner-model`/`--customiser-model`/
 `--judge-model`) is checked against LiteLLM's own provider registry once, before any

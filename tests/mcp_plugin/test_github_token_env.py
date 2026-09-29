@@ -43,6 +43,19 @@ def test_github_effective_env_raises_a_named_error_when_the_token_is_unset(
         adapter._effective_env()
 
 
+def test_github_missing_token_message_does_not_say_target_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fix round 1: the bundled mcp:github family has no target file at all
+    -- the generic custom-target-file wording ("target file references
+    undefined environment variable(s)...") is actively wrong here."""
+    monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
+    adapter = GitHubMCPAdapter(scope="myhandle/myrepo")
+    with pytest.raises(ValueError) as excinfo:
+        adapter._effective_env()
+    assert "target file" not in str(excinfo.value).lower()
+
+
 def test_a_caller_supplied_launch_env_is_also_expanded(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fix round 1: ``launch_env`` is NOT always concrete -- every real caller
     that constructs one (``factory.build_adapter_for_spec``, the ONLY path

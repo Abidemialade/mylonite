@@ -55,8 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seed runs, and a bad value exits with `invalid --model '<value>': ...
   Check --model.` A non-recoverable provider error's log line is also capped
   to a short summary, with the full detail moved to DEBUG (it was already
-  capped for the analogous recoverable-error case).
-- **`scan`'s M3 auto-wire probe now names a timeout as a timeout, instead of
+  capped for the analogous recoverable-error case). LiteLLM's own "Provider
+  List: <url>" banner — printed to stdout on every rejection, independent
+  of whether the caller catches the exception — is now suppressed around
+  this check, so a bad `--model` prints exactly one line, not two. For a
+  custom target needing the seed_arm auto-wire probe, this check now also
+  runs before that probe can launch the real server, not after.
+- **`scan`'s seed_arm auto-wire probe now names a timeout as a timeout, instead of
   telling you to add a `seed_arm`.** The 20-second describe() call it makes
   to infer a `seed_arm` from the live tool surface used to fall through to
   the generic "declare a seed_arm" pre-flight advice on ANY failure,
@@ -119,7 +124,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   itself now maps a session timeout to a message naming `timeout_s` and
   its effective value (was a raw, undiagnosed exception). A bundled
   target's timeout messages (no target file to set `timeout_s` in) say so
-  plainly instead of pointing at a file that doesn't exist.
+  plainly instead of pointing at a file that doesn't exist. `timeout_s`
+  now rejects a non-positive value, and is rejected outright on a `rest`
+  target (pointed at `request.timeout_s` instead) — declaring both was
+  ambiguous about which one applied. A missing-credential message for a
+  bundled target (currently `mcp:github`'s token) no longer says "target
+  file references..." — bundled families have no target file.
 - **The Layer 1 (DVMCP) verification scorer no longer counts an untested
   challenge as a miss.** A challenge with no report, or whose report shows
   zero attempts with outcome `finding`/`no_finding`, is now UNTESTED — it is

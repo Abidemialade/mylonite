@@ -155,14 +155,26 @@ def model_is_routable(model: str, *, api_base: str | None = None) -> bool:
     sends to the real ``litellm.completion`` call, so a self-hosted/gateway
     model that only resolves with an ``api_base`` set (e.g. a bare OpenAI-
     compatible model id behind a local proxy) is not rejected here either.
+
+    LiteLLM prints a "Provider List: <url>" banner to STDOUT on every
+    rejection -- regardless of whether the caller catches the raised
+    exception -- which is exactly the noise this pre-flight exists to
+    replace with one clean line (#207 fix round 1). Suppressed here via
+    ``litellm.suppress_debug_info``, restored afterwards so the flag never
+    leaks into an unrelated later call.
     """
     import litellm  # deferred: several seconds to import, needed only here
 
+    previous = litellm.suppress_debug_info
+    litellm.suppress_debug_info = True
     try:
         litellm.get_llm_provider(model=model, api_base=api_base)
     except Exception:
         return False
-    return True
+    else:
+        return True
+    finally:
+        litellm.suppress_debug_info = previous
 
 
 def preflight_model_or_exit(*models: str, api_base: str | None = None) -> None:
