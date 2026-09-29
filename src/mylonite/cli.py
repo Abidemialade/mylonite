@@ -3319,7 +3319,18 @@ def gate(
         # escape uncaught and exit 1, while the same exhaustion seen first by
         # the engine exits EXIT_BUDGET. Both now report the same way.
         echo_err(f"\nerror: LLM call budget exhausted: {exc}")
-        echo_err("Raise --max-llm-calls, or narrow the scan with --weakness-classes.")
+        # #204: `gate` has no `--weakness-classes` flag (that was `scan`'s,
+        # singular, and `scan`-only) -- for a custom target, point at the
+        # target file's own `weakness_classes:` key instead; for a
+        # reference/bundled target `gate` has no per-class filter at all, so
+        # the only lever is the budget itself.
+        if routed_to == "custom":
+            echo_err(
+                "Raise --max-llm-calls, or narrow the scan by editing "
+                f"weakness_classes: in {target_file}."
+            )
+        else:
+            echo_err("Raise --max-llm-calls — gate has no per-class filter for this target.")
         raise typer.Exit(code=EXIT_BUDGET) from exc
     except pr_mod.GatePrError as exc:
         # The git/gh step is the LAST thing gate does, so by the time it fails

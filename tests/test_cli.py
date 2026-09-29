@@ -5163,6 +5163,37 @@ def test_gate_maps_budget_exhaustion_to_exit_budget(
 
     assert result.exit_code == EXIT_BUDGET, result.output
     assert "budget" in result.output.lower()
+    # #204: gate has no --weakness-classes flag; for a custom target the
+    # budget message must point at the target file's own key instead.
+    out = result.stderr or result.output
+    assert "--weakness-classes" not in out
+    assert "weakness_classes:" in out
+    assert str(target_yaml) in out
+
+
+def test_gate_reference_budget_message_names_no_class_filter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#204: for a reference/bundled target `gate` has no per-class filter at
+    all — the message must not invent a flag that doesn't exist."""
+    from mylonite.scan._llm import BudgetExceededError
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    def _raise(*_a: Any, **_k: Any) -> Any:
+        raise BudgetExceededError("LLM call budget exhausted (12/12)")
+
+    monkeypatch.setattr("mylonite.cli.make_scan_fn", lambda **_k: _raise)
+
+    result = runner.invoke(
+        app,
+        ["gate", "reference:vulnerable", "--out", str(tmp_path / "gate_out"), "--no-workflows"],
+    )
+    out = result.stderr or result.output
+    assert "--weakness-classes" not in out
+    assert "weakness_classes:" not in out
+    assert "no per-class filter" in out.lower()
 
 
 def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
