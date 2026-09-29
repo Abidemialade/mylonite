@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Outside a git repository entirely, `--open-pr` now fails fast with a named
   error on exit code 8, before any scan/LLM spend, instead of silently
   writing to the wrong place.
+- **`gate`'s out-of-budget message no longer suggests a `--weakness-classes`
+  flag that doesn't exist.** `gate` has no such flag (`scan` has
+  `--weakness-class`, singular; `gate` has neither). For a custom target the
+  message now points at `weakness_classes:` in the target file; for a
+  reference or bundled target it says plainly that `gate` has no per-class
+  filter, so the only lever is `--max-llm-calls`.
 
 - **A malformed `--model` now fails once, with one message, instead of
   printing about 12 KB of repeated provider errors.** `not-a-real/model`
