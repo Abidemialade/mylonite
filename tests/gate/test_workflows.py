@@ -103,3 +103,42 @@ def test_discovery_passes_authorize_through_env(tmp_path):
     assert "${{" not in step["run"]
     assert step["env"]["MYLONITE_AUTHORIZE"] == "${{ vars.MYLONITE_AUTHORIZE }}"
     assert '--authorize "$MYLONITE_AUTHORIZE" --open-pr' in step["run"]
+
+
+def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
+    """#185: a target with no secrets renders nothing extra — the gate job
+    step keeps no ``env:`` key at all, matching pre-#185 output."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    step = doc["jobs"]["gate"]["steps"][-1]
+    assert "env" not in step
+
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
+    dstep = ddoc["jobs"]["discover"]["steps"][-1]
+    assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE"}
+
+
+def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
+    """#185: a target with a header secret renders an env: entry mapped to a
+    repository secret of the same name, in the step that runs pytest."""
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        target_env_vars=["MYLONITE_TARGET_HEADERS_X_API_KEY"],
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    step = doc["jobs"]["gate"]["steps"][-1]
+    assert step["env"] == {
+        "MYLONITE_TARGET_HEADERS_X_API_KEY": "${{ secrets.MYLONITE_TARGET_HEADERS_X_API_KEY }}"
+    }
+
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
+    dstep = ddoc["jobs"]["discover"]["steps"][-1]
+    assert dstep["env"]["MYLONITE_TARGET_HEADERS_X_API_KEY"] == (
+        "${{ secrets.MYLONITE_TARGET_HEADERS_X_API_KEY }}"
+    )
+    assert dstep["env"]["MYLONITE_AUTHORIZE"] == "${{ vars.MYLONITE_AUTHORIZE }}"

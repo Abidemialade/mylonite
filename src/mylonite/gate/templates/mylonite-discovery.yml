@@ -32,6 +32,7 @@ jobs:
         # it, so a value holding a quote or `;` would become shell syntax.
         env:
           MYLONITE_AUTHORIZE: ${{ vars.MYLONITE_AUTHORIZE }}
+#__TARGET_SECRETS_ENV_LINES__
         run: >
           mylonite gate --target-file __GATE_DIR__/target.yaml
           --authorize "$MYLONITE_AUTHORIZE" --open-pr

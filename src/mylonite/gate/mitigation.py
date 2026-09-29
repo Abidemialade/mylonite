@@ -309,6 +309,74 @@ def build_pr_body(
     return "\n".join(sections) + "\n"
 
 
+def build_gate_pr_body(
+    kept: list[tuple[ExploitRecord, ValidationReport]],
+    rejected: list[tuple[ExploitRecord, str]],
+    *,
+    llm_enrich: bool = False,
+    completion_fn: CompletionFn | None = None,
+    system_prompt: str | None = None,
+    model: str = DEFAULT_MITIGATION_MODEL,
+    guarded_is_server_layer: bool | None = None,
+    target: Any | None = None,
+) -> str:
+    """Thin wrapper (#202): join each KEPT finding's :func:`build_pr_body`
+    section, then list the REJECTED findings with their reason.
+
+    ``build_pr_body`` itself stays per-finding — unchanged, and still the only
+    thing that knows how to render one finding's evidence/recommendation. For
+    the single-kept/no-rejected case (today's only shape) this returns
+    ``build_pr_body``'s output byte-for-byte, so a one-finding gate PR is
+    unaffected by this wrapper existing. A run with several kept findings, or
+    any rejected ones, gets one ``## Finding N: <pattern_id>`` section per kept
+    finding plus a trailing "Other findings" section naming what was rejected
+    and why — so a finding the oracle could not confirm is never silently
+    dropped from the PR the way it used to be dropped from the gate entirely.
+    """
+    if len(kept) == 1 and not rejected:
+        exploit, report = kept[0]
+        return build_pr_body(
+            exploit,
+            report,
+            llm_enrich=llm_enrich,
+            completion_fn=completion_fn,
+            system_prompt=system_prompt,
+            model=model,
+            guarded_is_server_layer=guarded_is_server_layer,
+            target=target,
+        )
+
+    sections = [f"# Mylonite gate: {len(kept)} finding(s) kept, {len(rejected)} rejected", ""]
+    for i, (exploit, report) in enumerate(kept, start=1):
+        sections.append(f"## Finding {i}: `{exploit.pattern_id}`")
+        sections.append("")
+        sections.append(
+            build_pr_body(
+                exploit,
+                report,
+                llm_enrich=llm_enrich,
+                completion_fn=completion_fn,
+                system_prompt=system_prompt,
+                model=model,
+                guarded_is_server_layer=guarded_is_server_layer,
+                target=target,
+            )
+        )
+        sections.append("")
+    if rejected:
+        sections.append("## Other findings (not gated)")
+        sections.append(
+            "_The scan turned up more than this PR gates. Each of these was generated and "
+            "validated, but the oracle did not keep it — re-run `mylonite generate` + "
+            "`mylonite validate` on the scan directory to inspect one directly._"
+        )
+        sections.append("")
+        for exploit, reason in rejected:
+            sections.append(f"- `{exploit.pattern_id}`: {reason}")
+        sections.append("")
+    return "\n".join(sections)
+
+
 def _llm_suggestion(
     exploit: ExploitRecord,
     *,

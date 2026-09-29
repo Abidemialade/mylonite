@@ -26,6 +26,16 @@ minutes and API spend rather than seconds.
     make no call at all, and a probe that never ran is indistinguishable from a
     target that resisted. Size CI spend against the worst case, not the flag value.
 
+    **The budget bounds only `gate`'s scan phase.** `--help` already says so ("LLM
+    call budget for the scan phase"). Validation — re-driving each kept finding
+    across `--iterations` differential runs — happens *after* the scan and has no
+    call budget of its own; on most runs it makes the majority of the calls.
+    Roughly: `iterations × 2 legs (raw + guarded) × calls per attempt`, **per
+    finding**, now that every finding a scan proves is gated (#202), not just the
+    first. A two-finding scan at the default `--iterations 3` is roughly six
+    differential re-drives, not one. Size CI spend against the whole `gate` run —
+    scan plus validation — not against `--max-llm-calls` alone.
+
 ```bash
 # against the bundled reference agent
 mylonite gate reference:vulnerable
@@ -41,6 +51,41 @@ without one, `scan` looks for a store-and-recall pair on the live server and use
 target, run `mylonite scan --target-file target.yaml --authorize <family>` first. When it
 wires a `seed_arm`, it writes the wired target to `.mylonite/scans/<timestamp>/target.yaml`;
 pass that file to `gate --target-file`.
+
+### Gating every finding
+
+A scan often turns up more than one weakness. `gate` generates and validates
+**every** finding the scan proves, in deterministic order (sorted by pattern id),
+and commits every KEPT one's test to a single branch behind a single PR:
+
+```text
+2 findings: validating each (about 2x the single-finding validation cost)
+1 kept, 1 rejected
+```
+
+A finding that was generated and validated but not kept is still named in
+`PR_BODY.md`, with the reason, under "Other findings (not gated)" — it isn't
+silently dropped the way it used to be. If a generator or validator failure hits
+one finding specifically, the rest are still gated; only a run where *every*
+finding fails the same way falls back to the old single-finding exit codes (`6`
+generate failed, `7` validate failed).
+
+The branch name reflects how many findings it carries: gating exactly one kept
+finding keeps the historical `mylonite/gate-<pattern_id>`; gating several uses
+`mylonite/gate-<hash>`, a short stable hash of the kept pattern ids. Both keep the
+`mylonite/gate-` prefix, so anything that matches on it (a branch-protection rule,
+a script) keeps working either way.
+
+### Budget exhaustion and findings
+
+`--max-llm-calls` bounds the *scan* phase (see the sizing box above). If the
+budget runs out mid-scan but the scan already proved a real finding, `gate` still
+generates, validates, and opens or prints the PR for that finding — nothing is
+thrown away. The run's exit code is still the scan's own: **`3`**, not `0` — the
+same "abort always wins" rule `scan` follows on its own (see
+[Reading the results](reading-results.md#exit-codes-for-ci)). Treat exit `3` from
+`gate` as "check `PR_BODY.md` before you decide this was just an infrastructure
+failure", not as a reason to discard the run.
 
 ### What `gate` touches
 
@@ -79,6 +124,11 @@ The PR body is itself a result surface (see [Reading the results](reading-result
 - **Compliance** — the OWASP-LLM/ASI · MITRE ATLAS · NIST tags.
 - **Inline annotations** — a best-effort GitHub check-run annotation on the offending
   prompt line, when the AI layer is a committed file.
+- **Which repository secrets to add** — when the target file has secret-shaped
+  fields (headers, `env:`), the committed `target.yaml` replaces them with
+  `${MYLONITE_TARGET_...}` placeholders; the PR body and the console both name
+  the repository secrets those placeholders need before the scaffolded gate
+  workflow (or your own) can load the file in CI.
 
 The recommendation's confidence is degraded, not silently kept at full strength, when the
 effect probe didn't settle the finding on its own: `unprobed` (no `effect_probe`
@@ -94,7 +144,14 @@ recommended default.
 ## Adopting it in GitHub CI
 
 Add one secret — `MYLONITE_API_KEY` (your provider key) — and the two
-scaffolded workflows:
+scaffolded workflows. If your target file has secret-shaped fields (a header,
+an `env:` entry), add one repository secret per `${MYLONITE_TARGET_...}`
+placeholder too — `gate` names the exact variables in its console output and
+`PR_BODY.md` the first time it writes a redacted `target.yaml`. The
+scaffolded workflows already map each one to `${{ secrets.<NAME> }}` in the
+step that runs `pytest`; the redacted `target.yaml` is what `load_target_file`
+reads at that point, so a missing secret fails the job with a clear "undefined
+variable" error rather than silently using an empty string.
 
 - **`mylonite-gate.yml`** runs on every PR. It re-drives your agent (bounded:
   deterministic effect-probe, small model, 1 iteration) and fails the check on
@@ -137,9 +194,11 @@ you change that line, or re-run `gate --workflows` with the new version.
 client), so it inherits a few real preconditions the scaffolded workflows
 satisfy automatically but a local or non-GitHub run must provide itself:
 
-- **A git repository, and `gate` run from its root.** `gate` resolves the repo
-  root as the current working directory (`Path.cwd()`) — it does not search
-  upward for a `.git` — so `cd` into the repo root before running it.
+- **A git repository.** `gate --open-pr` (and `--workflows`) resolves the repo
+  root with `git rev-parse --show-toplevel`, so it works from any subdirectory —
+  the gate output and the scaffolded workflows land at the repo root either way,
+  not wherever you happened to run it from. Outside a git repository entirely,
+  it fails fast with a named error, before any scan/LLM spend.
 - **A `main` branch as the PR base.** The branch/commit/PR flow targets `main`
   by default; if your default branch is named differently, open the PR
   yourself with the printed `git push` + `gh pr create --base <branch>`

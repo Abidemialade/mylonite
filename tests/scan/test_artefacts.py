@@ -304,6 +304,72 @@ def test_render_summary_shows_aborted_when_set() -> None:
     assert "aborted" in summary.lower()
 
 
+def test_render_summary_shows_findings_first_when_aborted() -> None:
+    """#206: a budget-exhausted (or otherwise aborted) run that still found
+    something must not bury the finding under whatever ran first."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="ran-first-no-finding",
+                pattern_id="ran-first-no-finding",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="resisted",
+            ),
+            ScanAttempt(
+                seed_id="ran-second-a-real-finding",
+                pattern_id="ran-second-a-real-finding",
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="caught",
+            ),
+        ],
+        findings_count=1,
+        aborted="budget_exceeded",
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert summary.index("ran-second-a-real-finding") < summary.index("ran-first-no-finding")
+
+
+def test_render_summary_findings_stay_in_place_when_not_aborted() -> None:
+    """The reorder is scoped to the aborted+findings case — a normal, non-aborted
+    run's row order is unaffected."""
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        attack_modules=["prompt-injection-family"],
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=1.0,
+        attempts=[
+            ScanAttempt(
+                seed_id="ran-first-no-finding",
+                pattern_id="ran-first-no-finding",
+                outcome="no_finding",
+                verdict_mechanism="llm",
+                verdict_reason="resisted",
+            ),
+            ScanAttempt(
+                seed_id="ran-second-a-real-finding",
+                pattern_id="ran-second-a-real-finding",
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="caught",
+            ),
+        ],
+        findings_count=1,
+        aborted=None,
+        mylonite_version="0.2.0",
+    )
+    summary = render_summary(ScanResult(report=report, exploits=[]))
+    assert summary.index("ran-first-no-finding") < summary.index("ran-second-a-real-finding")
+
+
 def test_render_summary_surfaces_inconclusive_rate() -> None:
     """Issue #8: a 100%-fallback scan must not read as clean."""
     report = ScanReport(

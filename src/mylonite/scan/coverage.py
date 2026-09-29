@@ -28,6 +28,7 @@ Pure data/logic — no CLI concerns. Must not import ``typer`` or
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Final, get_args
@@ -124,6 +125,25 @@ if set(ATTEMPT_CLASS) != set(get_args(ScanAttemptOutcome)):
         f"ScanAttemptOutcome: missing={sorted(missing)} extra={sorted(extra)}. "
         "Every ScanAttemptOutcome literal must be classified here."
     )
+
+
+def findings_first(attempts: Sequence[object]) -> list[object]:
+    """Stable-reorder ``attempts`` so every ``outcome == "finding"`` attempt comes
+    first, in its original relative order, followed by everything else in ITS
+    original relative order.
+
+    #206: when a scan aborted (e.g. budget exhausted) but still turned up
+    findings, the operator's first screenful of the summary table used to be
+    whatever the scan happened to attempt first — usually NOT the findings,
+    since the budget more often runs out on the seeds that ran last. The
+    findings are the one thing a budget-exhausted run must not bury. Pure and
+    total: unlike :func:`ScanOutcome.from_report`, this reads only the literal
+    ``outcome`` field, so it works the same on a live ``ScanReport`` and one
+    reconstructed from disk.
+    """
+    findings = [a for a in attempts if getattr(a, "outcome", None) == "finding"]
+    rest = [a for a in attempts if getattr(a, "outcome", None) != "finding"]
+    return findings + rest
 
 
 # --- No-verdict attempts ---------------------------------------------------------

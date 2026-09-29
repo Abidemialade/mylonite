@@ -11,6 +11,7 @@ only the variable name and the original key it stands for.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from mylonite._redaction import (
@@ -25,6 +26,7 @@ __all__ = [
     "env_notice_lines",
     "posix_export_line",
     "powershell_env_line",
+    "repo_secret_lines",
     "write_redacted_target",
 ]
 
@@ -77,6 +79,25 @@ def echo_env_notice(text: str, target: Path) -> None:
 
     for line in env_notice_lines(text, target):
         echo_err(line)
+
+
+def repo_secret_lines(refs: Sequence[tuple[str, str]]) -> list[str]:
+    """The block a gate PR prints/writes when its workflow needs repository
+    secrets (#185). Reuses :func:`env_notice_lines`'s wording, adapted for
+    GitHub Actions: the workflow reads the redacted target's placeholders via
+    ``${{ secrets.<NAME> }}``, not an environment variable set by hand, so the
+    operator has to add them under the repository's Settings -> Secrets
+    before the gate workflow can run. Empty when ``refs`` is, so a caller can
+    print it unconditionally.
+    """
+    if not refs:
+        return []
+    lines = [
+        "note: the gate workflow reads target secrets from repository secrets "
+        "(Settings -> Secrets and variables -> Actions); add these before it can run:"
+    ]
+    lines.extend(f"  - {var} (from {key})" for var, key in refs)
+    return lines
 
 
 def write_redacted_target(dest: Path, source_text: str) -> str:

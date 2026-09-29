@@ -860,3 +860,25 @@ def test_adjudication_counts_reports_attempts_that_reached_no_verdict() -> None:
     assert counts.no_verdict == 2
     assert counts.llm == 1
     assert counts.decided == 1
+
+
+def test_findings_first_moves_finding_outcomes_to_the_front_stably() -> None:
+    """#206: the console summary must not bury a finding under whatever
+    attempts happened to run first when the scan aborted early."""
+    from mylonite.scan.coverage import findings_first
+
+    a1 = _attempt("no_finding", seed_id="a1")
+    a2 = _attempt("finding", seed_id="a2")
+    a3 = _attempt("not_applicable", seed_id="a3")
+    a4 = _attempt("finding", seed_id="a4")
+
+    reordered = findings_first([a1, a2, a3, a4])
+
+    assert [a.seed_id for a in reordered] == ["a2", "a4", "a1", "a3"]
+
+
+def test_findings_first_no_findings_is_a_no_op() -> None:
+    from mylonite.scan.coverage import findings_first
+
+    attempts = [_attempt("no_finding", seed_id="a1"), _attempt("not_applicable", seed_id="a2")]
+    assert findings_first(attempts) == attempts
