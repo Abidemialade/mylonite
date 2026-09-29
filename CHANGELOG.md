@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every finding the oracle keeps) commits one test each, in deterministic
   pattern-id order, on a single branch behind a single PR. A finding that
   is generated and validated but not kept is written to disk for local
-  debugging — never to a path the commit touches — and is still named in
+  debugging — never to a path the commit touches; only the files that finding
+  wrote move there, so an earlier run's tests and `target.yaml` in `--out`
+  stay put — and is still named in
   `PR_BODY.md`, with the actual failed validation stage and its detail, under
   "Other findings (not gated)". Each kept finding's directory carries its own
   copy of the redacted `target.yaml` (the emitted test loads it from there,
@@ -89,7 +91,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted target is now written first; the workflow gets one `env:` entry
   per placeholder, mapped to `${{ secrets.<NAME> }}`, in the step that runs
   `pytest`. `gate`'s console output and `PR_BODY.md` name the repository
-  secrets to add.
+  secrets to add. A secret you haven't added reaches the job as an empty
+  string, which the target file accepts as set, so the server would launch
+  with an empty credential and the gate test could pass for the wrong reason.
+  Each scaffolded workflow now checks every target secret in a step of its
+  own first, and fails naming each empty one.
+- **`gate` now shows the incomplete-coverage caveat `scan` shows.** When a
+  scan proved findings but left some attempts NOT TESTED, `scan` printed a
+  warning that the rest of the target was not shown clean; `gate` printed
+  nothing, and `PR_BODY.md` didn't mention it. `gate` now prints the same
+  warning and adds a "Coverage was incomplete" line to `PR_BODY.md`. Exit
+  codes are unchanged.
 - **`gate --open-pr` run from a subdirectory now resolves the real
   repository root instead of committing under that subdirectory.** `gate`
   used to take `Path.cwd()` as the repo root outright; run from `sub/dir` in
@@ -127,7 +139,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-default value now logs a GitHub `::warning::` naming which input and
   why it has no effect. The action still does not write workflow files in
   CI.
-
 - **A malformed `--model` now fails once, with one message, instead of
   printing about 12 KB of repeated provider errors.** `not-a-real/model`
   passed the cheap `<provider>/<model>` prefix check and was only rejected
@@ -295,7 +306,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite.plugins.cli_targets` respectively, with `cli.py` importing them
   back and calling them unchanged. No behaviour changed — `tests/cli_golden/`
   pins `--help` text, the reference dry-run seed listings and the `demo`
-  offline replay across the move — and `cli.py` is down to ~3,880 lines, with
+  offline replay across the move — and `cli.py` is down to ~3,910 lines, with
   its size cap lowered to match.
 
 ## [0.10.4] - 2026-09-28

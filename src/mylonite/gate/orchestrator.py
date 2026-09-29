@@ -23,7 +23,7 @@ from mylonite.exit_codes import (
 )
 from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_gate_pr_body
 from mylonite.generate.wiring import _slugify_pattern
-from mylonite.scan.coverage import AbortReason, ScanOutcome
+from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
 from mylonite.scan.llm_types import CompletionFn
 
 
@@ -155,21 +155,36 @@ def _rejected_evidence_dir(out_dir: Path, slug: str) -> Path:
     return out_dir.parent / f"{out_dir.name}-rejected" / slug
 
 
-def _finish_unkept(this_out: Path, out_dir: Path, slug: str, message: str) -> None:
-    """Echo the per-finding verdict, then relocate whatever was written for a
-    REJECTED or validate-failed finding into :func:`_rejected_evidence_dir`.
+def _finish_unkept(
+    this_out: Path, out_dir: Path, slug: str, message: str, written: list[Path]
+) -> None:
+    """Echo the per-finding verdict, then relocate the files this REJECTED or
+    validate-failed finding wrote into :func:`_rejected_evidence_dir`.
     Evidence stays on disk there for local debugging; it is simply outside
     anywhere a commit — automatic or printed for the operator to run by
     hand — ever looks.
+
+    Only ``written`` moves, never a directory. A single finding writes
+    straight into ``out_dir``, which can already hold an earlier run's kept
+    tests, ``target.yaml`` and workflows; moving the directory took all of
+    that with it, and the next rejected run then deleted it. Each file
+    replaces only the same-named file of this finding's own earlier
+    evidence, so other findings' evidence is never touched. A per-finding
+    subdirectory left empty by the move is removed.
     """
     echo(message)
-    if not this_out.exists():
+    present = [p for p in written if p.exists()]
+    if not present:
         return
     rejected_dir = _rejected_evidence_dir(out_dir, slug)
-    rejected_dir.parent.mkdir(parents=True, exist_ok=True)
-    if rejected_dir.exists():
-        shutil.rmtree(rejected_dir)
-    shutil.move(str(this_out), str(rejected_dir))
+    rejected_dir.mkdir(parents=True, exist_ok=True)
+    for path in present:
+        dest = rejected_dir / path.name
+        if dest.exists():
+            dest.unlink()
+        shutil.move(str(path), str(dest))
+    if this_out != out_dir and this_out.exists() and not any(this_out.iterdir()):
+        this_out.rmdir()
     echo(
         f"Mylonite gate: {slug}: evidence kept at {rejected_dir} for local debugging (not committed)."
     )
@@ -199,7 +214,9 @@ def _process_one_finding(
     this_out.mkdir(parents=True, exist_ok=True)
     test_path = this_out / generated.filename
     test_path.write_text(generated.source, encoding="utf-8")
-    (this_out / f"exploit_{exploit.pattern_id}.json").write_text(
+    exploit_path = this_out / f"exploit_{exploit.pattern_id}.json"
+    written = [test_path, exploit_path]
+    exploit_path.write_text(
         json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True),
         encoding="utf-8",
     )
@@ -208,7 +225,7 @@ def _process_one_finding(
     if report is None:
         reason = "the validator returned nothing"
         message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."
-        _finish_unkept(this_out, out_dir, slug, message)
+        _finish_unkept(this_out, out_dir, slug, message, written)
         return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
 
     if not report.kept:
@@ -219,7 +236,7 @@ def _process_one_finding(
         message = (
             f"{prefix}{console_reason}." if multi else f"{prefix}{console_reason} — no PR opened."
         )
-        _finish_unkept(this_out, out_dir, slug, message)
+        _finish_unkept(this_out, out_dir, slug, message, written)
         return _FindingOutcome(
             exploit=exploit, stage="rejected", report=report, reason=_rejection_reason(report)
         )
@@ -230,6 +247,19 @@ def _process_one_finding(
     # `validate`, so a failure in the git/gh step threw it away.
     _write_validation_report(this_out, report)
     return _FindingOutcome(exploit=exploit, stage="kept", report=report)
+
+
+def _coverage_note(outcome: ScanOutcome) -> str:
+    """One PR-body line when the scan behind this PR did not exercise every
+    attempt, so a reviewer never reads the gated findings as a complete
+    result. Empty when coverage was complete."""
+    if outcome.coverage is Coverage.EXERCISED:
+        return ""
+    return (
+        f"\n\n> **Coverage was incomplete.** {outcome.not_tested} attempt(s) were NOT "
+        "TESTED, so this PR gates what the scan proved; it does not show the rest of "
+        "the target is clean.\n"
+    )
 
 
 def _abort_message(outcome: ScanOutcome, budget_hint_text: str | None) -> str:
@@ -332,9 +362,14 @@ def run_gate(
         # mirroring ScanOutcome.from_report's own "abort always wins" rule so
         # `gate` cannot silently exit 0 on a budget-exhausted run just because
         # it found something before the budget ran out.
+        # Without an abort, the scan's own caveat (findings alongside NOT
+        # TESTED attempts) still prints: `scan` shows it, and a gate run over
+        # the same scan must not hide it. The exit code is unchanged.
         if bundle.outcome.abort is not None:
             echo(_abort_message(bundle.outcome, budget_hint_text))
             result.exit_code = bundle.outcome.exit_code
+        elif bundle.outcome.operator_message:
+            echo(bundle.outcome.operator_message)
         return result
 
     if not kept:
@@ -382,6 +417,7 @@ def run_gate(
         system_prompt=system_prompt,
         target=target_context,
     )
+    body += _coverage_note(bundle.outcome)
     pr = open_pr_fn(out_dir=out_dir, findings=kept, kept_dirs=kept_dirs, body=body, open_pr=open_pr)
     opened = bool(getattr(pr, "opened", False))
     branch = getattr(pr, "branch", None)

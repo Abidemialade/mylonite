@@ -32,10 +32,32 @@ def _target_secrets_env_lines(target_env_vars: Sequence[str]) -> str:
     return "\n".join(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars)
 
 
+def _target_secrets_check_step(target_env_vars: Sequence[str]) -> str:
+    """A step that fails the job, naming the secret, when any target secret
+    is empty. GitHub renders a missing ``${{ secrets.X }}`` as an empty
+    string, and an empty value counts as set when the target file is
+    expanded, so without this the target launches with an empty credential
+    and the gate can pass for the wrong reason. Runs before the step that
+    uses the secrets. Empty when the target declares no secrets."""
+    if not target_env_vars:
+        return ""
+    lines = [
+        "      - name: Check the target secrets are set",
+        "        env:",
+        *(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars),
+        "        run: |",
+        *(
+            f'          [ -n "${var}" ] || {{ echo "::error::secret {var} is empty - '
+            f'add it under repository secrets"; exit 1; }}'
+            for var in target_env_vars
+        ),
+    ]
+    return "\n".join(lines)
+
+
 def _relative_gate_dir(repo_root: Path, gate_dir: Path) -> Path:
     """``gate_dir`` as rendered into a workflow: always relative to
-    ``repo_root``, never a machine-local absolute path (Critical fix, round 1
-    of review). ``resolve_gate_out_dir`` anchors ``--out`` at the repo root as
+    ``repo_root``, never a machine-local absolute path. ``resolve_gate_out_dir`` anchors ``--out`` at the repo root as
     an ABSOLUTE path so file writes land in the right place regardless of the
     operator's cwd — but that same absolute path, rendered verbatim into
     ``run: pytest <path>``, only ever worked on the machine that wrote it.
@@ -95,6 +117,9 @@ def write_workflows(
       :func:`mylonite._redaction.target_env_refs`; empty (the default) for a
       target with no secrets, or a reference/bundled target with none to
       write at all.
+    * ``__TARGET_SECRETS_CHECK_STEP__`` -> a step, before the one that runs
+      the gate, that fails the job naming each target secret that is empty
+      (see :func:`_target_secrets_check_step`); removed when there are none.
 
     Returns the written paths.
     """
@@ -116,6 +141,7 @@ def write_workflows(
     line_tokens = {
         "#__TARGET_SECRETS_ENV__": _target_secrets_env_block(target_env_vars),
         "#__TARGET_SECRETS_ENV_LINES__": _target_secrets_env_lines(target_env_vars),
+        "#__TARGET_SECRETS_CHECK_STEP__": _target_secrets_check_step(target_env_vars),
     }
     dest = repo_root / ".github" / "workflows"
     dest.mkdir(parents=True, exist_ok=True)

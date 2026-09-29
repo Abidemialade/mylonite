@@ -30,6 +30,7 @@ jobs:
           python-version: "3.12"
       - name: Install mylonite + pytest
         run: pip install "mylonite==__MYLONITE_VERSION__" pytest
+#__TARGET_SECRETS_CHECK_STEP__
       - name: Run the committed gate test
         run: pytest __GATE_DIR__ -q -ra
 #__TARGET_SECRETS_ENV__

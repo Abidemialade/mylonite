@@ -1080,3 +1080,114 @@ def test_rejection_reason_skips_a_failed_report_only_leg():
     reason = _rejection_reason(report)
     assert "consensus" in reason
     assert "effect" not in reason
+
+
+def _run_single_rejected(out_dir, pattern_id: str, filename: str) -> GateResult:
+    ex = _exploit(pattern_id)
+    rejected = ValidationReport(test_filename=filename, kept=False, outcomes=[])
+    return run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename=filename, source="# rejected\n", exploit=e
+        ),
+        validate_fn=lambda t: rejected,
+        open_pr_fn=lambda **k: None,
+        open_pr=False,
+    )
+
+
+def test_a_single_rejected_finding_moves_only_its_own_files(tmp_path):
+    """A single finding writes straight into out_dir. Rejecting it must move
+    only the two files it wrote, never out_dir itself: out_dir can already
+    hold an earlier run's committed kept tests, target.yaml and workflows."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+    earlier = {
+        out_dir / "earlier_pattern" / "test_security_earlier.py": "# kept earlier\n",
+        out_dir / "earlier_pattern" / "validation_report.json": "{}\n",
+        out_dir / "target.yaml": "family: acme\n",
+        out_dir / "PR_BODY.md": "earlier body\n",
+        out_dir / "workflows" / "mylonite-gate.yml": "name: gate\n",
+    }
+    for path, text in earlier.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    result = _run_single_rejected(out_dir, "a-pattern", "test_security_a.py")
+    assert result.exit_code == 5
+
+    for path, text in earlier.items():
+        assert path.read_text(encoding="utf-8") == text, path
+    assert not (out_dir / "test_security_a.py").exists()
+    assert not (out_dir / "exploit_a-pattern.json").exists()
+    evidence = out_dir.parent / f"{out_dir.name}-rejected" / "a_pattern"
+    assert (evidence / "test_security_a.py").exists()
+    assert (evidence / "exploit_a-pattern.json").exists()
+
+    # A second rejected run keeps out_dir intact AND leaves the first run's
+    # evidence for a different finding where it was.
+    _run_single_rejected(out_dir, "b-pattern", "test_security_b.py")
+    for path, text in earlier.items():
+        assert path.read_text(encoding="utf-8") == text, path
+    assert (evidence / "test_security_a.py").exists()
+    assert (
+        out_dir.parent / f"{out_dir.name}-rejected" / "b_pattern" / "test_security_b.py"
+    ).exists()
+
+
+def test_gate_echoes_the_coverage_caveat_and_notes_it_in_the_pr_body(tmp_path, capsys):
+    """Findings plus NOT TESTED attempts and no abort: `scan` prints the
+    incomplete-coverage caveat, so `gate` must too, and the PR body must say
+    coverage was incomplete. The exit code stays 0 (a finding was gated)."""
+    from mylonite.scan.coverage import _INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE
+
+    partial = ScanOutcome(
+        coverage=Coverage.PARTIAL,
+        abort=None,
+        exercised=3,
+        not_tested=2,
+        findings=1,
+        fallbacks=0,
+        exit_code=0,
+        operator_message=_INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE,
+    )
+    seen: dict[str, str] = {}
+
+    def fake_open_pr(*, body, **_):
+        seen["body"] = body
+        return None
+
+    result = run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=partial, exploits=[_exploit()]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report(t.filename),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    assert result.exit_code == 0
+    assert _INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE in capsys.readouterr().out
+    assert "Coverage was incomplete" in seen["body"]
+    assert "2 attempt" in seen["body"]
+
+
+def test_gate_pr_body_has_no_coverage_note_on_a_complete_scan(tmp_path):
+    seen: dict[str, str] = {}
+
+    def fake_open_pr(*, body, **_):
+        seen["body"] = body
+        return None
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[_exploit()]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report(t.filename),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    assert "Coverage was incomplete" not in seen["body"]

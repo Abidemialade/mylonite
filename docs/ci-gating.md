@@ -105,6 +105,17 @@ same "abort always wins" rule `scan` follows on its own (see
 `gate` as "check `PR_BODY.md` before you decide this was just an infrastructure
 failure", not as a reason to discard the run.
 
+### Pre-flight order
+
+`gate` runs its pre-flight checks in this order, all before any LLM call:
+
+1. `--out` containment: with `--open-pr` or `--workflows`, an output directory outside
+   the repository exits `8`.
+2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
+   exiting `2`.
+
+So when both kinds of problem are present, the `--out` error is the one you see first.
+
 ### What `gate` touches
 
 **By default, nothing outside its own output directory.** `gate` writes
@@ -167,9 +178,14 @@ an `env:` entry), add one repository secret per `${MYLONITE_TARGET_...}`
 placeholder too — `gate` names the exact variables in its console output and
 `PR_BODY.md` the first time it writes a redacted `target.yaml`. The
 scaffolded workflows already map each one to `${{ secrets.<NAME> }}` in the
-step that runs `pytest`; the redacted `target.yaml` is what `load_target_file`
-reads at that point, so a missing secret fails the job with a clear "undefined
-variable" error rather than silently using an empty string.
+step that runs the gate. GitHub renders a secret you haven't added as an empty
+string, and an empty value counts as set when the target file is expanded, so
+on its own a missing secret would launch your server with an empty credential
+and the gate test could pass for the wrong reason. To stop that, each workflow
+runs a "Check the target secrets are set" step first, which fails the job with
+`secret <NAME> is empty - add it under repository secrets` for every empty one.
+Outside these workflows (a local run, another CI system), an empty
+`MYLONITE_TARGET_*` variable is used as given, so export real values.
 
 - **`mylonite-gate.yml`** runs on every PR. It re-drives your agent (bounded:
   deterministic effect-probe, small model, 1 iteration) and fails the check on

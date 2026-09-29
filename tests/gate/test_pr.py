@@ -469,7 +469,7 @@ def test_resolve_repo_root_outside_a_git_repo_raises_named_error(tmp_path):
 
 
 def test_add_paths_used_exactly_excludes_anything_not_listed(tmp_path, capsys):
-    """Critical fix: when ``add_paths`` is given, `git add`/the printed manual
+    """When ``add_paths`` is given, `git add`/the printed manual
     command reference EXACTLY those paths -- not the whole gate_dir, which
     would have swept in a sibling 'rejected/' directory too."""
     gate_dir = tmp_path / ".mylonite" / "gate"
