@@ -45,6 +45,10 @@ def _target_secrets_check_step(target_env_vars: Sequence[str]) -> str:
         "      - name: Check the target secrets are set",
         "        env:",
         *(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars),
+        # `[ -n ... ]` is POSIX shell; pin bash so this doesn't parse as
+        # pwsh on a self-hosted Windows runner (a documented `runs-on`
+        # option) and fail with the wrong message.
+        "        shell: bash",
         "        run: |",
         *(
             f'          [ -n "${var}" ] || {{ echo "::error::secret {var} is empty - '

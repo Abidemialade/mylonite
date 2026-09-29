@@ -1173,6 +1173,42 @@ def test_gate_echoes_the_coverage_caveat_and_notes_it_in_the_pr_body(tmp_path, c
     assert "2 attempt" in seen["body"]
 
 
+def test_gate_pr_body_coverage_note_on_an_abort_names_the_abort_not_a_zero_count(tmp_path, capsys):
+    """An abort can leave `not_tested == 0` — the seeds that never got a
+    chance to run were never added to `attempts` at all, so nothing was
+    classified NOT_TESTED, yet coverage is still PARTIAL because `abort is
+    not None`. The PR body must not say "0 attempt(s) were NOT TESTED",
+    which reads as a contradiction next to a gated finding."""
+    aborted = ScanOutcome(
+        coverage=Coverage.PARTIAL,
+        abort=AbortReason.PROVIDER_UNREACHABLE,
+        exercised=3,
+        not_tested=0,
+        findings=1,
+        fallbacks=0,
+        exit_code=4,
+        operator_message="aborted: provider_unreachable",
+    )
+    seen: dict[str, str] = {}
+
+    def fake_open_pr(*, body, **_):
+        seen["body"] = body
+        return None
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=aborted, exploits=[_exploit()]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: _kept_report(t.filename),
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    assert "0 attempt" not in seen["body"]
+    assert "did not finish" in seen["body"] or "aborted" in seen["body"].lower()
+
+
 def test_gate_pr_body_has_no_coverage_note_on_a_complete_scan(tmp_path):
     seen: dict[str, str] = {}
 

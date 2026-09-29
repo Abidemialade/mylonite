@@ -268,6 +268,9 @@ def test_target_secrets_are_checked_non_empty_before_the_gate_runs(tmp_path, nam
     assert check["env"] == {n: f"${{{{ secrets.{n} }}}}" for n in names}
     for n in names:
         assert f'[ -n "${n}" ]' in check["run"]
+    # A self-hosted Windows runner (a documented `runs-on` option) defaults
+    # to pwsh, where `[ -n ... ]` is a syntax error. Pin bash explicitly.
+    assert check["shell"] == "bash"
 
     bash = shutil.which("bash")
     if bash is None:

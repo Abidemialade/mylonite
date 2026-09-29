@@ -182,8 +182,9 @@ step that runs the gate. GitHub renders a secret you haven't added as an empty
 string, and an empty value counts as set when the target file is expanded, so
 on its own a missing secret would launch your server with an empty credential
 and the gate test could pass for the wrong reason. To stop that, each workflow
-runs a "Check the target secrets are set" step first, which fails the job with
-`secret <NAME> is empty - add it under repository secrets` for every empty one.
+runs a "Check the target secrets are set" step first, which fails the job on
+the first empty one with `secret <NAME> is empty - add it under repository
+secrets`.
 Outside these workflows (a local run, another CI system), an empty
 `MYLONITE_TARGET_*` variable is used as given, so export real values.
 
