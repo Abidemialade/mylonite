@@ -16,7 +16,10 @@ def _make_artifacts(tmp_path: Path) -> GatePaths:
     wf.mkdir(parents=True)
     (wf / "mylonite-gate.yml").write_text("name: gate\n", encoding="utf-8")
     return GatePaths(
-        repo_root=tmp_path, gate_dir=gate_dir, workflow_files=[wf / "mylonite-gate.yml"]
+        repo_root=tmp_path,
+        gate_dir=gate_dir,
+        add_paths=[gate_dir],
+        workflow_files=[wf / "mylonite-gate.yml"],
     )
 
 
@@ -87,6 +90,41 @@ def test_no_git_mutation_at_all_without_open_pr(tmp_path, capsys):
     assert "git add" in printed
     assert "git commit" in printed
     assert "gh pr create" in printed
+
+
+def test_print_path_warns_against_git_add_on_the_bare_gate_dir(tmp_path, capsys):
+    """The gate output directory can still hold artefacts from an earlier
+    run (a rejected finding's leftovers live in a SIBLING directory, but a
+    prior KEPT finding's own subdirectory is still right there) -- so the
+    printed next-steps text must tell the operator to stage with the
+    printed `git add` command, not a bare `git add <out>` of their own."""
+    paths = _make_artifacts(tmp_path)
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        _run=_fake_runner_recording(),
+    )
+    out = capsys.readouterr().out
+    assert result.printed_command is not None
+    add_line = next(line for line in result.printed_command.splitlines() if "git add" in line)
+    # The copy-pasteable command names the explicit paths, never the bare dir.
+    assert add_line.strip() != f"git add {paths.gate_dir}"
+    # And the surrounding prose says so outright, not just by implication.
+    assert "not `git add" in out
+    assert str(paths.gate_dir) in out
+
+
+def test_gate_paths_add_paths_is_required(tmp_path) -> None:
+    """`add_paths` names exactly what `git add` stages; there is no directory-
+    sweep fallback for a caller that omits it -- the sole production caller
+    (`gate/wiring.py`'s `open_pr_fn`) always builds this list explicitly, so
+    an omitted `add_paths` is a caller bug, not a valid "sweep everything"
+    request."""
+    with pytest.raises(TypeError):
+        GatePaths(repo_root=tmp_path, gate_dir=tmp_path / ".mylonite" / "gate")  # type: ignore[call-arg]
 
 
 def test_open_pr_still_commits(tmp_path, monkeypatch):
@@ -177,7 +215,10 @@ def test_relative_gate_dir_does_not_crash(tmp_path, monkeypatch):
     from pathlib import Path as _P
 
     # gate_dir is deliberately RELATIVE — mirrors the real CLI default
-    paths = GatePaths(repo_root=tmp_path, gate_dir=_P(".mylonite/gate"), workflow_files=[])
+    rel_gate_dir = _P(".mylonite/gate")
+    paths = GatePaths(
+        repo_root=tmp_path, gate_dir=rel_gate_dir, add_paths=[rel_gate_dir], workflow_files=[]
+    )
     runner = _fake_runner_recording()
     result = open_or_print_pr(
         paths,
@@ -282,7 +323,9 @@ def test_out_of_tree_gate_dir_raises_GatePrError_before_any_checkout(tmp_path):
     outside_dir = tmp_path / "outside" / "gate"
     outside_dir.mkdir(parents=True)
     (outside_dir / "test_security_x.py").write_text("# t\n", encoding="utf-8")
-    paths = GatePaths(repo_root=repo_root, gate_dir=outside_dir, workflow_files=[])
+    paths = GatePaths(
+        repo_root=repo_root, gate_dir=outside_dir, add_paths=[outside_dir], workflow_files=[]
+    )
     runner = _fake_runner_recording()
 
     with pytest.raises(GatePrError):
