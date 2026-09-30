@@ -82,6 +82,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`mylonite scan --scaffold`'s two W4 hints now match what a scan actually
+  does.** The "Consequential-action tools detected" hint used a separate,
+  weaker name-hint list than the one the live W4 control and `mylonite check`
+  use — on the official `server-filesystem` reference server it found none
+  of the four tools the control actually gates, and on `server-memory` it
+  missed half of the six (#217 cause 3). The hint now reads straight off
+  `consequential_tool_names`, the exact classifier the runtime uses, so it
+  can no longer disagree with what gets gated. The effect-probe example's
+  `verify_args_template` also stopped defaulting to the bare `{}`: it now
+  stubs the verify tool's own required arguments from its schema, so a
+  scaffolded target no longer ships a verify call that errors before it can
+  confirm anything.
 - **The pre-flight check for uncoverable weakness classes now fails closed.** When it
   could not describe the server (a slow first `npx`/`uvx` download, a crash, a timeout),
   it used to skip itself, and a declared class with nothing to run could let the rest of
