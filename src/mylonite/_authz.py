@@ -48,14 +48,27 @@ def required_authorization(*, family: str, scope: str | None) -> str:
 def check_authorization(
     *, family: str, scope: str | None, authorize: str | None, command: str
 ) -> None:
-    """Raise :class:`AuthorizationRefused` unless ``authorize`` names the target."""
+    """Raise :class:`AuthorizationRefused` unless ``authorize`` names the target.
+
+    ``check`` is the one caller that never drives an attack: with
+    ``--authorize`` it only runs the calibration controls (real writes, plus
+    a seed plant-and-recall), so its refusal says that instead of the
+    "live-drives ... and sends real attack payloads" wording every other
+    command's refusal uses. Every other command's message is unchanged.
+    """
     required = required_authorization(family=family, scope=scope)
     if authorize is not None and authorize.strip() == required:
         return
     kind = "scope" if (scope and scope.strip()) else "family name"
+    if command == "check":
+        action = (
+            f"mylonite check runs its calibration controls against {family!r}: "
+            "real writes, plus a seed plant-and-recall. It never drives an attack."
+        )
+    else:
+        action = f"mylonite {command} live-drives {family!r} and sends real attack payloads to it."
     msg = (
-        f"mylonite {command} live-drives {family!r} and sends real attack payloads "
-        f"to it. --authorize must equal the {kind} for {family!r} ({required!r}); "
+        f"{action} --authorize must equal the {kind} for {family!r} ({required!r}); "
         f"got {authorize!r}. See SECURITY.md."
     )
     raise AuthorizationRefused(msg)

@@ -114,6 +114,11 @@ class ToolControl:
     status: str
     reason_code: str | None
     detail: str
+    #: True when ``detail`` reports that a verify read itself raised or timed
+    #: out (as opposed to a control mismatch). An explicit flag, not a string
+    #: comparison against ``_read_failed()``'s wording, so a later rewording
+    #: of that message cannot silently stop matching and change behaviour.
+    is_read_failure: bool = False
 
 
 @dataclass(frozen=True)
@@ -453,7 +458,7 @@ async def _probe_controls(
         token = _new_token()
         # A negative-control failure or a failed read is about the probe, not the
         # tool, so trying further tools would only repeat it.
-        if control.reason_code == INC_NEGATIVE_FAILED or control.detail == _read_failed(probe):
+        if control.reason_code == INC_NEGATIVE_FAILED or control.is_read_failure:
             break
 
     if any(c.status == TOOL_CERTIFIED for c in controls) and not any(
@@ -499,8 +504,8 @@ async def _control_one_tool(
             f"the control write fails {tool.name!r}'s inputSchema: {errors[0]}",
         )
 
-    def failed(code: str, detail: str) -> ToolControl:
-        return ToolControl(tool.name, TOOL_FAILED, code, detail)
+    def failed(code: str, detail: str, *, is_read_failure: bool = False) -> ToolControl:
+        return ToolControl(tool.name, TOOL_FAILED, code, detail, is_read_failure=is_read_failure)
 
     read_failed = _read_failed(probe)
 
@@ -508,7 +513,7 @@ async def _control_one_tool(
     before = await adapter._probe_verify_content(session, probe, token)
     after = await adapter._probe_verify_content(session, probe, token)
     if before is None or after is None:
-        return failed(INC_POSITIVE_FAILED, read_failed)
+        return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
     if _changed(before, after, marker):
         return failed(
             INC_NEGATIVE_FAILED,
@@ -527,11 +532,11 @@ async def _control_one_tool(
         )
     written = await adapter._probe_verify_content(session, probe, token)
     if written is None:
-        return failed(INC_POSITIVE_FAILED, read_failed)
-    lowered_before, lowered_after = after.lower(), written.lower()
+        return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+    before_write, after_write = after.lower(), written.lower()
     for deferral in probe.deferred_markers:
         needle = deferral.lower()
-        if needle and lowered_after.count(needle) > lowered_before.count(needle):
+        if needle and after_write.count(needle) > before_write.count(needle):
             return failed(INC_POSITIVE_FAILED, f"the control write was deferred ({deferral!r})")
     if not (_changed(after, written, marker) and written.count(token) > after.count(token)):
         return failed(

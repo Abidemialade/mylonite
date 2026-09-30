@@ -100,6 +100,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`check --authorize`'s refusal now says what `check` actually does.** A
+  missing or wrong `--authorize` value used to print the same "live-drives
+  ... and sends real attack payloads" wording as `scan`/`gate`/`validate`/
+  `ablate`, even though `check --authorize` never drives an attack — it only
+  runs the calibration controls (real writes, plus a seed plant-and-recall).
+  The refusal for `check` now says that; every other command's message is
+  unchanged.
+- **MYL-INC-002's fix line now names `validate` among the commands
+  `--authorize` gates.** It listed only `scan`/`gate`/`ablate`, leaving
+  `validate` out even though SECURITY.md lists it too.
 - **`mylonite scan --scaffold`'s two W4 hints now match what a scan actually
   does.** The "Consequential-action tools detected" hint used a separate,
   weaker name-hint list than the one the live W4 control and `mylonite check`
