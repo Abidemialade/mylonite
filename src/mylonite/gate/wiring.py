@@ -145,6 +145,15 @@ def make_scan_fn(
         from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.engine import ScanConfig
 
+        # Calibrate the effect probe with real writes before it's trusted --
+        # only for a custom MCP target (`tf` is None for a bundled mcp:<family>
+        # or reference route); --authorize already matched before `adapter`
+        # was built.
+        if tf is not None and custom_spec is not None and custom_spec.transport != "rest":
+            from mylonite.plugins._mcp.calibration import calibrate_custom_target
+
+            asyncio.run(calibrate_custom_target(adapter, authorized=True))
+
         try:
             all_modules: list[Any] = discover("mylonite.attack_modules")
         except Exception as exc:

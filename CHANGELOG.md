@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A custom target's declared `effect_probe` is now calibrated with real
+  writes before its "no change" is ever trusted.** `scan`, `gate`, `validate`
+  and `ablate` each run this once per target — a write through a
+  consequential tool, and a negative control, prove the probe can actually
+  see a change; for a W2 target, a plant-and-recall through `seed_arm` proves
+  the same for indirect injection. A target file's new `calibration.controls`
+  field (`auto` | `allow` | `skip`; `auto`, the default, runs on an
+  authorized `stdio` target — a remote `sse`/`http` target needs `allow`)
+  controls it; see [Calibration](docs/target-file.md#calibration). `mylonite
+  check` gains `--authorize`, so this can run on its own, without a scan:
+  without it, `check` is unchanged (the schema check only, no writes); with
+  it, `check` also runs the calibration controls and prints each one's
+  status and reason code. The testkit's `assert_target_resists` /
+  `assert_control_holds` calibrate the same way before re-driving a real
+  target. Calibration itself changes no verdict yet — that follows in a
+  later release — but it records, per target, whether the probe is
+  certified, so those results carry a code to look up
+  ([docs/reason-codes.md](docs/reason-codes.md)).
 - **Every result that is not a verdict now carries a reason code you can look
   up.** A NOT TESTED attempt, an aborted scan and a pre-flight refusal each
   print a stable code on its error line, such as `[MYL-NT-005]` or

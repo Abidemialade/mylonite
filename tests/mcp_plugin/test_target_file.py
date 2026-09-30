@@ -16,7 +16,12 @@ from mylonite.plugins._mcp.target_file import (
     payload_placement_warnings,
     resolved_system_prompt,
 )
-from mylonite.plugins._mcp.target_registry import InvalidTargetScope, RequestSpec, SeedArmSpec
+from mylonite.plugins._mcp.target_registry import (
+    CalibrationSettings,
+    InvalidTargetScope,
+    RequestSpec,
+    SeedArmSpec,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -170,6 +175,49 @@ def test_target_file_rejects_timeout_s_on_a_rest_transport() -> None:
             command="",
             request=RequestSpec(url="https://agent.example/chat", body='{"prompt": "{prompt}"}'),
             timeout_s=30,
+        )
+
+
+def test_target_file_calibration_defaults_to_none() -> None:
+    """No calibration block declared -- build_target_spec falls back to "auto"."""
+    assert _tf().calibration is None
+
+
+def test_target_file_calibration_controls_round_trips_through_yaml(tmp_path: Path) -> None:
+    target = tmp_path / "t.yaml"
+    target.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\ncalibration:\n  controls: allow\n",
+        encoding="utf-8",
+    )
+    tf = load_target_file(target)
+    assert tf.calibration is not None
+    assert tf.calibration.controls == "allow"
+
+
+def test_build_target_spec_carries_calibration_controls() -> None:
+    spec = build_target_spec(_tf(calibration=CalibrationSettings(controls="skip")))
+    assert spec.calibration_controls == "skip"
+
+
+def test_build_target_spec_calibration_controls_defaults_to_auto() -> None:
+    spec = build_target_spec(_tf())
+    assert spec.calibration_controls == "auto"
+
+
+def test_target_file_rejects_an_unknown_calibration_controls_value() -> None:
+    with pytest.raises(Exception):  # noqa: B017 — pydantic ValidationError
+        _tf(calibration={"controls": "sometimes"})
+
+
+def test_target_file_rejects_calibration_on_a_rest_transport() -> None:
+    """calibration.controls is the MCP-transport knob -- a rest target has no
+    MCP session to calibrate, so it is rejected outright, mirroring timeout_s."""
+    with pytest.raises(ValueError, match="calibration"):
+        _tf(
+            transport="rest",
+            command="",
+            request=RequestSpec(url="https://agent.example/chat", body='{"prompt": "{prompt}"}'),
+            calibration=CalibrationSettings(controls="allow"),
         )
 
 

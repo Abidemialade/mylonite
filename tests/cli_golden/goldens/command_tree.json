@@ -163,9 +163,23 @@
     },
     "check": {
       "epilog": null,
-      "help": "Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.\n\nConnects to the target ONCE (`describe()` — exactly what `scan --scaffold`\nalready does) and reports structural exposure from the tool schemas alone:\nconsequential tools with no approval-shaped sibling, descriptions that\nsteer the agent, tools taking an apparent network destination, content-\nprocessing tools that could carry an indirect-injection payload, unpinned\ntool descriptions (rug-pull exposure), and which weakness classes the\nsurface suggests. Every finding is a HINT to confirm, never a verdict —\nthe differential oracle (`scan`/`gate`) is what proves an attack actually\nlands. Belongs in CI stage 1, next to lint: cheap enough to run on every\npush, unlike the live stages that spend LLM budget.",
+      "help": "Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.\n\nConnects to the target ONCE (`describe()` — exactly what `scan --scaffold`\nalready does) and reports structural exposure from the tool schemas alone:\nconsequential tools with no approval-shaped sibling, descriptions that\nsteer the agent, tools taking an apparent network destination, content-\nprocessing tools that could carry an indirect-injection payload, unpinned\ntool descriptions (rug-pull exposure), and which weakness classes the\nsurface suggests. Every finding is a HINT to confirm, never a verdict —\nthe differential oracle (`scan`/`gate`) is what proves an attack actually\nlands. Belongs in CI stage 1, next to lint: cheap enough to run on every\npush, unlike the live stages that spend LLM budget.\n\nWithout ``--authorize`` this makes no writes at all -- exactly the check\nabove. With it (naming the same value ``scan``/``gate`` would), it ALSO\nruns the calibration controls (see ``docs/target-file.md``) and reports\ntheir reason codes, so an operator can confirm an ``effect_probe`` before\never running a real scan.",
       "name": "check",
       "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Also run the calibration controls (real writes proving the effect_probe can see a change) against a --target-file target. Must equal its declared scope, or its family name with none. Omit to run only the schema check above, with no writes.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
         {
           "default": "False",
           "envvar": null,

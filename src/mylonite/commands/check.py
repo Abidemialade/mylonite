@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
 from rich.markup import escape as rich_escape
 from rich.table import Table
 
+from mylonite import reason_codes
 from mylonite._cli_io import (
     _exit_if_missing_target_file,
     console_print,
@@ -28,12 +29,31 @@ from mylonite._cli_io import (
     echo_exc,
 )
 from mylonite.exit_codes import EXIT_CONFIG, EXIT_FINDINGS, EXIT_SUCCESS
-from mylonite.plugins.cli_targets import _build_adapter_for_reference
+from mylonite.plugins.cli_targets import _build_adapter_for_reference, _enforce_custom_authorize
 from mylonite.scan.control_shim import _check_description_pins, _has_approval_sibling
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_roles import content_processor_tools, instruction_bearing_tools
 
 _console = Console()
+
+
+def _print_calibration_result(result: Any) -> None:
+    """Report a calibration run's status, and every code it carries -- each
+    printed line leads with its ``[MYL-INC-NNN]`` tag via ``reason_codes.tag``,
+    matching every other operator-facing calibration message."""
+    echo_err(f"calibration: {result.status} ({len(result.certified_tools)} tool(s) certified)")
+    for tool in result.tools:
+        if tool.reason_code is not None:
+            echo_err("  " + reason_codes.tag(tool.reason_code, f"{tool.tool}: {tool.detail}"))
+        else:
+            echo_err(f"  {tool.tool}: {tool.detail}")
+    if result.reason_code is not None:
+        echo_err(reason_codes.tag(result.reason_code, result.detail))
+    seed = result.seed_control
+    if seed.reason_code is not None:
+        echo_err(reason_codes.tag(seed.reason_code, f"seed control: {seed.detail}"))
+    else:
+        echo_err(f"seed control: {seed.status} ({seed.detail})")
 
 
 def check(
@@ -68,6 +88,18 @@ def check(
             ),
         ),
     ] = None,
+    authorize: Annotated[
+        str | None,
+        typer.Option(
+            "--authorize",
+            help=(
+                "Also run the calibration controls (real writes proving the effect_probe "
+                "can see a change) against a --target-file target. Must equal its declared "
+                "scope, or its family name with none. Omit to run only the schema check "
+                "above, with no writes."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.
 
@@ -81,6 +113,12 @@ def check(
     the differential oracle (`scan`/`gate`) is what proves an attack actually
     lands. Belongs in CI stage 1, next to lint: cheap enough to run on every
     push, unlike the live stages that spend LLM budget.
+
+    Without ``--authorize`` this makes no writes at all -- exactly the check
+    above. With it (naming the same value ``scan``/``gate`` would), it ALSO
+    runs the calibration controls (see ``docs/target-file.md``) and reports
+    their reason codes, so an operator can confirm an ``effect_probe`` before
+    ever running a real scan.
     """
     from mylonite.cli import _discover_run_config
     from mylonite.plugins._mcp import target_registry
@@ -122,6 +160,10 @@ def check(
             raise typer.Exit(code=EXIT_CONFIG) from exc
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
+        if authorize is not None:
+            _enforce_custom_authorize(
+                spec.family, tf.scope, spec.requires_scope, authorize, command="check"
+            )
         adapter = build_mcp_adapter(
             family=spec.family, scope=tf.scope, model="claude-haiku-4-5-20251001"
         )
@@ -254,6 +296,18 @@ def check(
         echo_err(line)
 
     echo(f"{findings} structural finding(s) across {len(tools)} tool(s).")
+
+    # --authorize also runs the calibration controls (real writes) so an
+    # operator can confirm an effect_probe before ever running a real scan.
+    # Custom (target-file) targets only -- a rest target has no MCP session
+    # to calibrate, and the reference route sets no `tf` at all.
+    if authorize is not None and tf is not None and spec.transport != "rest":
+        from mylonite.plugins._mcp.calibration import calibrate_custom_target
+
+        echo_err("running calibration controls (real writes)…")
+        cal_result = asyncio.run(calibrate_custom_target(adapter, authorized=True))
+        _print_calibration_result(cal_result)
+
     # The "Unpinned tool descriptions" row fires on EVERY tool of EVERY
     # target on first contact (nothing is pinned yet), so counting it toward the
     # --enforce exit made `check --enforce` red for everyone — unusable as the

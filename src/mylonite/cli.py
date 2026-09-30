@@ -169,6 +169,13 @@ def _autowire_budget_s(tf_timeout_s: float | None) -> float:
     return max(_AUTOWIRE_DESCRIBE_TIMEOUT_S, tf_timeout_s or 0)
 
 
+def _calibrate_custom_target_now(adapter: Any) -> None:
+    """Calibrate the effect probe with real writes, once --authorize matched."""
+    from mylonite.plugins._mcp.calibration import calibrate_custom_target
+
+    asyncio.run(calibrate_custom_target(adapter, authorized=True))
+
+
 _T = TypeVar("_T")
 
 
@@ -1358,6 +1365,8 @@ def scan(
             timeout_s=_autowire_budget_s(refusal_tf.timeout_s),
         )
 
+    if refusal_tf is not None and not dry_run and refusal_tf.transport != "rest":
+        _calibrate_custom_target_now(adapter)  # never under --dry-run
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
     # finding proves the target leaks to ANY attacker address, not the one demo literal
     # baked into every W2/W3 seed (avoids 'teaching to the test'). The reference/replay
@@ -1754,6 +1763,9 @@ def _validate_custom(
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
 
+    # Calibrate the effect probe before it's trusted (--authorize matched above).
+    if spec.transport != "rest":
+        _calibrate_custom_target_now(build_adapter_for_spec(spec, scope=tf.scope, model=model))
     # M1: the differential leg (re-driving a guarded twin of the SAME real target,
     # model held constant) gates `kept` BY DEFAULT — proving the *safeguard*, not the
     # model, carries the security. `--fast` opts out (it doubles the live runs per
@@ -3574,6 +3586,11 @@ def ablate(
         f"via {layer} ({iterations} run(s) each) — ~{total_scans} scoped scans."
     )
 
+    # Calibrate the effect probe before it's trusted (--authorize matched above).
+    if spec.transport != "rest":
+        _calibrate_custom_target_now(
+            build_adapter_for_spec(spec, scope=tf.scope, model=effective_planner_model)
+        )
     # Populated by scan_target_fires's on_outcome sink below with the full
     # ScanOutcome (abort reason + exit_code) behind every non-FIRED scoped
     # scan -- discarded by the bare FireOutcome return value otherwise. Used

@@ -34,7 +34,12 @@ from mylonite.plugins._mcp import calibration, stdio_adapter, target_registry
 from mylonite.plugins._mcp.factory import build_adapter_for_spec
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
 from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
-from mylonite.plugins._mcp.target_registry import ControlConfig, EffectProbeSpec, SeedArmSpec
+from mylonite.plugins._mcp.target_registry import (
+    CalibrationSettings,
+    ControlConfig,
+    EffectProbeSpec,
+    SeedArmSpec,
+)
 
 FAMILY = "cal-app"
 MARKER = "attacker@example.com"
@@ -181,6 +186,7 @@ def _register(
     seed_arm: SeedArmSpec | None = _SEED_ARM,
     control_config: ControlConfig | None = None,
     timeout_s: float | None = None,
+    calibration_controls: str | None = None,
 ) -> target_registry.TargetSpec:
     spec = build_target_spec(
         TargetFile(
@@ -192,6 +198,11 @@ def _register(
             effect_probe=probe,
             control_config=control_config,
             timeout_s=timeout_s,
+            calibration=(
+                CalibrationSettings(controls=calibration_controls)  # type: ignore[arg-type]
+                if calibration_controls is not None
+                else None
+            ),
         )
     )
     target_registry.register_target(spec)
@@ -537,3 +548,181 @@ def test_every_code_the_module_emits_is_registered() -> None:
     for code in calibration.EMITTED_CODES:
         assert reason_codes.get(code).category == reason_codes.CATEGORY_INCONCLUSIVE
     assert set(calibration.EMITTED_CODES) == {f"MYL-INC-00{n}" for n in range(2, 8)}
+
+
+# --- calibrate_custom_target: wiring, opt-in, caching ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_certifies_an_authorized_stdio_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "auto" (the default) allows controls on an authorized stdio target."""
+    _register()
+    launcher = _Launcher(_Store())
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", launcher)
+    adapter = MCPStdioAdapter(family=FAMILY, scope=None)
+    result = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert result.calibrated is True
+    assert len(launcher.sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_caches_a_second_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cached: a repeat call for the same spec+scope is a no-op (no new launch)."""
+    _register()
+    launcher = _Launcher(_Store())
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", launcher)
+    adapter = MCPStdioAdapter(family=FAMILY, scope=None)
+    first = await calibration.calibrate_custom_target(adapter, authorized=True)
+    second = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert second is first
+    assert len(launcher.sessions) == 1
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_makes_no_calls_when_not_authorized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _register()
+    launcher = _Launcher(_Store())
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", launcher)
+    adapter = MCPStdioAdapter(family=FAMILY, scope=None)
+    result = await calibration.calibrate_custom_target(adapter, authorized=False)
+    assert launcher.sessions == []
+    assert result.calibrated is False
+    assert result.status == calibration.STATUS_NOT_AUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_degrades_when_the_target_fails_to_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """calibrate() itself lets a launch/list_tools failure propagate;
+    calibrate_custom_target must degrade to a not-calibrated result instead of
+    raising, and still cache it (so a broken target isn't relaunched every call)."""
+
+    class _FailingLauncher:
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            @asynccontextmanager
+            async def _ctx() -> Any:
+                raise RuntimeError("could not launch")
+                yield  # pragma: no cover — never reached
+
+            return _ctx()
+
+    _register()
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _FailingLauncher())
+    adapter = MCPStdioAdapter(family=FAMILY, scope=None)
+    result = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert result.calibrated is False
+    assert result.status != calibration.STATUS_CERTIFIED
+    spec = target_registry.resolve_target(FAMILY, None)
+    assert calibration.lookup(spec, None) is result
+
+
+def _fake_spec_adapter(spec: target_registry.TargetSpec) -> Any:
+    """A bare adapter stand-in: calibrate_custom_target reads only _spec/_scope
+    off it before dispatching to (a monkeypatched) calibrate()."""
+    return SimpleNamespace(_spec=spec, _scope=None)
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_auto_withholds_consent_for_a_remote_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "auto" on a remote (sse/http) target makes no calls — only "allow" does."""
+    seen: list[bool] = []
+
+    async def fake_calibrate(adapter: Any, allow_writes: bool) -> calibration.CalibrationResult:
+        seen.append(allow_writes)
+        return calibration.CalibrationResult(
+            spec_key="k",
+            status=calibration.STATUS_NOT_AUTHORIZED,
+            reason_code=calibration.INC_NOT_CALIBRATED,
+            detail="stub",
+            tools=(),
+            seed_control=calibration.SeedControl(
+                calibration.SEED_NOT_RUN, calibration.INC_NOT_CALIBRATED, "stub"
+            ),
+        )
+
+    monkeypatch.setattr(calibration, "calibrate", fake_calibrate)
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            transport="sse",
+            url="https://agent.example/mcp",
+            command="",
+            weakness_classes=["W2"],
+        )
+    )
+    target_registry.register_target(spec)
+    adapter = _fake_spec_adapter(spec)
+    result = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert seen == [False]
+    assert result.status == calibration.STATUS_NOT_AUTHORIZED
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_allow_runs_on_a_remote_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[bool] = []
+
+    async def fake_calibrate(adapter: Any, allow_writes: bool) -> calibration.CalibrationResult:
+        seen.append(allow_writes)
+        return calibration.CalibrationResult(
+            spec_key="k",
+            status=calibration.STATUS_CERTIFIED,
+            reason_code=None,
+            detail="stub",
+            tools=(),
+            seed_control=calibration.SeedControl(calibration.SEED_NOT_DECLARED, None, "stub"),
+        )
+
+    monkeypatch.setattr(calibration, "calibrate", fake_calibrate)
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            transport="sse",
+            url="https://agent.example/mcp",
+            command="",
+            weakness_classes=["W2"],
+            calibration=CalibrationSettings(controls="allow"),
+        )
+    )
+    target_registry.register_target(spec)
+    adapter = _fake_spec_adapter(spec)
+    result = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert seen == [True]
+    assert result.calibrated is True
+
+
+@pytest.mark.asyncio
+async def test_calibrate_custom_target_controls_skip_makes_no_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[bool] = []
+
+    async def fake_calibrate(adapter: Any, allow_writes: bool) -> calibration.CalibrationResult:
+        seen.append(allow_writes)
+        return calibration.CalibrationResult(
+            spec_key="k",
+            status=calibration.STATUS_NOT_AUTHORIZED,
+            reason_code=calibration.INC_NOT_CALIBRATED,
+            detail="stub",
+            tools=(),
+            seed_control=calibration.SeedControl(
+                calibration.SEED_NOT_RUN, calibration.INC_NOT_CALIBRATED, "stub"
+            ),
+        )
+
+    monkeypatch.setattr(calibration, "calibrate", fake_calibrate)
+    spec = _register(calibration_controls="skip")
+    adapter = _fake_spec_adapter(spec)
+    result = await calibration.calibrate_custom_target(adapter, authorized=True)
+    assert seen == [False]
+    assert result.status == calibration.STATUS_NOT_AUTHORIZED

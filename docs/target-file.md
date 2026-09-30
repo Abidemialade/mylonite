@@ -30,6 +30,8 @@ requires_scope: false          # set true to require a non-empty scope
 # timeout_s: 90                # optional; stdio/sse/http only. Overrides the planner
 #                               # AND MCP session read timeout (both default to 60s) --
 #                               # see "MCP session timeout" below.
+# calibration:                 # optional; stdio/sse/http only -- see "Calibration" below.
+#   controls: auto              # auto (default) | allow | skip
 # --authorize must EQUAL this target's required value: the declared `scope`
 # exactly (e.g. `--authorize tenant-a` above) if one is set, else `family`
 # (e.g. `--authorize my-app`) if it isn't. This is derived from the target's
@@ -145,6 +147,32 @@ target is rejected — set `request.timeout_s` there instead.
 timeout_s: 90
 ```
 
+## Calibration
+
+`calibration.controls` (optional; `stdio`/`sse`/`http` only — a `rest` target is
+rejected, mirroring `timeout_s`) says whether `calibrate_custom_target()` may run
+its controls: real writes through a consequential tool, and a plant-and-recall
+through `seed_arm`, proving your `effect_probe` can actually see a change before
+a scan trusts its "no change". Every `scan`/`gate`/`ablate`/`validate` run that
+drives this target calls it once, automatically. `mylonite check --authorize`
+runs it on its own, without a scan, and prints each control's status and
+[reason code](reason-codes.md):
+
+- `auto` (the default): run on an **authorized `stdio`** target only. Every
+  live-driving command already requires `--authorize` to match this target's
+  scope — `auto` additionally withholds consent for a remote (`sse`/`http`)
+  target, since real writes against a server you don't launch yourself need a
+  separate, explicit opt-in.
+- `allow`: run on any transport, once authorized — including a remote one.
+- `skip`: never run. An uncalibrated `effect_probe`'s "no change" can then
+  never certify a resisted attempt; attempts it would have covered read
+  NOT TESTED with `MYL-INC-002` instead.
+
+```yaml
+calibration:
+  controls: allow   # e.g. for a remote (sse/http) target you own
+```
+
 ## Field groups
 
 - **Launch** (`family`, `command`, `args`, `env`, `scope`, `requires_scope`) — how the
@@ -192,6 +220,9 @@ timeout_s: 90
     - **`destructive_tools`** — sinks where an injection-driven call is damage in itself
       (delete/overwrite/transfer). These refuse untrusted context outright. Inferred
       from MCP's `destructiveHint` and name hints when you don't declare them.
+- **`calibration`** (`CalibrationSettings`) — whether the calibration controls (real
+  writes proving your `effect_probe` can see a change) may run; see
+  [Calibration](#calibration) above.
 - **Server-layer build** (`vulnerable_launch`, `control_env`) — optional: drive the
   differential against *your own* unguarded build and per-control env toggles, instead of
   the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
