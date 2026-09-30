@@ -223,7 +223,7 @@ A consequential tool call went through, but it could not be tied to this attempt
 The effect probe was not calibrated: calibration was not authorized, or its controls
 were set to skip.
 
-**Fix:** Pass `--authorize` (`scan`/`gate`/`ablate`) or `check --authorize` so the
+**Fix:** Pass `--authorize` (`scan`/`gate`/`ablate`/`validate`) or `check --authorize` so the
 calibration controls can run, and do not set `calibration.controls` to `skip`. A
 remote (`sse`/`http`) target also needs `calibration.controls: allow` -- `auto`
 only runs on an authorized `stdio` target.

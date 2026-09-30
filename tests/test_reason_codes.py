@@ -406,6 +406,15 @@ def test_payload_marker_fix_names_the_replacement() -> None:
     assert "{exfil_email}" in REGISTRY["MYL-INC-008"].fix
 
 
+def test_calibration_not_authorized_fix_names_every_authorize_taking_command() -> None:
+    """SECURITY.md lists scan/gate/ablate/validate plus `check --authorize` as
+    the commands that take `--authorize`. The fix for an uncalibrated probe
+    (MYL-INC-002) used to name only scan/gate/ablate, leaving `validate` out."""
+    fix = REGISTRY["MYL-INC-002"].fix
+    assert "scan/gate/ablate/validate" in fix
+    assert "check --authorize" in fix
+
+
 # --- summary lines ------------------------------------------------------------
 
 
