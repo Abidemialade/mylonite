@@ -16,6 +16,9 @@ The "thin shell" refactor (PR 0 of the #91/#197 follow-up) cut cli.py from
 `mylonite.generate.wiring`, the `check`-command structural helpers to
 `mylonite.scan.control_shim`, and the CLI target-adapter routing to
 `mylonite.plugins.cli_targets`.
+
+A later pass moved the `check` command body itself out to
+`mylonite.commands.check`, cutting cli.py further to ~3,682 LOC.
 """
 
 from __future__ import annotations
@@ -24,10 +27,10 @@ from pathlib import Path
 
 _CLI = Path(__file__).resolve().parents[1] / "src" / "mylonite" / "cli.py"
 
-# Ceiling with modest headroom over the post-thin-shell size (~3,878 LOC).
+# Ceiling with modest headroom over the post-`check`-extraction size (~3,682 LOC).
 # Lower it as more is extracted; do not raise it to accommodate new inlined
 # domain logic.
-_MAX_LOC = 3_930
+_MAX_LOC = 3_702
 
 
 def test_cli_py_stays_under_the_fat_controller_ceiling() -> None:
