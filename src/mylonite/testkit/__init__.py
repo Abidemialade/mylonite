@@ -57,7 +57,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mylonite._replay import (
     FixtureError,
@@ -764,6 +764,20 @@ def assert_target_resists(
     spec = build_target_spec(tf)
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
+    # Calibrate the effect probe with real writes before it's trusted -- an
+    # emitted test's own MYLONITE_LIVE_TARGET=1 skip guard is the testkit's
+    # authorization gesture; this function is only reached once that passed.
+    if spec.transport != "rest":
+        from mylonite.plugins._mcp._session_adapter import MCPSessionAdapterBase
+        from mylonite.plugins._mcp.calibration import calibrate_custom_target
+        from mylonite.plugins._mcp.factory import build_adapter_for_spec
+
+        calibration_adapter = build_adapter_for_spec(spec, scope=tf.scope, model=resolved_model)
+        asyncio.run(
+            calibrate_custom_target(
+                cast(MCPSessionAdapterBase, calibration_adapter), authorized=True
+            )
+        )
     try:
         result = _run_target_scan(
             spec=spec,
@@ -896,6 +910,20 @@ def assert_control_holds(
     )
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
+    # Calibrate the effect probe with real writes before it's trusted -- an
+    # emitted test's own MYLONITE_LIVE_TARGET=1 skip guard is the testkit's
+    # authorization gesture; this function is only reached once that passed.
+    if spec.transport != "rest":
+        from mylonite.plugins._mcp._session_adapter import MCPSessionAdapterBase
+        from mylonite.plugins._mcp.calibration import calibrate_custom_target
+        from mylonite.plugins._mcp.factory import build_adapter_for_spec
+
+        calibration_adapter = build_adapter_for_spec(spec, scope=tf.scope, model=resolved_model)
+        asyncio.run(
+            calibrate_custom_target(
+                cast(MCPSessionAdapterBase, calibration_adapter), authorized=True
+            )
+        )
     try:
         raw = _run_target_scan(
             spec=spec,

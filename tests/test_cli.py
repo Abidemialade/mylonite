@@ -585,6 +585,72 @@ def test_check_does_not_require_authorize(tmp_path: Path, monkeypatch: pytest.Mo
     assert "--authorize" not in (result.stderr or "")
 
 
+def _patch_calibrate_custom_target(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Stub out calibrate_custom_target so check --authorize tests exercise
+    only the CLI wiring (authorize enforcement + reason-code printing), not
+    calibrate()'s own live-session internals (covered by test_calibration.py)."""
+    from mylonite.plugins._mcp import calibration
+
+    calls: list[bool] = []
+
+    async def _fake(adapter: Any, *, authorized: bool) -> Any:
+        calls.append(authorized)
+        return calibration.CalibrationResult(
+            spec_key="k",
+            status=calibration.STATUS_FAILED,
+            reason_code=calibration.INC_POSITIVE_FAILED,
+            detail="no consequential tool with a content argument",
+            tools=(),
+            seed_control=calibration.SeedControl(
+                calibration.SEED_NOT_DECLARED, None, "the target declares no seed_arm"
+            ),
+        )
+
+    monkeypatch.setattr(calibration, "calibrate_custom_target", _fake)
+    return calls
+
+
+def test_check_without_authorize_makes_no_calibration_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    calls = _patch_calibrate_custom_target(monkeypatch)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert calls == []
+    assert "calibration" not in (result.output + (result.stderr or ""))
+
+
+def test_check_authorize_runs_calibration_and_prints_the_reason_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    calls = _patch_calibrate_custom_target(monkeypatch)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(
+        app, ["check", "--target-file", str(target_file), "--authorize", "custom"]
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert calls == [True]
+    combined = result.output + (result.stderr or "")
+    assert "MYL-INC-003" in combined
+
+
+def test_check_authorize_must_match_the_target_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+    calls = _patch_calibrate_custom_target(monkeypatch)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(
+        app, ["check", "--target-file", str(target_file), "--authorize", "wrong-value"]
+    )
+    assert result.exit_code == EXIT_CONFIG
+    assert "--authorize must equal the family name" in (result.stderr or result.output)
+    assert calls == []
+
+
 def test_check_unrelated_approval_shaped_tool_does_not_silence_the_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -120,6 +120,13 @@ up in [Reason codes](reason-codes.md).
 
 So when both kinds of problem are present, the `--out` error is the one you see first.
 
+For a custom (`--target-file`) target, `gate` then calibrates the declared
+`effect_probe` — real writes proving it can see a change — once, before its scan
+phase runs. This is the same calibration `scan`/`validate`/`ablate` each run on
+their own path; see [Calibration](target-file.md#calibration) for what
+`calibration.controls` permits and [Reason codes](reason-codes.md) for what an
+uncalibrated probe reads as.
+
 ### What `gate` touches
 
 **By default, nothing outside its own output directory.** `gate` writes

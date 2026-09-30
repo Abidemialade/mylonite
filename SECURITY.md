@@ -101,6 +101,19 @@ The project enforces the following non-negotiables:
    they own, point `mcp:github` at a throwaway repository with a
    fine-grained PAT scoped only to that repo, and treat `mcp:fetch`'s
    targets as out-of-scope for live scans against shared infrastructure.
+
+   **Calibration is live driving too.** Before trusting a custom target's
+   declared `effect_probe`, `scan`/`gate`/`validate`/`ablate` (and, on its
+   own, `mylonite check --authorize`) run a calibration step that makes REAL
+   writes through a consequential tool and, for W2 targets, plants and
+   recalls a record via `seed_arm` — proving the probe can actually see a
+   change before its "no change" is ever trusted. This is gated by the same
+   `--authorize` rule as the rest of this section: it never runs without
+   authorization, and a target file's `calibration.controls` (`auto` |
+   `allow` | `skip`; see [`docs/target-file.md`](docs/target-file.md#calibration))
+   additionally withholds it for a remote (`sse`/`http`) target under the
+   `auto` default. Every control record it writes carries a `myl-cal-`
+   prefixed token, so an operator can find and remove them afterward.
 2. **No bundled targeting of public services.** Mylonite ships no built-in
    target list, allowlist of public agents, or convenience flags pointing at
    third-party production systems.

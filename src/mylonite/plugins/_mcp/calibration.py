@@ -268,6 +268,78 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
     return result
 
 
+async def calibrate_custom_target(
+    adapter: MCPSessionAdapterBase, *, authorized: bool
+) -> CalibrationResult:
+    """Calibrate ``adapter``'s target once, honouring ``calibration.controls``
+    and the caller's own ``authorized`` gesture.
+
+    Cached: a second call for the same spec+scope (``spec_key``) returns the
+    recorded result without launching the target again — callers (``scan``,
+    ``validate``, ``gate``, ``ablate``, the testkit) each call this once on
+    their own path, and a long-lived process re-running the same target finds
+    the same result.
+
+    Whether the controls are allowed to run real writes is decided from
+    ``adapter._spec.calibration_controls`` and ``authorized``, never from
+    ``allow_writes`` directly:
+
+    * ``"skip"`` never runs, regardless of ``authorized``.
+    * ``"auto"`` (the default) runs only when ``authorized`` is True AND the
+      target's transport is ``"stdio"`` — a remote (``sse``/``http``) target
+      needs the explicit ``"allow"`` opt-in.
+    * ``"allow"`` runs whenever ``authorized`` is True, on any transport.
+
+    ``authorized`` is not re-derived here: every caller reaches this function
+    only after its own ``--authorize`` gate (or, for the testkit, the
+    ``MYLONITE_LIVE_TARGET=1`` opt-in an emitted test's skip guard already
+    checked) has already passed — this parameter exists so that guarantee is
+    still enforced defensively, at the one place that can make real writes,
+    rather than assumed.
+
+    :func:`calibrate` itself lets a failure to launch the target or list its
+    tools propagate; this wrapper catches that instead of crashing the caller,
+    and records a not-calibrated result so a broken target isn't relaunched on
+    every subsequent call either.
+    """
+    spec = adapter._spec
+    scope = adapter._scope
+    cached = lookup(spec, scope)
+    if cached is not None:
+        return cached
+
+    allow = authorized and _controls_permit_writes(spec)
+    try:
+        result = await calibrate(adapter, allow_writes=allow)
+    except Exception as exc:
+        result = CalibrationResult(
+            spec_key=spec_key(spec, scope),
+            status=STATUS_FAILED,
+            reason_code=INC_POSITIVE_FAILED,
+            detail=f"could not launch the target to calibrate it: {type(exc).__name__}: {exc}",
+            tools=(),
+            seed_control=SeedControl(
+                SEED_NOT_RUN,
+                INC_SEED_NOT_RUN,
+                "the target could not be launched to run the seed control",
+            ),
+        )
+        record(result)
+    return result
+
+
+def _controls_permit_writes(spec: target_registry.TargetSpec) -> bool:
+    """Whether ``spec.calibration_controls`` allows real writes, independent
+    of ``authorized`` (the caller ANDs the two together)."""
+    controls = spec.calibration_controls
+    if controls == "skip":
+        return False
+    if controls == "allow":
+        return True
+    # "auto": authorized stdio targets only.
+    return spec.transport == "stdio"
+
+
 def _new_token() -> str:
     return f"{TOKEN_PREFIX}{secrets.token_hex(6)}"
 

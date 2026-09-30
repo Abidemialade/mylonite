@@ -36,6 +36,7 @@ from mylonite._redaction import (
     CREDENTIAL_TOP_LEVEL_SECTIONS,
 )
 from mylonite.plugins._mcp.target_registry import (
+    CalibrationSettings,
     ControlConfig,
     EffectProbeSpec,
     InvalidTargetScope,
@@ -118,6 +119,14 @@ class TargetFile(BaseModel):
     # non-positive value is not a meaningful timeout (fires instantly or
     # never). See target_registry.TargetSpec.timeout_s.
     timeout_s: float | None = Field(default=None, gt=0)
+    # Real-write calibration controls (proving the effect_probe can see a
+    # change before its "no change" is trusted — see calibration.py). None
+    # (default) keeps today's behaviour, "auto": authorized stdio targets
+    # only. MCP transports (stdio/sse/http) only -- rejected together with
+    # timeout_s in _check below for a rest target, which has no MCP session
+    # to calibrate. See target_registry.CalibrationSettings /
+    # TargetSpec.calibration_controls.
+    calibration: CalibrationSettings | None = None
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
@@ -144,6 +153,11 @@ class TargetFile(BaseModel):
                 raise ValueError(
                     "timeout_s is for MCP transports (stdio/sse/http); a rest target's "
                     "HTTP client timeout is request.timeout_s — set that instead"
+                )
+            if self.calibration is not None:
+                raise ValueError(
+                    "calibration.controls is for MCP transports (stdio/sse/http); a rest "
+                    "target has no MCP session for calibrate_custom_target() to drive"
                 )
         else:  # sse | http — remote MCP
             if not self.url:
@@ -284,6 +298,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         headers=dict(tf.headers),
         request=tf.request,
         timeout_s=tf.timeout_s,
+        calibration_controls=tf.calibration.controls if tf.calibration is not None else "auto",
     )
 
 

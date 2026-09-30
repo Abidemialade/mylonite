@@ -19,7 +19,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -126,6 +126,28 @@ class EffectProbeSpec(BaseModel):
     verify_args_template: dict[str, Any] = {}
     expect_marker: str | None = None  # may reference {payload}/{scope}
     deferred_markers: tuple[str, ...] = ()
+
+
+class CalibrationSettings(BaseModel):
+    """Whether :func:`~mylonite.plugins._mcp.calibration.calibrate_custom_target`
+    may run its controls — real writes through a consequential tool — against
+    this target.
+
+    * ``"auto"`` (default): run only on an authorized ``stdio`` target. Every
+      custom target must already carry ``--authorize`` to reach a live-driving
+      command at all; ``auto`` additionally withholds consent for a remote
+      (``sse``/``http``) target, since real writes against someone else's
+      already-running server need a separate, explicit opt-in.
+    * ``"allow"``: run regardless of transport, once authorized — the
+      operator has confirmed real writes against this target (including a
+      remote one) are fine.
+    * ``"skip"``: never run. The effect probe (if declared) stays uncalibrated,
+      so a "no change" it reports can never certify a resisted attempt.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    controls: Literal["auto", "allow", "skip"] = "auto"
 
 
 class ControlConfig(BaseModel):
@@ -351,6 +373,12 @@ class TargetSpec:
     # DEFAULT_MCP_READ_TIMEOUT and factory.py, which threads this value into
     # both constructor arguments. Ignored for transport: rest (unused there).
     timeout_s: float | None = None
+    # Whether calibrate_custom_target() may run its controls (real writes)
+    # against this target. See CalibrationSettings for what each value means.
+    # "auto" (the default) keeps every existing target file's behaviour
+    # unchanged on a stdio target and withholds consent on a remote one.
+    # Ignored for transport: rest (no MCP session to calibrate there).
+    calibration_controls: Literal["auto", "allow", "skip"] = "auto"
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""
