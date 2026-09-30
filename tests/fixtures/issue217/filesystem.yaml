@@ -1,0 +1,80 @@
+# A "first-time user" custom target.yaml for the official
+# @modelcontextprotocol/server-filesystem reference MCP server (issue #217).
+#
+# This is a TEST INPUT (docs/superpowers/plans/2026-09-30-no-false-clean.md,
+# task T13) — nothing in this repo yet asserts a scan verdict against it.
+# That lands with T7 (the judge fix) and T13's own integration test; today
+# it exists so those later tests don't have to re-derive it.
+#
+# Provenance — how a first-time user would actually arrive at this file:
+#
+# * Launch command and the four tools under
+#   control_config.consequential_tools: copied from
+#   verification/EXTERNAL_DIFFERENTIAL.md's "second proof" table, the
+#   in-repo recipe for reproducing #217 against real OSS MCP servers.
+#   Those four (write_file, edit_file, create_directory, move_file) are
+#   exactly what mylonite.scan.control_shim.consequential_tool_names
+#   computes from this server's own MCP ToolAnnotations (readOnlyHint:
+#   false) — see tests/mcp_plugin/fakes/neutral_servers.py and
+#   tests/mcp_plugin/test_scaffold_issue217.py, which pin the scaffold's
+#   "Consequential-action tools detected" hint to that same list (#217
+#   cause 3; the OLD heuristic hint found ZERO of these four).
+# * `mylonite scan --scaffold` against this server's live tool surface
+#   DOES auto-suggest a verify_tool — but the wrong one for this job:
+#   `list_directory` (it matches the scaffold's "list"/"report" name
+#   hints), which only confirms a path EXISTS, not what was written into
+#   it. A first-time user who has read
+#   verification/EXTERNAL_DIFFERENTIAL.md overrides that suggestion with
+#   its designated read tool, `read_text_file`, which confirms the file's
+#   actual content.
+# * `verify_args_template: {}` follows docs/target-file.md's Full
+#   annotated example verbatim, rather than working out read_text_file's
+#   own schema (it REQUIRES a `path` string) — the scaffold only offers a
+#   filled-in argument stub for the tool IT suggested (list_directory), not
+#   for a tool the operator swapped in by hand. This reproduces #217's
+#   "the verify read errors" cause.
+# * `expect_marker: "{payload}"` follows docs/target-file.md's current
+#   effect_probe guidance verbatim ("a marker the agent's own call
+#   carries — the recipient address, a row it wrote, or `{payload}`").
+#   That line is what task T14's (deferred) docs fix will change; today it
+#   still recommends `{payload}`, which is #217's other cause: a
+#   plant-and-recall server reflects the payload back on its own, so the
+#   marker can match without the agent having done anything.
+# * weakness_classes is narrowed to [W4] (unconfirmed consequential
+#   action) — server-filesystem's app-design flaw here, per
+#   EXTERNAL_DIFFERENTIAL.md, is that none of its four state-changing
+#   tools confirm or gate the change; W2 needs no seed_arm to probe that,
+#   so seed_arm is left undeclared.
+
+family: issue217-filesystem
+command: npx
+args: ["-y", "@modelcontextprotocol/server-filesystem", "./.mylonite-issue217/sandbox"]
+
+weakness_classes: [W4]
+
+primary_tools:
+  [
+    read_file,
+    read_text_file,
+    read_media_file,
+    read_multiple_files,
+    write_file,
+    edit_file,
+    create_directory,
+    list_directory,
+    list_directory_with_sizes,
+    directory_tree,
+    move_file,
+    search_files,
+    get_file_info,
+    list_allowed_directories,
+  ]
+
+control_config:
+  consequential_tools: [write_file, edit_file, create_directory, move_file]
+
+effect_probe:
+  verify_tool: read_text_file
+  verify_args_template: {}
+  expect_marker: "{payload}"
+  deferred_markers: ["queued for approval", "pending review"]
