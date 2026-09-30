@@ -34,6 +34,7 @@ _TIER = {
     "gate": 2,
     "report": 2,
     "cli": 3,
+    "commands": 3,
 }
 
 
