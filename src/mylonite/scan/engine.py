@@ -16,13 +16,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mylonite import reason_codes
 from mylonite._redaction import redact
 from mylonite.contracts import (
     ExploitRecord,
@@ -314,12 +315,27 @@ def _declared_classes_without_seeds(descriptor: TargetDescriptor) -> dict[str, s
 
 def _unseeded_abort_detail(unseeded: dict[str, str]) -> str:
     lines = [
-        "error: this target declares weakness class(es) its tool surface cannot cover at "
-        "all, so nothing was scanned (running the rest would read as clean with these "
-        "never attempted):"
+        reason_codes.tag(
+            reason_codes.ABT_NO_PAYLOADS_UNSEEDED,
+            "error: this target declares weakness class(es) its tool surface cannot cover "
+            "at all, so nothing was scanned (running the rest would read as clean with "
+            "these never attempted):",
+        )
     ]
     lines.extend(f"  {w}: {reason}" for w, reason in sorted(unseeded.items()))
     return "\n".join(lines)
+
+
+def _weakness_filter_abort_detail(active_filter: Iterable[str], family: str) -> str:
+    """#205c: a ``--weakness-class`` filter that matched nothing is a different
+    cause from "this target declares no weakness classes at all" (the generic
+    ``no_payloads`` text), so it gets its own code and message."""
+    fix = reason_codes.get(reason_codes.ABT_NO_PAYLOADS_FILTER).fix
+    return reason_codes.tag(
+        reason_codes.ABT_NO_PAYLOADS_FILTER,
+        f"error: --weakness-class {sorted(active_filter)} matched no seeds applicable to "
+        f"this target ({family!r}); nothing was scanned. {fix}",
+    )
 
 
 class ScanEngine:
@@ -504,16 +520,9 @@ class ScanEngine:
                         known,
                     )
                     aborted = AbortReason.NO_PAYLOADS
-                    # #205c: a --weakness-class filter that matched nothing is a
-                    # DIFFERENT cause from "this target declares no weakness
-                    # classes at all" (the generic NO_PAYLOADS text) -- name it.
                     active_filter = active_weakness_filter()
                     if active_filter:
-                        no_payloads_detail = (
-                            f"error: --weakness-class {sorted(active_filter)} matched no "
-                            f"seeds applicable to this target ({family!r}); nothing was "
-                            "scanned. Drop or widen the filter, then re-run."
-                        )
+                        no_payloads_detail = _weakness_filter_abort_detail(active_filter, family)
                 return self._finalize(
                     attempts,
                     exploits,

@@ -237,13 +237,13 @@ when there is no store-and-recall pair AND no content-processing tool. If a clas
 run zero seeds either way, the run refuses outright and names each one:
 
 ```text
-error: this target declares weakness class(es) its tool surface cannot cover at all
-(every attempt for them would never run):
+error: [MYL-PRE-001] this target declares weakness class(es) its tool surface cannot
+cover at all (every attempt for them would never run):
   W2: this server has no tool that can store content for a later recall — remove W2
       from weakness_classes, or declare a seed_arm
 ```
 
-The fix is always one of the two named: drop the class from `weakness_classes`, or
+The fix is always one of the two named ([MYL-PRE-001](reason-codes.md#myl-pre-001)): drop the class from `weakness_classes`, or
 declare the missing piece (a `seed_arm` for W2, `control_config.egress_tools` for W3,
 `control_config.consequential_tools` for W4). `mylonite scan --scaffold` only ever
 suggests a class it already confirmed is coverable for the surface it just introspected,

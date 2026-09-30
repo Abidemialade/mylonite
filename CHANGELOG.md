@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Every result that is not a verdict now carries a reason code you can look
+  up.** A NOT TESTED attempt, an aborted scan and a pre-flight refusal each
+  print a stable code on its error line, such as `[MYL-NT-005]` or
+  `[MYL-PRE-001]`, and [docs/reason-codes.md](docs/reason-codes.md) gives
+  each code's cause and fix. The summary's `coverage:` and `judge:`
+  lines list the codes behind their counts (`[MYL-NT-005 x2]`). A code keeps
+  its meaning once shipped. An aborted `provider_unreachable` scan, which
+  used to end with only `aborted: provider_unreachable`, now says what to
+  check: the provider credentials, `--model`, and whether this machine can
+  reach the provider.
+
 ### Changed
 
 - **`gate` now gates every finding a scan proves, not just the first.**

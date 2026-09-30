@@ -15,7 +15,7 @@ import io
 import json
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
@@ -29,8 +29,15 @@ from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
 from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
+from mylonite.reason_codes import format_code_counts
 from mylonite.scan._llm import LLMSpend
-from mylonite.scan.coverage import ATTEMPT_CLASS, AttemptClass, adjudication_counts
+from mylonite.scan.coverage import (
+    ATTEMPT_CLASS,
+    AttemptClass,
+    adjudication_counts,
+    attempt_reached_no_verdict,
+    reason_code_for_attempt,
+)
 from mylonite.scan.engine import ScanResult
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
@@ -393,7 +400,8 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             else "unparseable/failed LLM output, or an effect_probe errored"
         )
         line = (
-            f"judge: {report.inconclusive_attempts}/{denom} attempts inconclusive "
+            f"judge: {report.inconclusive_attempts}/{denom} attempts inconclusive"
+            f"{_codes_suffix(report.attempts, no_verdict_only=True)} "
             f"({cause_label}) - {report.fallback_breakdown}"
         )
         # A scan where every judged attempt fell back found nothing because it
@@ -425,7 +433,8 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     if not_tested:
         console_print(
             console,
-            f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED "
+            f"[bold red]coverage: {not_tested} attempt(s) were NOT TESTED"
+            f"{_codes_suffix(report.attempts)} "
             "(planted payload undelivered, no seed_arm, no plant/sink/recall "
             "surface, malformed seed metadata, an unresolvable seed, a planner "
             "failure, or an unexpected error during invocation/judging) - those "
@@ -441,6 +450,23 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     if scope:
         console_print(console, scope)
     return redact(buffer.getvalue())
+
+
+def _codes_suffix(attempts: Sequence[object], *, no_verdict_only: bool = False) -> str:
+    """`` [MYL-NT-005 x2, ...]``: the reason codes behind a summary line, each
+    looked up in docs/reason-codes.md. Empty when no attempt carries a code.
+
+    Rich markup-escaped: a bare ``[MYL-...]`` would otherwise parse as a style tag.
+    """
+    codes = [
+        code
+        for a in attempts
+        if not no_verdict_only or attempt_reached_no_verdict(a)
+        if (code := reason_code_for_attempt(a)) is not None
+    ]
+    if not codes:
+        return ""
+    return " " + rich_escape(f"[{format_code_counts(codes)}]")
 
 
 def format_spend(spend: LLMSpend, *, sep: str) -> str:

@@ -157,7 +157,8 @@ def test_describe_failure_on_a_dry_run_is_a_warning(
             raise RuntimeError("boom")
 
     refuse_uncoverable_weakness_classes(tf, _FailingAdapter(), dry_run=True)  # must not raise
-    assert "warning: could not describe the server" in capsys.readouterr().err
+    # The level label still leads the line; the reason code follows it.
+    assert "warning: [MYL-PRE-003] could not describe the server" in capsys.readouterr().err
 
 
 def test_a_class_added_by_the_flag_names_the_flag_not_the_file(

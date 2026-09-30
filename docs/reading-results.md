@@ -37,6 +37,10 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     | `skipped_invalid_metadata` / `skipped_unknown_seed` | the attempt was malformed before it ran |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
 
+    Each NOT TESTED attempt also carries a reason code, such as `MYL-NT-005`, shown on
+    the summary's `coverage:` line. Look it up in [Reason codes](reason-codes.md) for
+    the fix.
+
     `skipped_planner_no_engagement` is the subtlest of these: the attack was
     generated and delivered, and the agent never exercised it against the target.
     Nothing was put to the target, so it is not evidence the target is defended.
@@ -58,17 +62,17 @@ NOT TESTED cause that accounts for most of the untested attempts, and its remedy
 a fixed "check your provider credentials" regardless of what actually happened:
 
 ```text
-error: coverage was incomplete or absent and nothing was found, but the scan was never
-formally aborted (...). This is NOT a clean result — 3 of 3 untested attempt(s) had no
-seed_arm to plant the payload — declare a seed_arm in the target file (see
-docs/target-file.md), then re-run.
+error: [MYL-NT-005] coverage was incomplete or absent and nothing was found, but the
+scan was never formally aborted (...). This is NOT a clean result — 3 of 3 untested
+attempt(s) had no seed_arm to plant the payload — declare a seed_arm in the target
+file (see docs/target-file.md), then re-run.
 ```
 
 Credentials are named only when attempts actually failed on a provider call
 (`outcome: error`, or a no-verdict attempt whose LLM call itself raised). A run whose
 `llm:` line shows dozens of successful provider calls will never get that hint. When no
 single cause accounts for most of the untested attempts, the hint falls back to the
-generic wording above.
+generic wording and lists every reason code it saw.
 
 ```
 leg          result   metric  detail

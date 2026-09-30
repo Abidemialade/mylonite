@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Final, get_args
 
+from mylonite import reason_codes
 from mylonite.contracts import AbortReason as AbortReason
 from mylonite.contracts import ScanAttemptOutcome, ScanReport
 from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SUCCESS
@@ -313,37 +314,44 @@ _EXIT_CODE_BY_ABORT: Final[dict[AbortReason, int]] = {
     AbortReason.WALL_CLOCK_TIMEOUT: EXIT_CONFIG,
 }
 
-# Verbatim (or near-verbatim) copies of the stderr lines cli.py's `scan`
-# command prints via `echo_err` for each abort reason. `provider_unreachable`
-# has no dedicated `echo_err` message in cli.py today — it relies on
-# render_summary's generic "aborted: <reason>" line — so it maps to `None`.
+# The stderr line `scan` prints (via `echo_err`) for each abort reason. Each
+# leads with the abort's reason code and ends with that code's registered fix,
+# so the remedy has one source: `mylonite.reason_codes`.
 #
-# `budget_exceeded` used to as well, which read as an anticlimax: the run
-# stopped, the exit code was right (EXIT_BUDGET), and the only explanation was
-# the bare words "aborted: budget_exceeded". It is the abort an operator is most
-# likely to hit and the easiest to act on, so it says what to do — matching the
-# treatment `wall_clock_timeout`, its exact sibling, already had.
+# `budget_exceeded` used to have no message, which read as an anticlimax: the
+# run stopped, the exit code was right (EXIT_BUDGET), and the only explanation
+# was the bare words "aborted: budget_exceeded". It is the abort an operator is
+# most likely to hit and the easiest to act on, so it says what to do --
+# matching the treatment `wall_clock_timeout`, its exact sibling, already had.
+# `provider_unreachable` had the same gap until reason codes gave it a fix.
+
+
+def _abort_message(code: str, what: str) -> str:
+    return reason_codes.tag(code, f"error: {what} {reason_codes.get(code).fix}")
+
+
 _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
-    AbortReason.BUDGET_EXCEEDED: (
-        "error: scan exhausted its LLM call budget and stopped early; coverage is "
-        "incomplete and the seeds that had not started were cancelled. Raise "
-        "--max-llm-calls, or run fewer weakness classes — --weakness-class on a "
-        "reference/bundled target, weakness_classes in the target file for a "
-        "custom one — then re-run."
+    AbortReason.BUDGET_EXCEEDED: _abort_message(
+        reason_codes.ABT_BUDGET_EXCEEDED,
+        "scan exhausted its LLM call budget and stopped early; coverage is incomplete "
+        "and the seeds that had not started were cancelled.",
     ),
-    AbortReason.PROVIDER_UNREACHABLE: None,
-    AbortReason.NO_PAYLOADS: (
-        "error: no seeds were applicable to this target, so nothing was scanned. "
-        "If this is a custom MCP app, declare which weakness classes it exposes "
-        "via --target-file (weakness_classes) or --weakness-class."
+    AbortReason.PROVIDER_UNREACHABLE: _abort_message(
+        reason_codes.ABT_PROVIDER_UNREACHABLE,
+        "LLM provider calls failed several times in a row, so the scan stopped early; "
+        "coverage is incomplete.",
     ),
-    AbortReason.DESCRIBE_FAILED: (
-        "error: could not describe the target (adapter.describe() failed); "
-        "nothing was scanned. Check the target command/scope and connectivity."
+    AbortReason.NO_PAYLOADS: _abort_message(
+        reason_codes.ABT_NO_PAYLOADS,
+        "no seeds were applicable to this target, so nothing was scanned.",
     ),
-    AbortReason.WALL_CLOCK_TIMEOUT: (
-        "error: scan exceeded its wall-clock budget and stopped early; coverage "
-        "is incomplete. Raise the timeout or narrow the scan, then re-run."
+    AbortReason.DESCRIBE_FAILED: _abort_message(
+        reason_codes.ABT_DESCRIBE_FAILED,
+        "could not describe the target (adapter.describe() failed); nothing was scanned.",
+    ),
+    AbortReason.WALL_CLOCK_TIMEOUT: _abort_message(
+        reason_codes.ABT_WALL_CLOCK_TIMEOUT,
+        "scan exceeded its wall-clock budget and stopped early; coverage is incomplete.",
     ),
 }
 
@@ -422,59 +430,38 @@ _PROVIDER_EXCEPTION_TYPE_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
-_BUCKET_REMEDY: Final[dict[str, str]] = {
-    _PROVIDER_ERROR_BUCKET: (
-        "failed on provider calls — check each attempt's verdict_reason/error_detail "
-        "(a common cause is missing or invalid provider credentials)"
-    ),
-    _GENERIC_ERROR_BUCKET: "raised an error — see each attempt's verdict_reason/error_detail",
-    "launch_failure": (
-        "never launched the target — check the target file's command:/args: and that "
-        "the server actually starts"
-    ),
-    "skipped_no_seed_arm": (
-        "had no seed_arm to plant the payload — declare a seed_arm in the target file "
-        "(see docs/target-file.md)"
-    ),
-    "skipped_payload_not_delivered": (
-        "planted a payload the planner never retrieved — check the seed_arm's "
-        "args_template/id_key and the drive's recall wiring"
-    ),
-    "skipped_planner_no_engagement": (
-        "got no tool calls from the model at all — check the target's purpose/"
-        "system_prompt and that the planner model is tool-capable"
-    ),
-    "not_applicable": (
-        "targeted a capability this surface doesn't expose — the seed doesn't fit "
-        "this target; check weakness_classes and the target's tool surface"
-    ),
+#: What happened, per bucket, phrased to follow "N of M untested attempt(s)".
+#: The fix that follows it comes from the bucket's reason code, so the remedy
+#: text has a single source (`mylonite.reason_codes`).
+_BUCKET_PHRASE: Final[dict[str, str]] = {
+    _PROVIDER_ERROR_BUCKET: "failed on provider calls",
+    _GENERIC_ERROR_BUCKET: "raised an error",
+    "launch_failure": "never launched the target",
+    "skipped_no_seed_arm": "had no seed_arm to plant the payload",
+    "skipped_payload_not_delivered": "planted a payload the planner never retrieved",
+    "skipped_planner_no_engagement": "got no tool calls from the model at all",
+    "not_applicable": "targeted a capability this surface doesn't expose",
     _UNDECIDED_EFFECT_PROBE_BUCKET: (
-        "reached no verdict because the declared effect_probe's verify call errored — "
-        "check the effect_probe wiring (verify_tool, verify_args_template)"
+        "reached no verdict because the declared effect_probe's verify call errored"
     ),
     _UNDECIDED_UNPARSEABLE_JUDGE_BUCKET: (
-        "reached no verdict because the LLM judge call succeeded but its output wasn't "
-        "usable — check the judge model (--judge-model)"
+        "reached no verdict because the LLM judge call succeeded but its output wasn't usable"
     ),
     _UNDECIDED_NO_ADJUDICATOR_BUCKET: (
         "reached no verdict because the deterministic predicate was inconclusive and no "
-        "LLM judge was configured to fall back to — set a judge model, or accept this as "
-        "an intentional predicate-only run"
+        "LLM judge was configured to fall back to"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"
     ),
-    "skipped_planner_failure": (
-        "failed before the attack could be delivered — check the target/model connectivity"
-    ),
-    "skipped_invalid_metadata": (
-        "had invalid seed metadata — this looks like an internal catalogue defect; "
-        "please file an issue"
-    ),
-    "skipped_unknown_seed": (
-        "could not be resolved from the seed catalogue — this looks like an internal "
-        "defect; please file an issue"
-    ),
+    "skipped_planner_failure": "failed before the attack could be delivered",
+    "skipped_invalid_metadata": "had invalid seed metadata",
+    "skipped_unknown_seed": "could not be resolved from the seed catalogue",
+}
+
+_BUCKET_REMEDY: Final[dict[str, str]] = {
+    bucket: f"{phrase} — {reason_codes.get(reason_codes.NT_CODE_BY_BUCKET[bucket]).fix}"
+    for bucket, phrase in _BUCKET_PHRASE.items()
 }
 
 _GENERIC_INCOMPLETE_COVERAGE_REMEDY: Final = (
@@ -516,6 +503,15 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
     return str(outcome)
 
 
+def reason_code_for_attempt(attempt: object) -> str | None:
+    """The reason code for a NOT_TESTED attempt, or ``None`` for an attempt that
+    isn't NOT_TESTED (a finding, a real negative, a dry run)."""
+    bucket = _not_tested_cause_bucket(attempt)
+    if bucket is None:
+        return None
+    return reason_codes.NT_CODE_BY_BUCKET[bucket]
+
+
 def _incomplete_coverage_no_abort_message(report: ScanReport) -> str:
     """The #212 fix: name the DOMINANT NOT_TESTED cause and its remedy, rather
     than always pointing at provider credentials. Falls back to generic
@@ -543,11 +539,21 @@ def _incomplete_coverage_no_abort_message(report: ScanReport) -> str:
 
     dominant_bucket, dominant_count = max(buckets.items(), key=lambda kv: kv[1])
     if dominant_count <= total_not_tested / 2:
-        return prefix + _GENERIC_INCOMPLETE_COVERAGE_REMEDY + ", then re-run."
+        # No single cause: name every code seen, so each can still be looked up.
+        codes = reason_codes.format_code_counts(
+            code
+            for bucket, count in buckets.items()
+            for code in [reason_codes.NT_CODE_BY_BUCKET[bucket]] * count
+        )
+        return (
+            f"{prefix}{_GENERIC_INCOMPLETE_COVERAGE_REMEDY} (reason codes: {codes}), then re-run."
+        )
 
-    remedy = _BUCKET_REMEDY.get(dominant_bucket, _GENERIC_INCOMPLETE_COVERAGE_REMEDY)
-    return (
-        f"{prefix}{dominant_count} of {total_not_tested} untested attempt(s) {remedy}, then re-run."
+    code = reason_codes.NT_CODE_BY_BUCKET[dominant_bucket]
+    remedy = _BUCKET_REMEDY[dominant_bucket]
+    return reason_codes.tag(
+        code,
+        f"{prefix}{dominant_count} of {total_not_tested} untested attempt(s) {remedy}, then re-run.",
     )
 
 
@@ -694,7 +700,14 @@ class ScanOutcome:
 
         if abort is not None:
             exit_code = _EXIT_CODE_BY_ABORT[abort]
-            operator_message = abort_detail or _OPERATOR_MESSAGE_BY_ABORT[abort]
+            # A detail the engine already coded (a specific `no_payloads` cause)
+            # keeps its code; any other detail gets the abort's own code.
+            message = abort_detail or _OPERATOR_MESSAGE_BY_ABORT[abort]
+            operator_message = (
+                reason_codes.tag(reason_codes.ABT_CODE_BY_ABORT[abort.value], message)
+                if message
+                else None
+            )
         elif incomplete and report.findings_count == 0:
             # No formal AbortReason was recorded, yet coverage never reached
             # EXERCISED (PARTIAL or NOT_EXERCISED) and nothing was found. Must

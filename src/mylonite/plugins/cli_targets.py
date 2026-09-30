@@ -21,6 +21,7 @@ from typing import Any
 
 import typer
 
+from mylonite import reason_codes
 from mylonite._cli_io import echo_err
 from mylonite.exit_codes import EXIT_CONFIG
 
@@ -262,19 +263,17 @@ def refuse_uncoverable_weakness_classes(
     except Exception as exc:
         if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
             what = f"within {timeout_s:g}s"
-            fix = (
-                "Re-run (a first npx/uvx download is cached after that), or raise "
-                "timeout_s in the target file."
-            )
+            code = reason_codes.PRE_DESCRIBE_TIMEOUT
         else:
             what = f"({type(exc).__name__})"
-            fix = (
-                "Check that the target file's command and args start the server and "
-                "that it lists its tools, then re-run."
-            )
+            code = reason_codes.PRE_DESCRIBE_FAILED
+        fix = reason_codes.get(code).fix
         echo_err(
-            f"{level}: could not describe the server {what} to check which declared "
-            f"weakness classes can run. {fix}"
+            reason_codes.tag(
+                code,
+                f"{level}: could not describe the server {what} to check which declared "
+                f"weakness classes can run. {fix}",
+            )
         )
         if not dry_run:
             raise typer.Exit(code=EXIT_CONFIG) from exc
@@ -291,8 +290,11 @@ def refuse_uncoverable_weakness_classes(
     if not uncoverable:
         return
     echo_err(
-        f"{level}: this target declares weakness class(es) its tool surface cannot cover "
-        "at all (every attempt for them would never run):"
+        reason_codes.tag(
+            reason_codes.PRE_UNCOVERABLE_CLASS,
+            f"{level}: this target declares weakness class(es) its tool surface cannot "
+            "cover at all (every attempt for them would never run):",
+        )
     )
     for weakness, reason in sorted(uncoverable.items()):
         if weakness in added_by_flag:
@@ -350,11 +352,14 @@ def autowire_seed_arm(
     except TimeoutError:
         # #186: a first-run npx/uvx download can legitimately take this long --
         # must NOT fall through to the "add a seed_arm" advice below.
+        fix = reason_codes.get(reason_codes.PRE_AUTOWIRE_TIMEOUT).fix
         echo_err(
-            f"auto-wire: timed out after {budget_s:.0f}s starting or "
-            "describing the server (first-run npx or uvx downloads can be "
-            "slow). Re-run once the download finishes -- it's cached after "
-            "that -- or set timeout_s: in the target file to raise this budget."
+            reason_codes.tag(
+                reason_codes.PRE_AUTOWIRE_TIMEOUT,
+                f"auto-wire: timed out after {budget_s:.0f}s starting or "
+                "describing the server (first-run npx or uvx downloads can be "
+                f"slow). {fix}",
+            )
         )
         raise typer.Exit(code=EXIT_CONFIG) from None
     except AdapterDescribeFailed as exc:
@@ -362,7 +367,7 @@ def autowire_seed_arm(
         # (e.g. an inner McpError/TimeoutError naming timeout_s -- see
         # MCPSessionAdapterBase.describe -- or a remote transport's own
         # cause). Show it verbatim; never fall through to the seed_arm advice.
-        echo_err(f"auto-wire: {exc}")
+        echo_err(reason_codes.tag(reason_codes.PRE_AUTOWIRE_DESCRIBE_FAILED, f"auto-wire: {exc}"))
         raise typer.Exit(code=EXIT_CONFIG) from None
     except Exception as exc:
         descriptor = None

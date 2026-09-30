@@ -105,6 +105,10 @@ same "abort always wins" rule `scan` follows on its own (see
 `gate` as "check `PR_BODY.md` before you decide this was just an infrastructure
 failure", not as a reason to discard the run.
 
+The error line carries reason code `[MYL-ABT-001]`. The other abort and
+incomplete-coverage errors `gate` prints carry codes the same way; look each one
+up in [Reason codes](reason-codes.md).
+
 ### Pre-flight order
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:
