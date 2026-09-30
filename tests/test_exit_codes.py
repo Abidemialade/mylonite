@@ -8,13 +8,29 @@ re-defines a code as a literal, or if the documented values drift.
 
 from __future__ import annotations
 
+import itertools
 import re
 from pathlib import Path
+
+import pytest
 
 from mylonite import cli, exit_codes
 from mylonite.gate import orchestrator
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "mylonite"
+
+# Every exit code defined today (0-8) -- see test_documented_values below.
+_ALL_CODES = [
+    exit_codes.EXIT_SUCCESS,
+    exit_codes.EXIT_FINDINGS,
+    exit_codes.EXIT_CONFIG,
+    exit_codes.EXIT_BUDGET,
+    exit_codes.EXIT_PROVIDER,
+    exit_codes.EXIT_NOT_KEPT,
+    exit_codes.EXIT_GENERATE_FAILED,
+    exit_codes.EXIT_VALIDATE_FAILED,
+    exit_codes.EXIT_PR_FAILED,
+]
 
 # A module-level assignment of an EXIT_* / _EXIT_* name to an integer *literal*.
 # Assignments to another named constant (e.g. `_X: Final = EXIT_CONFIG`) are fine.
@@ -51,3 +67,57 @@ def test_only_exit_codes_module_defines_the_literals() -> None:
         "these modules define an exit code as a literal instead of importing it "
         f"from mylonite.exit_codes: {offenders}"
     )
+
+
+# -- SEVERITY_ORDER / most_severe: explicit severity, not a numeric max() ---------
+#
+# `scan/ablation.py`'s `total_failure_exit_code` used to pick `max(exit_code for ...)`,
+# which happened to work only because every code minted so far ranks more severe as
+# its number increases. That's an accident of numbering, not a rule -- a later code
+# (e.g. a 9 or 10 that means something less severe than 8) would silently break it.
+# `most_severe` replaces the numeric comparison with an explicit order so future
+# codes can be placed deliberately.
+
+
+def test_severity_order_contains_every_documented_code_exactly_once() -> None:
+    assert sorted(exit_codes.SEVERITY_ORDER) == sorted(_ALL_CODES)
+    assert len(exit_codes.SEVERITY_ORDER) == len(set(exit_codes.SEVERITY_ORDER))
+
+
+def test_severity_order_is_not_simply_sorted_numerically() -> None:
+    # Guards against a no-op "explicit" list that's secretly `sorted(_ALL_CODES)`
+    # in disguise -- the ordering must be a real, independent list literal.
+    assert list(exit_codes.SEVERITY_ORDER) == sorted(exit_codes.SEVERITY_ORDER), (
+        "SEVERITY_ORDER happens to be numerically sorted today (it must reproduce "
+        "max() for codes 0-8), but this test exists to be revisited, not deleted, "
+        "the day a later code needs to rank out of numeric order."
+    )
+
+
+def test_most_severe_agrees_with_max_for_every_pair_of_documented_codes() -> None:
+    for a, b in itertools.product(_ALL_CODES, repeat=2):
+        assert exit_codes.most_severe([a, b]) == max(a, b)
+
+
+def test_most_severe_agrees_with_max_for_every_combination_of_documented_codes() -> None:
+    for r in range(1, len(_ALL_CODES) + 1):
+        for combo in itertools.combinations_with_replacement(_ALL_CODES, r):
+            assert exit_codes.most_severe(combo) == max(combo)
+
+
+def test_most_severe_is_order_independent() -> None:
+    assert exit_codes.most_severe([2, 4]) == 4
+    assert exit_codes.most_severe([4, 2]) == 4
+
+
+def test_most_severe_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        exit_codes.most_severe([])
+
+
+def test_most_severe_rejects_unknown_codes() -> None:
+    # Documented behaviour: an exit code outside SEVERITY_ORDER is a bug at the
+    # call site (a code that was never registered), so it raises rather than
+    # silently sorting to the end or the start.
+    with pytest.raises(ValueError):
+        exit_codes.most_severe([0, 99])

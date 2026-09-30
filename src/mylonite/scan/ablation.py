@@ -28,7 +28,7 @@ from enum import Enum, auto
 from typing import Any, Final, Literal
 
 from mylonite._concurrency import gather_bounded
-from mylonite.exit_codes import EXIT_PROVIDER
+from mylonite.exit_codes import EXIT_PROVIDER, most_severe
 from mylonite.scan.coverage import ScanOutcome
 from mylonite.scan.llm_types import CompletionFn
 
@@ -425,24 +425,26 @@ _EXIT_PROVIDER_FALLBACK: Final = EXIT_PROVIDER
 def total_failure_exit_code(observed_outcomes: list[ScanOutcome]) -> int:
     """Pick the exit code for a TOTAL-failure ``ablate`` run (see :func:`all_inconclusive`).
 
-    The most severe (numerically highest) ``ScanOutcome.exit_code`` observed
-    across every underlying scoped scan that fed the all-inconclusive result —
-    mirrors how ``scan``/``gate`` already derive their own exit codes from
-    ``ScanOutcome`` (``mylonite.scan.coverage``) rather than hardcoding a
-    single value. In practice this is usually ``EXIT_CONFIG`` (2), not
-    ``EXIT_PROVIDER`` (4): each ``scan_target_fires`` call is a single-seed
-    scoped scan, so it never accumulates the 3 consecutive LLM-call failures
-    ``ScanEngine.run()`` requires to set a formal
-    ``aborted="provider_unreachable"`` — it lands in the same "untrustworthy
-    without a formal abort" bucket ``ScanOutcome`` already uses for
-    ``scan``/``gate`` when a report is too small to trip that threshold (see
-    ``coverage.py``'s ``_EXIT_INCOMPLETE_NO_ABORT``). Only a formal
-    ``provider_unreachable`` abort (e.g. a much larger ``--iterations``/
-    ``--max-seeds`` run) actually earns ``EXIT_PROVIDER`` here.
+    The most severe ``ScanOutcome.exit_code`` observed across every underlying
+    scoped scan that fed the all-inconclusive result — mirrors how
+    ``scan``/``gate`` already derive their own exit codes from ``ScanOutcome``
+    (``mylonite.scan.coverage``) rather than hardcoding a single value. In
+    practice this is usually ``EXIT_CONFIG`` (2), not ``EXIT_PROVIDER`` (4):
+    each ``scan_target_fires`` call is a single-seed scoped scan, so it never
+    accumulates the 3 consecutive LLM-call failures ``ScanEngine.run()``
+    requires to set a formal ``aborted="provider_unreachable"`` — it lands in
+    the same "untrustworthy without a formal abort" bucket ``ScanOutcome``
+    already uses for ``scan``/``gate`` when a report is too small to trip
+    that threshold (see ``coverage.py``'s ``_EXIT_INCOMPLETE_NO_ABORT``). Only
+    a formal ``provider_unreachable`` abort (e.g. a much larger
+    ``--iterations``/``--max-seeds`` run) actually earns ``EXIT_PROVIDER``
+    here.
 
-    A genuinely trustworthy leg (``exit_code == 0``) mixed in with a crashed
-    one never masks the crashed leg's nonzero code — ``max()`` only ever
-    moves toward more severe, never less.
+    "Most severe" is decided by ``mylonite.exit_codes.most_severe``, an
+    explicit ordering rather than a numeric ``max()`` — see that function's
+    docstring. It reproduces the old numeric behaviour for every code in use
+    today, so a genuinely trustworthy leg (``exit_code == 0``) mixed in with a
+    crashed one still never masks the crashed leg's nonzero code.
 
     Falls back to a conservative non-zero default (``EXIT_PROVIDER``'s value)
     if ``observed_outcomes`` is empty — should not happen once the CLI wires
@@ -452,7 +454,9 @@ def total_failure_exit_code(observed_outcomes: list[ScanOutcome]) -> int:
     ``scan_fires``, as some CLI-level tests use) has no ``ScanOutcome`` to
     work with at all.
     """
-    return max((oc.exit_code for oc in observed_outcomes), default=_EXIT_PROVIDER_FALLBACK)
+    if not observed_outcomes:
+        return _EXIT_PROVIDER_FALLBACK
+    return most_severe(oc.exit_code for oc in observed_outcomes)
 
 
 def scan_target_fires(

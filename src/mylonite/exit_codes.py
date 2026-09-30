@@ -13,7 +13,9 @@ import it without inverting any layering.
 Contract:
 
 * ``0`` success
-* ``1`` findings present (a scan found something; not an error)
+* ``1`` ``check --enforce`` found structural findings (``scan`` itself exits ``0``
+  even when it finds weaknesses -- reporting is not an error; only ``check``'s
+  opt-in enforcement mode turns a finding into a non-zero exit)
 * ``2`` config / usage error
 * ``3`` budget exceeded
 * ``4`` provider unreachable
@@ -25,6 +27,7 @@ Contract:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Final
 
 EXIT_SUCCESS: Final = 0
@@ -36,3 +39,48 @@ EXIT_NOT_KEPT: Final = 5
 EXIT_GENERATE_FAILED: Final = 6
 EXIT_VALIDATE_FAILED: Final = 7
 EXIT_PR_FAILED: Final = 8
+
+#: Explicit severity ordering, least to most severe. Every code minted so far
+#: (0-8) happens to rank more severe as its number increases, which is why a
+#: plain ``max()`` over exit codes has worked until now -- but that was an
+#: accident of numbering, not a rule a future code is bound by. This list is
+#: the deliberate version: it reproduces today's ``max()`` result for every
+#: combination of 0-8, and gives later codes (e.g. a future distinct
+#: "inconclusive" or "clean, server-reported" code) a place to be inserted by
+#: hand rather than wherever their numeric value happens to fall.
+SEVERITY_ORDER: Final[tuple[int, ...]] = (
+    EXIT_SUCCESS,
+    EXIT_FINDINGS,
+    EXIT_CONFIG,
+    EXIT_BUDGET,
+    EXIT_PROVIDER,
+    EXIT_NOT_KEPT,
+    EXIT_GENERATE_FAILED,
+    EXIT_VALIDATE_FAILED,
+    EXIT_PR_FAILED,
+)
+
+_SEVERITY_RANK: Final[dict[int, int]] = {code: rank for rank, code in enumerate(SEVERITY_ORDER)}
+
+
+def most_severe(codes: Iterable[int]) -> int:
+    """Return the most severe of ``codes``, per :data:`SEVERITY_ORDER`.
+
+    This is the explicit replacement for ``max(codes)``: for every code in
+    :data:`SEVERITY_ORDER` (today, 0-8) it returns exactly what ``max()``
+    would, because the order was built to reproduce that. The difference is
+    that future codes are ranked by where they're placed in the list, not by
+    their integer value.
+
+    Raises ``ValueError`` if ``codes`` is empty, or if any code is not in
+    :data:`SEVERITY_ORDER` -- an unregistered code is a bug at the call site
+    (a new exit code was minted without being added here), so this fails
+    loudly instead of silently sorting it first or last.
+    """
+    codes = list(codes)
+    if not codes:
+        raise ValueError("most_severe() requires at least one exit code")
+    unknown = sorted({code for code in codes if code not in _SEVERITY_RANK})
+    if unknown:
+        raise ValueError(f"most_severe() received exit code(s) not in SEVERITY_ORDER: {unknown}")
+    return max(codes, key=_SEVERITY_RANK.__getitem__)
