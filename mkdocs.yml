@@ -66,6 +66,7 @@ nav:
   - Reference:
       - CLI reference: cli-reference.md
       - target.yaml reference: target-file.md
+      - Reason codes: reason-codes.md
       - Architecture & modules: architecture.md
       - Plugin authoring: plugin-authoring.md
   - Operating:

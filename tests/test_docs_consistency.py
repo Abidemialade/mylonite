@@ -641,3 +641,25 @@ def test_documented_not_tested_outcomes_are_complete() -> None:
         f"docs/reading-results.md does not document these NOT-TESTED outcomes: {missing}. "
         "A reader who sees one in the output has nothing to look it up in."
     )
+
+
+def test_reason_codes_documented() -> None:
+    """Every reason code has its own heading and a Fix line in
+    `docs/reason-codes.md`.
+
+    The code is what the operator sees in the output; the page is where they look
+    it up. A code with no entry sends them to a dead end, so the anchor each code
+    carries must resolve to a real section that says what to do.
+    """
+    from mylonite.reason_codes import REGISTRY
+
+    page = (_DOCS_DIR / "reason-codes.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", page, flags=re.MULTILINE)
+    by_heading = {s.splitlines()[0].strip(): s for s in sections[1:]}
+
+    missing = sorted(code for code in REGISTRY if code not in by_heading)
+    assert not missing, f"docs/reason-codes.md has no `## <code>` heading for: {missing}"
+    no_fix = sorted(code for code in REGISTRY if "**Fix:**" not in by_heading[code])
+    assert not no_fix, f"docs/reason-codes.md has no **Fix:** line for: {no_fix}"
+    unknown = sorted(h for h in by_heading if h.startswith("MYL-") and h not in REGISTRY)
+    assert not unknown, f"docs/reason-codes.md documents codes that do not exist: {unknown}"

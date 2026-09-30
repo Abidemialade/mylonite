@@ -1,0 +1,146 @@
+{
+  "MYL-NT-001": {
+    "category": "not-tested",
+    "summary": "The target's command never started, so nothing was tested."
+  },
+  "MYL-NT-002": {
+    "category": "not-tested",
+    "summary": "The planner failed before the attack could be delivered."
+  },
+  "MYL-NT-003": {
+    "category": "not-tested",
+    "summary": "The agent never called the tool this attack targets."
+  },
+  "MYL-NT-004": {
+    "category": "not-tested",
+    "summary": "The seed needs a capability this target's tool surface does not expose."
+  },
+  "MYL-NT-005": {
+    "category": "not-tested",
+    "summary": "There was no seed_arm to plant the poisoned content."
+  },
+  "MYL-NT-006": {
+    "category": "not-tested",
+    "summary": "The payload was planted, but the planner never retrieved it."
+  },
+  "MYL-NT-007": {
+    "category": "not-tested",
+    "summary": "The attempt failed on an LLM provider call."
+  },
+  "MYL-NT-008": {
+    "category": "not-tested",
+    "summary": "The attempt raised an error that is not a provider failure, such as a target crash."
+  },
+  "MYL-NT-009": {
+    "category": "not-tested",
+    "summary": "The effect_probe's verify call errored, so the effect was not confirmed either way."
+  },
+  "MYL-NT-010": {
+    "category": "not-tested",
+    "summary": "The LLM judge answered, but its output could not be used."
+  },
+  "MYL-NT-011": {
+    "category": "not-tested",
+    "summary": "The deterministic check was inconclusive and no LLM judge was configured."
+  },
+  "MYL-NT-012": {
+    "category": "not-tested",
+    "summary": "No mechanism (deterministic check, effect_probe or LLM judge) decided the attempt."
+  },
+  "MYL-NT-013": {
+    "category": "not-tested",
+    "summary": "The seed's metadata was invalid, so the attack never ran."
+  },
+  "MYL-NT-014": {
+    "category": "not-tested",
+    "summary": "The seed could not be resolved from the catalogue, so the attack never ran."
+  },
+  "MYL-ABT-001": {
+    "category": "abort",
+    "summary": "The scan used up its LLM call budget and stopped early; coverage is incomplete."
+  },
+  "MYL-ABT-002": {
+    "category": "abort",
+    "summary": "LLM provider calls failed several times in a row, so the scan stopped early."
+  },
+  "MYL-ABT-003": {
+    "category": "abort",
+    "summary": "No seeds applied to this target, so nothing was scanned."
+  },
+  "MYL-ABT-004": {
+    "category": "abort",
+    "summary": "The --weakness-class filter matched no seeds for this target, so nothing was scanned."
+  },
+  "MYL-ABT-005": {
+    "category": "abort",
+    "summary": "A declared weakness class has no seed on this target's tool surface, so the scan stopped before any payload."
+  },
+  "MYL-ABT-006": {
+    "category": "abort",
+    "summary": "The target could not be described (its tools were never listed), so nothing was scanned."
+  },
+  "MYL-ABT-007": {
+    "category": "abort",
+    "summary": "The scan exceeded its wall-clock budget and stopped early; coverage is incomplete."
+  },
+  "MYL-PRE-001": {
+    "category": "pre-flight",
+    "summary": "A declared weakness class cannot run at all on this target's tool surface, so the run was refused before any LLM call."
+  },
+  "MYL-PRE-002": {
+    "category": "pre-flight",
+    "summary": "The server was not described in time to check which declared weakness classes can run, so the run was refused."
+  },
+  "MYL-PRE-003": {
+    "category": "pre-flight",
+    "summary": "Describing the server raised an error, so which declared weakness classes can run is unknown and the run was refused."
+  },
+  "MYL-PRE-004": {
+    "category": "pre-flight",
+    "summary": "Starting or describing the server timed out while inferring a seed_arm."
+  },
+  "MYL-PRE-005": {
+    "category": "pre-flight",
+    "summary": "Starting or describing the server failed while inferring a seed_arm."
+  },
+  "MYL-INC-001": {
+    "category": "inconclusive",
+    "summary": "A consequential tool call went through, but it could not be tied to this attempt."
+  },
+  "MYL-INC-002": {
+    "category": "inconclusive",
+    "summary": "The effect probe was not calibrated: calibration was not authorized, or its controls were set to skip."
+  },
+  "MYL-INC-003": {
+    "category": "inconclusive",
+    "summary": "Positive control failed: the probe did not see a known write."
+  },
+  "MYL-INC-004": {
+    "category": "inconclusive",
+    "summary": "Negative control failed: the probe reported a change when nothing was written."
+  },
+  "MYL-INC-005": {
+    "category": "inconclusive",
+    "summary": "The verify or control arguments fail the tool's inputSchema."
+  },
+  "MYL-INC-006": {
+    "category": "inconclusive",
+    "summary": "W2 seed control failed: the planted content could not be recalled."
+  },
+  "MYL-INC-007": {
+    "category": "inconclusive",
+    "summary": "W2 seed control did not run: no recall tool could be inferred."
+  },
+  "MYL-INC-008": {
+    "category": "inconclusive",
+    "summary": "The effect_probe marker renders from {payload}, which the agent's call never carries."
+  },
+  "MYL-SRV-001": {
+    "category": "server-reported",
+    "summary": "The negative rests only on the server returning an error."
+  },
+  "MYL-SRV-002": {
+    "category": "server-reported",
+    "summary": "The negative rests only on a server reply deferring the action."
+  }
+}

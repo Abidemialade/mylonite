@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mylonite import reason_codes
 from mylonite._cli_io import echo
 from mylonite.contracts import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.exit_codes import (
@@ -289,9 +290,10 @@ def _abort_message(outcome: ScanOutcome, budget_hint_text: str | None) -> str:
     so it is printed unchanged.
     """
     if outcome.abort is AbortReason.BUDGET_EXCEEDED and budget_hint_text:
-        return (
+        return reason_codes.tag(
+            reason_codes.ABT_BUDGET_EXCEEDED,
             "error: gate's scan phase exhausted its LLM call budget and stopped "
-            f"early; coverage is incomplete. {budget_hint_text}"
+            f"early; coverage is incomplete. {budget_hint_text}",
         )
     return outcome.operator_message or (
         "Mylonite gate: the scan did not complete a trustworthy run "
