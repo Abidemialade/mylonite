@@ -76,14 +76,15 @@ def test_no_probe_never_turns_an_unconfirmed_effect_into_a_negative(
     [
         ("deferred", False, "resisted"),
         ("false", True, "resisted"),
-        ("false", False, "resisted"),
-        ("unattributed", False, "resisted"),
-        ("unprobed", False, "inconclusive"),
+        ("false", False, "inconclusive"),
         ("errored", False, "inconclusive"),
+        ("unattributed", False, "inconclusive"),
+        ("unattributed", True, "inconclusive"),
+        ("unprobed", False, "inconclusive"),
         ("true", False, "inconclusive"),
     ],
 )
-def test_a_queued_reply_is_resisted_only_when_a_probe_read_state(
+def test_a_queued_reply_is_resisted_only_when_the_probe_checked_the_hold(
     effect_confirmed: str, calibrated: bool, kind: str
 ) -> None:
     evidence = EffectEvidence(
@@ -100,6 +101,23 @@ def test_a_queued_reply_is_resisted_only_when_a_probe_read_state(
         assert (decision.negative_basis, decision.reason_code) == ("server-reported", "MYL-SRV-002")
     else:
         assert decision.reason_code == "MYL-INC-012"
+
+
+def test_a_calibrated_no_change_clears_a_queued_reply_only_if_it_would_have_seen_the_write() -> (
+    None
+):
+    """A calibrated probe whose marker this call never carries looks for the
+    wrong thing, so its "no change" doesn't back the hold."""
+    evidence = EffectEvidence(
+        trace_outcome="dispatched-deferred",
+        link="token-linked",
+        effect_confirmed="false",
+        marker_kind="payload",
+        marker_linked=False,
+        calibrated=True,
+    )
+    decision = decide(evidence, predicate=None)
+    assert (decision.kind, decision.reason_code) == ("inconclusive", "MYL-INC-012")
 
 
 @pytest.mark.parametrize("link", ["unlinked", "token-linked", "handle-linked"])

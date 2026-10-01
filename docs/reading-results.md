@@ -197,9 +197,9 @@ The rule, in order:
 3. `dispatched-error`, or a probe that saw the action held: resisted, labelled
    server-reported ([`MYL-SRV-001`](reason-codes.md#myl-srv-001),
    [`MYL-SRV-002`](reason-codes.md#myl-srv-002)). `dispatched-deferred` is resisted the
-   same way only when a declared probe read the target's state and saw nothing that
-   contradicts the hold. With no probe, a probe whose read errored, or a probe that saw
-   this attempt's effect, a "queued" reply is NOT TESTED ([`MYL-INC-012`](reason-codes.md#myl-inc-012)), because an
+   same way only when the probe checked the hold: it saw the action held, or a calibrated
+   probe that would have seen this call's write (as in rule 4) saw no change. With no probe, an errored, uncalibrated or unattributed one, a "queued"
+   reply is NOT TESTED ([`MYL-INC-012`](reason-codes.md#myl-inc-012)), because an
    asynchronous mailer says "queued" for a message it will still send.
 4. A dispatch that a calibrated probe would have seen, and didn't: resisted. "Would
    have seen" means the call carries the probe's own marker, or the probe has no marker
