@@ -168,6 +168,11 @@ Each decided attempt's `judge_evidence` carries `trace_outcome`, `link`, `marker
 attempt, and `reason_code` where one applies. Attempts against reference and REST
 targets carry no `trace_outcome` and are decided as before.
 
+`validate` counts a custom target's firing runs by these proof levels on its effect leg
+(see [Validation](validation.md)). When the leg fails because runs fired with nothing tying
+the damage to them (an LLM-judge verdict, say), the remediation line says so and points at an `{exfil_email}` or
+`{exfil_host}` marker and `mylonite check --authorize`.
+
 ### What a run spent
 
 `scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget

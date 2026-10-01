@@ -37,6 +37,7 @@ from mylonite.contracts import (
 )
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.plugins._reference.reference_validator import (
+    EFFECT_UNPROVEN_CLAUSE,
     DifferentialValidator,
     ReferenceVulnerableOracle,
     _CustomRun,
@@ -1790,13 +1791,15 @@ def test_validated_model_stamp_names_every_role_when_they_differ() -> None:
     )
 
 
-# --- effect attribution: "unattributed" in the effect leg -------------------------
+# --- the effect leg counts firing runs by proof level -----------------------------
 #
-# The adapter reports ``effect_confirmed="unattributed"`` when the target's state
-# changed but the change cannot be tied to this attempt's own calls. The effect
-# leg counts such a run only when the attempt-scoped predicate decided it (the
-# attempt's own executed calls prove the action), never when the LLM judge did,
-# and it requires at least one run confirmed end-to-end from state ("true").
+# A firing run counts toward the effect leg at the proof level its judge
+# evidence carries: "effect-confirmed" (a calibrated probe saw the change),
+# "dispatched" (the trace ties the attempt's own call to it) or
+# "dispatched-tool-linked" (the attempt called the seed's own tool). A run
+# with no proof level falls back to the probe's value: a "true", or an
+# "unattributed" the predicate decided, counts as "dispatched". An LLM-decided
+# "unattributed" run does not count: nothing structural links it to the effect.
 
 
 def _validate_with_runs(
@@ -1823,9 +1826,21 @@ def _validate_with_runs(
         return validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
 
-def _run(effect: str, *, finding: bool = True, mechanism: str | None = "predicate") -> _CustomRun:
+def _run(
+    effect: str,
+    *,
+    finding: bool = True,
+    mechanism: str | None = "predicate",
+    proof_level: str | None = None,
+    trace_outcome: str | None = None,
+) -> _CustomRun:
     return _CustomRun(
-        finding=finding, effect_confirmed=effect, response=None, verdict_mechanism=mechanism
+        finding=finding,
+        effect_confirmed=effect,
+        response=None,
+        verdict_mechanism=mechanism,
+        proof_level=proof_level,
+        trace_outcome=trace_outcome,
     )
 
 
@@ -1848,37 +1863,64 @@ def test_all_unattributed_non_findings_are_not_report_only() -> None:
     assert effect.passed is False
 
 
-def test_effect_leg_needs_at_least_one_run_confirmed_from_state() -> None:
-    """Predicate-decided "unattributed" runs meet the count, but without one
-    "true" the end-to-end effect was never observed, so the leg fails."""
-    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
+def test_all_deferred_runs_are_probed_not_report_only() -> None:
+    """A probe that read "deferred" on every run ran and saw the action held:
+    the effect leg gates on it, never dropping into the undeclared branch."""
+    report = _validate_with_runs([_run("deferred", finding=False), _run("deferred", finding=False)])
     effect = _outcome(report, "effect")
+    assert effect.report_only is False
+    assert "effect" in report.gating_legs
     assert effect.passed is False
-    assert report.kept is False
-    assert "0 confirmed from the target's state" in effect.detail
-    assert "at least one" in effect.detail
+    assert "no effect_probe declared" not in effect.detail
 
 
-def test_one_true_plus_a_predicate_decided_unattributed_passes_the_effect_leg() -> None:
-    report = _validate_with_runs([_run("true"), _run("unattributed")])
+def test_predicate_decided_unattributed_runs_pass_without_a_state_confirmed_run() -> None:
+    """The 0.10.4 rule wanted at least one run confirmed from state. Each of
+    these runs is tied to its own attempt by the predicate, so they count, and
+    the leg passes on the count alone."""
+    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
     effect = _outcome(report, "effect")
     assert effect.passed is True
     assert effect.metric == 1.0
-    assert "1 confirmed from the target's state" in effect.detail
-    assert "1 from the attempt's own actions" in effect.detail
+    assert "2/2 runs showed the damage" in effect.detail
+    assert "2 dispatched" in effect.detail
+    assert report.kept is True
+
+
+def test_firing_runs_count_by_their_proof_level() -> None:
+    """A trace-path finding counts at its own proof level, whatever the probe
+    read: an uncalibrated "false" never clears a dispatch the trace links."""
+    report = _validate_with_runs(
+        [
+            _run("true", proof_level="effect-confirmed", trace_outcome="dispatched-ok"),
+            _run("false", proof_level="dispatched", trace_outcome="dispatched-ok"),
+            _run(
+                "unprobed",
+                mechanism="predicate",
+                proof_level="dispatched-tool-linked",
+                trace_outcome="dispatched-ok",
+            ),
+        ],
+        iterations=3,
+        vuln_threshold=3,
+    )
+    effect = _outcome(report, "effect")
+    assert effect.passed is True
+    assert effect.metric == 1.0
+    assert "1 effect-confirmed" in effect.detail
+    assert "1 dispatched" in effect.detail
+    assert "1 dispatched-tool-linked" in effect.detail
     assert report.kept is True
 
 
 def test_effect_leg_detail_does_not_overclaim_end_to_end_confirmation() -> None:
-    """The wording must not say the PROBE confirmed the damage for a run that
-    was only decided by the predicate reading this attempt's own actions --
-    only the `from_state` count is an end-to-end, probe-confirmed number. It
-    must also say the mismatch is what "unattributed" means: the state
-    change, or its absence, could not be tied to the attempt."""
+    """Only "effect-confirmed" is a probe-confirmed, end-to-end number; the
+    detail must not say the probe confirmed a run that it did not."""
     report = _validate_with_runs([_run("true"), _run("unattributed")])
     effect = _outcome(report, "effect")
     assert "the target's effect probe confirmed the damage materialised" not in effect.detail
-    assert "could not be tied to that attempt" in effect.detail
+    assert "0 effect-confirmed" in effect.detail
+    assert "2 dispatched" in effect.detail
 
 
 def test_an_llm_decided_unattributed_run_does_not_count_toward_the_effect_leg() -> None:
@@ -1886,63 +1928,130 @@ def test_an_llm_decided_unattributed_run_does_not_count_toward_the_effect_leg() 
     effect = _outcome(report, "effect")
     assert effect.passed is False
     assert effect.metric == 0.5
+    assert EFFECT_UNPROVEN_CLAUSE in effect.detail
     assert report.kept is False
 
 
-# --- render.py's remediation-selection string coupling (fix round 1) --------
+# --- render.py's remediation selection reads the validator's constant ---------
 #
 # `_render_validation_report` (report/render.py) picks a specific remediation
-# for a failed "effect" leg by matching a substring of THIS validator's own
-# detail wording. These two drive the REAL DifferentialValidator (not a
-# hand-built ValidationOutcome) through `_render_validation_report`, so a
-# future wording change in either file that breaks the coupling fails here,
-# not just in the hand-built render.py unit tests in tests/test_cli.py.
+# for a failed "effect" leg when the detail carries
+# `EFFECT_UNPROVEN_CLAUSE`, imported from this validator rather than matched as
+# a copied string. These drive the REAL DifferentialValidator through the
+# renderer, so the two stay coupled.
 
 
-def test_render_validation_report_unattributed_remediation_via_the_real_validator() -> None:
-    """from_state == 0 (every firing run is "unattributed"): the printed
-    remediation is the specific "target keeps state between attempts" text."""
+def test_render_validation_report_unproven_remediation_via_the_real_validator() -> None:
+    """A run fired on the LLM judge's reading alone: the printed remediation
+    says so and points at a marker that ties the damage to the attempt."""
     from mylonite.report.render import _render_validation_report
 
-    report = _validate_with_runs([_run("unattributed"), _run("unattributed")])
+    report = _validate_with_runs(
+        [_run("unattributed", mechanism="llm"), _run("unattributed", mechanism="llm")]
+    )
     effect = _outcome(report, "effect")
     assert effect.passed is False
-    assert "0 confirmed from the target's state" in effect.detail
+    assert EFFECT_UNPROVEN_CLAUSE in effect.detail
 
     buf = io.StringIO()
     console = Console(file=buf, width=200)
     _render_validation_report(report, console=console)
     out = buf.getvalue()
     assert "REJECTED" in out
-    assert "keeps state between attempts" in out
-    assert "none reached a confirmed" in out
+    assert "{exfil_email}" in out
+    assert "check --authorize" in out
+    assert "{payload}" not in out
 
 
-def test_render_validation_report_does_not_overclaim_via_the_real_validator() -> None:
-    """Reproduces the reviewer's repro: 3 runs (true, unattributed decided by
-    the LLM judge so it doesn't count, false-non-finding), threshold 3 -- the
-    effect leg fails on COUNT (1/3), not because nothing was confirmed:
-    from_state == 1. The printed remediation must be the generic fallback,
-    never the "none reached a confirmed 'true'" claim, which would be false
-    here."""
+def test_render_validation_report_count_shortfall_gets_the_generic_remediation() -> None:
+    """Every firing run carried proof, but too few fired: the leg failed on
+    count, so the printed remediation is the generic one."""
     from mylonite.report.render import _render_validation_report
 
     report = _validate_with_runs(
-        [_run("true"), _run("unattributed", mechanism="llm"), _run("false", finding=False)],
+        [_run("true"), _run("false", finding=False), _run("false", finding=False)],
         iterations=3,
         vuln_threshold=3,
     )
     effect = _outcome(report, "effect")
     assert effect.passed is False
-    assert "1 confirmed from the target's state" in effect.detail
+    assert EFFECT_UNPROVEN_CLAUSE not in effect.detail
 
     buf = io.StringIO()
     console = Console(file=buf, width=200)
     _render_validation_report(report, console=console)
-    out = buf.getvalue()
+    out = " ".join(buf.getvalue().split())
     assert "REJECTED" in out
-    assert "none reached a confirmed" not in out
-    assert "keeps state between attempts" not in out
+    assert "did not confirm the damage materialised" in out
+    assert "{exfil_email}" not in out
+
+
+# --- each run's evidence is paired with its own exploit ------------------------
+
+
+def test_run_custom_iteration_pairs_the_evidence_with_its_own_exploit() -> None:
+    """The run's response must come from the exploit of the same attempt whose
+    judge evidence it reports, never from whichever exploit came first."""
+    from mylonite.contracts import ScanAttempt, ScanReport
+    from mylonite.scan.engine import ScanResult
+
+    pid = "excessive-agency-send-email-direct-unconfirmed"
+    other = "some-other-seed"
+
+    def _exploit(pattern_id: str, raw: str) -> ExploitRecord:
+        return ExploitRecord(
+            target_id="mcp:custom",
+            pattern_id=pattern_id,
+            payload=Payload(pattern_id=pattern_id, channel="user-message", body="b"),
+            response=AdapterResponse(
+                payload_pattern_id=pattern_id, raw_response=raw, tool_calls=["send_email"]
+            ),
+            success_reason="x",
+            compliance=ComplianceTags(owasp_llm=["LLM06"]),
+        )
+
+    def _attempt(pattern_id: str, proof: str) -> ScanAttempt:
+        return ScanAttempt(
+            seed_id=pattern_id,
+            pattern_id=pattern_id,
+            outcome="finding",
+            verdict_mechanism="predicate",
+            judge_evidence={
+                "effect_confirmed": "false",
+                "trace_outcome": "dispatched-ok",
+                "proof_level": proof,
+            },
+        )
+
+    result = ScanResult(
+        report=ScanReport(
+            target_id="mcp:custom",
+            provider="p",
+            model="m",
+            elapsed_seconds=0.0,
+            mylonite_version="0",
+            attempts=[_attempt(other, "dispatched-tool-linked"), _attempt(pid, "dispatched")],
+            findings_count=2,
+        ),
+        exploits=[_exploit(other, "the other seed's reply"), _exploit(pid, "this seed's reply")],
+    )
+
+    class _Engine:
+        async def run(self) -> ScanResult:
+            return result
+
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "mylonite.scan.assembly.build_scan_engine", lambda *a, **k: _Engine(), raising=True
+        )
+        run = validator._run_custom_iteration(_FakeCustomAdapter("true"), pid)
+    assert run.finding is True
+    assert run.response.raw_response == "this seed's reply"
+    assert run.proof_level == "dispatched"
+    assert run.trace_outcome == "dispatched-ok"
 
 
 def test_run_custom_iteration_records_the_real_effect_value_for_a_non_finding() -> None:

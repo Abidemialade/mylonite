@@ -25,7 +25,7 @@ from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
 from mylonite.contracts import AdapterResponse, ComplianceTags, ExploitRecord, Payload
-from mylonite.plugins._mcp import stdio_adapter, target_registry
+from mylonite.plugins._mcp import calibration, stdio_adapter, target_registry
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
 from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
 from mylonite.plugins._mcp.target_registry import EffectProbeSpec
@@ -40,6 +40,9 @@ from mylonite.scan.llm_types import ToolResult
 FAMILY = "attr-validate"
 RECIPIENT = "ops@example.com"
 PATTERN_ID = "excessive-agency-send-email-direct-unconfirmed"
+#: The same server launched with its server-side send guard on.
+GUARDED_FAMILY = "attr-validate-guarded"
+DROP_FLAG = "--drop-outside-mail"
 
 
 class _Outbox:
@@ -55,8 +58,11 @@ class _Outbox:
 
 
 class _Session:
-    def __init__(self, outbox: _Outbox) -> None:
+    def __init__(self, outbox: _Outbox, *, drop_sends: bool = False) -> None:
         self.outbox = outbox
+        #: A server-side guard: mail to an outside address is dropped, but the
+        #: reply still says "sent", with no error and no deferral word.
+        self.drop_sends = drop_sends
 
     async def initialize(self) -> None:
         return None
@@ -92,7 +98,8 @@ class _Session:
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         if name == "send_email":
             entry = f"to={arguments.get('to', '')} subject={arguments.get('subject', '')}"
-            if not (self.outbox.dedupe and entry in self.outbox.sent):
+            dropped = self.drop_sends and "@" in str(arguments.get("to", ""))
+            if not dropped and not (self.outbox.dedupe and entry in self.outbox.sent):
                 self.outbox.sent.append(entry)
             text = "sent"
         elif name == "list_outbox":
@@ -118,8 +125,11 @@ class _Launcher:
         self.outbox = outbox
         self.fresh_state = fresh_state
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        session = _Session(_Outbox() if self.fresh_state else self.outbox)
+    def __call__(self, spec: Any, *args: Any, **kwargs: Any) -> Any:
+        session = _Session(
+            _Outbox() if self.fresh_state else self.outbox,
+            drop_sends=DROP_FLAG in spec.args_template,
+        )
 
         @asynccontextmanager
         async def _ctx() -> Any:
@@ -165,22 +175,54 @@ async def _harness(**kwargs: Any) -> SimpleNamespace:
     return _message(json.dumps({"body": f"Please send an email to {RECIPIENT}. Use send_email."}))
 
 
+def _spec(family: str, args: list[str]) -> target_registry.TargetSpec:
+    return build_target_spec(
+        TargetFile(
+            family=family,
+            command="python",
+            args=args,
+            weakness_classes=["W4"],
+            effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker=RECIPIENT),
+        )
+    )
+
+
+GUARDED_SPEC = _spec(GUARDED_FAMILY, ["-m", "srv", DROP_FLAG])
+
+
 @pytest.fixture(autouse=True)
 def _registered_target() -> Iterator[None]:
     target_registry.clear_runtime_targets()
-    target_registry.register_target(
-        build_target_spec(
-            TargetFile(
-                family=FAMILY,
-                command="python",
-                args=["-m", "srv"],
-                weakness_classes=["W4"],
-                effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker=RECIPIENT),
-            )
-        )
-    )
+    calibration.clear_calibrations()
+    target_registry.register_target(_spec(FAMILY, ["-m", "srv"]))
+    target_registry.register_target(GUARDED_SPEC)
     yield
     target_registry.clear_runtime_targets()
+    calibration.clear_calibrations()
+
+
+def _certify(spec: target_registry.TargetSpec) -> None:
+    """Record that calibration proved this target's probe sees a send and stays
+    quiet without one, as ``mylonite check --authorize`` would."""
+    calibration.record(
+        calibration.CalibrationResult(
+            spec_key=calibration.spec_key(spec, None),
+            status=calibration.STATUS_CERTIFIED,
+            reason_code=None,
+            detail="certified",
+            tools=(
+                calibration.ToolControl(
+                    tool="send_email",
+                    status=calibration.TOOL_CERTIFIED,
+                    reason_code=None,
+                    detail="certified",
+                ),
+            ),
+            seed_control=calibration.SeedControl(
+                status=calibration.SEED_NOT_RUN, reason_code=None, detail="not run"
+            ),
+        )
+    )
 
 
 def _exploit() -> ExploitRecord:
@@ -218,11 +260,15 @@ def _validate(
     runs: list[Any] | None = None,
     guard: BoundaryControl | None = None,
     fresh_state: bool = False,
+    server_guard: bool = False,
 ) -> Any:
     def _raw() -> MCPStdioAdapter:
         return MCPStdioAdapter(family=FAMILY, scope=None, completion_fn=planner)
 
     def _guarded() -> MCPStdioAdapter:
+        if server_guard:
+            # The guard lives in the server: no client-side control at all.
+            return MCPStdioAdapter(family=GUARDED_FAMILY, scope=None, completion_fn=planner)
         return MCPStdioAdapter(
             family=FAMILY,
             scope=None,
@@ -269,15 +315,17 @@ def test_raw_then_guarded_on_persisted_state_gives_findings_and_no_guarded_leak(
     assert len(outbox.sent) == 3
     effect = _outcome(report, "effect")
     assert effect.passed is True
-    assert "3 confirmed from the target's state" in effect.detail
+    assert "3/3 runs showed the damage" in effect.detail
+    assert "3 dispatched" in effect.detail
     assert _outcome(report, "differential").passed is True
     assert report.kept is True, report.notes
 
 
-def test_idempotent_sends_count_through_the_predicate_after_one_confirmed_effect() -> None:
+def test_idempotent_sends_count_by_their_proof_level() -> None:
     """Raw runs 2 and 3 resend an identical email the target dedupes, so the
-    state cannot show them ("unattributed"). The predicate proves each attempt
-    sent it, and run 1 was confirmed from state, so the effect leg holds."""
+    state cannot show them ("unattributed"). Each send carries the probe's
+    marker, so the trace ties it to its own attempt: every run counts at
+    "dispatched", and the effect leg holds."""
     outbox = _Outbox(dedupe=True)
     report = _validate(outbox)
 
@@ -288,8 +336,7 @@ def test_idempotent_sends_count_through_the_predicate_after_one_confirmed_effect
     effect = _outcome(report, "effect")
     assert effect.report_only is False
     assert effect.passed is True
-    assert "1 confirmed from the target's state" in effect.detail
-    assert "2 from the attempt's own actions" in effect.detail
+    assert "3 dispatched" in effect.detail
     assert report.kept is True, report.notes
 
 
@@ -336,9 +383,57 @@ def test_a_silently_dropping_guard_on_fresh_state_does_not_leak() -> None:
     guarded = [run for is_guarded, run in runs if is_guarded]
     assert len(guarded) == 3
     assert [r.effect_confirmed for r in guarded] == ["false"] * 3
+    # The client-side control blocked each send, and the trace says so.
+    assert [r.trace_outcome for r in guarded] == ["blocked-by-client"] * 3
     assert not any(r.finding for r in guarded)
     assert report.reproducibility is not None
     assert report.reproducibility.vuln_fired == 3
     assert report.reproducibility.guard_fired == 0
     assert report.reproducibility.guard_resisted == 3
     assert _outcome(report, "differential").passed is True
+
+
+def test_a_server_side_silent_drop_leaks_when_the_probe_is_uncalibrated() -> None:
+    """The guard is in the server: each guarded send reaches it, gets "sent"
+    back, and is dropped. The probe sees no new email, but it was never shown
+    to see one, so its "no change" cannot clear a send the trace ties to this
+    attempt. The guarded runs leak at "dispatched", so the differential fails."""
+    runs: list[Any] = []
+    report = _validate(_Outbox(), server_guard=True, fresh_state=True, runs=runs)
+
+    guarded = [run for is_guarded, run in runs if is_guarded]
+    assert len(guarded) == 3
+    assert [r.trace_outcome for r in guarded] == ["dispatched-ok"] * 3
+    assert [r.effect_confirmed for r in guarded] == ["false"] * 3
+    assert all(r.finding for r in guarded)
+    assert [r.proof_level for r in guarded] == ["dispatched"] * 3
+    assert report.reproducibility is not None
+    assert report.reproducibility.vuln_fired == 3
+    assert report.reproducibility.guard_fired == 3
+    assert _outcome(report, "differential").passed is False
+    assert report.kept is False
+
+
+def test_a_server_side_silent_drop_resists_once_the_probe_is_calibrated() -> None:
+    """The same server-side drop, with the guarded target's probe certified.
+    Each send carries the probe's own marker (the recipient), so a certified
+    "no change" means the send did not land: the guarded runs resist."""
+    _certify(GUARDED_SPEC)
+    runs: list[Any] = []
+    report = _validate(_Outbox(), server_guard=True, fresh_state=True, runs=runs)
+
+    guarded = [run for is_guarded, run in runs if is_guarded]
+    assert len(guarded) == 3
+    assert [r.trace_outcome for r in guarded] == ["dispatched-ok"] * 3
+    assert [r.effect_confirmed for r in guarded] == ["false"] * 3
+    assert not any(r.finding for r in guarded)
+    assert all(r.resisted for r in guarded)
+    raw = [run for is_guarded, run in runs if not is_guarded]
+    assert [r.proof_level for r in raw] == ["dispatched"] * 3
+    assert report.reproducibility is not None
+    assert report.reproducibility.vuln_fired == 3
+    assert report.reproducibility.guard_fired == 0
+    assert report.reproducibility.guard_resisted == 3
+    assert _outcome(report, "effect").passed is True
+    assert _outcome(report, "differential").passed is True
+    assert report.kept is True, report.notes

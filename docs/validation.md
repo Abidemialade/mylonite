@@ -123,16 +123,20 @@ Every validation reports three headline figures.
   leg contributes only when a guarded twin is inferable (a server-layer control or a
   synthesised boundary shim).
 
-  **How the effect leg counts.** A firing run counts toward it when the probe confirmed
-  the effect from the target's own state (`effect_confirmed: "true"`), or when the state
-  change, or its absence, could not be tied to that attempt
-  (`"unattributed"`) **and** the attempt-scoped predicate — which reads only that
-  attempt's own trace — decided the run. The leg also needs **at least one** `"true"` run,
-  so the end-to-end effect was observed from the target's own state at least once; a run
-  set that is all `"unattributed"` cannot pass on its own. This is why a stateful target
-  — a file, a database, a memory store, any remote server, where a guarded run can
-  otherwise inherit an unguarded run's write — now validates correctly: a guarded attempt
-  the guard blocked reads `"false"`, not a leftover `"true"` from an earlier run.
+  **How the effect leg counts.** Each firing run counts at its
+  [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line
+  gives the count for each: `effect-confirmed` (a calibrated probe saw the change),
+  `dispatched` (the trace ties the attempt's own call to it) or `dispatched-tool-linked`
+  (the attempt called the seed's own tool). The leg passes when enough runs count; no
+  single level is required, so a stateful target (a file, a database, a memory store,
+  any remote server) can prove every run by its trace even when the probe never reads
+  `"true"`. A run decided without a proof level (a reference or REST target, or a seed
+  judged on the agent's reply) counts as `dispatched` when the probe read `"true"`, or
+  read `"unattributed"` and the attempt-scoped predicate decided it. Any other firing run
+  (an LLM-judge verdict, say) has nothing tying the damage to it, so it does not count,
+  and the detail says so. A probe that
+  read `"deferred"` on every run still ran, so the leg gates rather than going
+  report-only. Each run's evidence comes from the same attempt as its exploit.
   Consensus re-judges an `"unattributed"` run with the exploit's `predicate` metadata; a
   scan-written exploit always carries it, so this only matters for a hand-built
   `ExploitRecord`.

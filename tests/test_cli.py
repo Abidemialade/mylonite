@@ -3590,16 +3590,16 @@ def test_render_validation_report_gives_remediation_for_metamorphic_only_failure
     assert "metamorphic" in out.lower()
 
 
-def test_render_validation_report_effect_remediation_names_the_unattributed_cause(
+def test_render_validation_report_effect_remediation_names_the_unproven_cause(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A failed effect leg where every firing run was 'unattributed' (no run
-    was confirmed from the target's state) gets its own remediation text, not
-    the generic "did not confirm the damage" line -- it should say the target
-    keeps state between attempts and that the verdict came from the attempt's
-    own actions, not a confirmed state change."""
+    """A failed effect leg whose detail says some runs fired with nothing tying
+    the damage to the attempt gets its own remediation text, not the generic
+    "did not confirm the damage" line. It points at a marker that ties a
+    run's damage to it, never at a {payload} marker."""
     from mylonite.cli import _render_validation_report
     from mylonite.contracts import ValidationOutcome, ValidationReport
+    from mylonite.plugins._reference.reference_validator import EFFECT_UNPROVEN_CLAUSE
 
     report = ValidationReport(
         test_filename="test_security_x.py",
@@ -3608,40 +3608,27 @@ def test_render_validation_report_effect_remediation_names_the_unattributed_caus
             ValidationOutcome(
                 stage="effect",
                 passed=False,
-                detail=(
-                    "2/2 runs showed the damage (need >= 3): 0 confirmed from the "
-                    "target's state, 2 from the attempt's own actions, where the "
-                    "state change (or its absence) could not be tied to that "
-                    "attempt but the predicate showed it performed the action; no "
-                    "run was confirmed from the target's state, and at least one "
-                    "is required"
-                ),
-                metric=0.67,
+                detail=f"0/2 runs showed the damage (need >= 2); 2 runs {EFFECT_UNPROVEN_CLAUSE}",
+                metric=0.0,
             ),
         ],
         kept=False,
         gating_legs=["build", "effect"],
     )
     _render_validation_report(report)
-    out = capsys.readouterr().out
+    out = " ".join(capsys.readouterr().out.split())
     assert "REJECTED" in out
-    assert "keeps state between attempts" in out
-    assert "attempt's own actions" in out
+    assert "{exfil_email}" in out
+    assert "check --authorize" in out
+    assert "{payload}" not in out
     assert "did not confirm the damage materialised" not in out
 
 
-def test_render_validation_report_effect_remediation_does_not_claim_none_confirmed_when_one_was(
+def test_render_validation_report_effect_remediation_is_generic_without_the_clause(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A failed effect leg where at least one run WAS confirmed from the
-    target's state (from_state >= 1), but the total is still short of the
-    threshold, must not get the "keeps state between attempts ... none
-    reached a confirmed 'true'" text -- that text is true only when
-    from_state == 0. `reference_validator.py`'s detail carries the generic
-    "could not be tied to that attempt" phrase in EVERY probed case (it
-    describes the from_actions runs), so matching on that alone -- rather
-    than on the from_state == 0 exclusive clause -- would wrongly fire the
-    unattributed remediation here too."""
+    """A failed effect leg short on count, with every firing run proven, gets
+    the generic remediation."""
     from mylonite.cli import _render_validation_report
     from mylonite.contracts import ValidationOutcome, ValidationReport
 
@@ -3653,10 +3640,8 @@ def test_render_validation_report_effect_remediation_does_not_claim_none_confirm
                 stage="effect",
                 passed=False,
                 detail=(
-                    "1/3 runs showed the damage (need >= 3): 1 confirmed from the "
-                    "target's state, 0 from the attempt's own actions, where the "
-                    "state change (or its absence) could not be tied to that "
-                    "attempt but the predicate showed it performed the action"
+                    "1/3 runs showed the damage (need >= 3), by proof level: "
+                    "1 effect-confirmed, 0 dispatched, 0 dispatched-tool-linked"
                 ),
                 metric=0.33,
             ),
@@ -3665,10 +3650,10 @@ def test_render_validation_report_effect_remediation_does_not_claim_none_confirm
         gating_legs=["build", "effect"],
     )
     _render_validation_report(report)
-    out = capsys.readouterr().out
+    out = " ".join(capsys.readouterr().out.split())
     assert "REJECTED" in out
-    assert "none reached a confirmed" not in out
-    assert "keeps state between attempts" not in out
+    assert "did not confirm the damage materialised" in out
+    assert "{exfil_email}" not in out
 
 
 # ---------------------------------------------------------------------------

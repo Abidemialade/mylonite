@@ -79,6 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   versions are decided as before, except that a probe's `false` there now falls
   through to the deterministic check and the LLM judge instead of ending the attempt.
   See [How an MCP attempt is decided](docs/reading-results.md#how-an-mcp-attempt-is-decided).
+- **`validate` now counts a custom target's firing runs by proof level, so a
+  stateful target can keep a finding its trace proves.** The effect leg's detail
+  gives the count at `effect-confirmed`, `dispatched` and `dispatched-tool-linked`,
+  and the leg passes on that count. It no longer needs one run the probe confirmed
+  from the target's state, which a file, database or remote server whose state
+  outlives each run could rarely give. A guarded twin that drops a send in the server
+  and still replies "sent" now leaks while the probe is uncalibrated, and resists once
+  calibration has shown the probe sees the send. A firing run nothing ties to the damage
+  (an LLM-judge verdict, say) still does not count; the detail says so, and the remediation points
+  at an `{exfil_email}` or `{exfil_host}` marker and `mylonite check --authorize`
+  instead of a `{payload}` marker. Each run's evidence now comes from the same
+  attempt as its exploit, and a probe that read `deferred` on every run makes the leg
+  gate instead of going report-only. See [Validation](docs/validation.md).
 - **`gate` now gates every finding a scan proves, not just the first.**
   Previously it took `exploits[0]` and silently dropped the rest — a second
   real weakness never reached CI. `gate` now generates, validates, and (for
