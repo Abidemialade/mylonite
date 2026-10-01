@@ -77,6 +77,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   small local judge claimed a send at confidence 0.99. `validate` reuses the
   same judge, so such a success no longer counts toward a fire there either. A
   committed replay of that judge reply guards the fix.
+### Security
+
+- **A planner or judge provider-call failure no longer logs a raw traceback.**
+  `LLMPlanner.run()`, and two judging paths the reference validator uses for
+  multi-judge consensus and metamorphic robustness, called
+  `logger.exception(...)` on a provider-call exception. Its implicit
+  traceback bypasses the secret-redacting log filter entirely — the filter
+  only rewrites a record's rendered message, never the separately-rendered
+  `exc_info` traceback — so a provider error carrying an API key or a
+  token-bearing URL could reach a log handler unredacted. All three now log
+  a redacted one-line summary (the exception type name plus
+  `redact_exception()`'s masked detail) with no `exc_info`, and still
+  re-raise or return exactly as before.
 
 ## [0.10.5] - 2026-10-01
 
