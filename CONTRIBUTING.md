@@ -205,7 +205,8 @@ an offline end-to-end run) lands separately. `nr-ci` checks four things:
 - **Demo replay wall time.** `mylonite demo` must finish within 10 seconds
   wall-clock on the CI runner (measured at 6.8 s locally when this bar was
   set; re-baseline to 20 s only at the demo's own gate). The step prints
-  the measured time.
+  the measured time, and runs the demo a second time before failing, so
+  one slow run on a busy runner doesn't fail the PR.
 
 - **Test count floor.** `python scripts/check_test_count.py` compares
   `pytest --collect-only -q`'s count against the floor committed in

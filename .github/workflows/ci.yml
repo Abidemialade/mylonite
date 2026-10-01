@@ -202,16 +202,21 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
+        # Shared runners are noisy: one slow run alone doesn't fail the bar;
+        # two in a row do. A hung demo is killed after 60s.
         run: |
-          start_ms=$(date +%s%3N)
-          mylonite demo > /dev/null
-          end_ms=$(date +%s%3N)
-          elapsed_ms=$((end_ms - start_ms))
-          echo "demo replay wall time: ${elapsed_ms}ms"
-          if [ "$elapsed_ms" -gt 10000 ]; then
-            echo "::error::demo replay took ${elapsed_ms}ms, over the 10000ms (10s) bar"
-            exit 1
-          fi
+          for attempt in 1 2; do
+            start_ms=$(date +%s%3N)
+            timeout 60s mylonite demo > /dev/null
+            end_ms=$(date +%s%3N)
+            elapsed_ms=$((end_ms - start_ms))
+            echo "demo replay wall time (attempt ${attempt}): ${elapsed_ms}ms"
+            if [ "$elapsed_ms" -le 10000 ]; then
+              exit 0
+            fi
+          done
+          echo "::error::demo replay took over the 10000ms (10s) bar twice in a row (last: ${elapsed_ms}ms)"
+          exit 1
       - name: Test count floor (never drops without the tests-removed label)
         run: python scripts/check_test_count.py --labels-env PR_LABELS
 
