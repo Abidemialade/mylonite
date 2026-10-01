@@ -147,6 +147,7 @@ def _finding() -> tuple[Any, Any]:
         ExploitRecord,
         Payload,
         ReproducibilityEvidence,
+        ValidationOutcome,
         ValidationReport,
     )
 
@@ -176,6 +177,12 @@ def _finding() -> tuple[Any, Any]:
         return ValidationReport(
             test_filename="test_security_finding.py",
             kept=True,
+            # A passing build and differential leg: the report reads as KEPT, the
+            # only verdict the exports attach the claim to.
+            outcomes=[
+                ValidationOutcome(stage="build", passed=True, detail="built"),
+                ValidationOutcome(stage="differential", passed=True, detail="discriminates"),
+            ],
             notes=f"custom target: reproduced 5/5. {format_marker(server_layer=server_layer)}",
             reproducibility=ReproducibilityEvidence(
                 iterations=5, vuln_fired=5, guard_resisted=5, guard_fired=0, rate_gap=1.0
