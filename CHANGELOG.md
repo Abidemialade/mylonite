@@ -189,6 +189,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needed to point at one that isn't (a different `--scans-dir`, or an exploit
   copied elsewhere).
 
+- **A class no attack runs against now reads NOT TESTED, so a REST target that
+  declares W3 or W4 can't read clean (#221).** Coverage is counted from the
+  attacks each class actually got, not the seeds scheduled for it. W3 and W4
+  attacks need a tool-using (MCP) agent, so on a `transport: rest` target they
+  used to get zero attempts while W2 ran, and a resisted W2 read as a clean scan.
+  Each such class now shows `NOT TESTED [MYL-NT-016]` in the class summary and
+  `verdicts.json`, and a scan with no finding exits `2`. `scan` also warns before
+  it starts. See [MYL-NT-016](docs/reason-codes.md#myl-nt-016).
+- **The missing-`effect_probe` warning for W3/W4 now says what the scan does.**
+  It promised a "NOT TESTED FOR EFFECT" result the scan never emits and said a
+  side-effecting attack "may read as clean". Since the trace decides every MCP
+  attempt, a call that went through is a finding at `dispatched` or NOT TESTED,
+  never resisted; without a probe, a finding can't reach `effect-confirmed` and a
+  "queued" reply reads `RESISTED (server-reported)` unchecked. The warning now
+  says exactly that.
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with
   a log warning, so its classes vanished from the result and the scan could read

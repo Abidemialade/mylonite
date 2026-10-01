@@ -97,6 +97,7 @@ NT_UNDECIDED: Final = "MYL-NT-012"
 NT_INVALID_METADATA: Final = "MYL-NT-013"
 NT_UNKNOWN_SEED: Final = "MYL-NT-014"
 NT_MODULE_LOAD_FAILED: Final = "MYL-NT-015"
+NT_NO_ATTACK_EMITTED: Final = "MYL-NT-016"
 
 _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     _rc(
@@ -176,6 +177,13 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
         "reinstall the module's package and its dependencies; the `attack modules:` line "
         "names the module and the error type",
     ),
+    _rc(
+        NT_NO_ATTACK_EMITTED,
+        "No attack module in this run emitted an attack for this class on this target, so "
+        "the class was never attacked.",
+        "scan this class against an MCP target (transport stdio, sse or http), or remove "
+        "it from weakness_classes",
+    ),
 )
 
 #: The inconclusive codes the trace rule (``scan/effect_verdict.py``) stamps on
@@ -218,6 +226,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
     "module_load_failed": NT_MODULE_LOAD_FAILED,
+    "no_attack_emitted": NT_NO_ATTACK_EMITTED,
 }
 
 

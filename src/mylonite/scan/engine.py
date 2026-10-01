@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,6 +44,7 @@ from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped
 from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.coverage import (
     MODULE_LOAD_FAILURE_KEY,
+    NO_ATTACK_EMITTED_KEY,
     NO_VERDICT_EVIDENCE_KEYS,
     AbortReason,
     provider_abort_message,
@@ -429,6 +430,59 @@ def _load_failure_attempts(
     return attempts
 
 
+def _payload_weakness(payload: Payload, seeds_by_id: Mapping[str, Any]) -> str | None:
+    """The weakness class a payload attacks: its own metadata, else its seed's."""
+    weakness = (payload.metadata or {}).get("weakness")
+    if weakness:
+        return str(weakness)
+    seed = seeds_by_id.get(payload.pattern_id)
+    return str(seed.weakness) if seed is not None else None
+
+
+def _unemitted_class_attempts(
+    descriptor: TargetDescriptor,
+    payloads: Iterable[Payload],
+    *,
+    already_lost: set[str],
+    seeds_by_id: Mapping[str, Any] | None = None,
+) -> list[ScanAttempt]:
+    """One NOT TESTED attempt per scheduled class no module emitted a payload for (#221).
+
+    A class counts as covered by what the attack modules actually emitted, not
+    by the seeds scheduled for it. The excessive-agency module emits nothing for
+    a non-MCP target, so a REST target declaring W3 or W4 had those seeds
+    scheduled and zero attempts: the class dropped out of the result and the
+    scan could read clean. Classes already reported lost to a module that
+    failed to load (``already_lost``) are not counted twice.
+
+    ``outcome="not_applicable"`` (the attack does not apply to this target),
+    with a ``judge_evidence`` key that gives it its own reason code. No
+    contract field changes, so ``mylonite report`` reads it back.
+    """
+    by_id = {s.pattern_id: s for s in SEED_CATALOGUE} | dict(seeds_by_id or {})
+    scheduled = {str(s.weakness) for s in seeds_for_descriptor(descriptor)}
+    emitted = {w for p in payloads if (w := _payload_weakness(p, by_id))}
+    attempts: list[ScanAttempt] = []
+    for weakness in sorted(scheduled - emitted - already_lost):
+        seed_id = f"no-attack-emitted:{weakness}"
+        reason = reason_codes.tag(
+            reason_codes.NT_NO_ATTACK_EMITTED,
+            f"no attack module in this run emitted a {weakness} attack for this "
+            f"{descriptor.kind!r} target, so {weakness} was never attacked.",
+        )
+        attempts.append(
+            ScanAttempt(
+                seed_id=seed_id,
+                pattern_id=seed_id,
+                outcome="not_applicable",
+                verdict_reason=reason,
+                not_applicable_reason=reason,
+                judge_evidence={NO_ATTACK_EMITTED_KEY: "true", "weakness": weakness},
+            )
+        )
+    return attempts
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -597,6 +651,24 @@ class ScanEngine:
                             )
                         )
                     )
+
+            # #221: a class counts as covered by the payloads emitted for it, not
+            # by the seeds scheduled for it. Exempt as above.
+            if self._config.pattern_id_filter is None and not self._config.dry_run:
+                lost = {
+                    str(a.judge_evidence["weakness"])
+                    for a in attempts
+                    if a.judge_evidence.get(MODULE_LOAD_FAILURE_KEY)
+                    and a.judge_evidence.get("weakness")
+                }
+                attempts.extend(
+                    _unemitted_class_attempts(
+                        descriptor,
+                        all_payloads,
+                        already_lost=lost,
+                        seeds_by_id=self._seeds_by_id,
+                    )
+                )
 
             # Give every seed a floor of the budget before the rest is shared.
             # Payload tasks are all created up front, so a first-come-first-served

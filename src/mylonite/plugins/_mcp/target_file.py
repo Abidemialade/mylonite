@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mylonite import reason_codes
 from mylonite._paths import PathEscapesBase, resolve_contained
 from mylonite._redaction import (
     CREDENTIAL_ENV_FIELD,
@@ -619,32 +620,46 @@ _EMAIL_SHAPE_RE: Final = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def effect_probe_warnings(tf: TargetFile) -> list[str]:
-    """Non-fatal warnings: side-effecting weaknesses (W3/W4) need an ``effect_probe``.
+    """Non-fatal warnings about how a side-effecting class (W3/W4) is confirmed.
 
-    A W3 (egress/SSRF) or W4 (unconfirmed consequential action) finding turns on
-    whether a real side effect MATERIALISED. On the bundled reference target that
-    lands in adapter-private metadata the deterministic predicates read; a REAL MCP
-    target does not surface it, so without an ``effect_probe`` (which queries the
-    target's own state) the effect cannot be confirmed and the seed silently
-    under-detects — a vulnerable target can read as clean.
+    On an MCP target the planner trace decides every W3/W4 attempt, probe or not
+    (``scan/effect_verdict.decide``). Without an ``effect_probe``:
 
-    Distinct from the W2 hard block in :func:`validate_for_scan`: W3/W4 also have
-    direct (non-indirect) variants and still exercise the surface, so this is a
-    WARNING (the scan proceeds; those seeds report NOT TESTED FOR EFFECT), not an
-    error. ``mylonite scan --scaffold`` auto-suggests an ``effect_probe`` candidate from
-    the tool surface.
+    * a consequential call the trace ties to the attempt is a finding at
+      ``dispatched``, never ``effect-confirmed``;
+    * a call the trace can't tie to the attempt reads NOT TESTED
+      (``MYL-INC-001``), never resisted;
+    * a server reply that errors or says "queued" reads ``RESISTED
+      (server-reported)``, and nothing checks whether the effect landed anyway.
+
+    So a missing probe weakens the proof; it does not turn an unconfirmed effect
+    into a clean result. This is a WARNING, not an error (contrast the W2 block in
+    :func:`validate_for_scan`). ``mylonite scan --scaffold`` suggests an
+    ``effect_probe`` candidate from the tool surface.
+
+    A ``transport: rest`` target has no tool surface and no ``effect_probe``. No
+    shipped attack covers W3/W4 there, so those classes read NOT TESTED
+    (``MYL-NT-016``, #221); the warning says that instead.
     """
     warnings: list[str] = []
     effectful = sorted(set(tf.weakness_classes) & _EFFECTFUL_WEAKNESS_CLASSES)
+    if effectful and tf.transport == "rest":
+        warnings.append(
+            f"weakness class(es) {', '.join(effectful)} need a tool-using (MCP) target. "
+            "No attack for them runs against a rest target, so they will read NOT TESTED "
+            f"[{reason_codes.NT_NO_ATTACK_EMITTED}] and the scan cannot read clean. Remove "
+            "them from weakness_classes, or scan the agent's MCP server instead."
+        )
+        return warnings
     if effectful and tf.effect_probe is None:
         warnings.append(
-            f"weakness class(es) {', '.join(effectful)} cause a real side effect "
-            "(a send/fetch/write) whose occurrence can only be confirmed by an "
-            "effect_probe that queries the target's own state. None is declared, so "
-            "those seeds cannot confirm the effect on a real target and a side-effecting "
-            "attack may read as clean. Add an effect_probe to the target file "
-            "(see docs/target-file; `mylonite scan --scaffold` suggests one) for end-to-end "
-            "damage confirmation."
+            f"weakness class(es) {', '.join(effectful)} cause a real side effect (a "
+            "send, fetch or write). No effect_probe is declared, so a finding can be "
+            "proven only as far as 'dispatched' (the call reached the server), never "
+            "'effect-confirmed'. A server reply that errors or says it queued the action "
+            "reads RESISTED (server-reported), and nothing checks whether the effect "
+            "landed anyway. Add an effect_probe that reads the target's own state (see "
+            "docs/target-file.md; `mylonite scan --scaffold` suggests one)."
         )
     # An expect_marker that is one of Mylonite's OWN planted exfil literals collides
     # with the payload on a plant-and-recall target: the verify tool reflects the

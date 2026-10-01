@@ -44,6 +44,7 @@ from mylonite.scan.class_verdict import (
 from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
     MODULE_LOAD_FAILURE_KEY,
+    NO_ATTACK_EMITTED_KEY,
     AttemptClass,
     adjudication_counts,
     attempt_reached_no_verdict,
@@ -314,15 +315,17 @@ def _has_class_summary(result: ScanResult) -> bool:
     """Whether this result gets the per-class summary (sidecar and block).
 
     Only when an attempt was decided by the trace rule, the target carries a
-    calibration summary, or an attack module failed to load (its classes are
-    NOT TESTED, and the class block is where that shows per class). Reference,
-    REST and replayed scans otherwise have none of these, so their artefacts
-    and output are unchanged.
+    calibration summary, an attack module failed to load, or a scheduled class
+    had no attack emitted for it (#221). In the last two cases whole classes
+    are NOT TESTED, and the class block is where that shows per class.
+    Reference, REST and replayed scans otherwise have none of these, so their
+    artefacts and output are unchanged.
     """
     return (
         has_trace_outcome(result.report)
         or result.calibration is not None
         or bool(_load_failures(result.report))
+        or any(a.judge_evidence.get(NO_ATTACK_EMITTED_KEY) for a in result.report.attempts)
     )
 
 
@@ -585,7 +588,8 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             f"{_codes_suffix(report.attempts)} "
             "(planted payload undelivered, no seed_arm, no plant/sink/recall "
             "surface, malformed seed metadata, an unresolvable seed, a planner "
-            "failure, an attack module that failed to load, or an unexpected error "
+            "failure, an attack module that failed to load, a class no attack "
+            "module in this run emitted an attack for, or an unexpected error "
             "during invocation/judging) - those seeds proved NOTHING. This is not a "
             "clean result for them; reinstall any attack module named on the "
             "`attack modules:` line, declare a seed_arm (and for the tool-chaining / "

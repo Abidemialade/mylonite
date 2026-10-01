@@ -467,6 +467,12 @@ _UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET: Final = "undecided_judge_below_floor"
 #: construct. Told apart from a real error by this ``judge_evidence`` key.
 _MODULE_LOAD_FAILED_BUCKET: Final = "module_load_failed"
 MODULE_LOAD_FAILURE_KEY: Final = "module_load_failure"
+#: #221: the engine records one ``outcome == "not_applicable"`` attempt per
+#: weakness class that had seeds scheduled but no attack module emitted a
+#: payload for (the W3/W4 module emits nothing for a REST target). Told apart
+#: from a seed that missed a capability by this ``judge_evidence`` key.
+_NO_ATTACK_EMITTED_BUCKET: Final = "no_attack_emitted"
+NO_ATTACK_EMITTED_KEY: Final = "no_attack_emitted"
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -551,6 +557,7 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     "skipped_invalid_metadata": "had invalid seed metadata",
     "skipped_unknown_seed": "could not be resolved from the seed catalogue",
     _MODULE_LOAD_FAILED_BUCKET: "belong to an attack module that failed to load",
+    _NO_ATTACK_EMITTED_BUCKET: "stand for a class no attack module in this run emitted an attack for",
 }
 
 _BUCKET_REMEDY: Final[dict[str, str]] = {
@@ -599,6 +606,10 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
         if evidence.get("no_adjudicator") == NO_ADJUDICATOR:
             return _UNDECIDED_NO_ADJUDICATOR_BUCKET
         return "undecided"
+    if outcome == "not_applicable":
+        evidence = getattr(attempt, "judge_evidence", None) or {}
+        if evidence.get(NO_ATTACK_EMITTED_KEY):
+            return _NO_ATTACK_EMITTED_BUCKET
     return str(outcome)
 
 

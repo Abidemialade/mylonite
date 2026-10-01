@@ -59,6 +59,10 @@
     "category": "not-tested",
     "summary": "The attack module that covers this class failed to load, so its attacks never ran."
   },
+  "MYL-NT-016": {
+    "category": "not-tested",
+    "summary": "No attack module in this run emitted an attack for this class on this target, so the class was never attacked."
+  },
   "MYL-ABT-001": {
     "category": "abort",
     "summary": "The scan used up its LLM call budget and stopped early; coverage is incomplete."
