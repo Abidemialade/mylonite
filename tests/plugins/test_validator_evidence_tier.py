@@ -61,8 +61,9 @@ def test_custom_target_rejects_a_keep_resting_on_the_judge_alone() -> None:
     assert verdict_label(report) == REJECTED
     stability = _stability(report)
     assert stability.passed is False
-    assert JUDGE_ONLY_MARKER in stability.detail
+    assert "LLM judge alone" in stability.detail
     assert "2 judge-only" in stability.detail
+    assert JUDGE_ONLY_MARKER in report.notes
     assert "LLM judge alone" in verdict_reason(report)
 
 
@@ -70,13 +71,16 @@ def test_judge_only_runs_still_support_a_confirmed_run() -> None:
     report = _validate_custom(["trace", "judge-only"])
     stability = _stability(report)
     assert stability.passed is True
-    assert JUDGE_ONLY_MARKER not in stability.detail
+    assert "LLM judge alone" not in stability.detail
+    assert JUDGE_ONLY_MARKER not in report.notes
     assert "1 trace, 1 judge-only" in stability.detail
 
 
 def test_a_run_with_no_recorded_tier_is_not_judge_only() -> None:
     """Older stand-ins and runs with no judged attempt record no tier."""
-    assert _stability(_validate_custom([None, None])).passed is True
+    stability = _stability(_validate_custom([None, None]))
+    assert stability.passed is True
+    assert "2 unknown" in stability.detail
 
 
 def test_a_real_custom_run_records_its_evidence_tier() -> None:
@@ -148,7 +152,8 @@ def test_reference_twins_reject_a_differential_resting_on_the_judge_alone() -> N
     report = _validate_reference("llm")
     differential = next(o for o in report.outcomes if o.stage == "differential")
     assert differential.passed is False
-    assert JUDGE_ONLY_MARKER in differential.detail
+    assert "LLM judge alone" in differential.detail
+    assert JUDGE_ONLY_MARKER in report.notes
     assert report.kept is False
     assert "LLM judge alone" in verdict_reason(report)
 
