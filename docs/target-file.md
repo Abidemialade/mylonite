@@ -322,7 +322,8 @@ failed pre-flight can never let the other classes read as a clean pass.
 When the refused class came from `--weakness-class` rather than the file, the message
 says so and points at the flag, since editing `weakness_classes` would not help.
 
-This is a different check from `mylonite check`, which needs a live tool surface and no
+This is a different check from `mylonite check` (hidden and experimental — see
+[docs/experimental.md](experimental.md)), which needs a live tool surface and no
 LLM call: it diffs `seed_arm.tool`, `effect_probe.verify_tool` and every
 `control_config` tool-name field against the server's described tools, and flags any
 name that isn't there — a typo, or a stale name copied from another target file. Those
@@ -405,7 +406,7 @@ Set each variable to the real value in the shell that runs Mylonite, then use th
 
 ```bash
 export MYLONITE_TARGET_ENV_GITHUB_TOKEN='ghp_...'
-mylonite check --target-file app.yaml
+mylonite scan --target-file app.yaml --dry-run
 ```
 
 To keep the values in a `.env` file instead, load it into your shell first

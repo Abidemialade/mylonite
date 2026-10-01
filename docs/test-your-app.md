@@ -2,8 +2,7 @@
 
 The bundled [reference app](quarry.md) proves the machinery. The point of Mylonite is to run
 it against **your** AI agent. If your app exposes its tools over MCP (or any
-stdio MCP server), this is the end-to-end path: scaffold a target file, check it,
-scan, and gate.
+stdio MCP server), this is the end-to-end path: scaffold a target file, scan, and gate.
 
 > **No MCP?** If your agent is a plain HTTP endpoint (a prompt in, a reply out),
 > use the [`rest` transport](http-agent.md) — describe the request shape in the
@@ -50,28 +49,7 @@ seed_arm:                    # how to plant untrusted content (required for W2)
 > guaranteed to be surfaced back) — printing what it inferred. Otherwise it blocks
 > loudly rather than silently skipping the W2 attack patterns and reading as clean.
 
-## 2. Check it (free, no key)
-
-`check` connects to the same target ONCE — no LLM call, no attack, no `--authorize`
-needed — and reports structural exposure straight from the tool schemas: consequential
-tools with no approval-shaped sibling, descriptions that steer the agent, tools taking an
-apparent network destination, and unpinned tool descriptions (paste-ready digests for
-`control_config.description_pins`). It also summarises the surface's
-[lethal-trifecta](weakness-classes.md#the-lethal-trifecta) legs and, when no private data
-is declared, suggests the `private_tools` entry that lets the W2 control protect it:
-
-```bash
-mylonite check --target-file app.yaml
-```
-
-Every finding is a hint to confirm, never a verdict — the differential oracle (`scan`/
-`gate`) is what proves an attack actually lands. Cheap enough to run on every push: add
-`mylonite check --target-file app.yaml --enforce` to CI stage 1, next to lint, once the
-surface is clean (`--enforce` exits `1` on the substantive W1-W4 structural findings; the
-"unpinned descriptions" advisory is shown but does not gate, so this is adoptable on a
-server you have not pinned yet).
-
-## 3. Scan it
+## 2. Scan it
 
 ```bash
 mylonite scan --target-file app.yaml --authorize my-app
@@ -82,7 +60,7 @@ This runs the [single-shot engine](attack-modes.md). Findings land under
 [model roles](attack-modes.md#composing-the-model-roles) to point the
 *planner* at a representatively exploitable model.
 
-## 4. Gate it (the full pipeline)
+## 3. Gate it (the full pipeline)
 
 `gate` runs the whole pipeline — scan → generate → validate → (optionally) open a PR —
 and only a **kept** test makes it through:
@@ -98,13 +76,11 @@ and proves the finding *differentially* by default — the emitted test gates on
 **control** being load-bearing, with the boundary-proxy caveat stated on the label. See
 [CI gating](ci-gating.md) for the committed workflows and the PR anatomy.
 
-## 5. Keep it honest over time
+## 4. Keep it honest over time
 
-- **`mylonite ablate --target-file app.yaml --authorize my-app`** — score each safeguard:
-  load-bearing, security theater, or (with `--redundancy`) redundant, plus two honesty
-  outcomes: no-attack (the attack itself never reproduced, so there's nothing to
-  attribute) and inconclusive (a leg of the comparison never produced a trustworthy
-  result).
+- **Scoring each safeguard individually** (load-bearing, security theater, redundant,
+  no-attack, or inconclusive) is `ablate`, which is hidden and experimental — see
+  [docs/experimental.md](experimental.md).
 - **When you change models** — re-validate the committed test with the new
   `--planner-model` before you ship. See [Re-validate on a new model](model-upgrade.md).
 
