@@ -41,6 +41,7 @@ from mylonite.scan._llm import (
     seed_scope,
 )
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.coverage import NO_VERDICT_EVIDENCE_KEYS, AbortReason
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
@@ -220,6 +221,12 @@ class ScanResult:
     #: Consumed by ``ScanOutcome.from_report``'s ``abort_detail`` kwarg to
     #: replace the generic per-abort-reason text.
     abort_detail: str | None = None
+    #: What calibration proved about the target's effect probe, when the adapter
+    #: reports one (an MCP target that declares an effect probe or a seed arm).
+    #: Like ``descriptor``, outside ScanReport's schema: ``write_artefacts``
+    #: persists it in the ``verdicts.json`` sidecar, and ``mylonite report``
+    #: reads it back from there.
+    calibration: CalibrationSummary | None = None
 
 
 @dataclass
@@ -700,7 +707,16 @@ class ScanEngine:
             descriptor=descriptor,
             llm_spend=llm_spend,
             abort_detail=abort_detail,
+            calibration=self._adapter_calibration(),
         )
+
+    def _adapter_calibration(self) -> CalibrationSummary | None:
+        """The adapter's calibration summary, if it reports one."""
+        report = getattr(self._adapter, "calibration_summary", None)
+        if not callable(report):
+            return None
+        summary = report()
+        return summary if isinstance(summary, CalibrationSummary) else None
 
     def _stamp_exec_context(self, exploits: list[ExploitRecord]) -> list[ExploitRecord]:
         """Stamp T12 execution-context metadata onto every finding's payload.

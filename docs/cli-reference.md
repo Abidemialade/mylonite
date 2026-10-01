@@ -304,6 +304,9 @@ Options: `target` (a scan dir, a `generate`-emitted dir **once `validate` has ru
 `*_report.json`); `--sarif PATH` (SARIF 2.1.0
 for GitHub code scanning); `--json PATH` (machine-readable finding bundle). Both carry
 the differential proof, the OWASP/ASI/ATLAS/NIST tags, and the same recommendation.
+For a scan directory with a `verdicts.json`, `report` also prints the same per-class
+summary and calibration status the scan printed (see [The per-class
+summary](reading-results.md#the-per-class-summary)).
 
 ```bash
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json

@@ -4,7 +4,10 @@
   subdirectory and writes ``scan_report.json`` plus one
   ``exploit_<pattern_id>.json`` per finding. JSON serialised via the Pydantic
   models so the on-disk shape matches the committed schemas at
-  ``src/mylonite/schemas/``.
+  ``src/mylonite/schemas/``. A scan whose attempts were decided by the trace
+  rule (or whose target carries a calibration summary) also gets a
+  ``verdicts.json`` sidecar: the per-class summary, its reason codes and
+  proof levels, and the calibration certificate.
 * ``render_summary(result)`` — returns a string with a Rich-rendered summary
   table the CLI prints unmodified.
 """
@@ -31,6 +34,12 @@ from mylonite._redaction import redact, redact_value
 from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
 from mylonite.reason_codes import format_code_counts
 from mylonite.scan._llm import LLMSpend
+from mylonite.scan.class_verdict import (
+    CalibrationSummary,
+    ClassVerdict,
+    class_verdicts,
+    has_trace_outcome,
+)
 from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
     AttemptClass,
@@ -281,7 +290,79 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
             encoding="utf-8",
         )
 
+    if _has_class_summary(result):
+        (scan_dir / VERDICTS_FILENAME).write_text(
+            json.dumps(redact_value(_verdicts_document(result)), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     return scan_dir
+
+
+#: The per-class summary sidecar. Like ``tool_surface.json``, NOT a ScanReport
+#: field, so it costs no schema event and an older version simply ignores it.
+VERDICTS_FILENAME: Final = "verdicts.json"
+_VERDICTS_SCHEMA_VERSION: Final = "1.0"
+
+
+def _has_class_summary(result: ScanResult) -> bool:
+    """Whether this result gets the per-class summary (sidecar and block).
+
+    Only when an attempt was decided by the trace rule, or the target carries a
+    calibration summary. Reference, REST and replayed scans have neither, so
+    their artefacts and output are unchanged.
+    """
+    return has_trace_outcome(result.report) or result.calibration is not None
+
+
+def _verdicts_document(result: ScanResult) -> dict[str, object]:
+    verdicts = class_verdicts(result.report, calibration=result.calibration)
+    codes: dict[str, int] = {}
+    proof_levels: dict[str, int] = {}
+    for attempt in result.report.attempts:
+        evidence = attempt.judge_evidence
+        if attempt.outcome == "finding" and evidence.get("proof_level"):
+            level = evidence["proof_level"]
+            proof_levels[level] = proof_levels.get(level, 0) + 1
+    for verdict in verdicts:
+        for code in verdict.codes:
+            codes[code] = codes.get(code, 0) + 1
+    return {
+        "schema_version": _VERDICTS_SCHEMA_VERSION,
+        "target_id": result.report.target_id,
+        "classes": [v.to_dict() for v in verdicts],
+        # How many classes each code explains.
+        "codes": codes,
+        # How many findings were shown at each proof level.
+        "proof_levels": proof_levels,
+        "counts": {
+            "finding": sum(v.findings for v in verdicts),
+            "resisted": sum(v.resisted for v in verdicts),
+            "server_reported": sum(v.server_reported for v in verdicts),
+            "not_tested": sum(v.not_tested for v in verdicts),
+        },
+        "calibration": result.calibration.to_dict() if result.calibration else None,
+    }
+
+
+def read_verdicts_calibration(scan_dir: Path) -> CalibrationSummary | None:
+    """The calibration summary a saved scan directory recorded, if any.
+
+    ``None`` (never an exception) when ``verdicts.json`` is absent, malformed,
+    or records no calibration, so ``mylonite report`` renders the same per-class
+    block the scan printed whenever it can, and degrades to the attempts alone
+    when it cannot.
+    """
+    path = Path(scan_dir) / VERDICTS_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return CalibrationSummary.from_dict(data.get("calibration"))
 
 
 def read_tool_surface(scan_dir: Path) -> tuple[ToolSpec, ...] | None:
@@ -444,12 +525,61 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             "verdict_reason/error_detail for the specific cause, then "
             "re-scan.[/bold red]",
         )
+    if _has_class_summary(result):
+        for line in _class_block(result, sep=sep):
+            console_print(console, line)
     if report.aborted:
         console_print(console, f"[red]aborted: {report.aborted}[/red]")
     scope = _clean_result_scope(report, not_tested=not_tested)
     if scope:
         console_print(console, scope)
     return redact(buffer.getvalue())
+
+
+def _class_line(verdict: ClassVerdict, *, sep: str) -> str:
+    counts = [
+        f"{n} {label}"
+        for n, label in (
+            (verdict.findings, "finding"),
+            (verdict.resisted, "resisted"),
+            (verdict.not_tested, "not tested"),
+        )
+        if n
+    ]
+    line = f"  {verdict.weakness}  {verdict.status}"
+    if verdict.proof_levels:
+        line += f"{sep}proof: {', '.join(verdict.proof_levels)}"
+    if verdict.codes:
+        line += f" [{', '.join(verdict.codes)}]"
+    if counts:
+        line += f" ({', '.join(counts)})"
+    return rich_escape(line)
+
+
+def _calibration_line(calibration: CalibrationSummary) -> str:
+    line = f"calibration: {calibration.status}"
+    if calibration.certified_tools:
+        line += f" ({', '.join(calibration.certified_tools)})"
+    codes = [c for c in (calibration.reason_code, calibration.seed_reason_code) if c]
+    if codes:
+        line += f" [{', '.join(dict.fromkeys(codes))}]"
+    line += f"; seed control: {calibration.seed_status}"
+    return rich_escape(line)
+
+
+def _class_block(result: ScanResult, *, sep: str) -> list[str]:
+    """One line per weakness class (``classes:``), then the calibration status.
+
+    Look each code up in docs/reason-codes.md. Exit codes do not read this block.
+    """
+    verdicts = class_verdicts(result.report, calibration=result.calibration)
+    lines: list[str] = []
+    if verdicts:
+        lines.append("classes:")
+        lines.extend(_class_line(v, sep=sep) for v in verdicts)
+    if result.calibration is not None:
+        lines.append(_calibration_line(result.calibration))
+    return lines
 
 
 def _codes_suffix(attempts: Sequence[object], *, no_verdict_only: bool = False) -> str:

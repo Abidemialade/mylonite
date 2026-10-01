@@ -105,11 +105,12 @@ def test_bundle_recommendation_present_with_a_target() -> None:
 
 
 def test_bundle_schema_version_tracks_additive_keys() -> None:
-    """1.1 added "recommendation"; 1.2 added "guarded_twin_layer" and "proof.claim"."""
+    """1.1 added "recommendation"; 1.2 added "guarded_twin_layer" and "proof.claim";
+    1.3 added "proof_level"."""
     from mylonite.report.bundle import SCHEMA_VERSION, to_bundle
 
-    assert SCHEMA_VERSION == "1.2"
-    assert to_bundle([])["schema_version"] == "1.2"
+    assert SCHEMA_VERSION == "1.3"
+    assert to_bundle([])["schema_version"] == "1.3"
 
 
 def _fidelity_report(*, server_layer: bool, guard_resisted: int | None = 5) -> Any:
@@ -192,3 +193,26 @@ def test_bundle_redacts_secret_shaped_success_reason() -> None:
     )
     f = to_bundle([(ex, None)])["findings"][0]
     assert secret not in f["success_reason"]
+
+
+def test_bundle_shows_the_findings_proof_level() -> None:
+    from mylonite.report.bundle import to_bundle
+
+    exploit = _exploit("W4", metadata={"proof_level": "dispatched-tool-linked"})
+    assert to_bundle([(exploit, None)])["findings"][0]["proof_level"] == "dispatched-tool-linked"
+
+
+def test_bundle_proof_level_is_null_without_a_trace() -> None:
+    from mylonite.report.bundle import to_bundle
+
+    assert to_bundle([(_exploit("W4"), None)])["findings"][0]["proof_level"] is None
+
+
+def test_an_errored_or_deferred_probe_reads_like_an_unprobed_one() -> None:
+    """Only a confirmed effect raises severity: an errored or deferred probe
+    confirmed nothing."""
+    from mylonite.report.bundle import to_bundle
+
+    for effect in ("errored", "deferred", "unprobed"):
+        finding = to_bundle([(_exploit("W1", effect=effect), None)])["findings"][0]
+        assert finding["severity"] == "Medium", effect

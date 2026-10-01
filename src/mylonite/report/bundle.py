@@ -27,7 +27,9 @@ from mylonite.version import __version__
 #: 1.2: added "guarded_twin_layer" on each finding and "claim" inside "proof" --
 #: what played the guarded side of the differential, and the claim it earns.
 #: Both additive; both null when no guarded twin ran.
-SCHEMA_VERSION = "1.2"
+#: 1.3: added "proof_level" on each finding -- how strongly the tool-call trace
+#: showed it. Additive; null for a finding with no trace.
+SCHEMA_VERSION = "1.3"
 
 
 def _differential_layer(report: Any | None) -> TwinLayer | None:
@@ -88,6 +90,10 @@ def _finding(exploit: Any, report: Any | None, target: Any | None = None) -> dic
         "severity": severity_for(weakness, effect),
         # static / obfuscated / ... (attack tier or shape metadata, generic)
         "attack_shape": str(md.get("attack_shape") or md.get("attack_tier") or "static"),
+        # How strongly the trace showed this finding: effect-confirmed, dispatched
+        # or dispatched-tool-linked. None for a finding with no trace (reference
+        # and REST targets, and scans from earlier versions).
+        "proof_level": md.get("proof_level") or None,
         # Mirrors the sarif.py fix (DCR-0021): a real exfil finding's narration can
         # carry the exfiltrated value itself, and this bundle is written to disk
         # unconditionally (no console-boundary redaction applies to a file write).

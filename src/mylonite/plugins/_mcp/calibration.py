@@ -50,6 +50,7 @@ from mylonite.plugins._mcp._session_adapter import (
 )
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._types import SeedArmUnavailable
+from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.control_shim import _DESTRUCTIVE_HINTS, consequential_tool_names
 from mylonite.scan.tool_classifier import hint_matches
 from mylonite.scan.tool_roles import _classify_tools, _content_slot_template
@@ -200,6 +201,38 @@ def lookup(spec: target_registry.TargetSpec, scope: str | None) -> CalibrationRe
 def clear_calibrations() -> None:
     """Drop every recorded result (test isolation)."""
     _REGISTRY.clear()
+
+
+def summarise(result: CalibrationResult) -> CalibrationSummary:
+    """``result`` as the plain summary a scan result and ``verdicts.json`` carry."""
+    return CalibrationSummary(
+        status=result.status,
+        reason_code=result.reason_code,
+        seed_status=result.seed_control.status,
+        seed_reason_code=result.seed_control.reason_code,
+        certified_tools=result.certified_tools,
+    )
+
+
+def summary_for(spec: target_registry.TargetSpec, scope: str | None) -> CalibrationSummary | None:
+    """The calibration summary for this target, as a scan reports it.
+
+    The recorded result when calibration ran. When it did not (controls set to
+    ``skip``, or never authorized) but the target declares an effect probe or a
+    seed arm, that is reported as not calibrated (``MYL-INC-002``), never as
+    nothing. ``None`` for a target with nothing to calibrate.
+    """
+    recorded = lookup(spec, scope)
+    if recorded is not None:
+        return summarise(recorded)
+    if spec.effect_probe is None and spec.seed_arm is None:
+        return None
+    return CalibrationSummary(
+        status=STATUS_NOT_AUTHORIZED,
+        reason_code=INC_NOT_CALIBRATED,
+        seed_status=SEED_NOT_RUN,
+        seed_reason_code=INC_NOT_CALIBRATED if spec.seed_arm is not None else None,
+    )
 
 
 # --- schema check ---------------------------------------------------------------

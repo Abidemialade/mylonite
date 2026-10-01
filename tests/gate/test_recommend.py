@@ -1008,3 +1008,47 @@ def test_rest_recommendation_never_raises_with_malformed_trace():
     )
     rec = recommend(ex)  # must not raise
     assert rec.weakness_class == "rest"
+
+
+def _w3_exploit_with_effect(effect: str) -> ExploitRecord:
+    return ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id="w3",
+        payload=Payload(
+            pattern_id="w3", channel="user-message", body="x", metadata={"weakness": "W3"}
+        ),
+        response=AdapterResponse(
+            payload_pattern_id="w3",
+            raw_response="x",
+            tool_calls=["web_fetch"],
+            metadata={
+                "effect_trace": json.dumps(
+                    [
+                        {
+                            "tool": "web_fetch",
+                            "args": {"url": "http://attacker.example"},
+                            "result": "ok",
+                            "is_error": False,
+                        }
+                    ]
+                ),
+                "effect_confirmed": effect,
+            },
+        ),
+        success_reason="r",
+        compliance=ComplianceTags(),
+    )
+
+
+@pytest.mark.parametrize("effect", ["errored", "deferred", "false"])
+def test_a_probe_that_confirmed_nothing_degrades_like_unprobed(effect: str) -> None:
+    """A finding the trace decided can carry a probe that errored, held or saw
+    nothing. None of those confirmed the effect, so each degrades the same way
+    "unprobed" does, never reading as a confirmed effect."""
+    rec = recommend(_w3_exploit_with_effect(effect))
+    assert "effect probe did not confirm" in rec.degraded
+
+
+def test_a_confirmed_effect_is_not_degraded() -> None:
+    rec = recommend(_w3_exploit_with_effect("true"))
+    assert "effect probe did not confirm" not in rec.degraded

@@ -2660,7 +2660,7 @@ def report(
     else:
         from mylonite import testkit
         from mylonite.contracts import ScanReport
-        from mylonite.scan.artefacts import render_summary
+        from mylonite.scan.artefacts import read_verdicts_calibration, render_summary
         from mylonite.scan.engine import ScanResult
 
         try:
@@ -2692,7 +2692,7 @@ def report(
             echo_exc(f"could not classify {path}", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
-        result = ScanResult(report=sreport, exploits=[])
+        result = ScanResult(sreport, [], calibration=read_verdicts_calibration(path.parent))
         # render_summary already returns a fully-rendered, ASCII-aware string.
         console_print(console, render_summary(result), markup=False)
         # Compliance tags aggregated across the co-located exploit files, enriched

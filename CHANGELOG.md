@@ -59,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A scan on an MCP target now ends with one line per weakness class, and writes
+  them to `verdicts.json`.** Each class reads `FINDING` (with its proof levels),
+  `RESISTED`, `RESISTED (server-reported)` or `NOT TESTED`, with the reason codes
+  behind it, followed by the target's calibration status. One untested attempt keeps
+  an unfound class `NOT TESTED`. `verdicts.json` in the scan directory carries the same
+  classes, codes, proof levels and counts, plus the calibration certificate, and
+  `mylonite report` on that directory prints the same block. The JSON finding bundle
+  (`schema_version` `1.3`) and SARIF (`mylonite.proofLevel`) now show each finding's
+  proof level, and a gate recommendation is degraded when the probe errored, saw the
+  action held or saw nothing, the same way it is for an unprobed finding. Scans with
+  no tool-call trace print and write what they did before, and exit codes are
+  unchanged. See [The per-class summary](docs/reading-results.md#the-per-class-summary).
+
 - **An effect probe's "no change" can no longer clear an attack the trace shows
   landed.** On an MCP target, each attempt is now decided from its tool-call trace
   first. If the agent called no consequential tool, or a client-side control blocked

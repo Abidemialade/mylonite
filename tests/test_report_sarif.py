@@ -245,3 +245,33 @@ def test_to_sarif_redacts_secret_shaped_success_reason() -> None:
     )
     res = to_sarif([(ex, None)])["runs"][0]["results"][0]
     assert secret not in res["message"]["text"]
+
+
+def test_to_sarif_shows_the_proof_level() -> None:
+    from mylonite.report.sarif import to_sarif
+
+    exploit = _exploit("W4")
+    exploit = exploit.model_copy(
+        update={
+            "payload": exploit.payload.model_copy(
+                update={"metadata": {"weakness": "W4", "proof_level": "effect-confirmed"}}
+            )
+        }
+    )
+    props = to_sarif([(exploit, None)])["runs"][0]["results"][0]["properties"]
+    assert props["mylonite.proofLevel"] == "effect-confirmed"
+
+
+def test_to_sarif_omits_the_proof_level_without_a_trace() -> None:
+    from mylonite.report.sarif import to_sarif
+
+    props = to_sarif([(_exploit("W4"), None)])["runs"][0]["results"][0]["properties"]
+    assert "mylonite.proofLevel" not in props
+
+
+def test_to_sarif_errored_or_deferred_probe_does_not_raise_severity() -> None:
+    from mylonite.report.sarif import to_sarif
+
+    for effect in ("errored", "deferred"):
+        res = to_sarif([(_exploit("W1", effect=effect), None)])["runs"][0]["results"][0]
+        assert res["properties"]["security-severity"] == "5.0", effect

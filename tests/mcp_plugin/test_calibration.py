@@ -726,3 +726,43 @@ async def test_calibrate_custom_target_controls_skip_makes_no_calls(
     result = await calibration.calibrate_custom_target(adapter, authorized=True)
     assert seen == [False]
     assert result.status == calibration.STATUS_NOT_AUTHORIZED
+
+
+# --- the summary a scan carries ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_summarise_carries_the_certificate() -> None:
+    _register()
+    result = await _calibrate(_Launcher(_Store()))
+    summary = calibration.summarise(result)
+    assert summary.status == calibration.STATUS_CERTIFIED
+    assert summary.reason_code is None
+    assert summary.seed_status == result.seed_control.status
+    assert summary.certified_tools == result.certified_tools
+    assert summary.calibrated is True
+
+
+@pytest.mark.asyncio
+async def test_the_adapter_reports_its_recorded_calibration() -> None:
+    _register()
+    await _calibrate(_Launcher(_Store()))
+    summary = MCPStdioAdapter(family=FAMILY, scope=None).calibration_summary()
+    assert summary is not None
+    assert summary.status == calibration.STATUS_CERTIFIED
+
+
+def test_an_uncalibrated_probe_reads_not_calibrated() -> None:
+    """A declared probe that never ran its controls (skip, or no authorization)
+    is reported as such, never as nothing."""
+    _register()
+    summary = MCPStdioAdapter(family=FAMILY, scope=None).calibration_summary()
+    assert summary is not None
+    assert summary.status == calibration.STATUS_NOT_AUTHORIZED
+    assert summary.reason_code == "MYL-INC-002"
+    assert summary.seed_status == calibration.SEED_NOT_RUN
+
+
+def test_a_target_with_nothing_to_calibrate_has_no_summary() -> None:
+    _register(None, seed_arm=None)
+    assert MCPStdioAdapter(family=FAMILY, scope=None).calibration_summary() is None

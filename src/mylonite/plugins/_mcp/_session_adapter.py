@@ -49,6 +49,7 @@ from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
+from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.effect_verdict import LinkResult, TraceOutcome, classify_trace, link_for
 from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
@@ -429,6 +430,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         attempt's, so the scan engine runs one attempt at a time on such a target.
         """
         return self._spec.effect_probe is not None
+
+    def calibration_summary(self) -> CalibrationSummary | None:
+        """This target's calibration, for the scan result and ``verdicts.json``.
+
+        Read from the process-level registry, so it reflects whatever
+        :func:`calibration.calibrate_custom_target` recorded before the scan.
+        """
+        # Deferred import: `calibration` imports FROM this module at load time.
+        from mylonite.plugins._mcp import calibration
+
+        return calibration.summary_for(self._spec, self._scope)
 
     def _target_id(self) -> str:
         if self._scope is None:
