@@ -1181,6 +1181,7 @@ installs on Python 3.14.
   artefacts off disk and dropping it would silently start reading old
   no-verdict attempts as clean resistance.
 
+
 - `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
   did more than its comment justified: dropping `--strict` already avoids the
   editable-install false failure, so the flag was additionally swallowing real
@@ -1488,6 +1489,7 @@ installs on Python 3.14.
   produced the same `no_finding` the tests asserted — so nothing went red. Both
   doubles now key on the response-schema key `harmful_intent_present`, and each
   file carries a guard asserting the marker against the live prompt.
+
 
 - `gate-action/action.yml` pinned `actions/setup-python@v6` by moving tag and
   interpolated its inputs directly into a `run:` block. Both are more serious
