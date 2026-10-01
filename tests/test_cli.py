@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Iterator
 from dataclasses import replace
 from importlib.abc import MetaPathFinder
 from pathlib import Path
@@ -26,6 +27,28 @@ from mylonite.cli import (
 )
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _clean_target_registry() -> Iterator[None]:
+    """Isolate every test from the module-level runtime target registry.
+
+    Several `gate`/`scan`/`validate` invocations in this file register a
+    custom target under a reused family name (commonly "myapp") via the real
+    CLI code path, then assert on an exception raised before that command
+    ever reaches its own cleanup -- so without this, a registration from one
+    test can outlive it and leak into whichever test the parallel runner
+    happens to schedule next in the same worker (#230). Clearing on both
+    sides of the test, not just one, protects against a leak arriving FROM
+    an earlier test as well as one leaking TO a later one. The remote-MCP
+    and HTTP-adapter test modules already isolate the same registry this
+    way; this file never did.
+    """
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    yield
+    target_registry.clear_runtime_targets()
 
 
 def _sample_exploit() -> Any:
