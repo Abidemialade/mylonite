@@ -90,7 +90,6 @@ src/mylonite/testkit/__init__.py | claude- | 1 | docstring example of a committe
 # silently pick up a different one -- see that module's REPLAY INVARIANT
 # docstring. These are comments explaining that pin.
 src/mylonite/demo/runner.py | ollama/ | 1 | comment contrasting the demo's live-mode route naming, not a default
-src/mylonite/demo/runner.py | anthropic/ | 1 | comment explaining a past bug in deriving the provider from a --model override
 
 # --- an example mylonite.yaml snippet in a docstring -----------------------
 src/mylonite/config.py | claude- | 2 | docstring's example mylonite.yaml, not a parsed default
