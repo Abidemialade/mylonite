@@ -189,18 +189,28 @@ an offline end-to-end run) lands separately. `nr-ci` checks four things:
   `mylonite.scan.providers.looks_like_provider_env_var` recognises one).
   `mylonite.scan.providers` is the one registry allowed to name either; a
   hit anywhere else fails unless it is listed in
-  `scripts/hardcoded_models_allowlist.txt`, one line per hit:
-  `<path>:<line>:<matched text> | <reason>`. The entry is re-checked
-  against the current line every run, so an edit that moves or changes the
-  flagged text makes the entry stale and fails the build rather than
-  silently covering something else. The list may only shrink — a unit test
-  in `tests/test_check_no_hardcoded_models.py` pins today's entry count as
-  a ceiling; lower it whenever you remove an entry, and raise it only in
-  the same PR that adds a new, reviewed, genuinely-necessary one. Most of
-  today's entries are documentation and error-remedy text naming an
-  example provider/key for a human reader; some are pre-existing hardcoded
-  default models that predate this check and are flagged as follow-up
-  debt rather than fixed here.
+  `scripts/hardcoded_models_allowlist.txt`, one line per entry:
+  `<path> | <matched text or a stable regex> | <count> | <reason>`.
+
+  Matching is by **file content, not line number** — a row says "this
+  pattern is expected to appear `<count>` times somewhere in this file",
+  never which line. An earlier, line-keyed version broke on any unrelated
+  edit above a flagged line (it shifted every line number below it), which
+  would fail this check on a change that never touched the flagged text —
+  exactly the kind of failure a required check must not have. The check
+  now fails only when a match has no covering entry at all, when a
+  covered pattern matches *more* than its entry's count (a new,
+  unreviewed occurrence alongside the excused ones), or when an entry's
+  pattern no longer matches anything in its file (stale — delete or fix
+  it). The list may only shrink — a unit test in
+  `tests/test_check_no_hardcoded_models.py` pins today's row count and the
+  sum of every row's count as ceilings; lower them whenever you remove or
+  shrink an entry, and raise them only in the same PR that adds a new,
+  reviewed, genuinely-necessary one. Most of today's entries are
+  documentation and error-remedy text naming an example provider/key for a
+  human reader; some are pre-existing hardcoded default models that
+  predate this check and are flagged as follow-up debt rather than fixed
+  here.
 
 - **Demo replay wall time.** `mylonite demo` must finish within 10 seconds
   wall-clock on the CI runner (measured at 6.8 s locally when this bar was

@@ -23,12 +23,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_no_hardcoded_models as gate  # noqa: E402
 
-#: The allowlist may only shrink. Lower this whenever an entry is removed
-#: (a hardcoded model/key got fixed, or a stale entry got deleted); never
-#: raise it to make room for a new, unreviewed hit -- add a real reason to
-#: the allowlist file instead and raise this in the same PR, so the ratchet
-#: is a deliberate, reviewable act rather than a silent widening.
-ALLOWLIST_COUNT_CEILING = 79
+#: The allowlist may only shrink. Lower these whenever an entry is removed
+#: or its count drops (a hardcoded model/key got fixed, or a stale entry
+#: got deleted); never raise them to make room for a new, unreviewed hit --
+#: add a real reason to the allowlist file instead and raise these in the
+#: same PR, so the ratchet is a deliberate, reviewable act rather than a
+#: silent widening.
+ALLOWLIST_ROW_COUNT_CEILING = 55
+ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 81
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
@@ -86,14 +88,14 @@ def test_non_python_files_are_not_scanned(tmp_path: Path) -> None:
 
 
 def test_parse_allowlist_reads_a_valid_entry() -> None:
-    entries = gate.parse_allowlist("a.py:3:claude- | an example in a docstring\n")
+    entries = gate.parse_allowlist("a.py | claude- | 2 | an example in a docstring\n")
     assert entries == [
         gate.AllowlistEntry(
             "a.py",
-            3,
             "claude-",
+            2,
             "an example in a docstring",
-            "a.py:3:claude- | an example in a docstring",
+            "a.py | claude- | 2 | an example in a docstring",
         )
     ]
 
@@ -105,11 +107,14 @@ def test_parse_allowlist_ignores_blank_and_comment_lines() -> None:
 @pytest.mark.parametrize(
     "bad_line",
     [
-        "a.py:3:claude-",  # no " | reason"
-        "a.py:3:claude- | ",  # empty reason
-        "a.py:claude- | reason",  # missing line number field
-        "a.py:threeve:claude- | reason",  # non-integer line
-        "a.py:3: | reason",  # empty matched text
+        "a.py | claude- | 2",  # missing reason field
+        "a.py | claude- | 2 | ",  # empty reason
+        "a.py | | 2 | reason",  # empty pattern
+        " | claude- | 2 | reason",  # empty path
+        "a.py | claude- | zero | reason",  # non-integer count
+        "a.py | claude- | 0 | reason",  # count must be >= 1
+        "a.py | [ | 1 | reason",  # invalid regex
+        "a.py | claude- | 2 | reason | extra",  # too many fields
     ],
 )
 def test_parse_allowlist_rejects_malformed_entries(bad_line: str) -> None:
@@ -117,13 +122,19 @@ def test_parse_allowlist_rejects_malformed_entries(bad_line: str) -> None:
         gate.parse_allowlist(bad_line)
 
 
-# --- unmatched / stale ----------------------------------------------------
+def test_parse_allowlist_accepts_a_regex_pattern() -> None:
+    entries = gate.parse_allowlist(r"a.py | AZURE_API_(BASE|VERSION) | 2 | two related vars\n")
+    assert entries[0].pattern == "AZURE_API_(BASE|VERSION)"
+
+
+# --- unmatched / over-limit / stale ---------------------------------------
 
 
 def test_an_allowlisted_hit_does_not_fail() -> None:
     hits = [gate.Hit("a.py", 3, "claude-", 'MODEL = "claude-haiku"')]
-    entries = [gate.AllowlistEntry("a.py", 3, "claude-", "example", "src")]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 1, "example", "src")]
     assert gate.unmatched_hits(hits, entries) == []
+    assert gate.over_limit_entries(hits, entries) == []
     assert gate.stale_entries(hits, entries) == []
 
 
@@ -133,24 +144,62 @@ def test_a_hit_not_in_the_allowlist_fails() -> None:
 
 
 def test_an_allowlist_entry_with_no_matching_hit_is_stale() -> None:
-    entries = [gate.AllowlistEntry("a.py", 3, "claude-", "example", "src")]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 1, "example", "src")]
     assert gate.stale_entries([], entries) == entries
 
 
-def test_an_allowlist_entry_cannot_cover_a_different_matched_text_on_the_same_line() -> None:
-    """An entry for one matched substring must not silently also cover a
-    DIFFERENT substring that starts appearing on that same line later --
-    each hit is keyed on (path, line, matched text), not just location."""
-    hits = [gate.Hit("a.py", 3, "gpt-", 'MODEL = "gpt-4o"  # was claude-haiku')]
-    entries = [gate.AllowlistEntry("a.py", 3, "claude-", "example", "src")]
+def test_an_entry_for_one_path_does_not_cover_the_same_text_in_another_file() -> None:
+    hits = [gate.Hit("b.py", 3, "claude-", 'MODEL = "claude-haiku"')]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 1, "example", "src")]
     assert gate.unmatched_hits(hits, entries) == hits
     assert gate.stale_entries(hits, entries) == entries
+
+
+def test_an_edit_that_only_moves_lines_does_not_break_the_entry() -> None:
+    """The whole point of the content-keyed format: an unrelated edit that
+    shifts every subsequent line number must not make a correct entry look
+    stale or unmatched -- there is no line number in the key at all."""
+    hits_before = [gate.Hit("a.py", 10, "claude-", 'MODEL = "claude-haiku"')]
+    hits_after_insertion_above = [gate.Hit("a.py", 47, "claude-", 'MODEL = "claude-haiku"')]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 1, "example", "src")]
+    for hits in (hits_before, hits_after_insertion_above):
+        assert gate.unmatched_hits(hits, entries) == []
+        assert gate.stale_entries(hits, entries) == []
+
+
+def test_more_occurrences_than_the_count_allows_is_reported() -> None:
+    hits = [
+        gate.Hit("a.py", 1, "claude-", 'A = "claude-x"'),
+        gate.Hit("a.py", 2, "claude-", 'B = "claude-y"'),
+    ]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 1, "example", "src")]
+    assert gate.unmatched_hits(hits, entries) == []  # each hit IS covered by some entry
+    over = gate.over_limit_entries(hits, entries)
+    assert over == [(entries[0], 2)]
+
+
+def test_fewer_occurrences_than_the_count_allows_is_not_over_limit_but_not_stale_either() -> None:
+    hits = [gate.Hit("a.py", 1, "claude-", 'A = "claude-x"')]
+    entries = [gate.AllowlistEntry("a.py", "claude-", 3, "example", "src")]
+    assert gate.over_limit_entries(hits, entries) == []
+    assert gate.stale_entries(hits, entries) == []  # at least one match remains
+
+
+def test_a_regex_entry_can_cover_more_than_one_literal_matched_text() -> None:
+    hits = [
+        gate.Hit("a.py", 1, "AZURE_API_BASE", "..."),
+        gate.Hit("a.py", 2, "AZURE_API_VERSION", "..."),
+    ]
+    entries = [gate.AllowlistEntry("a.py", "AZURE_API_(BASE|VERSION)", 2, "example", "src")]
+    assert gate.unmatched_hits(hits, entries) == []
+    assert gate.over_limit_entries(hits, entries) == []
+    assert gate.stale_entries(hits, entries) == []
 
 
 # --- the real repository tree ---------------------------------------------
 
 
-def test_the_real_tree_has_no_unlisted_hits_and_no_stale_allowlist_entries() -> None:
+def test_the_real_tree_has_no_unlisted_hits_over_limit_or_stale_entries() -> None:
     hits = gate.scan()
     entries = gate.load_allowlist()
     problems = gate.unmatched_hits(hits, entries)
@@ -159,20 +208,28 @@ def test_the_real_tree_has_no_unlisted_hits_and_no_stale_allowlist_entries() -> 
         "scripts/hardcoded_models_allowlist.txt with a reason, or fix them: "
         f"{problems}"
     )
+    over = gate.over_limit_entries(hits, entries)
+    assert over == [], f"more occurrences than the allowlist's count permits: {over}"
     stale = gate.stale_entries(hits, entries)
     assert stale == [], (
-        "stale allowlist entries no longer match the line they name; update or "
-        f"remove them: {[e.source_line for e in stale]}"
+        "stale allowlist entries no longer match anything in the named file; update "
+        f"or remove them: {[e.source_line for e in stale]}"
     )
 
 
-def test_the_allowlist_count_has_not_grown() -> None:
+def test_the_allowlist_has_not_grown() -> None:
     entries = gate.load_allowlist()
-    assert len(entries) <= ALLOWLIST_COUNT_CEILING, (
-        f"the allowlist grew to {len(entries)} entries (ceiling {ALLOWLIST_COUNT_CEILING}). "
-        "If this is a deliberate, reviewed addition, raise ALLOWLIST_COUNT_CEILING in this "
-        "test in the same PR; otherwise fix the new hardcoded model/key instead of "
+    assert len(entries) <= ALLOWLIST_ROW_COUNT_CEILING, (
+        f"the allowlist grew to {len(entries)} rows (ceiling {ALLOWLIST_ROW_COUNT_CEILING}). "
+        "If this is a deliberate, reviewed addition, raise ALLOWLIST_ROW_COUNT_CEILING in "
+        "this test in the same PR; otherwise fix the new hardcoded model/key instead of "
         "allowlisting it."
+    )
+    total = sum(e.count for e in entries)
+    assert total <= ALLOWLIST_TOTAL_OCCURRENCE_CEILING, (
+        f"the allowlist's total permitted occurrences grew to {total} "
+        f"(ceiling {ALLOWLIST_TOTAL_OCCURRENCE_CEILING}). Raise the ceiling in this test "
+        "only alongside a deliberate, reviewed addition."
     )
 
 
