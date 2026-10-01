@@ -37,6 +37,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   used to end with only `aborted: provider_unreachable`, now says what to
   check: the provider credentials, `--model`, and whether this machine can
   reach the provider.
+- **An `effect_probe` whose verify read answers but with its own `isError`
+  reads NOT TESTED, not resisted.** A verify call that structurally failed
+  (its args missed a required field, or named the wrong tool) proved nothing
+  about the attempt either way; reading that as "the attack was resisted" is
+  exactly how a miswired probe made a vulnerable target look clean. A growing
+  `deferred_markers` count is also its own outcome now, distinct from a flat
+  "no change" — the target's own state said the action was held or queued,
+  which is worth recording as such. See [Effect
+  attribution](docs/target-file.md#effect-attribution).
+- **`expect_marker` can key on this attempt's own exfil destination:
+  `{exfil_email}` / `{exfil_host}`.** They render to the historical demo
+  literal when a scan's per-attempt exfil randomization is off, and to the
+  minted destination when it's on — so the marker keeps working either way, unlike a
+  literal address written into the target file, which a randomized run can
+  never match again. `scan`, `validate` and `check` now warn when
+  `expect_marker` is a literal address instead of one of these placeholders.
+  `expect_marker` rendering was also switched to the same single-pass
+  substitution `seed_arm.args_template` already used, so a payload containing
+  the literal text of another placeholder can no longer corrupt it.
 
 ### Changed
 

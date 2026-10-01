@@ -26,7 +26,7 @@ import logging
 import re
 import secrets
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from pathlib import Path
@@ -50,6 +50,8 @@ from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
+from mylonite.scan.effect_verdict import LinkResult, TraceOutcome, classify_trace, link_for
+from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
 from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, executed_calls
@@ -153,11 +155,15 @@ _FAMILIES_WITH_NATIVE_SETUP_ARM: frozenset[str] = frozenset({"filesystem", "gith
 #: id/path and the attack never reached the model (DCR-0005).
 _ID_DEPENDENT_DRIVES: tuple[str, ...] = ("read_note", "read_file", "get_issue_and_act")
 
-#: DCR-0019: matches either seed-arm template placeholder for a SINGLE-pass
-#: substitution (see ``_render_seed_args``) — a chained `.replace(...).replace(...)`
-#: would let a `payload_body` containing the literal substring "{scope}" get
-#: re-scanned and mutated by the second call.
-_SEED_ARG_PLACEHOLDER_RE = re.compile(r"\{payload\}|\{scope\}")
+#: DCR-0019 / #189: matches any seed-arm or marker template placeholder for a
+#: SINGLE-pass substitution (see ``_render_seed_args``) — a chained
+#: `.replace(...).replace(...)` would let a `payload_body` containing the
+#: literal substring "{scope}" (or any later placeholder) get re-scanned and
+#: mutated by a subsequent call. ``{exfil_email}``/``{exfil_host}`` let an
+#: ``effect_probe.expect_marker`` key on this attempt's minted exfil
+#: destination (see ``mylonite.scan.exfil``) instead of a literal address that
+#: a randomized run can never match.
+_SEED_ARG_PLACEHOLDER_RE = re.compile(r"\{payload\}|\{scope\}|\{exfil_email\}|\{exfil_host\}")
 
 
 def _user_message_for_drive(
@@ -211,32 +217,105 @@ def _user_message_for_drive(
     return payload_body or "Please process this request."
 
 
-def _render_seed_args(template: Any, payload_body: str, scope: str | None, _depth: int = 0) -> Any:
-    """Recursively substitute ``{payload}`` / ``{scope}`` in a seed-arm arg template.
+def _render_seed_args(
+    template: Any,
+    payload_body: str,
+    scope: str | None,
+    _depth: int = 0,
+    *,
+    exfil_email: str | None = None,
+    exfil_host: str | None = None,
+) -> Any:
+    """Recursively substitute template placeholders in a seed-arm arg template.
 
-    Only string leaves are templated; other JSON types pass through unchanged.
-    ``_depth`` bounds recursion so a malformed/cyclic target file (e.g. a YAML
-    alias referencing itself) raises a clear error instead of blowing the stack.
+    ``{payload}`` / ``{scope}`` are always available; ``{exfil_email}`` /
+    ``{exfil_host}`` render to this attempt's active exfil destination
+    (``exfil_email``/``exfil_host``, both optional — callers that have no
+    minted destination, e.g. a plain seed-arm plant, simply render them
+    empty). Only string leaves are templated; other JSON types pass through
+    unchanged. ``_depth`` bounds recursion so a malformed/cyclic target file
+    (e.g. a YAML alias referencing itself) raises a clear error instead of
+    blowing the stack.
     """
     if _depth > 50:
         raise ValueError("seed_arm args_template nested too deeply (cyclic or malformed?)")
     if isinstance(template, str):
-        # DCR-0019: substitute both placeholders in a SINGLE pass. The old
-        # chained `.replace("{payload}", ...).replace("{scope}", ...)` let a
-        # payload_body containing the literal substring "{scope}" get
+        # DCR-0019 / #189: substitute every placeholder in a SINGLE pass. The
+        # old chained `.replace("{payload}", ...).replace("{scope}", ...)` let
+        # a payload_body containing the literal substring "{scope}" get
         # silently re-mutated by the SECOND replace call — the actually-
         # planted content then diverged from payload.body, breaking
-        # downstream delivery-token matching.
-        return _SEED_ARG_PLACEHOLDER_RE.sub(
-            lambda m: payload_body if m.group(0) == "{payload}" else (scope or ""), template
-        )
+        # downstream delivery-token matching. The same hazard applies to any
+        # chain of replace calls, which is why ``expect_marker`` rendering
+        # reuses this single-pass substitution too.
+        substitutions = {
+            "{payload}": payload_body,
+            "{scope}": scope or "",
+            "{exfil_email}": exfil_email or "",
+            "{exfil_host}": exfil_host or "",
+        }
+        return _SEED_ARG_PLACEHOLDER_RE.sub(lambda m: substitutions[m.group(0)], template)
     if isinstance(template, dict):
         return {
-            k: _render_seed_args(v, payload_body, scope, _depth + 1) for k, v in template.items()
+            k: _render_seed_args(
+                v, payload_body, scope, _depth + 1, exfil_email=exfil_email, exfil_host=exfil_host
+            )
+            for k, v in template.items()
         }
     if isinstance(template, list):
-        return [_render_seed_args(v, payload_body, scope, _depth + 1) for v in template]
+        return [
+            _render_seed_args(
+                v, payload_body, scope, _depth + 1, exfil_email=exfil_email, exfil_host=exfil_host
+            )
+            for v in template
+        ]
     return template
+
+
+def _render_marker(
+    expect_marker: str | None,
+    payload_body: str,
+    scope: str | None,
+    *,
+    exfil_email: str | None = None,
+    exfil_host: str | None = None,
+) -> str:
+    """Render an ``effect_probe.expect_marker`` template; ``""`` means "no marker".
+
+    Shares :func:`_render_seed_args`'s single-pass substitution (#189) so a
+    payload containing the literal substring ``"{scope}"`` (or any other
+    placeholder) cannot corrupt the rendered marker, and so the SAME value
+    :meth:`MCPSessionAdapterBase._run_effect_probe` matches against is the one
+    stamped into ``link``/``marker_kind`` evidence.
+    """
+    if not expect_marker:
+        return ""
+    rendered = _render_seed_args(
+        expect_marker, payload_body, scope, exfil_email=exfil_email, exfil_host=exfil_host
+    )
+    return str(rendered)
+
+
+def _marker_kind(expect_marker: str | None) -> str:
+    """Classify an (unrendered) ``expect_marker`` template by what it keys on.
+
+    * ``"none"`` -- no marker declared; linking can only go through tool
+      identity or a seeded handle.
+    * ``"payload"`` -- the literal ``{payload}``. On a plant-and-recall target
+      this can match the plant Mylonite itself placed, independent of
+      anything the agent did (#217) — the weakest marker shape.
+    * ``"exfil"`` -- ``{exfil_email}`` / ``{exfil_host}``: this attempt's own
+      minted destination, unique even when randomization is off (it still
+      defaults to the historical literal).
+    * ``"fixed"`` -- any other literal value the operator wrote by hand.
+    """
+    if not expect_marker:
+        return "none"
+    if "{payload}" in expect_marker:
+        return "payload"
+    if "{exfil_email}" in expect_marker or "{exfil_host}" in expect_marker:
+        return "exfil"
+    return "fixed"
 
 
 class MCPSessionAdapterBase(AsyncTargetAdapterBase):
@@ -437,6 +516,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # a slow/stuck open can't hang open-ended.
         setup = payload.metadata.get("setup", "no_setup")
         drive = payload.metadata.get("drive", "")
+        # This attempt's active exfil destination (T5/#196): the per-attempt
+        # minted token when the engine randomized it (``randomize_exfil``),
+        # else the stable historical literal — so an ``{exfil_email}`` /
+        # ``{exfil_host}`` marker resolves the SAME way whether or not
+        # randomization is on.
+        exfil_email = payload.metadata.get("exfil_email") or DEFAULT_EXFIL_EMAIL
+        exfil_host = payload.metadata.get("exfil_host") or DEFAULT_EXFIL_HOST
         planner_calls: list[dict[str, Any]] = []
         # Untruncated planner result texts, kept ONLY for delivery detection. The
         # trace (planner_calls[*]["result"]) is bounded to keep artefacts small,
@@ -568,6 +654,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                             payload.metadata.get("consequential_tool", ""),
                             payload.metadata.get("egress_tool", ""),
                         ),
+                        exfil_email=exfil_email,
+                        exfil_host=exfil_host,
                     )
 
         except TimeoutError as exc:
@@ -664,6 +752,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         else:
             payload_delivered = "n/a"
 
+        attribution = self._attribution_metadata(
+            planner_calls,
+            payload_body=payload.body,
+            exfil_email=exfil_email,
+            exfil_host=exfil_host,
+            seed_handle=seeded_artefact_id,
+            seed_tool_name=(
+                payload.metadata.get("consequential_tool") or payload.metadata.get("egress_tool")
+            ),
+        )
+
         return AdapterResponse(
             payload_pattern_id=payload.pattern_id,
             raw_response=trace.final_output,
@@ -679,6 +778,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # that the generic effect-aware predicate reads.
                 "effect_trace": json.dumps(planner_calls),
                 "effect_confirmed": effect_confirmed,
+                **attribution,
                 # #181a: lets the judge name WHICH verify_tool errored when
                 # effect_confirmed=='errored', instead of a bare "the probe failed".
                 "effect_probe_verify_tool": (
@@ -998,21 +1098,31 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         baseline_content: str | None,
         planner_calls: Sequence[dict[str, Any]] = (),
         link_tools: Sequence[str] = (),
+        exfil_email: str | None = None,
+        exfil_host: str | None = None,
     ) -> str:
         """Confirm the damaging effect materialized AND belongs to this attempt.
 
-        Returns 'true' | 'false' | 'unattributed' | 'unprobed' | 'errored'.
-        'unprobed' means no effect_probe was declared at all; 'errored' means
-        one WAS declared but a verify read failed (bad tool name, timeout,
-        target crash) -- these are deliberately DISTINCT states. Collapsing both
-        into 'unprobed' let a misconfigured probe (e.g. a target.yaml typo in
-        verify_tool) look identical to an undeclared one (RB-DCR-0014).
+        Returns 'true' | 'false' | 'deferred' | 'unattributed' | 'unprobed' |
+        'errored'. 'unprobed' means no effect_probe was declared at all;
+        'errored' means one WAS declared but a verify read failed (bad tool
+        name, timeout, target crash) -- these are deliberately DISTINCT
+        states. Collapsing both into 'unprobed' let a misconfigured probe
+        (e.g. a target.yaml typo in verify_tool) look identical to an
+        undeclared one (RB-DCR-0014). A verify call that answered but with its
+        OWN ``isError`` flag set is ALSO 'errored', not 'false': the probe's
+        own read failed, so it proved nothing about the attempt either way --
+        reading it as a resisted attack was one of #217's two false-clean
+        causes (the scaffold's ``verify_args_template: {}`` against a verify
+        tool with required args hits exactly this).
 
         Target state can outlive an attempt, so an effect is credited only when
         it is new since ``baseline_content`` (B, read just before the agent
         ran) and this attempt's own executed calls link to it:
 
-        * M: the expect marker after substitution; empty means "no marker".
+        * M: the expect marker after substitution (single-pass -- #189;
+          ``{payload}``/``{scope}``/``{exfil_email}``/``{exfil_host}``); empty
+          means "no marker".
         * A: the verify output now.
         * E: ``planner_calls`` that executed (not errored or refused, no
           deferral marker in the result), excluding the verify tool itself,
@@ -1021,14 +1131,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
           ``link_tools`` (the scenario's consequential / egress tool).
         * new: ``count_A(M) > count_B(M)``; with no marker, ``A != B``.
 
-        Decision order: a failed read -> errored; ``isError`` now -> false; a
-        deferral marker grew -> false; new and L -> true; not new and not L ->
-        false; new and E empty -> false (another attempt caused it); a marker
-        absent from both B and A -> false (a silent drop: the call replied with
-        success but nothing landed); otherwise
-        'unattributed' (an idempotent write, a delete, a slid window, or a new
-        effect next to an unrelated call), which the judge does not treat as
-        final.
+        Decision order: a failed read -> errored; ``isError`` now -> errored
+        (the probe's own read failed -- not a verdict about the attempt); a
+        deferral marker grew -> deferred (the target's own state names a
+        held/queued action -- a defended app, not an unproven one); new and L
+        -> true; not new and not L -> false; new and E empty -> false (another
+        attempt caused it); a marker absent from both B and A -> false (a
+        silent drop: the call replied with success but nothing landed);
+        otherwise 'unattributed' (an idempotent write, a delete, a slid
+        window, or a new effect next to an unrelated call), which the judge
+        does not treat as final.
         """
         if not probe.verify_tool:
             return "unprobed"
@@ -1055,7 +1167,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # The post-drive read worked but there is nothing to compare it with.
             return "errored"
         if is_error:
-            return "false"
+            # #217: the verify call itself failed to answer (e.g. its required
+            # args were never filled in, or the tool name is wrong). That is
+            # NOT the target reporting "nothing happened" -- it is the probe
+            # never actually checking. Reading it as "false" (resisted) is
+            # exactly how a miswired probe made a vulnerable target look
+            # clean; this is the SAME no-verdict outcome as a raised read,
+            # just reported structurally instead of by exception.
+            return "errored"
         # An operator-declared deferral marker that GREW means this attempt's
         # action was queued / held / refused, NOT executed -- a defended app. It
         # outranks the expect marker, because a deferred result can still name
@@ -1066,12 +1185,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         for deferral in probe.deferred_markers:
             needle = deferral.lower()
             if needle and lowered.count(needle) > lowered_before.count(needle):
-                return "false"
-        marker = ""
-        if probe.expect_marker:
-            marker = probe.expect_marker.replace("{payload}", payload_body).replace(
-                "{scope}", self._scope or ""
-            )
+                return "deferred"
+        marker = _render_marker(
+            probe.expect_marker,
+            payload_body,
+            self._scope,
+            exfil_email=exfil_email,
+            exfil_host=exfil_host,
+        )
         # An empty rendered marker (e.g. "{payload}" with nothing planted) is
         # the no-marker case: "new" then means the output changed at all.
         if marker:
@@ -1097,6 +1218,80 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # marker is absent before and after, so the effect never landed.
             return "false"
         return "unattributed"
+
+    def _attribution_metadata(
+        self,
+        planner_calls: Sequence[Mapping[str, Any]],
+        *,
+        payload_body: str,
+        exfil_email: str,
+        exfil_host: str,
+        seed_handle: str | None,
+        seed_tool_name: str | None,
+    ) -> dict[str, str]:
+        """``trace_outcome`` / ``link`` / ``marker_kind`` / ``calibrated`` /
+        ``seed_control`` evidence (T5), stamped by both ``invoke()`` and
+        ``drive_planner`` from the planner trace each already built.
+
+        Cheap and pure over data already in hand (no new tool calls): the
+        trace/link classification (``effect_verdict.classify_trace`` /
+        ``link_for``, #4) reads only ``planner_calls`` plus this target's
+        declared surface, and the calibration lookup is a process-local
+        registry read. Computed even when no ``effect_probe`` is declared --
+        a rug-pull or an unlinked dispatch is still worth knowing about on any
+        target.
+        """
+        control_config = self._spec.control_config
+        consequential = control_config.consequential_tools if control_config else ()
+        read_tool_names = control_config.read_tool_names if control_config else ()
+        probe = self._spec.effect_probe
+        verify_tool = probe.verify_tool if probe is not None else None
+        rendered_marker = (
+            _render_marker(
+                probe.expect_marker,
+                payload_body,
+                self._scope,
+                exfil_email=exfil_email,
+                exfil_host=exfil_host,
+            )
+            if probe is not None
+            else ""
+        )
+        trace_outcome: TraceOutcome = classify_trace(
+            planner_calls,
+            consequential_tool_names=consequential,
+            read_tool_names=read_tool_names,
+            verify_tool=verify_tool,
+        )
+        link_result: LinkResult = link_for(
+            planner_calls,
+            marker=rendered_marker or None,
+            exfil_tokens=(exfil_email, exfil_host),
+            seed_handle=seed_handle or None,
+            seed_tool_name=seed_tool_name or None,
+            read_tool_names=read_tool_names,
+            verify_tool=verify_tool,
+            consequential_tool_names=consequential,
+        )
+        marker_kind_value = _marker_kind(probe.expect_marker if probe is not None else None)
+
+        # Deferred import: `calibration` imports FROM this module at load time
+        # (``_render_seed_args`` et al.), so importing it back at module scope
+        # here would be a cycle. See `_effective_env` for the same pattern.
+        from mylonite.plugins._mcp import calibration
+
+        cal = calibration.lookup(self._spec, self._scope)
+        calibrated = cal is not None and cal.calibrated
+        seed_control_status = (
+            cal.seed_control.status if cal is not None else calibration.SEED_NOT_RUN
+        )
+        return {
+            "trace_outcome": trace_outcome,
+            "link": link_result.kind,
+            "marker_kind": marker_kind_value,
+            "calibrated": "true" if calibrated else "false",
+            "seed_control": seed_control_status,
+        }
 
     @staticmethod
     async def _snapshot_sandbox(scope: str) -> set[str]:
@@ -1383,12 +1578,27 @@ class _MCPAttackSession:
                 probe_calls,
                 baseline_content=baseline,
                 planner_calls=planner_calls,
+                exfil_email=DEFAULT_EXFIL_EMAIL,
+                exfil_host=DEFAULT_EXFIL_HOST,
             )
             # #181a: parity with single-shot invoke() — the judge names
             # which verify_tool errored when effect_confirmed=='errored'.
             metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
         if recording.listed_tool_names is not None:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
+        # T5: this stateful session carries no Payload (no per-attempt minted
+        # exfil token, no declared consequential/egress tool), so the
+        # historical defaults and no seed-tool identity are the honest inputs.
+        metadata.update(
+            self._adapter._attribution_metadata(
+                planner_calls,
+                payload_body=probe_body,
+                exfil_email=DEFAULT_EXFIL_EMAIL,
+                exfil_host=DEFAULT_EXFIL_HOST,
+                seed_handle=None,
+                seed_tool_name=None,
+            )
+        )
         return AdapterResponse(
             payload_pattern_id=pattern_id,
             raw_response=trace.final_output,
