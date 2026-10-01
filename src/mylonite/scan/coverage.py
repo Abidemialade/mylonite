@@ -175,7 +175,9 @@ def findings_first(attempts: Sequence[object]) -> list[object]:
 #: engine treats them differently. ``fallback_cause`` means an LLM call degraded
 #: (raised, or returned unparseable output) and is counted into
 #: ``ScanReport.inconclusive_attempts``/``fallback_breakdown``, which
-#: ``artefacts.render_summary`` reports as failed LLM output. ``no_adjudicator``
+#: ``artefacts.render_summary`` reports as failed LLM output. The exception is a
+#: ``fallback_cause`` that is a reason code (the trace rule's ``MYL-INC-*``): no
+#: call was made, so the engine leaves it out of that tally. ``no_adjudicator``
 #: means no call was attempted at all because the judge is disabled — routine in
 #: the demo's wiring, and NOT a provider degradation. Reusing ``fallback_cause``
 #: for it would make every demo attempt print a bold-red "failed LLM output"
@@ -404,6 +406,17 @@ _GENERIC_ERROR_BUCKET: Final = "generic_error"
 _UNDECIDED_EFFECT_PROBE_BUCKET: Final = "undecided_effect_probe_errored"
 _UNDECIDED_UNPARSEABLE_JUDGE_BUCKET: Final = "undecided_unparseable_judge_output"
 _UNDECIDED_NO_ADJUDICATOR_BUCKET: Final = "undecided_no_adjudicator"
+_UNDECIDED_UNLINKED_DISPATCH_BUCKET: Final = "undecided_unlinked_dispatch"
+_UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
+
+#: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
+#: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
+#: like ``effect_probe_errored`` below, because coverage.py must not import the
+#: judge's modules.
+_INC_BUCKET_BY_CAUSE: Final[dict[str, str]] = {
+    reason_codes.INC_UNLINKED_DISPATCH: _UNDECIDED_UNLINKED_DISPATCH_BUCKET,
+    reason_codes.INC_PAYLOAD_MARKER: _UNDECIDED_PAYLOAD_MARKER_BUCKET,
+}
 
 #: Exception class NAMES (``type(exc).__name__``, the only thing
 #: `ScanAttempt.error_detail` carries for an `outcome == "error"` attempt —
@@ -451,6 +464,14 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
         "reached no verdict because the deterministic predicate was inconclusive and no "
         "LLM judge was configured to fall back to"
     ),
+    _UNDECIDED_UNLINKED_DISPATCH_BUCKET: (
+        "made a consequential call that could not be tied to the attempt, so it proved "
+        "neither a finding nor resistance"
+    ),
+    _UNDECIDED_PAYLOAD_MARKER_BUCKET: (
+        "made a consequential call the effect_probe could not tie to the attempt, because "
+        "its marker renders from {payload}"
+    ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"
     ),
@@ -497,6 +518,8 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
         # documented cross-module contract, like FALLBACK_CALL_RAISED itself.
         if cause == "effect_probe_errored":
             return _UNDECIDED_EFFECT_PROBE_BUCKET
+        if isinstance(cause, str) and cause in _INC_BUCKET_BY_CAUSE:
+            return _INC_BUCKET_BY_CAUSE[cause]
         if evidence.get("no_adjudicator") == NO_ADJUDICATOR:
             return _UNDECIDED_NO_ADJUDICATOR_BUCKET
         return "undecided"

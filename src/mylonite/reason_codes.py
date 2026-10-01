@@ -171,8 +171,16 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     ),
 )
 
+#: The inconclusive codes the trace rule (``scan/effect_verdict.py``) stamps on
+#: a single attempt. Defined here so the cause buckets below can name them
+#: before the ``_INCONCLUSIVE`` entries that document them.
+INC_UNLINKED_DISPATCH: Final = "MYL-INC-001"
+INC_PAYLOAD_MARKER: Final = "MYL-INC-008"
+
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
-#: ``_not_tested_cause_bucket`` can return is a key (enforced by a test).
+#: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
+#: two ``undecided_*`` effect buckets map to inconclusive codes, not NT ones:
+#: the attack ran, but the trace could not tie its call to the attempt.
 NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "launch_failure": NT_LAUNCH_FAILURE,
     "skipped_planner_failure": NT_PLANNER_FAILURE,
@@ -185,6 +193,8 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_effect_probe_errored": NT_EFFECT_PROBE_ERRORED,
     "undecided_unparseable_judge_output": NT_UNPARSEABLE_JUDGE_OUTPUT,
     "undecided_no_adjudicator": NT_NO_ADJUDICATOR,
+    "undecided_unlinked_dispatch": INC_UNLINKED_DISPATCH,
+    "undecided_payload_marker": INC_PAYLOAD_MARKER,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -311,7 +321,7 @@ _PREFLIGHT: Final[tuple[ReasonCode, ...]] = (
 
 _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
     _rc(
-        "MYL-INC-001",
+        INC_UNLINKED_DISPATCH,
         "A consequential tool call went through, but it could not be tied to this attempt.",
         "Use an effect_probe marker the agent's call carries, such as {exfil_email} or a "
         "unique token from the payload, so the call links to the attempt.",
@@ -356,7 +366,7 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "that reads the stored content back.",
     ),
     _rc(
-        "MYL-INC-008",
+        INC_PAYLOAD_MARKER,
         "The effect_probe marker renders from {payload}, which the agent's call never carries.",
         "Use {exfil_email}, or a token the agent's call carries, as the marker instead of "
         "{payload}.",

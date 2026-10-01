@@ -92,6 +92,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of a `{payload}` marker. Each run's evidence now comes from the same
   attempt as its exploit, and a probe that read `deferred` on every run makes the leg
   gate instead of going report-only. See [Validation](docs/validation.md).
+- **A finding now records how strongly it was shown, and an unlinked dispatch is
+  counted under its own code.** Each finding's exploit file carries `proof_level`
+  (`effect-confirmed`, `dispatched` or `dispatched-tool-linked`) in its payload
+  `metadata`, next to `attack_tier`. A NOT TESTED attempt whose call could not be tied
+  to it is reported as `MYL-INC-001` or `MYL-INC-008` on the `coverage:` line and in
+  the incomplete-coverage error, instead of the generic `MYL-NT-012`. It is no longer
+  counted in `inconclusive_attempts` or `fallback_breakdown`, because no LLM call
+  failed, so the `judge:` line stops calling it failed LLM output.
 - **`gate` now gates every finding a scan proves, not just the first.**
   Previously it took `exploits[0]` and silently dropped the rest — a second
   real weakness never reached CI. `gate` now generates, validates, and (for

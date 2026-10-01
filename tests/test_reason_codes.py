@@ -155,6 +155,8 @@ def _one_attempt_per_bucket() -> list[ScanAttempt]:
         _attempt("undecided", judge_evidence={"fallback_cause": "unparseable_output"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "effect_probe_errored"}),
         _attempt("undecided", judge_evidence={"no_adjudicator": NO_ADJUDICATOR}),
+        _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-001"}),
+        _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-008"}),
     ]
     return attempts
 
@@ -164,7 +166,12 @@ def test_every_not_tested_attempt_maps_to_a_registered_code() -> None:
         code = coverage.reason_code_for_attempt(attempt)
         assert code is not None, attempt.outcome
         assert code in REGISTRY
-        assert REGISTRY[code].category == reason_codes.CATEGORY_NOT_TESTED
+        # The trace rule's per-attempt codes are inconclusive, not NT: the attack
+        # ran, but its call could not be tied to the attempt.
+        assert REGISTRY[code].category in (
+            reason_codes.CATEGORY_NOT_TESTED,
+            reason_codes.CATEGORY_INCONCLUSIVE,
+        )
 
 
 def test_every_cause_bucket_has_a_code_and_a_remedy() -> None:
@@ -185,6 +192,8 @@ def test_the_undecided_split_gets_distinct_codes() -> None:
         {"fallback_cause": "unparseable_output"},
         {"fallback_cause": "effect_probe_errored"},
         {"no_adjudicator": NO_ADJUDICATOR},
+        {"fallback_cause": "MYL-INC-001"},
+        {"fallback_cause": "MYL-INC-008"},
         {},
     ]
     codes = {
@@ -468,3 +477,16 @@ def test_gate_budget_abort_message_carries_the_budget_code() -> None:
     )
     message = _abort_message(outcome, "Raise --max-llm-calls.")
     assert message.startswith(f"error: [{reason_codes.ABT_BUDGET_EXCEEDED}] gate's scan phase")
+
+
+def test_an_inc_cause_maps_to_its_own_code() -> None:
+    """The trace rule stamps its inconclusive code as ``fallback_cause``; coverage
+    must report that code, not the generic undecided one."""
+    for code in ("MYL-INC-001", "MYL-INC-008"):
+        attempt = _attempt("undecided", judge_evidence={"fallback_cause": code})
+        assert coverage.reason_code_for_attempt(attempt) == code
+
+
+def test_an_unknown_inc_cause_reads_as_plain_undecided() -> None:
+    attempt = _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-005"})
+    assert coverage.reason_code_for_attempt(attempt) == reason_codes.NT_UNDECIDED

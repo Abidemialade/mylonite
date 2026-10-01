@@ -165,8 +165,11 @@ deterministic-check-then-LLM-judge ladder.
 Each decided attempt's `judge_evidence` carries `trace_outcome`, `link`, `marker_kind`,
 `marker_linked`, `calibrated` and `seed_control`, plus `proof_level` for a finding,
 `negative_basis` (`trace`, `server-reported` or `certified-observer`) for a resisted
-attempt, and `reason_code` where one applies. Attempts against reference and REST
-targets carry no `trace_outcome` and are decided as before.
+attempt, and `reason_code` where one applies. A finding's exploit file also records its
+`proof_level` in the payload's `metadata`, next to `attack_tier`. An unlinked dispatch is
+counted on the `coverage:` line under its own code (`[MYL-INC-001 x1]`), not on the
+`judge:` line, because no LLM call failed. Attempts against reference and REST targets
+carry no `trace_outcome` and are decided as before.
 
 `validate` counts a custom target's firing runs by these proof levels on its effect leg
 (see [Validation](validation.md)). When the leg fails because runs fired with nothing tying
