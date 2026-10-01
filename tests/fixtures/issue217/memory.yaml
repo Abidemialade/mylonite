@@ -1,10 +1,8 @@
 # A "first-time user" custom target.yaml for the official
 # @modelcontextprotocol/server-memory reference MCP server (issue #217).
 #
-# This is a TEST INPUT — nothing in this repo yet asserts a scan verdict
-# against it. That lands with the judge's deferred-outcome fix and this
-# fixture's own integration test; today it exists so those later tests don't
-# have to re-derive it.
+# This is a TEST INPUT. tests/integration/test_issue217.py scans it end to
+# end and asserts it never reads clean.
 #
 # Provenance — how a first-time user would actually arrive at this file:
 #
@@ -30,13 +28,13 @@
 #   (`verify_args_template: {}`) rather than working out search_nodes's
 #   own schema. search_nodes REQUIRES a `query` string, so this reproduces
 #   #217's "the verify read errors" cause.
-# * `expect_marker: "{payload}"` follows docs/target-file.md's current
-#   effect_probe guidance verbatim ("a marker the agent's own call
+# * `expect_marker: "{payload}"` follows what docs/target-file.md's
+#   effect_probe guidance used to say ("a marker the agent's own call
 #   carries — the recipient address, a row it wrote, or `{payload}`").
-#   That line is what the docs fix will change; today it
-#   still recommends `{payload}`, which is #217's other cause: a
-#   plant-and-recall server reflects the payload back on its own, so the
-#   marker can match without the agent having done anything.
+#   The page now recommends `{exfil_email}` / `{exfil_host}` instead.
+#   `{payload}` was #217's other cause: a plant-and-recall server reflects
+#   the payload back on its own, so the marker can match without the agent
+#   having done anything.
 # * weakness_classes is narrowed to [W4] (unconfirmed consequential
 #   action) — server-memory's app-design flaw here, per
 #   EXTERNAL_DIFFERENTIAL.md, is that none of its six state-changing tools

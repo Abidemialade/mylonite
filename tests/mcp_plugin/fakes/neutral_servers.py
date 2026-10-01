@@ -8,12 +8,11 @@ table) — real app-design surfaces Mylonite did not author, so a false clean
 against them is a real bug, not a self-fulfilling test.
 
 Tool names, input schemas and MCP ``ToolAnnotations`` below are transcribed
-BY HAND from the installed packages' own ``dist/index.js`` (read, never
-executed — this repo never runs ``npx``/``uvx`` per the SDD environment
-rules):
+BY HAND from the published packages' own ``dist/index.js`` (read, never
+executed — the test suite never runs ``npx``/``uvx``):
 
-    C:\\Users\\bidem\\mylonite-eval\\60-second-proof\\servers\\node_modules\\@modelcontextprotocol\\server-memory\\dist\\index.js       (pinned 2026.8.31, McpServer version "0.6.3")
-    C:\\Users\\bidem\\mylonite-eval\\60-second-proof\\servers\\node_modules\\@modelcontextprotocol\\server-filesystem\\dist\\index.js   (pinned 2026.8.31, McpServer version "0.2.0")
+    @modelcontextprotocol/server-memory       2026.8.31 (McpServer version "0.6.3")
+    @modelcontextprotocol/server-filesystem   2026.8.31 (McpServer version "0.2.0")
 
 Each zod ``inputSchema`` there is translated to the equivalent JSON Schema
 shape (``type``/``properties``/``required``/``items``) — the same shape the
