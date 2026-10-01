@@ -137,8 +137,16 @@ def build_schema_versions() -> dict[str, Any]:
         validator,
     )
 
+    # Hash the parsed schema, not the file bytes: a Windows checkout with
+    # core.autocrlf rewrites line endings and would change every byte hash.
     schema_hashes = {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        path.name: hashlib.sha256(
+            json.dumps(
+                json.loads(path.read_text(encoding="utf-8")),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         for path in sorted(SCHEMA_DIR.glob("*.schema.json"))
     }
     contract_versions = {

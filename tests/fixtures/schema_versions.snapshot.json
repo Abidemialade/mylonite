@@ -7,15 +7,15 @@
     "validator": "0.5.0"
   },
   "schema_hashes": {
-    "adapter_response.schema.json": "3e733c86d36288fe9acd15ac89819f510b98764e47bd493523d64eed989ac589",
-    "attack_pattern.schema.json": "3e128077b3260bc9dbbaad11d11dc4b2730597305a2de7c94efbcaac3971a290",
-    "compliance_tags.schema.json": "ef36061683f96fe7c1dd0ea769c23488b57e53a74a827f510a6f6586ae558128",
-    "exploit_record.schema.json": "929b4049af722187e524c37d19dad96a88df8fc88f10577b128d81293b7d51f5",
-    "generated_test.schema.json": "f6c9c407df3d776ec867d5e7e229e965f11bf6182dbf5c49a752fcc67caac3bd",
-    "payload.schema.json": "4484185ce5af67557e93933beac3ae821eda3a1f62d64241f30efe4f3d365b4b",
-    "scan_attempt.schema.json": "04fdd9a91972c81adfe21522f8635acd7359ef334c57e23e4355566e93be2ccd",
-    "scan_report.schema.json": "b3ed1ce28034c965c2b994dc49013eae7caf5ebc70d037f1426f466483371f94",
-    "target_descriptor.schema.json": "dca6cb1af2895c1811581e3fa80a8d358d46db246fc62185bb1048440b527eae",
-    "validation_report.schema.json": "40c857aae00a2819eb41932267500b195f5067a73c50a5dae4cef56bca4590d4"
+    "adapter_response.schema.json": "a4025a8fd59a501a1eb7d03c3060cf4168ee068e4522e76c05e9fdc5cb87c2ef",
+    "attack_pattern.schema.json": "b7bdcc8716a74edb77410f32f2b64888b909db38f6674a620bd368134c9305d7",
+    "compliance_tags.schema.json": "4abdbda4b7a9fc924369493c9adf334dcabf623205673da8c6a1407b4f9cdd9b",
+    "exploit_record.schema.json": "0cdbf402520ed4779d4afb9701df2c18cc62995a65f4f01667ab168b55cca3cb",
+    "generated_test.schema.json": "2e3bed40687db7d39622c61f6f62340012d62db5be8aa3cae2e18f7d93869c71",
+    "payload.schema.json": "7ba62f132db6d9572aaff1f14658c8d4307a3bf0db9cca72d45e2615b5d55f8c",
+    "scan_attempt.schema.json": "2cd2a1c42b2eba23844ad61848cdc979e949e733ade40919eb238c017e2f193e",
+    "scan_report.schema.json": "6241f2fe260a39cbe9e9a4aa399825cd459fd08c17d73d81b7f73939735188fe",
+    "target_descriptor.schema.json": "018e3eed85c4d43cc00e71af4caccaf4738c7bc9b8834ea8b71e8ee0185194bf",
+    "validation_report.schema.json": "16eda3e7cecb3e0d54f6e8b0b9cf0fc586491c937c22c5318f163a6f07739ce2"
   }
 }
