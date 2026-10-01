@@ -101,7 +101,7 @@ filters which seeds run — on a custom target, `--target-file` or inline `mcp:c
 flags, it adds to the target file's declared `weakness_classes` instead. Unifying the
 two is a deliberate follow-up, not this release. Rejects an unknown or lowercase value,
 e.g. `w4`, naming it). For a custom target: `--command`, `--arg`,
-`--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`.
+`--env`, `--scope`, `--system-prompt`/`--system-prompt-file`, `--primary-tool`.
 
 If an attack module that would have run fails to import or construct, `scan` (and
 `gate`) runs the rest and reports each weakness class that module covers as NOT TESTED
@@ -140,6 +140,12 @@ commented starter `target.yaml` with suggested `weakness_classes` and auto-detec
 actually cover are suggested. Add `--force` to overwrite. Edit it, then scan
 with `--target-file`.
 
+To scaffold a REST/HTTP agent instead of an MCP server, pass `--rest-url URL` (no
+`--command` needed) — add `--rest-body` for a request-body template other than the
+default `{"prompt": "{prompt}"}`, and `--rest-response-path` for a dotted path into
+the JSON reply (e.g. `choices.0.message.content`) when the agent's answer isn't the
+whole body. See [the HTTP-agent walkthrough](http-agent.md).
+
 ```bash
 mylonite scan --command python --arg my_server.py --scaffold app.yaml --scope my-app  # generate the target file
 mylonite scan --target-file app.yaml --authorize my-app                                # then scan it
@@ -167,7 +173,10 @@ exit code 2 and the same `export` line. The scan-directory copy, `generate`'s co
 Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no
 LLM call. Carries the compliance metadata.
 
-Options: `scan_path` (an `exploit_*.json` or scan dir) or `--latest`; `--out PATH`;
+Options: `scan_path` (an `exploit_*.json` or scan dir) or `--latest` (searches
+`--scans-dir`, default the resolved scans dir, normally `.mylonite/scans` — an
+input, where `--latest` looks for a scan to read, not where this command writes;
+ignored when you pass `scan_path` directly); `--out PATH`;
 `--target-file PATH` (custom targets — co-locates the YAML so the live test re-drives
 your app; usually not needed, since this auto-resolves `target.yaml` from the scan
 directory `scan_path` points at — pass it only when that file isn't there);
@@ -188,14 +197,21 @@ Options: `target` (the generated dir/file); `--iterations N` (default 5); `--mod
 (any LiteLLM provider via a `provider/model` prefix); `--planner-model`,
 `--customiser-model`, `--judge-model` (the three [model roles](attack-modes.md#composing-the-model-roles),
 each defaulting to `--model`); `--config PATH`; `--target-file PATH` (re-drive
-your REAL app instead of the reference build);
+your REAL app instead of the reference build — usually not needed: for a custom
+target this auto-resolves `target.yaml` co-located with the test, the same file
+`generate` wrote; pass it explicitly only when that file isn't there);
 `--authorize` (**required** when `--target-file` names a custom target — must equal the
 target's declared `scope`, or its family name if no scope is declared; see
 [target-file.md](target-file.md)); `--fast`
-(skip the differential leg — faster, weaker); `--randomize-exfil/--no-randomize-exfil`
+(skip the differential leg — faster, weaker); `--prove-input-control` (for a
+black-box HTTP/`rest` target, run the input data-framing ("spotlighting")
+differential to measure whether that input defence is load-bearing; a no-op once
+`--fast` has already skipped the differential leg); `--randomize-exfil/--no-randomize-exfil`
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
-reference/replay path); `--iteration-timeout S`.
+reference/replay path); `--iteration-timeout S` (default 120s — a custom target's
+per-run wall-clock budget; a stuck or slow real target aborts that run cleanly
+instead of hanging open-ended).
 
 The report's notes record the models the test was proved against
 (`validated against model: <planner>`, plus the customiser and judge when they differ).
@@ -259,13 +275,20 @@ Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
 target's `scope`, or its family when it declares no scope); `--open-pr` (create the branch,
 commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
-a `provider/model` prefix); `--out PATH`; `--max-llm-calls` (a budget for the scan
+a `provider/model` prefix); `--planner-model`, `--customiser-model`, `--judge-model`
+(the three [model roles](attack-modes.md#composing-the-model-roles), each defaulting
+to `--model`, same split as `scan`); `--purpose "…"` (a one-line description of what
+the app is for; tailors the probes to its domain — overrides `purpose` in the target
+file); `--out PATH`; `--max-llm-calls` (a budget for the scan
 phase, not a hard ceiling — see [Sizing --max-llm-calls](ci-gating.md));
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
 `--workflows/--no-workflows` (**default off**); `--llm-enrich` (append a labelled, unverified LLM fix
 suggestion, rendered after the structural recommendation above); `--fast`;
+`--prove-input-control` (for a black-box HTTP/`rest` target, run the input
+data-framing differential to measure whether that input defence is load-bearing;
+opt-in, otherwise a `rest` target is gated by stability + effect + consensus);
 `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
 
 `gate` ends with a `gate llm:` line: the LLM calls made across every stage (by role), the
