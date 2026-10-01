@@ -2030,10 +2030,12 @@ def validate(
         typer.Option(
             "--target-file",
             help=(
-                "Required when validating a test for a CUSTOM target: the same "
-                "target YAML you scanned. The validator re-drives the REAL target "
-                "(N runs + multi-judge consensus + effect probe) instead of the "
-                "bundled twin, so the test fails when YOUR app regresses."
+                "For a CUSTOM target: the same target YAML you scanned. Usually not "
+                "needed — this auto-resolves target.yaml co-located with the test "
+                "(written by `generate`); pass it explicitly only when that file "
+                "isn't there. The validator re-drives the REAL target (N runs + "
+                "multi-judge consensus + effect probe) instead of the bundled "
+                "twin, so the test fails when YOUR app regresses."
             ),
         ),
     ] = None,

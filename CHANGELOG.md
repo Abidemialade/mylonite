@@ -180,6 +180,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite scan --target-file <file> --authorize <family>` instead.
 ### Fixed
 
+- **`docs/cli-reference.md` now documents every flag `--help` shows.**
+  `scan`'s REST-scaffold flags (`--rest-url`, `--rest-body`,
+  `--rest-response-path`, previously documented only on `http-agent.md`);
+  `generate --scans-dir`; `validate --prove-input-control` and
+  `--iteration-timeout`'s 120-second default; and `gate --purpose`,
+  `--planner-model`, `--customiser-model`, `--judge-model` and
+  `--prove-input-control` were all real, working flags with no mention on
+  the page (#209).
+- **`validate --target-file`'s help text no longer says it's required.** It
+  read "Required when validating a test for a CUSTOM target", but `validate`
+  auto-resolves the test's co-located `target.yaml` the same way `generate`
+  does — pass it explicitly only when that file isn't there. Both the
+  `--help` text and `docs/cli-reference.md` now say so.
 - **`mylonite demo`'s headline no longer calls itself the validator.** The
   second headline line used to say "this differential is the oracle that
   validates every generated regression test" — overstating what a judge-off,
