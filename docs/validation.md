@@ -262,6 +262,39 @@ controls — with the same claim wording as every other verdict surface.
 Single-model `validate` stamps the model it proved the test against into the
 report, so the committed regression is honest about which version it gates.
 
+## The testkit API
+
+`mylonite generate` writes tests that import `mylonite.testkit`. Its public surface
+is frozen the same way `mylonite.contracts` is (see the module's own docstring) —
+a consumer repo imports these names and calls them positionally/by keyword, so a
+silent signature change breaks every downstream regression gate.
+
+- **`testkit.load_exploit(path)`** — reads an `exploit_*.json` artefact (written by
+  `mylonite scan`) into an `ExploitRecord`. Raises `FileNotFoundError` if the file
+  is missing, `ValueError` if it isn't a valid record.
+- **`testkit.assert_guard_holds(exploit, *, fixtures_dir=None, _completion_fn=None)`**
+  — the offline gate for a bundled reference target. See
+  ["Isn't this a tautology?"](#isnt-this-a-tautology) above.
+- **`testkit.assert_target_resists(exploit, *, target_file, model=None, provider=None, _completion_fn=None)`**
+  — the LIVE regression check for a custom target. See
+  [Tier 2: the committed regression test](#two-tiers-live-discovery-offline-gate) above.
+- **`testkit.assert_control_holds(exploit, *, target_file, control, model=None, provider=None, _completion_fn=None)`**
+  — the LIVE control-efficacy check. See [the control-efficacy check](#the-control-efficacy-check)
+  above.
+- **`testkit.TestkitFixtureError`** — raised when `assert_guard_holds` cannot trust
+  its replay evidence (a missing, corrupt or version-mismatched fixture, or an
+  inconclusive run). Subclasses `mylonite._replay.FixtureError`.
+- **`testkit.TestkitRedriveAborted`** — a `TestkitFixtureError` subclass raised when
+  a LIVE re-drive is cut short by its own budget/timeout bound rather than a fixture
+  problem — there is nothing to re-record.
+- **`testkit.TestkitConfigError`** — raised when the model/provider an emitted LIVE
+  test needs to re-drive its target cannot be resolved from any source (an explicit
+  keyword argument, the exploit's own execution-context metadata, or a sibling
+  `scan_report.json`). A `ValueError` subclass.
+
+Every one of these is honest-fail (R4): a stale or missing fixture, or a run that
+never reached a verdict, raises — it never reports a silent pass.
+
 ## The bundled reference app (the reference/demo differential)
 
 The bundled **reference agent** — [the reference app](quarry.md)'s `mcp_kitchen_sink`
