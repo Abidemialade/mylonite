@@ -1,0 +1,80 @@
+# Live canaries: re-prove the differential oracle and the scan loop
+# against a real model, nightly. See `CONTRIBUTING.md`'s "Live canaries"
+# section for what each one checks and its bar. Spends real LLM tokens, so
+# this is never a required check and the PR path is untouched.
+#
+# Needs the repo secret `MYLONITE_DOGFOOD_KEY`, mapped to the provider's own
+# credential env var the same way `gate-dogfood.yml` does. There used to be
+# a verification.yml cron with no key configured that failed every night for
+# a month with nobody acting on it (see that workflow's own history) --
+# pure alarm fatigue, not a real signal. This workflow does not repeat that:
+# with no key, the live job is skipped (a `::notice::`, exit 0), not failed.
+name: Canaries
+
+on:
+  schedule:
+    - cron: "11 4 * * *" # nightly
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "LiteLLM provider/model, e.g. anthropic/claude-haiku-4-5-20251001"
+        default: "anthropic/claude-haiku-4-5-20251001"
+      runs:
+        description: "Runs per canary"
+        default: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_DOGFOOD_KEY }}
+      MYLONITE_CANARY_MODEL: ${{ github.event.inputs.model || 'anthropic/claude-haiku-4-5-20251001' }}
+    steps:
+      - name: Check for the dogfood key
+        id: key_check
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::MYLONITE_DOGFOOD_KEY is not set; skipping the live canaries (not a failure)."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.key_check.outputs.present == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.key_check.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install (editable, with reference target)
+        if: steps.key_check.outputs.present == 'true'
+        run: |
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+
+      - name: Run the canaries
+        if: steps.key_check.outputs.present == 'true'
+        # Dispatch inputs arrive through env, never through `${{ }}` inside
+        # the script body: they are free text and would be substituted
+        # before the shell parses the line, in a job that holds a provider
+        # key (same reasoning as verification.yml).
+        env:
+          RUNS: ${{ github.event.inputs.runs || '3' }}
+        run: |
+          python scripts/run_canaries.py --model "$MYLONITE_CANARY_MODEL" --runs "$RUNS" \
+            --out-dir .mylonite/canaries/ci
+
+      - name: Upload the canary report
+        if: always() && steps.key_check.outputs.present == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canaries-report
+          path: .mylonite/canaries/ci/**/canaries_report.json
