@@ -34,6 +34,7 @@ from enum import Enum, auto
 from typing import Final, get_args
 
 from mylonite import reason_codes
+from mylonite._redaction import redact
 from mylonite.contracts import AbortReason as AbortReason
 from mylonite.contracts import ScanAttemptOutcome, ScanReport
 from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SUCCESS
@@ -356,6 +357,51 @@ _OPERATOR_MESSAGE_BY_ABORT: Final[dict[AbortReason, str | None]] = {
         "scan exceeded its wall-clock budget and stopped early; coverage is incomplete.",
     ),
 }
+
+#: What a scan-shaped command tells the operator to turn down after a rate limit.
+SCAN_RATE_LIMIT_KNOBS: Final = "lower --max-concurrent or --max-llm-calls"
+
+
+def provider_abort_message(
+    category: str | None,
+    *,
+    provider: str | None,
+    model: str | None,
+    slow_down: str = SCAN_RATE_LIMIT_KNOBS,
+    stopped: str = "the scan stopped early; coverage is incomplete.",
+) -> str | None:
+    """The operator message for a run stopped by repeated provider failures (#191).
+
+    ``category`` is the diagnosis of the last failed call
+    (``scan.diagnostics.classify_provider_error``). A rate limit and an
+    unreachable provider each get their own message, naming the provider and
+    model and saying what to do. Any other category returns ``None`` so the
+    caller keeps its generic credentials text. ``slow_down`` names the flags
+    the calling command offers; ``stopped`` says what the abort cost.
+
+    Never carries a credential: only the provider and model ids are named, and
+    both are passed through :func:`mylonite._redaction.redact` in case a model
+    string was given with an embedded key.
+    """
+    where = redact(f"provider {provider or 'unknown'}, model {model or 'unknown'}")
+    if category == "rate_limit":
+        return reason_codes.tag(
+            reason_codes.ABT_PROVIDER_UNREACHABLE,
+            f"error: the LLM provider rate-limited this run ({where}): calls were refused "
+            f"with HTTP 429 several times in a row, so {stopped} Wait a minute for the "
+            f"limit to reset and re-run, {slow_down}, or check the quota on your "
+            "provider account.",
+        )
+    if category == "network":
+        return reason_codes.tag(
+            reason_codes.ABT_PROVIDER_UNREACHABLE,
+            f"error: could not reach the LLM provider ({where}): calls failed with network "
+            f"errors or timeouts several times in a row, so {stopped} Check this machine's "
+            "connection to the provider (behind a proxy, see "
+            "docs/enterprise-networking.md), then re-run.",
+        )
+    return None
+
 
 # --- Untrustworthy-without-a-formal-abort ---------------------------------------
 #

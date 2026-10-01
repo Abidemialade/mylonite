@@ -164,6 +164,12 @@ code `4`.
 `--model`, and that this machine can reach the provider. Behind a proxy, see
 [Enterprise networking](enterprise-networking.md). Then re-run.
 
+When the failures were rate limits (HTTP 429), the message says so instead, names the
+provider and model, and suggests waiting, lowering `--max-concurrent` or
+`--max-llm-calls`, or checking the account quota. When they were network errors or
+timeouts, it points at the connection. See
+[When the provider rate-limits or drops the run](reading-results.md#when-the-provider-rate-limits-or-drops-the-run).
+
 ## MYL-ABT-003
 
 No seeds applied to this target, so nothing was scanned. Exit code `2`.

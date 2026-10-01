@@ -972,3 +972,50 @@ def test_usage_tally_never_enforces_a_cap() -> None:
         for _ in range(5):
             _json_call(lambda **_: _stub_response('{"body": "x"}'))
     assert tally.count == 5
+
+
+# --- #191: the counter remembers why the provider failed -----------------------
+
+
+def test_a_swallowed_rate_limit_is_recorded_on_the_counter() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    def stub(**_: Any) -> SimpleNamespace:
+        raise litellm.RateLimitError(message="429", llm_provider="anthropic", model="m")
+
+    with counter.active():
+        litellm_json_call(
+            model="anthropic/claude-judge",
+            prompt="p",
+            expected_keys={"body"},
+            fallback={"body": "fb"},
+            caller="judge",
+            completion_fn=stub,
+        )
+    assert counter.last_failure_category == "rate_limit"
+    assert counter.last_failure_model == "anthropic/claude-judge"
+
+
+@pytest.mark.asyncio
+async def test_a_raised_planner_rate_limit_is_recorded_on_the_counter() -> None:
+    counter = LiteLLMCallCounter(cap=5)
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise litellm.RateLimitError(message="429", llm_provider="anthropic", model="m")
+
+    with counter.active(), pytest.raises(litellm.RateLimitError):
+        await litellm_tool_call_async(
+            model="anthropic/claude-planner", messages=[], completion_fn=stub
+        )
+    assert counter.last_failure_category == "rate_limit"
+    assert counter.last_failure_model == "anthropic/claude-planner"
+
+
+def test_a_success_keeps_the_last_failure_category() -> None:
+    """The category answers "why did the last failure happen"; a success resets
+    the streak, not the record of what the streak was made of."""
+    counter = LiteLLMCallCounter(cap=5)
+    counter.mark_failure("rate_limit", "m")
+    counter.mark_success()
+    assert counter.consecutive_failures == 0
+    assert counter.last_failure_category == "rate_limit"

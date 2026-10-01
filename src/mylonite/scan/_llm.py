@@ -225,6 +225,14 @@ class LiteLLMCallCounter:
     cap: int
     count: int = 0
     consecutive_failures: int = 0
+    #: The diagnosis category (``rate_limit``, ``network``, ``auth`` ...) of the
+    #: most recent failed call, or ``None`` when no failure was classified. The
+    #: engine reads it on a ``provider_unreachable`` abort so the operator
+    #: message can say a rate limit stopped the run, not just "calls failed".
+    last_failure_category: str | None = None
+    #: The model the most recent failed call was made to. With role-separated
+    #: models (planner, customiser, judge) this names the one that failed.
+    last_failure_model: str | None = None
     by_caller: dict[str, int] = field(default_factory=dict)
     #: How many tool schemas ``litellm_tool_call_async`` has actually
     #: rewritten via ``schema_sanitise.sanitise_tool_schema`` (T15/H4) --
@@ -318,8 +326,12 @@ class LiteLLMCallCounter:
     def mark_success(self) -> None:
         self.consecutive_failures = 0
 
-    def mark_failure(self) -> None:
+    def mark_failure(self, category: str | None = None, model: str | None = None) -> None:
         self.consecutive_failures += 1
+        if category is not None:
+            self.last_failure_category = category
+        if model is not None:
+            self.last_failure_model = model
 
     @contextmanager
     def active(self) -> Iterator[None]:
@@ -474,10 +486,15 @@ def _mark_success() -> None:
         counter.mark_success()
 
 
-def _mark_failure() -> None:
+def _mark_failure(category: str | None = None, model: str | None = None) -> None:
     counter = _ACTIVE_COUNTER.get()
     if counter is not None:
-        counter.mark_failure()
+        counter.mark_failure(category, model)
+
+
+def _failure_category(exc: BaseException, model: str) -> str:
+    """The diagnosis category of a raised completion call, for the counter."""
+    return classify_provider_error(exc, provider=provider_from_model(model)).category
 
 
 def _bump_schema_sanitised() -> None:
@@ -602,7 +619,7 @@ def _classify_or_swallow(
             _exc_detail(exc, limit=200),
         )
         logger.debug("%s: full detail for the failure above: %s", caller, redact_exception(exc))
-        _mark_failure()
+        _mark_failure(diagnosis.category, model)
         raise NonRecoverableProviderError(diagnosis, caller=caller) from exc
     # ONE legible line, not a stack trace. This fires once per caller per seed
     # and there is no logging configuration anywhere in src/, so `logger.
@@ -619,7 +636,7 @@ def _classify_or_swallow(
         _exc_detail(exc),
     )
     logger.debug("%s: full detail for the failure above: %s", caller, redact_exception(exc))
-    _mark_failure()
+    _mark_failure(diagnosis.category, model)
     return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
 
 
@@ -897,8 +914,8 @@ async def litellm_tool_call_async(
         call_kwargs["tool_choice"] = tool_choice or "auto"
     try:
         response = await fn(**call_kwargs)
-    except Exception:
-        _mark_failure()
+    except Exception as exc:
+        _mark_failure(_failure_category(exc, model), model)
         raise
     _mark_success()
     _record_usage(response)
@@ -943,9 +960,9 @@ def litellm_text_call(
         call_kwargs["timeout"] = timeout_s
     try:
         response = fn(**call_kwargs)
-    except Exception:
+    except Exception as exc:
         logger.info("%s: LiteLLM completion raised; enrichment skipped", caller)
-        _mark_failure()
+        _mark_failure(_failure_category(exc, model), model)
         return None
     _mark_success()
     _record_usage(response)

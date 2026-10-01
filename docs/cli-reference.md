@@ -24,7 +24,10 @@ all: `--model ollama_chat/llama3.2:3b` with [Ollama running](self-hosted-models.
 locally, or, on `scan` only, `--dry-run` to preview the run with no LLM calls.
 `validate`'s exit `4` (a credential IS set but the provider can't be reached, on
 either the custom-target or the reference-target path) points at the same
-local model.
+local model. When the provider refused the check with a rate limit (HTTP 429) or
+could not be reached over the network, exit `4` says that instead, names the
+provider and model, and says what to do; see
+[When the provider rate-limits or drops the run](reading-results.md#when-the-provider-rate-limits-or-drops-the-run).
 
 ---
 
