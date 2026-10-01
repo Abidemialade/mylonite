@@ -264,6 +264,25 @@ shows one line: what failed, the exception type, and its message with secrets ma
 raw traceback for these errors, even at DEBUG level, because a provider's error text can
 carry the key or the request URL.
 
+### When the provider rate-limits or drops the run
+
+When provider calls fail three times in a row, `scan` and `gate` stop early and exit `4`
+with [`MYL-ABT-002`](reason-codes.md#myl-abt-002). The message says why and names the
+provider and model that failed (never the key):
+
+```text
+error: [MYL-ABT-002] the LLM provider rate-limited this run (provider anthropic, model
+anthropic/claude-haiku-4-5): calls were refused with HTTP 429 several times in a row, so
+the scan stopped early; coverage is incomplete. Wait a minute for the limit to reset and
+re-run, lower --max-concurrent or --max-llm-calls, or check the quota on your provider
+account.
+```
+
+A run stopped by network errors or timeouts says it could not reach the provider and
+points at the connection and proxy settings instead. Any other cause, such as a rejected
+key, keeps the credentials message. `validate` checks the provider before it starts and
+gives the same messages; for a rate limit it suggests fewer `--iterations`.
+
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 
 SARIF is the portal to where developers already triage every other finding — the

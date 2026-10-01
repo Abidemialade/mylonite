@@ -86,6 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugins` now lists a module that fails to import, or an attack module that fails to
   construct, as `FAILED TO LOAD (<error type>)` instead of crashing on it.
 
+- **A scan stopped by provider rate limits now says so and what to do.** When
+  three provider calls in a row fail with HTTP 429, `scan` and `gate` exit `4`
+  with [`MYL-ABT-002`](docs/reason-codes.md#myl-abt-002) and a message that
+  names the provider and model (never the key) and suggests waiting, lowering
+  `--max-concurrent` or `--max-llm-calls`, or checking the quota. Before, the
+  message always pointed at credentials. A run stopped by network errors or
+  timeouts points at the connection instead. `validate`'s provider check gives
+  the same messages instead of asking for an API key (#191).
 - **MCP scans now see every tool on a server that pages its tool list.**
   `tools/list` is read page by page, following `nextCursor` until the server
   stops returning one. Before, only the first page was read, so tools on later

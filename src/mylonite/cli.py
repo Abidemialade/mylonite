@@ -102,6 +102,10 @@ from mylonite.scan.assembly import (
     no_usable_modules_message,
     select_attack_modules,
 )
+from mylonite.scan.preflight import PreflightFailure as _PreflightFailure
+from mylonite.scan.preflight import preflight_failure_message
+from mylonite.scan.preflight import provider_preflight as _provider_preflight
+from mylonite.scan.preflight import provider_preflight_direct as _provider_preflight_direct
 from mylonite.scan.providers import LOCAL_MODEL_HINT as _LOCAL_MODEL_HINT
 from mylonite.scan.providers import preflight_model_or_exit
 from mylonite.scan.providers import (
@@ -1749,10 +1753,9 @@ def _validate_custom(
     # The CUSTOM path uses a DIRECT LLM ping, not a reference scan, so it
     # does not require the deliberately-vulnerable mcp_kitchen_sink demo package
     # to be installed just to check "is my provider reachable".
-    reachable = _provider_preflight_direct(
-        provider, model, timeout_s=iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S
-    )
-    _exit_if_provider_unreachable(reachable)
+    timeout_s, why = iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S, _PreflightFailure()
+    reachable = _provider_preflight_direct(provider, model, timeout_s=timeout_s, failure=why)
+    _exit_if_provider_unreachable(reachable, why, provider=provider, model=model)
 
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
@@ -1941,94 +1944,20 @@ def _render_recommendation_panel(rec: Any, console: Console | None = None) -> No
     console_print(console, ctl_table)
 
 
-def _exit_if_provider_unreachable(reachable: bool) -> None:
-    """Shared by both `validate` branches so this message can't drift."""
+def _exit_if_provider_unreachable(
+    reachable: bool, failure: _PreflightFailure | None = None, *, provider: str, model: str
+) -> None:
+    """Shared by both `validate` branches so this message can't drift (#191 for rate limits)."""
     if reachable:
         return
+    if (specific := preflight_failure_message(failure, provider=provider, model=model)) is not None:
+        echo_err(specific)
+        raise typer.Exit(code=EXIT_PROVIDER)
     echo_err(
         "no provider reachable — set ANTHROPIC_API_KEY, or pass --model provider/modelname "
         "for another LiteLLM provider (e.g. --model openai/gpt-4o).\n" + _LOCAL_MODEL_HINT
     )
     raise typer.Exit(code=EXIT_PROVIDER)
-
-
-def _provider_preflight_direct(provider: str, model: str, *, timeout_s: float) -> bool:
-    """Reachability probe that does NOT route through the bundled reference target.
-
-    A custom-target validate has no reason to touch ``mcp_kitchen_sink`` — its
-    re-drive uses the operator's own target. But the reference-scan preflight
-    (below) imports and RUNS ``InProcessReferenceAdapter``, so a user validating
-    THEIR app was forced to `pip install mcp-kitchen-sink` (a deliberately
-    vulnerable demo) just to run an "is my provider reachable" check, and hit a
-    hard exit 2 without it. This does the same reachability check with a single
-    minimal LLM completion instead. Returns True iff the provider answered.
-    """
-    from mylonite.scan._llm import litellm_tool_call_async
-
-    _ = provider  # provider routing is carried by the model string / active policy
-
-    async def _ping() -> bool:
-        try:
-            # Uses the "planner" caller label: this IS a minimal planner-shaped
-            # completion (a user message + empty tools), and it routes through the
-            # same chokepoint so it inherits budget-counting and the active policy.
-            await litellm_tool_call_async(
-                model=model,
-                messages=[{"role": "user", "content": "reply with the single word: ok"}],
-                tools=[],
-                caller="planner",
-                timeout_s=timeout_s,
-            )
-        except Exception:
-            return False
-        return True
-
-    try:
-        return asyncio.run(_ping())
-    except Exception:
-        return False
-
-
-def _provider_preflight(
-    provider: str, model: str, *, timeout_s: float = _DEFAULT_ITERATION_TIMEOUT_S
-) -> bool:
-    """Cheap reachability probe before the (expensive) live validation loop.
-
-    Runs ONE vulnerable reference scan. If it aborts ``provider_unreachable``,
-    the validator's N-iteration loop would too — so we fail fast with a distinct
-    exit 4 rather than burning iterations and reporting a misleading non-discrim
-    result. Returns True iff the provider is reachable.
-
-    For a CUSTOM target use :func:`_provider_preflight_direct` instead — it does
-    not pull in the bundled reference target (see its docstring).
-
-    DCR-0008: bounded by ``timeout_s`` (defaults to the same
-    ``_DEFAULT_ITERATION_TIMEOUT_S`` the sibling ``DifferentialValidator``
-    construction 30 lines below explicitly threads via
-    ``iteration_timeout_s``) — this preflight exists specifically to fail
-    fast rather than burn iterations, but had no bound of its own: a provider
-    that accepts the connection and then stalls mid-response (rather than
-    erroring outright) would hang ``asyncio.run(engine.run())`` open-ended,
-    defeating the whole "fail fast" purpose and hanging the CLI/CI job with
-    no way out. A timeout is treated the same as any other unreachable-
-    provider outcome (returns ``False``), not re-raised, so every caller's
-    existing ``if not reachable: ... exit(EXIT_PROVIDER)`` handling already
-    covers it without a new except clause.
-    """
-    from mylonite.scan.wiring import build_scan, note_id_counter
-
-    engine = build_scan(
-        "vulnerable",
-        completion_fn=None,
-        note_id_factory=note_id_counter(),
-        provider=provider,
-        model=model,
-    )
-    try:
-        result = asyncio.run(asyncio.wait_for(engine.run(), timeout=timeout_s))
-    except TimeoutError:
-        return False
-    return result.report.aborted != "provider_unreachable"
 
 
 @app.command(
@@ -2339,14 +2268,17 @@ def validate(
         )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
+        why = _PreflightFailure()
         try:
             reachable = _provider_preflight(
-                effective_provider, effective_model, timeout_s=iteration_timeout
+                effective_provider, effective_model, timeout_s=iteration_timeout, failure=why
             )
         except (ModuleNotFoundError, ImportError) as exc:
             _exit_if_missing_kitchen_sink(exc)
             raise
-        _exit_if_provider_unreachable(reachable)
+        _exit_if_provider_unreachable(
+            reachable, why, provider=effective_provider, model=effective_model
+        )
 
         # DCR-0007: `fast` was previously accepted by this command but silently
         # dropped on the reference branch — a reference-target `--fast` was a

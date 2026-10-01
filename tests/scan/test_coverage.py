@@ -20,6 +20,7 @@ from mylonite.scan.coverage import (
     AttemptClass,
     Coverage,
     ScanOutcome,
+    provider_abort_message,
 )
 
 EXIT_SUCCESS = 0
@@ -882,3 +883,48 @@ def test_findings_first_no_findings_is_a_no_op() -> None:
 
     attempts = [_attempt("no_finding", seed_id="a1"), _attempt("not_applicable", seed_id="a2")]
     assert findings_first(attempts) == attempts
+
+
+# --- #191: a rate-limit or unreachable-provider abort says what to do ----------
+
+
+def test_a_rate_limit_abort_names_provider_model_and_remedies() -> None:
+    message = provider_abort_message(
+        "rate_limit", provider="anthropic", model="anthropic/claude-test"
+    )
+    assert message is not None
+    assert message.startswith("error: [MYL-ABT-002] ")
+    assert "rate-limited" in message
+    assert "provider anthropic, model anthropic/claude-test" in message
+    assert "--max-concurrent" in message
+    assert "--max-llm-calls" in message
+    assert "quota" in message
+
+
+def test_a_network_abort_points_at_connectivity_not_credentials() -> None:
+    message = provider_abort_message("network", provider="openai", model="openai/gpt-test")
+    assert message is not None
+    assert "could not reach the LLM provider" in message
+    assert "provider openai, model openai/gpt-test" in message
+    assert "enterprise-networking" in message
+
+
+@pytest.mark.parametrize("category", [None, "auth", "unknown", "bad_request"])
+def test_other_causes_keep_the_generic_message(category: str | None) -> None:
+    assert provider_abort_message(category, provider="anthropic", model="m") is None
+
+
+def test_the_message_never_carries_a_key_embedded_in_the_model_string() -> None:
+    key = "sk-ant-api03-" + "z" * 40  # pragma: allowlist secret
+    message = provider_abort_message(
+        "rate_limit", provider="anthropic", model=f"anthropic/claude?api_key={key}"
+    )
+    assert message is not None
+    assert key not in message
+
+
+def test_the_engine_detail_replaces_the_generic_provider_text() -> None:
+    detail = provider_abort_message("rate_limit", provider="anthropic", model="m")
+    outcome = ScanOutcome.from_report(_report(aborted="provider_unreachable"), abort_detail=detail)
+    assert outcome.exit_code == EXIT_PROVIDER
+    assert outcome.operator_message == detail

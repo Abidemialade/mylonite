@@ -2061,6 +2061,142 @@ def test_scan_exit_4_on_provider_failure(
     assert result.exit_code in (EXIT_PROVIDER, EXIT_CONFIG)
 
 
+_FAKE_RATE_LIMIT_KEY = "sk-ant-api03-" + "q" * 40  # pragma: allowlist secret
+
+
+def _patch_planner_to_rate_limit(monkeypatch: pytest.MonkeyPatch, model: str) -> None:
+    """Every planner call is refused with a LiteLLM RateLimitError (HTTP 429)."""
+    import litellm
+
+    async def always_rate_limited(**_: Any) -> SimpleNamespace:
+        raise litellm.RateLimitError(
+            message=f"429 Too Many Requests; key={_FAKE_RATE_LIMIT_KEY}",
+            llm_provider="anthropic",
+            model=model,
+        )
+
+    from mylonite.plugins._reference import reference_target_adapter
+
+    original_init = reference_target_adapter.InProcessReferenceAdapter.__init__
+
+    def patched_init(self: Any, **kwargs: Any) -> None:
+        kwargs["completion_fn"] = always_rate_limited
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(
+        reference_target_adapter.InProcessReferenceAdapter, "__init__", patched_init
+    )
+
+
+def test_scan_rate_limited_mid_run_prints_what_to_do(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#191: a scan stopped by repeated 429s says so, names the provider and
+    model, says what to do, exits 4 (provider unreachable) and never prints
+    the key -- not a bare traceback or a generic "calls failed"."""
+    model = "anthropic/claude-rate-limit-test"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _FAKE_RATE_LIMIT_KEY)
+    _patch_planner_to_rate_limit(monkeypatch, model)
+    monkeypatch.setattr(
+        "mylonite.scan.customiser.PayloadCustomiser.customise", _passthrough_customise
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--model",
+            model,
+            "--output-dir",
+            str(tmp_path),
+            "--max-llm-calls",
+            "200",
+        ],
+    )
+
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    out = result.stderr or result.output
+    assert "[MYL-ABT-002]" in out
+    assert "rate-limited" in out
+    assert "provider anthropic" in out
+    assert model in out
+    assert "--max-concurrent" in out
+    assert "--max-llm-calls" in out
+    assert "quota" in out
+    assert "Traceback" not in result.output
+    assert _FAKE_RATE_LIMIT_KEY not in result.output
+
+
+async def _passthrough_customise(self: Any, seed: Any, target: Any) -> Any:
+    from mylonite.contracts._types import Payload
+
+    return Payload(
+        pattern_id=seed.pattern_id,
+        channel=seed.channel,
+        body=seed.seed_body,
+        metadata={
+            "seed_id": seed.pattern_id,
+            "weakness": seed.weakness,
+            "predicate": seed.predicate,
+            "setup": seed.setup,
+            "drive": seed.drive,
+        },
+    )
+
+
+def test_validate_rate_limited_preflight_says_rate_limit_not_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#191: a validate whose provider preflight is refused with a 429 says the
+    provider rate-limited it and what to do, instead of the credentials hint."""
+    from mylonite import cli as cli_module
+
+    def rate_limited_preflight(*_: Any, failure: Any = None, **__: Any) -> bool:
+        if failure is not None:
+            failure.category = "rate_limit"
+        return False
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _FAKE_RATE_LIMIT_KEY)
+    monkeypatch.setattr(cli_module, "_provider_preflight", rate_limited_preflight)
+    _patch_validator(monkeypatch, kept=True)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    out = result.stderr or result.output
+    assert "[MYL-ABT-002]" in out
+    assert "rate-limited" in out
+    assert "--iterations" in out
+    assert "quota" in out
+    assert "set ANTHROPIC_API_KEY" not in out
+    assert _FAKE_RATE_LIMIT_KEY not in result.output
+
+
+def test_validate_preflight_reports_the_rate_limit_category(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#191: the direct preflight classifies the refused call, so validate can
+    tell a rate limit from bad credentials."""
+    import litellm
+
+    from mylonite.scan.preflight import PreflightFailure, provider_preflight_direct
+
+    async def rate_limited(*_: Any, **__: Any) -> Any:
+        raise litellm.RateLimitError(message="429", llm_provider="anthropic", model="m")
+
+    monkeypatch.setattr(litellm, "acompletion", rate_limited)
+    failure = PreflightFailure()
+
+    reachable = provider_preflight_direct(
+        "anthropic", "anthropic/claude-test", timeout_s=5.0, failure=failure
+    )
+
+    assert reachable is False
+    assert failure.category == "rate_limit"
+
+
 def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

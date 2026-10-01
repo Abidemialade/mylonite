@@ -46,6 +46,7 @@ from mylonite.scan.coverage import (
     MODULE_LOAD_FAILURE_KEY,
     NO_VERDICT_EVIDENCE_KEYS,
     AbortReason,
+    provider_abort_message,
 )
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
@@ -231,6 +232,11 @@ class ScanResult:
     #: persists it in the ``verdicts.json`` sidecar, and ``mylonite report``
     #: reads it back from there.
     calibration: CalibrationSummary | None = None
+    #: On a ``provider_unreachable`` abort, the diagnosis category of the last
+    #: failed provider call (``rate_limit``, ``network``, ``auth`` ...), so a
+    #: caller with its own wording (``validate``'s preflight) can still tell a
+    #: rate limit from bad credentials. ``None`` otherwise. In-process only.
+    provider_failure_category: str | None = None
 
 
 @dataclass
@@ -440,6 +446,7 @@ class ScanEngine:
         attempts: list[ScanAttempt] = []
         exploits: list[ExploitRecord] = []
         aborted: AbortReason | None = None
+        provider_abort_detail: str | None = None
         inconclusive_attempts = 0
         fallback_breakdown: dict[str, int] = {}
         module_ids = [m.attack_metadata().id for m in self._attack_modules]
@@ -712,6 +719,14 @@ class ScanEngine:
                 # ScanConfig.provider_failure_threshold's docstring.
                 if counter.consecutive_failures >= self._config.provider_failure_threshold:
                     aborted = AbortReason.PROVIDER_UNREACHABLE
+                    # #191: a rate limit or an unreachable provider gets a
+                    # message that names the provider and model and says what
+                    # to do; any other cause keeps the generic text.
+                    provider_abort_detail = provider_abort_message(
+                        counter.last_failure_category,
+                        provider=self._config.provider,
+                        model=counter.last_failure_model or self._config.model,
+                    )
                     for pending in tasks:
                         pending.cancel()
                     break
@@ -746,6 +761,12 @@ class ScanEngine:
             fallback_breakdown=fallback_breakdown,
             descriptor=descriptor,
             llm_spend=counter.spend(),
+            abort_detail=provider_abort_detail,
+            provider_failure_category=(
+                counter.last_failure_category
+                if aborted is AbortReason.PROVIDER_UNREACHABLE
+                else None
+            ),
         )
 
     def _finalize(
@@ -761,6 +782,7 @@ class ScanEngine:
         descriptor: TargetDescriptor | None = None,
         llm_spend: LLMSpend | None = None,
         abort_detail: str | None = None,
+        provider_failure_category: str | None = None,
     ) -> ScanResult:
         report = ScanReport(
             target_id=self._config.target_id,
@@ -783,6 +805,7 @@ class ScanEngine:
             llm_spend=llm_spend,
             abort_detail=abort_detail,
             calibration=self._adapter_calibration(),
+            provider_failure_category=provider_failure_category,
         )
 
     def _adapter_calibration(self) -> CalibrationSummary | None:
