@@ -143,6 +143,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite scan --target-file <file> --authorize <family>` instead.
 ### Fixed
 
+- **`mylonite demo`'s headline no longer calls itself the validator.** The
+  second headline line used to say "this differential is the oracle that
+  validates every generated regression test" — overstating what a judge-off,
+  single-scan-per-build demo actually ran. It now says what the demo is: one
+  scan per build, not the repeat-run oracle a kept finding passes. The
+  teaser's suggested next step, `mylonite gate reference:vulnerable`, is now
+  labelled "(needs an API key)", matching how the `scan` line below it is
+  already labelled, so a no-key reader isn't surprised twice.
+- **`mylonite gate`'s "repository was not modified" message is now accurate
+  when `--workflows` ran without `--open-pr`.** `--workflows` writes
+  `.github/workflows/*` regardless of `--open-pr`, so the old message claimed
+  nothing changed on a run that had already written files. It now lists the
+  workflow file(s) it wrote and scopes the "not modified" claim to runs that
+  truly touched nothing outside the gate output directory.
+- **A gating PR's "How this is gated" section now names the real `--out`
+  directory**, instead of a hardcoded `.mylonite/gate/` that drifted from a
+  non-default `--out`.
+- **`mylonite generate --target-file`'s help text no longer implies the flag
+  is required for a custom target.** `generate` auto-resolves `target.yaml`
+  from the scan directory when it's co-located there; `--target-file` is only
+  needed to point at one that isn't (a different `--scans-dir`, or an exploit
+  copied elsewhere).
+
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with
   a log warning, so its classes vanished from the result and the scan could read
