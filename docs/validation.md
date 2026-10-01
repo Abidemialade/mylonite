@@ -130,7 +130,9 @@ Every validation reports three headline figures.
   or only skips fails the leg, so the finding is rejected. A custom-target test needs
   the live target to run (it skips without `MYLONITE_LIVE_TARGET=1`), so there the
   leg runs `pytest --collect-only` and passes when the file collects at least one
-  test; its detail reads `collected (not run)`.
+  test; its detail reads `collected (not run)`. A collect-only build doesn't run the
+  committed test, so on a custom target the evidence for KEPT is the differential or
+  effect leg, which proved the attack on live runs.
 
   **KEPT, or STABLE, NOT PROVEN.** `kept` decides the exit code; the verdict label says
   what the keep rests on. It reads **KEPT** only when the build leg passed and a
@@ -141,7 +143,8 @@ Every validation reports three headline figures.
   `--fast` (no differential) and no `effect_probe`, or with no control and no probe.
   The label appears in the verdict line, the `gate:` line, the notes in
   `validation_report.json` and the gate's pull-request body; `kept` and the exit code
-  are unchanged, so existing pipelines keep working. Add a guarded side (drop `--fast`,
+  are unchanged, so existing pipelines keep working. After a STABLE, NOT PROVEN keep,
+  `validate` says the test gates reproduction only, instead of telling you to commit it. Add a guarded side (drop `--fast`,
   or declare `control_env`) or an `effect_probe` to turn it into KEPT.
 
   **How the effect leg counts.** Each firing run counts at its

@@ -2437,11 +2437,21 @@ def validate(
     echo(spend_summary(spend_tally.spend(), time.monotonic() - spend_started))
 
     if report.kept:
+        from mylonite._verdict import STABLE_NOT_PROVEN, verdict_label
+
         echo("")
-        echo(
-            "Next: commit the generated test + fixtures so CI can gate on it "
-            "(see `mylonite gate --help`)."
-        )
+        if verdict_label(report) == STABLE_NOT_PROVEN:
+            # Exit 0 as documented, but don't present an unproven keep as a
+            # finished gate: the committed test gates reproduction only.
+            echo(
+                "Next: committing this test gates reproduction only; add a guarded side "
+                "or an effect_probe and re-run `mylonite validate` to prove a safeguard."
+            )
+        else:
+            echo(
+                "Next: commit the generated test + fixtures so CI can gate on it "
+                "(see `mylonite gate --help`)."
+            )
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
 

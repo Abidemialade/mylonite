@@ -222,6 +222,11 @@ The report's notes record the models the test was proved against
 To re-prove a committed test after a model change, see
 [Re-validate on a new model](model-upgrade.md).
 
+A kept test exits `0`. If its verdict reads **STABLE, NOT PROVEN** (no differential or
+effect proof, see [what the numbers mean](validation.md#what-the-numbers-mean)),
+`validate` says the committed test would gate reproduction only, and points you at a
+guarded side or an `effect_probe`.
+
 When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
 tokens the provider reported, and the wall-clock time. The metamorphic stage runs under
 its own call budget; if that budget is reached before every perturbation has run, the

@@ -8,7 +8,12 @@ kept, but neither shows that a safeguard stops the attack or that the committed
 test passes, so neither may read as a plain KEPT.
 
 :func:`verdict_label` derives the label from fields every report already
-carries, so no new field is needed and older reports label the same way.
+carries, so no new field is needed.
+
+A collect-only build (a custom target, whose test needs the live target to run)
+doesn't run the committed test: it proves the file collects. There a KEPT rests
+on the differential or effect leg, which proved the attack on live runs; that
+leg is the evidence, not the build.
 """
 
 from __future__ import annotations
