@@ -2698,9 +2698,9 @@ def gate(
         str | None,
         typer.Argument(
             help=(
-                "Target ID: 'reference:vulnerable' / 'reference:guarded', a "
-                "bundled 'mcp:<family>[:<scope>]', or 'mcp:custom'. "
-                "Omit when using --target-file. Non-reference targets require --authorize."
+                "Target ID: 'reference:vulnerable' / 'reference:guarded' or a "
+                "bundled 'mcp:<family>[:<scope>]'. For a custom target, omit this "
+                "and pass --target-file. Non-reference targets require --authorize."
             )
         ),
     ] = None,
