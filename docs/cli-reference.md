@@ -4,12 +4,12 @@ Every command, its key options, and a worked example. Run `mylonite COMMAND --he
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
-**Exit codes:** `0` ok/kept · `1` `check --enforce`: structural findings present · `2`
-config or usage error (incl. an empty scan) · `3` LLM-call budget exceeded · `4` provider
-unreachable · `5` test rejected (not kept) · `6` `gate`: the test generator returned
-nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing
-(internal collaborator failure) · `8` `gate`: the git/gh step failed (your findings and
-validation report are still in `--out`).
+**Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
+--enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
+empty scan) · `3` LLM-call budget exceeded · `4` provider unreachable · `5` test rejected
+(not kept) · `6` `gate`: the test generator returned nothing (internal collaborator
+failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
+`gate`: the git/gh step failed (your findings and validation report are still in `--out`).
 
 Budget exhaustion always exits `3`, whichever layer of the run observes it first — and it
 wins over a finding, not the other way round: a run that finds a real weakness and then
@@ -60,40 +60,9 @@ re-record. It does not fall back to a live call, and it does not render a clean 
 a stale fixture would otherwise make the vulnerable side look guarded. See
 [the reference app](quarry.md).
 
-## `check` — static structural pre-check
-
-Zero-key, zero-spend on-ramp: connects to a target ONCE (`describe()` — no LLM call, no
-attack) and reports structural exposure from the tool schemas alone. Belongs in CI stage
-1, next to lint — cheap enough to run on every push.
-
-Options: `--target-file PATH` (required — or set `target_file:` in `mylonite.yaml`);
-`--enforce` (exit `1` on the substantive W1–W4 structural findings instead of reporting and
-exiting `0` — the report-then-enforce adoption ramp). The "unpinned descriptions" advisory
-is **shown but does not gate**: it fires on every tool of every server on first contact, so
-gating on it would make `--enforce` red for everyone and unusable as a CI stage.
-`--config mylonite.yaml` (auto-discovered from `./mylonite.yaml` when present).
-
-`check` takes no `--authorize` and makes no writes at all. To run the calibration
-controls (real writes proving a declared `effect_probe` can see a change before a real
-scan ever trusts its "no change"), run `scan`/`gate`/`validate` with `--authorize`
-against the same `--target-file` — see [Calibration](target-file.md#calibration).
-
-```bash
-mylonite check --target-file app.yaml
-mylonite check --target-file app.yaml --enforce         # CI gate once the surface is clean
-```
-
-Reports: consequential tools with no approval-shaped sibling tool, descriptions that
-steer the agent, tools taking an apparent network destination, content-processing tools
-that could carry an indirect-injection payload, unpinned tool descriptions (paste-ready
-digests for `control_config.description_pins`), a target-file wiring name
-(`seed_arm.tool`, `effect_probe.verify_tool`, or any `control_config` tool-name field)
-that isn't among the server's described tools — a typo or a name copied from another
-target file — and which weakness classes the surface suggests. Every finding except the
-unpinned-descriptions advisory counts toward `--enforce`, including the wiring-name one:
-a name that names no real tool means the plant or the effect probe silently never fires.
-Every finding is a hint to confirm, never a verdict — `scan`/`gate` are what prove an
-attack actually lands.
+> **`check` is experimental.** A structural, no-LLM pre-check of a tool surface used to be
+> documented here. It still exists, but it's hidden and needs `MYLONITE_EXPERIMENTAL=1` —
+> see [experimental.md](experimental.md).
 
 ## `scan` — find weaknesses
 
@@ -318,33 +287,9 @@ summary](reading-results.md#the-per-class-summary)).
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
-## `ablate` — score the safeguards
-
-Toggle each AI safeguard and report which are **load-bearing**, **security theater**,
-**redundant**, **no-attack** (the attack itself never reproduced, so there's nothing to
-attribute), or **inconclusive** (a leg of the comparison never produced a trustworthy
-result — a crash, a provider outage, a target that failed to launch). See
-[the control-efficacy check](validation.md#the-control-efficacy-check).
-Under the matrix, `guarded side:` names what played the guarded side — your own
-server-layer control (via `control_env`) or Mylonite's boundary control — together with
-the claim a load-bearing row earns (see
-[Which claim you earned](reading-results.md#which-claim-you-earned)).
-
-Options: `--target-file PATH` (**required** — there is no positional target form, and the
-bundled `reference:*` targets are not accepted); `--authorize` (the target's `scope`, or
-its family when it declares no scope); `--controls W2,W3,W4`;
-`--iterations N`; `--redundancy` (all-minus-one, to tell redundant from theater);
-`--max-seeds N`; `--model` (any LiteLLM provider via a `provider/model` prefix).
-
-On a target that declares an `effect_probe`, the raw and guarded legs of each
-comparison run one after the other instead of at the same time, so slower is the
-cost of a correct read on a target whose evidence lives in state the two legs
-would otherwise share (a file, a database, a remote server). A target with no
-`effect_probe` keeps running its legs at the same time.
-
-```bash
-mylonite ablate --target-file app.yaml --authorize my-app --controls W2,W4 --redundancy
-```
+> **`ablate` is experimental.** Scoring each safeguard as load-bearing, security theater,
+> redundant, no-attack or inconclusive used to be documented here. It still exists, but
+> it's hidden and needs `MYLONITE_EXPERIMENTAL=1` — see [experimental.md](experimental.md).
 
 > **Scaffolding moved.** The old `mylonite init-target` command is now `mylonite scan
 > --scaffold PATH` (see [`scan`](#scan-find-weaknesses) above). See [Test your own

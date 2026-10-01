@@ -155,11 +155,18 @@ def _param_snapshot(param: click.Parameter) -> dict[str, Any]:
 
 
 def _command_snapshot(cmd: click.Command) -> dict[str, Any]:
-    """Everything about one command that ``--help`` is built from."""
+    """Everything about one command that ``--help`` is built from.
+
+    ``hidden`` is tracked explicitly (not just inferred from absence in a
+    rendered listing, which this snapshot deliberately doesn't capture) so a
+    command silently gaining or losing `hidden=True` -- e.g. `check`/`ablate`,
+    hidden behind `MYLONITE_EXPERIMENTAL` -- shows up as a diff here.
+    """
     return {
         "name": cmd.name,
         "help": cmd.help,
         "epilog": cmd.epilog,
+        "hidden": bool(getattr(cmd, "hidden", False)),
         "params": sorted((_param_snapshot(p) for p in cmd.params), key=lambda p: p["name"]),
     }
 

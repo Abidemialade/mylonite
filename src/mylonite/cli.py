@@ -12,7 +12,7 @@ The end-to-end pipeline (each command also documented via ``--help``):
   validator (live).
 * ``mylonite gate`` — scan → generate → validate → optional gating PR, in one command.
 * ``mylonite report`` — render a scan/validation as a terminal panel, SARIF, or JSON.
-* ``mylonite ablate`` — score which controls are load-bearing vs. theater.
+* ``mylonite ablate`` — hidden/experimental; needs ``MYLONITE_EXPERIMENTAL=1``.
 * ``mylonite version`` — print the installed version.
 
 See the documentation site for guides and the full reference.
@@ -44,6 +44,7 @@ from mylonite._cli_io import (
     echo_exc,
     missing_target_file_message,
 )
+from mylonite._experimental import hidden_command as _hidden_experimental_command
 from mylonite.commands.check import check
 from mylonite.exit_codes import (
     EXIT_BUDGET,
@@ -3336,7 +3337,7 @@ def gate(
     raise typer.Exit(code=result.exit_code)
 
 
-@app.command()
+@_hidden_experimental_command(app, "ablate")
 def ablate(
     target_file: Annotated[
         Path | None,
@@ -3427,6 +3428,9 @@ def ablate(
     For each control, toggle it (on vs off, or all-minus-c with --redundancy)
     against its weakness's attack (model held constant) and report whether it
     actually carries the security. LIVE: launches the target's MCP server + provider.
+
+    Without `control_env` declared on the target, this grades Mylonite's own
+    boundary stand-in, not your safeguard -- declare `control_env` to grade yours.
     """
     from mylonite.plugins._mcp import target_registry
     from mylonite.plugins._mcp.factory import LaunchIntent, build_adapter_for_spec
@@ -3688,7 +3692,6 @@ def ablate(
 
 # `check`'s command body lives in `mylonite.commands.check` (#91/#197 follow-up,
 # extracted to keep this composition root thin -- see tests/test_cli_size.py).
-# Registered explicitly rather than via the `@app.command()` decorator so the
-# import above stays a plain, non-circular one: `commands/check.py` needs
-# `mylonite.cli._discover_run_config`, imported lazily inside the function body.
-app.command(name="check")(check)
+# Registered via a function call, not a decorator, because `commands/check.py`
+# needs `mylonite.cli._discover_run_config`, imported lazily in the function body.
+_hidden_experimental_command(app, "check")(check)

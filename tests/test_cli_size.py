@@ -19,6 +19,11 @@ The "thin shell" refactor (PR 0 of the #91/#197 follow-up) cut cli.py from
 
 A later pass moved the `check` command body itself out to
 `mylonite.commands.check`, cutting cli.py further to ~3,682 LOC.
+
+`check` and `ablate` were then hidden behind `MYLONITE_EXPERIMENTAL=1` (the
+gate itself lives in `mylonite._experimental`, not here): one import, one
+registration call, and a two-line docstring fix to `ablate`'s own `--help`
+text (what it grades without `control_env`) raised the ceiling by 3 LOC.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ _CLI = Path(__file__).resolve().parents[1] / "src" / "mylonite" / "cli.py"
 # Ceiling with modest headroom over the post-`check`-extraction size (~3,682 LOC).
 # Lower it as more is extracted; do not raise it to accommodate new inlined
 # domain logic.
-_MAX_LOC = 3_702
+_MAX_LOC = 3_705
 
 
 def test_cli_py_stays_under_the_fat_controller_ceiling() -> None:
