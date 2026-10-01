@@ -152,6 +152,73 @@ out of date:
    entry in the same diff — the label is a maintainer's own action, so a
    contributor's commit message alone can't opt out.
 
+## No-regression checks
+
+The `nr-ci` job runs on every PR and push to main, docs-only changes
+included — it has no path filter, so it is safe to treat as a required
+check. It is the first layer of the no-regression gate; a second, heavier
+layer (a labelled regression corpus, a scripted fake-LLM call-count check,
+an offline end-to-end run) lands separately. `nr-ci` checks four things:
+
+- **CLI goldens.** `pytest tests/cli_golden -q` pins the command tree
+  (every flag, default and help string), the `scan --dry-run` seed
+  listings, and the offline demo replay's output and exit code. A
+  deliberate CLI change regenerates the matching file under
+  `tests/cli_golden/goldens/` and explains the diff in the PR; see
+  `test_cli_golden.py`'s module docstring for how the goldens are captured
+  and why box-drawing glyphs and elapsed-time text are normalised out of
+  the comparison.
+
+  There is no `verdicts.json` golden here. That sidecar is written only
+  when an attempt is decided by the trace rule or the target carries a
+  calibration summary (`mylonite.scan.artefacts._has_class_summary`) — by
+  design, a reference, REST or replayed scan (which is what the offline
+  demo runs) has neither, so the demo replay never produces one. The only
+  path in the repository that does produce one offline is the full
+  scripted-session harness in `tests/integration/test_issue217.py`
+  (a behavioural MCP session fake plus a scripted planner/judge, no network
+  and no model call) — not a "cheap" path to turn into a second golden
+  here, so this is recorded as a known gap rather than worked around with
+  an invented shortcut.
+
+- **No hardcoded provider model or credential env var.**
+  `python scripts/check_no_hardcoded_models.py` greps every `*.py` file
+  under `src/mylonite` for a provider-prefixed model literal (`claude-`,
+  `gpt-`, `gemini-`, `ollama/`, `anthropic/`, `openai/`, `bedrock/`) or a
+  provider credential env var (recognised the same way
+  `mylonite.scan.providers.looks_like_provider_env_var` recognises one).
+  `mylonite.scan.providers` is the one registry allowed to name either; a
+  hit anywhere else fails unless it is listed in
+  `scripts/hardcoded_models_allowlist.txt`, one line per hit:
+  `<path>:<line>:<matched text> | <reason>`. The entry is re-checked
+  against the current line every run, so an edit that moves or changes the
+  flagged text makes the entry stale and fails the build rather than
+  silently covering something else. The list may only shrink — a unit test
+  in `tests/test_check_no_hardcoded_models.py` pins today's entry count as
+  a ceiling; lower it whenever you remove an entry, and raise it only in
+  the same PR that adds a new, reviewed, genuinely-necessary one. Most of
+  today's entries are documentation and error-remedy text naming an
+  example provider/key for a human reader; some are pre-existing hardcoded
+  default models that predate this check and are flagged as follow-up
+  debt rather than fixed here.
+
+- **Demo replay wall time.** `mylonite demo` must finish within 10 seconds
+  wall-clock on the CI runner (measured at 6.8 s locally when this bar was
+  set; re-baseline to 20 s only at the demo's own gate). The step prints
+  the measured time.
+
+- **Test count floor.** `python scripts/check_test_count.py` compares
+  `pytest --collect-only -q`'s count against the floor committed in
+  `tests/test_count_floor.txt`. The count may grow freely; it can only
+  drop if the PR carries the `tests-removed` label, in which case lower
+  the floor in the same PR to lock in the new count.
+
+**CI wall time** is not enforced per PR — there is no stored history to
+compare against inside a single workflow run. The current baseline is
+noted here for reference: ~5 minutes total (the Linux test job ~55 s, the
+Windows one ~297 s, the long pole). If a change is expected to move this
+meaningfully, re-measure and update this paragraph in the same PR.
+
 ## What we can and can't accept
 
 Mylonite reproduces working exploits, so a contribution here carries risks that

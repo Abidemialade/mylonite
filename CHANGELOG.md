@@ -26,6 +26,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI job.** A pull request that touches any `tests/fixtures/*.snapshot.json`
   now needs both the `snapshot-change` label and a `CHANGELOG.md` entry, the
   same two-part sign-off `check_docs_sync.py` already asks for docs.
+- **A no-regression CI job (`nr-ci`).** Runs on every PR and push to main,
+  docs-only changes included, with no path filter — so it is safe to mark
+  required. It runs the CLI golden tests (`tests/cli_golden`), a new check
+  that fails on a hardcoded provider model literal or credential env var
+  outside `scripts/hardcoded_models_allowlist.txt`
+  (`scripts/check_no_hardcoded_models.py`, unit-tested in
+  `tests/test_check_no_hardcoded_models.py`), a 10-second wall-time bar on
+  the offline demo replay, and a test-count floor that can only drop with
+  the PR label `tests-removed` (`scripts/check_test_count.py`, floor
+  recorded in `tests/test_count_floor.txt`). See "No-regression checks" in
+  `CONTRIBUTING.md` for what each check does and how to update a floor or
+  allowlist. There is no `verdicts.json` golden: that sidecar is only ever
+  written for a trace-decided or calibrated scan, which the offline demo
+  replay is neither — see that same CONTRIBUTING.md section for the full
+  explanation.
 
 ### Changed
 
