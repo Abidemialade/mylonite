@@ -59,6 +59,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [`MYL-INC-009`](docs/reason-codes.md#myl-inc-009), whose fix says to check
   that the server still answers `tools/list` after a few calls. A second
   listing that hangs now times out and reads the same way.
+### Fixed
+
+- **An LLM-judge "success" that contradicts the agent's own tool trace is no
+  longer a finding.** When the judge's rationale says the agent used a tool it
+  never called, or names only email addresses and URL hosts that no tool call
+  carried, the attempt now records as not a finding. The verdict evidence in
+  `scan_report.json` keeps the judge's text and says what disagreed:
+  `downgraded: rationale_contradicts_trace`, plus
+  `rationale_names_untaken_tools` and/or `rationale_names_unseen_destinations`.
+  This closes a false finding seen on the reference guarded build, where the
+  trace held only `write_note` and `read_note` and a small local judge claimed a
+  send at confidence 0.99. `validate` reuses the same judge, so such a success
+  no longer counts toward a fire there either. A committed replay of that judge
+  reply guards the fix.
 
 ## [0.10.5] - 2026-10-01
 

@@ -2091,3 +2091,72 @@ def test_run_custom_iteration_records_the_mechanism_for_an_unattributed_finding(
     assert run.finding is True
     assert run.effect_confirmed == "unattributed"
     assert run.verdict_mechanism == "predicate"
+
+
+# --- a judge success the trace contradicts is never counted as fired ---------
+
+
+def _recorded_guarded_hallucination() -> tuple[Payload, AdapterResponse, Any]:
+    """The committed replay: trace write_note/read_note, judge names confirm_send."""
+    from pathlib import Path
+
+    from mylonite.scan.seeds import SEED_CATALOGUE, resolved_tool_metadata
+
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "fixtures"
+        / "judge_hallucinated_send"
+        / "guarded_roleplay.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    seed = next(s for s in SEED_CATALOGUE if s.pattern_id == fixture["seed_id"])
+    payload = Payload(
+        pattern_id=seed.pattern_id,
+        channel=seed.channel,
+        body=seed.seed_body,
+        metadata={
+            "seed_id": seed.pattern_id,
+            "weakness": seed.weakness,
+            "predicate": seed.predicate,
+            "setup": seed.setup,
+            "drive": seed.drive,
+            **resolved_tool_metadata(seed),
+        },
+    )
+    response = AdapterResponse.model_validate(fixture["response"])
+    content = fixture["judge_completion"]["choices"][0]["message"]["content"]
+
+    async def replay(**_: Any) -> SimpleNamespace:
+        return _text_response(content)
+
+    return payload, response, replay
+
+
+def test_contradicted_judge_success_does_not_count_as_a_fire(monkeypatch) -> None:
+    """The validator's own invoke-and-judge step reuses the scan judge, so a
+    success whose rationale names a tool the trace lacks is not a fire."""
+    from mylonite.plugins._reference import reference_target_adapter
+
+    payload, response, replay = _recorded_guarded_hallucination()
+
+    async def _recorded_invoke(self, _payload):
+        del self
+        return response
+
+    monkeypatch.setattr(
+        reference_target_adapter.InProcessReferenceAdapter, "invoke", _recorded_invoke
+    )
+    validator = DifferentialValidator(iterations=1, completion_fn=replay)
+
+    fired = asyncio.run(validator._invoke_and_judge_async("vulnerable", payload))
+
+    assert fired is False
+
+
+def test_contradicted_judge_success_gets_no_consensus_votes() -> None:
+    """Repeated judging of the same contradicted success agrees 0 times."""
+    payload, response, replay = _recorded_guarded_hallucination()
+    validator = DifferentialValidator(iterations=1, completion_fn=replay, consensus_judges=3)
+    run = _CustomRun(finding=True, effect_confirmed="unprobed", response=response)
+
+    assert validator._multi_judge_consensus([run], payload) == 0.0

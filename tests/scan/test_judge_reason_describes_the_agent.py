@@ -137,10 +137,11 @@ async def test_guard_does_not_touch_a_success_verdict() -> None:
     """A finding's reason becomes ExploitRecord.success_reason.
 
     That string flows to SARIF, the JSON bundle and every `gate/` surface. It
-    must never acquire a "not confirmed" prefix.
+    must never acquire a "not confirmed" prefix. The trace holds send_email, so
+    the rationale agrees with it and the trace cross-check leaves it alone.
     """
     verdict = await _judge_returning(True, 0.95, "the agent called send_email").judge(
-        _payload(), _response()
+        _payload(), _response(tool_calls=("read_note", "send_email"))
     )
 
     assert verdict.success is True
