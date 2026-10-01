@@ -48,14 +48,14 @@ src/mylonite/scan/providers.py:292:OPENAI_API_BASE | the approved-provider regis
 # Error remedies and --help text that tell the USER which credential to
 # export. None of these pick a provider on the user's behalf.
 src/mylonite/_redaction.py:465:ANTHROPIC_API_KEY | comment explaining why gate-runner secrets get redacted, not a default
-src/mylonite/cli.py:391:ANTHROPIC_API_KEY | --env-file error text showing the KEY=VALUE shape a user should write
-src/mylonite/cli.py:1955:ANTHROPIC_API_KEY | error remedy telling the user which key to set, among other options the message also gives
-src/mylonite/cli.py:2058:ANTHROPIC_API_KEY | error remedy naming an example provider key
-src/mylonite/cli.py:2193:ANTHROPIC_API_KEY | docstring naming the example key used when describing --live
+src/mylonite/cli.py:392:ANTHROPIC_API_KEY | --env-file error text showing the KEY=VALUE shape a user should write
+src/mylonite/cli.py:1948:ANTHROPIC_API_KEY | error remedy telling the user which key to set, among other options the message also gives
+src/mylonite/cli.py:2051:ANTHROPIC_API_KEY | error remedy naming an example provider key
+src/mylonite/cli.py:2186:ANTHROPIC_API_KEY | docstring naming the example key used when describing --live
 src/mylonite/generate/wiring.py:370:ANTHROPIC_API_KEY | --help text naming an example provider key
 src/mylonite/plugins/_mcp/target_file.py:410:ANTHROPIC_API_KEY | docstring naming an example secret a CI gate runner has, not a default
 src/mylonite/plugins/_reference/reference_validator.py:262:ANTHROPIC_API_KEY | docstring naming the example key used when describing --live
-src/mylonite/reason_codes.py:238:ANTHROPIC_API_KEY | reason-code remedy text naming an example provider key
+src/mylonite/reason_codes.py:250:ANTHROPIC_API_KEY | reason-code remedy text naming an example provider key
 src/mylonite/scan/diagnostics.py:72:ANTHROPIC_API_KEY | doctor's remedy text listing several providers' keys as examples
 src/mylonite/scan/diagnostics.py:72:OPENAI_API_KEY | doctor's remedy text listing several providers' keys as examples
 src/mylonite/scan/diagnostics.py:72:GEMINI_API_KEY | doctor's remedy text listing several providers' keys as examples
@@ -65,25 +65,25 @@ src/mylonite/scan/llm_policy.py:72:OPENAI_API_KEY | error remedy listing two pro
 # --- comments/docstrings explaining a pre-flight or key-shape check -------
 # Explain WHY a check exists by naming the vars it looks at; they do not
 # pick a default.
-src/mylonite/cli.py:301:AZURE_API_BASE | comment explaining the Azure pre-flight completeness check
-src/mylonite/cli.py:301:AZURE_API_VERSION | comment explaining the Azure pre-flight completeness check
+src/mylonite/cli.py:302:AZURE_API_BASE | comment explaining the Azure pre-flight completeness check
+src/mylonite/cli.py:302:AZURE_API_VERSION | comment explaining the Azure pre-flight completeness check
 src/mylonite/config.py:278:AWS_ACCESS_KEY_ID | docstring explaining the Bedrock pre-flight completeness check
 src/mylonite/config.py:279:AWS_SECRET_ACCESS_KEY | docstring explaining the Bedrock pre-flight completeness check
 src/mylonite/config.py:282:AZURE_API_KEY | docstring explaining the Azure pre-flight completeness check
 src/mylonite/config.py:283:AZURE_API_BASE | docstring explaining the Azure pre-flight completeness check
 src/mylonite/config.py:284:AZURE_API_VERSION | docstring explaining the Azure pre-flight completeness check
-src/mylonite/cli.py:349:ANTHROPIC_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
-src/mylonite/cli.py:351:OPENAI_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
-src/mylonite/cli.py:353:AWS_ACCESS_KEY_ID | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
+src/mylonite/cli.py:350:ANTHROPIC_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
+src/mylonite/cli.py:352:OPENAI_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
+src/mylonite/cli.py:354:AWS_ACCESS_KEY_ID | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
 
 # --- example text illustrating the provider-prefixed --model syntax -------
 # Error messages and docstrings that show the SHAPE of a --model value
 # ("provider/model-name"); the user still has to type one.
-src/mylonite/cli.py:506:claude- | --model validation error showing example values, not a default
-src/mylonite/cli.py:546:anthropic/ | warning text showing the provider-prefixed form of an unprefixed --model the user passed
-src/mylonite/cli.py:546:claude- | warning text showing the provider-prefixed form of an unprefixed --model the user passed
-src/mylonite/cli.py:1956:openai/ | error remedy showing an example --model value for a non-default provider
-src/mylonite/cli.py:1956:gpt- | error remedy showing an example --model value for a non-default provider
+src/mylonite/cli.py:500:claude- | --model validation error showing example values, not a default
+src/mylonite/cli.py:540:anthropic/ | warning text showing the provider-prefixed form of an unprefixed --model the user passed
+src/mylonite/cli.py:540:claude- | warning text showing the provider-prefixed form of an unprefixed --model the user passed
+src/mylonite/cli.py:1949:openai/ | error remedy showing an example --model value for a non-default provider
+src/mylonite/cli.py:1949:gpt- | error remedy showing an example --model value for a non-default provider
 src/mylonite/config.py:299:openai/ | error remedy showing an example provider-prefixed --model value
 src/mylonite/config.py:299:gpt- | error remedy showing an example provider-prefixed --model value
 src/mylonite/scan/model_ref.py:36:claude- | docstring example of an unversioned alias that fails auto-routing
@@ -112,10 +112,10 @@ src/mylonite/config.py:96:claude- | docstring's example mylonite.yaml, not a par
 # nr-ci check itself. Flagged here so they are visible rather than silently
 # exempted; a follow-up should route them through providers.py/require_llm()
 # or make them error instead of defaulting.
-src/mylonite/cli.py:1088:claude- | pre-existing hardcoded fallback model (scan's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:2236:claude- | pre-existing hardcoded fallback model (validate's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:3010:claude- | pre-existing hardcoded fallback model (gate's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:3489:claude- | pre-existing hardcoded fallback model (ablate's base_model); real debt, not fixed by this PR
+src/mylonite/cli.py:1082:claude- | pre-existing hardcoded fallback model (scan's base_model); real debt, not fixed by this PR
+src/mylonite/cli.py:2229:claude- | pre-existing hardcoded fallback model (validate's base_model); real debt, not fixed by this PR
+src/mylonite/cli.py:3003:claude- | pre-existing hardcoded fallback model (gate's base_model); real debt, not fixed by this PR
+src/mylonite/cli.py:3482:claude- | pre-existing hardcoded fallback model (ablate's base_model); real debt, not fixed by this PR
 src/mylonite/commands/check.py:114:claude- | pre-existing hardcoded fallback model (check's reference-target adapter); real debt, not fixed by this PR
 src/mylonite/commands/check.py:132:claude- | pre-existing hardcoded fallback model (check's custom-target adapter); real debt, not fixed by this PR
 src/mylonite/gate/mitigation.py:29:claude- | comment quoting cli.py's hardcoded gate default, for the reason below
