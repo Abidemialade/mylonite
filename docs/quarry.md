@@ -43,7 +43,6 @@ Requires **Python 3.11–3.14**. No cloning, and the first two steps need no API
 ```bash
 pip install "mylonite[demo]"
 mylonite demo                         # the differential, replayed offline
-mylonite check reference:vulnerable   # its structural report, no LLM call
 ```
 
 `demo` replays committed fixtures: real scan, real predicates, real differential,

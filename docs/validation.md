@@ -225,7 +225,8 @@ Two honesty properties make this trustworthy:
   SARIF message and the gating PR headline alike. See
   [Which claim you earned](reading-results.md#which-claim-you-earned).
 
-`mylonite ablate` generalises this across a target's whole control set: it
+`mylonite ablate` (hidden and experimental — see [docs/experimental.md](experimental.md))
+generalises this across a target's whole control set: it
 toggles each safeguard and reports which are **load-bearing**, which are
 **security theater** (the attack fires with or without them), and — with
 `--redundancy` — which are **redundant** (another control already covers the

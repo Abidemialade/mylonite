@@ -190,7 +190,8 @@ agent that takes in **untrusted content**, can read **private data**, and can
 through the third. Integrity tracks the first leg, confidentiality the second, and each
 sink's policy the third.
 
-`mylonite check` reports the legs it finds on your tool surface:
+`mylonite check` (hidden and experimental — see [docs/experimental.md](experimental.md))
+reports the legs it finds on your tool surface:
 
 ```
 lethal trifecta (untrusted content + private data + external communication):

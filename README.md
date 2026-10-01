@@ -135,10 +135,9 @@ machinery work before pointing it somewhere the honest answer may be "nothing".
 
 Static scanners read your tool descriptions and flag whatever looks risky, leaving you to
 judge which flags matter. Model-eval harnesses swap models and score which behaves best.
-Mylonite includes a quick structural check of that first kind (`mylonite check`), but its
-purpose is the step neither of those takes: run the attack against your app, then hold the
-model constant and switch only your safeguard. The result is evidence about **your
-safeguard**, not about how a description reads or how a model scored today.
+Mylonite's purpose is the step neither of those takes: run the attack against your app,
+then hold the model constant and switch only your safeguard. The result is evidence about
+**your safeguard**, not about how a description reads or how a model scored today.
 
 ## Project status
 
@@ -159,11 +158,11 @@ pip install "mylonite[demo]"              # ...plus the bundled practice app
 Python 3.11–3.14.
 
 The `[demo]` extra installs the bundled practice app, and you need it for **any**
-`reference:...` command — `demo`, `check reference:...` and `scan reference:...` alike.
+`reference:...` command — `demo` and `scan reference:...` alike.
 
 Scanning your own app needs a model: an API key for a hosted provider, or no key at all for
 one you host yourself (Ollama, vLLM, or a LiteLLM proxy — see
-[self-hosted models](./docs/self-hosted-models.md)). `check`, `scan --scaffold` and `report`
+[self-hosted models](./docs/self-hosted-models.md)). `scan --scaffold` and `report`
 never need a model at all, and `demo` replays recorded responses rather than calling one.
 
 ## Try it
@@ -198,12 +197,6 @@ decided either way the table says so rather than showing it as a pass, and if a 
 ever missing or out of date the command fails and explains why instead of reporting a clean
 result it did not earn.
 
-The next step also needs no key, and works against your own server too:
-
-```bash
-mylonite check reference:vulnerable   # structural report, no model call
-```
-
 Then, with a model configured, the real thing:
 
 ```bash
@@ -215,27 +208,17 @@ See [the practice app](./docs/quarry.md) for what is built into it and why.
 
 ### Then point it at your own app
 
-**The first two steps are free** — no API key, no model call, no spend.
+**The first step is free** — no API key, no model call, no spend.
 
 ```bash
-# 1. Inspect a server and write a starter target.yaml
+# Inspect a server and write a starter target.yaml
 mylonite scan --command "python" --arg "my_server.py" --scaffold app.yaml --scope my-app
-
-# 2. Structural pre-check of that tool surface
-mylonite check --target-file app.yaml
 ```
 
 `--scaffold` connects to your server, lists its tools, says which weakness classes apply to
 it, and flags the tools whose actions have real consequences. It works from the names,
 descriptions and schemas your server advertises, matching them against keyword patterns, so
 treat everything it suggests as a hint to confirm rather than a verdict.
-
-`check` reports structural exposure: consequential tools with no approval step, descriptions
-that steer the agent, tools that take a network destination, content-processing tools that
-could be injection routes, and descriptions that are not pinned. `--enforce` turns it into a
-CI gate — it fails on the substantive findings and treats "unpinned descriptions" (which
-fires on every tool of every server the first time) as advice rather than a gate, so you can
-adopt it on day one.
 
 Proving which weaknesses actually *land*, and which of your safeguards stops them, is the
 scan itself. That needs a model:
@@ -274,24 +257,26 @@ Full guide: [docs/ci-gating.md](./docs/ci-gating.md). Behind a corporate network
 | Command | What it does | Needs a model? |
 |---|---|---|
 | `mylonite demo` | Replays the unguarded-vs-guarded comparison on the bundled practice app, offline. | No (`--live` does) |
-| `mylonite check` | Structural pre-check of a tool surface. Takes `reference:vulnerable` or `--target-file`. `--enforce` makes it a CI gate. | No |
 | `mylonite scan` | The weakness-finding loop. `--scaffold` inspects a server and writes a starter `target.yaml`. | Yes (except `--scaffold`) |
 | `mylonite generate` | Writes the `pytest` test from a confirmed weakness. | No |
 | `mylonite validate` | Confirms a test is meaningful by running the comparison. `--fast` makes it cheaper. | Yes |
 | `mylonite gate` | End to end: scan → generate → validate → optionally open a gating PR. | Yes |
-| `mylonite ablate` | Scores each safeguard as load-bearing, redundant, security theatre, untested, or inconclusive. Needs a target file. | Yes |
 | `mylonite report` | Terminal summary, **SARIF 2.1.0**, or a JSON bundle — each carrying the supporting evidence and compliance tags. | No |
 | `mylonite plugins` | Lists installed plugins across all five extension points. | No |
 | `mylonite version` | Prints the installed version. | No |
+
+Two more commands, `check` (a structural, no-LLM pre-check) and `ablate` (scores each
+safeguard as load-bearing, redundant, security theatre, no-attack, or inconclusive), exist
+but are hidden and experimental — see [docs/experimental.md](./docs/experimental.md).
 
 `--fast` trades thoroughness for cost, and what it skips depends on the target: against
 your own app it skips the safeguard comparison itself, leaving a weaker check; against the
 bundled practice app the comparison is not optional, so it reduces the robustness checks
 instead.
 
-Exit codes are a documented contract (`0` success · `1` `check --enforce` found
-structural findings · `2` configuration · `3` budget · `4` provider · `5` not confirmed ·
-`6` generate failed · `7` validate failed · `8` PR step failed). A scan that finds
+Exit codes are a documented contract (`0` success · `1` structural findings present,
+the experimental `check --enforce` · `2` configuration · `3` budget · `4` provider ·
+`5` not confirmed · `6` generate failed · `7` validate failed · `8` PR step failed). A scan that finds
 something exits `0`. Budget exhaustion always wins: a run that finds something AND runs
 out of `--max-llm-calls` exits `3`, not `0` — the findings are still written to disk and
 (for `gate`) still turned into a test and gated, so nothing is lost. Full details in the

@@ -350,7 +350,7 @@ This is near-free at generation time and is the foundation of audit/compliance r
 | Code | Meaning |
 |------|---------|
 | 0 | success / the test is kept |
-| 1 | `check --enforce`: structural findings present |
+| 1 | structural findings present (the experimental `check --enforce` — see [experimental.md](experimental.md)) |
 | 2 | config or usage error (incl. an empty scan — never reads as a clean pass) |
 | 3 | LLM-call budget exceeded |
 | 4 | provider unreachable |

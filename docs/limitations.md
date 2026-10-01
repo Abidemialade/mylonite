@@ -19,7 +19,8 @@ registration, token refresh — see the remote-authentication note below for wha
 means for a token that expires mid-run), or a server reached through an enterprise
 gateway. Both are on the roadmap.
 
-**Wiring caveat:** `mylonite check` flags a `seed_arm.tool`, `effect_probe.verify_tool` or
+**Wiring caveat:** `mylonite check` (hidden and experimental — see
+[docs/experimental.md](experimental.md)) flags a `seed_arm.tool`, `effect_probe.verify_tool` or
 `control_config` name that isn't among the server's described tools — a typo or a stale
 name from a copied target file — before you ever spend an LLM call. A `seed_arm` plant
 call or an `effect_probe` verify call that the server itself refuses (errors) is also
