@@ -17,9 +17,12 @@ mylonite report <dir> --json finding.json             # dashboards / SIEM / bots
 
 ## The terminal trust panel
 
-The default. For a scan it shows the findings, coverage per weakness class, and any
-**NOT TESTED** gap (an attack pattern that couldn't be delivered — surfaced loudly, never silently
-counted as clean). For a validation it shows the verdict and the evidence behind it:
+The default. For a scan it shows the findings and any **NOT TESTED** gap (an attack
+pattern that couldn't be delivered — surfaced loudly, never silently counted as clean);
+when the run carries a trace-decided attempt, a calibration summary, or an attack
+module that failed to load, it adds a [per-class coverage
+block](#the-per-class-summary) too. For a validation it shows the verdict and the
+evidence behind it:
 
 !!! note "What counts as NOT TESTED"
 
