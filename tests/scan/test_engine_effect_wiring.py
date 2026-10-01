@@ -264,3 +264,84 @@ async def test_a_finding_without_a_trace_has_no_proof_level() -> None:
     result = await _scan(_w4_payload(), [response])
     assert result.report.attempts[0].outcome == "finding"
     assert "proof_level" not in result.exploits[0].payload.metadata
+
+
+# --- tool-surface evidence that could not be trusted -------------------------
+
+
+def _rug_pull_payload() -> Payload:
+    return Payload(
+        pattern_id="synth-w1-rug-pull",
+        channel="user-message",
+        body="try each tool once",
+        metadata={
+            "seed_id": "synth-w1-rug-pull",
+            "weakness": "W1",
+            "predicate": "tool_surface_mutated_mid_session",
+            "setup": "no_setup",
+            "drive": "verbatim",
+        },
+    )
+
+
+def _surface_response(**meta: str) -> AdapterResponse:
+    return AdapterResponse(
+        payload_pattern_id="synth-w1-rug-pull",
+        raw_response="done",
+        tool_calls=["get_weather"],
+        metadata=meta,
+    )
+
+
+def _w1(result: Any) -> Any:
+    from mylonite.scan.class_verdict import STATUS_NOT_TESTED, class_verdicts
+
+    verdicts = {v.weakness: v for v in class_verdicts(result.report)}
+    assert verdicts["W1"].status == STATUS_NOT_TESTED
+    return verdicts["W1"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_relist_makes_the_class_not_tested_under_its_code() -> None:
+    result = await _scan(_rug_pull_payload(), [_surface_response(tool_surface_mutated="errored")])
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "undecided"
+    assert _w1(result).codes == (reason_codes.INC_RELIST_FAILED,)
+    assert result.report.inconclusive_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_a_stable_surface_on_a_partial_tool_list_is_not_tested() -> None:
+    result = await _scan(
+        _rug_pull_payload(),
+        [_surface_response(tool_surface_mutated="false", tool_list_truncated="true")],
+    )
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "undecided"
+    assert _w1(result).codes == (reason_codes.INC_TOOL_LIST_TRUNCATED,)
+
+
+@pytest.mark.asyncio
+async def test_a_finding_on_a_partial_tool_list_still_stands() -> None:
+    result = await _scan(
+        _rug_pull_payload(),
+        [
+            _surface_response(
+                tool_surface_mutated="true",
+                tool_surface_diff='{"added": ["x"], "removed": [], "changed": []}',
+                tool_list_truncated="true",
+            )
+        ],
+    )
+    assert result.report.attempts[0].outcome == "finding"
+
+
+@pytest.mark.asyncio
+async def test_a_trace_resisted_attempt_on_a_partial_tool_list_is_not_tested() -> None:
+    resisted = _response(
+        ["read_note"], trace_outcome="not-called", link="unlinked", tool_list_truncated="true"
+    )
+    result = await _scan(_w2_payload(), [resisted])
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "undecided"
+    assert coverage.reason_code_for_attempt(attempt) == reason_codes.INC_TOOL_LIST_TRUNCATED
