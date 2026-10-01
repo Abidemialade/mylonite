@@ -16,7 +16,7 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, get_args
 
-from mylonite.scan.control_shim import _READ_HINTS
+from mylonite.scan.control_shim import READ_HINTS
 from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS
 
 TraceOutcome = Literal[
@@ -57,7 +57,7 @@ def is_read_tool(
     if declared.get("readOnlyHint") is True:
         return True
     lowered = name.lower()
-    return any(hint in lowered for hint in _READ_HINTS)
+    return any(hint in lowered for hint in READ_HINTS)
 
 
 def classify_trace(
@@ -98,9 +98,10 @@ def classify_trace(
         return "dispatched-ok"
     if any(call.get("is_error") for call in dispatched):
         return "dispatched-error"
-    if any(_is_deferred(call, deferred_markers) for call in dispatched):
-        return "dispatched-deferred"
-    return "dispatched-ok"
+    # Every dispatched candidate failed the first check (so none is both
+    # non-error and non-deferred) and none carries `is_error`, so every one of
+    # them must be deferred.
+    return "dispatched-deferred"
 
 
 def link_for(

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from mylonite.contracts._types import ToolSpec
 from mylonite.plugins._mcp.target_file import infer_seed_arm
-from mylonite.scan.control_shim import _CONSEQUENTIAL_HINTS, _READ_HINTS
+from mylonite.scan.control_shim import _CONSEQUENTIAL_HINTS, READ_HINTS
 from mylonite.scan.tool_classifier import classify, hint_matches, name_tokens
 
 # The real @modelcontextprotocol/server-memory schemas, verbatim in shape.
@@ -143,5 +143,5 @@ def test_genuine_name_hints_still_match() -> None:
         applies, reason = classify(name, declared=None, hints=_CONSEQUENTIAL_HINTS)
         assert (applies, reason) == (True, "name hint"), name
     for name in ("read_note", "list_files", "search_nodes"):
-        applies, reason = classify(name, declared=None, hints=_READ_HINTS)
+        applies, reason = classify(name, declared=None, hints=READ_HINTS)
         assert (applies, reason) == (True, "name hint"), name
