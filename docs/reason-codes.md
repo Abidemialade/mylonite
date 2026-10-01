@@ -277,6 +277,14 @@ carries.
 **Fix:** Use `{exfil_email}`, or a token the agent's call carries, as the marker
 instead of `{payload}`.
 
+## MYL-INC-009
+
+The tool list could not be read again after the agent ran, so a mid-session change
+to the tools was not checked.
+
+**Fix:** Check that the server still answers `tools/list` after a few tool calls (it
+may have crashed or closed the session), then re-run.
+
 ## MYL-SRV-001
 
 The negative rests only on the server returning an error.

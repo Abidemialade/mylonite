@@ -408,6 +408,7 @@ _UNDECIDED_UNPARSEABLE_JUDGE_BUCKET: Final = "undecided_unparseable_judge_output
 _UNDECIDED_NO_ADJUDICATOR_BUCKET: Final = "undecided_no_adjudicator"
 _UNDECIDED_UNLINKED_DISPATCH_BUCKET: Final = "undecided_unlinked_dispatch"
 _UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
+_UNDECIDED_RELIST_FAILED_BUCKET: Final = "undecided_relist_failed"
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -416,6 +417,7 @@ _UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
 _INC_BUCKET_BY_CAUSE: Final[dict[str, str]] = {
     reason_codes.INC_UNLINKED_DISPATCH: _UNDECIDED_UNLINKED_DISPATCH_BUCKET,
     reason_codes.INC_PAYLOAD_MARKER: _UNDECIDED_PAYLOAD_MARKER_BUCKET,
+    reason_codes.INC_RELIST_FAILED: _UNDECIDED_RELIST_FAILED_BUCKET,
 }
 
 #: Exception class NAMES (``type(exc).__name__``, the only thing
@@ -471,6 +473,10 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     _UNDECIDED_PAYLOAD_MARKER_BUCKET: (
         "made a consequential call the effect_probe could not tie to the attempt, because "
         "its marker renders from {payload}"
+    ),
+    _UNDECIDED_RELIST_FAILED_BUCKET: (
+        "reached no verdict because the tool list could not be read again after the agent "
+        "ran, so a mid-session tool change was not checked"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"

@@ -224,6 +224,23 @@ def _user_message_for_drive(
     return payload_body or "Please process this request."
 
 
+def _tool_surface_metadata(
+    mutation: dict[str, list[str]] | None, *, relist_failed: bool, listed: bool
+) -> dict[str, str]:
+    """The rug-pull evidence keys for one attempt's response metadata.
+
+    ``"true"`` (plus the diff) when the surface changed, ``"errored"`` when the
+    re-list raised, ``"false"`` only when a re-list ran and matched, and nothing
+    when the planner never listed. A failed re-list compared nothing, so it is
+    stamped as an error the predicate treats as inconclusive, never as stable.
+    """
+    if mutation is not None:
+        return {"tool_surface_mutated": "true", "tool_surface_diff": json.dumps(mutation)}
+    if not listed:
+        return {}
+    return {"tool_surface_mutated": "errored" if relist_failed else "false"}
+
+
 def _render_seed_args(
     template: Any,
     payload_body: str,
@@ -563,6 +580,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         #: Non-None when the tool surface changed between the planner's first
         #: list_tools and a re-list after it ran — a mid-session rug-pull.
         tool_surface_mutation: dict[str, list[str]] | None = None
+        #: True when the re-list raised, so nothing was compared. Stamped as
+        #: "errored" (never "false"): a check that could not run is not a pass.
+        tool_surface_relist_failed = False
 
         try:
             async with self._session(
@@ -651,9 +671,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                                 "changed": changed,
                             }
                     except Exception:
-                        # Detection is best-effort — a re-list failure must not fail
-                        # the attempt.
-                        logger.info("%s: rug-pull re-list failed (ignored)", type(self).__name__)
+                        # A re-list failure must not fail the attempt, but it must
+                        # not read as a stable surface either: nothing was compared.
+                        tool_surface_relist_failed = True
+                        logger.info(
+                            "%s: rug-pull re-list failed; surface check is inconclusive",
+                            type(self).__name__,
+                        )
 
                 # Effect probe (app-native rigor): re-query the target to confirm
                 # the damaging effect actually MATERIALIZED end-to-end. The
@@ -822,18 +846,12 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # Rug-pull evidence (W1): whether the tool surface mutated
                 # mid-session, and how. Read by the tool_surface_mutated_mid_session
                 # predicate. "false" when a re-list ran and nothing changed;
+                # "errored" when the re-list raised (inconclusive, never a pass);
                 # omitted when no re-list happened at all.
-                **(
-                    {
-                        "tool_surface_mutated": "true",
-                        "tool_surface_diff": json.dumps(tool_surface_mutation),
-                    }
-                    if tool_surface_mutation is not None
-                    else (
-                        {"tool_surface_mutated": "false"}
-                        if recording_shim.first_surface is not None
-                        else {}
-                    )
+                **_tool_surface_metadata(
+                    tool_surface_mutation,
+                    relist_failed=tool_surface_relist_failed,
+                    listed=recording_shim.first_surface is not None,
                 ),
             },
         )

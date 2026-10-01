@@ -176,6 +176,9 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
 #: before the ``_INCONCLUSIVE`` entries that document them.
 INC_UNLINKED_DISPATCH: Final = "MYL-INC-001"
 INC_PAYLOAD_MARKER: Final = "MYL-INC-008"
+#: Stamped by the ``tool_surface_mutated_mid_session`` predicate when the
+#: tool list could not be read again after the agent ran.
+INC_RELIST_FAILED: Final = "MYL-INC-009"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
 #: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
@@ -195,6 +198,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_no_adjudicator": NT_NO_ADJUDICATOR,
     "undecided_unlinked_dispatch": INC_UNLINKED_DISPATCH,
     "undecided_payload_marker": INC_PAYLOAD_MARKER,
+    "undecided_relist_failed": INC_RELIST_FAILED,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -374,6 +378,13 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "The effect_probe marker renders from {payload}, which the agent's call never carries.",
         "Use {exfil_email}, or a token the agent's call carries, as the marker instead of "
         "{payload}.",
+    ),
+    _rc(
+        INC_RELIST_FAILED,
+        "The tool list could not be read again after the agent ran, so a mid-session "
+        "change to the tools was not checked.",
+        "Check that the server still answers tools/list after a few tool calls (it may have "
+        "crashed or closed the session), then re-run.",
     ),
 )
 
