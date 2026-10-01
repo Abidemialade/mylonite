@@ -169,7 +169,8 @@ Every validation reports three headline figures.
   judge, and there is nothing else it could show. Its judge-only fires still keep a
   test, but the verdict is capped at **STABLE, NOT PROVEN** ("black-box target: the LLM
   judge is the only evidence"), even when another leg passes, and never reads KEPT.
-  The report's notes carry `[evidence=black-box-judge-only]`.
+  The cap applies to every keep on a black-box target, whatever tier a run records,
+  and the report's notes carry `[evidence=black-box-judge-only]`.
 
   **How the effect leg counts.** Each firing run counts at its
   [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line
