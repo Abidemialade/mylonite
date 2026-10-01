@@ -305,7 +305,11 @@ def check(
         from mylonite.plugins._mcp.calibration import calibrate_custom_target
 
         echo_err("running calibration controls (real writes)…")
-        cal_result = asyncio.run(calibrate_custom_target(adapter, authorized=True))
+        try:
+            cal_result = asyncio.run(calibrate_custom_target(adapter, authorized=True))
+        except Exception as exc:
+            echo_exc("could not run the calibration controls", exc)
+            raise typer.Exit(code=EXIT_CONFIG) from exc
         _print_calibration_result(cal_result)
 
     # The "Unpinned tool descriptions" row fires on EVERY tool of EVERY

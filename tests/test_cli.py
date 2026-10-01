@@ -637,6 +637,26 @@ def test_check_authorize_runs_calibration_and_prints_the_reason_code(
     assert "MYL-INC-003" in combined
 
 
+def test_check_authorize_reports_a_calibration_crash_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.plugins._mcp import calibration
+
+    _patch_fake_adapter_for(monkeypatch, _fake_descriptor_with_seeded_weaknesses)
+
+    async def _crash(adapter: Any, *, authorized: bool) -> Any:
+        raise RuntimeError("calibration blew up")
+
+    monkeypatch.setattr(calibration, "calibrate_custom_target", _crash)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(
+        app, ["check", "--target-file", str(target_file), "--authorize", "custom"]
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert not isinstance(result.exception, RuntimeError)
+    assert "calibration" in (result.stderr or result.output)
+
+
 def test_check_authorize_must_match_the_target_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

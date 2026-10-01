@@ -840,7 +840,14 @@ async def test_calibrated_and_seed_control_reflect_the_calibration_registry() ->
             status=calibration.STATUS_CERTIFIED,
             reason_code=None,
             detail="certified through send_email",
-            tools=(),
+            tools=(
+                calibration.ToolControl(
+                    tool="send_email",
+                    status=calibration.TOOL_CERTIFIED,
+                    reason_code=None,
+                    detail="negative and positive controls passed",
+                ),
+            ),
             seed_control=calibration.SeedControl(
                 status=calibration.SEED_NOT_DECLARED,
                 reason_code=None,
@@ -912,3 +919,130 @@ async def test_the_seeds_named_tool_counts_as_consequential_even_with_a_read_lik
     )
     assert meta["trace_outcome"] == "dispatched-ok"
     assert meta["link"] == "dispatched-tool-linked"
+
+
+# --- calibrated is per attempt: only tools calibration wrote through -----------
+
+
+def _certified_through(spec: target_registry.TargetSpec, *tools: str) -> None:
+    from mylonite.plugins._mcp import calibration
+
+    calibration.record(
+        calibration.CalibrationResult(
+            spec_key=calibration.spec_key(spec, None),
+            status=calibration.STATUS_CERTIFIED,
+            reason_code=None,
+            detail="certified",
+            tools=tuple(
+                calibration.ToolControl(
+                    tool=name,
+                    status=calibration.TOOL_CERTIFIED,
+                    reason_code=None,
+                    detail="negative and positive controls passed",
+                )
+                for name in tools
+            ),
+            seed_control=calibration.SeedControl(
+                status=calibration.SEED_NOT_DECLARED, reason_code=None, detail="none"
+            ),
+        )
+    )
+
+
+def _outbox_spec(**extra: Any) -> target_registry.TargetSpec:
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            command="python",
+            args=["-m", "srv"],
+            weakness_classes=["W4"],
+            effect_probe=_OUTBOX_PROBE,
+            **extra,
+        )
+    )
+    target_registry.register_target(spec)
+    return spec
+
+
+@pytest.mark.asyncio
+async def test_a_dispatch_through_a_tool_calibration_never_wrote_through_is_uncalibrated() -> None:
+    """Calibration proved the probe sees a ``send_email`` write. The agent
+    called ``log_event`` instead, a tool the probe was never shown to see, so
+    this attempt's "no change" cannot be trusted to clear it."""
+    from mylonite.plugins._mcp import calibration
+
+    spec = _outbox_spec()
+    _certified_through(spec, "send_email")
+    try:
+        meta = await _invoke(_Store(), _Script([("log_event", {"text": MARKER})]))
+        certified_meta = await _invoke(_Store(), _Script([_send()]))
+    finally:
+        calibration.clear_calibrations()
+    assert meta["trace_outcome"] == "dispatched-ok"
+    assert meta["calibrated"] == "false"
+    assert certified_meta["calibrated"] == "true"
+
+
+# --- the trace reads the server's annotations and the declared egress tools ----
+
+
+class _AnnotatedSession(_StoreSession):
+    """The same store, with one tool the server marks ``readOnlyHint`` whose
+    name carries no read hint."""
+
+    _TOOL_NAMES = (*_StoreSession._TOOL_NAMES, "open_nodes")
+
+    async def list_tools(self) -> Any:
+        from mcp.types import ToolAnnotations
+
+        return SimpleNamespace(
+            tools=[
+                MCPTool(
+                    name=n,
+                    description=n,
+                    inputSchema={"type": "object"},
+                    annotations=(
+                        ToolAnnotations(readOnlyHint=True)
+                        if n == "open_nodes"
+                        else ToolAnnotations(readOnlyHint=False)
+                    ),
+                )
+                for n in self._TOOL_NAMES
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_annotated_tool_is_not_a_dispatch() -> None:
+    _outbox_spec()
+    store = _Store()
+
+    def _launch(*args: Any, **kwargs: Any) -> Any:
+        session = _AnnotatedSession(store)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(stdio_adapter, "_open_mcp_session", _launch)
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_Script([("open_nodes", {"names": ["a"]})])
+        )
+        response = await adapter.invoke(_payload())
+    assert response.metadata["trace_outcome"] == "not-called"
+
+
+@pytest.mark.asyncio
+async def test_a_declared_egress_tool_is_a_dispatch_whatever_its_name() -> None:
+    """``fetch_and_forward`` reads like a read by name, but the target file
+    declares it an egress tool, so a call to it is a dispatch."""
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
+    _outbox_spec(control_config=ControlConfig(egress_tools=("fetch_and_forward",)))
+    meta = await _invoke(
+        _Store(), _Script([("fetch_and_forward", {"url": "https://example.test/x"})])
+    )
+    assert meta["trace_outcome"] == "dispatched-ok"

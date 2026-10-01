@@ -328,18 +328,19 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
     ),
     _rc(
         "MYL-INC-002",
-        "The effect probe was not calibrated: calibration was not authorized, or its "
-        "controls were set to skip.",
+        "The effect probe was not calibrated: calibration was not authorized, its "
+        "controls were set to skip, or the target could not be launched to run them.",
         "Pass --authorize (scan/gate/ablate/validate) or check --authorize so the calibration "
         "controls can run, and do not set calibration.controls to skip. A remote "
         "(sse/http) target also needs calibration.controls: allow -- auto only runs on "
-        "an authorized stdio target.",
+        "an authorized stdio target. If the target could not be launched, check that its "
+        "command: and args: start the server.",
     ),
     _rc(
         "MYL-INC-003",
         "Positive control failed: the probe did not see a known write.",
         "Point verify_tool at a tool that reads back what the consequential tool writes, and "
-        "make verify_args_template select the written record.",
+        "make verify_args_template select the written record by a fixed value, not {payload}.",
     ),
     _rc(
         "MYL-INC-004",
@@ -350,8 +351,11 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
     _rc(
         "MYL-INC-005",
         "The verify or control arguments fail the tool's inputSchema.",
-        "Add the missing required argument the message names to verify_args_template, "
-        "matching the tool's inputSchema.",
+        "Add the missing required argument the message names to the template it names "
+        "(verify_args_template or the seed_arm's args_template), matching the tool's "
+        "inputSchema. When it names a control write or a recall call, that tool needs an "
+        "argument Mylonite cannot fill: list a simpler tool under consequential_tools or "
+        "read_tool_names.",
     ),
     _rc(
         "MYL-INC-006",

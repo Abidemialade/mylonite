@@ -54,10 +54,12 @@ loop should ``await`` :func:`_run_guarded_scan` directly.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import os
+from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from mylonite._replay import (
     FixtureError,
@@ -397,6 +399,29 @@ def _exploit_fired(result: ScanResult, exploit: ExploitRecord) -> bool:
     return any(e.pattern_id == pid for e in result.exploits) or any(
         a.outcome == "finding" for a in result.report.attempts if a.pattern_id == pid
     )
+
+
+_T = TypeVar("_T")
+
+
+def _run_coroutine_sync(coro: Coroutine[Any, Any, _T]) -> _T:
+    """Run ``coro`` to completion from synchronous code.
+
+    ``asyncio.run`` when no event loop is running in this thread. Inside a
+    running loop (an async test, a notebook) ``asyncio.run`` raises, so the
+    coroutine runs on a worker thread with its own loop instead, and this call
+    blocks until it finishes.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    def _run() -> _T:
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_run).result()
 
 
 def _resolve_exec_context(
@@ -773,7 +798,7 @@ def assert_target_resists(
         from mylonite.plugins._mcp.factory import build_adapter_for_spec
 
         calibration_adapter = build_adapter_for_spec(spec, scope=tf.scope, model=resolved_model)
-        asyncio.run(
+        _run_coroutine_sync(
             calibrate_custom_target(
                 cast(MCPSessionAdapterBase, calibration_adapter), authorized=True
             )
@@ -919,7 +944,7 @@ def assert_control_holds(
         from mylonite.plugins._mcp.factory import build_adapter_for_spec
 
         calibration_adapter = build_adapter_for_spec(spec, scope=tf.scope, model=resolved_model)
-        asyncio.run(
+        _run_coroutine_sync(
             calibrate_custom_target(
                 cast(MCPSessionAdapterBase, calibration_adapter), authorized=True
             )
