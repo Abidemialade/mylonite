@@ -1229,8 +1229,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         seed_handle: str | None,
         seed_tool_name: str | None,
     ) -> dict[str, str]:
-        """``trace_outcome`` / ``link`` / ``marker_kind`` / ``calibrated`` /
-        ``seed_control`` evidence, stamped by both ``invoke()`` and
+        """``trace_outcome`` / ``link`` / ``marker_kind`` / ``marker_linked`` /
+        ``calibrated`` / ``seed_control`` evidence, stamped by both ``invoke()`` and
         ``drive_planner`` from the planner trace each already built.
 
         Cheap and pure over data already in hand (no new tool calls): the
@@ -1242,7 +1242,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         target.
         """
         control_config = self._spec.control_config
-        consequential = control_config.consequential_tools if control_config else ()
+        consequential: tuple[str, ...] = tuple(
+            control_config.consequential_tools if control_config else ()
+        )
+        # The seed's own named tool is consequential for this attempt, whatever
+        # its name suggests: a call to it is a dispatch, never an exempt read.
+        if seed_tool_name and seed_tool_name not in consequential:
+            consequential = (*consequential, seed_tool_name)
         read_tool_names = control_config.read_tool_names if control_config else ()
         probe = self._spec.effect_probe
         verify_tool = probe.verify_tool if probe is not None else None
@@ -1274,6 +1280,20 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             consequential_tool_names=consequential,
         )
         marker_kind_value = _marker_kind(probe.expect_marker if probe is not None else None)
+        # Whether a call carries the probe's OWN marker, not just any token. A
+        # call linked only by this attempt's exfil token can be invisible to a
+        # probe looking for a different literal, so that probe's "no change"
+        # cannot clear it (#196). The verdict rule reads this.
+        marker_linked = bool(rendered_marker) and (
+            link_for(
+                planner_calls,
+                marker=rendered_marker,
+                read_tool_names=read_tool_names,
+                verify_tool=verify_tool,
+                consequential_tool_names=consequential,
+            ).kind
+            == "token-linked"
+        )
 
         # Deferred import: `calibration` imports FROM this module at load time
         # (``_render_seed_args`` et al.), so importing it back at module scope
@@ -1289,6 +1309,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "trace_outcome": trace_outcome,
             "link": link_result.kind,
             "marker_kind": marker_kind_value,
+            "marker_linked": "true" if marker_linked else "false",
             "calibrated": "true" if calibrated else "false",
             "seed_control": seed_control_status,
         }
