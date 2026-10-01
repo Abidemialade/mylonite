@@ -135,6 +135,10 @@
     "category": "inconclusive",
     "summary": "The effect_probe marker renders from {payload}, which the agent's call never carries."
   },
+  "MYL-INC-009": {
+    "category": "inconclusive",
+    "summary": "The tool list could not be read again after the agent ran, so a mid-session change to the tools was not checked."
+  },
   "MYL-SRV-001": {
     "category": "server-reported",
     "summary": "The negative rests only on the server returning an error."
