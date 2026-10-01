@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Three more frozen-surface snapshots, alongside the existing reason-code
+  one.** `tests/fixtures/testkit_signatures.snapshot.json` pins every
+  `mylonite.testkit.__all__` entry's shape (parameters, defaults,
+  annotations; base classes for the error types) — `test_public_surface`
+  only checked names, so a signature could drift underneath an emitted
+  test's import without failing. `tests/fixtures/exit_codes.snapshot.json`
+  pins the full set of `EXIT_*` codes and `SEVERITY_ORDER`.
+  `tests/fixtures/schema_versions.snapshot.json` pins every checked-in JSON
+  schema's content hash together with all five contracts'
+  `CONTRACT_VERSION` values, so a schema shape change with no version bump
+  anywhere now fails. Update any of the three deliberately with
+  `python scripts/update_snapshots.py`; see "Updating a frozen snapshot" in
+  `CONTRIBUTING.md`.
+- **`scripts/check_snapshot_changes.py`, wired into the `Docs and writing`
+  CI job.** A pull request that touches any `tests/fixtures/*.snapshot.json`
+  now needs both the `snapshot-change` label and a `CHANGELOG.md` entry, the
+  same two-part sign-off `check_docs_sync.py` already asks for docs.
+
 ### Changed
 
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
