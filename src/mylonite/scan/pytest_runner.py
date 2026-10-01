@@ -42,11 +42,22 @@ Exit code 5 (``NO_TESTS_COLLECTED``) — an empty file, or every test
 deselected — is mapped to :attr:`PytestOutcome.NO_TESTS`, which is NOT
 ``collected``: if nothing was collected, the file was not meaningfully
 validated.
+
+**A pass means a test ran and passed.** Exit 0 is also what pytest returns
+when every collected test was skipped (the custom-target test skips without a
+live target) or xfailed. :attr:`PytestOutcome.PASSED` therefore needs exit 0
+*and* at least one passed test in pytest's summary line; exit 0 with nothing
+passed is :attr:`PytestOutcome.ALL_SKIPPED`, which is not a pass.
+
+``collect_only=True`` runs ``pytest --collect-only``: it proves the file
+collects without running anything, and returns
+:attr:`PytestOutcome.COLLECTED`. That is never a pass either.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -66,8 +77,14 @@ class PytestOutcome(Enum):
     can, instead of collapsing them all into ``collected=False``.
     """
 
-    #: Exit 0 — every collected test passed.
+    #: Exit 0 and at least one test passed (none failed).
     PASSED = auto()
+    #: Exit 0 but no test passed: every test was skipped or xfailed, so the
+    #: file ran nothing that could prove it. NOT a pass.
+    ALL_SKIPPED = auto()
+    #: ``collect_only=True`` and at least one test collected. The tests were
+    #: not run, so this is NOT a pass.
+    COLLECTED = auto()
     #: Exit 1, WITH pytest confirmed importable — tests ran, at least one failed.
     FAILED = auto()
     #: Exit 5 (``NO_TESTS_COLLECTED``) — the file collected but contained no
@@ -118,19 +135,28 @@ class PytestRunResult:
 
     @property
     def passed(self) -> bool:
-        """True only when pytest exited 0 (every collected test passed)."""
+        """True only when pytest exited 0 and at least one test ran and passed.
+
+        A file whose every test skipped, a collect-only run, a failure and an
+        error are all ``False``."""
         return self.outcome is PytestOutcome.PASSED
 
     @property
     def collected(self) -> bool:
-        """True iff the file was meaningfully collected AND run to completion.
+        """True iff pytest collected at least one test from the file.
 
-        False for a missing pytest (never invoked), a collection error, an
-        internal/usage error, a timeout, an unrecognised exit code, and —
-        per the Bug-2 fix — ``NO_TESTS`` (exit 5): a file with zero tests was
-        not meaningfully validated even though pytest itself ran cleanly.
+        This says nothing about whether a test passed: ``FAILED``,
+        ``ALL_SKIPPED`` and ``COLLECTED`` are all collected. Use :attr:`passed`
+        for a pass. False for a missing pytest (never invoked), a collection
+        error, an internal/usage error, a timeout, an unrecognised exit code,
+        and ``NO_TESTS`` (exit 5).
         """
-        return self.outcome in {PytestOutcome.PASSED, PytestOutcome.FAILED}
+        return self.outcome in {
+            PytestOutcome.PASSED,
+            PytestOutcome.FAILED,
+            PytestOutcome.ALL_SKIPPED,
+            PytestOutcome.COLLECTED,
+        }
 
 
 # Sentinel exit code used when the real pytest subprocess was never invoked
@@ -146,12 +172,36 @@ _EXIT_CODE_PYTEST_UNAVAILABLE = -2
 #   3 INTERNAL_ERROR      — internal pytest error
 #   4 USAGE_ERROR         — bad CLI usage
 #   5 NO_TESTS_COLLECTED  — file collected but contained no tests
-def _classify(exit_code: int) -> tuple[PytestOutcome, str]:
+#: pytest's summary line counts, e.g. "1 passed, 2 skipped in 0.12s" or, under
+#: ``--collect-only``, "2 tests collected in 0.01s". The space before "passed" keeps "xpassed" out.
+_PASSED_RE = re.compile(r"\b(\d+) passed\b")
+_COLLECTED_RE = re.compile(r"\b(\d+) tests? collected\b")
+
+
+def _classify(
+    exit_code: int, *, stdout: str = "", collect_only: bool = False
+) -> tuple[PytestOutcome, str]:
     """Map a REAL pytest exit code (pytest was confirmed importable and ran)
     to ``(outcome, detail)``. Exit 1 here is unambiguous — see the module
-    docstring for why that's only true once the import preflight passed."""
+    docstring for why that's only true once the import preflight passed.
+
+    Exit 0 is split by ``stdout``: a run is a pass only when the summary
+    counts at least one passed test, and a collect-only run is ``COLLECTED``
+    only when it counts at least one collected test. Without a readable count
+    exit 0 is not taken as proof of anything."""
     if exit_code == 0:
-        return PytestOutcome.PASSED, "all tests passed"
+        if collect_only:
+            found = _COLLECTED_RE.search(stdout)
+            if found and int(found.group(1)) > 0:
+                return PytestOutcome.COLLECTED, f"{found.group(1)} collected, not run"
+            return PytestOutcome.NO_TESTS, "no tests collected"
+        found = _PASSED_RE.search(stdout)
+        if found and int(found.group(1)) > 0:
+            return PytestOutcome.PASSED, "all tests passed"
+        return (
+            PytestOutcome.ALL_SKIPPED,
+            "pytest exited 0 but no test passed (every test was skipped or none ran)",
+        )
     if exit_code == 1:
         return PytestOutcome.FAILED, "tests ran but some failed"
     if exit_code == 2:
@@ -205,6 +255,7 @@ def run_test_file(
     path: str | os.PathLike[str],
     *,
     timeout: float = 120.0,
+    collect_only: bool = False,
 ) -> PytestRunResult:
     """Run a single test file under pytest in an isolated subprocess.
 
@@ -219,6 +270,8 @@ def run_test_file(
         timeout: Seconds before the child is killed; on expiry a result with
             ``outcome=PytestOutcome.TIMEOUT, exit_code=-1`` is returned (the
             ``TimeoutExpired`` is caught, never propagated).
+        collect_only: Run ``pytest --collect-only``: prove the file collects
+            without running any test. Success is ``PytestOutcome.COLLECTED``.
 
     Returns:
         A :class:`PytestRunResult` describing the outcome.
@@ -256,6 +309,8 @@ def run_test_file(
         str(rootdir),
         "-q",
     ]
+    if collect_only:
+        cmd.append("--collect-only")
 
     # Force the child to speak UTF-8 on every platform (Windows A3 guard).
     env = {
@@ -290,7 +345,9 @@ def run_test_file(
             detail=f"pytest timed out after {timeout:g}s",
         )
 
-    outcome, detail = _classify(completed.returncode)
+    outcome, detail = _classify(
+        completed.returncode, stdout=completed.stdout or "", collect_only=collect_only
+    )
     return PytestRunResult(
         outcome=outcome,
         exit_code=completed.returncode,
