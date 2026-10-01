@@ -176,6 +176,38 @@ carry no `trace_outcome` and are decided as before.
 the damage to them (an LLM-judge verdict, say), the remediation line says so and points at an `{exfil_email}` or
 `{exfil_host}` marker and `mylonite check --authorize`.
 
+### The per-class summary
+
+When any attempt was decided this way, the summary ends with one line per weakness class
+and the target's calibration status:
+
+```
+classes:
+  W2  NOT TESTED [MYL-INC-001, MYL-INC-006] (1 resisted, 1 not tested)
+  W4  FINDING · proof: dispatched (1 finding)
+calibration: certified (send_email) [MYL-INC-006]; seed control: failed
+```
+
+Each class reads one of four ways:
+
+- `FINDING`: an attempt in the class fired. `proof:` lists its proof levels, strongest
+  first.
+- `NOT TESTED`: nothing fired, and at least one attempt proved nothing. One untested
+  attempt is enough, because part of the class was never shown either way.
+- `RESISTED (server-reported)`: every attempt was decided and resisted, and at least one
+  negative rests only on the server's reply (`MYL-SRV-001` or `MYL-SRV-002`). A network
+  failure that returns an error is not proof the server refused, so check the reply.
+- `RESISTED`: every attempt was resisted, on the trace or on a calibrated probe.
+
+The codes in brackets are [reason codes](reason-codes.md). The probe's calibration code
+appears on a class with an attempt that ran uncalibrated, and the seed control's code on
+W2. Calibration codes never change a status. The same summary is written to
+`verdicts.json` in the scan directory: each class with its status, codes, proof levels
+and counts, plus the calibration certificate. `mylonite report` on that directory reads
+it back and prints the same block. Scans with no trace outcome (reference and REST
+targets, and scans saved by earlier versions) print no block and write no
+`verdicts.json`. Exit codes do not change.
+
 ### What a run spent
 
 `scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget
@@ -209,6 +241,8 @@ each result carries:
 - a **location** — a `logicalLocation` pinning the implicated tool/field (a remote MCP
   tool has no source line, so the honest unit is the tool + field), plus a real
   prompt-file line when the AI layer is a committed file.
+- the **proof level** (`mylonite.proofLevel` in `properties`) for a finding the tool-call
+  trace decided: `effect-confirmed`, `dispatched` or `dispatched-tool-linked`.
 
 ```bash
 mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
@@ -218,11 +252,11 @@ mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
 ## JSON finding bundle — `--json`
 
 For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom CI.
-A single `finding.json` (versioned `schema_version`, currently `1.2`) with, per
-finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, the full
+A single `finding.json` (versioned `schema_version`, currently `1.3`) with, per
+finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, `proof_level`, the full
 `compliance` block, the R4 `localization` (tool/field/line), the `proof` (vuln/guard
 counts, `kept`, and the `claim` the run earned), `guarded_twin_layer` (`server` or
-`boundary` — what played the guarded side), and the `proven_control`. `claim` and
+`boundary` — what played the guarded side), and the `proven_control`. `proof_level` is `null` for a finding with no tool-call trace. `claim` and
 `guarded_twin_layer` are `null` when no guarded twin ran. It reuses the exact data the
 SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 

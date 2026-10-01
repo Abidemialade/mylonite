@@ -954,6 +954,12 @@ def _generic_recommendation(
 # --- entry point -------------------------------------------------------------
 
 
+#: ``effect_confirmed`` values on a finding that confirmed no effect.
+_EFFECT_NOT_CONFIRMED: Final[frozenset[str]] = frozenset(
+    {"unprobed", "errored", "deferred", "false"}
+)
+
+
 def recommend(
     exploit: ExploitRecord,
     report: ValidationReport | None = None,
@@ -1028,7 +1034,10 @@ def recommend(
         confidence = _degrade(confidence)
 
     effect_confirmed = exploit.response.metadata.get("effect_confirmed")
-    if effect_confirmed == "unprobed":
+    # A finding the trace decided can carry a probe that errored, saw the action
+    # held, or saw nothing: none of those confirmed the effect, so each degrades
+    # exactly as "unprobed" does.
+    if effect_confirmed in _EFFECT_NOT_CONFIRMED:
         degraded.append("effect probe did not confirm")
         confidence = _degrade(confidence)
     elif effect_confirmed == "unattributed":

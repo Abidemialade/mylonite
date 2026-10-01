@@ -111,6 +111,11 @@ def _result(
         "tags": _tags(exploit.compliance),
         "weakness": weakness,
     }
+    proof_level = (getattr(exploit.payload, "metadata", {}) or {}).get("proof_level")
+    if proof_level:
+        # How strongly the trace showed this finding (effect-confirmed, dispatched
+        # or dispatched-tool-linked). Absent for a finding with no trace.
+        props["mylonite.proofLevel"] = str(proof_level)
     if report is not None:
         props["kept"] = bool(getattr(report, "kept", False))
         # Machine-readable alongside the prose claim, so a consumer triaging SARIF
