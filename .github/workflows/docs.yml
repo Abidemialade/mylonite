@@ -1,7 +1,9 @@
 name: Docs
 
-# Build the docs (strict) on every PR so a broken link or missing nav entry fails the
-# check, and publish the live site to GitHub Pages on pushes to main.
+# Publishes the live site to GitHub Pages on pushes to main. The strict build that
+# used to run here on every PR (including docs-only ones) now lives in ci.yml as
+# `docs-build-strict`, unconditionally rather than path-filtered -- see that job's
+# comment for why. This workflow now only ever runs on push to main.
 on:
   push:
     branches: [main]
@@ -9,14 +11,9 @@ on:
       - "docs/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
-  pull_request:
-    paths:
-      - "docs/**"
-      - "mkdocs.yml"
-      - ".github/workflows/docs.yml"
 
-# Read-only by default. Only `deploy` widens it, and only for pushes to main --
-# see the note on that job.
+# Read-only by default. `deploy` is the only job and widens it only for its own
+# steps -- see the note there.
 permissions:
   contents: read
 
@@ -25,34 +22,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Runs on pull requests, including from forks, so it executes contributor-
-  # authored content (docs macros, mkdocs plugins). It therefore gets nothing:
-  # a read-only token, and no credentials left in .git/config.
-  #
-  # Named `docs-build`, not `build`: ci.yml already has a job called `build`, and
-  # two check runs sharing a name are ambiguous to read and worse to name in a
-  # ruleset's required-checks list.
-  docs-build:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[docs]"
-      # Fail on broken nav/links/anchors so docs can't rot.
-      - run: mkdocs build --strict
-
-  # Split from `docs-build` deliberately. `mkdocs gh-deploy` pushes to the gh-pages
-  # branch, so this job needs BOTH `contents: write` and the credentials that
-  # checkout persists into .git/config -- the two things the build job must not
-  # have. While one job served both triggers, every pull-request run was handed
-  # a write-scoped token it had no use for.
+  # `mkdocs gh-deploy` pushes to the gh-pages branch, so this job needs BOTH
+  # `contents: write` and the credentials that checkout persists into
+  # .git/config -- scoped to this job only, via the job-level `permissions:`
+  # below, so nothing else in the workflow run gets a write-scoped token.
   #
   # `if:` on the job (not just the step) matters: a step-level guard would still
   # have the job's write permission granted for the whole run.

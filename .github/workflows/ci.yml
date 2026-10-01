@@ -140,6 +140,36 @@ jobs:
           echo "version.py declares $expected"
           ls "dist/mylonite-$expected.tar.gz" "dist/mylonite-$expected-py3-none-any.whl"
 
+  docs-build-strict:
+    # No path filter, deliberately: this must run on EVERY PR and push to main,
+    # docs-only included. docs.yml's old `docs-build` job filtered on
+    # `docs/**`/`mkdocs.yml`, which worked for "does this PR's own docs change
+    # build", but a job gated that way can never become a GitHub required
+    # check -- a required check that is SKIPPED (not run) on a PR that doesn't
+    # touch those paths blocks the merge forever, since GitHub only treats a
+    # required check as satisfied when it reports a result. Unconditional here
+    # means it is safe to mark required later. docs.yml keeps the separate
+    # `deploy` job (push to main only, needs write creds this job must not have).
+    #
+    # Kept fast on purpose: pip's cache plus installing only the `[docs]` extra
+    # (mkdocs-material and friends), not the full `[dev]` dependency set this
+    # job never needs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]"
+      - name: Build the docs (strict)
+        run: mkdocs build --strict
+
   docs-consistency:
     # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs)
     # against the real Typer app. Runs in
