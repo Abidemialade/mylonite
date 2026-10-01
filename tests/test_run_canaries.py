@@ -222,3 +222,118 @@ def test_main_never_writes_a_key_looking_string_to_the_report(
     text = (tmp_path / "canaries_report.json").read_text(encoding="utf-8")
     assert "sk-ant-" not in text
     assert "ANTHROPIC_API_KEY" not in text
+
+
+# --- _load_verdict_label: the bar must come from the report, not the exit code ---
+
+_KEPT_REPORT = {
+    "test_filename": "test_x.py",
+    "kept": True,
+    "outcomes": [
+        {"stage": "build", "passed": True, "detail": "ok"},
+        {"stage": "differential", "passed": True, "detail": "ok"},
+    ],
+}
+
+# A CAPPED keep: ``kept`` is True (the validator decided to keep it) but no
+# build leg ran and no differential/effect leg proved anything -- this is
+# exactly the STABLE, NOT PROVEN case a bare `validate` exit code (0, same
+# as a real KEPT) cannot distinguish.
+_CAPPED_KEEP_REPORT = {
+    "test_filename": "test_x.py",
+    "kept": True,
+    "outcomes": [],
+}
+
+_REJECTED_REPORT = {
+    "test_filename": "test_x.py",
+    "kept": False,
+    "outcomes": [],
+}
+
+
+def _write_report(tmp_path: Path, report: dict) -> Path:
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir(exist_ok=True)
+    (gen_dir / "validation_report.json").write_text(json.dumps(report), encoding="utf-8")
+    return gen_dir
+
+
+def test_load_verdict_label_kept(tmp_path: Path) -> None:
+    gen_dir = _write_report(tmp_path, _KEPT_REPORT)
+    assert rc._load_verdict_label(gen_dir) == "KEPT"
+
+
+def test_load_verdict_label_capped_keep_is_not_kept(tmp_path: Path) -> None:
+    """A capped keep (STABLE, NOT PROVEN) must never be read as the W4 bar,
+    even though `validate` exits 0 for it exactly as it does for a real KEPT.
+    """
+    gen_dir = _write_report(tmp_path, _CAPPED_KEEP_REPORT)
+    label = rc._load_verdict_label(gen_dir)
+    assert label == "STABLE, NOT PROVEN"
+    assert label != rc.VERDICT_KEPT
+
+
+def test_load_verdict_label_rejected(tmp_path: Path) -> None:
+    gen_dir = _write_report(tmp_path, _REJECTED_REPORT)
+    assert rc._load_verdict_label(gen_dir) == "REJECTED"
+
+
+def test_load_verdict_label_missing_report_is_none(tmp_path: Path) -> None:
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    assert rc._load_verdict_label(gen_dir) is None
+
+
+def test_load_verdict_label_malformed_report_is_none(tmp_path: Path) -> None:
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "validation_report.json").write_text("not json", encoding="utf-8")
+    assert rc._load_verdict_label(gen_dir) is None
+
+
+def test_verdict_constants_match_mylonite_verdict() -> None:
+    """Guards against the two literals drifting from the real contract."""
+    from mylonite import _verdict
+
+    assert rc.VERDICT_KEPT == _verdict.KEPT
+    assert rc.VERDICT_REJECTED == _verdict.REJECTED
+
+
+def test_a_capped_keep_report_really_is_stable_not_proven_per_mylonite() -> None:
+    """Cross-checks the fixture itself against the real verdict_label, so the
+    fixture can't silently stop meaning what this test file says it means.
+    """
+    from mylonite._verdict import STABLE_NOT_PROVEN, verdict_label
+    from mylonite.contracts import ValidationReport
+
+    report = ValidationReport.model_validate(_CAPPED_KEEP_REPORT)
+    assert verdict_label(report) == STABLE_NOT_PROVEN
+
+
+# --- _authorize_value_for: read --authorize from the target file, never hardcode ---
+
+
+def test_authorize_value_for_uses_declared_scope(tmp_path: Path) -> None:
+    target = tmp_path / "t.yaml"
+    target.write_text("family: a-family\ncommand: python\nscope: a-scope\n", encoding="utf-8")
+    assert rc._authorize_value_for(target) == "a-scope"
+
+
+def test_authorize_value_for_falls_back_to_family_with_no_scope(tmp_path: Path) -> None:
+    target = tmp_path / "t.yaml"
+    target.write_text("family: a-family\ncommand: python\n", encoding="utf-8")
+    assert rc._authorize_value_for(target) == "a-family"
+
+
+def test_authorize_value_for_missing_file_is_none(tmp_path: Path) -> None:
+    assert rc._authorize_value_for(tmp_path / "missing.yaml") is None
+
+
+# --- the committed default custom-target file ---------------------------
+
+
+def test_default_custom_target_file_is_committed_and_loadable() -> None:
+    assert rc.DEFAULT_CUSTOM_TARGET_FILE.is_file()
+    authorize = rc._authorize_value_for(rc.DEFAULT_CUSTOM_TARGET_FILE)
+    assert authorize is not None and authorize.strip()

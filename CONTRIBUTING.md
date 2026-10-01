@@ -273,8 +273,7 @@ needs an actual LLM in the loop to show up — the differential oracle
 keeping a real finding (or correctly rejecting a false one), and the scan
 loop still reproducing enough of the reference app's seeded weaknesses.
 They run nightly and in the `Canaries` workflow, never as a required check
-(they cost money and a live model's output isn't perfectly repeatable), and
-at a $5-per-run cost sanity cap.
+(they cost money and a live model's output isn't perfectly repeatable).
 
 - **W4** — `validate` the reference `excessive-agency-send-email-direct-
   unconfirmed` finding on `reference:vulnerable`. Bar: KEPT.
@@ -286,18 +285,40 @@ at a $5-per-run cost sanity cap.
   regressed *and* the differential missed it) is a miss.
 - **Reference scan** — a full scan of `reference:vulnerable`. Bar: at least
   4 findings.
-- **Custom re-drive** — a custom kitchen-sink target's generated tests,
-  re-driven live. This repository doesn't carry a target file for it (the
-  baseline run used a local, uncommitted one), so it's reported SKIPPED
-  until `--custom-target-file` or `MYLONITE_CANARY_CUSTOM_TARGET` names one.
+- **Custom re-drive** — a custom target's generated tests, re-driven live
+  against `reference_targets/mcp_kitchen_sink/canary.target.yaml` by
+  default: a loopback stdio copy of the in-repo kitchen-sink server (the
+  same one `examples/target.yaml` runs), committed so this canary is
+  reproducible from the repo alone rather than needing an operator-supplied
+  file. `--custom-target-file`/`MYLONITE_CANARY_CUSTOM_TARGET` points it at
+  a different target instead; if the resolved file is missing, the canary
+  is reported SKIPPED, not failed. `--authorize` is read from that file's
+  own declared `scope` (its `family` if it declares none), never hardcoded.
+
+W4 and the guarded-W2 seed decide KEPT/REJECTED from the persisted
+`validation_report.json`'s verdict label
+(`mylonite._verdict.verdict_label`), not from `validate`'s exit code: exit
+0 covers both KEPT and the weaker STABLE, NOT PROVEN (a capped keep — the
+build leg was skipped, or nothing but the LLM judge showed the attack
+landed), so the exit code alone can't tell a real KEPT apart from one that
+quietly degraded.
 
 Each canary runs 3 times; it passes when at least 2 of those 3 runs meet
 its bar — a live model's output isn't perfectly repeatable, so one miss
-out of three isn't a regression. `scan` and `gate` take `--max-llm-calls`,
-so the discovery scans get a real budget sized from a recorded baseline
-call count plus the same 15% headroom this project uses elsewhere for a
-no-regression call-count bar. `validate` has no budget flag at all, so its
-cost is bounded instead by holding `--iterations` at the baseline value.
+out of three isn't a regression.
+
+**The $5-per-run figure is a sizing input, not an enforced ceiling.**
+`scan`/`gate`'s `--max-llm-calls` is not a hard cap either — each seed
+keeps a small floor, so the worst case is higher than the number passed
+(`mylonite scan --help` says so plainly) — and `validate` has no budget
+flag at all. The discovery scans and the reference scan get a real
+`--max-llm-calls` sized from a recorded baseline call count plus 15%
+headroom; `validate`'s only guards are pinning `--iterations` at the
+baseline value, a per-subprocess wall-clock timeout (`--timeout-s`,
+default 900s), and flagging — never aborting mid-run — a printed call
+count above that same 15% headroom. A single run can still cost more than
+$5 on a sufficiently expensive model; this is a soft, sized cap, not a
+hard stop.
 
 Run it locally with a model you have a key for:
 
@@ -308,8 +329,8 @@ python scripts/run_canaries.py --model anthropic/claude-haiku-4-5-20251001
 It prints a table (canary, run, verdict, calls, tokens, seconds) and writes
 a JSON report under `.mylonite/canaries/<timestamp>/`; it never prints a
 provider key. `python scripts/run_canaries.py --help` lists every flag,
-including `--runs`, `--max-cost-per-run` and `--only <canary-id>` for
-re-running a single one.
+including `--runs`, `--max-cost-per-run`, `--timeout-s` and `--only
+<canary-id>` for re-running a single one.
 
 ## What we can and can't accept
 

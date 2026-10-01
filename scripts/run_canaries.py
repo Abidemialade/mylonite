@@ -14,20 +14,31 @@ least 2 of those 3 runs. The four canaries:
 - **reference-scan**: a full scan of ``reference:vulnerable`` -- bar: at
   least 4 findings.
 - **custom-redrive**: a live re-drive of a custom kitchen-sink target's
-  generated tests. This repository does not carry the target file an
-  earlier measurement used -- without ``--custom-target-file`` (or
-  ``MYLONITE_CANARY_CUSTOM_TARGET``) pointing at one, this canary is
-  reported SKIPPED, not failed.
+  generated tests, against the committed
+  ``reference_targets/mcp_kitchen_sink/canary.target.yaml`` by default (a
+  loopback stdio server; nothing in that file touches the server itself).
+  ``--custom-target-file``/``MYLONITE_CANARY_CUSTOM_TARGET`` overrides it;
+  if the resolved file is missing, this canary is reported SKIPPED, not
+  failed. The ``--authorize`` value is read from the target file's own
+  declared ``scope`` (or ``family`` if it declares none), never hardcoded.
 
-Cost control: ``scan`` and ``gate`` both take ``--max-llm-calls``, so the
-two discovery scans (W4, guarded-w2-reject) and the reference scan get a
-real, enforced budget computed from a recorded baseline call count plus
-15% headroom, the same margin this project uses elsewhere for a
-no-regression call-count bar. ``validate`` has no budget flag at all
-(checked against ``mylonite validate --help``) -- its cost is bounded by
-pinning ``--iterations`` at the baseline value (5) rather than letting it
-grow, and by flagging (never aborting mid-run) a printed call count above
-baseline x 1.15.
+W4 and guarded-w2-reject decide KEPT/REJECTED from the persisted
+``validation_report.json``'s verdict label
+(``mylonite._verdict.verdict_label``), not from ``validate``'s exit code:
+exit 0 covers both KEPT and the weaker STABLE, NOT PROVEN, and only a
+genuine KEPT label may count as the W4 bar.
+
+Cost control is a SOFT cap, honestly: ``scan``/``gate``'s
+``--max-llm-calls`` is "not a hard ceiling" (every seed keeps a floor, so
+the worst case is higher, per ``scan --help``) -- the two discovery scans
+and the reference scan still pass it, sized from a recorded baseline call
+count plus 15% headroom. ``validate`` has no budget flag at all (checked
+against ``mylonite validate --help``) -- its cost is bounded only by
+pinning ``--iterations`` at the baseline value (5), a per-subprocess
+wall-clock timeout (``--timeout-s``), and flagging (never aborting
+mid-run) a printed call count above baseline x 1.15. None of this
+guarantees the $5-per-run figure is never exceeded; see "Live canaries" in
+CONTRIBUTING.md.
 
 Never prints a provider key: the key is read from the environment by the
 ``mylonite`` subprocess itself (whatever credential env var the chosen
@@ -77,10 +88,19 @@ DEFAULT_MAX_COST_PER_RUN = 5.0
 DEFAULT_RUNS = 3
 DEFAULT_VALIDATE_ITERATIONS = 5
 
-# mylonite.exit_codes, inlined so this script has no import-time dependency
-# on the package layout (it must keep working even if exit_codes.py moves).
-EXIT_SUCCESS = 0
-EXIT_NOT_KEPT = 5
+#: The custom-redrive canary's default target: a loopback stdio MCP server
+#: this repository already ships (`examples/target.yaml` runs the same
+#: server for the docs' own exercise path). Nothing in this file, and
+#: nothing this script does, modifies the server.
+DEFAULT_CUSTOM_TARGET_FILE = ROOT / "reference_targets" / "mcp_kitchen_sink" / "canary.target.yaml"
+
+# mylonite._verdict.VerdictLabel's two labels this script decides a bar on.
+# Imported lazily (see _load_verdict_label) rather than at module level, so
+# importing this script for its pure aggregation logic never requires
+# `mylonite` to be installed; these two literals are its stable, documented
+# public values (``_verdict.py``'s own ``VerdictLabel`` Literal type).
+VERDICT_KEPT = "KEPT"
+VERDICT_REJECTED = "REJECTED"
 
 _LLM_LINE_RE = re.compile(r"llm:\s*(\d+)\s*calls")
 _TOKENS_RE = re.compile(r"([\d,]+)\s*in\s*/\s*([\d,]+)\s*out\s*tokens")
@@ -246,6 +266,43 @@ def _read_findings_count(scan_dir: Path) -> int | None:
     return int(count) if isinstance(count, int) else None
 
 
+def _load_verdict_label(gen_dir: Path) -> str | None:
+    """The real verdict label for a ``validate`` run, from the
+    ``validation_report.json`` it persists next to the generated test --
+    never from the exit code. ``validate`` exits 0 for both KEPT and the
+    weaker STABLE, NOT PROVEN (a capped keep: the build leg was skipped, or
+    nothing but the LLM judge showed the attack landed), so the exit code
+    alone cannot tell them apart. Returns ``None`` when the report is
+    missing or unreadable (e.g. ``validate`` errored before writing one).
+    """
+    report_path = gen_dir / "validation_report.json"
+    if not report_path.is_file():
+        return None
+    try:
+        from mylonite._verdict import verdict_label
+        from mylonite.contracts import ValidationReport
+
+        report = ValidationReport.model_validate_json(report_path.read_text(encoding="utf-8"))
+        return verdict_label(report)
+    except Exception:
+        return None
+
+
+def _authorize_value_for(target_file: Path) -> str | None:
+    """The ``--authorize`` value a custom target file declares: its own
+    ``scope``, or its family when it declares none -- read from the file
+    itself (``scan --help``: "--authorize ... must equal the target's
+    scope, or its family if no scope is declared"), never hardcoded here.
+    """
+    try:
+        from mylonite.plugins._mcp.target_file import load_target_file
+
+        tf = load_target_file(target_file)
+        return tf.scope or tf.family
+    except Exception:
+        return None
+
+
 def _discover(
     ctx: RunContext,
     *,
@@ -337,14 +394,19 @@ def run_w4(ctx: RunContext, run_index: int) -> CanaryRun:
         return CanaryRun("w4", run_index, "ERROR", False, detail="validate timed out")
 
     val_summary = parse_llm_summary(val_proc.stdout)
-    kept = val_proc.returncode == EXIT_SUCCESS
-    detail = f"validate exit {val_proc.returncode}"
+    # The exit code alone cannot distinguish KEPT from the weaker STABLE,
+    # NOT PROVEN (both exit 0) -- the real verdict label, from the
+    # persisted report, is the only thing this bar may trust.
+    label = _load_verdict_label(gen_dir)
+    kept = label == VERDICT_KEPT
+    verdict = label if label is not None else f"NO_REPORT(exit {val_proc.returncode})"
+    detail = f"validate exit {val_proc.returncode}, verdict {verdict}"
     if val_summary.calls and val_summary.calls > math.ceil(BASELINE_CALLS["w4"] * CALL_HEADROOM):
         detail += f"; cost-cap note: {val_summary.calls} calls exceeds the baseline ceiling"
     return CanaryRun(
         "w4",
         run_index,
-        "KEPT" if kept else f"NOT_KEPT({val_proc.returncode})",
+        verdict,
         kept,
         calls=val_summary.calls,
         prompt_tokens=val_summary.prompt_tokens,
@@ -414,8 +476,13 @@ def run_guarded_w2_reject(ctx: RunContext, run_index: int) -> CanaryRun:
         )
 
     val_summary = parse_llm_summary(val_proc.stdout)
-    rejected = val_proc.returncode == EXIT_NOT_KEPT
-    detail = f"validate exit {val_proc.returncode} (a finding resurfaced -- cross-check regression)"
+    # Same reasoning as run_w4: the exit code can't tell REJECTED apart
+    # from a capped keep, so the decision comes from the persisted
+    # report's verdict label, not from exit 0 vs. exit 5.
+    label = _load_verdict_label(gen_dir)
+    rejected = label == VERDICT_REJECTED
+    verdict = label if label is not None else f"NO_REPORT(exit {val_proc.returncode})"
+    detail = f"validate exit {val_proc.returncode}, verdict {verdict} (a finding resurfaced -- cross-check regression)"
     if val_summary.calls and val_summary.calls > math.ceil(
         BASELINE_CALLS["guarded-w2-reject"] * CALL_HEADROOM
     ):
@@ -423,7 +490,7 @@ def run_guarded_w2_reject(ctx: RunContext, run_index: int) -> CanaryRun:
     return CanaryRun(
         "guarded-w2-reject",
         run_index,
-        "REJECTED" if rejected else f"KEPT({val_proc.returncode})",
+        verdict,
         rejected,
         calls=val_summary.calls,
         prompt_tokens=val_summary.prompt_tokens,
@@ -508,10 +575,21 @@ def run_custom_redrive(ctx: RunContext, run_index: int) -> CanaryRun:
             "SKIPPED",
             False,
             detail=(
-                "no custom kitchen-sink target file configured (pass "
-                "--custom-target-file or set MYLONITE_CANARY_CUSTOM_TARGET); "
-                "the baseline run used a local, uncommitted file"
+                "no custom target file at "
+                f"{ctx.custom_target_file or DEFAULT_CUSTOM_TARGET_FILE} (pass "
+                "--custom-target-file or set MYLONITE_CANARY_CUSTOM_TARGET to "
+                "point at one)"
             ),
+        )
+
+    authorize = _authorize_value_for(ctx.custom_target_file)
+    if authorize is None:
+        return CanaryRun(
+            "custom-redrive",
+            run_index,
+            "ERROR",
+            False,
+            detail=f"could not read scope/family from {ctx.custom_target_file}",
         )
 
     gen_dir = ctx.out_dir / f"custom-redrive-{run_index}" / "generated"
@@ -523,7 +601,7 @@ def run_custom_redrive(ctx: RunContext, run_index: int) -> CanaryRun:
                 "--target-file",
                 str(ctx.custom_target_file),
                 "--authorize",
-                "mylonite-canary",
+                authorize,
                 "--output-dir",
                 str(scan_dir),
                 "--model",
@@ -699,9 +777,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=(
             Path(os.environ["MYLONITE_CANARY_CUSTOM_TARGET"])
             if os.environ.get("MYLONITE_CANARY_CUSTOM_TARGET")
-            else None
+            else DEFAULT_CUSTOM_TARGET_FILE
         ),
-        help="A custom kitchen-sink target.yaml for the re-drive canary; skipped if unset.",
+        help=(
+            "A custom target.yaml for the re-drive canary (default: the committed "
+            f"{DEFAULT_CUSTOM_TARGET_FILE.relative_to(ROOT)}); the canary is SKIPPED "
+            "if the resolved path doesn't exist."
+        ),
     )
     parser.add_argument(
         "--only",
