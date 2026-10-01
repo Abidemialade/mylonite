@@ -338,7 +338,9 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
         command=adapter._launch_command,
         args=adapter._launch_args,
     ) as session:
-        shim = MCPSessionAsServerLike(session)
+        shim = MCPSessionAsServerLike(
+            session, page_timeout_s=adapter._mcp_read_timeout.total_seconds()
+        )
         specs = _serialise_tools(await adapter._bounded(shim.list_tools()))
         status, code, detail, tools = await _probe_controls(adapter, session, specs)
         seed = await _seed_control(adapter, session, specs)

@@ -179,6 +179,9 @@ INC_PAYLOAD_MARKER: Final = "MYL-INC-008"
 #: Stamped by the ``tool_surface_mutated_mid_session`` predicate when the
 #: tool list could not be read again after the agent ran.
 INC_RELIST_FAILED: Final = "MYL-INC-009"
+#: Stamped by the judge on a non-finding when the server's tool list was read
+#: only in part (page cap or a repeated cursor).
+INC_TOOL_LIST_TRUNCATED: Final = "MYL-INC-010"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
 #: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
@@ -199,6 +202,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_unlinked_dispatch": INC_UNLINKED_DISPATCH,
     "undecided_payload_marker": INC_PAYLOAD_MARKER,
     "undecided_relist_failed": INC_RELIST_FAILED,
+    "undecided_tool_list_truncated": INC_TOOL_LIST_TRUNCATED,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -385,6 +389,13 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "change to the tools was not checked.",
         "Check that the server still answers tools/list after a few tool calls (it may have "
         "crashed or closed the session), then re-run.",
+    ),
+    _rc(
+        INC_TOOL_LIST_TRUNCATED,
+        "The server's tool list was read only in part, so tools on the unread pages were "
+        "never tested.",
+        "Check the server's tools/list pagination: it repeated a cursor or returned more "
+        "than 100 pages. Fix the server's nextCursor handling, then re-run.",
     ),
 )
 

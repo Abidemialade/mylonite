@@ -139,6 +139,10 @@
     "category": "inconclusive",
     "summary": "The tool list could not be read again after the agent ran, so a mid-session change to the tools was not checked."
   },
+  "MYL-INC-010": {
+    "category": "inconclusive",
+    "summary": "The server's tool list was read only in part, so tools on the unread pages were never tested."
+  },
   "MYL-SRV-001": {
     "category": "server-reported",
     "summary": "The negative rests only on the server returning an error."

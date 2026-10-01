@@ -14,7 +14,9 @@ plan-eng-review finding **A3**.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from mcp import ClientSession
@@ -31,40 +33,87 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_LIST_PAGES = 100
 
 
-async def list_all_tools(session: ClientSession) -> list[MCPTool]:
+@dataclass(frozen=True)
+class ToolListing:
+    """The tools a server listed, and whether the listing reached its end."""
+
+    tools: list[MCPTool]
+    #: False when reading stopped early (page cap or a repeated cursor), so
+    #: tools on unread pages are missing from :attr:`tools`.
+    complete: bool
+
+
+async def _list_page(
+    session: ClientSession, cursor: str | None, page_timeout_s: float | None
+) -> Any:
+    """One ``tools/list`` request, bounded by ``page_timeout_s`` when set.
+
+    A later page is requested through ``params=PaginatedRequestParams(...)``,
+    the SDK's current spelling. An SDK too old for that keyword gets the
+    positional ``cursor`` instead.
+    """
+
+    async def _request() -> Any:
+        if cursor is None:
+            return await session.list_tools()
+        try:
+            from mcp.types import PaginatedRequestParams
+
+            return await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+        except (ImportError, TypeError):
+            return await session.list_tools(cursor)
+
+    if page_timeout_s is None:
+        return await _request()
+    return await asyncio.wait_for(_request(), timeout=page_timeout_s)
+
+
+async def list_all_tools(
+    session: ClientSession, *, page_timeout_s: float | None = None
+) -> ToolListing:
     """Every tool the server lists, following ``nextCursor`` across pages.
 
     The MCP spec lets a server split ``tools/list`` into pages; reading only the
     first would silently drop the rest from every scan. Stops when the server
-    returns no cursor, repeats a cursor, or after :data:`MAX_TOOL_LIST_PAGES`
-    pages (logged as a warning).
+    returns no cursor. A repeated cursor, or more than
+    :data:`MAX_TOOL_LIST_PAGES` pages, stops early with a warning and returns
+    ``complete=False``, so the caller can say the surface is partial. A tool
+    name seen on an earlier page is not added twice. Each page is bounded by
+    ``page_timeout_s`` when given; a page that times out raises.
     """
-    resp = await session.list_tools()
-    tools: list[MCPTool] = list(resp.tools)
+    tools: dict[str, MCPTool] = {}
+
+    def _add(page: Any) -> None:
+        for tool in page.tools:
+            tools.setdefault(tool.name, tool)
+
+    resp = await _list_page(session, None, page_timeout_s)
+    _add(resp)
     seen: set[str] = set()
     pages = 1
     cursor = getattr(resp, "nextCursor", None)
     while cursor:
         if cursor in seen:
             logger.warning(
-                "tools/list returned a repeated cursor after %d pages; using the %d tools read",
+                "tools/list returned a repeated cursor after %d pages; the %d tools read "
+                "are a partial list",
                 pages,
                 len(tools),
             )
-            break
+            return ToolListing(tools=list(tools.values()), complete=False)
         if pages >= MAX_TOOL_LIST_PAGES:
             logger.warning(
-                "tools/list still had more after %d pages; using the %d tools read",
+                "tools/list still had more after %d pages; the %d tools read are a partial list",
                 pages,
                 len(tools),
             )
-            break
+            return ToolListing(tools=list(tools.values()), complete=False)
         seen.add(cursor)
-        resp = await session.list_tools(cursor)
-        tools.extend(resp.tools)
+        resp = await _list_page(session, cursor, page_timeout_s)
+        _add(resp)
         pages += 1
         cursor = getattr(resp, "nextCursor", None)
-    return tools
+    return ToolListing(tools=list(tools.values()), complete=True)
 
 
 def _tool_to_description(t: MCPTool) -> ToolDescription:
@@ -109,11 +158,19 @@ def _result_to_tool_result(name: str, r: CallToolResult) -> ToolResult:
 class MCPSessionAsServerLike:
     """Async adapter from ``mcp.ClientSession`` to ``LLMPlanner._ServerLike``."""
 
-    def __init__(self, session: ClientSession) -> None:
+    def __init__(self, session: ClientSession, *, page_timeout_s: float | None = None) -> None:
         self._session = session
+        self._page_timeout_s = page_timeout_s
+        #: True once any listing through this shim stopped before its last
+        #: page. Sticky: a later complete listing does not clear it, because the
+        #: planner may already have acted on the partial one.
+        self.truncated = False
 
     async def list_tools(self) -> list[ToolDescription]:
-        return [_tool_to_description(t) for t in await list_all_tools(self._session)]
+        listing = await list_all_tools(self._session, page_timeout_s=self._page_timeout_s)
+        if not listing.complete:
+            self.truncated = True
+        return [_tool_to_description(t) for t in listing.tools]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         result = await self._session.call_tool(name, arguments)

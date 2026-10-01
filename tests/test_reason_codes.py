@@ -158,6 +158,7 @@ def _one_attempt_per_bucket() -> list[ScanAttempt]:
         _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-001"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-008"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-009"}),
+        _attempt("undecided", judge_evidence={"fallback_cause": "MYL-INC-010"}),
     ]
     return attempts
 
@@ -196,6 +197,7 @@ def test_the_undecided_split_gets_distinct_codes() -> None:
         {"fallback_cause": "MYL-INC-001"},
         {"fallback_cause": "MYL-INC-008"},
         {"fallback_cause": "MYL-INC-009"},
+        {"fallback_cause": "MYL-INC-010"},
         {},
     ]
     codes = {
@@ -409,7 +411,7 @@ def test_inconclusive_and_server_reported_codes_are_defined() -> None:
     srv = sorted(
         c for c, rc in REGISTRY.items() if rc.category == reason_codes.CATEGORY_SERVER_REPORTED
     )
-    assert inc == [f"MYL-INC-{n:03d}" for n in range(1, 10)]
+    assert inc == [f"MYL-INC-{n:03d}" for n in range(1, 11)]
     assert srv == ["MYL-SRV-001", "MYL-SRV-002"]
 
 
@@ -485,7 +487,7 @@ def test_gate_budget_abort_message_carries_the_budget_code() -> None:
 def test_an_inc_cause_maps_to_its_own_code() -> None:
     """The trace rule stamps its inconclusive code as ``fallback_cause``; coverage
     must report that code, not the generic undecided one."""
-    for code in ("MYL-INC-001", "MYL-INC-008", "MYL-INC-009"):
+    for code in ("MYL-INC-001", "MYL-INC-008", "MYL-INC-009", "MYL-INC-010"):
         attempt = _attempt("undecided", judge_evidence={"fallback_cause": code})
         assert coverage.reason_code_for_attempt(attempt) == code
 

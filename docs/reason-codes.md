@@ -285,6 +285,14 @@ to the tools was not checked.
 **Fix:** Check that the server still answers `tools/list` after a few tool calls (it
 may have crashed or closed the session), then re-run.
 
+## MYL-INC-010
+
+The server's tool list was read only in part, so tools on the unread pages were never
+tested.
+
+**Fix:** Check the server's `tools/list` pagination: it repeated a cursor or returned
+more than 100 pages. Fix the server's `nextCursor` handling, then re-run.
+
 ## MYL-SRV-001
 
 The negative rests only on the server returning an error.
