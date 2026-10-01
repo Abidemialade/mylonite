@@ -37,9 +37,14 @@ MVP target note
 ---------------
 The "guarded twin" replayed here is the bundled ``mcp_kitchen_sink`` reference
 server, wired via :func:`mylonite.scan.wiring.build_scan`. Importing this module
-therefore transitively imports the reference adapter (and the kitchen sink). For
-the MVP that coupling is intentional — the bundled twin *is* the differential
-oracle. A later phase will let emitted tests target a consumer-owned agent.
+therefore transitively imports the in-process reference adapter
+(``mylonite.plugins._reference.reference_target_adapter``) — that import is
+eager, at module load time. The ``mcp_kitchen_sink`` package itself is NOT
+pulled in by a bare ``import mylonite.testkit``: the adapter's own imports of it
+are lazy (inside function bodies), so it only loads once a guarded-scan call
+actually runs. For the MVP the reference-adapter coupling is intentional — the
+bundled twin *is* the differential oracle. A later phase will let emitted tests
+target a consumer-owned agent.
 
 Synchronous API
 ---------------
