@@ -198,8 +198,8 @@ _FAST_OVERRIDES_INPUT_CONTROL_BANNER = (
 _REST_NOT_APPLICABLE_BANNER = (
     "rest (HTTP-agent) target — the boundary-control differential does not "
     "apply to a black box, so `kept` is decided by stability + effect + consensus "
-    "(not the control-efficacy differential). Declare control_env / vulnerable_launch "
-    "for a server-layer differential, or pass --prove-input-control to test input "
+    "(not the control-efficacy differential). Declare control_env for a "
+    "server-layer differential, or pass --prove-input-control to test input "
     "data-framing."
 )
 
