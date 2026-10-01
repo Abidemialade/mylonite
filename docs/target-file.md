@@ -173,6 +173,16 @@ calibration:
   controls: allow   # e.g. for a remote (sse/http) target you own
 ```
 
+A certified probe is trusted only for what calibration showed it. Its "no change"
+clears a call only when every consequential tool the attempt called is one the
+positive control wrote through (`check --authorize` lists them). A call through any
+other tool may land where the probe cannot look, so it stays a finding. A
+`verify_args_template` that uses `{payload}` is never certified (`MYL-INC-003`): an
+attempt fills it with its whole attack text, so calibration cannot prove that read.
+Select the record by a fixed value, or use a verify tool that takes no arguments.
+Calibration is recorded per launch, so a result from the default launch is not reused
+for a `vulnerable_launch` twin.
+
 ## Field groups
 
 - **Launch** (`family`, `command`, `args`, `env`, `scope`, `requires_scope`) — how the
@@ -194,8 +204,8 @@ calibration:
 - **`effect_probe`** (`EffectProbeSpec`) — confirms the damage end-to-end, not just that
   a tool was called. `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success. Choose `expect_marker` as a
-  value **the agent's own call carries** — the recipient address, a row it wrote, or
-  `{payload}` — not a status word the target itself would print regardless of who acted.
+  value **the agent's own call carries** — the recipient address, a row it wrote,
+  `{exfil_email}` or `{exfil_host}` — not a status word the target itself would print regardless of who acted.
   A fixed status word like `status=sent` can only be tied to an attempt through the tool
   the seed names as its consequential or egress tool, and only synthesised seeds name
   one. A tool declared under `control_config.consequential_tools` can link only

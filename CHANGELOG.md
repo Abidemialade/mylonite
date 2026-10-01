@@ -21,11 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check` gains `--authorize`, so this can run on its own, without a scan:
   without it, `check` is unchanged (the schema check only, no writes); with
   it, `check` also runs the calibration controls and prints each one's
-  status and reason code. The testkit's `assert_target_resists` /
+  status and reason code; if calibration itself fails, it prints the error
+  and exits `2`. Its `--authorize` refusal says it runs only the calibration
+  controls, not an attack. The testkit's `assert_target_resists` /
   `assert_control_holds` calibrate the same way before re-driving a real
-  target. Calibration itself changes no verdict yet — that follows in a
-  later release — but it records, per target, whether the probe is
-  certified, so those results carry a code to look up
+  target, also when called from inside a running event loop. Calibration
+  records, per target and launch, which tools the probe was certified
+  through, and a certified probe's "no change" clears only a call through
+  those tools. A `verify_args_template` that uses `{payload}` is never
+  certified (`MYL-INC-003`), because an attempt fills it with its whole
+  attack text. Each result carries a code to look up
   ([docs/reason-codes.md](docs/reason-codes.md)).
 - **Every result that is not a verdict now carries a reason code you can look
   up.** A NOT TESTED attempt, an aborted scan and a pre-flight refusal each
@@ -43,8 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   about the attempt either way; reading that as "the attack was resisted" is
   exactly how a miswired probe made a vulnerable target look clean. A growing
   `deferred_markers` count is also its own outcome now, distinct from a flat
-  "no change" — the target's own state said the action was held or queued,
-  which is worth recording as such. See [Effect
+  "no change" — the target's own state said the action was held or queued.
+  That `deferred` outcome is never a finding: it reads resisted, with
+  `MYL-SRV-002` in its evidence. See [Effect
   attribution](docs/target-file.md#effect-attribution).
 - **`expect_marker` can key on this attempt's own exfil destination:
   `{exfil_email}` / `{exfil_host}`.** They render to the historical demo
@@ -80,7 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the attempt, through a token in its arguments, a seeded handle or the seed's own
   tool, is a finding at proof level `dispatched` or `dispatched-tool-linked`. Only a
   calibrated `effect_probe` that would have seen the write can clear it, and a
-  `{payload}` marker never can. A calibrated probe that saw the write raises the
+  `{payload}` marker never can. A call a client-side control blocked never ties
+  another call to the attempt. The trace honours a server's `readOnlyHint`, and counts
+  the target file's `egress_tools` as consequential whatever their names. A calibrated probe that saw the write raises the
   finding to `effect-confirmed`. A consequential call nothing ties to the attempt now
   reads NOT TESTED with `MYL-INC-001` (`MYL-INC-008` for a `{payload}` marker)
   instead of going to the LLM judge. Each attempt's `judge_evidence` records
@@ -173,23 +181,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A deferred effect probe can no longer read as a finding.** The judge
-  handled `effect_confirmed` values `true`, `false` and `errored`, but not
-  `deferred` — a server that held or queued the consequential action through
-  a side channel fell through to the named predicate, which reads only this
-  attempt's own tool-call trace and could still call it a finding. `deferred`
-  is now decided the same way as `false`: not a finding, carrying reason code
-  `MYL-SRV-002` in its evidence.
-- **`check --authorize`'s refusal now says what `check` actually does.** A
-  missing or wrong `--authorize` value used to print the same "live-drives
-  ... and sends real attack payloads" wording as `scan`/`gate`/`validate`/
-  `ablate`, even though `check --authorize` never drives an attack — it only
-  runs the calibration controls (real writes, plus a seed plant-and-recall).
-  The refusal for `check` now says that; every other command's message is
-  unchanged.
-- **MYL-INC-002's fix line now names `validate` among the commands
-  `--authorize` gates.** It listed only `scan`/`gate`/`ablate`, leaving
-  `validate` out even though SECURITY.md lists it too.
 - **`mylonite scan --scaffold`'s two W4 hints now match what a scan actually
   does.** The "Consequential-action tools detected" hint used a separate,
   weaker name-hint list than the one the live W4 control and `mylonite check`

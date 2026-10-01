@@ -50,6 +50,7 @@ file, but what it replays at the CI gate depends on the target:
   each calibrate the target's declared `effect_probe` once — the same
   real-write calibration `scan`/`gate`/`validate`/`ablate` run — so a probe
   that can't see a change is never trusted by the regression gate either.
+  This also works when the caller already runs an event loop.
   The `MYLONITE_LIVE_TARGET=1` opt-in above is the testkit's own authorization
   gesture for this. See [Calibration](target-file.md#calibration).
 

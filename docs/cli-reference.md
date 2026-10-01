@@ -78,7 +78,8 @@ writes at all) ALSO runs the calibration controls: real writes proving a declare
 `effect_probe` can see a change before a real scan ever trusts its "no change". `VALUE`
 must equal the target's declared scope, or its family name with none — the same rule
 `scan`/`gate`/`ablate` enforce. Prints each control's status and
-[reason code](reason-codes.md). See [Calibration](target-file.md#calibration) for what
+[reason code](reason-codes.md). If the calibration run itself fails, `check` prints the
+error and exits `2`. See [Calibration](target-file.md#calibration) for what
 `calibration.controls` in the target file permits.
 
 ```bash
