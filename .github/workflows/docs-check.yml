@@ -44,7 +44,8 @@ jobs:
           python scripts/check_docs_sync.py \
             --base "origin/${BASE_REF}" \
             --pr-body-env PR_BODY \
-            --labels-env PR_LABELS
+            --labels-env PR_LABELS \
+            --ci
       - name: Title, description and changed prose
         run: |
           python scripts/check_prose.py \
