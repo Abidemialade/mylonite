@@ -95,18 +95,22 @@ the remaining medium/low findings from the same review, intentionally left for a
 follow-up rather than expanding the 0.7.7 diff further. None are fail-opens; all are
 either correctness gaps in already-correct-in-spirit code, or non-blocking performance.
 
-- **`--target-file` silently overrides a non-`reference:`/non-`mcp:custom` positional
-  `TARGET` in `scan()`** (originally DCR-0001/0.7.7 — `cli.py:1081`). **`gate()`'s
-  equivalent instance is now fixed** (0.7.8's own deep-code-review, DCR-0001 —
-  `cli.py:3487-3506`; the fix additionally covers the auto-discovered-`mylonite.yaml`
-  case, not just an explicit `--target-file` flag). `scan()`'s is still open — same
-  root cause, re-derives "did the operator mean `--target-file` or the positional
-  argument" independently instead of sharing gate's now-fixed guard. **`gate()`'s
-  custom-target `target_id` still drops the scope and diverges from `scan()`'s
-  formula** (originally DCR-0004/0.7.7 — `cli.py:3593`, unchanged). *Trigger:* next
-  patch release; candidate for a small `_resolve_target_and_file()` helper shared by
-  both commands, since `gate()`'s new guard (0.7.8) is the pattern to replicate onto
-  `scan()`.
+- **DONE, closed by the 0.7.8 deep-code-review (DCR-0001) and a later `scan()` fix:**
+  `--target-file` combined with a non-`reference:`/non-`mcp:custom` positional
+  `TARGET` used to be silently resolved in favour of `--target-file`, discarding the
+  positional argument with no warning. `gate()`'s instance was fixed in 0.7.8
+  (`cli.py:3487-3506` at the time; the fix also covers the auto-discovered
+  `mylonite.yaml` case, not just an explicit `--target-file` flag). `scan()` now has
+  its own guard too: passing both raises a config error naming the ignored argument
+  (`cli.py`, the `target is not None and target != "mcp:custom" and target_file is
+  not None` check right before the custom-target branch) instead of silently
+  overriding. The two guards are still separate, independently-derived checks, not a
+  shared helper — **`gate()`'s custom-target `target_id` still drops the scope and
+  diverges from `scan()`'s formula** (originally DCR-0004/0.7.7 — `cli.py:3593` at the
+  time, unverified against current `cli.py`) remains open. *Trigger:* next patch
+  release; a small `_resolve_target_and_file()` helper shared by both commands would
+  remove the duplication and is the natural place to also fix the `target_id`/scope
+  divergence.
 - **`scan/engine.py`'s new exception redaction (0.7.8 DCR-0005) uses `redact(str(exc))`
   instead of the more defensive `redact_exception(exc)`** that already exists for this
   purpose (`_redaction.py:294-317`) — `redact_exception` also catches a pydantic
