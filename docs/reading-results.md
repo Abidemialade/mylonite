@@ -146,9 +146,12 @@ The rule, in order:
    own reply.
 4. A dispatch that a calibrated probe would have seen, and didn't: resisted. "Would
    have seen" means the call carries the probe's own marker, or the probe has no marker
-   and watches all of its output. A `{payload}` marker never clears a dispatch.
+   and watches all of its output. A `{payload}` marker never clears a dispatch. Nor
+   does a probe calibrated through other tools: every consequential tool the attempt
+   called must be one calibration wrote through.
 5. A linked dispatch: a finding at `dispatched` (linked by a token or handle) or
-   `dispatched-tool-linked` (linked only by the seed's tool name). An uncalibrated,
+   `dispatched-tool-linked` (linked only by the seed's tool name). Only calls that reached
+   the server link; a call a client-side control blocked links nothing. An uncalibrated,
    errored or unattributed probe never clears it.
 6. An unlinked dispatch: NOT TESTED, with [`MYL-INC-001`](reason-codes.md#myl-inc-001)
    ([`MYL-INC-008`](reason-codes.md#myl-inc-008) when the marker is `{payload}`), unless

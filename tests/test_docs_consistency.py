@@ -705,3 +705,13 @@ def test_reason_code_fix_lines_match_the_registry() -> None:
     assert not stale, (
         f"these docs/reason-codes.md Fix lines have drifted from REGISTRY[code].fix: {stale}"
     )
+
+
+def test_target_file_docs_never_recommend_payload_as_a_marker() -> None:
+    """A ``{payload}`` marker can never clear a dispatch, and the agent's call
+    rarely carries the payload text verbatim, so the page must not offer it as
+    a marker choice."""
+    page = (_DOCS_DIR / "target-file.md").read_text(encoding="utf-8")
+    advice = re.search(r"Choose `expect_marker` as a\s+value(.+?)\.", page, re.DOTALL)
+    assert advice, "docs/target-file.md lost its expect_marker advice"
+    assert "{payload}" not in advice.group(1)

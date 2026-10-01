@@ -34,8 +34,10 @@ written between them) that it must not. It closes exactly the gap this caveat us
 describe: a `verify_tool` that exists, never errors, but reads the *wrong* store, because
 the positive control's own write is what the probe is asked to find. A `seed_arm`'s
 recall path gets the same proof — a token planted through `seed_arm` must come back from
-a recall tool, or the attempt reads NOT TESTED with a reason code (see
-[Reason codes](reason-codes.md)) rather than a silent miss.
+a recall tool. When it does not, the W2 line of the per-class summary carries the
+seed control's reason code (see [Reason codes](reason-codes.md)), so a failed recall
+path is named rather than missed silently. The attempts themselves are still decided
+from their trace.
 
 What calibration does not cover: it only checks a "create" effect, never a destructive or
 egress one, and it needs authorization — `--authorize` on the driving command, or
