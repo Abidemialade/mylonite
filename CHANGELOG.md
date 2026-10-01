@@ -58,6 +58,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concurrent passes and checks every pair: the call one pass made never links
   to another pass, never matches its rendered `{exfil_email}` effect marker,
   and never satisfies its destination check (#192).
+- **SARIF uploads no longer raise a High alert for a finding nothing proved.**
+  `mylonite report --sarif` used to set `level` and `security-severity` from
+  the weakness alone, so a finding `validate` rejected, or a scan finding never
+  validated, showed in GitHub code scanning as an `error` with severity 8.0.
+  The level now follows the verdict, recorded in `properties.verdict`:
+
+  | Verdict | Before | After |
+  |---|---|---|
+  | `KEPT` | `error`/`warning`/`note` by severity, with severity | `error`, with severity |
+  | `UNVALIDATED` (scan finding) | by severity, with severity | `warning`, no severity |
+  | `STABLE, NOT PROVEN` | by severity, with severity | `warning`, no severity |
+  | `REJECTED` | by severity, with severity | `note`, no severity |
+
+  Only a `KEPT` message carries the guarded-twin claim; others give the counts
+  and the verdict. Existing alerts change level on the next upload. See
+  [Reading the results](docs/reading-results.md).
+- **The JSON bundle's `proof.claim` is set only for a `KEPT` finding.** A
+  rejected validation where the attack fired 0 times used to carry "the
+  safeguard, not the model, carries the security". `report --json` now sets
+  `claim` to `null` for any other verdict and adds `proof.verdict` and
+  `proof.status` (for example `not reproduced on this model`).
+  `schema_version` moves to `1.4`; no field was renamed or removed.
+
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the

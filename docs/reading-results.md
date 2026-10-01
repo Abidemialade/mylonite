@@ -292,11 +292,24 @@ SARIF is the portal to where developers already triage every other finding — t
 GitHub **Security tab** and PR checks. `--sarif` writes a SARIF 2.1.0 document where
 each result carries:
 
-- a **severity** (`security-severity` + level) GitHub uses to bucket the finding,
+- a **level** that follows the verdict, so only a proven finding is an error:
+
+  | Verdict (`properties.verdict`) | `level` | `security-severity` |
+  |---|---|---|
+  | `KEPT` | `error` | the computed value (8.0 High, 5.0 Medium, 3.0 Low) |
+  | `UNVALIDATED` (a scan finding, never validated) | `warning` | omitted |
+  | `STABLE, NOT PROVEN` | `warning` | omitted |
+  | `REJECTED` | `note` | omitted |
+
+  A finding with no `security-severity` cannot land in the Security tab as High.
+  The message ends with the verdict, and an unvalidated finding says to run
+  `mylonite validate` on it,
 - the **compliance tags** (OWASP-LLM/ASI · MITRE ATLAS · NIST),
 - the **differential proof** in the message (fired N/N on the raw target, resisted M/M
   with the control — worded to match the twin that produced it; see
-  [Which claim you earned](#which-claim-you-earned) below),
+  [Which claim you earned](#which-claim-you-earned) below). Only a `KEPT` verdict
+  carries the claim; any other verdict reports the counts and what they showed,
+  for example "REJECTED (not reproduced on this model)",
 - a **location** — a `logicalLocation` pinning the implicated tool/field (a remote MCP
   tool has no source line, so the honest unit is the tool + field), plus a real
   prompt-file line when the AI layer is a committed file.
@@ -311,12 +324,24 @@ mylonite report .mylonite/generated/<dir> --sarif mylonite.sarif
 ## JSON finding bundle — `--json`
 
 For everything that isn't GitHub/pytest — dashboards, SIEM, Slack bots, custom CI.
-A single `finding.json` (versioned `schema_version`, currently `1.3`) with, per
+A single `finding.json` (versioned `schema_version`, currently `1.4`) with, per
 finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, `proof_level`, the full
 `compliance` block, the R4 `localization` (tool/field/line), the `proof` (vuln/guard
-counts, `kept`, and the `claim` the run earned), `guarded_twin_layer` (`server` or
-`boundary` — what played the guarded side), and the `proven_control`. `proof_level` is `null` for a finding with no tool-call trace. `claim` and
-`guarded_twin_layer` are `null` when no guarded twin ran. It reuses the exact data the
+counts, `kept`, `verdict`, `status` and the `claim` the run earned), `guarded_twin_layer` (`server` or
+`boundary` — what played the guarded side), and the `proven_control`. `proof_level` is `null` for a finding with no tool-call trace. `guarded_twin_layer` is `null` when no guarded twin ran.
+
+`proof` is `null` for a scan finding that was never validated. For a validated one,
+`proof.verdict` is `KEPT`, `STABLE, NOT PROVEN` or `REJECTED`, and `proof.claim` is set
+only for `KEPT` with a guarded twin. Every other verdict has `claim: null`, and
+`proof.status` says what the run showed:
+
+| `proof.verdict` | `proof.status` |
+|---|---|
+| `KEPT` | `kept` |
+| `STABLE, NOT PROVEN` | `stable, not proven` |
+| `REJECTED`, attack fired 0 times | `not reproduced on this model` |
+| `REJECTED`, otherwise | `rejected` |
+ It reuses the exact data the
 SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR

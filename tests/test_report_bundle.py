@@ -29,12 +29,23 @@ def _exploit(
     )
 
 
+def _proven_outcomes() -> list[Any]:
+    """A passing build and differential leg: what a KEPT label needs beyond ``kept``."""
+    from mylonite.contracts._types import ValidationOutcome
+
+    return [
+        ValidationOutcome(stage="build", passed=True, detail="built"),
+        ValidationOutcome(stage="differential", passed=True, detail="discriminates"),
+    ]
+
+
 def _report(*, kept: bool = True) -> Any:
     from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
 
     return ValidationReport(
         test_filename="test_security_finding.py",
         kept=kept,
+        outcomes=_proven_outcomes() if kept else [],
         reproducibility=ReproducibilityEvidence(iterations=5, vuln_fired=5, guard_resisted=5),
     )
 
@@ -106,23 +117,31 @@ def test_bundle_recommendation_present_with_a_target() -> None:
 
 def test_bundle_schema_version_tracks_additive_keys() -> None:
     """1.1 added "recommendation"; 1.2 added "guarded_twin_layer" and "proof.claim";
-    1.3 added "proof_level"."""
+    1.3 added "proof_level"; 1.4 added "proof.verdict" and "proof.status"."""
     from mylonite.report.bundle import SCHEMA_VERSION, to_bundle
 
-    assert SCHEMA_VERSION == "1.3"
-    assert to_bundle([])["schema_version"] == "1.3"
+    assert SCHEMA_VERSION == "1.4"
+    assert to_bundle([])["schema_version"] == "1.4"
 
 
-def _fidelity_report(*, server_layer: bool, guard_resisted: int | None = 5) -> Any:
+def _fidelity_report(
+    *,
+    server_layer: bool,
+    guard_resisted: int | None = 5,
+    kept: bool = True,
+    vuln_fired: int = 5,
+    proven: bool = True,
+) -> Any:
     from mylonite._twin_fidelity import format_marker
     from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
 
     return ValidationReport(
         test_filename="test_security_finding.py",
-        kept=True,
+        kept=kept,
+        outcomes=_proven_outcomes() if proven else [],
         notes=format_marker(server_layer=server_layer),
         reproducibility=ReproducibilityEvidence(
-            iterations=5, vuln_fired=5, guard_resisted=guard_resisted
+            iterations=5, vuln_fired=vuln_fired, guard_resisted=guard_resisted
         ),
     )
 
@@ -154,6 +173,37 @@ def test_bundle_makes_no_differential_claim_without_a_guarded_twin() -> None:
     f = to_bundle([(_exploit("W2"), report)])["findings"][0]
     assert f["guarded_twin_layer"] is None
     assert f["proof"]["claim"] is None
+
+
+def test_bundle_rejected_finding_makes_no_claim_and_says_what_was_shown() -> None:
+    """A rejection where the attack never fired proved nothing about a safeguard,
+    even though a guarded twin ran and resisted every time."""
+    from mylonite.report.bundle import to_bundle
+
+    report = _fidelity_report(server_layer=True, kept=False, vuln_fired=0, proven=False)
+    proof = to_bundle([(_exploit("W2"), report)])["findings"][0]["proof"]
+    assert proof["verdict"] == "REJECTED"
+    assert proof["claim"] is None
+    assert proof["status"] == "not reproduced on this model"
+
+
+def test_bundle_rejected_after_reproducing_reads_as_rejected() -> None:
+    from mylonite.report.bundle import to_bundle
+
+    report = _fidelity_report(server_layer=True, kept=False, vuln_fired=5, proven=False)
+    proof = to_bundle([(_exploit("W2"), report)])["findings"][0]["proof"]
+    assert proof["claim"] is None
+    assert proof["status"] == "rejected"
+
+
+def test_bundle_stable_not_proven_makes_no_claim() -> None:
+    from mylonite.report.bundle import to_bundle
+
+    report = _fidelity_report(server_layer=True, proven=False)
+    proof = to_bundle([(_exploit("W2"), report)])["findings"][0]["proof"]
+    assert proof["verdict"] == "STABLE, NOT PROVEN"
+    assert proof["claim"] is None
+    assert proof["status"] == "stable, not proven"
 
 
 def test_bundle_scan_only_finding_carries_no_layer() -> None:

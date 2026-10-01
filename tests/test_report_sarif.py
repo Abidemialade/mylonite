@@ -39,16 +39,31 @@ def _report(
     guard_resisted: int | None,
     iters: int = 5,
     server_layer: bool | None = None,
+    proven: bool = True,
 ) -> Any:
     """A ValidationReport. ``server_layer`` stamps the guarded-twin fidelity marker;
     ``None`` leaves notes unmarked (an older artefact, or a report from a path that
-    never ran a differential)."""
+    never ran a differential). ``proven`` adds a passing build and differential leg,
+    so a kept report reads as KEPT rather than STABLE, NOT PROVEN."""
     from mylonite._twin_fidelity import format_marker
-    from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
+    from mylonite.contracts._types import (
+        ReproducibilityEvidence,
+        ValidationOutcome,
+        ValidationReport,
+    )
 
+    outcomes = (
+        [
+            ValidationOutcome(stage="build", passed=True, detail="built"),
+            ValidationOutcome(stage="differential", passed=True, detail="discriminates"),
+        ]
+        if proven
+        else []
+    )
     return ValidationReport(
         test_filename="test_security_finding.py",
         kept=kept,
+        outcomes=outcomes,
         notes=(None if server_layer is None else format_marker(server_layer=server_layer)),
         reproducibility=ReproducibilityEvidence(
             iterations=iters,
@@ -150,15 +165,53 @@ def test_partial_fingerprint_is_stable_and_distinct() -> None:
     assert fp(_exploit("W2")) != fp(_exploit("W1"))
 
 
-def test_to_sarif_levels_by_severity() -> None:
+def test_to_sarif_unvalidated_finding_is_a_warning_without_severity() -> None:
     from mylonite.report.sarif import to_sarif
 
-    doc = to_sarif([(_exploit("W1"), None)])  # W1, no effect → Medium → warning
+    doc = to_sarif([(_exploit("W2", effect="true"), None)])  # High, but never validated
     res = doc["runs"][0]["results"][0]
     assert res["level"] == "warning"
-    assert res["properties"]["security-severity"] == "5.0"
+    assert "security-severity" not in res["properties"]
+    assert res["properties"]["verdict"] == "UNVALIDATED"
     # No validation report → no differential proof, but still a valid result.
     assert "differential" not in res["message"]["text"].lower()
+    assert "Not validated" in res["message"]["text"]
+
+
+def test_to_sarif_kept_finding_keeps_its_computed_severity() -> None:
+    from mylonite.report.sarif import to_sarif
+
+    report = _report(kept=True, vuln=5, guard_resisted=5)
+    res = to_sarif([(_exploit("W1"), report)])["runs"][0]["results"][0]
+    assert res["level"] == "error"  # KEPT is an error whatever the severity
+    assert res["properties"]["security-severity"] == "5.0"  # W1, no effect → Medium
+
+
+def test_to_sarif_stable_not_proven_is_a_warning_without_claim() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_BOUNDARY, PROOF_CLAIM_SERVER
+    from mylonite.report.sarif import to_sarif
+
+    report = _report(kept=True, vuln=5, guard_resisted=5, server_layer=True, proven=False)
+    res = to_sarif([(_exploit("W2", effect="true"), report)])["runs"][0]["results"][0]
+    assert res["level"] == "warning"
+    assert res["properties"]["verdict"] == "STABLE, NOT PROVEN"
+    assert "security-severity" not in res["properties"]
+    text = res["message"]["text"]
+    assert PROOF_CLAIM_SERVER not in text and PROOF_CLAIM_BOUNDARY not in text
+    assert "STABLE, NOT PROVEN" in text
+
+
+def test_to_sarif_rejected_finding_is_a_note_without_severity_or_claim() -> None:
+    from mylonite._twin_fidelity import PROOF_CLAIM_SERVER
+    from mylonite.report.sarif import to_sarif
+
+    report = _report(kept=False, vuln=0, guard_resisted=5, server_layer=True)
+    res = to_sarif([(_exploit("W2", effect="true"), report)])["runs"][0]["results"][0]
+    assert res["level"] == "note"
+    assert res["properties"]["verdict"] == "REJECTED"
+    assert "security-severity" not in res["properties"]
+    assert PROOF_CLAIM_SERVER not in res["message"]["text"]
+    assert "not reproduced on this model" in res["message"]["text"]
 
 
 def test_to_sarif_localizes_finding_to_a_logical_location() -> None:
@@ -272,6 +325,7 @@ def test_to_sarif_omits_the_proof_level_without_a_trace() -> None:
 def test_to_sarif_errored_or_deferred_probe_does_not_raise_severity() -> None:
     from mylonite.report.sarif import to_sarif
 
+    report = _report(kept=True, vuln=5, guard_resisted=5)
     for effect in ("errored", "deferred"):
-        res = to_sarif([(_exploit("W1", effect=effect), None)])["runs"][0]["results"][0]
+        res = to_sarif([(_exploit("W1", effect=effect), report)])["runs"][0]["results"][0]
         assert res["properties"]["security-severity"] == "5.0", effect

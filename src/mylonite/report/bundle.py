@@ -17,6 +17,7 @@ from mylonite._twin_fidelity import TwinLayer, guarded_twin_layer, proof_claim
 from mylonite.gate.localize import localize
 from mylonite.gate.mitigation import weakness_class_for
 from mylonite.report.severity import severity_for
+from mylonite.report.verdict import KEPT, finding_verdict, proof_status
 from mylonite.scan.weakness import WEAKNESS_CLASSES
 from mylonite.version import __version__
 
@@ -29,7 +30,10 @@ from mylonite.version import __version__
 #: Both additive; both null when no guarded twin ran.
 #: 1.3: added "proof_level" on each finding -- how strongly the tool-call trace
 #: showed it. Additive; null for a finding with no trace.
-SCHEMA_VERSION = "1.3"
+#: 1.4: added "verdict" and "status" inside "proof". "claim" is now set only on
+#: a KEPT verdict; any other verdict has claim null and says what the run showed
+#: in "status". Additive.
+SCHEMA_VERSION = "1.4"
 
 
 def _differential_layer(report: Any | None) -> TwinLayer | None:
@@ -53,12 +57,18 @@ def _proof(report: Any | None) -> dict[str, Any] | None:
     if repro is None or not getattr(repro, "iterations", 0):
         return None
     layer = _differential_layer(report)
+    verdict = finding_verdict(report)
     return {
         "iterations": repro.iterations,
         "vuln_fired": repro.vuln_fired,
         "guard_resisted": repro.guard_resisted,
         "kept": bool(getattr(report, "kept", False)),
-        "claim": proof_claim(layer) if layer is not None else None,
+        "verdict": verdict,
+        # KEPT: a passing build and a passing differential or effect leg. Any
+        # other verdict proved nothing about a safeguard, so it earns no claim;
+        # "status" says what the run did show.
+        "status": proof_status(report),
+        "claim": proof_claim(layer) if layer is not None and verdict == KEPT else None,
     }
 
 

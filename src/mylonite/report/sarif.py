@@ -15,13 +15,28 @@ from typing import Any
 
 from mylonite._redaction import redact
 from mylonite._twin_fidelity import guarded_twin_layer, proof_claim
+from mylonite._verdict import verdict_reason
 from mylonite.gate.localize import localize
 from mylonite.report.severity import severity_for
+from mylonite.report.verdict import (
+    KEPT,
+    REJECTED,
+    UNVALIDATED,
+    finding_verdict,
+    proof_status,
+)
 from mylonite.version import __version__
 
 _SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
-_LEVEL = {"High": "error", "Medium": "warning", "Low": "note"}
-#: GitHub code scanning reads `security-severity` (0-10) to bucket findings.
+#: The level each verdict maps to. GitHub code scanning shows `level` on every
+#: alert, so only a KEPT finding (a passing build and a passing differential or
+#: effect leg) is an `error`. A scan finding nobody validated and a keep that
+#: proved no safeguard are `warning`; a rejected finding is a `note`.
+_VERDICT_LEVEL = {KEPT: "error", UNVALIDATED: "warning", REJECTED: "note"}
+_DEFAULT_LEVEL = "warning"
+#: GitHub code scanning reads `security-severity` (0-10) to bucket findings
+#: (7.0 and up is High). Emitted for KEPT findings only: an unproven finding
+#: carries no severity, so it can never be bucketed as High.
 _SECURITY_SEVERITY = {"High": "8.0", "Medium": "5.0", "Low": "3.0"}
 
 
@@ -38,27 +53,47 @@ def _tags(compliance: Any) -> list[str]:
 
 
 def _proof_text(report: Any | None) -> str | None:
-    """The differential proof, claimed only as strongly as the guarded twin allows.
+    """The validation result, claimed only as strongly as the verdict allows.
 
     This artefact is uploaded to GitHub code scanning, where it persists in the
-    Security tab and gets quoted back months later — so it is the worst surface on
-    which to overstate what a run proved. It used to print the server-layer claim
-    for ANY differential, including one whose guarded side was Mylonite's own
-    boundary shim, while the validator that produced the report carefully refused
-    that claim. Both now resolve the fidelity the same way.
+    Security tab and gets quoted back months later, so it is the worst surface on
+    which to overstate what a run proved. The guarded-twin claim appears only on a
+    KEPT verdict, worded for the twin that ran (``_twin_fidelity``). Any other
+    verdict reports the counts and says what they showed.
     """
-    repro = getattr(report, "reproducibility", None) if report is not None else None
+    if report is None:
+        return (
+            "Not validated: a scan finding from a single run. Run `mylonite validate` "
+            "on it before treating it as real."
+        )
+    repro = getattr(report, "reproducibility", None)
+    label = finding_verdict(report)
+    if label == KEPT:
+        verdict = "Verdict: KEPT."
+    elif label == REJECTED:
+        verdict = (
+            f"Verdict: REJECTED ({proof_status(report)}); "
+            "this run proves nothing about a safeguard."
+        )
+    else:
+        verdict = f"Verdict: {label}: {verdict_reason(report)}"
     if repro is None or not getattr(repro, "iterations", 0):
-        return None
+        return verdict
     it = repro.iterations
     vf = repro.vuln_fired
     gr = repro.guard_resisted
+    if label != KEPT:
+        guard = "" if gr is None else f" and was resisted {gr}/{it} with the control applied"
+        return f"Validation: the attack fired {vf}/{it} on the target{guard}. {verdict}"
     if gr is None:
-        return f"Reproducible: the attack fired {vf}/{it} times on the target (no guarded twin)."
+        return (
+            f"Reproducible: the attack fired {vf}/{it} times on the target "
+            f"(no guarded twin). {verdict}"
+        )
     return (
         f"Differential proof: the attack fired {vf}/{it} on the vulnerable target and was "
         f"resisted {gr}/{it} with the control applied — "
-        f"{proof_claim(guarded_twin_layer(report))}."
+        f"{proof_claim(guarded_twin_layer(report))}. {verdict}"
     )
 
 
@@ -106,11 +141,14 @@ def _result(
                 "fullyQualifiedName": f"{loc.tool}.{loc.field}" if loc.field else loc.tool,
             }
         ]
+    verdict = finding_verdict(report)
     props: dict[str, Any] = {
-        "security-severity": _SECURITY_SEVERITY.get(sev, "5.0"),
+        "verdict": verdict,
         "tags": _tags(exploit.compliance),
         "weakness": weakness,
     }
+    if verdict == KEPT:
+        props["security-severity"] = _SECURITY_SEVERITY.get(sev, "5.0")
     proof_level = (getattr(exploit.payload, "metadata", {}) or {}).get("proof_level")
     if proof_level:
         # How strongly the trace showed this finding (effect-confirmed, dispatched
@@ -151,7 +189,7 @@ def _result(
     fingerprint = hashlib.sha256(fp_seed.encode("utf-8")).hexdigest()[:16]
     return {
         "ruleId": str(exploit.pattern_id),
-        "level": _LEVEL.get(sev, "warning"),
+        "level": _VERDICT_LEVEL.get(verdict, _DEFAULT_LEVEL),
         "message": {"text": message},
         "locations": [location],
         "partialFingerprints": {"mylonitePatternLocus/v1": fingerprint},
