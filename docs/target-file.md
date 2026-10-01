@@ -205,7 +205,7 @@ for a `vulnerable_launch` twin.
   record's handle so it can drive a read-back.
 - **`effect_probe`** (`EffectProbeSpec`) — confirms the damage end-to-end, not just that
   a tool was called. Without one, a W3/W4 finding is proven only as far as `dispatched`
-  and a "queued" reply from the server reads `RESISTED (server-reported)` unchecked (see
+  and a "queued" reply from the server reads NOT TESTED (`MYL-INC-012`), not resisted (see
   [How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided)).
   `mylonite scan --scaffold` names a candidate `verify_tool`: a tool that reports what was
   sent (an outbox, a status or history tool), or else a readback of the store that needs

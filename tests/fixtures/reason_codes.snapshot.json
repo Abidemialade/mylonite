@@ -155,6 +155,10 @@
     "category": "inconclusive",
     "summary": "The LLM judge leaned toward the attack landing, but below the confidence it needs to count as a finding, so the attempt proved neither a finding nor resistance."
   },
+  "MYL-INC-012": {
+    "category": "inconclusive",
+    "summary": "The server replied that it queued or held a consequential call, and no effect probe checked whether the action took effect anyway."
+  },
   "MYL-SRV-001": {
     "category": "server-reported",
     "summary": "The negative rests only on the server returning an error."

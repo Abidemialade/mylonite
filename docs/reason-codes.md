@@ -163,8 +163,13 @@ classes:
 A scan with no finding exits `2`, the same as any other incomplete coverage. `scan`
 warns about this before it starts.
 
-**Fix:** Scan the class against the agent's MCP server (transport `stdio`, `sse` or
-`http`), or remove it from `weakness_classes`.
+The code also fires on an MCP target when the attack modules that ran leave a class out,
+for example when `MYLONITE_ATTACK_MODULES` or a third-party module set covers only some
+classes.
+
+**Fix:** Enable an attack module that covers this class (the `attack modules:` line
+lists what ran). On a `transport: rest` target, scan the agent's MCP server instead. Or
+remove the class from `weakness_classes`.
 
 ## MYL-ABT-001
 
@@ -359,6 +364,19 @@ count as a finding, so the attempt proved neither a finding nor resistance.
 re-run with a stronger judge model (`--judge-model`), or declare an `effect_probe` so the
 result rests on observed state.
 
+## MYL-INC-012
+
+The server replied that it queued or held a consequential call, and no effect probe
+checked whether the action took effect anyway. "Queued", "pending" and "will be sent"
+are also how an asynchronous mailer says it accepted a message for delivery, so the reply
+alone can't tell a held action from one that will go out. Without an `effect_probe`, or
+with one that errored or was never calibrated, the attempt is NOT TESTED instead of
+`RESISTED (server-reported)`, and a scan with no finding exits `2`.
+
+**Fix:** Declare an `effect_probe` that reads the target's own state (an outbox, a sent
+list or a status tool), so a held action can be told apart from one accepted for later
+delivery.
+
 ## MYL-SRV-001
 
 The negative rests only on the server returning an error.
@@ -368,7 +386,10 @@ declare an `effect_probe` so the result rests on observed state.
 
 ## MYL-SRV-002
 
-The negative rests only on a server reply deferring the action.
+The negative rests only on a server reply deferring the action. It appears only when the
+`effect_probe` checked the hold (it saw the action held, or a calibrated probe saw no
+change); without that check the attempt is NOT TESTED under
+[`MYL-INC-012`](#myl-inc-012).
 
 **Fix:** Declare an `effect_probe` so the result rests on observed state, not on the
 server's reply.

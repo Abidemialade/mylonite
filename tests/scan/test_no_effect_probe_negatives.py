@@ -47,15 +47,21 @@ def test_no_probe_never_turns_an_unconfirmed_effect_into_a_negative(
 
     decision = decide(evidence, predicate=predicate)
 
+    # "predicate" is a finding the seed's own check made, at its proof level.
+    assert decision.kind in ("finding", "predicate", "inconclusive", "resisted")
+    if trace_outcome == "dispatched-deferred" and decision.kind != "predicate":
+        # "Queued" with no probe to check it proves nothing either way (#221 follow-up).
+        assert decision.kind == "inconclusive"
+        assert decision.reason_code == "MYL-INC-012"
     if decision.kind != "resisted":
         return
     if trace_outcome in ("not-called", "blocked-by-client"):
         # No consequential call reached the server: there is no effect to confirm.
         assert decision.negative_basis == "trace"
-    elif trace_outcome in ("dispatched-error", "dispatched-deferred"):
-        # Rests on the server's reply, and says so.
+    elif trace_outcome == "dispatched-error":
+        # The server refused the call, and the label says the negative rests on that.
         assert decision.negative_basis == "server-reported"
-        assert decision.reason_code is not None
+        assert decision.reason_code == "MYL-SRV-001"
     else:
         # A call went through. Only the seed's own predicate, reading that call,
         # may say it was not the attack (an email to a non-attacker address).
@@ -63,6 +69,35 @@ def test_no_probe_never_turns_an_unconfirmed_effect_into_a_negative(
         assert link == "dispatched-tool-linked"
         assert predicate is False
         assert decision.negative_basis == "trace"
+
+
+@pytest.mark.parametrize(
+    ("effect_confirmed", "calibrated", "kind"),
+    [
+        ("deferred", False, "resisted"),
+        ("false", True, "resisted"),
+        ("false", False, "inconclusive"),
+        ("errored", False, "inconclusive"),
+        ("unattributed", True, "inconclusive"),
+    ],
+)
+def test_a_queued_reply_is_resisted_only_when_the_probe_checked_the_hold(
+    effect_confirmed: str, calibrated: bool, kind: str
+) -> None:
+    evidence = EffectEvidence(
+        trace_outcome="dispatched-deferred",
+        link="token-linked",
+        effect_confirmed=effect_confirmed,
+        marker_kind="exfil",
+        marker_linked=True,
+        calibrated=calibrated,
+    )
+    decision = decide(evidence, predicate=None)
+    assert decision.kind == kind
+    if kind == "resisted":
+        assert (decision.negative_basis, decision.reason_code) == ("server-reported", "MYL-SRV-002")
+    else:
+        assert decision.reason_code == "MYL-INC-012"
 
 
 @pytest.mark.parametrize("link", ["unlinked", "token-linked", "handle-linked"])
@@ -89,6 +124,7 @@ def test_missing_probe_warning_describes_what_the_scan_really_does() -> None:
     assert "effect_probe" in warning
     assert "dispatched" in warning
     assert "server-reported" in warning
+    assert "MYL-INC-012" in warning
 
 
 def test_rest_target_with_w3_w4_is_warned_they_read_not_tested() -> None:

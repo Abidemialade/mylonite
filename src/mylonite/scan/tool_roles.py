@@ -60,7 +60,15 @@ _OBSERVE_NAME_HINTS = _words("sent outbox history status log audit recent list f
 #: effect_probe fallback when no tool reads like an outbox or status report.
 #: Matched as whole tokens (``read_graph`` -> {"read", "graph"}). No "fetch":
 #: that reads like egress, and an egress tool is a W3 target, not an observer.
-_READBACK_NAME_HINTS = _words("read get list search find view show query open lookup")
+#: No "open" or "query": ``open_pull_request`` and ``execute_query`` write.
+_READBACK_NAME_HINTS = _words("read get list search find view show lookup")
+#: Any of these tokens in a name rules a tool out as a readback, whatever its
+#: annotations say. The probe calls ``verify_tool`` before and after every
+#: attempt, so a write picked here would run over and over (``get_or_create_user``,
+#: ``search_and_delete``, a ``delete_all`` that claims ``readOnlyHint``).
+_WRITE_VERB_HINTS = _words(
+    "create update write add set insert put execute run exec open delete remove send post"
+)
 _SINK_NAME_HINTS = _words(
     "send email post publish pay transfer purchase execute "
     "delete remove dispatch share forward submit"
@@ -334,13 +342,23 @@ def _requires_id(tool: Any) -> bool:
     return any(_hints_match(r, _ID_PARAM_HINTS) for r in _schema_required(tool))
 
 
+def _names_a_write(name: str) -> bool:
+    """True when a tool's name carries a write or sink verb as a whole token.
+
+    Rules a tool out as an effect_probe ``verify_tool`` candidate, whatever its
+    annotations claim: the probe calls it before and after every attempt.
+    """
+    return _hints_match(name, _SINK_NAME_HINTS) or _hints_match(name, _WRITE_VERB_HINTS)
+
+
 def _readback_tool(tools: list[Any]) -> str | None:
     """A tool that reads the target's store back, as an effect_probe candidate.
 
     The fallback for a surface with no outbox- or status-named tool (#217's
     server-memory: ``read_graph``). A candidate is named like a read
     (:data:`_READBACK_NAME_HINTS`, whole tokens) or annotated ``readOnlyHint``,
-    is not annotated as a write, and needs no record id (the planner never
+    is not annotated as a write, has no write verb in its name
+    (:data:`_SINK_NAME_HINTS`, :data:`_WRITE_VERB_HINTS`), and needs no record id (the planner never
     learns one). One that takes no required argument reads the whole store and
     is preferred; otherwise the first in listing order. A hint only: the
     scaffold writes it commented, and nothing enables it.
@@ -350,6 +368,8 @@ def _readback_tool(tools: list[Any]) -> str | None:
         name = getattr(tool, "name", "") or ""
         annotations = getattr(tool, "annotations", None) or {}
         if annotations.get("readOnlyHint") is False or annotations.get("destructiveHint"):
+            continue
+        if _names_a_write(name):
             continue
         read_like = annotations.get("readOnlyHint") is True or _hints_match(
             name, _READBACK_NAME_HINTS
@@ -394,6 +414,7 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
             verify_tool is None
             and any(h in low for h in _OBSERVE_NAME_HINTS)
             and not _requires_id(tool)
+            and not _names_a_write(name)
         ):
             verify_tool = name
         if any(h in low for h in _SINK_NAME_HINTS):
