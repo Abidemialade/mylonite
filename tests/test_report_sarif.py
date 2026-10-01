@@ -329,3 +329,22 @@ def test_to_sarif_errored_or_deferred_probe_does_not_raise_severity() -> None:
     for effect in ("errored", "deferred"):
         res = to_sarif([(_exploit("W1", effect=effect), report)])["runs"][0]["results"][0]
         assert res["properties"]["security-severity"] == "5.0", effect
+
+
+def test_rule_security_severity_is_set_only_when_every_result_is_kept() -> None:
+    """GitHub reads security-severity from the rule, so the rule must not carry
+    one that an unproven result under it would inherit."""
+    from mylonite.report.sarif import to_sarif
+
+    kept = _report(kept=True, vuln=5, guard_resisted=5)
+    rejected = _report(kept=False, vuln=0, guard_resisted=5)
+    high = _exploit("W2", effect="true")
+
+    rule = to_sarif([(high, kept)])["runs"][0]["tool"]["driver"]["rules"][0]
+    assert rule["properties"]["security-severity"] == "8.0"
+    assert "security" in rule["properties"]["tags"]
+
+    for findings in ([(high, rejected)], [(high, None)], [(high, kept), (high, rejected)]):
+        rule = to_sarif(findings)["runs"][0]["tool"]["driver"]["rules"][0]
+        assert "security-severity" not in rule["properties"]
+        assert "security" not in rule["properties"]["tags"]
