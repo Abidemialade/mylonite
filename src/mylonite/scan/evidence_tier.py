@@ -45,8 +45,8 @@ def evidence_tier(mechanism: str | None, evidence: Mapping[str, object]) -> Evid
     """The evidence tier of one verdict; ``None`` when no mechanism decided it.
 
     In order: the trace rule's proof level (``effect-confirmed`` is state, the
-    dispatch levels are trace); then an effect probe that saw the effect
-    (state); then the mechanism (a predicate is trace, the LLM judge is
+    dispatch levels are trace); then, on an attempt with no ``trace_outcome``,
+    an effect probe that saw the effect (state); then the mechanism (a predicate is trace, the LLM judge is
     judge-only).
     """
     if mechanism is None:
@@ -56,7 +56,10 @@ def evidence_tier(mechanism: str | None, evidence: Mapping[str, object]) -> Evid
         return "state"
     if proof_level in _TRACE_PROOF_LEVELS:
         return "trace"
-    if str(evidence.get("effect_confirmed", "")) == "true":
+    # Only where the trace rule did not decide. On a traced attempt the rule
+    # already weighed the probe: a finding carries a proof level, and a
+    # resisted attempt's "true" (a stale or uncalibrated probe) is not state.
+    if "trace_outcome" not in evidence and str(evidence.get("effect_confirmed", "")) == "true":
         return "state"
     if mechanism == "predicate":
         return "trace"
