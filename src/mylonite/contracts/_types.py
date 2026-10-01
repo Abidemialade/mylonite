@@ -307,9 +307,8 @@ class ValidationOutcome(BaseModel):
         le=1.0,
         description=(
             "Optional per-stage numeric — flakiness: reproducibility fraction "
-            "[0,1]; differential: discrimination strength (the average of the "
-            "vulnerable-fire rate and the guard-resist rate); metamorphic: "
-            "robustness rate."
+            "[0,1]; differential: agreement fraction; metamorphic: robustness "
+            "rate."
         ),
     )
     report_only: bool = Field(

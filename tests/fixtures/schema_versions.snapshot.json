@@ -4,7 +4,7 @@
     "compliance_mapper": "0.1.0",
     "target_adapter": "0.8.0",
     "test_generator": "0.2.0",
-    "validator": "0.5.1"
+    "validator": "0.5.0"
   },
   "schema_hashes": {
     "adapter_response.schema.json": "a4025a8fd59a501a1eb7d03c3060cf4168ee068e4522e76c05e9fdc5cb87c2ef",
@@ -16,6 +16,6 @@
     "scan_attempt.schema.json": "2cd2a1c42b2eba23844ad61848cdc979e949e733ade40919eb238c017e2f193e",
     "scan_report.schema.json": "6241f2fe260a39cbe9e9a4aa399825cd459fd08c17d73d81b7f73939735188fe",
     "target_descriptor.schema.json": "018e3eed85c4d43cc00e71af4caccaf4738c7bc9b8834ea8b71e8ee0185194bf",
-    "validation_report.schema.json": "1165b374e81395dfc24cadd131ca3c14267839f46a883653b5b7ecafc57baa2f"
+    "validation_report.schema.json": "16eda3e7cecb3e0d54f6e8b0b9cf0fc586491c937c22c5318f163a6f07739ce2"
   }
 }

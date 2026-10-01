@@ -122,7 +122,7 @@
             }
           ],
           "default": null,
-          "description": "Optional per-stage numeric \u2014 flakiness: reproducibility fraction [0,1]; differential: discrimination strength (the average of the vulnerable-fire rate and the guard-resist rate); metamorphic: robustness rate.",
+          "description": "Optional per-stage numeric \u2014 flakiness: reproducibility fraction [0,1]; differential: agreement fraction; metamorphic: robustness rate.",
           "title": "Metric"
         },
         "passed": {
