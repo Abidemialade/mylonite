@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `testkit.__all__` surface emitted tests import by name — each now has a
   one-line description under "The testkit API". `load_exploit` and the three
   exception types had no mention anywhere under `docs/` before this.
+- **A two-way docs/registry ratchet** (`tests/test_docs_registry_ratchet.py`),
+  covering the CLI's flags, the `mylonite.testkit` public surface, and the
+  reason-code registry. Each is checked both ways: every live flag/name/code
+  has a mention in its docs page, and every flag/name/code the docs page
+  carries actually exists — not just the registry-to-docs direction the
+  existing reason-code test already covered. Known gaps live in
+  `tests/fixtures/docs_ratchet_allowlist.json`, with a per-registry ceiling
+  that may only shrink, mirroring `scripts/hardcoded_models_allowlist.txt`'s
+  ratchet. All three registries are currently clean (empty allowlist). See
+  "Fixing a docs-registry ratchet failure" in `CONTRIBUTING.md`.
 
 ### Changed
 
