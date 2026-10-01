@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`mylonite check` and `mylonite ablate` are now hidden and experimental.**
+  Both commands still work, but they're dropped from `mylonite --help`, from
+  README's command table and from the docs nav, and neither runs without
+  `MYLONITE_EXPERIMENTAL=1` set — without it, each exits with a one-line
+  message naming the variable. Their reference sections moved to the new
+  (unlisted) `docs/experimental.md`, which also tightens two things the old
+  pages got wrong: `ablate` grades Mylonite's own boundary stand-in, not your
+  safeguard, unless your `target.yaml` declares `control_env`; and a control
+  that never saw an attack reports as `no-attack`, not "untested."
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the

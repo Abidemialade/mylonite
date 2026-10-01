@@ -2,7 +2,8 @@
   "commands": {
     "ablate": {
       "epilog": null,
-      "help": "Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).\n\nFor each control, toggle it (on vs off, or all-minus-c with --redundancy)\nagainst its weakness's attack (model held constant) and report whether it\nactually carries the security. LIVE: launches the target's MCP server + provider.",
+      "help": "Score each AI safeguard's marginal contribution (load-bearing / theater / redundant).\n\nFor each control, toggle it (on vs off, or all-minus-c with --redundancy)\nagainst its weakness's attack (model held constant) and report whether it\nactually carries the security. LIVE: launches the target's MCP server + provider.\n\nWithout `control_env` declared on the target, this grades Mylonite's own\nboundary stand-in, not your safeguard -- declare `control_env` to grade yours.",
+      "hidden": true,
       "name": "ablate",
       "params": [
         {
@@ -164,6 +165,7 @@
     "check": {
       "epilog": null,
       "help": "Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.\n\nConnects to the target ONCE (`describe()` — exactly what `scan --scaffold`\nalready does) and reports structural exposure from the tool schemas alone:\nconsequential tools with no approval-shaped sibling, descriptions that\nsteer the agent, tools taking an apparent network destination, content-\nprocessing tools that could carry an indirect-injection payload, unpinned\ntool descriptions (rug-pull exposure), and which weakness classes the\nsurface suggests. Every finding is a HINT to confirm, never a verdict —\nthe differential oracle (`scan`/`gate`) is what proves an attack actually\nlands. Belongs in CI stage 1, next to lint: cheap enough to run on every\npush, unlike the live stages that spend LLM budget.\n\nMakes no writes at all and takes no ``--authorize``. To run the\ncalibration controls (real writes proving a declared ``effect_probe`` can\nsee a change — see ``docs/target-file.md#calibration``), run\n``scan``/``gate``/``validate`` with ``--authorize`` against the same\n``--target-file``; those are the commands that drive the target live.",
+      "hidden": true,
       "name": "check",
       "params": [
         {
@@ -227,6 +229,7 @@
     "demo": {
       "epilog": null,
       "help": "Run the zero-config reference-app playground: vulnerable vs guarded differential.\n\nDefault is offline replay of recorded fixtures - no network, no API key,\ndeterministic. `--live` makes real calls against the in-process reference\nagent (two variants, ~2 min). The recorded model is self-hosted, so a live\nrun costs nothing but needs that model served locally; `--provider`/`--model`\npoint it at a hosted one instead.\n\nBody lives in `mylonite.demo.cli_entry`, which documents the replay\ninvariant that keeps this command independent of the environment.",
+      "hidden": false,
       "name": "demo",
       "params": [
         {
@@ -276,6 +279,7 @@
     "gate": {
       "epilog": "Examples:\n\n`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- write the target file first; its scope is the --authorize value below.\n\n`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh.",
       "help": "Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline.",
+      "hidden": false,
       "name": "gate",
       "params": [
         {
@@ -553,6 +557,7 @@
     "generate": {
       "epilog": null,
       "help": "Emit a pytest regression test from a confirmed exploit.\n\nOffline and deterministic — no LLM call. Reads an ``exploit_*.json`` (written\nby ``mylonite scan``), renders a testkit-based pytest file, and writes it next\nto a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a\nCUSTOM target, pass ``--target-file`` so the target YAML is co-located as\n``target.yaml`` (the live test needs it). With ``--prove-control`` the emitted\ntest asserts the control is load-bearing (``assert_control_holds``) rather than\njust that the target resists. Prints what to run next.",
+      "hidden": false,
       "name": "generate",
       "params": [
         {
@@ -644,12 +649,14 @@
     "plugins": {
       "epilog": null,
       "help": "List installed extension plugins across all five contract groups.\n\nDiscovers every registered plugin via its PyPI entry point, which also runs\nthe contract-version compatibility check (a major mismatch is refused here\nrather than failing silently mid-run). Attack modules are additionally *run*\nby ``scan``/``gate``; for the target-adapter, test-generator, validator and\ncompliance-mapper contracts Mylonite uses its bundled reference\nimplementation, and selecting a third-party one for those is not yet exposed\non the CLI (see docs/plugin-authoring.md).",
+      "hidden": false,
       "name": "plugins",
       "params": []
     },
     "report": {
       "epilog": "Examples:\n\n`mylonite report .mylonite/scans/<dir>` -- terminal trust panel (offline, no LLM).\n\n`mylonite report <dir> --sarif out.sarif` -- GitHub code scanning (Security tab + PR checks).\n\n`mylonite report <dir> --json finding.json` -- machine-readable bundle (dashboards/SIEM/bots).",
       "help": "Render a saved scan or validation as a trust panel (offline, no LLM).\n\nA clean, screenshot-able \"why you can trust this\" readout. For a validation it\nshows the verdict, the gating formula with\nlive per-leg marks, the fires/resists reproducibility counts, the per-seed\nkill matrix, and the compliance tags. For a scan it shows the findings,\ncoverage (incl. any NOT TESTED gap), and compliance tags. Exit 2 if no\nloadable artefact is found.",
+      "hidden": false,
       "name": "report",
       "params": [
         {
@@ -699,6 +706,7 @@
     "scan": {
       "epilog": "Examples:\n\n`mylonite scan reference:vulnerable` -- attack the bundled vulnerable twin.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- introspect a server and write a starter target.yaml (no LLM call, no attack).\n\n`mylonite scan --target-file app.yaml --authorize my-app` -- attack YOUR MCP app\n(--authorize equals the scope the scaffold wrote).\n\nExit codes: 0 ok | 2 config/usage | 3 budget exceeded | 4 provider unreachable.",
       "help": "Run the exploit-finding loop against a target.\n\nExit codes: 0 ok; 2 config/usage error (incl. nothing scanned); 3 budget\nexceeded; 4 provider unreachable. A clean exit 0 means the scan ran - an\naborted/empty scan exits non-zero so it never reads as a clean pass.",
+      "hidden": false,
       "name": "scan",
       "params": [
         {
@@ -1100,6 +1108,7 @@
     "validate": {
       "epilog": "Examples:\n\n`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the validation engine).\n\n`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\nExit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected).",
       "help": "Run a generated test through the differential-oracle validator (LIVE).\n\nRuns LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM\n(Haiku), plus the metamorphic re-drives, and needs a provider\n(ANTHROPIC_API_KEY). The LLM calls and tokens it used are printed when it\nfinishes. Validates the ACTUAL committed test on disk (no\nre-emit), then — on a clean discriminating run — RECORDS the canonical guarded\nfixtures into the generated dir's ``fixtures/`` and runs that on-disk test\noffline as a full-pass build, so the command leaves a ready-to-commit,\nreplayable test + fixtures behind. Renders a per-leg report (build /\ndifferential / flakiness / metamorphic) with the mutation score and the kept\nverdict. Exit 0 when the test is kept, 5 when it is cleanly rejected, 4 with\nno provider.",
+      "hidden": false,
       "name": "validate",
       "params": [
         {
@@ -1291,6 +1300,7 @@
     "version": {
       "epilog": null,
       "help": "Print the installed Mylonite version.",
+      "hidden": false,
       "name": "version",
       "params": []
     }
@@ -1298,6 +1308,7 @@
   "root": {
     "epilog": "Examples:\n\n`mylonite scan reference:vulnerable` -- run the attack suite against a target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml` -- scaffold a target.yaml.\n\n`mylonite gate --target-file app.yaml --authorize custom --open-pr` -- scan to a gating PR.\n\nDocs: https://abidemialade.github.io/mylonite/ -- run 'mylonite COMMAND --help' for any command.",
     "help": "Mylonite -- AI-layer security testing.\n\nFinds app-specific weaknesses in your AI agent's attack surface (system prompt, tool/function schemas, MCP tools), proves each one with a differential oracle, and writes the pytest regression test that gates CI.",
+    "hidden": false,
     "name": "mylonite",
     "params": [
       {
