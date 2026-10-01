@@ -56,6 +56,11 @@ _RETRIEVE_NAME_HINTS = _words(
     "recall list search history feed inbox recent browse read get find load query"
 )
 _OBSERVE_NAME_HINTS = _words("sent outbox history status log audit recent list feed report get")
+#: Verbs that name a readback: a tool that returns what the target stores. The
+#: effect_probe fallback when no tool reads like an outbox or status report.
+#: Matched as whole tokens (``read_graph`` -> {"read", "graph"}). No "fetch":
+#: that reads like egress, and an egress tool is a W3 target, not an observer.
+_READBACK_NAME_HINTS = _words("read get list search find view show query open lookup")
 _SINK_NAME_HINTS = _words(
     "send email post publish pay transfer purchase execute "
     "delete remove dispatch share forward submit"
@@ -329,6 +334,32 @@ def _requires_id(tool: Any) -> bool:
     return any(_hints_match(r, _ID_PARAM_HINTS) for r in _schema_required(tool))
 
 
+def _readback_tool(tools: list[Any]) -> str | None:
+    """A tool that reads the target's store back, as an effect_probe candidate.
+
+    The fallback for a surface with no outbox- or status-named tool (#217's
+    server-memory: ``read_graph``). A candidate is named like a read
+    (:data:`_READBACK_NAME_HINTS`, whole tokens) or annotated ``readOnlyHint``,
+    is not annotated as a write, and needs no record id (the planner never
+    learns one). One that takes no required argument reads the whole store and
+    is preferred; otherwise the first in listing order. A hint only: the
+    scaffold writes it commented, and nothing enables it.
+    """
+    candidates: list[tuple[int, int, str]] = []
+    for index, tool in enumerate(tools):
+        name = getattr(tool, "name", "") or ""
+        annotations = getattr(tool, "annotations", None) or {}
+        if annotations.get("readOnlyHint") is False or annotations.get("destructiveHint"):
+            continue
+        read_like = annotations.get("readOnlyHint") is True or _hints_match(
+            name, _READBACK_NAME_HINTS
+        )
+        if not name or not read_like or _requires_id(tool):
+            continue
+        candidates.append((1 if _schema_required(tool) else 0, index, name))
+    return min(candidates)[2] if candidates else None
+
+
 def _classify_tools(tools: list[Any]) -> _ToolRoles:
     """Bucket discovered tools into seed-arm / retrieve / verify / sink roles.
 
@@ -367,6 +398,9 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
             verify_tool = name
         if any(h in low for h in _SINK_NAME_HINTS):
             sink_tools.append(name)
+
+    if verify_tool is None:
+        verify_tool = _readback_tool(tools)
 
     return _ToolRoles(
         seed_arm_tool=seed_arm_tool,
