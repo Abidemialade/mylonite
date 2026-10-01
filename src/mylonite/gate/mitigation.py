@@ -325,7 +325,14 @@ def build_pr_body(
                 "> **Unverified LLM suggestion** (not validated by the oracle — review before applying):",
                 "> " + extra.replace("\n", "\n> "),
             ]
-    if is_control:
+    if is_control and not proven:
+        gating_desc = (
+            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives the attack with and "
+            f"without control **{control}**. This run has not yet shown that the control stops "
+            "the attack, so a passing check does not show it either; re-run `mylonite validate` "
+            "until the verdict is KEPT before relying on this gate."
+        )
+    elif is_control:
         gating_desc = (
             f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives the attack with and "
             f"without control **{control}** and asserts it fires on the raw target but is "

@@ -389,6 +389,8 @@ def test_pr_body_states_no_claim_for_a_stable_not_proven_report():
     assert "Proven fix" not in body
     assert "## Control efficacy not proven" in body
     assert "**Verdict: STABLE, NOT PROVEN:**" in body
+    assert "stops carrying the security" not in body
+    assert "has not yet shown that the control stops the attack" in body
 
 
 def test_pr_body_states_no_claim_for_a_rejected_report():
