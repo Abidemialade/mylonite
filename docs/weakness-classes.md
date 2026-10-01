@@ -119,8 +119,8 @@ surface as unknown rather than clean, falling through to the LLM judge.
   after the planner runs** and diffs the surface; `tool_surface_mutated_mid_session`
   fires deterministically on any change. The mutation itself is the finding — a
   supply-chain attack on the agent — and the pin refuses the mutated tool. If that
-  second listing fails, the attempt reads NOT TESTED (`MYL-INC-009`), never as a
-  stable surface.
+  second listing fails or times out, the attempt reads NOT TESTED (`MYL-INC-009`),
+  never as a stable surface.
 
 **Maps to:** OWASP-LLM `LLM01` · OWASP-ASI `ASI02` · attack patterns
 `tool-description-summary-smuggle`, `tool-description-send-licence-smuggle`,

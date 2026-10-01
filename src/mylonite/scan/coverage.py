@@ -409,6 +409,7 @@ _UNDECIDED_NO_ADJUDICATOR_BUCKET: Final = "undecided_no_adjudicator"
 _UNDECIDED_UNLINKED_DISPATCH_BUCKET: Final = "undecided_unlinked_dispatch"
 _UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
 _UNDECIDED_RELIST_FAILED_BUCKET: Final = "undecided_relist_failed"
+_UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: Final = "undecided_tool_list_truncated"
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -418,6 +419,7 @@ _INC_BUCKET_BY_CAUSE: Final[dict[str, str]] = {
     reason_codes.INC_UNLINKED_DISPATCH: _UNDECIDED_UNLINKED_DISPATCH_BUCKET,
     reason_codes.INC_PAYLOAD_MARKER: _UNDECIDED_PAYLOAD_MARKER_BUCKET,
     reason_codes.INC_RELIST_FAILED: _UNDECIDED_RELIST_FAILED_BUCKET,
+    reason_codes.INC_TOOL_LIST_TRUNCATED: _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET,
 }
 
 #: Exception class NAMES (``type(exc).__name__``, the only thing
@@ -477,6 +479,9 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     _UNDECIDED_RELIST_FAILED_BUCKET: (
         "reached no verdict because the tool list could not be read again after the agent "
         "ran, so a mid-session tool change was not checked"
+    ),
+    _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: (
+        "reached no verdict because the server's tool list was read only in part"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"

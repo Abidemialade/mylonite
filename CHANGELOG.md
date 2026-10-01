@@ -46,15 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tools/list` is read page by page, following `nextCursor` until the server
   stops returning one. Before, only the first page was read, so tools on later
   pages were never described, attacked or checked for mid-session changes.
-  Reading stops after 100 pages, or when the server repeats a cursor, with a
-  warning in the log.
+  Each page has a timeout. Tools that appear on more than one page are kept
+  once. If reading stops early (after 100 pages, or when the server repeats a
+  cursor), any attempt that did not find a weakness reads NOT TESTED under the
+  new reason code [`MYL-INC-010`](docs/reason-codes.md#myl-inc-010), so a
+  partial tool list never yields a clean result.
 - **A rug-pull check that could not run no longer reads as a stable tool
   surface.** After the agent runs, an MCP scan lists the tools again to catch
   a server that changes them mid-session. When that second listing raised, the
-  attempt used to record the surface as unchanged. It now reads NOT TESTED with
-  the new reason code [`MYL-INC-009`](docs/reason-codes.md#myl-inc-009), whose
-  fix says to check that the server still answers `tools/list` after a few
-  calls.
+  attempt used to record the surface as unchanged. The attempt now reads NOT
+  TESTED with the new reason code
+  [`MYL-INC-009`](docs/reason-codes.md#myl-inc-009), whose fix says to check
+  that the server still answers `tools/list` after a few calls. A second
+  listing that hangs now times out and reads the same way.
 
 ## [0.10.5] - 2026-10-01
 

@@ -213,3 +213,71 @@ async def test_describe_lists_tools_from_every_page() -> None:
     finally:
         target_registry.clear_runtime_targets()
     assert [t.name for t in descriptor.tools] == ["read_file", "write_file", "send_email"]
+
+
+@pytest.mark.asyncio
+async def test_a_complete_listing_is_marked_complete() -> None:
+    from mylonite.plugins._mcp.server_shim import list_all_tools
+
+    listing = await list_all_tools(_PagingSession([["a"], ["b"]]))  # type: ignore[arg-type]
+    assert listing.complete is True
+    assert [t.name for t in listing.tools] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_listing_is_marked_partial_on_the_shim() -> None:
+    from mylonite.plugins._mcp.server_shim import list_all_tools
+
+    listing = await list_all_tools(_PagingSession([], loop_forever=True))  # type: ignore[arg-type]
+    assert listing.complete is False
+    shim = MCPSessionAsServerLike(_PagingSession([], loop_forever=True))  # type: ignore[arg-type]
+    assert shim.truncated is False
+    await shim.list_tools()
+    assert shim.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_a_tool_on_two_pages_is_listed_once() -> None:
+    session = _PagingSession([["read_file", "write_file"], ["write_file", "send_email"]])
+    tools = await MCPSessionAsServerLike(session).list_tools()  # type: ignore[arg-type]
+    assert [t.name for t in tools] == ["read_file", "write_file", "send_email"]
+
+
+@pytest.mark.asyncio
+async def test_later_pages_use_the_params_keyword_when_the_sdk_has_it() -> None:
+    from mcp.types import PaginatedRequestParams
+
+    class _ParamsSession:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str | None, object]] = []
+
+        async def list_tools(
+            self, cursor: str | None = None, *, params: PaginatedRequestParams | None = None
+        ) -> SimpleNamespace:
+            self.calls.append((cursor, params))
+            if params is None:
+                return SimpleNamespace(tools=[_mcp_tool("a")], nextCursor="p2")
+            return SimpleNamespace(tools=[_mcp_tool("b")], nextCursor=None)
+
+    session = _ParamsSession()
+    tools = await MCPSessionAsServerLike(session).list_tools()  # type: ignore[arg-type]
+    assert [t.name for t in tools] == ["a", "b"]
+    assert session.calls[1][0] is None
+    assert isinstance(session.calls[1][1], PaginatedRequestParams)
+    assert session.calls[1][1].cursor == "p2"
+
+
+@pytest.mark.asyncio
+async def test_a_page_that_hangs_times_out() -> None:
+    import asyncio
+
+    class _Hangs:
+        async def list_tools(self, cursor: str | None = None) -> SimpleNamespace:
+            if cursor is None:
+                return SimpleNamespace(tools=[_mcp_tool("a")], nextCursor="next")
+            await asyncio.sleep(10)
+            raise AssertionError("unreachable")  # pragma: no cover
+
+    shim = MCPSessionAsServerLike(_Hangs(), page_timeout_s=0.05)  # type: ignore[arg-type]
+    with pytest.raises(asyncio.TimeoutError):
+        await shim.list_tools()

@@ -490,7 +490,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 command=self._launch_command,
                 args=self._launch_args,
             ) as session:
-                shim = MCPSessionAsServerLike(session)
+                shim = MCPSessionAsServerLike(
+                    session, page_timeout_s=self._mcp_read_timeout.total_seconds()
+                )
                 tools = _serialise_tools(await shim.list_tools())
         except Exception as exc:
             if _is_timeout_error(exc):
@@ -583,6 +585,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         #: True when the re-list raised, so nothing was compared. Stamped as
         #: "errored" (never "false"): a check that could not run is not a pass.
         tool_surface_relist_failed = False
+        #: True when a tool listing stopped before its last page, so the planner
+        #: (or the re-list) worked from a partial surface.
+        tool_list_truncated = False
 
         try:
             async with self._session(
@@ -590,7 +595,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 command=self._launch_command,
                 args=self._launch_args,
             ) as session:
-                shim = MCPSessionAsServerLike(session)
+                shim = MCPSessionAsServerLike(
+                    session, page_timeout_s=self._mcp_read_timeout.total_seconds()
+                )
 
                 # Setup arm.
                 seeded_artefact_id = await self._run_setup(
@@ -657,7 +664,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # must not fail the attempt.
                 if recording_shim.first_surface is not None:
                     try:
-                        current = await recording_shim.current_surface_signature()
+                        # Bounded: with pagination a re-list can be many requests,
+                        # and a hung one must read as inconclusive, not stall.
+                        current = await self._bounded(recording_shim.current_surface_signature())
                         first = recording_shim.first_surface
                         added = sorted(set(current) - set(first))
                         removed = sorted(set(first) - set(current))
@@ -678,6 +687,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                             "%s: rug-pull re-list failed; surface check is inconclusive",
                             type(self).__name__,
                         )
+                tool_list_truncated = shim.truncated
 
                 # Effect probe (app-native rigor): re-query the target to confirm
                 # the damaging effect actually MATERIALIZED end-to-end. The
@@ -843,6 +853,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     if recording_shim.listed_tool_names is not None
                     else {}
                 ),
+                # A partial tool list: tools on unread pages were never offered to
+                # the planner, so a negative here proves nothing about them. The
+                # judge turns any non-finding into an inconclusive result.
+                **({"tool_list_truncated": "true"} if tool_list_truncated else {}),
                 # Rug-pull evidence (W1): whether the tool surface mutated
                 # mid-session, and how. Read by the tool_surface_mutated_mid_session
                 # predicate. "false" when a re-list ran and nothing changed;
@@ -1597,7 +1611,11 @@ class _MCPAttackSession:
     ) -> AdapterResponse:
         planner_calls: list[dict[str, Any]] = []
         result_texts: list[str] = []
-        inner_shim: _ServerLike = MCPSessionAsServerLike(self._session)
+        session_shim = MCPSessionAsServerLike(
+            self._session,
+            page_timeout_s=self._adapter._mcp_read_timeout.total_seconds(),
+        )
+        inner_shim: _ServerLike = session_shim
         if self._adapter._controls:
             # Guard ONLY the planner's view (the boundary-guarded twin); the plant
             # above used the raw session.
@@ -1674,6 +1692,8 @@ class _MCPAttackSession:
             metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
         if recording.listed_tool_names is not None:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
+        if session_shim.truncated:
+            metadata["tool_list_truncated"] = "true"
         # This stateful session carries no Payload (no per-attempt minted
         # exfil token, no declared consequential/egress tool), so the
         # historical defaults and no seed-tool identity are the honest inputs.
