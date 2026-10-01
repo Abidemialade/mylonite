@@ -1,18 +1,18 @@
 """#217 end to end, offline: the docs-following target files never read
 clean, and a corrected one certifies and reads resisted.
 
-T13 (0.10.5 "no false clean"). ``tests/fixtures/issue217/{memory,filesystem}.yaml``
-(T13a) are target files written exactly as a first-time user following the
-CURRENT docs/scaffold would write them for the official
+``tests/fixtures/issue217/{memory,filesystem}.yaml`` are target files
+written exactly as a first-time user following the earlier docs/scaffold
+would write them for the official
 ``@modelcontextprotocol/server-memory`` / ``server-filesystem`` reference MCP
 servers: ``verify_args_template: {}`` (fails the verify tool's own schema —
 #217 cause 2) and ``expect_marker: "{payload}"`` (the weakest marker shape,
 which a calibrated probe can never use to clear a dispatch — see
 ``effect_verdict._may_downgrade``). ``tests/mcp_plugin/fakes/neutral_servers.py``
-(T13a) carries those two servers' real tool surfaces (names, JSON schemas,
+carries those two servers' real tool surfaces (names, JSON schemas,
 MCP annotations), transcribed by hand from the installed packages.
 
-This module adds the one piece T13a deliberately left out: a BEHAVIOURAL
+This module adds the one piece those fakes leave out: a BEHAVIOURAL
 session fake for each server (state that outlives one launch, real
 schema-shaped errors on a missing required argument) so a full
 ``ScanEngine``/calibration run can be driven against them without ever
@@ -29,9 +29,8 @@ Three things, per server:
    genuinely attempted), the class reads ``FINDING`` at proof level
    ``dispatched`` — never silently ``RESISTED`` because the broken
    ``verify_args_template``/``{payload}`` marker happened to fail quietly (the
-   exact #217 failure mode this plan fixes). The class-level acceptance bar
-   (see the plan's T13 entry) is NOT TESTED-with-a-reason-code OR a finding at
-   proof level ``dispatched``; this module exercises the latter, which is what
+   exact #217 failure mode). The class-level acceptance bar is NOT
+   TESTED-with-a-reason-code OR a finding at proof level ``dispatched``; this module exercises the latter, which is what
    a real-shaped, actually-attempted attack against these fixtures produces.
 2. A CORRECTED target file — valid ``verify_args_template`` (fills the verify
    tool's required argument), ``expect_marker: "{exfil_email}"`` instead of
@@ -42,7 +41,7 @@ Three things, per server:
    does nothing harmful") reads ``RESISTED``, calibrated.
 3. ``mylonite.scan.coverage.ScanOutcome.from_report`` — the one place `scan`'s
    exit code is derived from — stays ``EXIT_SUCCESS`` in every case here,
-   exactly as before this plan: a finding alone was never a `scan`-level
+   exactly as before: a finding alone was never a `scan`-level
    failure, and neither is a trace-decided ``RESISTED``. The verdict RULE
    changed; the exit code did not.
 
@@ -351,8 +350,8 @@ class _ParrotingAttacker:
     ``drive: verbatim`` puts in the user message — see
     ``_session_adapter._render_marker``/``_user_message_for_drive``), which is
     what drives the ``link_for`` token-linked path to a finding at proof level
-    ``dispatched`` — the literal class of evidence the plan's T13 acceptance
-    bar names.
+    ``dispatched`` — the literal class of evidence the acceptance bar above
+    names.
     """
 
     def __init__(self, tool_name: str, content_arg: str, other_args: dict[str, Any]) -> None:
@@ -428,7 +427,7 @@ class _TriesThenBlockedAttacker:
 
 
 # ---------------------------------------------------------------------------
-# A corrected target file, built the way T14's docs/scaffold fix will teach:
+# A corrected target file, built the way the docs now teach:
 # a schema-valid verify_args_template, "{exfil_email}" instead of "{payload}"
 # for expect_marker, and calibration controls explicitly allowed.
 # ---------------------------------------------------------------------------
