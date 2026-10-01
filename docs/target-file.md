@@ -269,15 +269,23 @@ for a `vulnerable_launch` twin.
 > does **not** inherit Mylonite's own environment wholesale — Mylonite routinely spawns
 > deliberately-vulnerable and third-party servers, and handing every one of them
 > Mylonite's own provider API keys / `GITHUB_TOKEN` / other credentials would be a real
-> leak. The child gets a small, fixed allowlist of OS-plumbing variables (`PATH`, `HOME`,
-> `USERPROFILE`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`, `PATHEXT`,
-> `COMSPEC`, `APPDATA`, `LOCALAPPDATA`) plus whatever you declare in `env:` — nothing
-> else. If your server needs some OTHER parent-env variable, declare it explicitly here.
-> The most common case: an `npx`/`uvx`-launched target running behind a corporate
-> TLS-inspecting proxy needs its proxy/CA variables declared explicitly too, e.g.
-> `env: { HTTPS_PROXY: "...", HTTP_PROXY: "...", NO_PROXY: "...", NODE_EXTRA_CA_CERTS:
-> "...", SSL_CERT_FILE: "..." }` — without them the launch can fail with a TLS/registry
-> error that looks unrelated to Mylonite.
+> leak. Mylonite itself forwards only a small, fixed allowlist of OS-plumbing variables
+> (`PATH`, `HOME`, `USERPROFILE`, `SYSTEMROOT`, `TEMP`, `TMP`, `TMPDIR`, `LANG`, `LC_ALL`,
+> `PATHEXT`, `COMSPEC`, `APPDATA`, `LOCALAPPDATA`) plus whatever you declare in `env:`.
+> The underlying MCP SDK then adds its own platform-default set on top of that — it
+> always does this, independently of Mylonite — pulling a few more OS-plumbing
+> variables (`HOMEDRIVE`, `HOMEPATH`, `PROCESSOR_ARCHITECTURE`, `SYSTEMDRIVE`,
+> `USERNAME` on Windows; `LOGNAME`, `SHELL`, `TERM`, `USER` on POSIX) from Mylonite's own
+> process into the child. None of these carry secrets, so the leak this allowlist
+> guards against (provider API keys, `GITHUB_TOKEN`, other credentials) still can't
+> happen, but "nothing else" is the aspiration, not the literal child environment. If
+> your server needs some OTHER parent-env variable, declare it explicitly here — the
+> SDK default set is fixed and not configurable. The most common case: an
+> `npx`/`uvx`-launched target running behind a corporate TLS-inspecting proxy needs its
+> proxy/CA variables declared explicitly too, e.g. `env: { HTTPS_PROXY: "...",
+> HTTP_PROXY: "...", NO_PROXY: "...", NODE_EXTRA_CA_CERTS: "...", SSL_CERT_FILE: "..." }`
+> — without them the launch can fail with a TLS/registry error that looks unrelated to
+> Mylonite.
 
 ## Coverage: a declared class your surface can't run is refused, not silently dropped
 
