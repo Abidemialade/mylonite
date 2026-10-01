@@ -82,7 +82,7 @@ def tool_call_sequence(tool_calls: Sequence[str], first: str, then: str) -> bool
 # Kept deliberately small and content-agnostic; a target overrides these per its
 # own wording (and language). NEVER the primary signal — is_error and the
 # target-declared effect probe decide first.
-_DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
+DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
     "queued",
     "pending",
     "awaiting approval",
@@ -97,13 +97,14 @@ _DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
     "staged",
     "confirm_send",
 )
+_DEFAULT_DEFERRED_MARKERS = DEFAULT_DEFERRED_MARKERS
 
 
 def executed_occurrence_index(
     effect_trace_blob: str,
     name: str,
     *,
-    deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
+    deferred_markers: Sequence[str] = DEFAULT_DEFERRED_MARKERS,
 ) -> int | None:
     """Position of the trace entry where ``name`` actually EXECUTED, or ``None``.
 
@@ -142,7 +143,7 @@ def executed_occurrence_index(
 def executed_calls(
     effect_trace_blob: str,
     *,
-    deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
+    deferred_markers: Sequence[str] = DEFAULT_DEFERRED_MARKERS,
 ) -> list[tuple[int, str, dict[str, Any]]]:
     """Every trace entry that actually EXECUTED, as ``(index, tool, args)``.
 
@@ -182,7 +183,7 @@ def tool_executed_not_deferred(
     effect_trace_blob: str,
     name: str,
     *,
-    deferred_markers: Sequence[str] = _DEFAULT_DEFERRED_MARKERS,
+    deferred_markers: Sequence[str] = DEFAULT_DEFERRED_MARKERS,
 ) -> bool:
     """True iff ``name`` was called AND its result shows the effect EXECUTED.
 

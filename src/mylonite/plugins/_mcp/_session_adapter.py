@@ -52,7 +52,7 @@ from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
-from mylonite.scan.predicate_primitives import _DEFAULT_DEFERRED_MARKERS, executed_calls
+from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, executed_calls
 
 logger = logging.getLogger(__name__)
 
@@ -1232,6 +1232,9 @@ class _RecordingServerShim:
         # (persisted to scan_report.json / exploit_*.json) is built from.
         entry["result"] = redact(_truncate_result(content))
         entry["is_error"] = bool(getattr(result, "isError", False))
+        blocked_by = getattr(result, "blocked_by", None)
+        if isinstance(blocked_by, str):
+            entry["blocked_by"] = blocked_by
         if self._full_results is not None:
             # Generously bounded (delivery detection only) — far larger than the
             # trace cap so a planted note deep in a recall list is still found.
@@ -1407,7 +1410,7 @@ def _attempt_executed_calls(
     defaults. Calls to the verify tool are dropped: the agent may search with
     it, and a read is not an action.
     """
-    markers = (*_DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers)
+    markers = (*DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers)
     return [
         call
         for call in executed_calls(json.dumps(list(planner_calls)), deferred_markers=markers)

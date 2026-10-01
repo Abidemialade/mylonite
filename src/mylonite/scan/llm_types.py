@@ -65,6 +65,7 @@ class ToolResult(BaseModel):
     name: str
     content: str
     isError: bool = False
+    blocked_by: str | None = None
 
 
 class PlannerStep(BaseModel):

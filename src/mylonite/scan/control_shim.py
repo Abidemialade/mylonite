@@ -1014,7 +1014,7 @@ class ControlServerShim:
         for control in self._controls:
             refused = control.intercept_call(name, arguments)
             if refused is not None:
-                return refused
+                return refused.model_copy(update={"blocked_by": type(control).__name__})
         result = await self._inner.call_tool(name, arguments)
         for control in self._controls:
             result = control.transform_result(name, result)
