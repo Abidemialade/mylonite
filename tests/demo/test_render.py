@@ -162,7 +162,7 @@ def test_render_clean_differential() -> None:
     lines = [line.strip() for line in output.splitlines()]
     assert "reference app: 2 exploits on vulnerable, 0 on guarded" in lines
     assert (
-        "this differential is the oracle that validates every generated regression test"
+        "one scan per build, judge off — not the repeat-run oracle a kept finding passes"
     ) in lines
     assert "unexpected finding on the guarded build" not in output
 
@@ -181,7 +181,7 @@ def test_render_clean_differential() -> None:
     # Teaser, next step, and footer.
     assert (
         "Each finding becomes a committed regression test, validated against this "
-        "same vulnerable/guarded oracle. Turn one into a gating test:"
+        "same vulnerable/guarded oracle. Turn one into a gating test (needs an API key):"
     ) in output
     assert "mylonite gate reference:vulnerable" in lines
     # `--command` takes the executable and `--arg` each argument; a single
