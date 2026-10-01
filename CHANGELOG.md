@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-subprocess wall-clock timeout instead — the $5-per-run figure is a
   sizing input, not an enforced ceiling. Prints a table and writes a JSON
   report; never prints a provider key. The nightly workflow needs the
-  `MYLONITE_DOGFOOD_KEY` secret and skips cleanly (a notice, not a failure)
+  `MYLONITE_LLM_KEY` secret and skips cleanly (a notice, not a failure)
   when it's absent — never a required check. See "Live canaries" in
   `CONTRIBUTING.md`.
 - **Three more frozen-surface snapshots, alongside the existing reason-code

@@ -3,7 +3,7 @@
 # section for what each one checks and its bar. Spends real LLM tokens, so
 # this is never a required check and the PR path is untouched.
 #
-# Needs the repo secret `MYLONITE_DOGFOOD_KEY`, mapped to the provider's own
+# Needs the repo secret `MYLONITE_LLM_KEY`, mapped to the provider's own
 # credential env var the same way `gate-dogfood.yml` does. There used to be
 # a verification.yml cron with no key configured that failed every night for
 # a month with nobody acting on it (see that workflow's own history) --
@@ -31,14 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_DOGFOOD_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
       MYLONITE_CANARY_MODEL: ${{ github.event.inputs.model || 'anthropic/claude-haiku-4-5-20251001' }}
     steps:
       - name: Check for the dogfood key
         id: key_check
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::notice::MYLONITE_DOGFOOD_KEY is not set; skipping the live canaries (not a failure)."
+            echo "::notice::MYLONITE_LLM_KEY is not set; skipping the live canaries (not a failure)."
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
