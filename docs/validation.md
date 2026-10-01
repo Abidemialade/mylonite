@@ -159,12 +159,17 @@ Every validation reports three headline figures.
   count toward the threshold as support. Each leg's detail lists the firing runs by
   tier (`firing runs by evidence: 1 trace, 1 judge-only`).
 
-  On a custom target this means a seed the LLM judge has to decide can no longer keep a
-  test by itself. That covers the tool-description and summary seeds, which are judged
-  on the agent's reply, a synthesised seed that names no tool, and any seed against a
-  `transport: rest` target. To keep one, declare an `effect_probe` in the target file so
-  the target's state confirms the damage, or rely on a seed whose predicate fires on
-  the recorded tool calls.
+  On an MCP target this means a seed the LLM judge has to decide (the tool-description
+  and summary seeds, judged on the agent's reply, or a synthesised seed that names no
+  tool) keeps a test only when an `effect_probe` in the target file confirms the damage,
+  or the seed's predicate fires on the recorded tool calls.
+
+  A black-box `transport: rest` target is the exception. The HTTP adapter records no
+  tool calls and runs no effect probe, so every finding on it is decided by the LLM
+  judge, and there is nothing else it could show. Its judge-only fires still keep a
+  test, but the verdict is capped at **STABLE, NOT PROVEN** ("black-box target: the LLM
+  judge is the only evidence"), even when another leg passes, and never reads KEPT.
+  The report's notes carry `[evidence=black-box-judge-only]`.
 
   **How the effect leg counts.** Each firing run counts at its
   [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line

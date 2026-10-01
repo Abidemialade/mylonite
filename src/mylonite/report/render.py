@@ -25,6 +25,7 @@ from mylonite._verdict import (
     KEPT,
     STABLE_NOT_PROVEN,
     has_proof,
+    is_black_box_keep,
     verdict_label,
     verdict_reason,
 )
@@ -172,7 +173,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             f"[yellow]verdict: STABLE, NOT PROVEN {dash} "
             f"{rich_escape(verdict_reason(report))}[/yellow]",
         )
-        if not has_proof(report):
+        if not has_proof(report) and not is_black_box_keep(report):
             console_print(
                 console,
                 "[yellow]  next: run without --fast so a guarded twin gives a differential "
