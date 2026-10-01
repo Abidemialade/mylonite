@@ -162,12 +162,14 @@ def test_docs_only_or_test_only_changes_pass() -> None:
 
 
 def test_code_without_changelog_fails() -> None:
-    problems = docs.check(["src/mylonite/scan/engine.py"])
+    # version.py matches no DOC_RULE, so this isolates the changelog-only check
+    # from the doc-page rules exercised below.
+    problems = docs.check(["src/mylonite/version.py"])
     assert len(problems) == 1 and "CHANGELOG.md" in problems[0].message
 
 
 def test_code_with_changelog_passes() -> None:
-    assert not docs.check(["src/mylonite/scan/engine.py", "CHANGELOG.md"])
+    assert not docs.check(["src/mylonite/version.py", "CHANGELOG.md"])
 
 
 def test_user_facing_module_needs_its_page() -> None:
@@ -213,6 +215,41 @@ def test_opt_out_needs_a_real_reason() -> None:
 
 def test_no_docs_label_opts_out() -> None:
     assert not docs.check(["src/mylonite/cli.py"], labels=["no-docs"])
+
+
+def test_ci_mode_needs_the_label_not_just_the_reason() -> None:
+    """In CI, a written reason alone must not opt out — only a maintainer adding
+    the `no-docs` label does. Local (non-CI, the pre-commit hook's mode) must
+    keep accepting the reason on its own, exactly as before."""
+    change = ["src/mylonite/cli.py"]
+    reason = ["Docs-Impact: none - internal refactor, no flag changes"]
+
+    assert docs.check(change, reason, ci=True), "a reason alone must not opt out in CI"
+    assert docs.check(change, [], labels=["no-docs"], ci=True), (
+        "the label alone, with no written reason, must not opt out in CI either"
+    )
+    assert not docs.check(change, reason, labels=["no-docs"], ci=True), (
+        "the reason together with the label must opt out in CI"
+    )
+    assert not docs.check(change, reason), "local mode must keep accepting the reason alone"
+
+
+def _sample_path_for_rule(rule: docs.DocRule) -> str:
+    """A concrete changed-file path that falls under ``rule.code``, whether
+    that is a single file or a directory prefix."""
+    return rule.code if not rule.code.endswith("/") else f"{rule.code}_docrule_probe.py"
+
+
+@pytest.mark.parametrize("rule", docs.DOC_RULES, ids=lambda r: r.code)
+def test_every_doc_rule_fires_on_its_code_path(rule: docs.DocRule) -> None:
+    """Parametrised over the live ``DOC_RULES`` tuple, so a rule added without
+    this test still gets it for free — and a rule that never fires (a typo'd
+    prefix, a page that doesn't exist) is caught here rather than in the wild."""
+    sample = _sample_path_for_rule(rule)
+    problems = docs.check([sample, docs.CHANGELOG])
+    assert any(any(page in p.message for page in rule.docs) for p in problems), (
+        f"changing {sample!r} did not require one of {rule.docs}: {[p.message for p in problems]}"
+    )
 
 
 def test_every_mapped_doc_page_exists() -> None:
