@@ -52,6 +52,7 @@ from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
+from mylonite.scan.providers import provider_from_model
 from mylonite.scan.seeds import (
     SEED_CATALOGUE,
     SeedPattern,
@@ -724,7 +725,13 @@ class ScanEngine:
                     # to do; any other cause keeps the generic text.
                     provider_abort_detail = provider_abort_message(
                         counter.last_failure_category,
-                        provider=self._config.provider,
+                        # The failing call may be a judge or customiser on
+                        # another provider than the scan's own.
+                        provider=(
+                            counter.last_failure_model
+                            and provider_from_model(counter.last_failure_model)
+                        )
+                        or self._config.provider,
                         model=counter.last_failure_model or self._config.model,
                     )
                     for pending in tasks:

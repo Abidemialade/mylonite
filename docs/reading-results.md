@@ -268,20 +268,23 @@ carry the key or the request URL.
 
 When provider calls fail three times in a row, `scan` and `gate` stop early and exit `4`
 with [`MYL-ABT-002`](reason-codes.md#myl-abt-002). The message says why and names the
-provider and model that failed (never the key):
+provider and model of the call that failed (never the key):
 
 ```text
 error: [MYL-ABT-002] the LLM provider rate-limited this run (provider anthropic, model
-anthropic/claude-haiku-4-5): calls were refused with HTTP 429 several times in a row, so
-the scan stopped early; coverage is incomplete. Wait a minute for the limit to reset and
+anthropic/claude-haiku-4-5): the last calls were refused with HTTP 429, so the scan
+stopped early; coverage is incomplete. Wait a minute for the limit to reset and
 re-run, lower --max-concurrent or --max-llm-calls, or check the quota on your provider
 account.
 ```
 
-A run stopped by network errors or timeouts says it could not reach the provider and
-points at the connection and proxy settings instead. Any other cause, such as a rejected
-key, keeps the credentials message. `validate` checks the provider before it starts and
-gives the same messages; for a rate limit it suggests fewer `--iterations`.
+A run stopped by network errors, timeouts or provider outages (HTTP 5xx) says it could
+not reach the provider and points at the provider's status page and this machine's
+connection instead. Any other cause, such as a rejected key, keeps the credentials
+message, which names the API-key variable for the model's provider. The message describes
+the last failed call, so a streak that mixed causes is reported by its final one. `validate` checks the provider before it starts and
+gives the same messages; for a rate limit it suggests fewer `--iterations`, and a check
+that stalls past its timeout reads as unreachable.
 
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 

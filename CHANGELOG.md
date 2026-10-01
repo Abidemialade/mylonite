@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pages got wrong: `ablate` grades Mylonite's own boundary stand-in, not your
   safeguard, unless your `target.yaml` declares `control_env`; and a control
   that never saw an attack reports as `no-attack`, not "untested."
+- **Per-pass exfil isolation is now pinned by a test.** Each concurrent pass
+  of one attack already minted its own exfil address. A new test runs three
+  concurrent passes and checks every pair: the call one pass made never links
+  to another pass, never matches its rendered `{exfil_email}` effect marker,
+  and never satisfies its destination check (#192).
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the
@@ -91,13 +96,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with [`MYL-ABT-002`](docs/reason-codes.md#myl-abt-002) and a message that
   names the provider and model (never the key) and suggests waiting, lowering
   `--max-concurrent` or `--max-llm-calls`, or checking the quota. Before, the
-  message always pointed at credentials. A run stopped by network errors or
-  timeouts points at the connection instead. `validate`'s provider check gives
-  the same messages instead of asking for an API key (#191).
-- **Concurrent passes of one attack can never confirm each other.** Each pass
-  mints its own exfil address, so the call one pass made never matches another
-  pass's effect marker or destination check. A new test runs three concurrent
-  passes and checks every pair (#192).
+  message always pointed at credentials. A run stopped by network errors,
+  timeouts or provider outages (HTTP 5xx) points at the provider's status page
+  and the connection instead. The provider named is that of the model whose
+  call failed. `validate`'s provider check gives the same messages, reads a
+  stalled check as unreachable, and its credentials hint names the API-key
+  variable for the model's provider instead of always `ANTHROPIC_API_KEY`
+  (#191).
 - **MCP scans now see every tool on a server that pages its tool list.**
   `tools/list` is read page by page, following `nextCursor` until the server
   stops returning one. Before, only the first page was read, so tools on later

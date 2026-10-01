@@ -102,8 +102,11 @@ from mylonite.scan.assembly import (
     no_usable_modules_message,
     select_attack_modules,
 )
+from mylonite.scan.preflight import (
+    DEFAULT_ITERATION_TIMEOUT_S as _DEFAULT_ITERATION_TIMEOUT_S,  # validate --iteration-timeout
+)
 from mylonite.scan.preflight import PreflightFailure as _PreflightFailure
-from mylonite.scan.preflight import preflight_failure_message
+from mylonite.scan.preflight import preflight_failure_message, unreachable_hint
 from mylonite.scan.preflight import provider_preflight as _provider_preflight
 from mylonite.scan.preflight import provider_preflight_direct as _provider_preflight_direct
 from mylonite.scan.providers import LOCAL_MODEL_HINT as _LOCAL_MODEL_HINT
@@ -151,13 +154,6 @@ app = typer.Typer(
 #: :func:`_resolve_option`, and is also what ``--help`` displays via
 #: ``show_default``.
 _DEFAULT_MAX_LLM_CALLS = 50
-
-#: Sane non-None default for ``validate --iteration-timeout`` (DCR-0010): a
-#: stuck/slow real custom target must not be able to block a CI job
-#: indefinitely just because the flag was left unset. 120s comfortably covers
-#: a real subprocess spawn + a multi-turn planner run; pass a larger value
-#: explicitly for a target known to need more headroom.
-_DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
 #: #186: floor for the seed_arm auto-wire describe() probe (below). A
 #: first-run npx/uvx server download can genuinely take this long, so a
@@ -1953,10 +1949,7 @@ def _exit_if_provider_unreachable(
     if (specific := preflight_failure_message(failure, provider=provider, model=model)) is not None:
         echo_err(specific)
         raise typer.Exit(code=EXIT_PROVIDER)
-    echo_err(
-        "no provider reachable — set ANTHROPIC_API_KEY, or pass --model provider/modelname "
-        "for another LiteLLM provider (e.g. --model openai/gpt-4o).\n" + _LOCAL_MODEL_HINT
-    )
+    echo_err(unreachable_hint(provider, model) + "\n" + _LOCAL_MODEL_HINT)
     raise typer.Exit(code=EXIT_PROVIDER)
 
 

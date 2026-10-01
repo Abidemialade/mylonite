@@ -379,26 +379,31 @@ def provider_abort_message(
     caller keeps its generic credentials text. ``slow_down`` names the flags
     the calling command offers; ``stopped`` says what the abort cost.
 
-    Never carries a credential: only the provider and model ids are named, and
-    both are passed through :func:`mylonite._redaction.redact` in case a model
-    string was given with an embedded key.
+    Only the provider and model ids are named, and both pass through
+    :func:`mylonite._redaction.redact`, so a key embedded in a model string is
+    masked when it has a shape ``redact`` knows (``sk-``/``sk-ant-``/``gsk_``/
+    ``AIza`` keys, ``api_key=``-style parameters, URL credentials). A key in
+    any other shape is not recognised.
+
+    The category is the LAST failed call's: a streak that mixed causes is
+    described by the final one, which is why the text says "the last calls".
     """
     where = redact(f"provider {provider or 'unknown'}, model {model or 'unknown'}")
     if category == "rate_limit":
         return reason_codes.tag(
             reason_codes.ABT_PROVIDER_UNREACHABLE,
-            f"error: the LLM provider rate-limited this run ({where}): calls were refused "
-            f"with HTTP 429 several times in a row, so {stopped} Wait a minute for the "
+            f"error: the LLM provider rate-limited this run ({where}): the last calls were "
+            f"refused with HTTP 429, so {stopped} Wait a minute for the "
             f"limit to reset and re-run, {slow_down}, or check the quota on your "
             "provider account.",
         )
     if category == "network":
         return reason_codes.tag(
             reason_codes.ABT_PROVIDER_UNREACHABLE,
-            f"error: could not reach the LLM provider ({where}): calls failed with network "
-            f"errors or timeouts several times in a row, so {stopped} Check this machine's "
-            "connection to the provider (behind a proxy, see "
-            "docs/enterprise-networking.md), then re-run.",
+            f"error: could not reach the LLM provider ({where}): the last calls failed with "
+            f"network errors, timeouts or provider outages (HTTP 5xx), so {stopped} Check "
+            "the provider's status page and this machine's connection to the provider "
+            "(behind a proxy, see docs/enterprise-networking.md), then re-run.",
         )
     return None
 

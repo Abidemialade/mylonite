@@ -2174,6 +2174,75 @@ def test_validate_rate_limited_preflight_says_rate_limit_not_credentials(
     assert _FAKE_RATE_LIMIT_KEY not in result.output
 
 
+def test_scan_rate_limit_names_the_provider_of_the_model_that_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#191: when only the planner's model (on another provider) is rate
+    limited, the message names that model's provider, not the scan's own."""
+    planner = "openai/gpt-rate-limit-test"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", _FAKE_RATE_LIMIT_KEY)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-" + "o" * 40)  # pragma: allowlist secret
+    _patch_planner_to_rate_limit(monkeypatch, planner)
+    monkeypatch.setattr(
+        "mylonite.scan.customiser.PayloadCustomiser.customise", _passthrough_customise
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--model",
+            "anthropic/claude-rate-limit-test",
+            "--planner-model",
+            planner,
+            "--output-dir",
+            str(tmp_path),
+            "--max-llm-calls",
+            "200",
+        ],
+    )
+
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    out = result.stderr or result.output
+    assert f"provider openai, model {planner}" in out
+
+
+def test_validate_unreachable_fallback_names_the_models_own_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The credentials fallback names the key variable for the model's own
+    provider instead of assuming one provider's key."""
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-" + "o" * 40)  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: False)
+    _patch_validator(monkeypatch, kept=True)
+
+    result = runner.invoke(app, ["validate", str(out_dir), "--model", "openai/gpt-test"])
+
+    assert result.exit_code == EXIT_PROVIDER, result.output
+    out = result.stderr or result.output
+    assert "OPENAI_API_KEY" in out
+    assert "check that ANTHROPIC_API_KEY" not in out
+
+
+def test_a_stalled_preflight_reads_as_network_not_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import litellm
+
+    from mylonite.scan.preflight import PreflightFailure, provider_preflight
+
+    async def _hanging(*_: Any, **__: Any) -> Any:
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(litellm, "acompletion", _hanging)
+    failure = PreflightFailure()
+
+    assert provider_preflight("anthropic", "stub-model", timeout_s=0.2, failure=failure) is False
+    assert failure.category == "network"
+
+
 def test_validate_preflight_reports_the_rate_limit_category(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
