@@ -109,7 +109,7 @@
   },
   "MYL-INC-002": {
     "category": "inconclusive",
-    "summary": "The effect probe was not calibrated: calibration was not authorized, or its controls were set to skip."
+    "summary": "The effect probe was not calibrated: calibration was not authorized, its controls were set to skip, or the target could not be launched to run them."
   },
   "MYL-INC-003": {
     "category": "inconclusive",

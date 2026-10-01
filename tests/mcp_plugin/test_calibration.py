@@ -766,3 +766,86 @@ def test_an_uncalibrated_probe_reads_not_calibrated() -> None:
 def test_a_target_with_nothing_to_calibrate_has_no_summary() -> None:
     _register(None, seed_arm=None)
     assert MCPStdioAdapter(family=FAMILY, scope=None).calibration_summary() is None
+
+
+# --- verify arguments must render the way an attempt renders them ---------------
+
+
+@pytest.mark.asyncio
+async def test_a_payload_placeholder_in_verify_args_is_never_certified() -> None:
+    """Calibration would render ``{payload}`` as its own short token, but an
+    attempt renders it as the whole attack text. A search that finds the
+    token proves nothing about the search an attempt runs, so the probe is
+    never certified, and no control write is made."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["search_outbox"] = _schema(query="string")
+    _register(
+        EffectProbeSpec(
+            verify_tool="search_outbox",
+            verify_args_template={"query": "{payload}"},
+            expect_marker=MARKER,
+        )
+    )
+    launcher = _Launcher(_Store(), tools)
+    result = await _calibrate(launcher)
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-003"
+    assert "{payload}" in result.detail
+    assert launcher.called("send_email") == []
+
+
+# --- a launch failure is reported as such ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_launch_failure_is_not_calibrated_and_blames_no_probe_wiring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FailingLauncher:
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            @asynccontextmanager
+            async def _ctx() -> Any:
+                raise RuntimeError("could not launch")
+                yield  # pragma: no cover — never reached
+
+            return _ctx()
+
+    _register(seed_arm=None)
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _FailingLauncher())
+    result = await calibration.calibrate_custom_target(
+        MCPStdioAdapter(family=FAMILY, scope=None), authorized=True
+    )
+    assert result.reason_code == calibration.INC_NOT_CALIBRATED
+    assert "launch" in result.detail
+    # No seed_arm is declared, so there is no seed control to blame.
+    assert result.seed_control.status == calibration.SEED_NOT_DECLARED
+    assert result.seed_control.reason_code is None
+
+
+# --- the launch is part of what calibration proved --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_calibration_of_one_launch_is_not_reused_for_the_vulnerable_twin() -> None:
+    from mylonite.plugins._mcp.factory import LaunchIntent
+    from mylonite.plugins._mcp.target_registry import LaunchOverride
+
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            command="python",
+            args=["-m", "srv"],
+            weakness_classes=["W4"],
+            effect_probe=_PROBE,
+            vulnerable_launch=LaunchOverride(env={"GUARD": "off"}),
+        )
+    )
+    target_registry.register_target(spec)
+    guarded = build_adapter_for_spec(spec, scope=None, model="m")
+    vulnerable = build_adapter_for_spec(
+        spec, scope=None, model="m", intent=LaunchIntent(vulnerable=True)
+    )
+    result = await _calibrate(_Launcher(_Store()), adapter=guarded)
+    assert result.calibrated is True
+    assert guarded.calibration_summary().status == calibration.STATUS_CERTIFIED
+    assert vulnerable.calibration_summary().status != calibration.STATUS_CERTIFIED

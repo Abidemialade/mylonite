@@ -51,7 +51,13 @@ from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
-from mylonite.scan.effect_verdict import LinkResult, TraceOutcome, classify_trace, link_for
+from mylonite.scan.effect_verdict import (
+    LinkResult,
+    TraceOutcome,
+    classify_trace,
+    dispatched_tools,
+    link_for,
+)
 from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
@@ -440,7 +446,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # Deferred import: `calibration` imports FROM this module at load time.
         from mylonite.plugins._mcp import calibration
 
-        return calibration.summary_for(self._spec, self._scope)
+        return calibration.summary_for(self._spec, self._scope, launch=calibration.launch_of(self))
 
     def _target_id(self) -> str:
         if self._scope is None:
@@ -773,6 +779,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             seed_tool_name=(
                 payload.metadata.get("consequential_tool") or payload.metadata.get("egress_tool")
             ),
+            tool_annotations=recording_shim.tool_annotations,
         )
 
         return AdapterResponse(
@@ -1240,6 +1247,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         exfil_host: str,
         seed_handle: str | None,
         seed_tool_name: str | None,
+        tool_annotations: Mapping[str, Mapping[str, object]] | None = None,
     ) -> dict[str, str]:
         """``trace_outcome`` / ``link`` / ``marker_kind`` / ``marker_linked`` /
         ``calibrated`` / ``seed_control`` evidence, stamped by both ``invoke()`` and
@@ -1254,8 +1262,12 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         target.
         """
         control_config = self._spec.control_config
-        consequential: tuple[str, ...] = tuple(
-            control_config.consequential_tools if control_config else ()
+        # Declared egress tools are consequential too: an egress tool whose
+        # name reads like a read ("fetch") is still a dispatch.
+        consequential: tuple[str, ...] = (
+            tuple(control_config.consequential_tools) + tuple(control_config.egress_tools)
+            if control_config
+            else ()
         )
         # The seed's own named tool is consequential for this attempt, whatever
         # its name suggests: a call to it is a dispatch, never an exempt read.
@@ -1279,6 +1291,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             planner_calls,
             consequential_tool_names=consequential,
             read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
             verify_tool=verify_tool,
         )
         link_result: LinkResult = link_for(
@@ -1288,6 +1301,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             seed_handle=seed_handle or None,
             seed_tool_name=seed_tool_name or None,
             read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
             verify_tool=verify_tool,
             consequential_tool_names=consequential,
         )
@@ -1301,6 +1315,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 planner_calls,
                 marker=rendered_marker,
                 read_tool_names=read_tool_names,
+                tool_annotations=tool_annotations,
                 verify_tool=verify_tool,
                 consequential_tool_names=consequential,
             ).kind
@@ -1312,8 +1327,19 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # here would be a cycle. See `_effective_env` for the same pattern.
         from mylonite.plugins._mcp import calibration
 
-        cal = calibration.lookup(self._spec, self._scope)
-        calibrated = cal is not None and cal.calibrated
+        cal = calibration.lookup(self._spec, self._scope, launch=calibration.launch_of(self))
+        # Calibrated for THIS attempt only when the probe was certified through
+        # every consequential tool the attempt dispatched. Calibration proves
+        # the probe sees a write through the tools it wrote through; a call
+        # through any other tool may land where the probe cannot look.
+        dispatched = dispatched_tools(
+            planner_calls,
+            consequential_tool_names=consequential,
+            read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
+            verify_tool=verify_tool,
+        )
+        calibrated = cal is not None and cal.calibrated and dispatched <= set(cal.certified_tools)
         seed_control_status = (
             cal.seed_control.status if cal is not None else calibration.SEED_NOT_RUN
         )
@@ -1403,6 +1429,10 @@ class _RecordingServerShim:
         #: from "listed and empty" — a predicate must not infer NOT APPLICABLE from
         #: an unknown surface.
         self.listed_tool_names: list[str] | None = None
+        #: Each listed tool's MCP annotations, as the planner saw them, so the
+        #: trace rule can honour a server's ``readOnlyHint``. Uniform SDK
+        #: defaults are cleared first, exactly as ``describe()`` does.
+        self.tool_annotations: dict[str, dict[str, object]] = {}
         #: Signature of the tool surface the planner saw on FIRST list_tools —
         #: {tool_name: sha256(description)}. Lets the adapter detect a mid-session
         #: rug-pull (a server that mutates its own tool descriptions / adds a tool
@@ -1420,6 +1450,13 @@ class _RecordingServerShim:
     async def list_tools(self) -> list[ToolDescription]:
         tools = await self._inner.list_tools()
         self.listed_tool_names = [t.name for t in tools]
+        from mylonite.scan.tool_classifier import neutralize_uniform_default_annotations
+
+        self.tool_annotations = {
+            t.name: dict(t.annotations)
+            for t in neutralize_uniform_default_annotations(tools)
+            if t.annotations
+        }
         if self.first_surface is None:
             self.first_surface = self._surface_sig(tools)
         return tools
@@ -1630,6 +1667,7 @@ class _MCPAttackSession:
                 exfil_host=DEFAULT_EXFIL_HOST,
                 seed_handle=None,
                 seed_tool_name=None,
+                tool_annotations=recording.tool_annotations,
             )
         )
         return AdapterResponse(

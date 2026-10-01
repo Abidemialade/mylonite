@@ -946,10 +946,9 @@ class DifferentialValidator(ValidatorBase):
         exploits = [e for e in result.exploits if e.pattern_id == pattern_id]
         if exploits:
             # The engine records a finding attempt and its exploit together, in
-            # the same order, so the k-th finding attempt for this seed and the
-            # k-th exploit for it are one attempt. Pairing them keeps the
-            # evidence and the response from the same attempt, whichever
-            # exploit the scan happened to record first.
+            # the same order, so the first finding attempt for this seed and the
+            # first exploit for it are one attempt. Taking the first of each
+            # keeps the evidence and the response from the same attempt.
             exploit = exploits[0]
             attempt = findings[0] if findings else None
             evidence = dict(attempt.judge_evidence) if attempt is not None else {}

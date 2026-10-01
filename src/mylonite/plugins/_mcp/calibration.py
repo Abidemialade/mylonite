@@ -24,9 +24,12 @@ Only "create" effects are calibrated: destructive tools (delete, overwrite,
 transfer and the like) are never written to.
 
 Results live in a process-level registry keyed by :func:`spec_key`, so an
-adapter rebuilt for another run of the same target (validate, gate, ablate, the
-testkit) finds the same result. ``target_registry.clear_runtime_targets()``
-does not clear it; :func:`clear_calibrations` does.
+adapter rebuilt for another run of the same target and launch (validate, gate,
+ablate, the testkit) finds the same result. The launch is part of the key: a
+probe proven against the default launch says nothing about a vulnerable twin
+started with a different command or environment.
+``target_registry.clear_runtime_targets()`` does not clear the registry;
+:func:`clear_calibrations` does.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
@@ -159,12 +163,48 @@ class CalibrationResult:
 _REGISTRY: dict[str, CalibrationResult] = {}
 
 
-def spec_key(spec: target_registry.TargetSpec, scope: str | None) -> str:
+def launch_of(adapter: Any) -> dict[str, Any]:
+    """The launch an adapter starts its target with, for :func:`spec_key`.
+
+    Read defensively: ``None`` for a launch knob the adapter does not set,
+    which :func:`spec_key` reads as the target's default launch.
+    """
+    return {
+        "command": getattr(adapter, "_launch_command", None),
+        "args": getattr(adapter, "_launch_args", None),
+        "env": getattr(adapter, "_launch_env", None),
+    }
+
+
+def _launch_material(
+    spec: target_registry.TargetSpec, scope: str | None, launch: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The launch, normalised so the default launch always reads the same way."""
+    launch = launch or {}
+    args = launch.get("args")
+    env = launch.get("env") or {}
+    return {
+        "command": launch.get("command") or spec.command,
+        "args": list(args) if args is not None else spec.render_args(scope),
+        # Only what differs from the target's own env: a vulnerable_launch or
+        # control_env toggle. Folded into the digest, never stored or printed.
+        "env_overrides": sorted(
+            (key, str(value)) for key, value in env.items() if spec.extra_env.get(key) != value
+        ),
+    }
+
+
+def spec_key(
+    spec: target_registry.TargetSpec,
+    scope: str | None,
+    launch: Mapping[str, Any] | None = None,
+) -> str:
     """A stable digest of everything about a target that calibration depends on.
 
-    Env and header values are left out (they may carry secrets); their names
-    are kept. The timeout is left out: it bounds the run but changes nothing
-    the run proves.
+    ``launch`` is :func:`launch_of` an adapter; ``None`` is the default launch.
+    The target's own env and header values are left out (they may carry
+    secrets); their names are kept. The timeout is left out: it bounds the run
+    but changes nothing the run proves.
     """
 
     def dump(model: Any) -> Any:
@@ -183,6 +223,7 @@ def spec_key(spec: target_registry.TargetSpec, scope: str | None) -> str:
         "effect_probe": dump(spec.effect_probe),
         "seed_arm": dump(spec.seed_arm),
         "control_config": dump(spec.control_config),
+        "launch": _launch_material(spec, scope, launch),
     }
     blob = json.dumps(material, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -193,9 +234,13 @@ def record(result: CalibrationResult) -> None:
     _REGISTRY[result.spec_key] = result
 
 
-def lookup(spec: target_registry.TargetSpec, scope: str | None) -> CalibrationResult | None:
-    """The recorded result for this target, or ``None`` if it was never calibrated."""
-    return _REGISTRY.get(spec_key(spec, scope))
+def lookup(
+    spec: target_registry.TargetSpec,
+    scope: str | None,
+    launch: Mapping[str, Any] | None = None,
+) -> CalibrationResult | None:
+    """The recorded result for this target and launch, or ``None`` if it was never calibrated."""
+    return _REGISTRY.get(spec_key(spec, scope, launch))
 
 
 def clear_calibrations() -> None:
@@ -214,7 +259,11 @@ def summarise(result: CalibrationResult) -> CalibrationSummary:
     )
 
 
-def summary_for(spec: target_registry.TargetSpec, scope: str | None) -> CalibrationSummary | None:
+def summary_for(
+    spec: target_registry.TargetSpec,
+    scope: str | None,
+    launch: Mapping[str, Any] | None = None,
+) -> CalibrationSummary | None:
     """The calibration summary for this target, as a scan reports it.
 
     The recorded result when calibration ran. When it did not (controls set to
@@ -222,7 +271,7 @@ def summary_for(spec: target_registry.TargetSpec, scope: str | None) -> Calibrat
     seed arm, that is reported as not calibrated (``MYL-INC-002``), never as
     nothing. ``None`` for a target with nothing to calibrate.
     """
-    recorded = lookup(spec, scope)
+    recorded = lookup(spec, scope, launch)
     if recorded is not None:
         return summarise(recorded)
     if spec.effect_probe is None and spec.seed_arm is None:
@@ -269,7 +318,7 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
     """
     spec = adapter._spec
     scope = adapter._scope
-    key = spec_key(spec, scope)
+    key = spec_key(spec, scope, launch_of(adapter))
     if not allow_writes:
         return CalibrationResult(
             spec_key=key,
@@ -342,7 +391,8 @@ async def calibrate_custom_target(
     """
     spec = adapter._spec
     scope = adapter._scope
-    cached = lookup(spec, scope)
+    launch = launch_of(adapter)
+    cached = lookup(spec, scope, launch)
     if cached is not None:
         return cached
 
@@ -350,17 +400,27 @@ async def calibrate_custom_target(
     try:
         result = await calibrate(adapter, allow_writes=allow)
     except Exception as exc:
-        result = CalibrationResult(
-            spec_key=spec_key(spec, scope),
-            status=STATUS_FAILED,
-            reason_code=INC_POSITIVE_FAILED,
-            detail=f"could not launch the target to calibrate it: {type(exc).__name__}: {exc}",
-            tools=(),
-            seed_control=SeedControl(
+        # The target never started, so no control ran: not calibrated, and
+        # nothing about the probe's wiring is to blame.
+        seed = (
+            SeedControl(
                 SEED_NOT_RUN,
-                INC_SEED_NOT_RUN,
+                INC_NOT_CALIBRATED,
                 "the target could not be launched to run the seed control",
+            )
+            if spec.seed_arm is not None
+            else SeedControl(SEED_NOT_DECLARED, None, "the target declares no seed_arm")
+        )
+        result = CalibrationResult(
+            spec_key=spec_key(spec, scope, launch),
+            status=STATUS_FAILED,
+            reason_code=INC_NOT_CALIBRATED,
+            detail=(
+                "could not launch the target to calibrate it: "
+                f"{type(exc).__name__}: {redact(str(exc))}"
             ),
+            tools=(),
+            seed_control=seed,
         )
         record(result)
     return result
@@ -464,6 +524,19 @@ async def _probe_controls(
             (),
         )
 
+    if _mentions_payload(probe.verify_args_template):
+        # An attempt renders {payload} as its whole attack text, calibration as
+        # its own short token. A read that finds the token proves nothing about
+        # the read an attempt makes, so the probe can never be certified.
+        return (
+            STATUS_FAILED,
+            INC_POSITIVE_FAILED,
+            "verify_args_template uses {payload}, which an attempt fills with its whole "
+            "attack text, so calibration cannot prove the read an attempt makes; select "
+            "the record by a fixed value instead",
+            (),
+        )
+
     token = _new_token()
     verify_args = _render_seed_args(probe.verify_args_template, token, scope)
     errors = validate_args(verify.json_schema, verify_args)
@@ -504,6 +577,17 @@ async def _probe_controls(
         next(c for c in controls if c.status == TOOL_FAILED),
     )
     return STATUS_FAILED, first.reason_code, f"{first.tool}: {first.detail}", tuple(controls)
+
+
+def _mentions_payload(template: Any) -> bool:
+    """Whether ``{payload}`` appears in any string leaf of ``template``."""
+    if isinstance(template, str):
+        return "{payload}" in template
+    if isinstance(template, dict):
+        return any(_mentions_payload(v) for v in template.values())
+    if isinstance(template, (list, tuple)):
+        return any(_mentions_payload(v) for v in template)
+    return False
 
 
 def _read_failed(probe: target_registry.EffectProbeSpec) -> str:
