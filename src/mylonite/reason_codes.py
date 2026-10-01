@@ -330,7 +330,7 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "MYL-INC-002",
         "The effect probe was not calibrated: calibration was not authorized, its "
         "controls were set to skip, or the target could not be launched to run them.",
-        "Pass --authorize (scan/gate/ablate/validate) or check --authorize so the calibration "
+        "Pass --authorize (scan/gate/ablate/validate) so the calibration "
         "controls can run, and do not set calibration.controls to skip. A remote "
         "(sse/http) target also needs calibration.controls: allow -- auto only runs on "
         "an authorized stdio target. If the target could not be launched, check that its "

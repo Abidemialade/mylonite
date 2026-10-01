@@ -203,7 +203,8 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                     "attempt (an LLM-judge verdict, say), so they do not count. "
                     "Give the effect probe a marker built from {exfil_email} or "
                     "{exfil_host}, so the attempt's own call carries it, and run "
-                    "`mylonite check --authorize` to calibrate the probe."
+                    "`mylonite scan --target-file <file> --authorize <family>` to "
+                    "calibrate the probe."
                 )
                 break
         _remediation = {

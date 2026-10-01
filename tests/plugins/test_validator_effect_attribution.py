@@ -203,7 +203,7 @@ def _registered_target() -> Iterator[None]:
 
 def _certify(spec: target_registry.TargetSpec) -> None:
     """Record that calibration proved this target's probe sees a send and stays
-    quiet without one, as ``mylonite check --authorize`` would."""
+    quiet without one, as a live ``scan``/``gate``/``validate`` run would."""
     calibration.record(
         calibration.CalibrationResult(
             spec_key=calibration.spec_key(spec, None),

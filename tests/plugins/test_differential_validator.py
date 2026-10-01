@@ -1959,7 +1959,8 @@ def test_render_validation_report_unproven_remediation_via_the_real_validator() 
     out = buf.getvalue()
     assert "REJECTED" in out
     assert "{exfil_email}" in out
-    assert "check --authorize" in out
+    assert "scan --target-file" in out
+    assert "--authorize" in out
     assert "{payload}" not in out
 
 
