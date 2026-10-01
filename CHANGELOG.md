@@ -39,14 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catch what the offline `nr-ci` job can't: a kept W4 finding staying kept,
   the already-fixed guarded W2 hallucination staying rejected (or not
   resurfacing at all), the reference scan still reproducing at least 4
-  findings, and (once a target file is supplied) a custom-target live
-  re-drive. Each canary runs 3 times and passes on 2 of those 3 meeting its
-  bar — a live model's output isn't perfectly repeatable, so one miss out
-  of three isn't a regression. `scan`/`gate`'s `--max-llm-calls` bounds the
-  discovery scans' cost from the baseline call count plus 15% headroom;
-  `validate` has no budget flag, so its cost is held down by pinning
-  `--iterations` at the baseline value instead. Prints a table and writes a
-  JSON report; never prints a provider key. The nightly workflow needs the
+  findings, and a custom-target live re-drive against a committed loopback
+  stdio target (`reference_targets/mcp_kitchen_sink/canary.target.yaml`),
+  overridable with a different target file. KEPT/REJECTED is decided from
+  the persisted `validation_report.json`'s verdict label, never from
+  `validate`'s exit code (0 covers both a real KEPT and the weaker STABLE,
+  NOT PROVEN). Each canary runs 3 times and passes on 2 of those 3 meeting
+  its bar — a live model's output isn't perfectly repeatable, so one miss
+  out of three isn't a regression. `scan`/`gate`'s `--max-llm-calls` sizes
+  the discovery scans' budget from a baseline call count plus 15%
+  headroom, but that flag is a soft cap on those commands too (each seed
+  keeps a floor); `validate` has no budget flag at all, so its cost is
+  held down by pinning `--iterations` at the baseline value and a
+  per-subprocess wall-clock timeout instead — the $5-per-run figure is a
+  sizing input, not an enforced ceiling. Prints a table and writes a JSON
+  report; never prints a provider key. The nightly workflow needs the
   `MYLONITE_DOGFOOD_KEY` secret and skips cleanly (a notice, not a failure)
   when it's absent — never a required check. See "Live canaries" in
   `CONTRIBUTING.md`.

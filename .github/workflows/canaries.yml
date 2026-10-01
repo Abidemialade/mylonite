@@ -56,9 +56,12 @@ jobs:
 
       - name: Install (editable, with reference target)
         if: steps.key_check.outputs.present == 'true'
+        # The [mcp] extra is required for the custom-redrive canary: it
+        # launches reference_targets/mcp_kitchen_sink/canary.target.yaml's
+        # real stdio MCP server (mcp_kitchen_sink.stdio_vulnerable).
         run: |
           pip install -e ".[dev]"
-          pip install -e ./reference_targets/mcp_kitchen_sink
+          pip install -e "./reference_targets/mcp_kitchen_sink[mcp]"
 
       - name: Run the canaries
         if: steps.key_check.outputs.present == 'true'
