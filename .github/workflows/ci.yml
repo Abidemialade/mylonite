@@ -220,6 +220,66 @@ jobs:
       - name: Test count floor (never drops without the tests-removed label)
         run: python scripts/check_test_count.py --labels-env PR_LABELS
 
+  nr-ci-e2e:
+    # No-regression gate, stage 2: the deepest offline path, end to end. A
+    # reference scan replayed from recordings, its finding through the real
+    # generator and differential validator, then the emitted test run under
+    # pytest. The same run checks the gate's LLM call count against the
+    # committed baseline, and the labelled corpus checks every recorded
+    # verdict against its ground truth.
+    #
+    # No path filter and no `if:`, like `nr-ci`: it must report on every PR,
+    # docs-only included, so it can be made required. No provider key is set,
+    # so a replay that fell through to a live call fails instead of spending.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MYLONITE_OFFLINE_E2E: "1"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
+      - name: Install
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+      - name: Offline deep path, labelled corpus and LLM call counts
+        run: pytest tests/e2e/test_offline_deep_path.py tests/corpus tests/test_llm_call_count.py -q
+
+  nr-ci-e2e-windows:
+    # The same offline deep path on Windows, in parallel with the Linux job.
+    # Windows is where path, encoding and subprocess differences show up, and
+    # the main Windows test job skips this path to keep its wall time down.
+    # Always runs and always reports, like `nr-ci-e2e`.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      MYLONITE_OFFLINE_E2E: "1"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
+      - name: Install
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+      - name: Offline deep path, labelled corpus and LLM call counts
+        run: pytest tests/e2e/test_offline_deep_path.py tests/corpus tests/test_llm_call_count.py -q
+
   docs-consistency:
     # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs)
     # against the real Typer app. Runs in

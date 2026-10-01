@@ -156,9 +156,9 @@ out of date:
 
 The `nr-ci` job runs on every PR and push to main, docs-only changes
 included — it has no path filter, so it is safe to treat as a required
-check. It is the first layer of the no-regression gate; a second, heavier
-layer (a labelled regression corpus, a scripted fake-LLM call-count check,
-an offline end-to-end run) lands separately. `nr-ci` checks four things:
+check. It is the first layer of the no-regression gate; the second layer
+is described under "Offline deep path, corpus and call counts" below.
+`nr-ci` checks four things:
 
 - **CLI goldens.** `pytest tests/cli_golden -q` pins the command tree
   (every flag, default and help string), the `scan --dry-run` seed
@@ -223,6 +223,40 @@ an offline end-to-end run) lands separately. `nr-ci` checks four things:
   `tests/test_count_floor.txt`. The count may grow freely; it can only
   drop if the PR carries the `tests-removed` label, in which case lower
   the floor in the same PR to lock in the new count.
+
+### Offline deep path, corpus and call counts
+
+Two more jobs, `nr-ci-e2e` (Linux) and `nr-ci-e2e-windows`, run on every PR
+and push to main with no path filter and no provider key. Each runs:
+
+```bash
+MYLONITE_OFFLINE_E2E=1 pytest tests/e2e/test_offline_deep_path.py tests/corpus tests/test_llm_call_count.py -q
+```
+
+- **Offline deep path.** `tests/e2e/test_offline_deep_path.py` runs the
+  reference scan of the vulnerable twin from the demo's recordings, sends
+  its finding through the real generator and differential validator (which
+  replay `examples/reference_validation/differential_fixtures/`), and runs
+  the emitted test under pytest. It skips without `MYLONITE_OFFLINE_E2E=1`,
+  so the main test jobs don't pay for it twice; the two jobs above always
+  set it.
+- **Labelled corpus.** `tests/corpus/labels.yaml` gives each recorded run a
+  ground-truth label (`FINDING`, `NOT A FINDING` or `NOT TESTED`) and a
+  one-line reason. Rows point at runs already in the repo, such as the
+  recorded judge hallucination, the demo's reference scans and the #217
+  target files; nothing is copied. `tests/corpus/test_labelled_corpus.py`
+  replays each row and fails when its verdict stops matching the label.
+  Change a label only when the ground truth was wrong, and say why in the PR.
+- **LLM call counts.** `scripts/count_llm_calls.py` drives the reference
+  `scan` and `gate` paths through a scripted fake model that counts every
+  call: the planner replays recordings, the customiser and judge get
+  scripted replies. `tests/fixtures/llm_call_baseline.json` holds the
+  counts measured at the baseline commit (scan: 34 calls on the vulnerable
+  twin, 36 on the guarded one; gate: 113). A path that makes more than 15%
+  more calls fails `tests/test_llm_call_count.py` (scan) or the deep-path
+  test (gate). If a change needs more calls on purpose, re-run
+  `python scripts/count_llm_calls.py --gate`, update the baseline in the
+  same PR and say why.
 
 **CI wall time** is not enforced per PR — there is no stored history to
 compare against inside a single workflow run. The current baseline is
