@@ -154,9 +154,10 @@ rejected, mirroring `timeout_s`) says whether `calibrate_custom_target()` may ru
 its controls: real writes through a consequential tool, and a plant-and-recall
 through `seed_arm`, proving your `effect_probe` can actually see a change before
 a scan trusts its "no change". Every `scan`/`gate`/`ablate`/`validate` run that
-drives this target calls it once, automatically. `mylonite check --authorize`
-runs it on its own, without a scan, and prints each control's status and
-[reason code](reason-codes.md):
+drives this target calls it once, automatically, and prints each control's status
+and [reason code](reason-codes.md). Run
+`mylonite scan --target-file app.yaml --authorize my-app` to see it before
+trusting a full campaign's "no change" findings:
 
 - `auto` (the default): run on an **authorized `stdio`** target only. Every
   live-driving command already requires `--authorize` to match this target's
@@ -175,7 +176,8 @@ calibration:
 
 A certified probe is trusted only for what calibration showed it. Its "no change"
 clears a call only when every consequential tool the attempt called is one the
-positive control wrote through (`check --authorize` lists them). A call through any
+positive control wrote through (`scan --target-file app.yaml --authorize my-app`
+lists them). A call through any
 other tool may land where the probe cannot look, so it stays a finding. A
 `verify_args_template` that uses `{payload}` is never certified (`MYL-INC-003`): an
 attempt fills it with its whole attack text, so calibration cannot prove that read.

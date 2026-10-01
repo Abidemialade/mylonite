@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `docs/` (#231). `verification/README.md` previously told a reader to
   pass `scan --json`, a flag that never existed; it was fixed by hand before
   this guard existed to catch it.
+### Removed
+
+- **`mylonite check` no longer takes `--authorize`.** `check` stays a
+  zero-write, zero-key structural pre-check; calibration (the real-write
+  proof that a declared `effect_probe` can see a change) runs only through
+  `scan`, `gate` and `validate`, which already drive the target live and
+  already take `--authorize`. Point calibration readers at
+  `mylonite scan --target-file <file> --authorize <family>` instead.
 
 ## [0.10.5] - 2026-10-01
 

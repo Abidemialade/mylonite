@@ -27,8 +27,9 @@ caught: the attempt is reported as a plant failure or an undecided (NOT TESTED) 
 never as a clean pass.
 
 The wiring self-test now exists: `calibration` (`calibration.controls` in the target
-file; `mylonite check --authorize` runs it on its own) does real writes against the live
-target — a positive control (a fresh write through a consequential tool, carrying its
+file; `scan`/`gate`/`validate` run it automatically against a `--target-file` target)
+does real writes against the live target — a positive control (a fresh write through
+a consequential tool, carrying its
 own token) that the probe must see, and a negative control (two reads with nothing
 written between them) that it must not. It closes exactly the gap this caveat used to
 describe: a `verify_tool` that exists, never errors, but reads the *wrong* store, because
