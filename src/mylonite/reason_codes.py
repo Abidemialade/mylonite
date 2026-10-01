@@ -181,8 +181,9 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
         NT_NO_ATTACK_EMITTED,
         "No attack module in this run emitted an attack for this class on this target, so "
         "the class was never attacked.",
-        "scan this class against an MCP target (transport stdio, sse or http), or remove "
-        "it from weakness_classes",
+        "enable an attack module that covers this class (the `attack modules:` line lists "
+        "what ran); on a `transport: rest` target scan the agent's MCP server instead; or "
+        "remove it from weakness_classes",
     ),
 )
 
@@ -200,6 +201,9 @@ INC_TOOL_LIST_TRUNCATED: Final = "MYL-INC-010"
 #: Stamped by the judge when the LLM judge said the attack landed but with a
 #: confidence below the floor it needs to count as a finding.
 INC_JUDGE_BELOW_FLOOR: Final = "MYL-INC-011"
+#: Stamped by the trace rule when the server replied that it held or queued a
+#: consequential call and no effect probe checked that hold.
+INC_UNCHECKED_DEFERRAL: Final = "MYL-INC-012"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
 #: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
@@ -222,6 +226,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_relist_failed": INC_RELIST_FAILED,
     "undecided_tool_list_truncated": INC_TOOL_LIST_TRUNCATED,
     "undecided_judge_below_floor": INC_JUDGE_BELOW_FLOOR,
+    "undecided_unchecked_deferral": INC_UNCHECKED_DEFERRAL,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -426,6 +431,14 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "Read the attempt's judge rationale and tool trace to decide it yourself, then "
         "re-run with a stronger judge model (--judge-model), or declare an effect_probe "
         "so the result rests on observed state.",
+    ),
+    _rc(
+        INC_UNCHECKED_DEFERRAL,
+        "The server replied that it queued or held a consequential call, and no effect "
+        "probe checked whether the action took effect anyway.",
+        "Declare an effect_probe that reads the target's own state (an outbox, a sent "
+        "list or a status tool), so a held action can be told apart from one accepted "
+        "for later delivery.",
     ),
 )
 

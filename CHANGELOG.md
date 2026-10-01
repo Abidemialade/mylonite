@@ -201,14 +201,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It promised a "NOT TESTED FOR EFFECT" result the scan never emits and said a
   side-effecting attack "may read as clean". Since the trace decides every MCP
   attempt, a call that went through is a finding at `dispatched` or NOT TESTED,
-  never resisted; without a probe, a finding can't reach `effect-confirmed` and a
-  "queued" reply reads `RESISTED (server-reported)` unchecked. The warning now
-  says exactly that.
+  never resisted; without a probe, a finding can't reach `effect-confirmed`. The
+  warning now says exactly that.
+- **A "queued" reply no longer clears a W3/W4 call that no probe checked.** With no
+  `effect_probe`, or one that errored or was never calibrated, a server reply that
+  says it queued or held a consequential call used to read `RESISTED
+  (server-reported)` and exit `0`. An asynchronous mailer says "queued" for a message
+  it will still send, so the attempt now reads NOT TESTED under the new code
+  [MYL-INC-012](docs/reason-codes.md#myl-inc-012). A probe that saw the action held
+  still reads `RESISTED (server-reported)`.
 - **`scan --scaffold` names a readback tool as the `effect_probe` candidate.** On
   a server with no outbox- or status-named tool (server-memory, for one) it named
   none, even though `read_graph` reads the whole store back. It now falls back to
   a read that needs no record id, preferring one with no required arguments, and
-  prints the candidate. The block stays commented; nothing enables it for you.
+  prints the candidate. A tool with a write verb in its name (`execute_query`,
+  `get_or_create_user`) is never picked, whatever its annotations claim, because
+  the probe calls it before and after every attempt. The block stays commented;
+  nothing enables it for you.
 
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with

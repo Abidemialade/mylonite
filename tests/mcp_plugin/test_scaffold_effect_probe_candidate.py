@@ -69,6 +69,25 @@ def test_readback_fallback_never_picks_a_tool_marked_not_read_only() -> None:
     assert _classify_tools(tools).verify_tool is None
 
 
+def test_readback_fallback_never_picks_a_tool_whose_name_writes() -> None:
+    """The probe calls verify_tool before and after every attempt, so a write
+    picked here would run over and over. A read verb in the name is not enough."""
+    writes = [
+        _tool("execute_query", []),
+        _tool("search_and_delete", []),
+        _tool("open_pull_request", []),
+        _tool("get_or_create_user", []),
+    ]
+    assert _classify_tools(writes).verify_tool is None
+    # A real readback after them still wins, whatever the listing order.
+    assert _classify_tools([*writes, _tool("read_graph", [])]).verify_tool == "read_graph"
+
+
+def test_readback_fallback_ignores_a_read_only_claim_on_a_write_name() -> None:
+    tools = [_tool("send_message", ["to", "body"]), _tool("delete_all", [], read_only=True)]
+    assert _classify_tools(tools).verify_tool is None
+
+
 def test_scaffold_suggests_the_probe_but_never_enables_it() -> None:
     rendered = _render(memory_tools())
     assert "# CANDIDATE verify_tool (auto-detected): read_graph." in rendered

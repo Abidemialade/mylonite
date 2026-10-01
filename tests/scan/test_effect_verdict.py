@@ -442,10 +442,17 @@ _DECIDE_TABLE = [
         ("resisted", None, "MYL-SRV-001", "server-reported"),
     ),
     (
-        "server-deferred",
-        _evidence(trace_outcome="dispatched-deferred"),
+        "server-deferred-probe-saw-hold",
+        _evidence(trace_outcome="dispatched-deferred", effect_confirmed="deferred"),
         None,
         ("resisted", None, "MYL-SRV-002", "server-reported"),
+    ),
+    # With no probe to check it, a "queued" reply proves nothing either way.
+    (
+        "server-deferred-unprobed",
+        _evidence(trace_outcome="dispatched-deferred"),
+        None,
+        ("inconclusive", None, "MYL-INC-012", None),
     ),
     (
         "observer-saw-deferral",
@@ -663,12 +670,14 @@ def test_certified_true_beats_a_deferral_word() -> None:
 
 
 def test_uncalibrated_true_does_not_beat_a_deferral_word() -> None:
+    """An uncalibrated probe's "true" is not a finding, and the "queued" reply is
+    not a negative the probe checked, so the attempt proves nothing."""
     decision = decide(
         _evidence(trace_outcome="dispatched-deferred", effect_confirmed="true"),
         predicate=None,
     )
-    assert decision.kind == "resisted"
-    assert decision.reason_code == "MYL-SRV-002"
+    assert decision.kind == "inconclusive"
+    assert decision.reason_code == "MYL-INC-012"
 
 
 def test_decide_rejects_an_unknown_trace_outcome() -> None:

@@ -629,8 +629,9 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
       ``dispatched``, never ``effect-confirmed``;
     * a call the trace can't tie to the attempt reads NOT TESTED
       (``MYL-INC-001``), never resisted;
-    * a server reply that errors or says "queued" reads ``RESISTED
-      (server-reported)``, and nothing checks whether the effect landed anyway.
+    * a server reply that errors reads ``RESISTED (server-reported)``;
+    * a server reply that says "queued" reads NOT TESTED (``MYL-INC-012``):
+      nothing checks whether the action goes out anyway.
 
     So a missing probe weakens the proof; it does not turn an unconfirmed effect
     into a clean result. This is a WARNING, not an error (contrast the W2 block in
@@ -656,9 +657,10 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
             f"weakness class(es) {', '.join(effectful)} cause a real side effect (a "
             "send, fetch or write). No effect_probe is declared, so a finding can be "
             "proven only as far as 'dispatched' (the call reached the server), never "
-            "'effect-confirmed'. A server reply that errors or says it queued the action "
-            "reads RESISTED (server-reported), and nothing checks whether the effect "
-            "landed anyway. Add an effect_probe that reads the target's own state (see "
+            "'effect-confirmed'. A server reply that errors reads RESISTED "
+            "(server-reported); one that says it queued the action reads NOT TESTED "
+            f"[{reason_codes.INC_UNCHECKED_DEFERRAL}], since nothing checks whether it "
+            "goes out anyway. Add an effect_probe that reads the target's own state (see "
             "docs/target-file.md; `mylonite scan --scaffold` suggests one)."
         )
     # An expect_marker that is one of Mylonite's OWN planted exfil literals collides
