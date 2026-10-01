@@ -13,8 +13,9 @@ carries, so no new field is needed.
 A finding whose every firing run is judge-only (only the LLM judge said the
 attack landed) is REJECTED, not STABLE, NOT PROVEN: the validator fails the
 leg that claims the attack reproduced, because nothing but the judge showed
-that it did. :data:`JUDGE_ONLY_MARKER` in that leg's detail lets
-:func:`verdict_reason` say so.
+that it did. The report's ``notes`` then carry :data:`JUDGE_ONLY_MARKER`
+(the same bracketed-marker convention as ``_twin_fidelity.format_marker``),
+which lets :func:`verdict_reason` say so.
 
 A collect-only build (a custom target, whose test needs the live target to run)
 doesn't run the committed test: it proves the file collects. There a KEPT rests
@@ -34,14 +35,15 @@ KEPT: Final = "KEPT"
 STABLE_NOT_PROVEN: Final = "STABLE, NOT PROVEN"
 REJECTED: Final = "REJECTED"
 
-#: Stamped into the detail of the leg a judge-only finding fails, so the
-#: verdict reason can name the cause from the report alone (no new field).
+#: Stamped into ``ValidationReport.notes`` when a judge-only finding failed a
+#: leg, so the verdict reason can name the cause from the report alone (no new
+#: field). Same convention as the ``[guarded-twin=...]`` marker.
 JUDGE_ONLY_MARKER: Final = "[evidence=judge-only]"
 
 #: The clause that leg's detail carries next to the marker.
 JUDGE_ONLY_CLAUSE: Final = (
     "every firing run rests on the LLM judge alone: nothing in the target's state "
-    "or the recorded trace confirmed the attack, so it cannot keep a test " + JUDGE_ONLY_MARKER
+    "or the recorded trace confirmed the attack, so it cannot keep a test"
 )
 
 #: The legs that show a safeguard stops the attack (``differential``) or that
@@ -59,12 +61,14 @@ def has_proof(report: ValidationReport) -> bool:
     return any(o.stage in _PROOF_STAGES and o.passed and not o.report_only for o in report.outcomes)
 
 
+def judge_only_marker(judge_only: bool) -> str:
+    """`` [evidence=judge-only]`` for a report's notes, or empty."""
+    return f" {JUDGE_ONLY_MARKER}" if judge_only else ""
+
+
 def rests_on_judge_only(report: ValidationReport) -> bool:
-    """True when a gating leg failed because every firing run was judge-only."""
-    return any(
-        not o.passed and not o.report_only and JUDGE_ONLY_MARKER in o.detail
-        for o in report.outcomes
-    )
+    """True when the validator marked the report: every firing run was judge-only."""
+    return JUDGE_ONLY_MARKER in (report.notes or "")
 
 
 def verdict_label(report: ValidationReport) -> VerdictLabel:

@@ -126,7 +126,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leg (custom targets) or `differential` leg (reference twins) fails, and the
   verdict reads REJECTED: "every firing run rested on the LLM judge alone".
   One `state` or `trace` run is enough; judge-only runs then still count as
-  support. See `docs/validation.md`.
+  support. On a custom target, the tool-description and summary seeds, a
+  synthesised seed that names no tool, and any seed against a
+  `transport: rest` target are decided by the judge, so they now keep a test
+  only with an `effect_probe` in the target file (or a predicate hit on the
+  recorded tool calls). See `docs/validation.md`.
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the

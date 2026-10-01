@@ -82,7 +82,7 @@ from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact_exception
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
-from mylonite._verdict import JUDGE_ONLY_CLAUSE, verdict_label
+from mylonite._verdict import JUDGE_ONLY_CLAUSE, judge_only_marker, verdict_label
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -316,8 +316,13 @@ class _CustomRun:
 
 
 def _tier_clause(tiers: list[str | None]) -> str:
-    """``"; firing runs by evidence: 1 state, 2 trace"``, or empty with no tiers."""
+    """``"; firing runs by evidence: 1 state, 2 trace"``, or empty with no runs.
+
+    A firing run with no recorded tier counts as ``unknown``, so it stays
+    visible. It is not judge-only, so it never fails a leg on its own.
+    """
     counts = {tier: tiers.count(tier) for tier in ("state", "trace", "judge-only")}
+    counts["unknown"] = tiers.count(None)
     parts = [f"{n} {tier}" for tier, n in counts.items() if n]
     return f"; firing runs by evidence: {', '.join(parts)}" if parts else ""
 
@@ -648,7 +653,7 @@ class DifferentialValidator(ValidatorBase):
             # earns the strong claim. Stamping it is not cosmetic -- every reader
             # defaults to "boundary" when the marker is absent, so without this the
             # reference app (the demo everyone runs first) would UNDER-claim.
-        )
+        ) + judge_only_marker(judge_only)
 
         return ValidationReport(
             test_filename=test.filename,
@@ -921,7 +926,10 @@ class DifferentialValidator(ValidatorBase):
         notes = (
             f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "
             f"{effect_yes}/{n} runs showed the damage, consensus={agree:.2f}; "
-            f"{label} (kept = {' AND '.join(legs)})." + twin_note + notes_tail
+            f"{label} (kept = {' AND '.join(legs)})."
+            + twin_note
+            + notes_tail
+            + judge_only_marker(judge_only)
         )
         return ValidationReport(
             test_filename=test.filename,
