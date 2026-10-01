@@ -345,7 +345,8 @@ scan finding:
 | `STABLE, NOT PROVEN` | `stable, not proven` |
 | `REJECTED`, attack fired 0 times | `not reproduced on this model` |
 | `REJECTED`, otherwise | `rejected` |
- It reuses the exact data the
+
+It reuses the exact data the
 SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR
