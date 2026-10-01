@@ -34,6 +34,9 @@ _FIXTURE_0_10_4 = Path(__file__).resolve().parents[1] / "fixtures" / "scan_repor
         # The judge's rationale disagreed with the trace and the finding was kept.
         ("llm", {"rationale_trace_mismatch": "scaffold_tools_unknown"}, "judge-only"),
         ("llm", {"effect_confirmed": "true"}, "state"),
+        # A traced attempt the rule resisted: a stale probe "true" is not state.
+        ("predicate", {"trace_outcome": "not-called", "effect_confirmed": "true"}, "trace"),
+        ("llm", {"trace_outcome": "dispatched-ok", "effect_confirmed": "true"}, "judge-only"),
         (None, {}, None),
     ],
 )
