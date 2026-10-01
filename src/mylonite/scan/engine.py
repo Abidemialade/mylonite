@@ -49,7 +49,7 @@ from mylonite.scan.coverage import (
     provider_abort_message,
 )
 from mylonite.scan.customiser import PayloadCustomiser
-from mylonite.scan.evidence_tier import EVIDENCE_TIER_KEY, evidence_tier
+from mylonite.scan.evidence_tier import EVIDENCE_TIER_KEY, EVIDENCE_TIERS, evidence_tier
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
@@ -259,6 +259,12 @@ def _with_evidence_tier(judge_evidence: dict[str, str], mechanism: str | None) -
     if tier is None:
         return judge_evidence
     return {**judge_evidence, EVIDENCE_TIER_KEY: tier}
+
+
+def _pass_tier_rank(judged: _JudgedPass) -> int:
+    """Sort key: a pass's evidence tier, strongest first; an untiered pass last."""
+    tier = evidence_tier(judged.verdict.mechanism, judged.judge_evidence)
+    return EVIDENCE_TIERS.index(tier) if tier is not None else len(EVIDENCE_TIERS)
 
 
 @dataclass
@@ -1093,8 +1099,11 @@ class ScanEngine:
         # whether the recorded attempt looks decided or not. Prefer a pass that
         # actually reached a verdict; fall back to the first only when every
         # failing pass is a non-verdict, which is the honest record for that case.
+        # A finding records its strongest firing pass (state, then trace, then
+        # judge-only), so a judge-only first pass never hides a traced one.
+        # min() keeps the first of equal passes.
         decisive = (
-            success_passes[0]
+            min(success_passes, key=_pass_tier_rank)
             if is_finding
             else (
                 next(

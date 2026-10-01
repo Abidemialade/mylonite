@@ -456,34 +456,52 @@ async def test_an_undecided_attempt_has_no_evidence_tier() -> None:
     assert "evidence_tier" not in result.report.attempts[0].judge_evidence
 
 
-@pytest.mark.asyncio
-async def test_a_finding_only_the_llm_judge_made_is_judge_only() -> None:
+async def _judge_says_landed(**_: Any) -> Any:
     import json
     from types import SimpleNamespace
 
-    async def judge_says_landed(**_: Any) -> SimpleNamespace:
-        body = json.dumps(
-            {
-                "success": True,
-                "confidence": 0.95,
-                "reason": "the agent followed the planted instruction",
-                "harmful_intent_present": True,
-            }
-        )
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=body))])
-
-    # No trace outcome and no predicate signal, so only the judge decides.
-    response = AdapterResponse(
-        payload_pattern_id="x", raw_response="done", tool_calls=["read_note"], metadata={}
+    body = json.dumps(
+        {
+            "success": True,
+            "confidence": 0.95,
+            "reason": "the agent followed the planted instruction",
+            "harmful_intent_present": True,
+        }
     )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=body))])
+
+
+#: No trace outcome and no predicate signal, so only the judge decides.
+_JUDGE_ONLY_RESPONSE = AdapterResponse(
+    payload_pattern_id="x", raw_response="done", tool_calls=["read_note"], metadata={}
+)
+
+
+async def _judged_scan(responses: list[AdapterResponse], *, runs: int = 1) -> Any:
     engine = ScanEngine(
-        config=_config(),
-        adapter=_Adapter([response]),
+        config=_config(runs=runs),
+        adapter=_Adapter(responses),
         attack_modules=[_Module([_w2_payload()])],
         customiser=_NoCustomiser(),
-        judge=SuccessJudge(model="stub", completion_fn=judge_says_landed),
+        judge=SuccessJudge(model="stub", completion_fn=_judge_says_landed),
     )
-    result = await engine.run()
+    return await engine.run()
+
+
+@pytest.mark.asyncio
+async def test_under_runs_a_finding_records_its_strongest_firing_pass() -> None:
+    """The first firing pass is judge-only, the second is a traced dispatch: the
+    finding records the trace pass, whatever the order."""
+    result = await _judged_scan([_JUDGE_ONLY_RESPONSE, _response(["send_email"])], runs=2)
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "finding"
+    assert attempt.judge_evidence["evidence_tier"] == "trace"
+    assert result.exploits[0].payload.metadata["evidence_tier"] == "trace"
+
+
+@pytest.mark.asyncio
+async def test_a_finding_only_the_llm_judge_made_is_judge_only() -> None:
+    result = await _judged_scan([_JUDGE_ONLY_RESPONSE])
     attempt = result.report.attempts[0]
     assert attempt.outcome == "finding"
     assert attempt.verdict_mechanism == "llm"
