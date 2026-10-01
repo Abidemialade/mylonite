@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`mkdocs build --strict` now runs on every PR and push to main, docs-only
+  changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
+  PR could pass with a broken nav or a dead link) to `ci.yml` as the
+  unconditional `docs-build-strict` job; `docs.yml` keeps only its push-to-main
+  GitHub Pages deploy.
+- **The `Docs-Impact: none - <reason>` opt-out needs the `no-docs` label too,
+  in CI.** A commit message or PR description used to be enough on its own,
+  so anyone could skip the docs-sync check by writing the trailer into their
+  own commit. `scripts/check_docs_sync.py`'s `Docs and writing` CI run now
+  also requires the label — a maintainer's separate action — before the
+  reason is honoured; the local pre-commit hook is unchanged and still
+  accepts the reason by itself. See
+  [Enforcement](docs/contributing/writing-style.md#enforcement).
+- **`check_docs_sync.py` maps more of the codebase to the page that documents
+  it:** `commands/`, `scan/` (and `scan/providers.py` to the self-hosted-models
+  page specifically), `reason_codes.py`, `config.py`, `demo/` and
+  `gate/templates/` each now need their mapped doc page touched alongside a
+  change, the same way `cli.py` already did.
+- **The docs-consistency guard (`tests/test_docs_consistency.py`) now also
+  checks `mylonite ...` commands in `verification/*.md`**, not just README.md
+  and `docs/` (#231). `verification/README.md` previously told a reader to
+  pass `scan --json`, a flag that never existed; it was fixed by hand before
+  this guard existed to catch it.
+
 ## [0.10.5] - 2026-10-01
 
 This release closes the false clean on MCP targets set up the way the docs describe.
