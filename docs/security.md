@@ -33,6 +33,7 @@ non-negotiables:
 2. **No bundled targeting of public services.**
 3. **Secret-redaction in logs.** Anything that looks like a secret is
    redacted before any log line, report, or generated test is written.
+   Provider errors are logged as one redacted line, never as a raw traceback.
 4. **No evasion features.** PRs that add detection-evasion or anti-forensics
    are closed.
 5. **Vulnerable reference agents stay loopback-only.** The bundled
