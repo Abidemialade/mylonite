@@ -32,7 +32,7 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     | `skipped_no_seed_arm` | there was no way to plant the poisoned content |
     | `skipped_payload_not_delivered` | the plant never reached the model |
     | `skipped_planner_no_engagement` | the agent never invoked **the tool this attack targets** |
-    | `undecided` | the attack ran, but nothing adjudicated it — shown as `⚠ NO VERDICT` |
+    | `undecided` | the attack ran, but nothing adjudicated it — shown as `⚠ NO VERDICT`. This includes a failed mid-session tool re-list ([`MYL-INC-009`](reason-codes.md#myl-inc-009)) and a negative result on a tool list the server stopped paging early ([`MYL-INC-010`](reason-codes.md#myl-inc-010)) |
     | `launch_failure` | the target's command never started — shown as `⚠ LAUNCH FAILED` |
     | `skipped_invalid_metadata` / `skipped_unknown_seed` | the attempt was malformed before it ran |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
