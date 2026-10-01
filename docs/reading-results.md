@@ -130,6 +130,34 @@ low-confidence success that the trace contradicts is still the not-a-finding dow
 above, because the contradiction is the stronger evidence. A low-confidence "no" is a
 decided negative and reads as resisted, as before.
 
+### Evidence tier
+
+Every decided attempt says what its verdict rests on, in the `evidence` column of the
+scan table:
+
+| Tier | What decided it |
+|---|---|
+| `state` | a probe read the target's own state and saw the effect: proof level `effect-confirmed`, or `effect_confirmed: true` on a target with no trace outcome. |
+| `trace` | a deterministic check decided from what the session recorded: the trace rule (proof level `dispatched` or `dispatched-tool-linked`) or the seed's predicate. |
+| `judge-only` | only the LLM judge said so. Nothing in the target's state or the trace confirmed it. A judge success kept with a `rationale_trace_mismatch` is judge-only too. |
+
+Under the counts, a scan with findings prints how many rest on each tier:
+
+```
+findings by evidence: 1 state, 2 trace, 1 judge-only (judge-only: no state or trace confirmation)
+```
+
+A judge-only finding is worth a look, not a commit: `validate` never keeps a test when
+every firing run is judge-only (see [Validation](validation.md)). Attempts that reached no
+verdict, never ran, or could not apply have no tier and show `-`.
+
+The tier is written as `evidence_tier` in each decided attempt's `judge_evidence` in
+`scan_report.json`, and in a finding's payload `metadata` in `exploit_*.json`, next to
+`proof_level`. `verdicts.json` counts findings by tier, per class and in total
+(`evidence_tiers`). The tier is derived from fields every report already carries
+(`verdict_mechanism`, `proof_level`, `effect_confirmed`), so `mylonite report` on a scan
+directory saved by an earlier version shows the same tiers.
+
 ### What `effect_confirmed` means
 
 When the target file declares an `effect_probe`, every attempt records an
@@ -231,8 +259,8 @@ Each class reads one of four ways:
 The codes in brackets are [reason codes](reason-codes.md). The probe's calibration code
 appears on a class with an attempt that ran uncalibrated, and the seed control's code on
 W2. Calibration codes never change a status. The same summary is written to
-`verdicts.json` in the scan directory: each class with its status, codes, proof levels
-and counts, plus the calibration certificate. `mylonite report` on that directory reads
+`verdicts.json` in the scan directory: each class with its status, codes, proof levels,
+counts and findings by [evidence tier](#evidence-tier), plus the calibration certificate. `mylonite report` on that directory reads
 it back and prints the same block. Scans with no trace outcome (reference and REST
 targets, and scans saved by earlier versions) print no block and write no
 `verdicts.json`. Exit codes do not change.

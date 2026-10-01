@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every verdict now says what it rests on: `state`, `trace` or `judge-only`.**
+  The scan table has an `evidence` column, and a scan with findings prints
+  `findings by evidence: 1 state, 2 trace, 1 judge-only`. A `judge-only`
+  finding is one only the LLM judge called; nothing in the target's state or
+  the recorded tool calls confirmed it. The tier is written as `evidence_tier`
+  in `scan_report.json` (`judge_evidence`) and `exploit_*.json` (payload
+  `metadata`), and `verdicts.json` (now schema 1.1) counts findings per tier,
+  per class and in total. It is derived from fields every report already
+  carries, so `mylonite report` shows it for scans saved by earlier versions.
+  No contract or JSON schema changed. See "Evidence tier" in
+  `docs/reading-results.md`.
 - **Three more frozen-surface snapshots, alongside the existing reason-code
   one.** `tests/fixtures/testkit_signatures.snapshot.json` pins every
   `mylonite.testkit.__all__` entry's shape (parameters, defaults,
@@ -1187,7 +1198,6 @@ installs on Python 3.14.
   artefacts off disk and dropping it would silently start reading old
   no-verdict attempts as clean resistance.
 
-
 - `pip-audit` in CI is a real gate. It carried `continue-on-error: true`, which
   did more than its comment justified: dropping `--strict` already avoids the
   editable-install false failure, so the flag was additionally swallowing real
@@ -1495,7 +1505,6 @@ installs on Python 3.14.
   produced the same `no_finding` the tests asserted — so nothing went red. Both
   doubles now key on the response-schema key `harmful_intent_present`, and each
   file carries a guard asserting the marker against the live prompt.
-
 
 - `gate-action/action.yml` pinned `actions/setup-python@v6` by moving tag and
   interpolated its inputs directly into a `run:` block. Both are more serious

@@ -322,5 +322,22 @@ def test_class_verdict_to_dict_is_json_ready() -> None:
         "codes": [],
         "proof_levels": ["dispatched"],
         "counts": {"finding": 1, "resisted": 0, "server_reported": 0, "not_tested": 0},
+        "evidence_tiers": {"state": 0, "trace": 1, "judge-only": 0},
         "trace_decided": 1,
     }
+
+
+def test_a_class_counts_its_findings_by_evidence_tier() -> None:
+    judge_only = _attempt(_W4_B, "finding").model_copy(update={"verdict_mechanism": "llm"})
+    verdicts = _by_class(
+        cv.class_verdicts(
+            _report(
+                _attempt(_W4, "finding", proof_level="effect-confirmed"),
+                judge_only,
+                # A resisted attempt is not counted: the tiers describe findings.
+                _attempt(_W2, "no_finding"),
+            )
+        )
+    )
+    assert dict(verdicts["W4"].evidence_tiers) == {"state": 1, "trace": 0, "judge-only": 1}
+    assert dict(verdicts["W2"].evidence_tiers) == {"state": 0, "trace": 0, "judge-only": 0}

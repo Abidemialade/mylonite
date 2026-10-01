@@ -419,3 +419,73 @@ async def test_a_below_floor_judge_decline_stays_resisted() -> None:
     assert result.report.attempts[0].outcome == "no_finding"
     verdicts = {v.weakness: v for v in class_verdicts(result.report)}
     assert verdicts["W2"].status == STATUS_RESISTED
+
+
+# --- evidence tier on findings -----------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("meta", "tier"),
+    [
+        ({}, "trace"),
+        ({"calibrated": "true", "effect_confirmed": "true"}, "state"),
+    ],
+)
+async def test_a_finding_carries_its_evidence_tier(meta: dict[str, str], tier: str) -> None:
+    result = await _scan(_w4_payload(), [_response(["send_email"], **meta)])
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "finding"
+    assert attempt.judge_evidence["evidence_tier"] == tier
+    assert result.exploits[0].payload.metadata["evidence_tier"] == tier
+
+
+@pytest.mark.asyncio
+async def test_a_resisted_attempt_carries_its_evidence_tier() -> None:
+    resisted = _response(["read_note"], trace_outcome="not-called", link="unlinked")
+    result = await _scan(_w2_payload(), [resisted])
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "no_finding"
+    assert attempt.judge_evidence["evidence_tier"] == "trace"
+
+
+@pytest.mark.asyncio
+async def test_an_undecided_attempt_has_no_evidence_tier() -> None:
+    result = await _scan(_w2_payload(), [_unlinked()])
+    assert result.report.attempts[0].outcome == "undecided"
+    assert "evidence_tier" not in result.report.attempts[0].judge_evidence
+
+
+@pytest.mark.asyncio
+async def test_a_finding_only_the_llm_judge_made_is_judge_only() -> None:
+    import json
+    from types import SimpleNamespace
+
+    async def judge_says_landed(**_: Any) -> SimpleNamespace:
+        body = json.dumps(
+            {
+                "success": True,
+                "confidence": 0.95,
+                "reason": "the agent followed the planted instruction",
+                "harmful_intent_present": True,
+            }
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=body))])
+
+    # No trace outcome and no predicate signal, so only the judge decides.
+    response = AdapterResponse(
+        payload_pattern_id="x", raw_response="done", tool_calls=["read_note"], metadata={}
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_Adapter([response]),
+        attack_modules=[_Module([_w2_payload()])],
+        customiser=_NoCustomiser(),
+        judge=SuccessJudge(model="stub", completion_fn=judge_says_landed),
+    )
+    result = await engine.run()
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "finding"
+    assert attempt.verdict_mechanism == "llm"
+    assert attempt.judge_evidence["evidence_tier"] == "judge-only"
+    assert result.exploits[0].payload.metadata["evidence_tier"] == "judge-only"

@@ -87,7 +87,7 @@ def test_verdicts_json_records_classes_codes_proof_levels_and_the_certificate(
 ) -> None:
     scan_dir = write_artefacts(_traced(), tmp_path)
     data = json.loads((scan_dir / "verdicts.json").read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.0"
+    assert data["schema_version"] == "1.1"
     assert data["target_id"] == "mcp:custom"
     classes = {c["weakness"]: c for c in data["classes"]}
     assert classes["W4"]["status"] == "FINDING"
@@ -96,6 +96,8 @@ def test_verdicts_json_records_classes_codes_proof_levels_and_the_certificate(
     assert classes["W2"]["codes"] == ["MYL-INC-001", "MYL-INC-005", "MYL-INC-006"]
     assert data["codes"] == {"MYL-INC-001": 1, "MYL-INC-005": 1, "MYL-INC-006": 1}
     assert data["proof_levels"] == {"dispatched": 1}
+    assert data["evidence_tiers"] == {"state": 0, "trace": 1, "judge-only": 0}
+    assert classes["W4"]["evidence_tiers"] == {"state": 0, "trace": 1, "judge-only": 0}
     assert data["counts"] == {"finding": 1, "resisted": 0, "server_reported": 0, "not_tested": 1}
     assert data["calibration"]["status"] == "failed"
     assert data["calibration"]["reason_code"] == "MYL-INC-005"

@@ -50,6 +50,7 @@ from mylonite.scan.coverage import (
     reason_code_for_attempt,
 )
 from mylonite.scan.engine import ScanResult
+from mylonite.scan.evidence_tier import attempt_evidence_tier, tier_counts
 
 # Outcomes that mean "an attack was NOT exercised" — distinct from a benign
 # skip (the seed didn't apply) and CRUCIALLY distinct from a proven `no_finding`.
@@ -304,7 +305,9 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
 #: The per-class summary sidecar. Like ``tool_surface.json``, NOT a ScanReport
 #: field, so it costs no schema event and an older version simply ignores it.
 VERDICTS_FILENAME: Final = "verdicts.json"
-_VERDICTS_SCHEMA_VERSION: Final = "1.0"
+#: 1.1: added "evidence_tiers", top level and per class: findings by evidence
+#: tier (state, trace, judge-only).
+_VERDICTS_SCHEMA_VERSION: Final = "1.1"
 
 
 def _has_class_summary(result: ScanResult) -> bool:
@@ -388,6 +391,8 @@ def _verdicts_document(result: ScanResult) -> dict[str, object]:
         "codes": codes,
         # How many findings were shown at each proof level.
         "proof_levels": proof_levels,
+        # How many findings rest on the target's state, the trace, or the judge alone.
+        "evidence_tiers": tier_counts(a for a in result.report.attempts if a.outcome == "finding"),
         "counts": {
             "finding": sum(v.findings for v in verdicts),
             "resisted": sum(v.resisted for v in verdicts),
@@ -483,6 +488,8 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     table.add_column("status", no_wrap=True)
     table.add_column("seed_id", no_wrap=True)
     table.add_column("mechanism", no_wrap=True)
+    # Derived, not read from a stamp, so an older scan_report.json gets one too.
+    table.add_column("evidence", no_wrap=True)
     table.add_column("reason")
 
     # #206: an aborted run (e.g. budget exhausted) that still found something
@@ -504,6 +511,7 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             # can't raise MarkupError when the table renders (DCR-0004).
             rich_escape(attempt.seed_id),
             rich_escape(attempt.verdict_mechanism or "-"),
+            attempt_evidence_tier(attempt) or "-",
             # Free text (an LLM judge's rationale can quote target/response
             # content) — redact before Rich's column-width wrapping, not after.
             rich_escape(redact(attempt.verdict_reason or "")),
@@ -517,6 +525,9 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
     )
     console_print(console, counts)
     console_print(console, _verdicts_line(report, sep=sep))
+    evidence_line = _evidence_line(report)
+    if evidence_line:
+        console_print(console, evidence_line)
     if result.llm_spend is not None:
         console_print(console, format_spend(result.llm_spend, sep=sep))
     if report.inconclusive_attempts:
@@ -703,6 +714,23 @@ def _verdicts_line(report: ScanReport, *, sep: str) -> str:
         )
     if counts.no_verdict:
         line += f"{sep}{counts.no_verdict} reached no verdict"
+    return line
+
+
+def _evidence_line(report: ScanReport) -> str | None:
+    """What the findings rest on, by evidence tier; ``None`` with no findings.
+
+    A finding only the LLM judge made reads ``judge-only``: nothing in the
+    target's state or the recorded trace confirmed it, and ``validate`` will
+    not keep a test on that alone.
+    """
+    findings = [a for a in report.attempts if a.outcome == "finding"]
+    if not findings:
+        return None
+    counts = tier_counts(findings)
+    line = "findings by evidence: " + ", ".join(f"{n} {tier}" for tier, n in counts.items())
+    if counts["judge-only"]:
+        return f"[yellow]{line} (judge-only: no state or trace confirmation)[/yellow]"
     return line
 
 
