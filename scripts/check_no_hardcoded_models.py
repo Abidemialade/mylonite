@@ -17,7 +17,7 @@ mechanically.
 What it flags
 --------------
 Every ``*.py`` file under ``src/mylonite`` (never ``tests/`` or ``docs/`` --
-example strings and fixtures there legitimately name a model), line by line:
+example strings and fixtures there legitimately name a model), per occurrence:
 
 1. A provider-prefixed model literal: ``claude-``, ``gpt-``, ``gemini-``,
    ``ollama/``, ``anthropic/``, ``openai/``, ``bedrock/``.
@@ -28,15 +28,32 @@ example strings and fixtures there legitimately name a model), line by line:
    this check can never drift from what the CLI itself treats as a
    provider credential.
 
-A hit is an error unless it is listed in
-``scripts/hardcoded_models_allowlist.txt``. Each allowlist line names the
-file, the line number, the exact text that was flagged, and the reason it is
-there (the registry itself, the demo's pinned replay provider, an
-error-remedy or docstring that names an env var for a human to set). The
-entry is checked against the CURRENT line, not trusted blindly: if the named
-line no longer contains the named text, the entry is stale and the check
-fails, asking for it to be updated -- it can mask a different, unreviewed
-hit otherwise.
+Allowlist, keyed by content, not location
+------------------------------------------
+``scripts/hardcoded_models_allowlist.txt``, one entry per line::
+
+    <path> | <matched text or a stable regex> | <count> | <reason>
+
+Deliberately NOT line-number-keyed. An earlier version was, and that meant
+an unrelated edit anywhere ABOVE an allowlisted line -- adding a function, a
+docstring paragraph, anything -- silently shifted every line number below it
+and broke the check on a file nobody touched. That is exactly the kind of
+"required check blocks an unrelated change" failure a solo maintainer's own
+condition rules out (`nr-ci` is meant to be safe to mark required). Matching
+is now by file + the matched text itself (or a regex covering more than one
+literal spelling), with a count of how many times it is expected to appear in
+that file. The check fails only when:
+
+* a file holds a matched occurrence that no entry's pattern covers at all
+  ("new hit" -- flag it, fix it, or add an entry), or
+* a file holds MORE occurrences of a covered pattern than the entry's
+  ``count`` allows ("more matches than allowed" -- a new, unreviewed
+  occurrence slipped in alongside the ones already excused).
+
+It never looks at which line anything is on, so inserting, deleting or moving
+lines anywhere in the file is invisible to it. A stale entry (its pattern no
+longer matches ANYTHING in the named file -- the text it was excusing is
+gone) is also reported, so the list doesn't accumulate dead rows.
 
 Usage::
 
@@ -74,7 +91,7 @@ _SELF = Path(__file__).resolve()
 @dataclass(frozen=True)
 class Hit:
     path: str  # POSIX, relative to repo root
-    line: int
+    line: int  # diagnostic only -- never part of allowlist matching
     matched: str  # the exact substring that fired
     text: str  # the full line, for a readable report
 
@@ -82,10 +99,10 @@ class Hit:
 @dataclass(frozen=True)
 class AllowlistEntry:
     path: str
-    line: int
-    matched: str
+    pattern: str  # literal matched text, or a regex covering more than one
+    count: int  # how many occurrences of `pattern` are expected in `path`
     reason: str
-    source_line: str  # for a clear parse error
+    source_line: str  # for a clear parse error / report
 
 
 def _provider_env_var_matches(line: str) -> list[str]:
@@ -137,38 +154,44 @@ def parse_allowlist(text: str) -> list[AllowlistEntry]:
 
     Format, one entry per line::
 
-        <path>:<line>:<matched text> | <reason>
+        <path> | <matched text or a stable regex> | <count> | <reason>
 
     Blank lines and lines starting with ``#`` are ignored. Every field is
-    required -- an entry with no reason, or no matched text to re-check
-    against the current line, is a parse error rather than a silent no-op,
-    so a malformed edit fails loudly instead of quietly allowing nothing (or
-    everything).
+    required and ``count`` must be a positive integer -- a malformed edit
+    fails loudly rather than quietly allowing nothing (or everything).
     """
     entries: list[AllowlistEntry] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if "|" not in line:
-            raise AllowlistError(f"missing ' | <reason>': {raw!r}")
-        location, reason = line.split("|", 1)
-        reason = reason.strip()
-        if not reason:
-            raise AllowlistError(f"empty reason: {raw!r}")
-        parts = location.strip().split(":", 2)
-        if len(parts) != 3:
-            raise AllowlistError(f"expected '<path>:<line>:<matched text>': {raw!r}")
-        path, lineno_text, matched = parts
-        path = path.strip()
-        matched = matched.strip()
-        if not path or not matched:
-            raise AllowlistError(f"empty path or matched text: {raw!r}")
+        # A regex pattern may itself contain "|" (alternation, e.g.
+        # ``AZURE_API_(BASE|VERSION)``), so a plain 4-way split on "|" would
+        # misparse it. `path` is always the first segment and `reason` the
+        # last; `count` is the second-to-last; everything in between is the
+        # pattern, rejoined with "|" if it was itself split.
+        fields = [f.strip() for f in line.split("|")]
+        if len(fields) < 4:
+            raise AllowlistError(
+                f"expected '<path> | <matched text or regex> | <count> | <reason>': {raw!r}"
+            )
+        path = fields[0]
+        reason = fields[-1]
+        count_text = fields[-2]
+        pattern = "|".join(fields[1:-2]).strip()
+        if not path or not pattern or not reason:
+            raise AllowlistError(f"empty path, pattern or reason: {raw!r}")
         try:
-            lineno = int(lineno_text.strip())
+            count = int(count_text)
         except ValueError as exc:
-            raise AllowlistError(f"line number is not an integer: {raw!r}") from exc
-        entries.append(AllowlistEntry(path, lineno, matched, reason, raw))
+            raise AllowlistError(f"count is not an integer: {raw!r}") from exc
+        if count < 1:
+            raise AllowlistError(f"count must be >= 1: {raw!r}")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise AllowlistError(f"invalid regex {pattern!r}: {raw!r}") from exc
+        entries.append(AllowlistEntry(path, pattern, count, reason, raw))
     return entries
 
 
@@ -178,21 +201,35 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> list[AllowlistEntry]:
     return parse_allowlist(path.read_text(encoding="utf-8"))
 
 
-def _allowed_key(entry: AllowlistEntry) -> tuple[str, int, str]:
-    return (entry.path, entry.line, entry.matched)
+def _entry_covers(entry: AllowlistEntry, hit: Hit) -> bool:
+    return entry.path == hit.path and re.fullmatch(entry.pattern, hit.matched) is not None
+
+
+def count_for_entry(hits: list[Hit], entry: AllowlistEntry) -> int:
+    """How many scanned occurrences this entry's pattern actually covers."""
+    return sum(1 for h in hits if _entry_covers(entry, h))
 
 
 def unmatched_hits(hits: list[Hit], entries: list[AllowlistEntry]) -> list[Hit]:
-    """Hits not covered by any allowlist entry."""
-    allowed = {_allowed_key(e) for e in entries}
-    return [h for h in hits if (h.path, h.line, h.matched) not in allowed]
+    """Hits that no allowlist entry's pattern covers at all, at that path."""
+    return [h for h in hits if not any(_entry_covers(e, h) for e in entries)]
+
+
+def over_limit_entries(
+    hits: list[Hit], entries: list[AllowlistEntry]
+) -> list[tuple[AllowlistEntry, int]]:
+    """Entries whose pattern now matches MORE occurrences than ``count`` allows."""
+    out = []
+    for entry in entries:
+        actual = count_for_entry(hits, entry)
+        if actual > entry.count:
+            out.append((entry, actual))
+    return out
 
 
 def stale_entries(hits: list[Hit], entries: list[AllowlistEntry]) -> list[AllowlistEntry]:
-    """Allowlist entries that no longer match a real hit at that location --
-    the line moved, was edited, or the matched text is gone."""
-    live = {(h.path, h.line, h.matched) for h in hits}
-    return [e for e in entries if _allowed_key(e) not in live]
+    """Entries whose pattern no longer matches ANYTHING in the named file."""
+    return [e for e in entries if count_for_entry(hits, e) == 0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -205,9 +242,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     problems = unmatched_hits(hits, entries)
+    over_limit = over_limit_entries(hits, entries)
     stale = stale_entries(hits, entries)
 
-    if not problems and not stale:
+    if not problems and not over_limit and not stale:
         print(f"no hardcoded provider models or credential env vars ({len(entries)} allowlisted)")
         return 0
 
@@ -218,15 +256,25 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "\nUse mylonite.scan.providers / require_llm() instead of naming a provider "
             "directly, or add a line to scripts/hardcoded_models_allowlist.txt:\n"
-            "  <path>:<line>:<matched text> | <reason>",
+            "  <path> | <matched text or a stable regex> | <count> | <reason>",
             file=sys.stderr,
         )
-    if stale:
+    if over_limit:
         if problems:
             print(file=sys.stderr)
         print(
-            "Stale allowlist entries (the line no longer matches -- update or remove "
-            "them; a stale entry can hide a different, unreviewed hit):\n",
+            "More occurrences than the allowlist expects (a new, unreviewed one "
+            "slipped in alongside the excused ones):\n",
+            file=sys.stderr,
+        )
+        for entry, actual in over_limit:
+            print(f"  {entry.source_line}  (found {actual})", file=sys.stderr)
+    if stale:
+        if problems or over_limit:
+            print(file=sys.stderr)
+        print(
+            "Stale allowlist entries (the pattern no longer matches anything in that "
+            "file -- update or remove them):\n",
             file=sys.stderr,
         )
         for entry in stale:

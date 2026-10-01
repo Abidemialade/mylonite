@@ -1,127 +1,112 @@
 # Allowlist for scripts/check_no_hardcoded_models.py.
 #
-# One entry per line: <path>:<line>:<matched text> | <reason>
-# Blank lines and lines starting with "#" are ignored. The path is relative
-# to the repo root; the line and matched text must still be true of that
-# line today, or the entry is stale and the check fails (see the script's
-# module docstring for why a stale entry is treated as an error rather than
-# silently ignored).
+# One entry per line: <path> | <matched text or a stable regex> | <count> | <reason>
 #
-# This list may only shrink. If you remove a hardcoded model or credential
-# read, delete its line here too — do not leave a dead entry "for later".
-# If you add a new one, you almost certainly want
-# mylonite.scan.providers / require_llm() instead; if there is a genuine
-# reason it can't go through the registry, add a line here with that
-# reason, and say so in the PR description.
+# Blank lines and lines starting with "#" are ignored. The path is relative
+# to the repo root. `count` is how many times the pattern is expected to
+# match somewhere in that file TODAY -- not which line. Matching is by
+# content, not location, on purpose: a line-number-keyed allowlist breaks on
+# any unrelated edit above the flagged line, which would make an
+# unconnected change fail a required check. See the script's module
+# docstring for the full reasoning.
+#
+# The check fails when a file holds a matched occurrence no entry's pattern
+# covers at all, when a covered pattern matches MORE than its count, or when
+# an entry's pattern no longer matches anything in its file (stale).
+#
+# This list may only shrink (both the number of rows and the sum of their
+# counts are pinned as ceilings in tests/test_check_no_hardcoded_models.py).
+# If you remove a hardcoded model or credential read, lower the matching
+# count (or delete the row) and lower the ceiling in the same PR. If you add
+# a new one, you almost certainly want mylonite.scan.providers /
+# require_llm() instead; if there is a genuine reason it can't go through
+# the registry, add a row here with that reason and raise the ceiling in the
+# same PR, and say so in the PR description.
 
 # --- scan/providers.py: the approved-provider registry itself -------------
 # The one file allowed to name a provider's identity, default model family,
 # or credential env var(s) by design (see its own module docstring).
-src/mylonite/scan/providers.py:4:ANTHROPIC_API_KEY | the approved-provider registry's own docstring, explaining why it exists
-src/mylonite/scan/providers.py:14:ollama/ | the approved-provider registry
-src/mylonite/scan/providers.py:23:ANTHROPIC_API_KEY | the approved-provider registry
-src/mylonite/scan/providers.py:24:OPENAI_API_KEY | the approved-provider registry
-src/mylonite/scan/providers.py:25:AZURE_API_KEY | the approved-provider registry
-src/mylonite/scan/providers.py:26:GEMINI_API_KEY | the approved-provider registry
-src/mylonite/scan/providers.py:26:GOOGLE_API_KEY | the approved-provider registry (explains LiteLLM also accepts this name)
-src/mylonite/scan/providers.py:27:AWS_ACCESS_KEY_ID | the approved-provider registry (Bedrock's credential pair)
-src/mylonite/scan/providers.py:27:AWS_SECRET_ACCESS_KEY | the approved-provider registry (Bedrock's credential pair)
-src/mylonite/scan/providers.py:36:AZURE_API_BASE | the approved-provider registry's own comment
-src/mylonite/scan/providers.py:36:AZURE_API_VERSION | the approved-provider registry's own comment
-src/mylonite/scan/providers.py:36:AZURE_API_KEY | the approved-provider registry's own comment
-src/mylonite/scan/providers.py:42:AZURE_API_BASE | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS)
-src/mylonite/scan/providers.py:42:AZURE_API_VERSION | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS)
-src/mylonite/scan/providers.py:56:AWS_REGION_NAME | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS)
-src/mylonite/scan/providers.py:60:OPENAI_API_BASE | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS)
-src/mylonite/scan/providers.py:262:anthropic/ | the approved-provider registry's own docstring, listing providers it covers
-src/mylonite/scan/providers.py:262:openai/ | the approved-provider registry's own docstring, listing providers it covers
-src/mylonite/scan/providers.py:262:bedrock/ | the approved-provider registry's own docstring, listing providers it covers
-src/mylonite/scan/providers.py:262:ollama/ | the approved-provider registry's own docstring, listing providers it covers
-src/mylonite/scan/providers.py:264:AZURE_API_BASE | the approved-provider registry's own docstring, explaining a past bug
-src/mylonite/scan/providers.py:265:AZURE_API_VERSION | the approved-provider registry's own docstring, explaining a past bug
-src/mylonite/scan/providers.py:265:AZURE_API_KEY | the approved-provider registry's own docstring, explaining a past bug
-src/mylonite/scan/providers.py:278:STRIPE_API_KEY | docstring example of an unrelated credential that happens to match the *_API_KEY shape, not a provider
-src/mylonite/scan/providers.py:291:AWS_REGION_NAME | the approved-provider registry's own docstring, explaining a past bug
-src/mylonite/scan/providers.py:292:OPENAI_API_BASE | the approved-provider registry's own docstring, explaining a past bug
+src/mylonite/scan/providers.py | ANTHROPIC_API_KEY | 2 | the approved-provider registry
+src/mylonite/scan/providers.py | OPENAI_API_KEY | 1 | the approved-provider registry
+src/mylonite/scan/providers.py | AZURE_API_KEY | 3 | the approved-provider registry
+src/mylonite/scan/providers.py | GEMINI_API_KEY | 1 | the approved-provider registry
+src/mylonite/scan/providers.py | GOOGLE_API_KEY | 1 | the approved-provider registry (LiteLLM also accepts this name)
+src/mylonite/scan/providers.py | AWS_ACCESS_KEY_ID | 1 | the approved-provider registry (Bedrock's credential pair)
+src/mylonite/scan/providers.py | AWS_SECRET_ACCESS_KEY | 1 | the approved-provider registry (Bedrock's credential pair)
+src/mylonite/scan/providers.py | AZURE_API_BASE | 3 | the approved-provider registry
+src/mylonite/scan/providers.py | AZURE_API_VERSION | 3 | the approved-provider registry
+src/mylonite/scan/providers.py | AWS_REGION_NAME | 2 | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS, and its own docstring)
+src/mylonite/scan/providers.py | OPENAI_API_BASE | 2 | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS, and its own docstring)
+src/mylonite/scan/providers.py | anthropic/ | 1 | the approved-provider registry's own docstring, listing providers it covers
+src/mylonite/scan/providers.py | openai/ | 1 | the approved-provider registry's own docstring, listing providers it covers
+src/mylonite/scan/providers.py | bedrock/ | 1 | the approved-provider registry's own docstring, listing providers it covers
+src/mylonite/scan/providers.py | ollama/ | 2 | the approved-provider registry's own docstring and comment, listing providers it covers
+src/mylonite/scan/providers.py | STRIPE_API_KEY | 1 | docstring example of an unrelated credential that happens to match the *_API_KEY shape, not a provider
 
 # --- user-facing text naming an env var so a human knows what to set ------
 # Error remedies and --help text that tell the USER which credential to
-# export. None of these pick a provider on the user's behalf.
-src/mylonite/_redaction.py:465:ANTHROPIC_API_KEY | comment explaining why gate-runner secrets get redacted, not a default
-src/mylonite/cli.py:392:ANTHROPIC_API_KEY | --env-file error text showing the KEY=VALUE shape a user should write
-src/mylonite/cli.py:1948:ANTHROPIC_API_KEY | error remedy telling the user which key to set, among other options the message also gives
-src/mylonite/cli.py:2051:ANTHROPIC_API_KEY | error remedy naming an example provider key
-src/mylonite/cli.py:2186:ANTHROPIC_API_KEY | docstring naming the example key used when describing --live
-src/mylonite/generate/wiring.py:370:ANTHROPIC_API_KEY | --help text naming an example provider key
-src/mylonite/plugins/_mcp/target_file.py:410:ANTHROPIC_API_KEY | docstring naming an example secret a CI gate runner has, not a default
-src/mylonite/plugins/_reference/reference_validator.py:262:ANTHROPIC_API_KEY | docstring naming the example key used when describing --live
-src/mylonite/reason_codes.py:250:ANTHROPIC_API_KEY | reason-code remedy text naming an example provider key
-src/mylonite/scan/diagnostics.py:72:ANTHROPIC_API_KEY | doctor's remedy text listing several providers' keys as examples
-src/mylonite/scan/diagnostics.py:72:OPENAI_API_KEY | doctor's remedy text listing several providers' keys as examples
-src/mylonite/scan/diagnostics.py:72:GEMINI_API_KEY | doctor's remedy text listing several providers' keys as examples
-src/mylonite/scan/llm_policy.py:72:ANTHROPIC_API_KEY | error remedy listing two providers' keys as examples
-src/mylonite/scan/llm_policy.py:72:OPENAI_API_KEY | error remedy listing two providers' keys as examples
+# export, or a doctor-style helper that returns the credential var name for
+# a provider the caller already chose. None of these pick a provider on the
+# user's behalf.
+src/mylonite/_redaction.py | ANTHROPIC_API_KEY | 1 | comment explaining why gate-runner secrets get redacted, not a default
+src/mylonite/cli.py | ANTHROPIC_API_KEY | 5 | --env-file/--live docstrings and error remedies naming an example key, plus the doctor key-shape helper returning this var for a provider the caller already chose
+src/mylonite/cli.py | OPENAI_API_KEY | 1 | the doctor key-shape helper, returning this var for a provider the caller already chose
+src/mylonite/cli.py | AWS_ACCESS_KEY_ID | 1 | the doctor key-shape helper, returning this var for a provider the caller already chose
+src/mylonite/cli.py | AZURE_API_BASE | 1 | comment explaining the Azure pre-flight completeness check
+src/mylonite/cli.py | AZURE_API_VERSION | 1 | comment explaining the Azure pre-flight completeness check
+src/mylonite/generate/wiring.py | ANTHROPIC_API_KEY | 1 | --help text naming an example provider key
+src/mylonite/plugins/_mcp/target_file.py | ANTHROPIC_API_KEY | 1 | docstring naming an example secret a CI gate runner has, not a default
+src/mylonite/plugins/_reference/reference_validator.py | ANTHROPIC_API_KEY | 1 | docstring naming the example key used when describing --live
+src/mylonite/reason_codes.py | ANTHROPIC_API_KEY | 1 | reason-code remedy text naming an example provider key
+src/mylonite/scan/diagnostics.py | ANTHROPIC_API_KEY | 1 | doctor's remedy text listing several providers' keys as examples
+src/mylonite/scan/diagnostics.py | OPENAI_API_KEY | 1 | doctor's remedy text listing several providers' keys as examples
+src/mylonite/scan/diagnostics.py | GEMINI_API_KEY | 1 | doctor's remedy text listing several providers' keys as examples
+src/mylonite/scan/llm_policy.py | ANTHROPIC_API_KEY | 1 | error remedy listing two providers' keys as examples
+src/mylonite/scan/llm_policy.py | OPENAI_API_KEY | 1 | error remedy listing two providers' keys as examples
 
 # --- comments/docstrings explaining a pre-flight or key-shape check -------
-# Explain WHY a check exists by naming the vars it looks at; they do not
-# pick a default.
-src/mylonite/cli.py:302:AZURE_API_BASE | comment explaining the Azure pre-flight completeness check
-src/mylonite/cli.py:302:AZURE_API_VERSION | comment explaining the Azure pre-flight completeness check
-src/mylonite/config.py:278:AWS_ACCESS_KEY_ID | docstring explaining the Bedrock pre-flight completeness check
-src/mylonite/config.py:279:AWS_SECRET_ACCESS_KEY | docstring explaining the Bedrock pre-flight completeness check
-src/mylonite/config.py:282:AZURE_API_KEY | docstring explaining the Azure pre-flight completeness check
-src/mylonite/config.py:283:AZURE_API_BASE | docstring explaining the Azure pre-flight completeness check
-src/mylonite/config.py:284:AZURE_API_VERSION | docstring explaining the Azure pre-flight completeness check
-src/mylonite/cli.py:350:ANTHROPIC_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
-src/mylonite/cli.py:352:OPENAI_API_KEY | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
-src/mylonite/cli.py:354:AWS_ACCESS_KEY_ID | returns the credential var name for a provider the caller already chose (mirrors PROVIDER_ENV_VARS for doctor's key-shape check), not a default
+src/mylonite/config.py | AWS_ACCESS_KEY_ID | 1 | docstring explaining the Bedrock pre-flight completeness check
+src/mylonite/config.py | AWS_SECRET_ACCESS_KEY | 1 | docstring explaining the Bedrock pre-flight completeness check
+src/mylonite/config.py | AZURE_API_KEY | 1 | docstring explaining the Azure pre-flight completeness check
+src/mylonite/config.py | AZURE_API_BASE | 1 | docstring explaining the Azure pre-flight completeness check
+src/mylonite/config.py | AZURE_API_VERSION | 1 | docstring explaining the Azure pre-flight completeness check
 
 # --- example text illustrating the provider-prefixed --model syntax -------
 # Error messages and docstrings that show the SHAPE of a --model value
 # ("provider/model-name"); the user still has to type one.
-src/mylonite/cli.py:500:claude- | --model validation error showing example values, not a default
-src/mylonite/cli.py:540:anthropic/ | warning text showing the provider-prefixed form of an unprefixed --model the user passed
-src/mylonite/cli.py:540:claude- | warning text showing the provider-prefixed form of an unprefixed --model the user passed
-src/mylonite/cli.py:1949:openai/ | error remedy showing an example --model value for a non-default provider
-src/mylonite/cli.py:1949:gpt- | error remedy showing an example --model value for a non-default provider
-src/mylonite/config.py:299:openai/ | error remedy showing an example provider-prefixed --model value
-src/mylonite/config.py:299:gpt- | error remedy showing an example provider-prefixed --model value
-src/mylonite/scan/model_ref.py:36:claude- | docstring example of an unversioned alias that fails auto-routing
-src/mylonite/scan/model_ref.py:90:anthropic/ | error remedy showing the provider-prefixed form to pass instead
-src/mylonite/scan/model_ref.py:90:claude- | error remedy showing the provider-prefixed form to pass instead
-src/mylonite/scan/_llm.py:921:claude- | docstring describing a PAST hardcode that was removed, quoted for context
-src/mylonite/testkit/__init__.py:151:claude- | docstring example of a committed regression test's pinned model/provider
+src/mylonite/cli.py | anthropic/ | 1 | warning text showing the provider-prefixed form of an unprefixed --model the user passed
+src/mylonite/cli.py | gpt- | 1 | error remedy showing an example --model value for a non-default provider
+src/mylonite/cli.py | openai/ | 1 | error remedy showing an example --model value for a non-default provider
+src/mylonite/config.py | gpt- | 1 | error remedy showing an example provider-prefixed --model value
+src/mylonite/config.py | openai/ | 1 | error remedy showing an example provider-prefixed --model value
+src/mylonite/scan/model_ref.py | anthropic/ | 1 | error remedy showing the provider-prefixed form to pass instead
+src/mylonite/scan/model_ref.py | claude- | 2 | docstring example of an unversioned alias, plus the error remedy showing the provider-prefixed form
+src/mylonite/scan/_llm.py | claude- | 1 | docstring describing a PAST hardcode that was removed, quoted for context
+src/mylonite/testkit/__init__.py | claude- | 1 | docstring example of a committed regression test's pinned model/provider
 
 # --- the demo's own pinned replay provider/model ---------------------------
 # The demo deliberately replays fixtures recorded against one fixed
 # provider/model (DEMO_PROVIDER/DEMO_MODEL in demo/runner.py) and must never
-# silently pick up a different one — see that module's REPLAY INVARIANT
+# silently pick up a different one -- see that module's REPLAY INVARIANT
 # docstring. These are comments explaining that pin.
-src/mylonite/demo/runner.py:89:ollama/ | comment contrasting the demo's live-mode route naming, not a default
-src/mylonite/demo/runner.py:296:anthropic/ | comment explaining a past bug in deriving the provider from a --model override
+src/mylonite/demo/runner.py | ollama/ | 1 | comment contrasting the demo's live-mode route naming, not a default
+src/mylonite/demo/runner.py | anthropic/ | 1 | comment explaining a past bug in deriving the provider from a --model override
 
 # --- an example mylonite.yaml snippet in a docstring -----------------------
-src/mylonite/config.py:95:claude- | docstring's example mylonite.yaml, not a parsed default
-src/mylonite/config.py:96:claude- | docstring's example mylonite.yaml, not a parsed default
+src/mylonite/config.py | claude- | 2 | docstring's example mylonite.yaml, not a parsed default
 
 # --- pre-existing hardcoded fallback models (real debt, not fixed here) ---
 # These ARE defaults used when a caller passes no --model, predating the
 # 2026-09-30 "no default provider" rule in CLAUDE.md. Fixing them means
 # deciding what every model-taking command does with no --model and no
-# config — a cross-cutting, security-sensitive change, out of scope for the
+# config -- a cross-cutting, security-sensitive change, out of scope for the
 # nr-ci check itself. Flagged here so they are visible rather than silently
 # exempted; a follow-up should route them through providers.py/require_llm()
 # or make them error instead of defaulting.
-src/mylonite/cli.py:1082:claude- | pre-existing hardcoded fallback model (scan's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:2229:claude- | pre-existing hardcoded fallback model (validate's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:3003:claude- | pre-existing hardcoded fallback model (gate's base_model); real debt, not fixed by this PR
-src/mylonite/cli.py:3482:claude- | pre-existing hardcoded fallback model (ablate's base_model); real debt, not fixed by this PR
-src/mylonite/commands/check.py:114:claude- | pre-existing hardcoded fallback model (check's reference-target adapter); real debt, not fixed by this PR
-src/mylonite/commands/check.py:132:claude- | pre-existing hardcoded fallback model (check's custom-target adapter); real debt, not fixed by this PR
-src/mylonite/gate/mitigation.py:29:claude- | comment quoting cli.py's hardcoded gate default, for the reason below
-src/mylonite/gate/mitigation.py:33:claude- | pre-existing hardcoded fallback model (DEFAULT_MITIGATION_MODEL); real debt, not fixed by this PR
-src/mylonite/gate/mitigation.py:391:claude- | docstring quoting the same pre-existing hardcoded fallback model, for context
-src/mylonite/plugins/_mcp/_session_adapter.py:68:claude- | pre-existing hardcoded fallback model (DEFAULT_MODEL for the MCP session adapter); real debt, not fixed by this PR
-src/mylonite/plugins/_mcp/scaffold.py:401:claude- | pre-existing hardcoded fallback model (scaffold's adapter default); real debt, not fixed by this PR
-src/mylonite/plugins/_reference/reference_target_adapter.py:54:claude- | pre-existing hardcoded fallback model (DEFAULT_MODEL for the reference/demo adapter); real debt, not fixed by this PR
-src/mylonite/plugins/_reference/reference_validator.py:379:claude- | pre-existing hardcoded fallback model (reference_validator's default param); real debt, not fixed by this PR
+src/mylonite/cli.py | claude- | 8 | --model validation/warning example text, plus the pre-existing hardcoded base_model fallback repeated across scan/validate/gate/ablate; the fallback is real debt, not fixed by this PR
+src/mylonite/commands/check.py | claude- | 2 | pre-existing hardcoded fallback model for check's reference- and custom-target adapters; real debt, not fixed by this PR
+src/mylonite/gate/mitigation.py | claude- | 3 | pre-existing hardcoded fallback model (DEFAULT_MITIGATION_MODEL) plus two comments/docstrings quoting it; real debt, not fixed by this PR
+src/mylonite/plugins/_mcp/_session_adapter.py | claude- | 1 | pre-existing hardcoded fallback model (DEFAULT_MODEL for the MCP session adapter); real debt, not fixed by this PR
+src/mylonite/plugins/_mcp/scaffold.py | claude- | 1 | pre-existing hardcoded fallback model (scaffold's adapter default); real debt, not fixed by this PR
+src/mylonite/plugins/_reference/reference_target_adapter.py | claude- | 1 | pre-existing hardcoded fallback model (DEFAULT_MODEL for the reference/demo adapter); real debt, not fixed by this PR
+src/mylonite/plugins/_reference/reference_validator.py | claude- | 1 | pre-existing hardcoded fallback model (reference_validator's default param); real debt, not fixed by this PR
