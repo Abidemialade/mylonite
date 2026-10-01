@@ -69,8 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evidence in `scan_report.json` keeps the judge's text and says what
   disagreed: `downgraded: rationale_contradicts_trace`, plus
   `rationale_names_untaken_tools` and/or `rationale_names_unseen_destinations`.
-  If the agent did make a consequential call, or the attempt's setup is not one
-  the check knows, the finding stands and the disagreement is recorded as
+  If the agent did make a consequential call, wrote the named destination into
+  its reply, or the attempt's setup is not one the check knows, the finding stands and the disagreement is recorded as
   `rationale_trace_mismatch`, so a judge that names the wrong tool on a real
   send never hides it. This closes a false finding seen on the reference
   guarded build, where the trace held only `write_note` and `read_note` and a
