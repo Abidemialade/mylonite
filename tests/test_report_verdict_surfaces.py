@@ -112,6 +112,25 @@ def test_recorded_scan_finding_is_a_warning_marked_unvalidated(tmp_path: Path) -
     assert finding["proof"] is None
 
 
+def test_recorded_rejected_validation_names_no_proven_control() -> None:
+    """The recorded run tested control W4 (its notes say so) and was rejected,
+    so the bundle must not call that control proven."""
+    from mylonite import testkit
+    from mylonite.contracts import ValidationReport
+    from mylonite.report.bundle import to_bundle
+
+    report = ValidationReport.model_validate_json(
+        (REJECTED_DIR / "validation_report.json").read_text(encoding="utf-8")
+    )
+    assert "control 'W4'" in (report.notes or "")
+    exploit = testkit.load_exploit(next(REJECTED_DIR.glob("exploit_*.json")))
+    metadata = {**exploit.payload.metadata, "synthetic_control": "W4"}
+    exploit = exploit.model_copy(
+        update={"payload": exploit.payload.model_copy(update={"metadata": metadata})}
+    )
+    assert to_bundle([(exploit, report)])["findings"][0]["proven_control"] is None
+
+
 @pytest.mark.parametrize("artefact_dir", [REJECTED_DIR, SCAN_DIR])
 def test_nothing_unproven_reaches_code_scanning_as_an_error(
     artefact_dir: Path, tmp_path: Path

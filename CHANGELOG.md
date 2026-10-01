@@ -89,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   safeguard, not the model, carries the security". `report --json` now sets
   `claim` to `null` for any other verdict and adds `proof.verdict` and
   `proof.status` (for example `not reproduced on this model`).
-  `schema_version` moves to `1.4`; no field was renamed or removed.
+  `proven_control` follows the same rule: it is `null` unless the verdict is
+  `KEPT`. `schema_version` moves to `1.4`; no field was renamed or removed.
 
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only

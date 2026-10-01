@@ -335,7 +335,9 @@ counts, `kept`, `verdict`, `status` and the `claim` the run earned), `guarded_tw
 `proof` is `null` for a scan finding that was never validated. For a validated one,
 `proof.verdict` is `KEPT`, `STABLE, NOT PROVEN` or `REJECTED`, and `proof.claim` is set
 only for `KEPT` with a guarded twin. Every other verdict has `claim: null`, and
-`proof.status` says what the run showed:
+`proof.status` says what the run showed. `proven_control` follows the same rule: it
+names the control only for `KEPT`, and is `null` for every other verdict and for a
+scan finding:
 
 | `proof.verdict` | `proof.status` |
 |---|---|
