@@ -34,6 +34,7 @@ import logging
 from enum import Enum
 from typing import Any
 
+from mylonite._redaction import redact_exception
 from mylonite.scan.model_ref import ModelRef
 
 logger = logging.getLogger(__name__)
@@ -301,10 +302,16 @@ def sanitise_tool_schema(schema: dict[str, Any], dialect: SchemaDialect) -> dict
         defs = _collect_defs(schema)
         result = _sanitise_node(schema, defs, depth=0, seen=frozenset())
         return result if isinstance(result, dict) else dict(schema)
-    except Exception:
+    except Exception as exc:
+        # DCR-0016: exc_info=True renders the raw (unredacted) exception text
+        # + traceback -- the secret-redacting log filter only rewrites a
+        # record's rendered message, never the separately-rendered
+        # traceback, so a malformed schema that happens to embed a
+        # credential-shaped string could otherwise leak it at DEBUG. Log a
+        # redacted one-line summary instead, with no exc_info.
         logger.debug(
-            "sanitise_tool_schema: STRICT sanitisation raised unexpectedly; "
+            "sanitise_tool_schema: STRICT sanitisation raised unexpectedly (%s); "
             "returning the original schema unchanged",
-            exc_info=True,
+            redact_exception(exc),
         )
         return schema

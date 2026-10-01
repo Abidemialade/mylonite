@@ -40,6 +40,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel
 
+from mylonite._redaction import redact_exception
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
 from mylonite.scan.llm_parse import (
     _extract_json_candidate,
@@ -588,14 +589,19 @@ def _classify_or_swallow(
         # NonRecoverableProviderError per payload, so an uncapped line here
         # repeated once per seed per role: most of the ~12 KB a single bad
         # --model printed before the one useful line. Same shape as the
-        # recoverable branch: a short ERROR line, the full traceback at DEBUG.
+        # recoverable branch: a short ERROR line, plus a redacted one-line
+        # detail at DEBUG — DCR-0016: `exc_info`'s traceback bypasses the
+        # secret-redacting log filter even at DEBUG (the filter only
+        # rewrites a record's rendered message, never the separately
+        # -rendered traceback), so no raw traceback is logged here at any
+        # level, only `redact_exception(exc)`.
         logger.error(
             "%s: LiteLLM completion raised a non-recoverable [%s] error: %s",
             caller,
             diagnosis.category,
             _exc_detail(exc, limit=200),
         )
-        logger.debug("%s: full traceback for the failure above", caller, exc_info=exc)
+        logger.debug("%s: full detail for the failure above: %s", caller, redact_exception(exc))
         _mark_failure()
         raise NonRecoverableProviderError(diagnosis, caller=caller) from exc
     # ONE legible line, not a stack trace. This fires once per caller per seed
@@ -603,14 +609,16 @@ def _classify_or_swallow(
     # exception` turned a single bad --model into hundreds of traceback lines
     # before any usable summary. WARNING is emitted by Python's lastResort
     # handler without any configuration, so the operator still sees it; the
-    # traceback drops to DEBUG for whoever actually wants it.
+    # redacted detail drops to DEBUG for whoever actually wants it (DCR-0016:
+    # never the raw `exc_info` traceback, even at DEBUG — see the identical
+    # note above).
     logger.warning(
         "%s: LiteLLM completion failed [%s], continuing with a fallback: %s",
         caller,
         diagnosis.category,
         _exc_detail(exc),
     )
-    logger.debug("%s: full traceback for the failure above", caller, exc_info=exc)
+    logger.debug("%s: full detail for the failure above: %s", caller, redact_exception(exc))
     _mark_failure()
     return _with_cause(fallback, FALLBACK_CALL_RAISED, _exc_detail(exc))
 

@@ -823,12 +823,15 @@ def test_llm_scope_policy_only_leaves_counter_untouched() -> None:
 
 
 def test_a_recoverable_call_failure_logs_one_line_not_a_traceback(caplog: Any) -> None:
-    """A recoverable provider error must not dump a stack trace per call.
+    """A recoverable provider error must not dump a stack trace per call,
+    at ANY level -- including DEBUG.
 
     `logger.exception` fired once per caller per seed with no logging
     configuration anywhere in src/, so a single bad --model produced hundreds of
     traceback lines before any usable summary. The operator needs one legible
-    line; the traceback belongs at DEBUG for whoever actually wants it.
+    line; the full (redacted) detail belongs at DEBUG for whoever actually
+    wants it -- but never the raw `exc_info` traceback, which bypasses the
+    secret-redacting log filter (DCR-0016) regardless of level.
     """
     import logging
 
@@ -854,8 +857,11 @@ def test_a_recoverable_call_failure_logs_one_line_not_a_traceback(caplog: Any) -
     assert "RateLimitError" in warnings[0].getMessage()
     # ...and carries NO traceback
     assert warnings[0].exc_info is None
-    # the traceback is still available to anyone who asks for DEBUG
-    assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
+    # the full detail is still available to anyone who asks for DEBUG...
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("RateLimitError" in r.getMessage() for r in debug_records)
+    # ...but never as a raw traceback, at any level (DCR-0016).
+    assert not any(r.exc_info for r in caplog.records)
 
 
 def test_a_non_recoverable_call_failure_caps_the_error_log_line(caplog: Any) -> None:
@@ -865,7 +871,8 @@ def test_a_non_recoverable_call_failure_caps_the_error_log_line(caplog: Any) -> 
     catches ``NonRecoverableProviderError`` per payload, so an uncapped line
     here repeats once per seed per role -- most of the 12 KB a bad --model
     used to print. The cap mirrors the recoverable branch: a short ERROR
-    line, the full detail only at DEBUG.
+    line, the full (redacted) detail only at DEBUG -- never a raw
+    ``exc_info`` traceback at any level (DCR-0016).
     """
     import logging
 
@@ -892,8 +899,12 @@ def test_a_non_recoverable_call_failure_caps_the_error_log_line(caplog: Any) -> 
     assert len(errors) == 1, [r.getMessage() for r in errors]
     assert len(errors[0].getMessage()) < 300, errors[0].getMessage()
     assert errors[0].exc_info is None
-    # the full traceback is still available to anyone who asks for DEBUG
-    assert any(r.levelno == logging.DEBUG and r.exc_info for r in caplog.records)
+    # the full (redacted) detail is still available to anyone who asks for
+    # DEBUG...
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("BadRequestError" in r.getMessage() for r in debug_records)
+    # ...but never as a raw traceback, at any level (DCR-0016).
+    assert not any(r.exc_info for r in caplog.records)
 
 
 # --- spend: token capture and the command-level usage tally ------------------
