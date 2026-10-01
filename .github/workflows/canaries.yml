@@ -22,6 +22,9 @@ on:
       runs:
         description: "Runs per canary"
         default: "3"
+      only:
+        description: "Run one canary only (w4, guarded-w2-reject, reference-scan, custom-redrive); empty runs all"
+        default: ""
 
 permissions:
   contents: read
@@ -71,13 +74,18 @@ jobs:
         # key (same reasoning as verification.yml).
         env:
           RUNS: ${{ github.event.inputs.runs || '3' }}
+          ONLY: ${{ github.event.inputs.only || '' }}
         run: |
-          python scripts/run_canaries.py --model "$MYLONITE_CANARY_MODEL" --runs "$RUNS" \
-            --out-dir .mylonite/canaries/ci
+          set -- --model "$MYLONITE_CANARY_MODEL" --runs "$RUNS" --out-dir .mylonite/canaries/ci
+          if [ -n "$ONLY" ]; then set -- "$@" --only "$ONLY"; fi
+          python scripts/run_canaries.py "$@"
 
       - name: Upload the canary report
         if: always() && steps.key_check.outputs.present == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: canaries-report
-          path: .mylonite/canaries/ci/**/canaries_report.json
+          path: |
+            .mylonite/canaries/ci/**/canaries_report.json
+            .mylonite/canaries/ci/**/scan_report.json
+            .mylonite/canaries/ci/**/verdicts.json
