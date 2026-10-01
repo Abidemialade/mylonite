@@ -82,7 +82,7 @@ from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact_exception
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
-from mylonite._verdict import verdict_label
+from mylonite._verdict import JUDGE_ONLY_CLAUSE, verdict_label
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -101,6 +101,7 @@ from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.effect_verdict import ProofLevel
 from mylonite.scan.engine import ScanResult
+from mylonite.scan.evidence_tier import attempt_evidence_tier, rests_on_judge_only
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
@@ -308,6 +309,17 @@ class _CustomRun:
     #: "dispatched" | "dispatched-tool-linked"), or None when the rule did not
     #: decide it. The effect leg counts firing runs by this.
     proof_level: str | None = None
+    #: What a firing run rests on ("state" | "trace" | "judge-only"), or None
+    #: when no judged attempt was recorded. When every firing run is
+    #: judge-only, the stability leg fails.
+    evidence_tier: str | None = None
+
+
+def _tier_clause(tiers: list[str | None]) -> str:
+    """``"; firing runs by evidence: 1 state, 2 trace"``, or empty with no tiers."""
+    counts = {tier: tiers.count(tier) for tier in ("state", "trace", "judge-only")}
+    parts = [f"{n} {tier}" for tier, n in counts.items() if n]
+    return f"; firing runs by evidence: {', '.join(parts)}" if parts else ""
 
 
 def _effect_proof_level(run: _CustomRun) -> str | None:
@@ -567,7 +579,12 @@ class DifferentialValidator(ValidatorBase):
             f"{self._min_guard_resist_rate:.0%}), leaked {guard_fires}/{n}, "
             f"reached no verdict {undecided}/{n}"
         )
-        differential_passed = decision.differential_passed and clean_runs > 0
+        # Every vulnerable-side fire judge-only: nothing but the LLM judge showed
+        # the attack landed, so the differential proves nothing.
+        fire_tiers = [self._fire_tier(t.vuln_result, pattern_id) for t in tallies if t.vuln_fired]
+        judge_only = rests_on_judge_only(fire_tiers)
+        differential_passed = decision.differential_passed and clean_runs > 0 and not judge_only
+        judge_only_tail = f"; {JUDGE_ONLY_CLAUSE}" if judge_only else ""
 
         differential = ValidationOutcome(
             stage="differential",
@@ -577,6 +594,8 @@ class DifferentialValidator(ValidatorBase):
                 f"{guard_evidence}; {clean_runs}/{n} runs both fired and resisted; the test "
                 f"{'discriminates' if differential_passed else 'does NOT discriminate'} "
                 f"between the twins (strength={decision.differential_metric:.2f})"
+                + _tier_clause(fire_tiers)
+                + judge_only_tail
             ),
             metric=decision.differential_metric,
         )
@@ -672,6 +691,11 @@ class DifferentialValidator(ValidatorBase):
             self._progress(f"re-driving real target: stability run {i + 1}/{n}")
             runs.append(self._run_custom_iteration(target, pattern_id))
         fired = sum(1 for r in runs if r.finding)
+        # A finding only the LLM judge made, on every run, keeps nothing: no run
+        # was confirmed by the target's state or the recorded trace. Judge-only
+        # runs still count toward the threshold when one run is confirmed.
+        fire_tiers = [r.evidence_tier for r in runs if r.finding]
+        judge_only = rests_on_judge_only(fire_tiers)
         # A firing run counts toward the effect leg at its proof level (see
         # `_effect_proof_level`). Each level already ties the damage to that
         # attempt, so no level is required on top of the count: a target whose
@@ -697,13 +721,16 @@ class DifferentialValidator(ValidatorBase):
         # them).
         errored = (not probed) and any(r.effect_confirmed == "errored" for r in runs)
 
+        stability_detail = (
+            f"the attack reproduced against the real target {fired}/{n} runs "
+            f"(need >= {self._vuln_threshold})" + _tier_clause(fire_tiers)
+        )
+        if judge_only:
+            stability_detail += f"; {JUDGE_ONLY_CLAUSE}"
         stability = ValidationOutcome(
             stage="stability",
-            passed=fired >= self._vuln_threshold,
-            detail=(
-                f"the attack reproduced against the real target {fired}/{n} runs "
-                f"(need >= {self._vuln_threshold})"
-            ),
+            passed=fired >= self._vuln_threshold and not judge_only,
+            detail=stability_detail,
             metric=(fired / n) if n else 0.0,
         )
         if probed:
@@ -969,6 +996,7 @@ class DifferentialValidator(ValidatorBase):
                 verdict_mechanism=attempt.verdict_mechanism if attempt is not None else None,
                 trace_outcome=evidence.get("trace_outcome", response.metadata.get("trace_outcome")),
                 proof_level=evidence.get("proof_level"),
+                evidence_tier=attempt_evidence_tier(attempt) if attempt is not None else None,
             )
         attempt = next(iter(attempts), None)
         evidence = dict(attempt.judge_evidence) if attempt is not None else {}
@@ -1164,6 +1192,19 @@ class DifferentialValidator(ValidatorBase):
         return any(
             a.pattern_id == pattern_id and a.outcome == "finding" for a in result.report.attempts
         )
+
+    @staticmethod
+    def _fire_tier(result: ScanResult, pattern_id: str) -> str | None:
+        """The evidence tier of the finding ``result`` recorded for ``pattern_id``."""
+        attempt = next(
+            (
+                a
+                for a in result.report.attempts
+                if a.pattern_id == pattern_id and a.outcome == "finding"
+            ),
+            None,
+        )
+        return attempt_evidence_tier(attempt) if attempt is not None else None
 
     @staticmethod
     def _resisted(result: ScanResult, pattern_id: str) -> bool:

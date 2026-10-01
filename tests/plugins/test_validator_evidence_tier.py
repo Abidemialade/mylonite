@@ -1,0 +1,176 @@
+"""``validate`` never keeps a test when every firing run is judge-only.
+
+A judge-only run is one only the LLM judge said landed: nothing in the target's
+state or the recorded trace confirmed it. Judge-only runs still count as
+support when at least one run is confirmed.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from mylonite._verdict import JUDGE_ONLY_MARKER, REJECTED, verdict_label, verdict_reason
+from mylonite.contracts import ScanAttempt, ScanReport
+from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+from mylonite.plugins._reference.reference_validator import (
+    DifferentialValidator,
+    ReferenceVulnerableOracle,
+    _CustomRun,
+    _IterationTally,
+)
+from mylonite.scan.engine import ScanResult
+
+from .test_differential_validator import _cust_completion, _custom_exploit, _FakeCustomAdapter
+
+
+def _validate_custom(tiers: list[str | None], *, effect: str = "unprobed") -> Any:
+    """Validate a custom target whose runs all fire, at the given tiers."""
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+    queue = list(tiers)
+
+    def _run(self: Any, target: Any, pattern_id: str, *, factory: Any = None) -> _CustomRun:
+        tier = queue.pop(0)
+        return _CustomRun(
+            finding=True,
+            effect_confirmed=effect,
+            response=None,
+            verdict_mechanism="llm" if tier == "judge-only" else "predicate",
+            evidence_tier=tier,
+        )
+
+    validator = DifferentialValidator(
+        iterations=len(tiers),
+        vuln_threshold=len(tiers),
+        completion_fn=_cust_completion,
+        run_build=False,
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(DifferentialValidator, "_run_custom_iteration", _run, raising=True)
+        return validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+
+def _stability(report: Any) -> Any:
+    return next(o for o in report.outcomes if o.stage == "stability")
+
+
+def test_custom_target_rejects_a_keep_resting_on_the_judge_alone() -> None:
+    report = _validate_custom(["judge-only", "judge-only"])
+    assert report.kept is False
+    assert verdict_label(report) == REJECTED
+    stability = _stability(report)
+    assert stability.passed is False
+    assert JUDGE_ONLY_MARKER in stability.detail
+    assert "2 judge-only" in stability.detail
+    assert "LLM judge alone" in verdict_reason(report)
+
+
+def test_judge_only_runs_still_support_a_confirmed_run() -> None:
+    report = _validate_custom(["trace", "judge-only"])
+    stability = _stability(report)
+    assert stability.passed is True
+    assert JUDGE_ONLY_MARKER not in stability.detail
+    assert "1 trace, 1 judge-only" in stability.detail
+
+
+def test_a_run_with_no_recorded_tier_is_not_judge_only() -> None:
+    """Older stand-ins and runs with no judged attempt record no tier."""
+    assert _stability(_validate_custom([None, None])).passed is True
+
+
+def test_a_real_custom_run_records_its_evidence_tier() -> None:
+    """The effect probe confirmed the effect, so the run rests on state."""
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+    )
+    run = validator._run_custom_iteration(_FakeCustomAdapter("true"), _custom_exploit().pattern_id)
+    assert run.finding is True
+    assert run.evidence_tier == "state"
+
+
+# --- reference twins ---------------------------------------------------------
+
+
+def _scan_result(pattern_id: str, outcome: str, mechanism: str | None) -> ScanResult:
+    attempt = ScanAttempt(
+        seed_id=pattern_id,
+        pattern_id=pattern_id,
+        outcome=outcome,  # type: ignore[arg-type]
+        verdict_mechanism=mechanism,  # type: ignore[arg-type]
+    )
+    report = ScanReport(
+        target_id="reference:vulnerable",
+        provider="anthropic",
+        model="stub",
+        elapsed_seconds=0.1,
+        attempts=[attempt],
+        findings_count=1 if outcome == "finding" else 0,
+        mylonite_version="0.10.5",
+    )
+    return ScanResult(report=report, exploits=[])
+
+
+def _validate_reference(vuln_mechanism: str) -> Any:
+    exploit = _custom_exploit().model_copy(update={"target_id": "reference:vulnerable"})
+    pid = exploit.pattern_id
+    test = ReferencePytestGenerator().emit(exploit)
+
+    def _iteration(self: Any, pattern_id: str) -> _IterationTally:
+        return _IterationTally(
+            vuln_fired=True,
+            guard_resisted=True,
+            vuln_result=_scan_result(pid, "finding", vuln_mechanism),
+            guard_result=_scan_result(pid, "no_finding", "predicate"),
+            guard_fired=False,
+        )
+
+    from mylonite.contracts import ValidationOutcome
+
+    passing = {"passed": True, "detail": "stub", "metric": 1.0}
+    validator = DifferentialValidator(iterations=2, completion_fn=_cust_completion)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(DifferentialValidator, "_run_iteration", _iteration)
+        mp.setattr(
+            DifferentialValidator,
+            "_metamorphic_outcome",
+            lambda self, e: ValidationOutcome(stage="metamorphic", **passing),
+        )
+        mp.setattr(
+            DifferentialValidator,
+            "_build_outcome",
+            lambda self, t, tallies: ValidationOutcome(stage="build", **passing),
+        )
+        return validator._validate_reference(test)
+
+
+def test_reference_twins_reject_a_differential_resting_on_the_judge_alone() -> None:
+    report = _validate_reference("llm")
+    differential = next(o for o in report.outcomes if o.stage == "differential")
+    assert differential.passed is False
+    assert JUDGE_ONLY_MARKER in differential.detail
+    assert report.kept is False
+    assert "LLM judge alone" in verdict_reason(report)
+
+
+def test_reference_twins_keep_a_differential_the_trace_confirmed() -> None:
+    report = _validate_reference("predicate")
+    differential = next(o for o in report.outcomes if o.stage == "differential")
+    assert differential.passed is True
+    assert "2 trace" in differential.detail
+
+
+def test_the_rendered_verdict_names_the_judge_only_cause() -> None:
+    import io
+
+    from rich.console import Console
+
+    from mylonite.report.render import _render_validation_report
+
+    buffer = io.StringIO()
+    _render_validation_report(
+        _validate_custom(["judge-only", "judge-only"]),
+        console=Console(file=buffer, width=200, force_terminal=False),
+    )
+    assert "verdict: REJECTED" in buffer.getvalue()
+    assert "LLM judge alone" in buffer.getvalue()

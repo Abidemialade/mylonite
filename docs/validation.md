@@ -147,6 +147,18 @@ Every validation reports three headline figures.
   `validate` says the test gates reproduction only, instead of telling you to commit it. Add a guarded side (drop `--fast`,
   or declare `control_env`) or an `effect_probe` to turn it into KEPT.
 
+  **The LLM judge alone never keeps a test.** Each firing run has an
+  [evidence tier](reading-results.md#evidence-tier): `state`, `trace` or `judge-only`.
+  When every firing run on the vulnerable side is `judge-only`, nothing but the judge
+  showed the attack landed, so the leg that claims it reproduced fails: `stability` on a
+  custom target, `differential` on the reference twins. The verdict reads **REJECTED**,
+  with the reason "every firing run rested on the LLM judge alone", and the leg's detail
+  carries `[evidence=judge-only]`. It is REJECTED rather than STABLE, NOT PROVEN because
+  STABLE, NOT PROVEN is still a keep, and here not even reproduction was shown by
+  anything but the judge. One `state` or `trace` run is enough: judge-only runs then
+  count toward the threshold as support. Each leg's detail lists the firing runs by
+  tier (`firing runs by evidence: 1 trace, 1 judge-only`).
+
   **How the effect leg counts.** Each firing run counts at its
   [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line
   gives the count for each: `effect-confirmed` (a calibrated probe saw the change),
