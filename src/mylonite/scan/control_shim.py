@@ -255,8 +255,9 @@ class BoundaryControl:
 
 # Tool-name hints for "retrieval/read" tools whose results carry untrusted
 # content back to the planner (the W2 indirect-injection surface). Substring,
-# case-insensitive; tool_roles classification refines this heuristic.
-_READ_HINTS: tuple[str, ...] = (
+# case-insensitive; tool_roles classification refines this heuristic. Public:
+# scan.effect_verdict reads this to tell a read call apart from a dispatch.
+READ_HINTS: tuple[str, ...] = (
     "read",
     "get",
     "fetch",
@@ -322,7 +323,7 @@ class UntrustedEnvelopeControl(BoundaryControl):
         # RESULT is untrusted data isn't decidable from the CALL arguments, only
         # from the tool's role, so name classification is all there is short of
         # an explicit declaration.
-        return classify(name, declared=self._read_tool_names, hints=_READ_HINTS)
+        return classify(name, declared=self._read_tool_names, hints=READ_HINTS)
 
     def _config_snippet(self, name: str) -> str:
         return config_snippet_for("W2", name)
@@ -502,7 +503,7 @@ class InformationFlowControl(BoundaryControl):
         return classify(
             name,
             declared=self._read_tool_names,
-            hints=_READ_HINTS,
+            hints=READ_HINTS,
             annotation_says=annotation_is_read(self.annotations_for(name)),
         )
 
@@ -1147,7 +1148,7 @@ def untrusted_content_tool_names(
         applies, reason = classify(
             name,
             declared=declared,
-            hints=_READ_HINTS,
+            hints=READ_HINTS,
             annotation_says=annotation_is_read(getattr(tool, "annotations", None)),
         )
         if applies and reason != "fail-closed default":

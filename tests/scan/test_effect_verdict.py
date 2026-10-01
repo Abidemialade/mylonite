@@ -80,6 +80,26 @@ def test_blocked_by_client_is_not_a_server_is_error() -> None:
     )
 
 
+def test_mixed_ok_and_error_calls_read_as_the_strongest_outcome() -> None:
+    """One dispatched call succeeded and a second, different call errored.
+
+    ``classify_trace`` reports the STRONGEST consequential outcome across the
+    whole trace (its own docstring), so one real dispatch outweighs an
+    unrelated error from the same attempt.
+    """
+    trace = [
+        _entry("write_note", is_error=True),
+        _entry("send_email", result="Sent"),
+    ]
+    assert (
+        classify_trace(
+            trace,
+            consequential_tool_names={"write_note", "send_email"},
+        )
+        == "dispatched-ok"
+    )
+
+
 def test_read_tool_exemptions() -> None:
     assert is_read_tool("lookup_record", read_tool_names={"lookup_record"})
     assert is_read_tool("read_customer", read_tool_names=set())

@@ -97,7 +97,6 @@ DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
     "staged",
     "confirm_send",
 )
-_DEFAULT_DEFERRED_MARKERS = DEFAULT_DEFERRED_MARKERS
 
 
 def executed_occurrence_index(
