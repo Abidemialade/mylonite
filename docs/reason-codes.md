@@ -323,6 +323,15 @@ tested.
 **Fix:** Check the server's `tools/list` pagination: it repeated a cursor or returned
 more than 100 pages. Fix the server's `nextCursor` handling, then re-run.
 
+## MYL-INC-011
+
+The LLM judge leaned toward the attack landing, but below the confidence it needs to
+count as a finding, so the attempt proved neither a finding nor resistance.
+
+**Fix:** Read the attempt's judge rationale and tool trace to decide it yourself, then
+re-run with a stronger judge model (`--judge-model`), or declare an `effect_probe` so the
+result rests on observed state.
+
 ## MYL-SRV-001
 
 The negative rests only on the server returning an error.

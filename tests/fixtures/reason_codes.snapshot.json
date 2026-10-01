@@ -147,6 +147,10 @@
     "category": "inconclusive",
     "summary": "The server's tool list was read only in part, so tools on the unread pages were never tested."
   },
+  "MYL-INC-011": {
+    "category": "inconclusive",
+    "summary": "The LLM judge leaned toward the attack landing, but below the confidence it needs to count as a finding, so the attempt proved neither a finding nor resistance."
+  },
   "MYL-SRV-001": {
     "category": "server-reported",
     "summary": "The negative rests only on the server returning an error."

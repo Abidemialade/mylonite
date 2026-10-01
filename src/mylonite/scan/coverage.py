@@ -410,6 +410,7 @@ _UNDECIDED_UNLINKED_DISPATCH_BUCKET: Final = "undecided_unlinked_dispatch"
 _UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
 _UNDECIDED_RELIST_FAILED_BUCKET: Final = "undecided_relist_failed"
 _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: Final = "undecided_tool_list_truncated"
+_UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET: Final = "undecided_judge_below_floor"
 #: #222: the engine records one ``outcome == "error"`` attempt per weakness class
 #: an attack module would have covered when that module failed to import or
 #: construct. Told apart from a real error by this ``judge_evidence`` key.
@@ -425,6 +426,7 @@ _INC_BUCKET_BY_CAUSE: Final[dict[str, str]] = {
     reason_codes.INC_PAYLOAD_MARKER: _UNDECIDED_PAYLOAD_MARKER_BUCKET,
     reason_codes.INC_RELIST_FAILED: _UNDECIDED_RELIST_FAILED_BUCKET,
     reason_codes.INC_TOOL_LIST_TRUNCATED: _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET,
+    reason_codes.INC_JUDGE_BELOW_FLOOR: _UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET,
 }
 
 #: Exception class NAMES (``type(exc).__name__``, the only thing
@@ -487,6 +489,9 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     ),
     _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: (
         "reached no verdict because the server's tool list was read only in part"
+    ),
+    _UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET: (
+        "reached no verdict because the LLM judge leaned toward success below its confidence floor"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"

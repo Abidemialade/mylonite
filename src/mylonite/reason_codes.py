@@ -189,6 +189,9 @@ INC_RELIST_FAILED: Final = "MYL-INC-009"
 #: Stamped by the judge on a non-finding when the server's tool list was read
 #: only in part (page cap or a repeated cursor).
 INC_TOOL_LIST_TRUNCATED: Final = "MYL-INC-010"
+#: Stamped by the judge when the LLM judge said the attack landed but with a
+#: confidence below the floor it needs to count as a finding.
+INC_JUDGE_BELOW_FLOOR: Final = "MYL-INC-011"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
 #: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
@@ -210,6 +213,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_payload_marker": INC_PAYLOAD_MARKER,
     "undecided_relist_failed": INC_RELIST_FAILED,
     "undecided_tool_list_truncated": INC_TOOL_LIST_TRUNCATED,
+    "undecided_judge_below_floor": INC_JUDGE_BELOW_FLOOR,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -404,6 +408,15 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "never tested.",
         "Check the server's tools/list pagination: it repeated a cursor or returned more "
         "than 100 pages. Fix the server's nextCursor handling, then re-run.",
+    ),
+    _rc(
+        INC_JUDGE_BELOW_FLOOR,
+        "The LLM judge leaned toward the attack landing, but below the confidence it "
+        "needs to count as a finding, so the attempt proved neither a finding nor "
+        "resistance.",
+        "Read the attempt's judge rationale and tool trace to decide it yourself, then "
+        "re-run with a stronger judge model (--judge-model), or declare an effect_probe "
+        "so the result rests on observed state.",
     ),
 )
 
