@@ -30,7 +30,7 @@ import check_no_hardcoded_models as gate  # noqa: E402
 #: same PR, so the ratchet is a deliberate, reviewable act rather than a
 #: silent widening.
 ALLOWLIST_ROW_COUNT_CEILING = 55
-ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 81
+ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 80
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:

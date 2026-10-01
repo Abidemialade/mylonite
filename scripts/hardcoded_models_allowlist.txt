@@ -49,7 +49,7 @@ src/mylonite/scan/providers.py | STRIPE_API_KEY | 1 | docstring example of an un
 # a provider the caller already chose. None of these pick a provider on the
 # user's behalf.
 src/mylonite/_redaction.py | ANTHROPIC_API_KEY | 1 | comment explaining why gate-runner secrets get redacted, not a default
-src/mylonite/cli.py | ANTHROPIC_API_KEY | 5 | --env-file/--live docstrings and error remedies naming an example key, plus the doctor key-shape helper returning this var for a provider the caller already chose
+src/mylonite/cli.py | ANTHROPIC_API_KEY | 4 | --env-file/--live docstrings and error remedies naming an example key, plus the doctor key-shape helper returning this var for a provider the caller already chose
 src/mylonite/cli.py | OPENAI_API_KEY | 1 | the doctor key-shape helper, returning this var for a provider the caller already chose
 src/mylonite/cli.py | AWS_ACCESS_KEY_ID | 1 | the doctor key-shape helper, returning this var for a provider the caller already chose
 src/mylonite/cli.py | AZURE_API_BASE | 1 | comment explaining the Azure pre-flight completeness check
@@ -75,10 +75,10 @@ src/mylonite/config.py | AZURE_API_VERSION | 1 | docstring explaining the Azure 
 # Error messages and docstrings that show the SHAPE of a --model value
 # ("provider/model-name"); the user still has to type one.
 src/mylonite/cli.py | anthropic/ | 1 | warning text showing the provider-prefixed form of an unprefixed --model the user passed
-src/mylonite/cli.py | gpt- | 1 | error remedy showing an example --model value for a non-default provider
-src/mylonite/cli.py | openai/ | 1 | error remedy showing an example --model value for a non-default provider
 src/mylonite/config.py | gpt- | 1 | error remedy showing an example provider-prefixed --model value
 src/mylonite/config.py | openai/ | 1 | error remedy showing an example provider-prefixed --model value
+src/mylonite/scan/preflight.py | gpt- | 1 | no-provider-reachable remedy showing an example --model value for a non-default provider
+src/mylonite/scan/preflight.py | openai/ | 1 | no-provider-reachable remedy showing an example --model value for a non-default provider
 src/mylonite/scan/model_ref.py | anthropic/ | 1 | error remedy showing the provider-prefixed form to pass instead
 src/mylonite/scan/model_ref.py | claude- | 2 | docstring example of an unversioned alias, plus the error remedy showing the provider-prefixed form
 src/mylonite/scan/_llm.py | claude- | 1 | docstring describing a PAST hardcode that was removed, quoted for context
