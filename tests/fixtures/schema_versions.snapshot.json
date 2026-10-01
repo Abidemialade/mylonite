@@ -1,0 +1,21 @@
+{
+  "contract_versions": {
+    "attack_module": "0.1.0",
+    "compliance_mapper": "0.1.0",
+    "target_adapter": "0.8.0",
+    "test_generator": "0.2.0",
+    "validator": "0.5.0"
+  },
+  "schema_hashes": {
+    "adapter_response.schema.json": "3e733c86d36288fe9acd15ac89819f510b98764e47bd493523d64eed989ac589",
+    "attack_pattern.schema.json": "3e128077b3260bc9dbbaad11d11dc4b2730597305a2de7c94efbcaac3971a290",
+    "compliance_tags.schema.json": "ef36061683f96fe7c1dd0ea769c23488b57e53a74a827f510a6f6586ae558128",
+    "exploit_record.schema.json": "929b4049af722187e524c37d19dad96a88df8fc88f10577b128d81293b7d51f5",
+    "generated_test.schema.json": "f6c9c407df3d776ec867d5e7e229e965f11bf6182dbf5c49a752fcc67caac3bd",
+    "payload.schema.json": "4484185ce5af67557e93933beac3ae821eda3a1f62d64241f30efe4f3d365b4b",
+    "scan_attempt.schema.json": "04fdd9a91972c81adfe21522f8635acd7359ef334c57e23e4355566e93be2ccd",
+    "scan_report.schema.json": "b3ed1ce28034c965c2b994dc49013eae7caf5ebc70d037f1426f466483371f94",
+    "target_descriptor.schema.json": "dca6cb1af2895c1811581e3fa80a8d358d46db246fc62185bb1048440b527eae",
+    "validation_report.schema.json": "40c857aae00a2819eb41932267500b195f5067a73c50a5dae4cef56bca4590d4"
+  }
+}
