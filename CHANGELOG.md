@@ -34,6 +34,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   more than 15% over the committed baseline
   (`tests/fixtures/llm_call_baseline.json`: 34, 36 and 113 calls) fails the
   build. See "No-regression checks" in `CONTRIBUTING.md`.
+- **Live canaries: `scripts/run_canaries.py` and a nightly `Canaries`
+  workflow.** Four checks that drive the real CLI against a real model and
+  catch what the offline `nr-ci` job can't: a kept W4 finding staying kept,
+  the already-fixed guarded W2 hallucination staying rejected (or not
+  resurfacing at all), the reference scan still reproducing at least 4
+  findings, and (once a target file is supplied) a custom-target live
+  re-drive. Each canary runs 3 times and passes on 2 of those 3 meeting its
+  bar — a live model's output isn't perfectly repeatable, so one miss out
+  of three isn't a regression. `scan`/`gate`'s `--max-llm-calls` bounds the
+  discovery scans' cost from the baseline call count plus 15% headroom;
+  `validate` has no budget flag, so its cost is held down by pinning
+  `--iterations` at the baseline value instead. Prints a table and writes a
+  JSON report; never prints a provider key. The nightly workflow needs the
+  `MYLONITE_DOGFOOD_KEY` secret and skips cleanly (a notice, not a failure)
+  when it's absent — never a required check. See "Live canaries" in
+  `CONTRIBUTING.md`.
 - **Three more frozen-surface snapshots, alongside the existing reason-code
   one.** `tests/fixtures/testkit_signatures.snapshot.json` pins every
   `mylonite.testkit.__all__` entry's shape (parameters, defaults,

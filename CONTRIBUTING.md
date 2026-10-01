@@ -264,6 +264,53 @@ noted here for reference: ~5 minutes total (the Linux test job ~55 s, the
 Windows one ~297 s, the long pole). If a change is expected to move this
 meaningfully, re-measure and update this paragraph in the same PR.
 
+## Live canaries
+
+`nr-ci` above is offline and deterministic — it never spends a token. The
+live canaries are the other half: four checks that drive the real CLI
+against a real model and catch a regression `nr-ci` can't see, because it
+needs an actual LLM in the loop to show up — the differential oracle
+keeping a real finding (or correctly rejecting a false one), and the scan
+loop still reproducing enough of the reference app's seeded weaknesses.
+They run nightly and in the `Canaries` workflow, never as a required check
+(they cost money and a live model's output isn't perfectly repeatable), and
+at a $5-per-run cost sanity cap.
+
+- **W4** — `validate` the reference `excessive-agency-send-email-direct-
+  unconfirmed` finding on `reference:vulnerable`. Bar: KEPT.
+- **The guarded W2 "note body roleplay" seed** — `validate` it on
+  `reference:guarded`. The judge-hallucination bug that used to make this
+  a false finding is already fixed
+  (`tests/scan/test_judge_success_cross_check.py`), so a clean scan with
+  nothing to validate also meets the bar; only a live KEPT verdict (the fix
+  regressed *and* the differential missed it) is a miss.
+- **Reference scan** — a full scan of `reference:vulnerable`. Bar: at least
+  4 findings.
+- **Custom re-drive** — a custom kitchen-sink target's generated tests,
+  re-driven live. This repository doesn't carry a target file for it (the
+  baseline run used a local, uncommitted one), so it's reported SKIPPED
+  until `--custom-target-file` or `MYLONITE_CANARY_CUSTOM_TARGET` names one.
+
+Each canary runs 3 times; it passes when at least 2 of those 3 runs meet
+its bar — a live model's output isn't perfectly repeatable, so one miss
+out of three isn't a regression. `scan` and `gate` take `--max-llm-calls`,
+so the discovery scans get a real budget sized from a recorded baseline
+call count plus the same 15% headroom this project uses elsewhere for a
+no-regression call-count bar. `validate` has no budget flag at all, so its
+cost is bounded instead by holding `--iterations` at the baseline value.
+
+Run it locally with a model you have a key for:
+
+```bash
+python scripts/run_canaries.py --model anthropic/claude-haiku-4-5-20251001
+```
+
+It prints a table (canary, run, verdict, calls, tokens, seconds) and writes
+a JSON report under `.mylonite/canaries/<timestamp>/`; it never prints a
+provider key. `python scripts/run_canaries.py --help` lists every flag,
+including `--runs`, `--max-cost-per-run` and `--only <canary-id>` for
+re-running a single one.
+
 ## What we can and can't accept
 
 Mylonite reproduces working exploits, so a contribution here carries risks that
