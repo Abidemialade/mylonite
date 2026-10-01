@@ -97,6 +97,7 @@ from mylonite.plugins.cli_targets import (
 from mylonite.report.render import _render_ablation_matrix, _render_validation_report
 from mylonite.scan.assembly import (
     build_scan_engine,
+    load_attack_modules,
     no_usable_modules_message,
     select_attack_modules,
 )
@@ -1133,7 +1134,6 @@ def scan(
         )
         return
 
-    from mylonite.plugins.registry import discover
     from mylonite.scan.engine import ScanConfig
 
     # A named positional target (e.g. 'reference:vulnerable', 'mcp:filesystem')
@@ -1320,17 +1320,16 @@ def scan(
         raise typer.Exit(code=EXIT_CONFIG)
 
     try:
-        all_modules: list[Any] = discover("mylonite.attack_modules")
+        all_modules, module_load_failures = load_attack_modules()
     except Exception as exc:
         echo_exc("plugin discovery failed", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    # Shipped families, plus anything the operator opted into via
-    # MYLONITE_ATTACK_MODULES. The reference_example stub is shipped for plugin
-    # authors and stays out unless explicitly named.
+    # Shipped families plus MYLONITE_ATTACK_MODULES opt-ins; the reference_example
+    # stub (for plugin authors) stays out unless named. Load failures go to the engine.
     attack_modules = select_attack_modules(all_modules)
     if not attack_modules:
-        echo_err(no_usable_modules_message())
+        echo_err(no_usable_modules_message(module_load_failures))
         raise typer.Exit(code=EXIT_CONFIG)
 
     # T14/H3: the "no default provider, fail loudly" invariant, enforced
@@ -1397,6 +1396,7 @@ def scan(
         judge_model=effective_judge_model,
         purpose=effective_purpose,
         attack_modules=attack_modules,
+        module_load_failures=module_load_failures,
     )
 
     from mylonite.scan._llm import llm_scope

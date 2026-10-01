@@ -15,6 +15,7 @@ Compatibility rule (also documented in CONTRIBUTING.md):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 from typing import Any, Literal, NamedTuple, get_args
 
@@ -85,20 +86,51 @@ def _check_compat(group: str, host_version: str, plugin: object, ep_name: str) -
         )
 
 
-def discover(group: PluginGroup) -> list[Any]:
-    """Discover and instantiate plugins for ``group``.
+@dataclass(frozen=True)
+class PluginLoadFailure:
+    """A registered plugin that could not be imported or constructed.
+
+    Recorded instead of raised, so one broken plugin cannot stop discovery. The
+    scan reads these for attack modules: the weakness classes a failed module
+    would have covered are reported NOT TESTED rather than silently dropped
+    (#222).
+
+    Only the exception's TYPE name is kept. Its message can quote a file path,
+    an environment value or a secret, and this record reaches the scan report.
+    """
+
+    #: The entry-point group, e.g. ``mylonite.attack_modules``.
+    group: str
+    #: The entry-point name the plugin registered under.
+    entry_point: str
+    #: ``import`` (``ep.load()`` raised) or ``construct`` (``cls()`` raised).
+    stage: Literal["import", "construct"]
+    #: ``type(exc).__name__`` only.
+    error_type: str
+    #: The attack id, when the host knows it for this entry point. Filled in by
+    #: the scan layer for attack modules; ``None`` means unknown.
+    attack_id: str | None = None
+    #: The weakness classes the plugin would have covered, when known. Empty
+    #: means unknown (or, with a known ``attack_id``, none).
+    weakness_classes: tuple[str, ...] = ()
+
+
+def discover_with_failures(group: PluginGroup) -> tuple[list[Any], list[PluginLoadFailure]]:
+    """Discover and instantiate plugins for ``group``, recording each failure.
 
     Each plugin is a class (registered as an entry point pointing at the
     class itself); the registry instantiates them with no arguments. Plugins
     that need configuration should accept it lazily via the contract's
     methods, not via ``__init__``, to keep discovery side-effect free.
 
-    A plugin that cannot be instantiated with no arguments (i.e. does not meet
-    that contract) is **skipped with a WARNING** rather than crashing discovery
-    -- one misregistered plugin must not take out an unrelated group. This is
-    how ``mylonite plugins`` can enumerate every group even though some target
+    A plugin whose import raises, or that cannot be instantiated with no
+    arguments, is **skipped with a WARNING** and returned as a
+    :class:`PluginLoadFailure` rather than crashing discovery: one broken or
+    misregistered plugin must not take out an unrelated group. This is how
+    ``mylonite plugins`` can enumerate every group even though some target
     adapters are reached through the target-file / factory path and expect
-    construction arguments, not the no-arg registry.
+    construction arguments, not the no-arg registry. A major contract-version
+    mismatch still raises :class:`VersionIncompatibleError`.
     """
     if group not in _GROUP_VERSIONS:
         valid = ", ".join(sorted(_GROUP_VERSIONS))
@@ -107,19 +139,32 @@ def discover(group: PluginGroup) -> list[Any]:
     host_version = _GROUP_VERSIONS[group]
     eps: list[EntryPoint] = list(entry_points(group=group))
     loaded: list[Any] = []
+    failures: list[PluginLoadFailure] = []
     for ep in eps:
-        cls = ep.load()
+        try:
+            cls = ep.load()
+        except Exception as exc:
+            # A broken plugin package, a missing optional dependency, or a
+            # stale entry point. Log the type only: the message can quote paths
+            # or values from the environment.
+            logger.warning(
+                "skipping plugin %r in group %s: import failed (%s)",
+                ep.name,
+                group,
+                type(exc).__name__,
+            )
+            failures.append(PluginLoadFailure(group, ep.name, "import", type(exc).__name__))
+            continue
         try:
             instance = cls()
-        except Exception:
+        except Exception as exc:
             # Best-effort discovery: a plugin that needs construction config
             # signals it in varied ways -- a missing required argument raises
             # TypeError (`http_agent`), while an adapter that needs a scope raises
             # its own error (`InvalidTargetScope` for `mcp_filesystem`/`github`).
             # Catch broadly and skip with a WARNING so one such plugin can't take
-            # out an unrelated group. This does not hide a genuine bug: a plugin
-            # that fails here is still constructed (with its real arguments) on
-            # the path that actually uses it, where the same error surfaces.
+            # out an unrelated group. The failure is returned to the caller, so a
+            # scan can report what it lost instead of reading clean.
             logger.warning(
                 "skipping plugin %r in group %s: not instantiable with no arguments "
                 "(discovery requires config to flow via the contract's methods, not "
@@ -127,10 +172,16 @@ def discover(group: PluginGroup) -> list[Any]:
                 ep.name,
                 group,
             )
+            failures.append(PluginLoadFailure(group, ep.name, "construct", type(exc).__name__))
             continue
         _check_compat(group, host_version, instance, ep.name)
         loaded.append(instance)
-    return loaded
+    return loaded, failures
+
+
+def discover(group: PluginGroup) -> list[Any]:
+    """The plugins :func:`discover_with_failures` loaded, without the failures."""
+    return discover_with_failures(group)[0]
 
 
 class PluginInfo(NamedTuple):

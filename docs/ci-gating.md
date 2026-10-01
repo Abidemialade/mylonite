@@ -17,7 +17,9 @@ minutes and API spend rather than seconds.
     server with many egress or action tools wants a larger budget than the default
     of 50. If the budget runs out, the summary **names the seeds that never
     started** — those proved nothing and are reported as NOT TESTED, never as
-    clean.
+    clean. The same holds for an attack module that fails to load: its classes read
+    NOT TESTED with [`MYL-NT-015`](reason-codes.md#myl-nt-015), so the gate does not
+    pass on a scan that never ran them.
 
     **`--max-llm-calls` is therefore a floor-adjusted budget, not a hard ceiling.**
     Worst case is `cap + (seeds - 1) × max(2, cap ÷ seeds)` — with `--max-llm-calls

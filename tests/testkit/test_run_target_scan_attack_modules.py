@@ -105,11 +105,11 @@ def test_run_target_scan_includes_third_party_attack_modules(
     the owning module never made it into the engine's ``attack_modules`` list.
     """
 
-    def fake_discover(group: str) -> list[Any]:
+    def fake_discover(group: str) -> tuple[list[Any], list[Any]]:
         assert group == "mylonite.attack_modules"
-        return [_ThirdPartyAttackModule()]
+        return [_ThirdPartyAttackModule()], []
 
-    monkeypatch.setattr("mylonite.plugins.registry.discover", fake_discover)
+    monkeypatch.setattr("mylonite.plugins.registry.discover_with_failures", fake_discover)
 
     def fake_build_adapter_for_spec(spec: Any, **kwargs: Any) -> Any:
         del spec, kwargs

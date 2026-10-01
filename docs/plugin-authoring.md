@@ -83,6 +83,14 @@ mylonite scan reference:vulnerable
 empty the error names this variable, because "no usable attack modules" is exactly
 what an author sees when their module is installed but not enabled.
 
+If an attack module fails to import or to construct with no arguments, discovery
+skips it and the other modules still run. When that module would have run, the scan
+does not read clean: each weakness class it covers shows NOT TESTED with
+[`MYL-NT-015`](reason-codes.md#myl-nt-015), and an `attack modules:` line names it.
+Mylonite knows the classes of the modules it ships. It can't know a third-party
+module's classes when that module fails to load, so the loss shows as one NOT TESTED
+row in the `unknown` class.
+
 This is opt-in by id rather than "run everything discovered", deliberately. Mylonite
 drives real attacks against a real app, so which code gets to do that should be a
 decision you made, not a consequence of what happens to be in the environment.

@@ -42,7 +42,11 @@ from mylonite.scan._llm import (
 )
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
-from mylonite.scan.coverage import NO_VERDICT_EVIDENCE_KEYS, AbortReason
+from mylonite.scan.coverage import (
+    MODULE_LOAD_FAILURE_KEY,
+    NO_VERDICT_EVIDENCE_KEYS,
+    AbortReason,
+)
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
@@ -346,6 +350,60 @@ def _weakness_filter_abort_detail(active_filter: Iterable[str], family: str) -> 
     )
 
 
+def _load_failure_attempts(
+    failures: Sequence[Any], descriptor: TargetDescriptor
+) -> list[ScanAttempt]:
+    """One NOT TESTED attempt per weakness class a failed attack module lost (#222).
+
+    ``failures`` are ``PluginLoadFailure`` records (``plugins/registry.py``),
+    typed loosely so the scan layer takes no import edge on the plugin layer.
+    A module with known classes gets one attempt for each class this target
+    schedules seeds for: a class the target never runs lost nothing. A module
+    whose classes are unknown gets one attempt in the ``unknown`` class, so the
+    loss still shows in the class summary and keeps the result from reading
+    clean.
+
+    ``outcome="error"`` with the exception's type name as ``error_detail``, like
+    any other error, plus a ``judge_evidence`` key that gives it its own reason
+    code. No contract field changes, so ``mylonite report`` reads it back.
+    """
+    if not failures:
+        return []
+    scheduled = {str(s.weakness) for s in seeds_for_descriptor(descriptor)}
+    attempts: list[ScanAttempt] = []
+    for failure in failures:
+        stage = "import" if failure.stage == "import" else "construct"
+        classes = [w for w in failure.weakness_classes if w in scheduled]
+        if failure.weakness_classes and not classes:
+            continue
+        base = f"module-load-failed:{failure.entry_point}"
+        for weakness in classes or [None]:
+            what = (
+                f"its {weakness} attacks never ran"
+                if weakness
+                else "its weakness classes are unknown, so whatever it covers was never attacked"
+            )
+            evidence = {MODULE_LOAD_FAILURE_KEY: failure.entry_point, "load_stage": stage}
+            if weakness:
+                evidence["weakness"] = weakness
+            seed_id = f"{base}:{weakness}" if weakness else base
+            attempts.append(
+                ScanAttempt(
+                    seed_id=seed_id,
+                    pattern_id=seed_id,
+                    outcome="error",
+                    verdict_reason=reason_codes.tag(
+                        reason_codes.NT_MODULE_LOAD_FAILED,
+                        f"attack module {failure.entry_point!r} failed to {stage} "
+                        f"({failure.error_type}); {what}.",
+                    ),
+                    error_detail=failure.error_type,
+                    judge_evidence=evidence,
+                )
+            )
+    return attempts
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -357,10 +415,14 @@ class ScanEngine:
         attack_modules: Sequence[Any],  # _AttackModuleProtocol
         customiser: PayloadCustomiser,
         judge: SuccessJudge,
+        module_load_failures: Sequence[Any] = (),
     ) -> None:
         self._config = config
         self._adapter = adapter
         self._attack_modules = list(attack_modules)
+        #: Attack modules that failed to import or construct
+        #: (``PluginLoadFailure``); their classes are reported NOT TESTED.
+        self._module_load_failures = list(module_load_failures)
         self._customiser = customiser
         self._judge = judge
         #: Seeds resolvable by pattern_id for THIS run. Seeded with the static
@@ -465,6 +527,12 @@ class ScanEngine:
                         abort_detail=_unseeded_abort_detail(unseeded),
                     )
 
+            # #222: an attack module that failed to load must not drop its
+            # classes silently. A pattern_id filter (one seed re-driven) and a
+            # dry run (no verdict by design) are exempt, as above.
+            if self._config.pattern_id_filter is None and not self._config.dry_run:
+                attempts.extend(_load_failure_attempts(self._module_load_failures, descriptor))
+
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(_effective_max_concurrent(self._config, self._adapter))
 
@@ -518,7 +586,11 @@ class ScanEngine:
                 # produced zero payloads means no seeds were applicable to this
                 # target — that must be loud, never look like a clean pass (#3).
                 no_payloads_detail: str | None = None
-                if self._config.pattern_id_filter is None:
+                # Nothing ran because the modules that had seeds here failed to
+                # load: the load-failure attempts already make this NOT TESTED
+                # under their own code, which names the real cause. "No seeds
+                # applied" would send the operator to the wrong fix.
+                if self._config.pattern_id_filter is None and not attempts:
                     family = target_family(descriptor.target_id)
                     known = sorted({t for s in SEED_CATALOGUE for t in s.applicable_targets})
                     logger.warning(

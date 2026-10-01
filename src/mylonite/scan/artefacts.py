@@ -32,7 +32,7 @@ from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
 from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
-from mylonite.reason_codes import format_code_counts
+from mylonite.reason_codes import NT_MODULE_LOAD_FAILED, format_code_counts
 from mylonite.scan._llm import LLMSpend
 from mylonite.scan.class_verdict import (
     CalibrationSummary,
@@ -42,6 +42,7 @@ from mylonite.scan.class_verdict import (
 )
 from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
+    MODULE_LOAD_FAILURE_KEY,
     AttemptClass,
     adjudication_counts,
     attempt_reached_no_verdict,
@@ -308,11 +309,54 @@ _VERDICTS_SCHEMA_VERSION: Final = "1.0"
 def _has_class_summary(result: ScanResult) -> bool:
     """Whether this result gets the per-class summary (sidecar and block).
 
-    Only when an attempt was decided by the trace rule, or the target carries a
-    calibration summary. Reference, REST and replayed scans have neither, so
-    their artefacts and output are unchanged.
+    Only when an attempt was decided by the trace rule, the target carries a
+    calibration summary, or an attack module failed to load (its classes are
+    NOT TESTED, and the class block is where that shows per class). Reference,
+    REST and replayed scans otherwise have none of these, so their artefacts
+    and output are unchanged.
     """
-    return has_trace_outcome(result.report) or result.calibration is not None
+    return (
+        has_trace_outcome(result.report)
+        or result.calibration is not None
+        or bool(_load_failures(result.report))
+    )
+
+
+def _load_failures(report: ScanReport) -> dict[str, tuple[str, str, list[str]]]:
+    """Attack modules that failed to load, read off the report's attempts.
+
+    ``{entry point: (stage, error type, [lost classes])}``; an empty class list
+    means the module's classes are unknown.
+    """
+    out: dict[str, tuple[str, str, list[str]]] = {}
+    for attempt in report.attempts:
+        evidence = attempt.judge_evidence
+        module = evidence.get(MODULE_LOAD_FAILURE_KEY)
+        if not module:
+            continue
+        _stage, _error, classes = out.setdefault(
+            module, (evidence.get("load_stage", "load"), attempt.error_detail or "error", [])
+        )
+        if evidence.get("weakness"):
+            classes.append(evidence["weakness"])
+    return out
+
+
+def _load_failure_line(report: ScanReport) -> str | None:
+    """The scan-level line naming each attack module that failed to load (#222)."""
+    failures = _load_failures(report)
+    if not failures:
+        return None
+    parts = []
+    for module, (stage, error, classes) in sorted(failures.items()):
+        lost = f"{', '.join(classes)} NOT TESTED" if classes else "classes unknown, NOT TESTED"
+        parts.append(f"{module} ({stage} failed: {error}; {lost})")
+    text = (
+        f"attack modules: {len(failures)} failed to load [{NT_MODULE_LOAD_FAILED}]: "
+        f"{'; '.join(parts)}. Their attacks never ran, so this is not a clean result "
+        "for what they cover."
+    )
+    return f"[bold red]{rich_escape(text)}[/bold red]"
 
 
 def _verdicts_document(result: ScanResult) -> dict[str, object]:
@@ -506,6 +550,9 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             f"[yellow]flakiness: {nrun_disagreements} payload(s) disagreed across runs "
             "(N-run majority decided) - the finding is not perfectly reproducible[/yellow]",
         )
+    load_failure_line = _load_failure_line(report)
+    if load_failure_line:
+        console_print(console, load_failure_line)
     # Correctness safeguard (PR3): an attempt that was NOT TESTED (poison never
     # delivered / no seed_arm to plant) proved nothing — it must not let a
     # findings_count==0 scan read as "clean". Surface the gap loudly so a misfire

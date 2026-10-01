@@ -55,6 +55,10 @@
     "category": "not-tested",
     "summary": "The seed could not be resolved from the catalogue, so the attack never ran."
   },
+  "MYL-NT-015": {
+    "category": "not-tested",
+    "summary": "The attack module that covers this class failed to load, so its attacks never ran."
+  },
   "MYL-ABT-001": {
     "category": "abort",
     "summary": "The scan used up its LLM call budget and stopped early; coverage is incomplete."

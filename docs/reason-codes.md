@@ -17,7 +17,7 @@ stays listed here. Reason codes do not change exit codes: see
 
 | Prefix | Where you see it | What it means |
 |---|---|---|
-| `MYL-NT` | the `coverage:` and `judge:` summary lines, the incomplete-coverage error | an attempt was NOT TESTED: it proved nothing about the target |
+| `MYL-NT` | the `coverage:`, `judge:` and `attack modules:` summary lines, the incomplete-coverage error | an attempt was NOT TESTED: it proved nothing about the target |
 | `MYL-ABT` | the error line after an aborted scan | the scan stopped before it covered what it set out to |
 | `MYL-PRE` | the error line before a scan starts | the run was refused before any LLM call |
 | `MYL-INC` | an attempt's evidence | the attack ran, but the effect evidence could not be trusted, so the attempt is NOT TESTED |
@@ -115,6 +115,34 @@ The seed could not be resolved from the catalogue, so the attack never ran.
 
 **Fix:** This is an internal defect. Please
 [file an issue](https://github.com/Abidemialade/mylonite/issues).
+
+## MYL-NT-015
+
+The attack module that covers this class failed to load, so its attacks never ran. The
+module either failed to import (a broken package, a missing dependency) or raised when
+it was constructed. The other modules still run. The summary prints an
+`attack modules:` line naming each failed module, the step that failed and the error
+type; the error message itself is never shown, because it can quote paths or secrets.
+
+```text
+attack modules: 1 failed to load [MYL-NT-015]: prompt_injection (import failed:
+ImportError; W1, W2 NOT TESTED). Their attacks never ran, so this is not a clean
+result for what they cover.
+```
+
+Each weakness class the module would have run on this target reads NOT TESTED with
+this code, in the class summary and in `verdicts.json`. A scan with no finding exits
+`2`, the same as any other incomplete coverage.
+
+The classes of a module Mylonite ships are known even when it fails to load. A
+third-party module that fails to import or construct can't say which classes it
+covers, so it shows as one NOT TESTED row in the `unknown` class instead. That row
+appears only when the module would have run: you opted its entry-point name or an id
+into `MYLONITE_ATTACK_MODULES` that no loaded module answers to. A module nobody
+enabled loses no coverage, so its failure stays a log warning.
+
+**Fix:** Reinstall the module's package and its dependencies, then re-run. The
+`attack modules:` line names the module and the error type.
 
 ## MYL-ABT-001
 

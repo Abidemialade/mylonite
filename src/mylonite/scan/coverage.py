@@ -410,6 +410,11 @@ _UNDECIDED_UNLINKED_DISPATCH_BUCKET: Final = "undecided_unlinked_dispatch"
 _UNDECIDED_PAYLOAD_MARKER_BUCKET: Final = "undecided_payload_marker"
 _UNDECIDED_RELIST_FAILED_BUCKET: Final = "undecided_relist_failed"
 _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: Final = "undecided_tool_list_truncated"
+#: #222: the engine records one ``outcome == "error"`` attempt per weakness class
+#: an attack module would have covered when that module failed to import or
+#: construct. Told apart from a real error by this ``judge_evidence`` key.
+_MODULE_LOAD_FAILED_BUCKET: Final = "module_load_failed"
+MODULE_LOAD_FAILURE_KEY: Final = "module_load_failure"
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -489,6 +494,7 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     "skipped_planner_failure": "failed before the attack could be delivered",
     "skipped_invalid_metadata": "had invalid seed metadata",
     "skipped_unknown_seed": "could not be resolved from the seed catalogue",
+    _MODULE_LOAD_FAILED_BUCKET: "belong to an attack module that failed to load",
 }
 
 _BUCKET_REMEDY: Final[dict[str, str]] = {
@@ -509,6 +515,9 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
     if ATTEMPT_CLASS.get(outcome) is not AttemptClass.NOT_TESTED:
         return None
     if outcome == "error":
+        evidence = getattr(attempt, "judge_evidence", None) or {}
+        if evidence.get(MODULE_LOAD_FAILURE_KEY):
+            return _MODULE_LOAD_FAILED_BUCKET
         error_detail = str(getattr(attempt, "error_detail", "") or "")
         if error_detail in _PROVIDER_EXCEPTION_TYPE_NAMES:
             return _PROVIDER_ERROR_BUCKET

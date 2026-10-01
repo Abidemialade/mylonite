@@ -34,6 +34,7 @@ from typing import Any, Final
 from mylonite.contracts import ScanAttempt, ScanReport
 from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
+    MODULE_LOAD_FAILURE_KEY,
     AttemptClass,
     attempt_reached_no_verdict,
     reason_code_for_attempt,
@@ -163,8 +164,12 @@ def weakness_of(attempt: ScanAttempt, exploit_weakness: Mapping[str, str] | None
 
     From the bundled seed catalogue, then a synthesised seed's own id, then
     ``exploit_weakness`` (pattern id -> class, from the exploit files a finding
-    wrote), and :data:`UNKNOWN_CLASS` otherwise.
+    wrote), and :data:`UNKNOWN_CLASS` otherwise. An attempt the engine recorded
+    for an attack module that failed to load names its class in its evidence
+    (:data:`UNKNOWN_CLASS` when the module's classes could not be known).
     """
+    if attempt.judge_evidence.get(MODULE_LOAD_FAILURE_KEY):
+        return attempt.judge_evidence.get("weakness") or UNKNOWN_CLASS
     for key in (attempt.seed_id, attempt.pattern_id):
         if key in _SEED_WEAKNESS:
             return _SEED_WEAKNESS[key]
