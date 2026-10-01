@@ -66,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written for a trace-decided or calibrated scan, which the offline demo
   replay is neither — see that same CONTRIBUTING.md section for the full
   explanation.
+- **`docs/validation.md` documents the full `mylonite.testkit` API.**
+  `load_exploit`, `assert_guard_holds`, `assert_target_resists`,
+  `assert_control_holds` and the `TestkitFixtureError` /
+  `TestkitRedriveAborted` / `TestkitConfigError` exceptions — the complete
+  `testkit.__all__` surface emitted tests import by name — each now has a
+  one-line description under "The testkit API". `load_exploit` and the three
+  exception types had no mention anywhere under `docs/` before this.
 
 ### Changed
 
