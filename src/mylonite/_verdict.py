@@ -73,3 +73,19 @@ def verdict_reason(report: ValidationReport) -> str:
     if not _build_passed(report):
         gaps.append("the build leg was skipped, so the emitted test was not checked")
     return "the attack reproduced, but " + "; and ".join(gaps) + "."
+
+
+def next_step_after_keep(report: ValidationReport) -> str:
+    """The next step ``validate`` prints for a kept report.
+
+    The exit code is 0 either way, but an unproven keep is not presented as a
+    finished gate: committing its test gates reproduction only."""
+    if verdict_label(report) == STABLE_NOT_PROVEN:
+        return (
+            "Next: committing this test gates reproduction only; add a guarded side "
+            "or an effect_probe and re-run `mylonite validate` to prove a safeguard."
+        )
+    return (
+        "Next: commit the generated test + fixtures so CI can gate on it "
+        "(see `mylonite gate --help`)."
+    )
