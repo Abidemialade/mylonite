@@ -72,7 +72,7 @@ mylonite scan --target-file my-agent.yaml --authorize my-agent
 `--authorize` is mandatory, as for every real target: you assert you own or are
 authorized to test it (see the [responsible-use policy](security.md)). From there
 the flow is the same as any target — `generate` emits the regression test,
-`validate` proves it, `gate` opens the PR:
+`validate` checks it, `gate` opens the PR:
 
 ```bash
 mylonite gate --target-file my-agent.yaml --authorize my-agent
@@ -80,14 +80,19 @@ mylonite gate --target-file my-agent.yaml --authorize my-agent
 
 ## Notes
 
-- **Control-efficacy on a black box.** The control-efficacy differential needs a way
-  to toggle a safeguard, and a black box exposes none — so `validate`/`gate`
-  **automatically** decide `kept` by stability + effect + consensus for a `rest`
-  target (a finding is never falsely rejected for lack of a differential).
+- **What a kept test proves on a black box.** The HTTP adapter sees only the agent's
+  reply: it records no tool calls and runs no effect probe. So every finding on a
+  `rest` target is decided by the LLM judge, and its
+  [evidence tier](reading-results.md#evidence-tier) is `judge-only`. `validate` and
+  `gate` decide `kept` by stability and consensus, and a kept test is capped at
+  **STABLE, NOT PROVEN** ("black-box target: the LLM judge is the only evidence"). It
+  never reads KEPT, even when the input-framing differential below passes. The test
+  still gates reproduction in CI; it does not prove a safeguard stops the attack.
 - **Test an input defence: `--prove-input-control`.** Opt into an **input
   data-framing ("spotlighting")** differential — Mylonite drives the same attack
   raw and again wrapped as untrusted data, and `kept` then means that input framing
-  **is load-bearing** for this attack on your agent. It's the black-box analogue of
+  **is load-bearing** for this attack on your agent (the label still reads STABLE,
+  NOT PROVEN, because the judge decided each run). It's the black-box analogue of
   the untrusted-data envelope; use it to check whether a realistic input guard would
   defend you.
 - **The structural recommendation.** Because a `rest` target has no tool surface to

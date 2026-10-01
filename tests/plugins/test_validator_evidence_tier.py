@@ -11,7 +11,14 @@ from typing import Any
 
 import pytest
 
-from mylonite._verdict import JUDGE_ONLY_MARKER, REJECTED, verdict_label, verdict_reason
+from mylonite._verdict import (
+    JUDGE_ONLY_MARKER,
+    REJECTED,
+    STABLE_NOT_PROVEN,
+    next_step_after_keep,
+    verdict_label,
+    verdict_reason,
+)
 from mylonite.contracts import ScanAttempt, ScanReport
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.plugins._reference.reference_validator import (
@@ -25,7 +32,9 @@ from mylonite.scan.engine import ScanResult
 from .test_differential_validator import _cust_completion, _custom_exploit, _FakeCustomAdapter
 
 
-def _validate_custom(tiers: list[str | None], *, effect: str = "unprobed") -> Any:
+def _validate_custom(
+    tiers: list[str | None], *, effect: str = "unprobed", black_box: bool = False
+) -> Any:
     """Validate a custom target whose runs all fire, at the given tiers."""
     test = ReferencePytestGenerator().emit(_custom_exploit())
     queue = list(tiers)
@@ -38,6 +47,7 @@ def _validate_custom(tiers: list[str | None], *, effect: str = "unprobed") -> An
             response=None,
             verdict_mechanism="llm" if tier == "judge-only" else "predicate",
             evidence_tier=tier,
+            black_box=black_box,
         )
 
     validator = DifferentialValidator(
@@ -48,6 +58,8 @@ def _validate_custom(tiers: list[str | None], *, effect: str = "unprobed") -> An
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(DifferentialValidator, "_run_custom_iteration", _run, raising=True)
+        # The judges agree, so only the evidence rule decides the keep.
+        mp.setattr(DifferentialValidator, "_multi_judge_consensus", lambda self, runs, payload: 1.0)
         return validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
 
@@ -65,6 +77,34 @@ def test_custom_target_rejects_a_keep_resting_on_the_judge_alone() -> None:
     assert "2 judge-only" in stability.detail
     assert JUDGE_ONLY_MARKER in report.notes
     assert "LLM judge alone" in verdict_reason(report)
+
+
+def test_a_black_box_target_keeps_a_judge_only_test_capped_at_stable_not_proven() -> None:
+    """A transport: rest target records no tool calls and runs no effect probe,
+    so the judge is all it can offer: the test is kept, never as KEPT."""
+    report = _validate_custom(["judge-only", "judge-only"], black_box=True)
+    assert report.kept is True
+    assert _stability(report).passed is True
+    assert verdict_label(report) == STABLE_NOT_PROVEN
+    assert "black-box target: the LLM judge is the only evidence" in verdict_reason(report)
+    assert JUDGE_ONLY_MARKER not in report.notes
+    assert "effect_probe" not in next_step_after_keep(report)
+
+
+def test_a_black_box_cap_holds_even_when_every_other_leg_proves() -> None:
+    """A passing differential (e.g. the input-framing one) never lifts the cap."""
+    from mylonite.contracts import ValidationOutcome
+
+    report = _validate_custom(["judge-only", "judge-only"], black_box=True)
+    proven = report.model_copy(
+        update={
+            "outcomes": [
+                ValidationOutcome(stage="build", passed=True, detail="ok"),
+                ValidationOutcome(stage="differential", passed=True, detail="ok"),
+            ]
+        }
+    )
+    assert verdict_label(proven) == STABLE_NOT_PROVEN
 
 
 def test_judge_only_runs_still_support_a_confirmed_run() -> None:
@@ -179,3 +219,18 @@ def test_the_rendered_verdict_names_the_judge_only_cause() -> None:
     )
     assert "verdict: REJECTED" in buffer.getvalue()
     assert "LLM judge alone" in buffer.getvalue()
+
+
+def test_a_real_run_against_an_http_agent_is_marked_black_box() -> None:
+    class _HttpAgent(_FakeCustomAdapter):
+        async def describe(self) -> Any:
+            from mylonite.contracts import TargetDescriptor
+
+            return TargetDescriptor(target_id="rest:agent", kind="http-agent")
+
+    validator = DifferentialValidator(
+        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+    )
+    pid = _custom_exploit().pattern_id
+    assert validator._run_custom_iteration(_HttpAgent("unprobed"), pid).black_box is True
+    assert validator._run_custom_iteration(_FakeCustomAdapter("true"), pid).black_box is False

@@ -82,7 +82,12 @@ from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact_exception
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
-from mylonite._verdict import JUDGE_ONLY_CLAUSE, judge_only_marker, verdict_label
+from mylonite._verdict import (
+    JUDGE_ONLY_CLAUSE,
+    black_box_marker,
+    judge_only_marker,
+    verdict_label,
+)
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -313,6 +318,10 @@ class _CustomRun:
     #: when no judged attempt was recorded. When every firing run is
     #: judge-only, the stability leg fails.
     evidence_tier: str | None = None
+    #: True when the target is a black box (``transport: rest``, descriptor kind
+    #: ``http-agent``): it records no tool calls and runs no effect probe, so
+    #: the LLM judge is the only evidence it can give.
+    black_box: bool = False
 
 
 def _tier_clause(tiers: list[str | None]) -> str:
@@ -700,7 +709,12 @@ class DifferentialValidator(ValidatorBase):
         # was confirmed by the target's state or the recorded trace. Judge-only
         # runs still count toward the threshold when one run is confirmed.
         fire_tiers = [r.evidence_tier for r in runs if r.finding]
-        judge_only = rests_on_judge_only(fire_tiers)
+        all_judge_only = rests_on_judge_only(fire_tiers)
+        # A black-box target can give nothing but the judge, so its judge-only
+        # fires still keep a test, capped at STABLE, NOT PROVEN (see
+        # `mylonite._verdict`). Every other target must confirm one run.
+        black_box_cap = all_judge_only and any(r.black_box for r in runs if r.finding)
+        judge_only = all_judge_only and not black_box_cap
         # A firing run counts toward the effect leg at its proof level (see
         # `_effect_proof_level`). Each level already ties the damage to that
         # attempt, so no level is required on top of the count: a target whose
@@ -930,6 +944,7 @@ class DifferentialValidator(ValidatorBase):
             + twin_note
             + notes_tail
             + judge_only_marker(judge_only)
+            + black_box_marker(black_box_cap)
         )
         return ValidationReport(
             test_filename=test.filename,
@@ -979,6 +994,7 @@ class DifferentialValidator(ValidatorBase):
             judge_model=self._judge_model,
         )
         result = asyncio.run(engine.run())
+        black_box = result.descriptor is not None and result.descriptor.kind == "http-agent"
         # The judged attempt for this seed carries the verdict mechanism and the
         # judge evidence, which holds the adapter's effect value for every
         # branch, so a defended or undecided run records its real value too.
@@ -1005,6 +1021,7 @@ class DifferentialValidator(ValidatorBase):
                 trace_outcome=evidence.get("trace_outcome", response.metadata.get("trace_outcome")),
                 proof_level=evidence.get("proof_level"),
                 evidence_tier=attempt_evidence_tier(attempt) if attempt is not None else None,
+                black_box=black_box,
             )
         attempt = next(iter(attempts), None)
         evidence = dict(attempt.judge_evidence) if attempt is not None else {}
@@ -1015,6 +1032,7 @@ class DifferentialValidator(ValidatorBase):
             resisted=self._resisted(result, pattern_id),
             verdict_mechanism=attempt.verdict_mechanism if attempt is not None else None,
             trace_outcome=evidence.get("trace_outcome"),
+            black_box=black_box,
         )
 
     @staticmethod
