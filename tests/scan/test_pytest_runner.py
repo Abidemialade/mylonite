@@ -181,3 +181,61 @@ def test_import_preflight_is_memoized(tmp_path: Path, monkeypatch: pytest.Monkey
     run_test_file(f)
 
     assert call_count == 1
+
+
+# --- a pass means a test actually ran and passed ------------------------------
+
+
+def test_all_skipped_file_is_not_a_pass(tmp_path: Path) -> None:
+    """Exit 0 with every test skipped ran nothing. It must not read as a pass."""
+    f = _write(
+        tmp_path,
+        "test_skip.py",
+        "import pytest\n\n@pytest.mark.skip(reason='x')\ndef test_x():\n    assert False\n",
+    )
+    result = run_test_file(f)
+    assert result.exit_code == 0
+    assert result.outcome is PytestOutcome.ALL_SKIPPED
+    assert result.passed is False
+
+
+def test_one_pass_among_skips_is_a_pass(tmp_path: Path) -> None:
+    f = _write(
+        tmp_path,
+        "test_mixed.py",
+        "import pytest\n\n@pytest.mark.skip(reason='x')\ndef test_a():\n    pass\n\n"
+        "def test_b():\n    assert True\n",
+    )
+    result = run_test_file(f)
+    assert result.outcome is PytestOutcome.PASSED
+    assert result.passed is True
+
+
+def test_exit_zero_without_a_summary_is_not_a_pass() -> None:
+    """With no readable pass count, exit 0 is not taken as proof of a pass."""
+    assert pytest_runner._classify(0, stdout="") == (
+        PytestOutcome.ALL_SKIPPED,
+        "pytest exited 0 but no test passed (every test was skipped or none ran)",
+    )
+
+
+def test_collect_only_collects_without_running(tmp_path: Path) -> None:
+    f = _write(tmp_path, "test_bad.py", "def test_bad():\n    assert False\n")
+    result = run_test_file(f, collect_only=True)
+    assert result.outcome is PytestOutcome.COLLECTED
+    assert result.passed is False
+    assert result.collected is True
+
+
+def test_collect_only_on_a_broken_file_is_a_collection_error(tmp_path: Path) -> None:
+    f = _write(tmp_path, "test_syntax.py", "def test_x(:\n    assert True\n")
+    result = run_test_file(f, collect_only=True)
+    assert result.outcome is PytestOutcome.COLLECTION_ERROR
+    assert result.collected is False
+
+
+def test_collect_only_on_an_empty_file_is_no_tests(tmp_path: Path) -> None:
+    f = _write(tmp_path, "test_empty.py", "x = 1\n")
+    result = run_test_file(f, collect_only=True)
+    assert result.outcome is PytestOutcome.NO_TESTS
+    assert result.collected is False
