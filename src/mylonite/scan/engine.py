@@ -238,6 +238,7 @@ class _PerPayloadOutcome:
 class _JudgedPass:
     """One invoke→judge pass that produced a verdict (not a structural skip)."""
 
+    payload: Payload
     verdict: Any  # mylonite.scan.judge.Verdict
     response: Any  # mylonite.contracts._types.AdapterResponse
     tool_call_trace: list[str]
@@ -896,13 +897,6 @@ class ScanEngine:
                 )
             customiser_fallback = payload.metadata.get("customiser") == "fallback"
 
-        # Generalization probe (opt-in): randomize the exfil destination AFTER
-        # customisation so the predicate (keyed on the minted token via metadata)
-        # tests whether the control/target stops exfil to ANY attacker address,
-        # not just the demo literal. No-op by default; never on the fixture path.
-        if self._config.randomize_exfil:
-            payload = randomize_payload_exfil(payload)
-
         # Invoke + judge the (customised) payload `runs` times (scan-time flakiness
         # filter). A structural skip or error on ANY pass is terminal — retrying a
         # missing seed arm, an undelivered payload, or a planner outage tests
@@ -986,8 +980,8 @@ class ScanEngine:
             # they return `skipped_unknown_seed` above — but kept for safety).
             resolved_compliance = seed.compliance if seed is not None else compliance
             # Attack-tier provenance (no contract change — rides payload.metadata).
-            tiered_payload = payload.model_copy(
-                update={"metadata": {**payload.metadata, "attack_tier": "static"}}
+            tiered_payload = decisive.payload.model_copy(
+                update={"metadata": {**decisive.payload.metadata, "attack_tier": "static"}}
             )
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
@@ -1266,8 +1260,11 @@ class ScanEngine:
         a terminal :class:`_PerPayloadOutcome` for a structural skip / error that
         must not be retried.
         """
+        attempt_payload = (
+            randomize_payload_exfil(payload) if self._config.randomize_exfil else payload
+        )
         try:
-            response = await self._adapter.invoke(payload)
+            response = await self._adapter.invoke(attempt_payload)
         except SeedArmUnavailable as skip:
             return _PerPayloadOutcome(
                 attempt=ScanAttempt(
@@ -1354,7 +1351,7 @@ class ScanEngine:
             )
 
         try:
-            verdict = await self._judge.judge(payload, response)
+            verdict = await self._judge.judge(attempt_payload, response)
         except BudgetExceededError:
             raise
         except Exception as exc:
@@ -1378,6 +1375,7 @@ class ScanEngine:
         # the judge evidence on EVERY judged outcome, so a no_finding is as
         # auditable as a finding without re-querying the target's own state.
         return _JudgedPass(
+            payload=attempt_payload,
             verdict=verdict,
             response=response,
             tool_call_trace=list(response.tool_calls),
