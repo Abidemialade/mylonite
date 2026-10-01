@@ -261,8 +261,9 @@ says exactly what it saw. The one residual leak: a silent drop where the marker 
 runs the unguarded runs and then the guarded runs inside one command, against the same
 state, so a guarded twin that drops silently meets the marker the unguarded runs wrote
 and can read as a leak; fresh state before each `validate` command does not prevent
-this. A per-run marker does: build `expect_marker` from `{payload}` and keep the default
-per-run randomised exfil address, so each run looks for a marker no earlier run wrote. A
+this. A per-run marker does: set `expect_marker` to `{exfil_email}` or `{exfil_host}` and keep
+the default per-run randomised exfil address, so each run looks for a marker no earlier run
+wrote. A
 guard that refuses at the tool boundary with `isError`, rather than replying with
 success, also reads correctly, because a refused call never links.
 
