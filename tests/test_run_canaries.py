@@ -337,3 +337,39 @@ def test_default_custom_target_file_is_committed_and_loadable() -> None:
     assert rc.DEFAULT_CUSTOM_TARGET_FILE.is_file()
     authorize = rc._authorize_value_for(rc.DEFAULT_CUSTOM_TARGET_FILE)
     assert authorize is not None and authorize.strip()
+
+
+# --- scan writes into a timestamped subdirectory of --output-dir -------------
+
+
+def _write_scan(out_dir: Path, stamp: str, findings: int) -> Path:
+    sub = out_dir / stamp
+    sub.mkdir(parents=True)
+    (sub / "scan_report.json").write_text(
+        json.dumps({"findings_count": findings}), encoding="utf-8"
+    )
+    return sub
+
+
+def test_findings_count_is_read_from_the_timestamped_subdir(tmp_path: Path) -> None:
+    # The live canary run read UNKNOWN on three good scans because it looked
+    # for scan_report.json directly under --output-dir.
+    _write_scan(tmp_path, "2026-10-01T22-00-00Z", findings=5)
+    assert rc._read_findings_count(tmp_path) == 5
+
+
+def test_latest_scan_dir_picks_the_newest_run(tmp_path: Path) -> None:
+    import os
+    import time
+
+    old = _write_scan(tmp_path, "2026-10-01T21-00-00Z", findings=1)
+    new = _write_scan(tmp_path, "2026-10-01T22-00-00Z", findings=4)
+    past = time.time() - 60
+    os.utime(old / "scan_report.json", (past, past))
+    assert rc._latest_scan_dir(tmp_path) == new
+    assert rc._read_findings_count(tmp_path) == 4
+
+
+def test_no_scan_report_reads_as_unknown(tmp_path: Path) -> None:
+    assert rc._latest_scan_dir(tmp_path) is None
+    assert rc._read_findings_count(tmp_path) is None

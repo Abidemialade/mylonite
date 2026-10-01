@@ -254,7 +254,30 @@ def _find_exploit(scan_dir: Path, pattern_id: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def _read_findings_count(scan_dir: Path) -> int | None:
+def _latest_scan_dir(out_dir: Path) -> Path | None:
+    """The directory ``scan --output-dir <out_dir>`` actually wrote into.
+
+    ``scan`` writes each run into a timestamped subdirectory of
+    ``--output-dir``, never into it directly, so the report and exploit files
+    sit one level down. Returns the newest directory holding a
+    ``scan_report.json``, or ``None`` when the scan wrote none.
+    """
+    if (out_dir / "scan_report.json").is_file():
+        return out_dir
+    reports = sorted(out_dir.glob("**/scan_report.json"), key=lambda p: p.stat().st_mtime)
+    return reports[-1].parent if reports else None
+
+
+def _stderr_tail(proc: subprocess.CompletedProcess[str], lines: int = 3) -> str:
+    """The last few stderr lines, so an ERROR row says why."""
+    tail = [ln for ln in (proc.stderr or "").strip().splitlines() if ln.strip()][-lines:]
+    return " | ".join(tail)
+
+
+def _read_findings_count(out_dir: Path) -> int | None:
+    scan_dir = _latest_scan_dir(out_dir)
+    if scan_dir is None:
+        return None
     report_path = scan_dir / "scan_report.json"
     if not report_path.is_file():
         return None
@@ -617,10 +640,19 @@ def run_custom_redrive(ctx: RunContext, run_index: int) -> CanaryRun:
             "custom-redrive", run_index, "ERROR", False, detail=f"scan exit {scan_proc.returncode}"
         )
 
+    written = _latest_scan_dir(scan_dir)
+    if written is None:
+        return CanaryRun(
+            "custom-redrive",
+            run_index,
+            "ERROR",
+            False,
+            detail=f"scan wrote no scan_report.json: {_stderr_tail(scan_proc)}",
+        )
     gen_proc = run_cli(
         [
             "generate",
-            str(scan_dir),
+            str(written),
             "--out",
             str(gen_dir),
             "--target-file",
@@ -630,7 +662,13 @@ def run_custom_redrive(ctx: RunContext, run_index: int) -> CanaryRun:
         timeout_s=ctx.timeout_s,
     )
     if gen_proc.returncode != 0:
-        return CanaryRun("custom-redrive", run_index, "ERROR", False, detail="generate failed")
+        return CanaryRun(
+            "custom-redrive",
+            run_index,
+            "ERROR",
+            False,
+            detail=f"generate failed: {_stderr_tail(gen_proc)}",
+        )
 
     try:
         collect_proc = subprocess.run(
