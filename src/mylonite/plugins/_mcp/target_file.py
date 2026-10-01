@@ -676,8 +676,13 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
     # `validate` needs at least one "true" to keep a finding.
     if probe is not None and probe.expect_marker and "{payload}" not in probe.expect_marker:
         marker = probe.expect_marker
+        # {exfil_email}/{exfil_host} render to THIS attempt's active
+        # destination, which the agent's own call carries exactly as a fixed
+        # address would -- they are not the "fixed value the call never
+        # carries" case below.
+        uses_exfil_placeholder = "{exfil_email}" in marker or "{exfil_host}" in marker
         is_address = "://" in marker or bool(_EMAIL_SHAPE_RE.match(marker.strip()))
-        if not is_address:
+        if not is_address and not uses_exfil_placeholder:
             warnings.append(
                 f"effect_probe.expect_marker {marker!r} is a fixed value that the "
                 "agent's own call does not carry. An effect counts for an attempt only "
@@ -688,6 +693,19 @@ def effect_probe_warnings(tf: TargetFile) -> list[str]:
                 "'true', and `validate` cannot keep the finding. The dependable fix is "
                 "a marker the agent's own call carries, for example the recipient "
                 "address or '{payload}'."
+            )
+        elif is_address and not uses_exfil_placeholder:
+            # #196: a scan can mint a fresh exfil destination per attempt (the
+            # generalization probe) so a control is tested against more than
+            # one memorised literal. A literal address marker never matches
+            # that minted token, so the probe silently stops confirming the
+            # effect the moment randomization is on.
+            warnings.append(
+                f"effect_probe.expect_marker {marker!r} is a literal address. A scan "
+                "can mint a fresh exfil destination for each attempt, which this fixed "
+                "literal can never match, silently losing effect confirmation. Use "
+                "{exfil_email} or {exfil_host} instead -- they render to this attempt's "
+                "active destination whether or not that randomization is on."
             )
     return warnings
 

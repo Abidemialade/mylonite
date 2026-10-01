@@ -330,15 +330,17 @@ def test_effect_probe_warning_for_side_effecting_weakness_without_probe() -> Non
 
 def test_effect_probe_warning_silent_when_probe_declared() -> None:
     """With an effect_probe declared, the effect is confirmable — no missing-probe
-    warning. Uses a marker the agent must PRODUCE (not one Mylonite plants), so the
-    exfil-literal collision advisory stays silent too."""
+    warning. Uses {exfil_email}: a marker the agent must PRODUCE (not one Mylonite
+    plants), so the exfil-literal collision advisory stays silent, and it already
+    is the randomization-safe marker shape, so the literal-address advisory (#196)
+    stays silent too."""
     from mylonite.plugins._mcp.target_registry import EffectProbeSpec
 
     tf = _tf(
         weakness_classes=["W4"],
         # A recipient the agent's own call carries, so the fixed-marker warning
         # stays silent too.
-        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="ops@example.com"),
+        effect_probe=EffectProbeSpec(verify_tool="list_sent", expect_marker="{exfil_email}"),
     )
     assert effect_probe_warnings(tf) == []
 
@@ -409,6 +411,36 @@ def test_effect_probe_fixed_marker_warning_silent_for_an_address(marker: str) ->
     """A recipient or destination is what the agent's own call carries, so it
     links through that call's arguments: the fix the warning recommends."""
     assert _status_word_warnings(marker) == []
+
+
+@pytest.mark.parametrize("marker", ["ops@example.com", "https://collector.example.net/x"])
+def test_effect_probe_warns_a_literal_address_cannot_match_a_randomized_one(
+    marker: str,
+) -> None:
+    """#196: a scan can mint a fresh exfil destination per attempt, which a fixed
+    literal address can never match -- steer the operator to {exfil_email}/{exfil_host}."""
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    tf = _tf(
+        weakness_classes=["W4"],
+        effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker=marker),
+    )
+    warnings = [w for w in effect_probe_warnings(tf) if "{exfil_email}" in w or "{exfil_host}" in w]
+    assert len(warnings) == 1, warnings
+    assert marker in warnings[0]
+
+
+@pytest.mark.parametrize("marker", ["{exfil_email}", "{exfil_host}", "sent to {exfil_email}"])
+def test_effect_probe_exfil_placeholder_marker_warns_neither_way(marker: str) -> None:
+    """{exfil_email}/{exfil_host} render to THIS attempt's active destination, so
+    they are neither "fixed and uncarried" nor "a literal that can't be randomized"."""
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    tf = _tf(
+        weakness_classes=["W4"],
+        effect_probe=EffectProbeSpec(verify_tool="list_outbox", expect_marker=marker),
+    )
+    assert effect_probe_warnings(tf) == []
 
 
 @pytest.mark.parametrize(
