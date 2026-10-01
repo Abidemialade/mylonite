@@ -240,6 +240,14 @@ When a scan exercised every attempt and found nothing, a `result:` line states t
 scope of that result: the attack patterns run in that scan, against that model. Re-scan
 when the system prompt, the tools, or the model change.
 
+### Errors in the log
+
+When a provider call made by the planner, the judge or a robustness check fails, the log
+shows one line: what failed, the exception type, and its message with secrets masked
+(API keys, bearer tokens, and `key=`/`api_key=` values in URLs). Mylonite never logs the
+raw traceback for these errors, even at DEBUG level, because a provider's error text can
+carry the key or the request URL.
+
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 
 SARIF is the portal to where developers already triage every other finding — the
