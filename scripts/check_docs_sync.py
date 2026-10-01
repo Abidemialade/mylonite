@@ -13,13 +13,16 @@ opts out with a reason, in a commit message or the pull-request description::
 
     Docs-Impact: none - internal refactor of the scan loop, no behaviour change
 
-or, in CI only, with the ``no-docs`` label. The reason is required so a reviewer
-can agree with it at a glance.
+Locally (the pre-commit hook, ``--staged``), that reason is enough on its own.
+In CI (``--ci``), it is honoured only when the PR also carries the ``no-docs``
+label: anyone can write a trailer into their own commit, but the label takes a
+maintainer's separate action, so it is the label that actually gates the
+opt-out there, and the reason is what a reviewer agreeing with it reads.
 
 Usage::
 
-    python scripts/check_docs_sync.py --base origin/main          # branch vs base
-    python scripts/check_docs_sync.py --staged --message "$MSG"   # before a commit
+    python scripts/check_docs_sync.py --base origin/main --ci       # CI: label-gated opt-out
+    python scripts/check_docs_sync.py --staged --message "$MSG"     # pre-commit: reason alone
 """
 
 from __future__ import annotations
@@ -85,6 +88,41 @@ DOC_RULES: tuple[DocRule, ...] = (
         ("docs/verification.md",),
         "the third-party verification harness and its published numbers",
     ),
+    DocRule(
+        "src/mylonite/commands/",
+        ("docs/cli-reference.md",),
+        "the command implementations backing the CLI",
+    ),
+    DocRule(
+        "src/mylonite/scan/",
+        ("docs/reading-results.md",),
+        "scan behaviour and the outcomes it reports",
+    ),
+    DocRule(
+        "src/mylonite/scan/providers.py",
+        ("docs/self-hosted-models.md",),
+        "the approved-provider registry and LLM credential wiring",
+    ),
+    DocRule(
+        "src/mylonite/reason_codes.py",
+        ("docs/reason-codes.md",),
+        "the reason-code registry",
+    ),
+    DocRule(
+        "src/mylonite/config.py",
+        ("docs/cli-reference.md",),
+        "the mylonite.yaml run-config schema",
+    ),
+    DocRule(
+        "src/mylonite/demo/",
+        ("docs/cli-reference.md",),
+        "the demo command and its bundled fixtures",
+    ),
+    DocRule(
+        "src/mylonite/gate/templates/",
+        ("docs/ci-gating.md",),
+        "the gate action's reusable CI workflow templates",
+    ),
 )
 
 # Found anywhere in a text, so it also works inline in `git commit -m "..."`.
@@ -118,16 +156,36 @@ def opt_out_reason(texts: Iterable[str]) -> str | None:
 
 
 def check(
-    changed: Sequence[str], opt_out_texts: Iterable[str] = (), labels: Iterable[str] = ()
+    changed: Sequence[str],
+    opt_out_texts: Iterable[str] = (),
+    labels: Iterable[str] = (),
+    *,
+    ci: bool = False,
 ) -> list[Problem]:
-    """Return the doc updates this change set is missing (empty when in sync)."""
+    """Return the doc updates this change set is missing (empty when in sync).
+
+    ``ci`` picks which opt-out rule applies (see the module docstring):
+
+    * ``ci=False`` (the default, used by the local pre-commit hook): a valid
+      ``Docs-Impact: none - <reason>`` trailer opts out on its own, same as
+      always. The ``no-docs`` label also opts out if somehow present, though
+      the hook never has one to pass.
+    * ``ci=True`` (the ``Docs and writing`` job): the trailer is honoured only
+      together with the ``no-docs`` label. The label is the real gate — a
+      maintainer has to add it — and the reason is what a reviewer reads
+      alongside it. A bare reason with no label, or a label with no reason,
+      does not opt out.
+    """
     changed_set = {p.replace("\\", "/") for p in changed}
     code = sorted(p for p in changed_set if _is_code(p))
     if not code:
         return []
-    if NO_DOCS_LABELS & {label.strip().lower() for label in labels}:
-        return []
-    if opt_out_reason(opt_out_texts):
+    has_label = bool(NO_DOCS_LABELS & {label.strip().lower() for label in labels if label.strip()})
+    reason = opt_out_reason(opt_out_texts)
+    if ci:
+        if has_label and reason:
+            return []
+    elif has_label or reason:
         return []
 
     problems: list[Problem] = []
@@ -194,6 +252,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--labels-env", help="environment variable holding comma-separated PR labels"
     )
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help="CI mode: honour Docs-Impact only together with the no-docs label",
+    )
     args = parser.parse_args(argv)
 
     texts: list[str] = list(args.message)
@@ -203,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         texts.append(os.environ.get(args.pr_body_env, ""))
     labels = os.environ.get(args.labels_env, "").split(",") if args.labels_env else []
 
-    problems = check(changed_files(args.base, args.staged), texts, labels)
+    problems = check(changed_files(args.base, args.staged), texts, labels, ci=args.ci)
     if not problems:
         reason = opt_out_reason(texts)
         print(f"docs in sync{f' (Docs-Impact: none - {reason})' if reason else ''}")

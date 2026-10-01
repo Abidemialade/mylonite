@@ -162,3 +162,10 @@ Docs-Impact: none - internal refactor of the scan loop, no behaviour change
 ```
 
 The reason is required. A reviewer should be able to agree with it at a glance.
+
+Locally, that line is enough on its own — the pre-commit hook accepts it as
+written. In CI, it is honoured only together with the `no-docs` label: a
+trailer is something anyone can write into their own commit, but the label
+takes a maintainer's separate action on the PR, so the label is the actual
+gate and the trailer is what the maintainer is agreeing to. Add the reason
+*and* the label; either alone still fails the `Docs and writing` check.
