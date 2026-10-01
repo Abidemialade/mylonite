@@ -81,6 +81,10 @@ and commits every KEPT one's test to a single branch behind a single PR:
 1 kept, 1 rejected
 ```
 
+A kept finding whose validation had no differential and no effect proof is
+labelled **STABLE, NOT PROVEN** in `PR_BODY.md` rather than KEPT, and
+`recommend` reports it as not proven. Its test is still committed.
+
 A finding that was generated and validated but not kept is still named in
 `PR_BODY.md`, with the reason, under "Other findings (not gated)" — it isn't
 silently dropped the way it used to be. If a generator or validator failure hits

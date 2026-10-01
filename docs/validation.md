@@ -111,10 +111,10 @@ Every validation reports three headline figures.
 
 - **`kept`** — the gating verdict.
   For a bundled reference target:
-  `kept = build ∧ differential ∧ flakiness ∧ metamorphic`. The test built and
-  collected under pytest, showed the differential at all, showed it reliably across
-  the flakiness filter, *and* survived a majority of metamorphic rewrites. Only a kept
-  test is worth committing.
+  `kept = build ∧ differential ∧ flakiness ∧ metamorphic`. The committed test ran
+  offline against its recorded fixtures and passed, the test showed the differential
+  at all, showed it reliably across the flakiness filter, *and* survived a majority of
+  metamorphic rewrites. Only a kept test is worth committing.
   For a custom target (no in-repo guarded twin):
   `kept = build ∧ stability ∧ consensus [∧ effect] [∧ differential]`. The **effect**
   leg contributes only when an `effect_probe` is declared; without one it is shown as
@@ -123,6 +123,26 @@ Every validation reports three headline figures.
   `effect_probe` for a KEPT test backed by real damage confirmation. The **differential**
   leg contributes only when a guarded twin is inferable (a server-layer control or a
   synthesised boundary shim).
+
+  **The build leg passes only on a real pass.** On the reference target, `validate`
+  records fixtures and runs the committed test offline; the leg passes only when pytest
+  exits 0 *and* at least one test passed. A test that fails, errors, collects nothing
+  or only skips fails the leg, so the finding is rejected. A custom-target test needs
+  the live target to run (it skips without `MYLONITE_LIVE_TARGET=1`), so there the
+  leg runs `pytest --collect-only` and passes when the file collects at least one
+  test; its detail reads `collected (not run)`.
+
+  **KEPT, or STABLE, NOT PROVEN.** `kept` decides the exit code; the verdict label says
+  what the keep rests on. It reads **KEPT** only when the build leg passed and a
+  differential or effect leg passed: a guarded side stopped the attack, or an effect
+  probe confirmed the damage. A kept test that has neither, or whose build leg was
+  skipped, reads **STABLE, NOT PROVEN**: the attack reproduced and the judges agreed,
+  but nothing showed a safeguard stops it. That happens on a custom target run with
+  `--fast` (no differential) and no `effect_probe`, or with no control and no probe.
+  The label appears in the verdict line, the `gate:` line, the notes in
+  `validation_report.json` and the gate's pull-request body; `kept` and the exit code
+  are unchanged, so existing pipelines keep working. Add a guarded side (drop `--fast`,
+  or declare `control_env`) or an `effect_probe` to turn it into KEPT.
 
   **How the effect leg counts.** Each firing run counts at its
   [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line

@@ -85,6 +85,11 @@ reproducibility: vulnerable fired 5/5, guarded resisted 5/5
 mutation score: 7/9   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
 ```
 
+The verdict at the end of the gate line is **KEPT**, **STABLE, NOT PROVEN** or
+**REJECTED**. STABLE, NOT PROVEN is a kept test with no proof behind it: the attack
+reproduced, but no guarded side or effect probe showed a safeguard stops it, or the
+build leg was skipped. See [what the numbers mean](validation.md#what-the-numbers-mean).
+
 That panel is the **anti-false-positive trust signal**: a large share of security alerts are
 false positives, so a finding that ships with a machine-checkable differential proof
 ("fired 5/5, resisted 5/5") is worth far more than one that just asserts a problem.

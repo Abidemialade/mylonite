@@ -37,6 +37,7 @@ from typing import Any, Final, Literal
 
 from mylonite._redaction import redact, redact_value
 from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
+from mylonite._verdict import KEPT, verdict_label
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import Localization, localize
 from mylonite.scan import control_shim
@@ -1049,7 +1050,9 @@ def recommend(
         degraded.append("effect probe could not be tied to this attempt")
         confidence = _degrade(confidence)
 
-    proven = bool(report and report.kept)
+    # Proven means a plain KEPT: a kept report with no differential or effect
+    # proof, or with its build leg skipped, is STABLE, NOT PROVEN and not proven.
+    proven = report is not None and verdict_label(report) == KEPT
     proven_layer: Literal["server", "boundary", "none"] = "none"
     if report is not None:
         notes = getattr(report, "notes", "") or ""

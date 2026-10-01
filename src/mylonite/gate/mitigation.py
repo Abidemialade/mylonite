@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
+from mylonite._verdict import verdict_label
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.mitigations import snippet as _snippet
@@ -90,8 +91,7 @@ def _evidence_lines(report: ValidationReport) -> str:
             for leg in report.gating_legs
             if leg in legs_by_stage
         )
-        verdict = "KEPT" if report.kept else "REJECTED"
-        rows.append(f"- **gate**: kept = {rendered} => **{verdict}**")
+        rows.append(f"- **gate**: kept = {rendered} => **{verdict_label(report)}**")
     repro = report.reproducibility
     if repro is not None:
         if repro.guard_resisted is not None:
