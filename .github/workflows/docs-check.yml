@@ -1,9 +1,11 @@
 name: Docs and writing
 
-# Keeps the docs in step with the code and the prose in the project's voice.
-# The rules live in docs/contributing/writing-style.md; the checks are
-# scripts/check_docs_sync.py and scripts/check_prose.py. Contributors can run
-# them locally before pushing, but this job is the one that counts.
+# Keeps the docs in step with the code, the prose in the project's voice, and
+# the frozen public-surface snapshots honest. The rules live in
+# docs/contributing/writing-style.md and CONTRIBUTING.md; the checks are
+# scripts/check_docs_sync.py, scripts/check_prose.py and
+# scripts/check_snapshot_changes.py. Contributors can run them locally before
+# pushing, but this job is the one that counts.
 
 on:
   pull_request:
@@ -52,3 +54,8 @@ jobs:
             --diff-base "origin/${BASE_REF}" \
             --pr-title-env PR_TITLE \
             --pr-body-env PR_BODY
+      - name: Frozen snapshots change deliberately
+        run: |
+          python scripts/check_snapshot_changes.py \
+            --base "origin/${BASE_REF}" \
+            --labels-env PR_LABELS
