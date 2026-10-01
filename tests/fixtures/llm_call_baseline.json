@@ -1,0 +1,10 @@
+{
+  "measured_at": "a203a7b",
+  "how": "python scripts/count_llm_calls.py --gate, with PYTHONPATH and --root pointing at a checkout of the commit above",
+  "allowed_growth_percent": 15,
+  "counts": {
+    "scan_vulnerable": 34,
+    "scan_guarded": 36,
+    "gate": 113
+  }
+}
