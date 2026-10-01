@@ -8,14 +8,17 @@ Plugins register via standard PyPI entry points and are discovered by
 Run `mylonite plugins` to list every registered plugin across all five groups
 (which also runs the version-compatibility check below).
 
-**What runs today.** *Attack modules* are discovered **and run** on every
-`scan`/`gate` — install one and it contributes payloads immediately. The other
-four contracts (target adapter, test generator, validator, compliance mapper)
-are discovered and version-checked, but Mylonite uses its bundled **reference
-implementation** for each; selecting a third-party implementation of those four
-on the CLI is not yet exposed (a roadmap item). Custom target adapters today
-are reached through the target-file / `mcp:` family mechanism rather than the
-entry-point registry.
+**What runs today.** *Attack modules* are discovered on every `scan`/`gate`,
+but only the two bundled families run by default. A third-party module is
+discoverable the moment it's installed — `mylonite plugins` lists it — but it
+stays inert until you opt it in by id, with `MYLONITE_ATTACK_MODULES` (see
+[below](#attack-modules-opting-yours-into-a-scan)). The other four contracts
+(target adapter, test generator, validator, compliance mapper) are discovered
+and version-checked, but Mylonite uses its bundled **reference implementation**
+for each; selecting a third-party implementation of those four on the CLI is
+not yet exposed (a roadmap item). Custom target adapters today are reached
+through the target-file / `mcp:` family mechanism rather than the entry-point
+registry.
 
 ## Versioning rules
 
