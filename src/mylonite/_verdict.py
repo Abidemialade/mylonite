@@ -10,6 +10,12 @@ test passes, so neither may read as a plain KEPT.
 :func:`verdict_label` derives the label from fields every report already
 carries, so no new field is needed.
 
+A finding whose every firing run is judge-only (only the LLM judge said the
+attack landed) is REJECTED, not STABLE, NOT PROVEN: the validator fails the
+leg that claims the attack reproduced, because nothing but the judge showed
+that it did. :data:`JUDGE_ONLY_MARKER` in that leg's detail lets
+:func:`verdict_reason` say so.
+
 A collect-only build (a custom target, whose test needs the live target to run)
 doesn't run the committed test: it proves the file collects. There a KEPT rests
 on the differential or effect leg, which proved the attack on live runs; that
@@ -28,6 +34,16 @@ KEPT: Final = "KEPT"
 STABLE_NOT_PROVEN: Final = "STABLE, NOT PROVEN"
 REJECTED: Final = "REJECTED"
 
+#: Stamped into the detail of the leg a judge-only finding fails, so the
+#: verdict reason can name the cause from the report alone (no new field).
+JUDGE_ONLY_MARKER: Final = "[evidence=judge-only]"
+
+#: The clause that leg's detail carries next to the marker.
+JUDGE_ONLY_CLAUSE: Final = (
+    "every firing run rests on the LLM judge alone: nothing in the target's state "
+    "or the recorded trace confirmed the attack, so it cannot keep a test " + JUDGE_ONLY_MARKER
+)
+
 #: The legs that show a safeguard stops the attack (``differential``) or that
 #: the damage really happened on the target (``effect``).
 _PROOF_STAGES: Final = frozenset({"differential", "effect"})
@@ -41,6 +57,14 @@ def _build_passed(report: ValidationReport) -> bool:
 def has_proof(report: ValidationReport) -> bool:
     """True when a gating differential or effect leg passed."""
     return any(o.stage in _PROOF_STAGES and o.passed and not o.report_only for o in report.outcomes)
+
+
+def rests_on_judge_only(report: ValidationReport) -> bool:
+    """True when a gating leg failed because every firing run was judge-only."""
+    return any(
+        not o.passed and not o.report_only and JUDGE_ONLY_MARKER in o.detail
+        for o in report.outcomes
+    )
 
 
 def verdict_label(report: ValidationReport) -> VerdictLabel:
@@ -61,6 +85,11 @@ def verdict_reason(report: ValidationReport) -> str:
     """One plain sentence on why the report earned its label."""
     label = verdict_label(report)
     if label == REJECTED:
+        if rests_on_judge_only(report):
+            return (
+                "the test was not kept: every firing run rested on the LLM judge alone, "
+                "and nothing in the target's state or the recorded trace confirmed the attack."
+            )
         return "the test was not kept."
     if label == KEPT:
         return "the test discriminates and is stable."

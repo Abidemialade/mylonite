@@ -180,7 +180,9 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 "effect_probe in the target file, then re-run `mylonite validate`.[/yellow]",
             )
     else:
-        console_print(console, f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
+        console_print(
+            console, f"[red]verdict: REJECTED {dash} {rich_escape(verdict_reason(report))}[/red]"
+        )
         # The differential remediation must not accuse a real (server-layer) control
         # of being theater when the guarded side was only the SYNTHETIC boundary shim.
         # The validator stamps a [guarded-twin=...] marker into notes; key off it.

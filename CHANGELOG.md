@@ -121,6 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `proof.status` (for example `not reproduced on this model`).
   `proven_control` follows the same rule: it is `null` unless the verdict is
   `KEPT`. `schema_version` moves to `1.4`; no field was renamed or removed.
+- **`validate` no longer keeps a test that only the LLM judge vouches for.**
+  When every firing run on the vulnerable side is `judge-only`, the `stability`
+  leg (custom targets) or `differential` leg (reference twins) fails, and the
+  verdict reads REJECTED: "every firing run rested on the LLM judge alone".
+  One `state` or `trace` run is enough; judge-only runs then still count as
+  support. See `docs/validation.md`.
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the
