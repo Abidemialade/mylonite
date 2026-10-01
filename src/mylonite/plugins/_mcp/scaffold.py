@@ -465,6 +465,11 @@ def _scaffold_target_file(
             "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
             "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
         )
+    if roles.verify_tool is not None and {"W3", "W4"} & set(suggested_weaknesses):
+        echo_err(
+            f"  effect_probe candidate: {roles.verify_tool} (left commented). Check that it "
+            "reads back what a W3/W4 attack would change, then uncomment it."
+        )
     from mylonite._authz import required_authorization
     from mylonite._target_env import echo_env_notice
 

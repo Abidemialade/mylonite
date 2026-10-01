@@ -204,7 +204,15 @@ for a `vulnerable_launch` twin.
   JSON. The `id_key`/`id_pattern`/`id_from` tell Mylonite how to capture the new
   record's handle so it can drive a read-back.
 - **`effect_probe`** (`EffectProbeSpec`) — confirms the damage end-to-end, not just that
-  a tool was called. `expect_marker` proves it fired; `deferred_markers` mean the action
+  a tool was called. Without one, a W3/W4 finding is proven only as far as `dispatched`
+  and a "queued" reply from the server reads `RESISTED (server-reported)` unchecked (see
+  [How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided)).
+  `mylonite scan --scaffold` names a candidate `verify_tool`: a tool that reports what was
+  sent (an outbox, a status or history tool), or else a readback of the store that needs
+  no record id, such as `read_graph`, preferring one with no required arguments. It is
+  written commented out; check that it reads back what an attack would change, then
+  uncomment it. Not available on a `transport: rest` target, where W3 and W4 read NOT
+  TESTED ([`MYL-NT-016`](reason-codes.md#myl-nt-016)). `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success. Choose `expect_marker` as a
   value **the agent's own call carries** — the recipient address, a row it wrote,
   `{exfil_email}` or `{exfil_host}` — not a status word the target itself would print regardless of who acted.

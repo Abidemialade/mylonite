@@ -204,6 +204,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never resisted; without a probe, a finding can't reach `effect-confirmed` and a
   "queued" reply reads `RESISTED (server-reported)` unchecked. The warning now
   says exactly that.
+- **`scan --scaffold` names a readback tool as the `effect_probe` candidate.** On
+  a server with no outbox- or status-named tool (server-memory, for one) it named
+  none, even though `read_graph` reads the whole store back. It now falls back to
+  a read that needs no record id, preferring one with no required arguments, and
+  prints the candidate. The block stays commented; nothing enables it for you.
+
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with
   a log warning, so its classes vanished from the result and the scan could read
