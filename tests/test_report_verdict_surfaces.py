@@ -50,6 +50,10 @@ def _export(artefact_dir: Path, tmp_path: Path) -> tuple[dict[str, Any], dict[st
     results = sarif_doc["runs"][0]["results"]
     findings = bundle_doc["findings"]
     assert len(results) == 1 and len(findings) == 1
+    # GitHub reads security-severity from the rule; carry it on the result so
+    # each test can assert on one dict.
+    rule = sarif_doc["runs"][0]["tool"]["driver"]["rules"][0]
+    results[0]["rule_properties"] = rule["properties"]
     return results[0], findings[0]
 
 
@@ -72,6 +76,7 @@ def test_recorded_kept_validation_is_an_error_with_severity_and_claim(tmp_path: 
     assert result["level"] == "error"
     assert result["properties"]["verdict"] == "KEPT"
     assert "security-severity" in result["properties"]
+    assert "security-severity" in result["rule_properties"]
     claims = (PROOF_CLAIM_SERVER, PROOF_CLAIM_BOUNDARY)
     assert any(c in result["message"]["text"] for c in claims)
     assert finding["proof"]["verdict"] == "KEPT"
@@ -86,6 +91,7 @@ def test_recorded_rejected_validation_is_a_note_with_no_claim(tmp_path: Path) ->
     assert result["level"] == "note"
     assert result["properties"]["verdict"] == "REJECTED"
     assert "security-severity" not in result["properties"]
+    assert "security-severity" not in result["rule_properties"]
     text = result["message"]["text"]
     assert PROOF_CLAIM_SERVER not in text and PROOF_CLAIM_BOUNDARY not in text
     assert "not reproduced on this model" in text
@@ -101,6 +107,7 @@ def test_recorded_scan_finding_is_a_warning_marked_unvalidated(tmp_path: Path) -
     assert result["level"] == "warning"
     assert result["properties"]["verdict"] == "UNVALIDATED"
     assert "security-severity" not in result["properties"]
+    assert "security-severity" not in result["rule_properties"]
     assert "not validated" in result["message"]["text"].lower()
     assert finding["proof"] is None
 

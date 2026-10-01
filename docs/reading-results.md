@@ -301,7 +301,9 @@ each result carries:
   | `STABLE, NOT PROVEN` | `warning` | omitted |
   | `REJECTED` | `note` | omitted |
 
-  A finding with no `security-severity` cannot land in the Security tab as High.
+  GitHub reads `security-severity` from the rule, so Mylonite sets it there,
+  with a `security` tag, only when every result under that rule is `KEPT`. A
+  finding with no `security-severity` cannot land in the Security tab as High.
   The message ends with the verdict, and an unvalidated finding says to run
   `mylonite validate` on it,
 - the **compliance tags** (OWASP-LLM/ASI · MITRE ATLAS · NIST),
@@ -348,7 +350,10 @@ SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 
 When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 
-- **What was found** — the validated weakness, compliance tags, attack tier.
+- **What was found** — the validated weakness, compliance tags, attack tier. Only a
+  `KEPT` validation gets the claim ("Control efficacy verified", a **Proven fix**). A
+  `STABLE, NOT PROVEN` or `REJECTED` one opens with "Control efficacy not proven" and
+  its verdict and reason instead.
 - **The differential proof** — the fires/resists numbers and the kept formula, so the
   reviewer sees *why the test is trustworthy*, not just that it exists.
 - **Located at** — the exact locus to fix: which tool's *description* smuggled the

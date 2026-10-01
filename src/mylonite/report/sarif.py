@@ -34,9 +34,12 @@ _SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 #: proved no safeguard are `warning`; a rejected finding is a `note`.
 _VERDICT_LEVEL = {KEPT: "error", UNVALIDATED: "warning", REJECTED: "note"}
 _DEFAULT_LEVEL = "warning"
-#: GitHub code scanning reads `security-severity` (0-10) to bucket findings
-#: (7.0 and up is High). Emitted for KEPT findings only: an unproven finding
-#: carries no severity, so it can never be bucketed as High.
+#: GitHub code scanning reads `security-severity` (0-10) from the RULE's
+#: properties, on rules tagged `security` (7.0 to 8.9 is High). A rule gets the
+#: value, and the `security` tag, only when every result under it in this
+#: document is KEPT; otherwise the rule carries neither and GitHub shows the
+#: result's `level`. The same value also rides on each KEPT result's properties
+#: for consumers that read it there.
 _SECURITY_SEVERITY = {"High": "8.0", "Medium": "5.0", "Low": "3.0"}
 
 
@@ -208,6 +211,15 @@ def _rule(exploit: Any) -> dict[str, Any]:
     }
 
 
+def _rule_security_severity(results: list[dict[str, Any]]) -> str | None:
+    """The rule's `security-severity`: the highest of its results' values, or
+    ``None`` unless every result under the rule is KEPT."""
+    values = [r["properties"].get("security-severity") for r in results]
+    if not values or any(v is None for v in values):
+        return None
+    return str(max(values, key=float))
+
+
 def to_sarif(
     findings: list[tuple[Any, Any | None]],
     *,
@@ -232,6 +244,11 @@ def to_sarif(
         if pid not in rules:
             rules[pid] = _rule(exploit)
         results.append(_result(exploit, report, target=target))
+    for pid, rule in rules.items():
+        severity = _rule_security_severity([r for r in results if r["ruleId"] == pid])
+        if severity is not None:
+            rule["properties"]["security-severity"] = severity
+            rule["properties"]["tags"] = [*rule["properties"]["tags"], "security"]
     return {
         "$schema": _SCHEMA,
         "version": "2.1.0",
