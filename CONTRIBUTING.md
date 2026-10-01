@@ -443,6 +443,26 @@ the bundled-target wiring still matches the upstream servers.
 
 Full instructions: [docs/contributing/live-e2e-tests.md](./docs/contributing/live-e2e-tests.md).
 
+## Live smoke test
+
+`tests/integration/test_issue217.py` proves the calibration fix for #217
+offline, against a scripted model and a monkeypatched MCP session. The
+`live-smoke` GitHub Actions workflow is the live counterpart: it runs the
+real `mylonite scan` CLI against a real `npx`-launched
+`@modelcontextprotocol/server-filesystem`, with a real model, on the same
+two fixtures (`tests/fixtures/issue217/filesystem.yaml` and its corrected
+twin, `filesystem.corrected.yaml`). Dispatch it manually — it is never
+triggered by a push or a PR, since it spends tokens and needs the
+`MYLONITE_LLM_KEY` repo secret:
+
+```bash
+gh workflow run live-smoke.yml -f model=anthropic/claude-haiku-4-5-20251001
+```
+
+`max_llm_calls` defaults to 40; pass `-f max_llm_calls=<n>` to override it.
+A run with no `MYLONITE_LLM_KEY` secret configured skips both scans with a
+notice rather than failing the dispatch.
+
 ## Community attack-pattern registry (planned)
 
 A versioned, CI-validated registry of contributed attack patterns is on the

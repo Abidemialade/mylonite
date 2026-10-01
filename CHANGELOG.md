@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A manually-dispatched live smoke test for the #217 calibration fix.**
+  The new `live-smoke` GitHub Actions workflow runs the real `mylonite scan`
+  CLI, with a real model, against a real `npx`-launched
+  `@modelcontextprotocol/server-filesystem`: once against the docs-following
+  target file (expect calibration to fail with `MYL-INC-005`, and the
+  scanned class to never silently read resisted) and once against its
+  corrected twin, `tests/fixtures/issue217/filesystem.corrected.yaml` (expect
+  a calibration certificate). `scripts/check_live_smoke.py` reads the
+  resulting `verdicts.json` and makes both checks precise; it is unit-tested
+  on synthetic `verdicts.json` shapes, so it needs no live run to be
+  exercised in CI. See "Live smoke test" in `CONTRIBUTING.md`.
 - **Every verdict now says what it rests on: `state`, `trace` or `judge-only`.**
   The scan table has an `evidence` column, and a scan with findings prints
   `findings by evidence: 1 state, 2 trace, 1 judge-only`. A `judge-only`
