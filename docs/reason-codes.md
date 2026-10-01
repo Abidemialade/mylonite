@@ -166,8 +166,9 @@ code `4`.
 
 When the failures were rate limits (HTTP 429), the message says so instead, names the
 provider and model, and suggests waiting, lowering `--max-concurrent` or
-`--max-llm-calls`, or checking the account quota. When they were network errors or
-timeouts, it points at the connection. See
+`--max-llm-calls`, or checking the account quota. When they were network errors,
+timeouts or provider outages (HTTP 5xx), it points at the provider's status page and the
+connection. See
 [When the provider rate-limits or drops the run](reading-results.md#when-the-provider-rate-limits-or-drops-the-run).
 
 ## MYL-ABT-003

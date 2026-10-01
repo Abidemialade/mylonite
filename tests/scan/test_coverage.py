@@ -914,13 +914,35 @@ def test_other_causes_keep_the_generic_message(category: str | None) -> None:
     assert provider_abort_message(category, provider="anthropic", model="m") is None
 
 
-def test_the_message_never_carries_a_key_embedded_in_the_model_string() -> None:
-    key = "sk-ant-api03-" + "z" * 40  # pragma: allowlist secret
-    message = provider_abort_message(
-        "rate_limit", provider="anthropic", model=f"anthropic/claude?api_key={key}"
-    )
+_FAKE_SK_ANT = "sk-ant-api03-" + "z" * 40  # pragma: allowlist secret
+_FAKE_SK_PROJ = "sk-proj-" + "Ab3dE_f6Gh-9jK2mN5pQ8rS1tU4vW7xY0z"  # pragma: allowlist secret
+_FAKE_GSK = "gsk_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"  # pragma: allowlist secret
+_FAKE_PARAM = "Q9w8E7r6T5y4U3i2O1p0"  # pragma: allowlist secret
+
+
+@pytest.mark.parametrize(
+    ("model", "secret"),
+    [
+        (f"anthropic/claude?x={_FAKE_SK_ANT}", _FAKE_SK_ANT),
+        (f"openai/{_FAKE_SK_PROJ}", _FAKE_SK_PROJ),
+        (f"groq/llama?k={_FAKE_GSK}", _FAKE_GSK),
+        (f"openai/gpt?api_key={_FAKE_PARAM}", _FAKE_PARAM),
+    ],
+)
+@pytest.mark.parametrize("category", ["rate_limit", "network"])
+def test_the_message_masks_a_key_embedded_in_the_model_string(
+    model: str, secret: str, category: str
+) -> None:
+    message = provider_abort_message(category, provider="anthropic", model=model)
     assert message is not None
-    assert key not in message
+    assert secret not in message
+
+
+def test_the_network_message_names_provider_outages_and_the_status_page() -> None:
+    message = provider_abort_message("network", provider="anthropic", model="m")
+    assert message is not None
+    assert "HTTP 5xx" in message
+    assert "status page" in message
 
 
 def test_the_engine_detail_replaces_the_generic_provider_text() -> None:

@@ -17,8 +17,13 @@ from typing import Final
 
 from mylonite.scan.coverage import provider_abort_message
 
-#: The ``validate`` per-iteration timeout default, mirrored from the CLI.
-DEFAULT_PREFLIGHT_TIMEOUT_S: Final = 120.0
+#: Sane non-None default for ``validate --iteration-timeout`` (DCR-0010), and
+#: the preflight's own bound: a stuck/slow real custom target must not be able
+#: to block a CI job indefinitely just because the flag was left unset. 120s
+#: comfortably covers a real subprocess spawn + a multi-turn planner run; pass
+#: a larger value explicitly for a target known to need more headroom. The CLI
+#: imports this one value, so the two cannot drift.
+DEFAULT_ITERATION_TIMEOUT_S: Final = 120.0
 
 
 @dataclass
@@ -41,6 +46,24 @@ def preflight_failure_message(
         model=model,
         slow_down="lower --iterations",
         stopped="validate stopped before it started.",
+    )
+
+
+def unreachable_hint(provider: str | None, model: str) -> str:
+    """The fallback message when the preflight failed for any other reason.
+
+    Names the API-key variable for the model's own provider when it is known,
+    and stays neutral otherwise; never assumes one provider's key.
+    """
+    from mylonite._redaction import redact
+    from mylonite.scan.providers import env_vars_for, provider_from_model
+
+    env_vars = env_vars_for(provider_from_model(model) or provider)
+    key = " or ".join(env_vars) if env_vars else "your provider's API key"
+    return redact(
+        f"no provider reachable for --model {model}: check that {key} is set and valid, "
+        "or pass --model provider/modelname for another LiteLLM provider "
+        "(e.g. --model openai/gpt-4o)."
     )
 
 
@@ -96,7 +119,7 @@ def provider_preflight(
     provider: str,
     model: str,
     *,
-    timeout_s: float = DEFAULT_PREFLIGHT_TIMEOUT_S,
+    timeout_s: float = DEFAULT_ITERATION_TIMEOUT_S,
     failure: PreflightFailure | None = None,
 ) -> bool:
     """Cheap reachability probe before the (expensive) live validation loop.
@@ -130,6 +153,10 @@ def provider_preflight(
     try:
         result = asyncio.run(asyncio.wait_for(engine.run(), timeout=timeout_s))
     except TimeoutError:
+        # A provider that stalls is unreachable, not misconfigured: say so
+        # rather than falling through to the credentials hint.
+        if failure is not None:
+            failure.category = "network"
         return False
     if result.report.aborted != "provider_unreachable":
         return True
