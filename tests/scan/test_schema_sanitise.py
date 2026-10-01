@@ -310,6 +310,37 @@ def test_never_raises_on_non_dict_input() -> None:
         assert isinstance(out2, dict)
 
 
+def test_unexpected_sanitisation_error_logs_redacted_detail_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, caplog: Any
+) -> None:
+    """The STRICT path's final backstop (an unexpected exception from
+    ``_sanitise_node``) must degrade to the original schema and log only a
+    redacted one-line DEBUG summary -- never a raw ``exc_info`` traceback,
+    which bypasses the secret-redacting log filter regardless of level
+    (DCR-0016). A credential-shaped string embedded in the exception's own
+    message must not survive into the log line either."""
+    import logging
+
+    import mylonite.scan.schema_sanitise as schema_sanitise_module
+
+    secret = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # pragma: allowlist secret
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError(f"unexpected node while holding {secret}")
+
+    monkeypatch.setattr(schema_sanitise_module, "_sanitise_node", _boom)
+
+    schema = {"type": "object", "properties": {"x": {"type": "string"}}}
+    with caplog.at_level(logging.DEBUG, logger="mylonite.scan.schema_sanitise"):
+        out = sanitise_tool_schema(schema, SchemaDialect.STRICT)
+
+    assert out == schema  # degrades to the original, unchanged
+    debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("ValueError" in r.getMessage() for r in debug_records)
+    assert not any(secret in r.getMessage() for r in caplog.records)
+    assert not any(r.exc_info for r in caplog.records)
+
+
 # ---------------------------------------------------------------------------
 # Wiring into litellm_tool_call_async (the planner's chokepoint)
 # ---------------------------------------------------------------------------

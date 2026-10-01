@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bare `key=` rule is scoped so it never fires inside an ordinary word or a
   compound identifier (`monkey=`, `sort_key=`, `primary_key=` survive
   untouched).
+- **Two DEBUG-level log lines no longer carry a raw traceback.**
+  `scan/_llm.py`'s non-recoverable and recoverable provider-failure paths,
+  and `scan/schema_sanitise.py`'s STRICT-sanitisation backstop, logged the
+  full exception via `exc_info` at DEBUG — bypassing the secret-redacting
+  filter the same way `logger.exception(...)` does, just one level down. All
+  three now log a redacted one-line detail instead, with no `exc_info`, even
+  at DEBUG.
 
 ## [0.10.5] - 2026-10-01
 
