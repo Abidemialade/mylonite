@@ -14,6 +14,7 @@ plan-eng-review finding **A3**.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from mcp import ClientSession
@@ -21,6 +22,49 @@ from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
 from mylonite.scan.llm_types import ToolDescription, ToolResult
+
+logger = logging.getLogger(__name__)
+
+#: Most ``tools/list`` pages read before giving up. A server that keeps handing
+#: back a cursor past this is treated as broken: the tools read so far are used
+#: and a warning is logged.
+MAX_TOOL_LIST_PAGES = 100
+
+
+async def list_all_tools(session: ClientSession) -> list[MCPTool]:
+    """Every tool the server lists, following ``nextCursor`` across pages.
+
+    The MCP spec lets a server split ``tools/list`` into pages; reading only the
+    first would silently drop the rest from every scan. Stops when the server
+    returns no cursor, repeats a cursor, or after :data:`MAX_TOOL_LIST_PAGES`
+    pages (logged as a warning).
+    """
+    resp = await session.list_tools()
+    tools: list[MCPTool] = list(resp.tools)
+    seen: set[str] = set()
+    pages = 1
+    cursor = getattr(resp, "nextCursor", None)
+    while cursor:
+        if cursor in seen:
+            logger.warning(
+                "tools/list returned a repeated cursor after %d pages; using the %d tools read",
+                pages,
+                len(tools),
+            )
+            break
+        if pages >= MAX_TOOL_LIST_PAGES:
+            logger.warning(
+                "tools/list still had more after %d pages; using the %d tools read",
+                pages,
+                len(tools),
+            )
+            break
+        seen.add(cursor)
+        resp = await session.list_tools(cursor)
+        tools.extend(resp.tools)
+        pages += 1
+        cursor = getattr(resp, "nextCursor", None)
+    return tools
 
 
 def _tool_to_description(t: MCPTool) -> ToolDescription:
@@ -69,8 +113,7 @@ class MCPSessionAsServerLike:
         self._session = session
 
     async def list_tools(self) -> list[ToolDescription]:
-        resp = await self._session.list_tools()
-        return [_tool_to_description(t) for t in resp.tools]
+        return [_tool_to_description(t) for t in await list_all_tools(self._session)]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         result = await self._session.call_tool(name, arguments)

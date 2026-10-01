@@ -115,3 +115,101 @@ async def test_shim_call_tool_delegates_and_propagates_is_error() -> None:
     assert result.isError is True
     assert "refused" in result.content
     session.call_tool.assert_awaited_once_with("fetch", {"url": "http://x"})
+
+
+# --- tools/list pagination ------------------------------------------------------
+
+
+class _PagingSession:
+    """A fake ``mcp.ClientSession`` that serves ``tools/list`` in pages."""
+
+    def __init__(self, pages: list[list[str]], *, loop_forever: bool = False) -> None:
+        self.pages = pages
+        self.loop_forever = loop_forever
+        self.cursors: list[str | None] = []
+
+    async def list_tools(self, cursor: str | None = None) -> SimpleNamespace:
+        self.cursors.append(cursor)
+        if self.loop_forever:
+            n = len(self.cursors)
+            return SimpleNamespace(tools=[_mcp_tool(f"t{n}")], nextCursor=f"c{n}")
+        index = 0 if cursor is None else int(cursor)
+        nxt = str(index + 1) if index + 1 < len(self.pages) else None
+        return SimpleNamespace(tools=[_mcp_tool(n) for n in self.pages[index]], nextCursor=nxt)
+
+
+@pytest.mark.asyncio
+async def test_list_tools_follows_next_cursor_across_pages() -> None:
+    session = _PagingSession([["read_file", "write_file"], ["send_email"]])
+    shim = MCPSessionAsServerLike(session)  # type: ignore[arg-type]
+    tools = await shim.list_tools()
+    assert [t.name for t in tools] == ["read_file", "write_file", "send_email"]
+    assert session.cursors == [None, "1"]
+
+
+@pytest.mark.asyncio
+async def test_list_tools_single_page_makes_one_request() -> None:
+    session = _PagingSession([["read_file"]])
+    tools = await MCPSessionAsServerLike(session).list_tools()  # type: ignore[arg-type]
+    assert [t.name for t in tools] == ["read_file"]
+    assert session.cursors == [None]
+
+
+@pytest.mark.asyncio
+async def test_list_tools_stops_at_the_page_cap(caplog: pytest.LogCaptureFixture) -> None:
+    from mylonite.plugins._mcp.server_shim import MAX_TOOL_LIST_PAGES
+
+    session = _PagingSession([], loop_forever=True)
+    with caplog.at_level("WARNING"):
+        tools = await MCPSessionAsServerLike(session).list_tools()  # type: ignore[arg-type]
+    assert len(session.cursors) == MAX_TOOL_LIST_PAGES
+    assert len(tools) == MAX_TOOL_LIST_PAGES
+    assert "pages" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_list_tools_stops_on_a_repeated_cursor(caplog: pytest.LogCaptureFixture) -> None:
+    class _Stuck:
+        calls = 0
+
+        async def list_tools(self, cursor: str | None = None) -> SimpleNamespace:
+            self.calls += 1
+            return SimpleNamespace(tools=[_mcp_tool(f"t{self.calls}")], nextCursor="same")
+
+    session = _Stuck()
+    with caplog.at_level("WARNING"):
+        tools = await MCPSessionAsServerLike(session).list_tools()  # type: ignore[arg-type]
+    assert session.calls == 2
+    assert [t.name for t in tools] == ["t1", "t2"]
+    assert "repeated" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_describe_lists_tools_from_every_page() -> None:
+    """End to end through the stdio adapter: a paginating server loses no tools."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+    from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    session = _PagingSession([["read_file"], ["write_file"], ["send_email"]])
+
+    def _open(*args: object, **kwargs: object) -> object:
+        @asynccontextmanager
+        async def _ctx():  # type: ignore[no-untyped-def]
+            yield session
+
+        return _ctx()
+
+    target_registry.clear_runtime_targets()
+    try:
+        target_registry.register_target(
+            build_target_spec(TargetFile(family="paging-app", command="python", args=["-m", "srv"]))
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(stdio_adapter, "_open_mcp_session", _open)
+            descriptor = await MCPStdioAdapter(family="paging-app", scope=None).describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    assert [t.name for t in descriptor.tools] == ["read_file", "write_file", "send_email"]

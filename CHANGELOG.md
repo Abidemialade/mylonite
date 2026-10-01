@@ -42,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite scan --target-file <file> --authorize <family>` instead.
 ### Fixed
 
+- **MCP scans now see every tool on a server that pages its tool list.**
+  `tools/list` is read page by page, following `nextCursor` until the server
+  stops returning one. Before, only the first page was read, so tools on later
+  pages were never described, attacked or checked for mid-session changes.
+  Reading stops after 100 pages, or when the server repeats a cursor, with a
+  warning in the log.
 - **A rug-pull check that could not run no longer reads as a stable tool
   surface.** After the agent runs, an MCP scan lists the tools again to catch
   a server that changes them mid-session. When that second listing raised, the
