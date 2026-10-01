@@ -516,11 +516,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # a slow/stuck open can't hang open-ended.
         setup = payload.metadata.get("setup", "no_setup")
         drive = payload.metadata.get("drive", "")
-        # This attempt's active exfil destination (T5/#196): the per-attempt
-        # minted token when the engine randomized it (``randomize_exfil``),
-        # else the stable historical literal — so an ``{exfil_email}`` /
-        # ``{exfil_host}`` marker resolves the SAME way whether or not
-        # randomization is on.
+        # This attempt's active exfil destination (per-attempt minting, #196):
+        # the per-attempt minted token when the engine randomized it
+        # (``randomize_exfil``), else the stable historical literal — so an
+        # ``{exfil_email}`` / ``{exfil_host}`` marker resolves the SAME way
+        # whether or not randomization is on.
         exfil_email = payload.metadata.get("exfil_email") or DEFAULT_EXFIL_EMAIL
         exfil_host = payload.metadata.get("exfil_host") or DEFAULT_EXFIL_HOST
         planner_calls: list[dict[str, Any]] = []
@@ -1230,7 +1230,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         seed_tool_name: str | None,
     ) -> dict[str, str]:
         """``trace_outcome`` / ``link`` / ``marker_kind`` / ``calibrated`` /
-        ``seed_control`` evidence (T5), stamped by both ``invoke()`` and
+        ``seed_control`` evidence, stamped by both ``invoke()`` and
         ``drive_planner`` from the planner trace each already built.
 
         Cheap and pure over data already in hand (no new tool calls): the
@@ -1586,7 +1586,7 @@ class _MCPAttackSession:
             metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
         if recording.listed_tool_names is not None:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
-        # T5: this stateful session carries no Payload (no per-attempt minted
+        # This stateful session carries no Payload (no per-attempt minted
         # exfil token, no declared consequential/egress tool), so the
         # historical defaults and no seed-tool identity are the honest inputs.
         metadata.update(

@@ -69,6 +69,10 @@ _PATTERN_ID = "excessive-agency-send-email-direct-unconfirmed"
 #:     the agent's call links to the effect it caused (the attribution rule).
 #:   * uses a no-op ``command`` (``echo``) — never actually executed because
 #:     ``_open_mcp_session`` is patched.
+#:   * sets ``calibration.controls: skip`` so the open-count assertion below
+#:     is stable regardless of test order: calibration is cached process-wide
+#:     by spec hash, so without this, whichever test runs first against this
+#:     exact spec pays the calibration opens and every later one doesn't.
 _TARGET_YAML = """\
 family: myapp-email
 command: echo
@@ -79,6 +83,8 @@ effect_probe:
   verify_tool: check_sent
   verify_args_template: {}
   expect_marker: ops@example.com
+calibration:
+  controls: skip
 """
 
 

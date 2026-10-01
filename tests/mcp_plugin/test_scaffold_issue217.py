@@ -3,8 +3,7 @@ of the two official reference servers the false-clean bug was found on
 (server-memory, server-filesystem — see ``tests/mcp_plugin/fakes/neutral_servers.py``
 and ``tests/fixtures/issue217/``).
 
-Two scaffold defects, fixed here (task T14 of
-``docs/superpowers/plans/2026-09-30-no-false-clean.md``):
+Two scaffold defects, fixed here:
 
 * The scaffold's "Consequential-action tools detected" hint used a SEPARATE,
   weaker name-hint heuristic (``tool_roles._classify_tools().sink_tools``)
@@ -21,9 +20,9 @@ Two scaffold defects, fixed here (task T14 of
   scaffold must instead emit the verify tool's OWN required arguments,
   stubbed to a schema-valid placeholder.
 
-These tests do not assert a scan verdict (that needs T7's judge fix and
-lands with T13's integration test) — only that the scaffold's two outputs
-are internally consistent with what the runtime actually does.
+These tests do not assert a scan verdict (that needs the judge's verdict-rule
+fix and lands with the #217 integration test) — only that the scaffold's two
+outputs are internally consistent with what the runtime actually does.
 """
 
 from __future__ import annotations
@@ -122,7 +121,7 @@ def test_verify_args_stub_validates_against_the_tools_own_schema(
     server_tools: list[Any], verify_tool_name: str
 ) -> None:
     """``_verify_args_stub`` must emit an args dict the verify tool's OWN
-    schema accepts — the T6 calibration validator (``calibration.validate_args``)
+    schema accepts — the calibration validator (``calibration.validate_args``)
     is the same check a live calibration run applies to a declared
     ``verify_args_template``."""
     tool = next(t for t in server_tools if t.name == verify_tool_name)
