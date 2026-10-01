@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries, so `mylonite report` shows it for scans saved by earlier versions.
   No contract or JSON schema changed. See "Evidence tier" in
   `docs/reading-results.md`.
+- **Offline end-to-end, corpus and LLM call-count checks on every PR.** Two
+  new CI jobs, `nr-ci-e2e` on Linux and `nr-ci-e2e-windows`, run the
+  deepest offline path with no provider key: a recorded reference scan, its
+  finding through the real generator and differential validator, then the
+  emitted test under pytest (`tests/e2e/test_offline_deep_path.py`, which
+  runs when `MYLONITE_OFFLINE_E2E=1` is set). A labelled corpus,
+  `tests/corpus/labels.yaml`, pins the right verdict for seven recorded
+  runs: the judge hallucination stays not a finding, the unconfirmed
+  direct send stays a finding, and the #217 target files never read clean.
+  `scripts/count_llm_calls.py` counts the LLM calls the reference `scan`
+  and `gate` paths make through a scripted fake model. A path that grows
+  more than 15% over the committed baseline
+  (`tests/fixtures/llm_call_baseline.json`: 34, 36 and 113 calls) fails the
+  build. See "No-regression checks" in `CONTRIBUTING.md`.
 - **Three more frozen-surface snapshots, alongside the existing reason-code
   one.** `tests/fixtures/testkit_signatures.snapshot.json` pins every
   `mylonite.testkit.__all__` entry's shape (parameters, defaults,
