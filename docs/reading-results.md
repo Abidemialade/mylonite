@@ -338,9 +338,7 @@ so check `proof.verdict` before acting on it. `proof_level` is `null` for a find
 (its counts are `null` if the validation recorded no runs),
 `proof.verdict` is `KEPT`, `STABLE, NOT PROVEN` or `REJECTED`, and `proof.claim` is set
 only for `KEPT` with a guarded twin. Every other verdict has `claim: null`, and
-`proof.status` says what the run showed. `proven_control` follows the same rule: it
-names the control only for `KEPT`, and is `null` for every other verdict and for a
-scan finding:
+`proof.status` says what the run showed:
 
 | `proof.verdict` | `proof.status` |
 |---|---|
@@ -349,7 +347,8 @@ scan finding:
 | `REJECTED`, attack fired 0 times | `not reproduced on this model` |
 | `REJECTED`, otherwise | `rejected` |
 
-It reuses the exact data the
+`proven_control` follows the same rule: it names the control only for `KEPT`, and is
+`null` for every other verdict and for a scan finding. It reuses the exact data the
 SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 
 ## The gating PR
