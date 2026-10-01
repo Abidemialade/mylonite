@@ -94,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message always pointed at credentials. A run stopped by network errors or
   timeouts points at the connection instead. `validate`'s provider check gives
   the same messages instead of asking for an API key (#191).
+- **Concurrent passes of one attack can never confirm each other.** Each pass
+  mints its own exfil address, so the call one pass made never matches another
+  pass's effect marker or destination check. A new test runs three concurrent
+  passes and checks every pair (#192).
 - **MCP scans now see every tool on a server that pages its tool list.**
   `tools/list` is read page by page, following `nextCursor` until the server
   stops returning one. Before, only the first page was read, so tools on later
