@@ -233,6 +233,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the probe calls it before and after every attempt. The block stays commented;
   nothing enables it for you.
 
+- **Several docs pages matched facts that had since changed under them (#194).**
+  `docs/experimental.md` now documents `check`'s positional `reference:vulnerable` /
+  `reference:guarded` form, which it had dropped when `check` moved there from
+  `docs/cli-reference.md` — the page only mentioned `--target-file`, as if a target
+  file were always required. `docs/reading-results.md` now says the scan panel's
+  per-class coverage block only appears for a trace-decided attempt, a calibration
+  summary, or an attack module that failed to load — not for every scan. `docs/target-file.md`
+  now says the MCP SDK's own default inherited-environment set (`HOMEDRIVE`,
+  `HOMEPATH`, `USERNAME`, … on Windows; `LOGNAME`, `SHELL`, `TERM`, `USER` on POSIX)
+  layers on top of Mylonite's own allowlist, rather than claiming nothing else reaches
+  a spawned stdio server. `docs/enterprise-networking.md` now says the `truststore`
+  fix also covers an `sse`/`http`/`rest` remote target's own connection (same
+  process), and that a `stdio` child runs as a separate process with its own,
+  unpatched trust store — its proxy/CA variables need their own `env:` entry.
+  `TODOS.md`'s note that `scan --target-file` silently overrides a positional target
+  is stale: `scan()` now rejects the combination outright, the same as `gate()`.
+  `report/render.py`'s metric legend called the differential score "agreement"; it is
+  the average of the vulnerable-fire rate and the guard-resist rate, so it now reads
+  "discrimination strength", matching a corrected `ValidationOutcome.metric` field
+  description (**`validator` `CONTRACT_VERSION` 0.5.0 → 0.5.1** — patch, docstring
+  only, no shape change). `testkit/__init__.py` and `docs/validation.md` now say
+  precisely which import is eager on `import mylonite.testkit` (the in-process
+  reference adapter) and which stays lazy (the `mcp_kitchen_sink` package itself,
+  loaded only when a guarded scan runs).
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with
   a log warning, so its classes vanished from the result and the scan could read

@@ -117,7 +117,7 @@ them, and a contract bump does not imply a package bump or the reverse.
 | `compliance_mapper` | 0.1.0 |
 | `test_generator` | 0.2.0 |
 | `target_adapter` | 0.8.0 |
-| `validator` | 0.5.0 |
+| `validator` | 0.5.1 |
 
 **A contract major bump is a bigger event than a package major bump.**
 `mylonite.plugins.registry` *refuses* to load a plugin whose major differs and

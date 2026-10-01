@@ -102,7 +102,11 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         console,
         "metric legend: "
         + sep.join(
-            ["differential=agreement", "flakiness=reproducibility", "metamorphic=robustness (0-1)"]
+            [
+                "differential=discrimination strength",
+                "flakiness=reproducibility",
+                "metamorphic=robustness (0-1)",
+            ]
         ),
     )
 

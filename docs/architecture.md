@@ -91,7 +91,10 @@ Public API from day one (versioned `Protocol`/ABCs + JSON schemas + entry-point 
 
 Plugins are discovered via setuptools entry-point groups
 (`mylonite.attack_modules`, `mylonite.validators`, …). Treat any change to a contract as
-an API change — see [Plugin authoring](plugin-authoring.md).
+an API change — see [Plugin authoring](plugin-authoring.md). `Validator`'s
+`ValidationOutcome.metric` field is a per-stage numeric whose meaning depends on
+`stage` (reproducibility, discrimination strength, robustness, …) — see
+[Validation](validation.md) for what each stage's number means.
 
 ## Constraints worth knowing
 
