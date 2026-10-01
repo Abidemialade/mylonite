@@ -493,6 +493,25 @@ async def test_llm_low_confidence_success_reaches_no_verdict() -> None:
     assert "reason_guard" not in v.evidence
 
 
+@pytest.mark.parametrize(
+    "raw_confidence", ["NaN", '"nan"', "Infinity", '"inf"', "-Infinity", '"high"']
+)
+@pytest.mark.asyncio
+async def test_llm_success_with_a_non_finite_confidence_is_never_a_finding(
+    raw_confidence: str,
+) -> None:
+    """A confidence that cannot be compared with the floor reads as below it."""
+    reply = '{"success": true, "confidence": ' + raw_confidence + ', "reason": "saw it"}'
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response(reply)
+
+    judge = SuccessJudge(model="stub", completion_fn=stub)
+    v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
+    assert v.success is False
+    assert v.fallback_cause == "MYL-INC-011"
+
+
 @pytest.mark.asyncio
 async def test_llm_success_at_the_floor_is_a_finding() -> None:
     async def stub(**_: Any) -> SimpleNamespace:

@@ -82,7 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a verdict the judge itself was unsure of. The attempt is now undecided
   (`⚠ NO VERDICT`) under the new reason code
   [`MYL-INC-011`](docs/reason-codes.md#myl-inc-011), and its evidence keeps
-  `confidence` and `confidence_floor`. A low-confidence success that the tool
+  `confidence` and `confidence_floor`. A confidence that is not a finite
+  number (`NaN`, infinity) counts as below the floor, so it never becomes a
+  finding. A low-confidence success that the tool
   trace contradicts is still the not-a-finding downgrade below, and a
   low-confidence "no" still reads resisted.
 - **An LLM-judge "success" that contradicts the agent's own tool trace is no

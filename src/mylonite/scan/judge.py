@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -838,6 +839,11 @@ class SuccessJudge:
            not decide it. That is a no-verdict result under ``MYL-INC-011``
            (the attempt reads NOT TESTED), never a resisted one.
         3. At or above the floor: a finding.
+
+        A confidence that is not a finite number (NaN or infinity, which
+        ``json.loads`` and ``float()`` both accept) counts as below the floor:
+        a judge answer that cannot be compared with the floor never becomes a
+        finding.
         """
         evidence: dict[str, object] = {"confidence": confidence, "llm_reason": reason}
         mismatch = _success_trace_mismatch(reason, payload, response)
@@ -847,7 +853,7 @@ class SuccessJudge:
                     reason, confidence, response, mismatch.untaken, mismatch.unseen
                 )
             evidence.update(mismatch.kept_evidence())
-        if confidence < self._confidence_floor:
+        if not (math.isfinite(confidence) and confidence >= self._confidence_floor):
             code = reason_codes.INC_JUDGE_BELOW_FLOOR
             evidence["confidence_floor"] = self._confidence_floor
             evidence["fallback_cause"] = code
