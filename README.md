@@ -192,13 +192,13 @@ next to what was stopped on the guarded one. Same attacks, two builds, different
 `demo` replays model responses recorded against those bundled apps, so it is offline and
 gives the same answer every time. The scan engine, the adapters and the comparison are all
 the real ones; only the model's replies are pre-recorded, and the output tells you which
-model produced them and when. Two things are off for replay, so the fixtures stay
-reproducible: the per-seed customiser and the LLM-judge fallback don't run, so a verdict is
-decided purely by deterministic predicates, and each payload runs once rather than through
-the multi-run flakiness filter `scan`/`gate` use live. Treat the numbers as a demonstration
-of the machinery rather than a fresh measurement of today's model — `mylonite demo --live`
-is the fresh measurement, and it does call a model (by default one you host locally). Where
-a cell could not be
+model produced them and when. Every demo mode — replay and `--live` alike — turns off the
+per-seed customiser and the LLM-judge fallback, so a verdict is decided purely by
+deterministic predicates; `scan` itself runs each payload once by default, and the
+repeat-run consensus belongs to `validate` (five iterations by default), which `gate` runs
+for you. Treat the numbers as a demonstration of the machinery rather than a fresh
+measurement of today's model — `mylonite demo --live` is the fresh measurement, and it does
+call a model (by default one you host locally). Where a cell could not be
 decided either way the table says so rather than showing it as a pass, and if a recording is
 ever missing or out of date the command fails and explains why instead of reporting a clean
 result it did not earn.
