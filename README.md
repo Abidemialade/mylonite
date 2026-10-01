@@ -15,10 +15,12 @@
 **For teams shipping MCP or agentic apps who want CI-enforced regression coverage on the AI
 layer.**
 
-Point Mylonite at any MCP (Model Context Protocol) app, whatever model or framework sits
-behind it. It attacks the part an ordinary code scanner cannot see — the system prompt and
-the tool descriptions your agent reads — finds weaknesses specific to your app, and turns
-each one into a **`pytest` test that gates your CI**.
+Point Mylonite at any MCP (Model Context Protocol) app. Mylonite's own agent reads your
+system prompt and tool descriptions and drives your tools itself — attacking the part an
+ordinary code scanner cannot see — finds weaknesses specific to your app, and turns each
+one into a **`pytest` test that gates your CI**. The API key you configure pays for that
+agent: the planner driving the attack, the customiser crafting payloads, and the judge
+scoring the result — not for a call your own app's agent made.
 
 Mylonite deliberately does *not* review your ordinary application code. That is what
 SAST/DAST tools are for.
@@ -188,11 +190,15 @@ next to what was stopped on the guarded one. Same attacks, two builds, different
 **That contrast is the point of the tool.**
 
 `demo` replays model responses recorded against those bundled apps, so it is offline and
-gives the same answer every time. The scan, the adapters, the checks and the comparison are
-all the real ones; only the model's replies are pre-recorded, and the output tells you which
-model produced them and when. Treat the numbers as a demonstration of the machinery rather
-than a fresh measurement of today's model — `mylonite demo --live` is the fresh measurement,
-and it does call a model (by default one you host locally). Where a cell could not be
+gives the same answer every time. The scan engine, the adapters and the comparison are all
+the real ones; only the model's replies are pre-recorded, and the output tells you which
+model produced them and when. Two things are off for replay, so the fixtures stay
+reproducible: the per-seed customiser and the LLM-judge fallback don't run, so a verdict is
+decided purely by deterministic predicates, and each payload runs once rather than through
+the multi-run flakiness filter `scan`/`gate` use live. Treat the numbers as a demonstration
+of the machinery rather than a fresh measurement of today's model — `mylonite demo --live`
+is the fresh measurement, and it does call a model (by default one you host locally). Where
+a cell could not be
 decided either way the table says so rather than showing it as a pass, and if a recording is
 ever missing or out of date the command fails and explains why instead of reporting a clean
 result it did not earn.
@@ -220,8 +226,12 @@ it, and flags the tools whose actions have real consequences. It works from the 
 descriptions and schemas your server advertises, matching them against keyword patterns, so
 treat everything it suggests as a hint to confirm rather than a verdict.
 
-Proving which weaknesses actually *land*, and which of your safeguards stops them, is the
-scan itself. That needs a model:
+Proving which weaknesses actually *land*, and whether a safeguard closes them, is the scan
+itself. By default the safeguard side is Mylonite's own stand-in guard at the tool boundary
+— real evidence that this kind of guard closes the attack, not yet that *your*
+implementation does; declare `control_env` in the target file to measure your own guard
+instead (see [docs/concepts.md](./docs/concepts.md#control-efficacy-which-safeguard-is-load-bearing)).
+That needs a model:
 
 ```bash
 mylonite scan --target-file app.yaml --authorize my-app
