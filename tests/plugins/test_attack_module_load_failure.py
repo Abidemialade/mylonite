@@ -30,7 +30,7 @@ from mylonite.contracts import (
 )
 from mylonite.contracts.attack_module import CONTRACT_VERSION
 from mylonite.plugins import registry
-from mylonite.reason_codes import NT_MODULE_LOAD_FAILED
+from mylonite.reason_codes import NT_MODULE_LOAD_FAILED, NT_NO_ATTACK_EMITTED
 from mylonite.scan.artefacts import VERDICTS_FILENAME, render_summary, write_artefacts
 from mylonite.scan.assembly import (
     ATTACK_MODULES_ENV,
@@ -177,8 +177,10 @@ def test_failed_import_reports_its_classes_not_tested_with_the_reason_code(
     for weakness in ("W1", "W2"):
         assert rows[weakness].status == STATUS_NOT_TESTED
         assert rows[weakness].codes == (NT_MODULE_LOAD_FAILED,)
-    # The module that loaded lost nothing.
-    assert not {"W3", "W4"} & set(rows)
+    # The module that loaded lost nothing to a load failure. This stub emits no
+    # payload, so its classes read NOT TESTED under their own code (#221).
+    for weakness in ("W3", "W4"):
+        assert rows[weakness].codes == (NT_NO_ATTACK_EMITTED,)
     assert result.report.aborted is None
 
     summary = _summary(result)
@@ -209,7 +211,7 @@ def test_failed_import_reports_its_classes_not_tested_with_the_reason_code(
     saved = ScanReport.model_validate_json(
         (scan_dir / "scan_report.json").read_text(encoding="utf-8")
     )
-    assert {v.weakness for v in class_verdicts(saved) if v.status == STATUS_NOT_TESTED} == {
+    assert {v.weakness for v in class_verdicts(saved) if NT_MODULE_LOAD_FAILED in v.codes} == {
         "W1",
         "W2",
     }
@@ -226,7 +228,9 @@ def test_failed_constructor_reports_its_classes_not_tested(
     result = _scan()
 
     rows = _rows(result)
-    assert {w for w, v in rows.items() if v.status == STATUS_NOT_TESTED} == {"W3", "W4"}
+    lost = {w for w, v in rows.items() if NT_MODULE_LOAD_FAILED in v.codes}
+    assert lost == {"W3", "W4"}
+    assert rows["W3"].status == STATUS_NOT_TESTED
     assert rows["W3"].codes == (NT_MODULE_LOAD_FAILED,)
     assert "excessive_agency (construct failed: RuntimeError; W3, W4 NOT TESTED)" in (
         _summary(result)
@@ -315,7 +319,11 @@ def test_a_failed_module_nobody_enabled_costs_nothing(monkeypatch: pytest.Monkey
         _EntryPoint("acme_probe", _import_fails),
     )
     result = _scan()
-    assert result.report.attempts == []
+    # No load-failure row. The healthy stubs emit no payload, so each class they
+    # own reads NOT TESTED under its own code instead (#221).
+    attempts = result.report.attempts
+    assert not [a for a in attempts if a.judge_evidence.get(MODULE_LOAD_FAILURE_KEY)]
+    assert {a.judge_evidence.get("weakness") for a in attempts} == {"W1", "W2", "W3", "W4"}
 
 
 def test_a_one_seed_redrive_and_a_dry_run_record_no_load_failure(

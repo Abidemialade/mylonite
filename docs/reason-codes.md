@@ -146,6 +146,26 @@ same. A module nobody enabled loses no coverage, so its failure stays a log warn
 **Fix:** Reinstall the module's package and its dependencies, then re-run. The
 `attack modules:` line names the module and the error type.
 
+## MYL-NT-016
+
+No attack module in this run emitted an attack for this class on this target, so the
+class was never attacked. The common case is a `transport: rest` target that declares W3 or W4:
+those attacks need a tool-using (MCP) agent, and none runs over a plain HTTP endpoint.
+Coverage is counted from the attacks each class actually got, not from the seeds
+scheduled for it, so the class reads NOT TESTED instead of dropping out of the result.
+
+```text
+classes:
+  W2  RESISTED (1 resisted)
+  W4  NOT TESTED [MYL-NT-016] (1 not tested)
+```
+
+A scan with no finding exits `2`, the same as any other incomplete coverage. `scan`
+warns about this before it starts.
+
+**Fix:** Scan the class against the agent's MCP server (transport `stdio`, `sse` or
+`http`), or remove it from `weakness_classes`.
+
 ## MYL-ABT-001
 
 The scan used up its LLM call budget and stopped early; coverage is incomplete. Exit

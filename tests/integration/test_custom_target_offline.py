@@ -350,7 +350,10 @@ async def test_scan_cycle_against_real_stdio_subprocess(
     # 3 synth-W1 tool-description (one per instruction-bearing tool, capped)
     # + 1 synth-W1 rug-pull probe + 3 catalogue W2 (family ==
     # "kitchen-sink" exact match -> the hand-tuned kitchen-sink seeds apply).
-    assert len(result.report.attempts) == 7, weaknesses_attempted
+    # Only the prompt-injection module runs here, so the declared W3 and W4 get
+    # one NOT TESTED row each instead of dropping out of the result (#221).
+    assert len(result.report.attempts) == 9, weaknesses_attempted
+    assert {"no-attack-emitted:W3", "no-attack-emitted:W4"} <= weaknesses_attempted
     assert "synth-w1-rug-pull" in weaknesses_attempted
     findings = [a for a in result.report.attempts if a.outcome == "finding"]
     # The scripted planner always complies and the scripted judge always returns
