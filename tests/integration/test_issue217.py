@@ -48,6 +48,11 @@ Three things, per server:
 Each test also writes real artefacts (``write_artefacts``) and reads back
 ``verdicts.json`` — the sidecar an operator actually opens — rather than
 asserting on ``class_verdicts()`` output alone.
+
+``tests/corpus/test_labelled_corpus.py`` imports this module's fakes and
+helpers (the launchers, attackers, ``_text_response``, ``_open_over``,
+``_run_single_seed_scan``, ``_class``, ``_verdicts_document``). Rename or
+change them together with that file.
 """
 
 from __future__ import annotations
