@@ -121,6 +121,37 @@ and `docs/plugin-authoring.md` for the long-form walkthrough.
   need an issue tagged `contract-change` open for at least a week — see
   `GOVERNANCE.md`.
 
+## Updating a frozen snapshot
+
+A handful of public, stability-promised surfaces are pinned by a JSON
+snapshot under `tests/fixtures/`, so a drift fails a test instead of shipping
+unnoticed: reason codes (`reason_codes.snapshot.json`), the `mylonite.testkit`
+function signatures and error types that emitted tests import by name
+(`testkit_signatures.snapshot.json`), the CLI's process exit codes
+(`exit_codes.snapshot.json`), and the checked-in JSON schemas together with
+the five extension contracts' `CONTRACT_VERSION` values
+(`schema_versions.snapshot.json`).
+
+These are meant to change — that's how a reviewed, intentional addition or
+break ships — just never by accident. When a test tells you a snapshot is
+out of date:
+
+1. Confirm the change is intentional (read the failing assertion; it names
+   what moved).
+2. Regenerate: `python scripts/update_snapshots.py`. It rewrites
+   `testkit_signatures.snapshot.json`, `exit_codes.snapshot.json`, and
+   `schema_versions.snapshot.json` from the live code — it never touches
+   `reason_codes.snapshot.json`, which has its own regeneration path (see
+   `tests/test_reason_codes.py`).
+3. Review the diff. `git diff tests/fixtures/` should show exactly the
+   surface you meant to change.
+4. Add a `CHANGELOG.md` entry describing the change.
+5. Ask a maintainer to add the `snapshot-change` label to the pull request.
+   `scripts/check_snapshot_changes.py` (run in the `Docs and writing` CI job)
+   fails a changed snapshot without both that label and a `CHANGELOG.md`
+   entry in the same diff — the label is a maintainer's own action, so a
+   contributor's commit message alone can't opt out.
+
 ## What we can and can't accept
 
 Mylonite reproduces working exploits, so a contribution here carries risks that
