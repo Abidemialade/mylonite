@@ -20,7 +20,7 @@ from mylonite.scan.llm_types import ToolDescription, ToolResult
 
 # Fake, not a real credential -- assembled from fragments so no provider-key-
 # shaped literal sits whole in this file outside the redaction assertion below.
-_FAKE_KEY = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+_FAKE_KEY = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # pragma: allowlist secret
 
 
 class _AsyncServerWrapper:
