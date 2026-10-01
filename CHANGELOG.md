@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-01
+
+This release makes every result say what proved it, and stops reporting what was never
+proven. An LLM-judge "success" that the agent's own tool calls contradict is no longer a
+finding. Every finding is labelled `state`, `trace` or `judge-only`, and `validate` keeps
+a test only when something other than the judge shows the attack landed. A black-box REST
+target's keeps read STABLE, NOT PROVEN. Seven more ways a scan could read clean without the
+evidence now read NOT TESTED, each with a reason code:
+
+- a failed rug-pull re-list;
+- a partial tool list;
+- a broken attack module;
+- a class no attack ran against;
+- an unchecked "queued" reply;
+- a low-confidence judge;
+- a non-finite judge confidence.
+
+GitHub code scanning shows only kept findings as errors.
+
+Breaking changes, which the 0.x minor line allows:
+
+- `check --authorize` is removed; calibration runs through `scan`, `validate` and `gate`.
+- `check` and `ablate` are hidden and need `MYLONITE_EXPERIMENTAL=1`.
+- SARIF `level` and `security-severity` now follow the validation verdict.
+- `validate` no longer keeps a finding on a failed or skipped build test, or on judge-only
+  evidence.
+
 ### Added
 
 - **A manually-dispatched live smoke test for the #217 calibration fix.**
@@ -5253,7 +5280,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.5...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Abidemialade/mylonite/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/Abidemialade/mylonite/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/Abidemialade/mylonite/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...v0.10.3
