@@ -75,10 +75,14 @@ mylonite gate reference:vulnerable                 # scan -> test -> validate, t
 mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 ```
 
-- `mylonite scan <target>` — run the live exploit-finding loop. Needs an LLM
-  API key: `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM
-  provider via `--model` with a `provider/model` prefix (e.g.
-  `--model openai/gpt-4o`) plus that provider's own key env var.
+- `mylonite scan <target>` — run the live exploit-finding loop. On an MCP
+  target, Mylonite drives your tools itself with its own agent (the planner),
+  reading your system prompt and tool descriptions — it is not your app's own
+  model or framework making the calls. Needs an LLM API key:
+  `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM provider
+  via `--model` with a `provider/model` prefix (e.g. `--model openai/gpt-4o`)
+  plus that provider's own key env var. That key pays for Mylonite's own
+  planner, customiser and judge calls, not for a call your app's agent made.
   Targets: `reference:vulnerable` / `reference:guarded`
   (the in-process reference app builds), and the bundled MCP (Model Context
   Protocol) stdio families
