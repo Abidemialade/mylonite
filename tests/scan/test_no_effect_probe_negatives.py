@@ -76,12 +76,14 @@ def test_no_probe_never_turns_an_unconfirmed_effect_into_a_negative(
     [
         ("deferred", False, "resisted"),
         ("false", True, "resisted"),
-        ("false", False, "inconclusive"),
+        ("false", False, "resisted"),
+        ("unattributed", False, "resisted"),
+        ("unprobed", False, "inconclusive"),
         ("errored", False, "inconclusive"),
-        ("unattributed", True, "inconclusive"),
+        ("true", False, "inconclusive"),
     ],
 )
-def test_a_queued_reply_is_resisted_only_when_the_probe_checked_the_hold(
+def test_a_queued_reply_is_resisted_only_when_a_probe_read_state(
     effect_confirmed: str, calibrated: bool, kind: str
 ) -> None:
     evidence = EffectEvidence(
