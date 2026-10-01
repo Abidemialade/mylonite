@@ -139,16 +139,18 @@ uncalibrated probe reads as.
 **By default, nothing outside its own output directory.** `gate` writes
 `.mylonite/gate/` — the generated test, the exploit JSON, the validation report,
 your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
-commands to commit and open the PR yourself. Your repository is not modified:
-no branch, no commit, no workflow files.
+commands to commit and open the PR yourself. With neither flag below, your
+repository is not modified: no branch, no commit, no workflow files.
 
-Two flags opt in to the rest:
+Two flags opt in to the rest, independently:
 
 - **`--open-pr`** creates the branch, commits the gate directory, pushes, and
   opens the PR via `gh`. If `gh` is missing or unauthenticated it still commits
   and prints the remaining two commands.
-- **`--workflows`** additionally scaffolds the two `.github/workflows/`
-  templates described below.
+- **`--workflows`** scaffolds the two `.github/workflows/` templates described
+  below — this writes to disk whether or not `--open-pr` is also set. Pass
+  `--workflows` alone and the printed summary lists the workflow file(s) it
+  wrote, rather than claiming nothing outside the output directory changed.
 
 Both are off by default. Writing into someone's repository is an action you ask
 for, not one you opt out of.
