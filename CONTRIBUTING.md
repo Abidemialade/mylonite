@@ -152,6 +152,29 @@ out of date:
    entry in the same diff — the label is a maintainer's own action, so a
    contributor's commit message alone can't opt out.
 
+## Fixing a docs-registry ratchet failure
+
+`tests/test_docs_registry_ratchet.py` checks three registries against their
+docs page, both ways: every live CLI flag, `mylonite.testkit` name, or
+reason code has a mention in its page (`docs/cli-reference.md`,
+`docs/validation.md`, `docs/reason-codes.md`), and every flag/name/code
+those pages mention actually exists. A run that fails names the gap as
+`undocumented:<thing>` (real, but not written down) or `stale-doc:<thing>`
+(written down, but no longer real — a renamed or removed flag/name/code).
+
+1. Fix the cause for real: add the missing flag/name/code to the page, or
+   remove the stale mention. This is always the preferred outcome.
+2. If the page genuinely can't say it yet (good reason required — "forgot"
+   doesn't count), add an entry to `tests/fixtures/docs_ratchet_allowlist.json`
+   under the named registry: `{"key": "<the gap string>", "reason": "..."}`.
+3. Raise that registry's ceiling in `_CEILINGS` (same file as the test) by
+   exactly the number of entries you added, in the same PR as the new
+   entry. The ceiling may only shrink otherwise — this is the one deliberate
+   exception, and it is reviewable in the diff.
+4. If a doc edit fixed a gap that was previously allowlisted, delete that
+   entry and lower the ceiling in the same PR — a stale entry fails its own
+   test (`test_allowlist_entries_are_not_stale`).
+
 ## No-regression checks
 
 The `nr-ci` job runs on every PR and push to main, docs-only changes

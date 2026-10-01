@@ -705,11 +705,12 @@ def test_reason_codes_documented() -> None:
     it up. A code with no entry sends them to a dead end, so the anchor each code
     carries must resolve to a real section that says what to do.
     """
+    from tests._doc_registry_sync import markdown_sections_by_heading
+
     from mylonite.reason_codes import REGISTRY
 
     page = (_DOCS_DIR / "reason-codes.md").read_text(encoding="utf-8")
-    sections = re.split(r"^## ", page, flags=re.MULTILINE)
-    by_heading = {s.splitlines()[0].strip(): s for s in sections[1:]}
+    by_heading = markdown_sections_by_heading(page)
 
     missing = sorted(code for code in REGISTRY if code not in by_heading)
     assert not missing, f"docs/reason-codes.md has no `## <code>` heading for: {missing}"
@@ -740,11 +741,12 @@ def test_reason_code_fix_lines_match_the_registry() -> None:
     matching doc edit (or the reverse: a doc rewritten to say something the
     code's fix no longer backs) fails here instead of drifting silently.
     """
+    from tests._doc_registry_sync import markdown_sections_by_heading
+
     from mylonite.reason_codes import REGISTRY
 
     page = (_DOCS_DIR / "reason-codes.md").read_text(encoding="utf-8")
-    sections = re.split(r"^## ", page, flags=re.MULTILINE)
-    by_heading = {s.splitlines()[0].strip(): s for s in sections[1:]}
+    by_heading = markdown_sections_by_heading(page)
 
     stale: list[str] = []
     for code, rc in REGISTRY.items():
