@@ -169,7 +169,9 @@ LLM call. Carries the compliance metadata.
 
 Options: `scan_path` (an `exploit_*.json` or scan dir) or `--latest`; `--out PATH`;
 `--target-file PATH` (custom targets — co-locates the YAML so the live test re-drives
-your app); `--prove-control` (emit a control-efficacy test).
+your app; usually not needed, since this auto-resolves `target.yaml` from the scan
+directory `scan_path` points at — pass it only when that file isn't there);
+`--prove-control` (emit a control-efficacy test).
 
 ```bash
 mylonite generate --latest --out .mylonite/generated/my-finding

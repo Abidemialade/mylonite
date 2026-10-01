@@ -1540,9 +1540,11 @@ def generate(
         typer.Option(
             "--target-file",
             help=(
-                "For a CUSTOM target: the same target YAML you scanned. Co-located "
-                "next to the emitted test as target.yaml so the live test can re-drive "
-                "your real app out of the box."
+                "For a CUSTOM target: the target YAML you scanned. Usually not needed — "
+                "generate auto-resolves target.yaml from the scan directory SCAN_PATH "
+                "points at. Pass it explicitly when that file isn't there (a different "
+                "--scans-dir, or an exploit copied elsewhere). Co-located next to the "
+                "emitted test as target.yaml so the live test can re-drive your real app."
             ),
         ),
     ] = None,
@@ -1565,10 +1567,12 @@ def generate(
     Offline and deterministic — no LLM call. Reads an ``exploit_*.json`` (written
     by ``mylonite scan``), renders a testkit-based pytest file, and writes it next
     to a co-located copy of the exploit plus a ``fixtures/`` placeholder. For a
-    CUSTOM target, pass ``--target-file`` so the target YAML is co-located as
-    ``target.yaml`` (the live test needs it). With ``--prove-control`` the emitted
-    test asserts the control is load-bearing (``assert_control_holds``) rather than
-    just that the target resists. Prints what to run next.
+    CUSTOM target, the live test needs the target YAML co-located as
+    ``target.yaml``: this auto-resolves from the scan directory when it's there,
+    so ``--target-file`` is only needed to point at one that isn't. With
+    ``--prove-control`` the emitted test asserts the control is load-bearing
+    (``assert_control_holds``) rather than just that the target resists. Prints
+    what to run next.
     """
     import json
 
