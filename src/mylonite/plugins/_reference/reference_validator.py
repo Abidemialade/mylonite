@@ -849,8 +849,8 @@ class DifferentialValidator(ValidatorBase):
                     f"control {control!r} (synthetic boundary twin): {counts} "
                     f"(need >= {self._min_rate_gap}); the SYNTHETIC boundary twin did not "
                     "block this attack. If your real control is server-layer (an approval "
-                    "gate or allowlist enforced inside the server), declare control_env / "
-                    "vulnerable_launch in the target file so the differential measures it - "
+                    "gate or allowlist enforced inside the server), declare control_env "
+                    "in the target file so the differential measures it - "
                     "the boundary twin cannot see server-side guards, so this is NOT "
                     "evidence your control is ineffective"
                 )

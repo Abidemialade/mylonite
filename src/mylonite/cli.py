@@ -1824,7 +1824,7 @@ def _validate_custom(
             "applies at the adapter boundary, NOT your server's own guard. A kept\n"
             "finding proves a canonical control WOULD be load-bearing for this model --\n"
             "not that your implementation is. For the strong, server-side claim, declare\n"
-            "control_env or vulnerable_launch in your target.yaml (see docs/concepts.md).\n"
+            "control_env in your target.yaml (see docs/concepts.md).\n"
             f"{bar}"
         )
     validator = DifferentialValidator(

@@ -44,6 +44,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs and help text now say who drives the tools, and only credit
+  `control_env` with the server-layer claim.** README, `docs/quickstart.md`
+  and `docs/concepts.md` used to leave the impression that your own agent or
+  framework makes the tool calls `mylonite scan`/`gate` attacks; on an MCP
+  target it is Mylonite's own agent (the planner) reading your system prompt
+  and tool descriptions, and your API key pays for that planner's,
+  the customiser's and the judge's calls, not your app's. `docs/ci-gating.md`
+  no longer promises a NOT TESTED row for every seed a budget starves — the
+  scan aborts and a log line names them, but they're not report rows.
+  `docs/plugin-authoring.md` now says plainly that a third-party attack
+  module stays inert until you opt it in with `MYLONITE_ATTACK_MODULES`, with
+  a link to how. README's "Try it" section now names the two things replay
+  turns off (the per-seed customiser and the LLM-judge fallback) and that
+  each payload runs once, rather than claiming everything but the model
+  replies is live. `cli.py`'s help, `reference_validator.py` and
+  `report/render.py` no longer credit `vulnerable_launch` with the
+  server-layer claim either — only `control_env` earns it; `vulnerable_launch`
+  on its own changes just the raw side, and the guarded side stays Mylonite's
+  boundary shim.
 - **`mylonite check` and `mylonite ablate` are now hidden and experimental.**
   Both commands still work, but they're dropped from `mylonite --help`, from
   README's command table and from the docs nav, and neither runs without
