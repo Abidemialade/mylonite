@@ -251,12 +251,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is stale: `scan()` now rejects the combination outright, the same as `gate()`.
   `report/render.py`'s metric legend called the differential score "agreement"; it is
   the average of the vulnerable-fire rate and the guard-resist rate, so it now reads
-  "discrimination strength", matching a corrected `ValidationOutcome.metric` field
-  description (**`validator` `CONTRACT_VERSION` 0.5.0 → 0.5.1** — patch, docstring
-  only, no shape change). `testkit/__init__.py` and `docs/validation.md` now say
-  precisely which import is eager on `import mylonite.testkit` (the in-process
-  reference adapter) and which stays lazy (the `mcp_kitchen_sink` package itself,
-  loaded only when a guarded scan runs).
+  "discrimination strength". (The matching `ValidationOutcome.metric` field
+  description is a contract change and is tracked separately, not in this release.)
+  `testkit/__init__.py` and `docs/validation.md` now say precisely which import is
+  eager on `import mylonite.testkit` (the in-process reference adapter) and which
+  stays lazy (the `mcp_kitchen_sink` package itself, loaded only when a guarded scan
+  runs).
 - **An attack module that fails to load no longer drops its weakness classes without
   a word (#222).** A module that fails to import or construct used to be skipped with
   a log warning, so its classes vanished from the result and the scan could read
