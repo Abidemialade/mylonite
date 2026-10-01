@@ -17,9 +17,11 @@ These tests are sync ``def`` (not async) so ``assert_guard_holds`` can call
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -32,6 +34,20 @@ from mylonite.contracts._types import (
     Payload,
 )
 from mylonite.testkit import assert_guard_holds, load_exploit
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+_SIGNATURE_SNAPSHOT = REPO_ROOT / "tests" / "fixtures" / "testkit_signatures.snapshot.json"
+
+
+def _load_script(relative: str, name: str) -> ModuleType:
+    """Load a ``scripts/*.py`` helper as a module (``scripts/`` has no ``__init__.py``)."""
+    spec = importlib.util.spec_from_file_location(name, REPO_ROOT / relative)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 # Aliased (not imported as ``TestkitFixtureError``) so pytest does not try to
 # collect it as a test class via the ``Test*`` naming heuristic.
@@ -362,6 +378,38 @@ def test_public_surface() -> None:
     assert callable(testkit.load_exploit)
     assert issubclass(testkit.TestkitFixtureError, Exception)
     assert issubclass(testkit.TestkitConfigError, Exception)
+
+
+def test_signatures_match_the_frozen_snapshot() -> None:
+    """The names in ``__all__`` can hold still while their shape drifts underneath:
+    a parameter added, removed, reordered, or changed in kind/default/annotation,
+    or an exception's base classes changing. Emitted tests in consumer repos
+    import these by name and call them positionally/by keyword, so any of that
+    is a public-API break ``test_public_surface`` above cannot see.
+
+    Update deliberately: ``python scripts/update_snapshots.py``, then add a
+    ``CHANGELOG.md`` line. A pull request also needs the snapshot-change label
+    (enforced by ``scripts/check_snapshot_changes.py`` in CI)."""
+    update_snapshots = _load_script("scripts/update_snapshots.py", "update_snapshots")
+    snapshot = json.loads(_SIGNATURE_SNAPSHOT.read_text(encoding="utf-8"))
+    current = update_snapshots.build_testkit_signatures()
+    removed = sorted(set(snapshot) - set(current))
+    assert not removed, (
+        f"testkit surface removed or renamed: {removed}. If intentional, update "
+        f"{_SIGNATURE_SNAPSHOT.name} (python scripts/update_snapshots.py) and add a "
+        "CHANGELOG.md line."
+    )
+    added = sorted(set(current) - set(snapshot))
+    assert not added, (
+        f"new testkit surface not yet in the snapshot: {added}. Add it via "
+        f"python scripts/update_snapshots.py and a CHANGELOG.md line."
+    )
+    changed = sorted(name for name in snapshot if snapshot[name] != current[name])
+    assert not changed, (
+        f"testkit signature(s) changed shape: {changed}. If intentional, update "
+        f"{_SIGNATURE_SNAPSHOT.name} (python scripts/update_snapshots.py) and add a "
+        "CHANGELOG.md line."
+    )
 
 
 def test_assert_target_resists_missing_target_file_actionable(tmp_path: Path) -> None:

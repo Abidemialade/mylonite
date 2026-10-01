@@ -1,0 +1,134 @@
+{
+  "TestkitConfigError": {
+    "bases": [
+      "builtins.ValueError"
+    ],
+    "kind": "exception"
+  },
+  "TestkitFixtureError": {
+    "bases": [
+      "mylonite._replay.FixtureError"
+    ],
+    "kind": "exception"
+  },
+  "TestkitRedriveAborted": {
+    "bases": [
+      "mylonite.testkit.TestkitFixtureError"
+    ],
+    "kind": "exception"
+  },
+  "assert_control_holds": {
+    "kind": "function",
+    "parameters": [
+      {
+        "annotation": "ExploitRecord",
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "exploit"
+      },
+      {
+        "annotation": "str | os.PathLike[str]",
+        "default": null,
+        "kind": "KEYWORD_ONLY",
+        "name": "target_file"
+      },
+      {
+        "annotation": "str",
+        "default": null,
+        "kind": "KEYWORD_ONLY",
+        "name": "control"
+      },
+      {
+        "annotation": "str | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "model"
+      },
+      {
+        "annotation": "str | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "provider"
+      },
+      {
+        "annotation": "CompletionFn | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "_completion_fn"
+      }
+    ],
+    "return": "None"
+  },
+  "assert_guard_holds": {
+    "kind": "function",
+    "parameters": [
+      {
+        "annotation": "ExploitRecord",
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "exploit"
+      },
+      {
+        "annotation": "str | os.PathLike[str] | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "fixtures_dir"
+      },
+      {
+        "annotation": "CompletionFn | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "_completion_fn"
+      }
+    ],
+    "return": "None"
+  },
+  "assert_target_resists": {
+    "kind": "function",
+    "parameters": [
+      {
+        "annotation": "ExploitRecord",
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "exploit"
+      },
+      {
+        "annotation": "str | os.PathLike[str]",
+        "default": null,
+        "kind": "KEYWORD_ONLY",
+        "name": "target_file"
+      },
+      {
+        "annotation": "str | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "model"
+      },
+      {
+        "annotation": "str | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "provider"
+      },
+      {
+        "annotation": "CompletionFn | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "_completion_fn"
+      }
+    ],
+    "return": "None"
+  },
+  "load_exploit": {
+    "kind": "function",
+    "parameters": [
+      {
+        "annotation": "str | os.PathLike[str]",
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "path"
+      }
+    ],
+    "return": "ExploitRecord"
+  }
+}
