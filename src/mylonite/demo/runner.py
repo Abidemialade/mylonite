@@ -293,7 +293,7 @@ async def run_demo(
         used_model = model if model is not None else DEMO_MODEL
         # A model override alone used to leave the provider at DEMO_PROVIDER
         # ("ollama"), so `--live --model <some-other-provider's-model>` printed
-        # `live (ollama/...)` for a run LiteLLM routed elsewhere on the model
+        # a "live" label naming the demo provider for a run LiteLLM routed elsewhere on the model
         # prefix — and stamped that provider into ScanConfig, ScanReport.provider
         # and every exploit's ExecContext. Derive it from the model instead.
         #
