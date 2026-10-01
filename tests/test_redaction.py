@@ -50,6 +50,28 @@ def test_redact_masks_generic_sk_key() -> None:
     assert REDACTION_PLACEHOLDER in out
 
 
+FAKE_OPENAI_PROJECT = "sk-proj-" + "Ab3dE_f6Gh-9jK2mN5pQ8rS1tU4vW7xY0z"  # pragma: allowlist secret
+FAKE_GROQ = "gsk_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"  # pragma: allowlist secret
+
+
+def test_redact_masks_project_scoped_sk_key_whole() -> None:
+    out = redact(f"model openai/{FAKE_OPENAI_PROJECT} failed")
+    assert FAKE_OPENAI_PROJECT not in out
+    assert "f6Gh-9jK" not in out
+    assert REDACTION_PLACEHOLDER in out
+
+
+def test_redact_masks_groq_key() -> None:
+    out = redact(f"calling Groq with {FAKE_GROQ} now")
+    assert FAKE_GROQ not in out
+    assert REDACTION_PLACEHOLDER in out
+
+
+def test_redact_leaves_words_ending_in_sk_alone() -> None:
+    text = "see the risk-assessment-for-new-users page"
+    assert redact(text) == text
+
+
 def test_redact_masks_aws_access_key() -> None:
     out = redact(f"aws id {FAKE_AWS} here")
     assert FAKE_AWS not in out

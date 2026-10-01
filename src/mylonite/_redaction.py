@@ -59,8 +59,12 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # Anthropic-style keys: sk-ant-<...>. Listed before the generic sk- rule so
     # the longer, more specific form wins.
     re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),
-    # Generic provider keys: sk-<20+ alnum>.
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),
+    # Generic provider keys: sk-<20+ chars>, hyphens and underscores included,
+    # so a project-scoped key (sk-proj-...) is caught whole. Not preceded by a
+    # letter or digit, so ordinary words ending in "sk" ("risk-...") survive.
+    re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}"),
+    # Groq keys: gsk_<20+ alnum>.
+    re.compile(r"(?<![A-Za-z0-9])gsk_[A-Za-z0-9]{20,}"),
     # AWS access key id.
     re.compile(r"AKIA[0-9A-Z]{16}"),
     # Google-style keys: AIza<...> (Gemini/Maps/etc). Same shape as the
