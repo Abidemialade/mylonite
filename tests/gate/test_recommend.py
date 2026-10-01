@@ -649,18 +649,38 @@ def test_effect_unattributed_degrades_confidence():
 
 
 def test_proven_layer_server_from_notes_marker():
-    from mylonite.contracts._types import ValidationReport
+    from mylonite.contracts._types import ValidationOutcome, ValidationReport
 
     ex = _exploit(pattern_id="w2", weakness="W2")
     report = ValidationReport(
         test_filename="t.py",
         kept=True,
-        outcomes=[],
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail=""),
+            ValidationOutcome(stage="differential", passed=True, detail=""),
+        ],
         notes="Server-layer-guarded twin (control 'W2'): leaked 0/2. [guarded-twin=server-layer]",
     )
     rec = recommend(ex, report=report)
     assert rec.proven is True
     assert rec.proven_layer == "server"
+
+
+def test_kept_without_differential_or_effect_is_not_proven():
+    """A keep that rests on reproduction alone is STABLE, NOT PROVEN, not proven."""
+    from mylonite.contracts._types import ValidationOutcome, ValidationReport
+
+    ex = _exploit(pattern_id="w2", weakness="W2")
+    report = ValidationReport(
+        test_filename="t.py",
+        kept=True,
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail=""),
+            ValidationOutcome(stage="stability", passed=True, detail=""),
+            ValidationOutcome(stage="consensus", passed=True, detail=""),
+        ],
+    )
+    assert recommend(ex, report=report).proven is False
 
 
 def test_proven_layer_none_when_no_report():

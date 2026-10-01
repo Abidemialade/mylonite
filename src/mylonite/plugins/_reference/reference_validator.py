@@ -82,6 +82,7 @@ from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact_exception
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
+from mylonite._verdict import verdict_label
 from mylonite.contracts import (
     ExploitRecord,
     GeneratedTest,
@@ -103,7 +104,7 @@ from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
-from mylonite.scan.pytest_runner import run_test_file
+from mylonite.scan.pytest_runner import PytestOutcome, run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
 from mylonite.testkit import FIXTURE_FORMAT_VERSION
@@ -604,7 +605,15 @@ class DifferentialValidator(ValidatorBase):
         # guarded fixtures and run the on-disk committed test offline (full pass).
         build = self._build_outcome(test, tallies)
 
-        kept = build.passed and differential.passed and flakiness.passed and metamorphic.passed
+        outcomes = [build, differential, flakiness, metamorphic]
+        # A report-only leg (a skipped build) neither passes nor blocks; the
+        # verdict label below keeps a skipped build from reading as KEPT.
+        gating = [o for o in outcomes if not o.report_only]
+        legs = [str(o.stage) for o in gating]
+        kept = all(o.passed for o in gating)
+        label = verdict_label(
+            ValidationReport(test_filename=test.filename, outcomes=outcomes, kept=kept)
+        )
         notes = (
             f"statistical differential: vulnerable fired {vuln_fires}/{self._iterations} "
             f"({vuln_rate:.0%}), guarded leaked {guard_fires}/{self._iterations} "
@@ -614,24 +623,22 @@ class DifferentialValidator(ValidatorBase):
             f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
             f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
             f"(need >= {self._metamorphic_threshold:.0%}, gates kept); "
-            f"{'KEPT' if kept else 'REJECTED'} "
-            "(kept = build ∧ differential ∧ flakiness ∧ metamorphic). "
+            f"{label} (kept = {' ∧ '.join(legs)}). " + format_marker(server_layer=True)
             # The reference twins ARE a server-layer pair: the guarded side is the
             # real `server_guarded.py`, not a boundary shim, so this differential
             # earns the strong claim. Stamping it is not cosmetic -- every reader
             # defaults to "boundary" when the marker is absent, so without this the
             # reference app (the demo everyone runs first) would UNDER-claim.
-            + format_marker(server_layer=True)
         )
 
         return ValidationReport(
             test_filename=test.filename,
-            outcomes=[build, differential, flakiness, metamorphic],
+            outcomes=outcomes,
             kept=kept,
             notes=notes,
             mutation_score=mutation.score,
-            gating_formula="kept = build AND differential AND flakiness AND metamorphic",
-            gating_legs=["build", "differential", "flakiness", "metamorphic"],
+            gating_formula="kept = " + " AND ".join(legs),
+            gating_legs=legs,
             reproducibility=ReproducibilityEvidence(
                 iterations=self._iterations,
                 vuln_fired=vuln_fires,
@@ -753,16 +760,13 @@ class DifferentialValidator(ValidatorBase):
             ),
             metric=agree,
         )
-        # T5: the build leg used to hardcode `passed=True` unconditionally here,
-        # citing a testkit re-drive helper that never existed anywhere in this
-        # codebase — dead code that could never catch a malformed emitted test.
-        # Consolidated onto the SAME real pytest-invoking leg the reference
-        # path uses (`_collect_only_outcome`): it writes the emitted source to
-        # a temp file and genuinely runs it under pytest. A custom-target test
-        # carries a `skipif(MYLONITE_LIVE_TARGET != "1")` guard (see
-        # `reference_pytest_generator.py`), so this collects-and-skips rather
-        # than launching the real target — still a genuine proof the file is
-        # syntactically valid and collectible, which the hardcoded True never was.
+        # The build leg writes the emitted source to a temp file and runs
+        # `pytest --collect-only` on it (`_collect_only_outcome`). A
+        # custom-target test needs the live target (it carries a
+        # `skipif(MYLONITE_LIVE_TARGET != "1")` guard, see
+        # `reference_pytest_generator.py`), so running it here would only skip.
+        # Collecting it proves the file is a well-formed gate without
+        # pretending a skipped run passed.
         build = (
             self._build_skip_outcome() if not self._run_build else self._collect_only_outcome(test)
         )
@@ -884,12 +888,13 @@ class DifferentialValidator(ValidatorBase):
             if self._guarded_adapter_factory is None
             else ""
         )
+        label = verdict_label(
+            ValidationReport(test_filename=test.filename, outcomes=outcomes, kept=kept)
+        )
         notes = (
             f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "
             f"{effect_yes}/{n} runs showed the damage, consensus={agree:.2f}; "
-            f"{'KEPT' if kept else 'REJECTED'} (kept = {' AND '.join(legs)})."
-            + twin_note
-            + notes_tail
+            f"{label} (kept = {' AND '.join(legs)})." + twin_note + notes_tail
         )
         return ValidationReport(
             test_filename=test.filename,
@@ -1542,11 +1547,16 @@ class DifferentialValidator(ValidatorBase):
         """The ``build`` outcome when ``run_build=False`` — shared by both the
         reference-target (:meth:`_build_outcome`) and custom-target
         (:meth:`_validate_custom_target`) paths so a skip reads identically
-        either way."""
+        either way.
+
+        A skipped build is REPORT-ONLY: it neither passes nor blocks ``kept``,
+        and the verdict label never reads KEPT for a report whose build was
+        skipped (see ``mylonite._verdict``)."""
         return ValidationOutcome(
             stage="build",
-            passed=True,
-            detail="build stage skipped (run_build=False)",
+            passed=False,
+            report_only=True,
+            detail="build stage skipped (run_build=False): the emitted test was not checked",
         )
 
     @staticmethod
@@ -1572,17 +1582,22 @@ class DifferentialValidator(ValidatorBase):
         return indices[0] if indices else None
 
     def _collect_only_outcome(self, test: GeneratedTest, *, suffix: str = "") -> ValidationOutcome:
-        """Collect-only build: assert the emitted source collects under pytest."""
+        """Collect-only build: assert the emitted source collects under pytest.
+
+        Runs ``pytest --collect-only``, so no test runs. A test that would fail
+        or skip here (no recorded fixtures, no live target) can't be read as a
+        pass or a fail; only a file that collects at least one test passes."""
         with tempfile.TemporaryDirectory() as tmp:
             test_path = Path(tmp) / test.filename
             test_path.write_text(test.source, encoding="utf-8")
-            result = run_test_file(test_path)
+            result = run_test_file(test_path, collect_only=True)
+        collected = result.outcome is PytestOutcome.COLLECTED
         return ValidationOutcome(
             stage="build",
-            passed=result.collected,
+            passed=collected,
             detail=(
                 f"collect-only: emitted test "
-                f"{'collected' if result.collected else 'did NOT collect'} under pytest "
+                f"{'collected (not run)' if collected else 'did NOT collect'} under pytest "
                 f"(exit_code={result.exit_code}: {result.detail}){suffix}"
             ),
         )

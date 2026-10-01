@@ -21,6 +21,13 @@ from mylonite._twin_fidelity import (
     TwinLayer,
     proof_claim,
 )
+from mylonite._verdict import (
+    KEPT,
+    STABLE_NOT_PROVEN,
+    has_proof,
+    verdict_label,
+    verdict_reason,
+)
 
 
 def _render_validation_report(report: Any, console: Console | None = None) -> None:
@@ -112,8 +119,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             else f"{leg} (missing)"
             for leg in report.gating_legs
         )
-        verdict = "KEPT" if report.kept else "REJECTED"
-        console_print(console, f"gate: kept = {rendered}  =>  {verdict}")
+        console_print(console, f"gate: kept = {rendered}  =>  {verdict_label(report)}")
 
     # Reproducibility counts (fires/resists) behind differential + flakiness.
     repro = getattr(report, "reproducibility", None)
@@ -155,10 +161,24 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             "the differential did not survive that perturbation.",
         )
 
-    if report.kept:
+    label = verdict_label(report)
+    if label == KEPT:
+        console_print(console, f"[green]verdict: KEPT {dash} {verdict_reason(report)}[/green]")
+    elif label == STABLE_NOT_PROVEN:
+        # Kept, but nothing proved a safeguard stops the attack, or the build
+        # leg was skipped. Never print this as KEPT (see mylonite._verdict).
         console_print(
-            console, f"[green]verdict: KEPT {dash} the test discriminates and is stable.[/green]"
+            console,
+            f"[yellow]verdict: STABLE, NOT PROVEN {dash} "
+            f"{rich_escape(verdict_reason(report))}[/yellow]",
         )
+        if not has_proof(report):
+            console_print(
+                console,
+                "[yellow]  next: run without --fast so a guarded twin gives a differential "
+                "(declare control_env to measure your own control), or declare an "
+                "effect_probe in the target file, then re-run `mylonite validate`.[/yellow]",
+            )
     else:
         console_print(console, f"[red]verdict: REJECTED {dash} the test was not kept.[/red]")
         # The differential remediation must not accuse a real (server-layer) control
@@ -208,7 +228,10 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 )
                 break
         _remediation = {
-            "build": "build fail: emitted test didn't collect; re-run `mylonite generate`.",
+            "build": (
+                "build fail: the emitted test did not pass (it failed, errored, ran no "
+                "test or only skipped); re-run `mylonite generate`."
+            ),
             "differential": diff_remediation,
             "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
             "stability": "stability fail: the attack did not reproduce against the real target.",
@@ -227,7 +250,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             ),
         }
         for outcome in report.outcomes:
-            if not outcome.passed and outcome.stage in _remediation:
+            if not outcome.passed and not outcome.report_only and outcome.stage in _remediation:
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
 
 
