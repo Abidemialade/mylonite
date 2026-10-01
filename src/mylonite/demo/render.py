@@ -41,18 +41,24 @@ SAFETY_BANNER: Final[str] = (
 
 #: Two lines, not one: the first is the result and fits an 80-column terminal on
 #: its own, so CI's grep for "N exploits on vulnerable" never meets a wrap.
+#: The second line says what this run IS, not what it stands in for: a single
+#: scan on each build, judge disabled, so it is the differential's shape, not
+#: the oracle's repeat-run + metamorphic checks that confirm a kept finding.
 _HEADLINE_TEMPLATE: Final[str] = (
     "reference app: {n_vuln} exploits on vulnerable, {n_guard} on guarded\n"
-    "this differential is the oracle that validates every generated regression test"
+    "one scan per build, judge off — not the repeat-run oracle a kept finding passes"
 )
 _GUARDED_FINDING_NOTE: Final[str] = (
     "⚠ unexpected finding on the guarded build — LLM-judge noise or a real bug"
 )
 #: Every command sits on its own indented line, under 80 columns, so a reader
-#: can copy it whole instead of stitching it back together across a wrap.
+#: can copy it whole instead of stitching it back together across a wrap. The
+#: gate line is labelled "(needs an API key)" for the same reason the scan
+#: line below is: it is the second command a no-key user would otherwise hit
+#: a wall on.
 _TEASER: Final[str] = (
     "Each finding becomes a committed regression test, validated against this same "
-    "vulnerable/guarded oracle. Turn one into a gating test:\n"
+    "vulnerable/guarded oracle. Turn one into a gating test (needs an API key):\n"
     "  mylonite gate reference:vulnerable"
 )
 #: Each command is one line with no shell continuation: a trailing backslash
