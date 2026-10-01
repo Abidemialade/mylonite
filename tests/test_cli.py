@@ -2562,14 +2562,27 @@ def _generated_dir(tmp_path: Path) -> Path:
 
 
 def _patch_validator(
-    monkeypatch: pytest.MonkeyPatch, *, kept: bool, mutation_score: float = 1.0
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    kept: bool,
+    mutation_score: float = 1.0,
+    build_skipped: bool = False,
 ) -> None:
-    """Replace DifferentialValidator with a canned-report double (no live call)."""
+    """Replace DifferentialValidator with a canned-report double (no live call).
+
+    ``build_skipped`` makes the build leg report-only, so a kept report reads
+    STABLE, NOT PROVEN."""
     from mylonite.contracts import ValidationOutcome, ValidationReport
     from mylonite.plugins._reference import reference_validator
 
     outcomes = [
-        ValidationOutcome(stage="build", passed=True, detail="collected", metric=None),
+        ValidationOutcome(
+            stage="build",
+            passed=not build_skipped,
+            report_only=build_skipped,
+            detail="skipped" if build_skipped else "collected",
+            metric=None,
+        ),
         ValidationOutcome(
             stage="differential",
             passed=kept,
@@ -2648,6 +2661,23 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "flakiness" in result.output
     assert "mutation score" in result.output
     assert "KEPT" in result.output
+
+
+def test_validate_stable_not_proven_does_not_say_commit_to_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unproven keep still exits 0, but the next step is qualified rather
+    than "commit it so CI can gate on it"."""
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True, build_skipped=True)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert "STABLE, NOT PROVEN" in result.output
+    assert "so CI can gate on it" not in result.output
+    assert "gates reproduction only" in result.output
 
 
 def test_validate_stamps_the_planner_model_it_was_proved_against(

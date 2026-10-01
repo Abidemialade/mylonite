@@ -107,19 +107,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   three now log a redacted one-line detail instead, with no `exc_info`, even
   at DEBUG.
 - **`validate` no longer keeps a test whose build leg failed or only skipped.** The
-  build leg used to count a test that ran and failed as a pass, because it checked
-  that pytest collected the file rather than that a test passed. It now passes only
-  when pytest exits 0 with at least one passed test; a failed, errored, empty or
-  all-skipped run fails the leg and the finding is rejected. A custom-target build,
-  which can't run without the live target, runs `pytest --collect-only` and says
-  `collected (not run)`.
+  build leg counted a test that only skipped as a pass, because pytest exits 0 when
+  every test skips. On custom targets it also counted a test that failed, because it
+  checked collection rather than a passing test. It now passes only when pytest exits
+  0 and its final summary line counts at least one passed test; a failed, errored,
+  empty or all-skipped run fails the leg and the finding is rejected. A custom-target
+  build, which can't run without the live target, runs `pytest --collect-only` and
+  says `collected (not run)`. An inherited `PYTEST_ADDOPTS` no longer reaches the run.
 - **A keep with no proof behind it now reads STABLE, NOT PROVEN, not KEPT.** On a
   custom target run with `--fast` or with no control, and with no `effect_probe`, a
   test could be kept on reproduction and judge agreement alone and still print
   "KEPT — the test discriminates and is stable". Such a keep, and any keep whose build
   leg was skipped, now reads **STABLE, NOT PROVEN** in the verdict line, the gate
   line, the report notes and the gate's pull-request body, and `recommend` no longer
-  calls it proven. `kept`, the JSON fields and the exit codes are unchanged. See
+  calls it proven. `validate` no longer tells you to commit such a test so CI can gate
+  on it; it says the test gates reproduction only. `kept`, the JSON fields and the
+  exit codes are unchanged. Labels are derived from the legs a report carries, so an
+  older report, or one from a third-party validator with no build or differential
+  leg, may read differently than before. See
   [what the numbers mean](docs/validation.md#what-the-numbers-mean).
 
 ## [0.10.5] - 2026-10-01
