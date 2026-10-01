@@ -57,6 +57,15 @@ dev machine's local Windows console is a "legacy" one; CI's Windows and
 Linux runners are not, and box style/width computation differ only through
 that one function) -- see the fix-round-2 report section for the exact
 commands.
+
+Regenerating the dry-run goldens after an intended output change: run the real
+CLI from an empty directory with no ``MYLONITE_*``, ``LITELLM_*`` or provider
+key variables set, then replace each elapsed time (``1.2s``) with ``<TIME>s``
+and strip trailing whitespace. Never hand-edit them::
+
+    export COLUMNS=120 TERM=dumb NO_COLOR=1 PYTHONIOENCODING=utf-8
+    python -m mylonite scan reference:vulnerable --dry-run > tests/cli_golden/goldens/scan_reference_vulnerable_dry_run.txt
+    python -m mylonite scan reference:guarded --dry-run > tests/cli_golden/goldens/scan_reference_guarded_dry_run.txt
 """
 
 from __future__ import annotations
