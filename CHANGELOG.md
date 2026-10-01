@@ -66,14 +66,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   | Verdict | Before | After |
   |---|---|---|
-  | `KEPT` | `error`/`warning`/`note` by severity, with severity | `error`, with severity |
+  | `KEPT` | `error` (High), `warning` (Medium) or `note` (Low), with severity | always `error`, with severity |
   | `UNVALIDATED` (scan finding) | by severity, with severity | `warning`, no severity |
   | `STABLE, NOT PROVEN` | by severity, with severity | `warning`, no severity |
   | `REJECTED` | by severity, with severity | `note`, no severity |
 
-  Only a `KEPT` message carries the guarded-twin claim; others give the counts
-  and the verdict. Existing alerts change level on the next upload. See
+  A KEPT Medium or Low finding is now an `error` too: it was proven, so it
+  belongs with the alerts to act on. `security-severity` now also sits on the
+  rule, which is where GitHub reads it, together with a `security` tag, and
+  only when every result under that rule is KEPT. Until now it sat only on the
+  result, where GitHub does not read it. Only a `KEPT` message carries the
+  guarded-twin claim; others give the counts and the verdict. Existing alerts
+  change level on the next upload. See
   [Reading the results](docs/reading-results.md).
+- **The gating PR body states the guarded-twin claim only for a `KEPT`
+  validation.** For a `STABLE, NOT PROVEN` or `REJECTED` report, `gate`'s PR
+  description used to open with "Control efficacy verified" and the strong
+  claim. It now opens with "Control efficacy not proven", names the verdict
+  and the reason, and frames the fix as a recommended fix, not a proven one.
 - **The JSON bundle's `proof.claim` is set only for a `KEPT` finding.** A
   rejected validation where the attack fired 0 times used to carry "the
   safeguard, not the model, carries the security". `report --json` now sets

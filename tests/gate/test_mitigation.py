@@ -100,9 +100,12 @@ def test_all_mitigation_snippets_present():
 
 
 def _report(kept=True):
+    # A passing build leg plus a passing effect leg: a KEPT verdict, the only one
+    # the PR body states a claim for.
     return ValidationReport(
         test_filename="test_security_x.py",
         outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected"),
             ValidationOutcome(stage="stability", passed=True, detail="2/2 runs", metric=1.0),
             ValidationOutcome(stage="effect", passed=True, detail="probe confirmed", metric=1.0),
         ],
@@ -350,3 +353,53 @@ def test_pr_body_explicit_guarded_is_server_layer_wins_over_notes():
     body = build_pr_body(ex, _report(), guarded_is_server_layer=True)
     assert "Boundary-validated control (proxy)" not in body
     assert "Server-layer control verified" in body
+
+
+def _control_finding():
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    return ex.model_copy(
+        update={"payload": ex.payload.model_copy(update={"metadata": {"synthetic_control": "W2"}})}
+    )
+
+
+def _unproven_report(*, kept: bool, vuln_fired: int):
+    """A server-layer differential that proved nothing: kept with no passing
+    differential or effect leg, or rejected."""
+    from mylonite.contracts import ReproducibilityEvidence
+
+    return ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected"),
+            ValidationOutcome(stage="stability", passed=True, detail="2/2 runs", metric=1.0),
+        ],
+        kept=kept,
+        notes="[guarded-twin=server-layer]",
+        reproducibility=ReproducibilityEvidence(
+            iterations=3, vuln_fired=vuln_fired, guard_resisted=3, guard_fired=0
+        ),
+    )
+
+
+def test_pr_body_states_no_claim_for_a_stable_not_proven_report():
+    body = build_pr_body(_control_finding(), _unproven_report(kept=True, vuln_fired=3))
+    assert "carries the security" not in body
+    assert "Control efficacy verified" not in body
+    assert "Server-layer control verified" not in body
+    assert "Proven fix" not in body
+    assert "## Control efficacy not proven" in body
+    assert "**Verdict: STABLE, NOT PROVEN:**" in body
+
+
+def test_pr_body_states_no_claim_for_a_rejected_report():
+    body = build_pr_body(_control_finding(), _unproven_report(kept=False, vuln_fired=0))
+    assert "carries the security" not in body
+    assert "Proven fix" not in body
+    assert "**Verdict: REJECTED:**" in body
+
+
+def test_pr_body_non_control_finding_names_an_unproven_verdict():
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
+    body = build_pr_body(ex, _unproven_report(kept=True, vuln_fired=3))
+    assert "A validated weakness" not in body
+    assert "**Verdict: STABLE, NOT PROVEN:**" in body
