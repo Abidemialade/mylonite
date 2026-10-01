@@ -16,11 +16,13 @@ $env:MYLONITE_EXPERIMENTAL = "1"        # PowerShell
 Zero-key, zero-spend on-ramp: connects to a target ONCE (`describe()` — no LLM call, no
 attack) and reports structural exposure from the tool schemas alone.
 
-Options: `--target-file PATH` (required — or set `target_file:` in `mylonite.yaml`);
-`--enforce` (exit `1` on the substantive W1–W4 structural findings instead of reporting and
-exiting `0`). The "unpinned descriptions" advisory is **shown but does not gate**: it fires
-on every tool of every server on first contact, so gating on it would make `--enforce` red
-for everyone. `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml` when present).
+Options: a positional `reference:vulnerable` / `reference:guarded` target, or
+`--target-file PATH` for your own app (or set `target_file:` in `mylonite.yaml`) —
+one of the two is required; `--enforce` (exit `1` on the substantive W1–W4 structural
+findings instead of reporting and exiting `0`). The "unpinned descriptions" advisory is
+**shown but does not gate**: it fires on every tool of every server on first contact, so
+gating on it would make `--enforce` red for everyone. `--config mylonite.yaml`
+(auto-discovered from `./mylonite.yaml` when present).
 
 `check` takes no `--authorize` and makes no writes at all. To run the calibration
 controls (real writes proving a declared `effect_probe` can see a change before a real
@@ -28,6 +30,7 @@ scan ever trusts its "no change"), run `scan`/`gate`/`validate` with `--authoriz
 against the same `--target-file` — see [Calibration](target-file.md#calibration).
 
 ```bash
+MYLONITE_EXPERIMENTAL=1 mylonite check reference:vulnerable   # zero-key, no target file needed
 MYLONITE_EXPERIMENTAL=1 mylonite check --target-file app.yaml
 MYLONITE_EXPERIMENTAL=1 mylonite check --target-file app.yaml --enforce
 ```
