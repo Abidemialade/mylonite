@@ -180,37 +180,30 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             )
         else:
             diff_remediation = "differential fail: no discriminating power between the twins."
-        # The effect leg fails this way only when the target's own state
-        # persists between attempts: every firing run's damage was real, by
-        # the attempt's own actions, but none of them was confirmed from the
-        # target's state itself, and the leg needs at least one. The generic
-        # "did not confirm the damage" line would read as no damage at all,
-        # which is wrong here and points at the wrong fix (declare a probe,
-        # when one already ran).
+        # Deferred: the validator module pulls in the scan engine, which a
+        # report render does not otherwise need.
+        from mylonite.plugins._reference.reference_validator import EFFECT_UNPROVEN_CLAUSE
+
         effect_remediation = (
             "effect fail: the target's effect probe did not confirm the damage materialised."
         )
-        # Keyed on the clause `reference_validator.py` appends ONLY when
-        # from_state == 0 -- not on "could not be tied to that attempt",
-        # which appears in the detail for EVERY probed effect leg (it
-        # describes the from_actions runs) whether or not from_state is 0.
-        # Matching the wider phrase would wrongly claim "none reached a
-        # confirmed 'true'" for a leg that failed on count alone with at
-        # least one run confirmed from state.
+        # The effect leg carries EFFECT_UNPROVEN_CLAUSE only when a run fired
+        # with nothing in the trace or the probe tying the damage to that
+        # attempt (an LLM-judge verdict, say). The generic line would point
+        # at the wrong fix (declare a probe, when one already ran). Imported,
+        # not copied, so a rewording in the validator cannot break the match.
         for outcome in report.outcomes:
             if (
                 outcome.stage == "effect"
                 and not outcome.passed
-                and "no run was confirmed from the target's state" in outcome.detail
+                and EFFECT_UNPROVEN_CLAUSE in outcome.detail
             ):
                 effect_remediation = (
-                    "effect fail: the target keeps state between attempts, so the effect "
-                    "probe could not tie the damage to that attempt (an idempotent write, "
-                    "a delete, another attempt's write) - the verdict for those runs came "
-                    "from the attempt's own actions, not a confirmed state change, and none "
-                    "reached a confirmed 'true'. Re-run with fresh state before the "
-                    "`validate` command, or use a marker built from {payload}, to get at "
-                    "least one run confirmed from the target's state."
+                    "effect fail: some runs fired with nothing tying the damage to that "
+                    "attempt (an LLM-judge verdict, say), so they do not count. "
+                    "Give the effect probe a marker built from {exfil_email} or "
+                    "{exfil_host}, so the attempt's own call carries it, and run "
+                    "`mylonite check --authorize` to calibrate the probe."
                 )
                 break
         _remediation = {

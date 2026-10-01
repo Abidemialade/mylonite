@@ -76,7 +76,7 @@ import tempfile
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Final, Literal, get_args
 
 from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._replay import LiteLLMRecorder
@@ -97,6 +97,7 @@ from mylonite.plugins._reference.reference_target_adapter import InProcessRefere
 from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.coverage import attempt_reached_no_verdict
+from mylonite.scan.effect_verdict import ProofLevel
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import CompletionFn
@@ -114,6 +115,16 @@ logger = logging.getLogger(__name__)
 _KITCHEN_SINK_SEEDS: tuple[tuple[str, str], ...] = tuple(
     (s.pattern_id, s.weakness) for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets
 )
+
+#: The proof levels a firing run can count at on the custom-target effect leg,
+#: strongest first. They are the verdict rule's own levels.
+_EFFECT_PROOF_LEVELS: Final[tuple[ProofLevel, ...]] = get_args(ProofLevel)
+
+#: The clause the effect leg's detail carries when at least one run fired with
+#: no proof level: nothing in the trace or the probe tied the damage to that
+#: attempt (the LLM judge decided it, say, or a check on the agent's reply). ``report/render.py`` imports it to
+#: pick the matching remediation, so the two cannot drift apart.
+EFFECT_UNPROVEN_CLAUSE: Final = "fired with nothing tying the damage to that attempt"
 
 
 #: Exfil literals (email / URL) the model must EMIT for the attack to land — the
@@ -286,6 +297,37 @@ class _CustomRun:
     #: the effect leg only when the predicate, which reads this attempt's own
     #: trace, decided it.
     verdict_mechanism: str | None = None
+    #: What the planner trace showed for this attempt's consequential calls
+    #: ("not-called" | "blocked-by-client" | "dispatched-error" |
+    #: "dispatched-deferred" | "dispatched-ok"), or None when the adapter
+    #: records no trace outcome.
+    trace_outcome: str | None = None
+    #: The proof level the verdict rule gave a finding ("effect-confirmed" |
+    #: "dispatched" | "dispatched-tool-linked"), or None when the rule did not
+    #: decide it. The effect leg counts firing runs by this.
+    proof_level: str | None = None
+
+
+def _effect_proof_level(run: _CustomRun) -> str | None:
+    """The proof level a firing run counts at on the effect leg, or None.
+
+    A run the verdict rule decided carries its own level. A run it did not
+    decide (a target with no trace outcome, or a seed the rule does not judge)
+    falls back to the probe: a "true", or an "unattributed" the predicate
+    decided from this attempt's own calls, counts as "dispatched". Neither is
+    "effect-confirmed", which needs a calibrated probe. An "unattributed" the
+    LLM judge decided counts at no level: nothing structural ties it to the
+    effect.
+    """
+    if not run.finding:
+        return None
+    if run.proof_level in _EFFECT_PROOF_LEVELS:
+        return run.proof_level
+    if run.effect_confirmed == "true":
+        return "dispatched"
+    if run.effect_confirmed == "unattributed" and run.verdict_mechanism == "predicate":
+        return "dispatched"
+    return None
 
 
 @dataclass(frozen=True)
@@ -622,25 +664,23 @@ class DifferentialValidator(ValidatorBase):
             self._progress(f"re-driving real target: stability run {i + 1}/{n}")
             runs.append(self._run_custom_iteration(target, pattern_id))
         fired = sum(1 for r in runs if r.finding)
-        # A firing run counts toward the effect leg when the probe confirmed the
-        # effect from the target's state ("true"), or when the state change, or
-        # its absence, could not be tied to this attempt ("unattributed") AND the
-        # predicate, which reads only this attempt's own executed calls, decided
-        # it. An LLM-decided "unattributed" run does not count: nothing
-        # structural links it to the effect.
-        from_state = sum(1 for r in runs if r.finding and r.effect_confirmed == "true")
-        from_actions = sum(
-            1
-            for r in runs
-            if r.finding
-            and r.effect_confirmed == "unattributed"
-            and r.verdict_mechanism == "predicate"
+        # A firing run counts toward the effect leg at its proof level (see
+        # `_effect_proof_level`). Each level already ties the damage to that
+        # attempt, so no level is required on top of the count: a target whose
+        # state persists between attempts can prove every run by its trace
+        # without the probe ever reading "true".
+        levels = [_effect_proof_level(r) for r in runs]
+        by_level = {level: levels.count(level) for level in _EFFECT_PROOF_LEVELS}
+        effect_yes = sum(by_level.values())
+        unproven = sum(1 for r, level in zip(runs, levels, strict=True) if r.finding and not level)
+        # Any value but "unprobed" or "errored" means the declared probe ran: an
+        # "unattributed" saw a change it could not tie to the attempt, and a
+        # "deferred" saw the action recorded as held. A run set made only of
+        # those must never fall into the "no effect_probe declared" report-only
+        # branch below.
+        probed = any(
+            r.effect_confirmed in ("true", "false", "unattributed", "deferred") for r in runs
         )
-        effect_yes = from_state + from_actions
-        # "unattributed" means the declared probe ran and saw a change, so it is
-        # probed: an all-"unattributed" run set must never fall into the
-        # "no effect_probe declared" report-only branch below.
-        probed = any(r.effect_confirmed in ("true", "false", "unattributed") for r in runs)
         # A probe that raised on every run is NOT the same as no probe being
         # declared: the operator asked for end-to-end confirmation and it never
         # ran, so the leg must fail loud rather than silently auto-pass like the
@@ -659,23 +699,20 @@ class DifferentialValidator(ValidatorBase):
             metric=(fired / n) if n else 0.0,
         )
         if probed:
-            # At least one run must be confirmed from state, so the end-to-end
-            # effect was observed at least once; the attempt-scoped runs only
-            # add to a count that already rests on one real observation.
             detail = (
-                f"{effect_yes}/{n} runs showed the damage (need >= {self._vuln_threshold}): "
-                f"{from_state} confirmed from the target's state, {from_actions} from "
-                "the attempt's own actions, where the state change (or its absence) "
-                "could not be tied to that attempt but the predicate showed it "
-                "performed the action"
+                f"{effect_yes}/{n} runs showed the damage (need >= {self._vuln_threshold}), "
+                "by proof level: "
+                + ", ".join(f"{by_level[level]} {level}" for level in _EFFECT_PROOF_LEVELS)
             )
-            if from_state == 0:
+            if unproven:
                 detail += (
-                    "; no run was confirmed from the target's state, and at least one is required"
+                    f"; {unproven} firing run{'s' if unproven != 1 else ''} "
+                    f"{EFFECT_UNPROVEN_CLAUSE}, so {'they do' if unproven != 1 else 'it does'} "
+                    "not count"
                 )
             effect = ValidationOutcome(
                 stage="effect",
-                passed=effect_yes >= self._vuln_threshold and from_state >= 1,
+                passed=effect_yes >= self._vuln_threshold,
                 detail=detail,
                 metric=(effect_yes / n) if n else 0.0,
             )
@@ -905,19 +942,18 @@ class DifferentialValidator(ValidatorBase):
         # judge evidence, which holds the adapter's effect value for every
         # branch, so a defended or undecided run records its real value too.
         attempts = [a for a in result.report.attempts if a.pattern_id == pattern_id]
-        attempt = next((a for a in attempts if a.outcome == "finding"), None) or next(
-            iter(attempts), None
-        )
-        evidence = dict(attempt.judge_evidence) if attempt is not None else {}
-        mechanism = attempt.verdict_mechanism if attempt is not None else None
-        if result.exploits:
-            # `attempt` (from result.report.attempts) and `exploits[0]` are
-            # assumed to be the SAME attempt: this engine runs with
-            # max_concurrent=1 and a single pattern_id_filter, so one iteration
-            # drives exactly one seed to at most one finding. If a future
-            # change lets an iteration drive more than one attempt, match them
-            # by payload instead of indexing exploits[0].
-            response = result.exploits[0].response
+        findings = [a for a in attempts if a.outcome == "finding"]
+        exploits = [e for e in result.exploits if e.pattern_id == pattern_id]
+        if exploits:
+            # The engine records a finding attempt and its exploit together, in
+            # the same order, so the k-th finding attempt for this seed and the
+            # k-th exploit for it are one attempt. Pairing them keeps the
+            # evidence and the response from the same attempt, whichever
+            # exploit the scan happened to record first.
+            exploit = exploits[0]
+            attempt = findings[0] if findings else None
+            evidence = dict(attempt.judge_evidence) if attempt is not None else {}
+            response = exploit.response
             return _CustomRun(
                 finding=True,
                 effect_confirmed=evidence.get(
@@ -925,14 +961,19 @@ class DifferentialValidator(ValidatorBase):
                 ),
                 response=response,
                 resisted=False,
-                verdict_mechanism=mechanism,
+                verdict_mechanism=attempt.verdict_mechanism if attempt is not None else None,
+                trace_outcome=evidence.get("trace_outcome", response.metadata.get("trace_outcome")),
+                proof_level=evidence.get("proof_level"),
             )
+        attempt = next(iter(attempts), None)
+        evidence = dict(attempt.judge_evidence) if attempt is not None else {}
         return _CustomRun(
             finding=False,
             effect_confirmed=evidence.get("effect_confirmed", "unprobed"),
             response=None,
             resisted=self._resisted(result, pattern_id),
-            verdict_mechanism=mechanism,
+            verdict_mechanism=attempt.verdict_mechanism if attempt is not None else None,
+            trace_outcome=evidence.get("trace_outcome"),
         )
 
     @staticmethod
