@@ -32,7 +32,9 @@ from mylonite.version import __version__
 #: showed it. Additive; null for a finding with no trace.
 #: 1.4: added "verdict" and "status" inside "proof". "claim" is now set only on
 #: a KEPT verdict; any other verdict has claim null and says what the run showed
-#: in "status". Additive.
+#: in "status". "proven_control" is likewise set only on a KEPT verdict and is
+#: null otherwise; a control that a rejected or unproven run tested was not
+#: proven. Additive.
 SCHEMA_VERSION = "1.4"
 
 
@@ -123,7 +125,11 @@ def _finding(exploit: Any, report: Any | None, target: Any | None = None) -> dic
         },
         "proof": _proof(report),
         "guarded_twin_layer": _differential_layer(report),
-        "proven_control": md.get("synthetic_control") or None,
+        # Named "proven" only when the verdict is KEPT: a rejected or unproven
+        # run tested the control but proved nothing about it.
+        "proven_control": (
+            (md.get("synthetic_control") or None) if finding_verdict(report) == KEPT else None
+        ),
         "recommendation": _recommendation(exploit, report, target),
     }
 
