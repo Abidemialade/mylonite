@@ -382,6 +382,12 @@ cannot load, and will be skipped at run time. The full listing still prints —
 that is the point of the command — and the exit code is non-zero so a scripted
 check still catches it.
 
+A plugin marked *"FAILED TO LOAD (ImportError)"* raised when it was imported. An
+attack module that raises when built with no arguments is marked the same way, with
+its error type, because a scan can't run it either. Only the error type is shown, never
+the message. A scan reports such a module's classes NOT TESTED with
+[`MYL-NT-015`](reason-codes.md#myl-nt-015).
+
 ---
 
 ### Run config (`mylonite.yaml`)

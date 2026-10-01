@@ -478,17 +478,10 @@ def plugins() -> None:
             echo("  (none registered)")
             continue
         for info in infos:
-            # "configured per target" is a property of the contract, not a fault:
-            # an adapter for a named server family is constructed with that
-            # family rather than discovered ready-made.
-            suffix = " — configured per target" if info.needs_config else ""
-            if info.incompatible:
-                # Reported inline rather than aborting the listing: an
-                # incompatible third-party plugin is exactly when the user needs
-                # to see the rest of what is installed.
-                incompatible = True
-                suffix += " — INCOMPATIBLE, will not be loaded"
-            echo(f"  - {info.class_name} (contract {info.contract_version}){suffix}")
+            # Reported inline rather than aborting the listing: an incompatible or
+            # broken plugin is exactly when the user needs to see the rest.
+            incompatible = incompatible or bool(info.incompatible)
+            echo(f"  - {info.class_name} (contract {info.contract_version}){info.listing_suffix()}")
 
     if incompatible:
         echo_err(

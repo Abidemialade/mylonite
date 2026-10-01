@@ -138,8 +138,10 @@ The classes of a module Mylonite ships are known even when it fails to load. A
 third-party module that fails to import or construct can't say which classes it
 covers, so it shows as one NOT TESTED row in the `unknown` class instead. That row
 appears only when the module would have run: you opted its entry-point name or an id
-into `MYLONITE_ATTACK_MODULES` that no loaded module answers to. A module nobody
-enabled loses no coverage, so its failure stays a log warning.
+into `MYLONITE_ATTACK_MODULES` that no loaded module answers to. In that second case
+the line also names the unmatched id, because a typo in the opt-in list looks the
+same. A module nobody enabled loses no coverage, so its failure stays a log warning.
+`mylonite plugins` lists a failed module as `FAILED TO LOAD (<error type>)`.
 
 **Fix:** Reinstall the module's package and its dependencies, then re-run. The
 `attack modules:` line names the module and the error type.

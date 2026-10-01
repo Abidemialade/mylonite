@@ -386,6 +386,9 @@ def _load_failure_attempts(
             evidence = {MODULE_LOAD_FAILURE_KEY: failure.entry_point, "load_stage": stage}
             if weakness:
                 evidence["weakness"] = weakness
+            unmatched = getattr(failure, "unmatched_opt_in", ())
+            if unmatched:
+                evidence["unmatched_opt_in"] = ",".join(unmatched)
             seed_id = f"{base}:{weakness}" if weakness else base
             attempts.append(
                 ScanAttempt(

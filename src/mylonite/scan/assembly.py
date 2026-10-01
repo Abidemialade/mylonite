@@ -108,7 +108,7 @@ def relevant_load_failures(
     extra = extra_attack_module_ids() if extra_ids is None else extra_ids
     allowed = ATTACK_FAMILIES | extra
     loaded_ids = {m.attack_metadata().id for m in loaded}
-    unmatched_opt_in = bool(extra - loaded_ids)
+    unmatched_opt_in = tuple(sorted(extra - loaded_ids))
     out: list[PluginLoadFailure] = []
     for failure in failures:
         known = SHIPPED_ATTACK_MODULES.get(failure.entry_point)
@@ -118,8 +118,10 @@ def relevant_load_failures(
                 out.append(
                     dataclasses.replace(failure, attack_id=attack_id, weakness_classes=classes)
                 )
-        elif failure.entry_point in extra or unmatched_opt_in:
+        elif failure.entry_point in extra:
             out.append(failure)
+        elif unmatched_opt_in:
+            out.append(dataclasses.replace(failure, unmatched_opt_in=unmatched_opt_in))
     return out
 
 
@@ -130,7 +132,15 @@ def describe_load_failure(failure: PluginLoadFailure) -> str:
         if failure.weakness_classes
         else "its weakness classes are unknown"
     )
-    return f"{failure.entry_point} ({failure.stage} failed: {failure.error_type}; {covers})"
+    text = f"{failure.stage} failed: {failure.error_type}; {covers}"
+    if failure.unmatched_opt_in:
+        text += f"; {unmatched_opt_in_note(failure.unmatched_opt_in)}"
+    return f"{failure.entry_point} ({text})"
+
+
+def unmatched_opt_in_note(ids: Sequence[str]) -> str:
+    """Names the opted-in ids no loaded module provides (a typo looks the same)."""
+    return f"{ATTACK_MODULES_ENV} names {', '.join(ids)}, which no loaded module provides"
 
 
 def no_usable_modules_message(failures: Sequence[PluginLoadFailure] = ()) -> str:
