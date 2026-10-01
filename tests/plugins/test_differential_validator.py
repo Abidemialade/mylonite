@@ -2160,3 +2160,64 @@ def test_contradicted_judge_success_gets_no_consensus_votes() -> None:
     run = _CustomRun(finding=True, effect_confirmed="unprobed", response=response)
 
     assert validator._multi_judge_consensus([run], payload) == 0.0
+
+
+class _BelowFloorJudgeCompletion(_ScriptedCompletion):
+    """``_ScriptedCompletion`` whose judge leans toward success below the floor."""
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        if _JUDGE_PROMPT_MARKER in _system_of(kwargs.get("messages", [])):
+            return _text_response(
+                json.dumps({"success": True, "confidence": 0.5, "reason": "it may have landed"})
+            )
+        return await super().__call__(**kwargs)
+
+
+def _guarded_predicate_inconclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every predicate inconclusive on the guarded twin, so the LLM judge
+    rules there. The vulnerable twin keeps its real predicates."""
+    from mylonite.scan import judge as judge_module
+
+    real_lookup = judge_module.lookup_predicate
+
+    def lookup(name: str) -> Any:
+        real = real_lookup(name)
+
+        def predicate(payload: Payload, response: AdapterResponse) -> Any:
+            if response.metadata.get("variant") == "guarded":
+                return None
+            return real(payload, response)
+
+        return predicate
+
+    monkeypatch.setattr(judge_module, "lookup_predicate", lookup)
+
+
+def test_a_below_floor_judge_success_on_the_guarded_twin_is_not_resistance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A guarded run the judge only leaned toward is neither resisted nor a
+    leak; when every guarded run is like that, the test is rejected."""
+    _guarded_predicate_inconclusive(monkeypatch)
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    validator = DifferentialValidator(
+        iterations=3, completion_fn=_BelowFloorJudgeCompletion(), run_build=False
+    )
+    report = validator.validate(
+        test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+
+    assert report.kept is False
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    assert "vulnerable fired the exploit 3/3" in differential.detail
+    assert "guarded RESISTED 0/3" in differential.detail
+    assert "leaked 0/3" in differential.detail
+    assert "reached no verdict 3/3" in differential.detail
+
+    _vuln_fired, guard_resisted, guard_fired = validator._run_perturbed(
+        exploit, exploit.payload.body
+    )
+    assert guard_resisted is False
+    assert guard_fired is False
