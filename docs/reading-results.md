@@ -332,7 +332,8 @@ finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, `proof_leve
 counts, `kept`, `verdict`, `status` and the `claim` the run earned), `guarded_twin_layer` (`server` or
 `boundary` — what played the guarded side), and the `proven_control`. `proof_level` is `null` for a finding with no tool-call trace. `guarded_twin_layer` is `null` when no guarded twin ran.
 
-`proof` is `null` for a scan finding that was never validated. For a validated one,
+`proof` is `null` for a scan finding that was never validated. For a validated one
+(its counts are `null` if the validation recorded no runs),
 `proof.verdict` is `KEPT`, `STABLE, NOT PROVEN` or `REJECTED`, and `proof.claim` is set
 only for `KEPT` with a guarded twin. Every other verdict has `claim: null`, and
 `proof.status` says what the run showed. `proven_control` follows the same rule: it

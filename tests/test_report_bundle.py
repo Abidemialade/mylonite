@@ -266,3 +266,18 @@ def test_an_errored_or_deferred_probe_reads_like_an_unprobed_one() -> None:
     for effect in ("errored", "deferred", "unprobed"):
         finding = to_bundle([(_exploit("W1", effect=effect), None)])["findings"][0]
         assert finding["severity"] == "Medium", effect
+
+
+def test_bundle_validation_with_no_runs_keeps_its_verdict() -> None:
+    """A validation that recorded no iterations is still a validation: proof
+    carries its verdict and status, with null counts, rather than null."""
+    from mylonite.contracts._types import ValidationReport
+    from mylonite.report.bundle import to_bundle
+
+    report = ValidationReport(test_filename="test_security_finding.py", kept=False)
+    proof = to_bundle([(_exploit("W2"), report)])["findings"][0]["proof"]
+    assert proof is not None
+    assert proof["verdict"] == "REJECTED"
+    assert proof["status"] == "rejected"
+    assert proof["iterations"] is None and proof["vuln_fired"] is None
+    assert proof["claim"] is None

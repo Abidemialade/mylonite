@@ -55,15 +55,19 @@ def _differential_layer(report: Any | None) -> TwinLayer | None:
 
 
 def _proof(report: Any | None) -> dict[str, Any] | None:
-    repro = getattr(report, "reproducibility", None) if report is not None else None
-    if repro is None or not getattr(repro, "iterations", 0):
+    """``None`` only for a finding no validation looked at. A validation that
+    recorded no iterations still has a verdict, so it gets null counts."""
+    if report is None:
         return None
+    repro = getattr(report, "reproducibility", None)
+    if repro is not None and not getattr(repro, "iterations", 0):
+        repro = None
     layer = _differential_layer(report)
     verdict = finding_verdict(report)
     return {
-        "iterations": repro.iterations,
-        "vuln_fired": repro.vuln_fired,
-        "guard_resisted": repro.guard_resisted,
+        "iterations": repro.iterations if repro is not None else None,
+        "vuln_fired": repro.vuln_fired if repro is not None else None,
+        "guard_resisted": repro.guard_resisted if repro is not None else None,
         "kept": bool(getattr(report, "kept", False)),
         "verdict": verdict,
         # KEPT: a passing build and a passing differential or effect leg. Any
