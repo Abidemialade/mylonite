@@ -41,7 +41,7 @@ from mylonite.scan.assembly import (
     relevant_load_failures,
 )
 from mylonite.scan.class_verdict import STATUS_NOT_TESTED, UNKNOWN_CLASS, class_verdicts
-from mylonite.scan.coverage import ScanOutcome
+from mylonite.scan.coverage import MODULE_LOAD_FAILURE_KEY, ScanOutcome
 from mylonite.scan.engine import ScanConfig, ScanResult
 
 _GROUP = "mylonite.attack_modules"
@@ -186,6 +186,14 @@ def test_failed_import_reports_its_classes_not_tested_with_the_reason_code(
     assert "prompt_injection (import failed: ImportError; W1, W2 NOT TESTED)" in summary
     assert "classes:" in summary
     assert NT_MODULE_LOAD_FAILED in summary
+    # The cause list names the load failure, not only seed_arm causes.
+    assert "an attack module that failed to load" in summary
+
+    # The engine writes, and the summary line reads, the same evidence keys.
+    lost = [a for a in result.report.attempts if a.outcome == "error"]
+    assert {a.judge_evidence[MODULE_LOAD_FAILURE_KEY] for a in lost} == {"prompt_injection"}
+    assert {a.judge_evidence["load_stage"] for a in lost} == {"import"}
+    assert {a.judge_evidence["weakness"] for a in lost} == {"W1", "W2"}
 
     outcome = ScanOutcome.from_report(result.report)
     assert outcome.exit_code != 0
@@ -243,7 +251,9 @@ def test_unknowable_import_failure_shows_a_scan_level_line(
     assert rows[UNKNOWN_CLASS].status == STATUS_NOT_TESTED
     assert rows[UNKNOWN_CLASS].codes == (NT_MODULE_LOAD_FAILED,)
     summary = _summary(result)
-    assert "acme_probe (import failed: ImportError; classes unknown, NOT TESTED)" in summary
+    assert "acme_probe (import failed: ImportError; classes unknown, NOT TESTED; " in summary
+    # The opted-in id nothing provides is named, so a typo is not blamed on acme_probe.
+    assert "MYLONITE_ATTACK_MODULES names acme-probe, which no loaded module provides" in summary
     assert ScanOutcome.from_report(result.report).exit_code != 0
 
 
@@ -331,6 +341,18 @@ def test_no_usable_modules_message_names_the_failed_modules(
     assert "prompt_injection (import failed: ImportError; covers W1, W2)" in message
 
 
+def test_no_usable_modules_message_names_an_unmatched_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(ATTACK_MODULES_ENV, "acme-probe")
+    _install(monkeypatch, _EntryPoint("acme_probe", _import_fails))
+    loaded, failures = registry.discover_with_failures(_GROUP)
+    message = no_usable_modules_message(relevant_load_failures(failures, loaded))
+    assert "acme_probe (import failed: ImportError; its weakness classes are unknown; " in message
+    assert "MYLONITE_ATTACK_MODULES names acme-probe, which no loaded module provides" in message
+    assert "DO-NOT-LEAK-7f3a" not in message
+
+
 def test_the_shipped_module_table_matches_the_shipped_modules() -> None:
     """The host's table is the only source of a failed shipped module's classes,
     so it must name every shipped entry point with the right id and classes."""
@@ -382,3 +404,33 @@ def test_scan_and_gate_discovery_returns_every_module_and_the_relevant_failures(
     assert [(f.entry_point, f.weakness_classes) for f in failures] == [
         ("prompt_injection", ("W1", "W2"))
     ]
+
+
+# --- the plugin listing -----------------------------------------------------------
+
+
+def test_plugin_listing_shows_a_module_that_failed_to_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``mylonite plugins`` is where the operator looks next, so it must list a
+    broken module as failed instead of crashing or calling it "configured"."""
+    from typer.testing import CliRunner
+
+    from mylonite.cli import app
+
+    _install(
+        monkeypatch,
+        _EntryPoint("prompt_injection", _import_fails),
+        _EntryPoint("excessive_agency", lambda: _ConstructorFails),
+    )
+    infos = {i.entry_point: i for i in registry.describe(_GROUP)}
+    assert infos["prompt_injection"].load_failed == "ImportError"
+    assert infos["excessive_agency"].load_failed == "RuntimeError"
+    assert infos["excessive_agency"].needs_config is False
+
+    result = CliRunner().invoke(app, ["plugins"])
+    output = " ".join(result.output.split())
+    assert "prompt_injection (contract ?) — FAILED TO LOAD (ImportError)" in output
+    assert "_ConstructorFails (contract " in output
+    assert "FAILED TO LOAD (RuntimeError)" in output
+    assert "DO-NOT-LEAK-7f3a" not in result.output

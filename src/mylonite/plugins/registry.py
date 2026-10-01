@@ -113,6 +113,10 @@ class PluginLoadFailure:
     #: The weakness classes the plugin would have covered, when known. Empty
     #: means unknown (or, with a known ``attack_id``, none).
     weakness_classes: tuple[str, ...] = ()
+    #: Opted-in attack ids no loaded module provides, when this unknown module's
+    #: failure counts because it may be the one that would have. Named in the
+    #: output so a typo in the opt-in list is not blamed on this module.
+    unmatched_opt_in: tuple[str, ...] = ()
 
 
 def discover_with_failures(group: PluginGroup) -> tuple[list[Any], list[PluginLoadFailure]]:
@@ -202,6 +206,19 @@ class PluginInfo(NamedTuple):
     #: rather than raised, so one incompatible plugin cannot stop the listing —
     #: which is precisely when a user most needs to see what is installed.
     incompatible: str | None = None
+    #: The exception type name when the plugin failed to import, or (for an
+    #: attack module, which must build with no arguments) to construct. Only the
+    #: type: the message can quote paths or secrets.
+    load_failed: str | None = None
+
+    def listing_suffix(self) -> str:
+        """The status text ``mylonite plugins`` prints after this plugin's name."""
+        if self.load_failed:
+            return f" — FAILED TO LOAD ({self.load_failed})"
+        suffix = " — configured per target" if self.needs_config else ""
+        if self.incompatible:
+            suffix += " — INCOMPATIBLE, will not be loaded"
+        return suffix
 
 
 def describe(group: PluginGroup) -> list[PluginInfo]:
@@ -234,17 +251,29 @@ def describe(group: PluginGroup) -> list[PluginInfo]:
     host_version = _GROUP_VERSIONS[group]
     out: list[PluginInfo] = []
     for ep in entry_points(group=group):
-        cls = ep.load()
+        try:
+            cls = ep.load()
+        except Exception as exc:
+            # The listing is where an operator goes to see why a scan lost a
+            # module (#222), so a broken import is a row, never a traceback.
+            out.append(PluginInfo(ep.name, ep.name, "?", False, load_failed=type(exc).__name__))
+            continue
         incompatible: str | None = None
         try:
             _check_compat(group, host_version, cls, ep.name)
         except VersionIncompatibleError as exc:
             incompatible = str(exc)
         needs_config = False
+        load_failed: str | None = None
         try:
             cls()
-        except Exception:
-            needs_config = True
+        except Exception as exc:
+            # An attack module must build with no arguments; a scan reports
+            # one that can't as a failure, so the listing does too.
+            if group == "mylonite.attack_modules":
+                load_failed = type(exc).__name__
+            else:
+                needs_config = True
         out.append(
             PluginInfo(
                 entry_point=ep.name,
@@ -252,6 +281,7 @@ def describe(group: PluginGroup) -> list[PluginInfo]:
                 contract_version=str(getattr(cls, "contract_version", "?")),
                 needs_config=needs_config,
                 incompatible=incompatible,
+                load_failed=load_failed,
             )
         )
     return out

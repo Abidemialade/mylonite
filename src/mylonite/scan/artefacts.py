@@ -34,6 +34,7 @@ from mylonite._redaction import redact, redact_value
 from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
 from mylonite.reason_codes import NT_MODULE_LOAD_FAILED, format_code_counts
 from mylonite.scan._llm import LLMSpend
+from mylonite.scan.assembly import unmatched_opt_in_note
 from mylonite.scan.class_verdict import (
     CalibrationSummary,
     ClassVerdict,
@@ -322,20 +323,26 @@ def _has_class_summary(result: ScanResult) -> bool:
     )
 
 
-def _load_failures(report: ScanReport) -> dict[str, tuple[str, str, list[str]]]:
+def _load_failures(report: ScanReport) -> dict[str, tuple[str, str, list[str], str]]:
     """Attack modules that failed to load, read off the report's attempts.
 
-    ``{entry point: (stage, error type, [lost classes])}``; an empty class list
-    means the module's classes are unknown.
+    ``{entry point: (stage, error type, [lost classes], unmatched opt-in ids)}``;
+    an empty class list means the module's classes are unknown.
     """
-    out: dict[str, tuple[str, str, list[str]]] = {}
+    out: dict[str, tuple[str, str, list[str], str]] = {}
     for attempt in report.attempts:
         evidence = attempt.judge_evidence
         module = evidence.get(MODULE_LOAD_FAILURE_KEY)
         if not module:
             continue
-        _stage, _error, classes = out.setdefault(
-            module, (evidence.get("load_stage", "load"), attempt.error_detail or "error", [])
+        _stage, _error, classes, _ids = out.setdefault(
+            module,
+            (
+                evidence.get("load_stage", "load"),
+                attempt.error_detail or "error",
+                [],
+                evidence.get("unmatched_opt_in", ""),
+            ),
         )
         if evidence.get("weakness"):
             classes.append(evidence["weakness"])
@@ -348,8 +355,10 @@ def _load_failure_line(report: ScanReport) -> str | None:
     if not failures:
         return None
     parts = []
-    for module, (stage, error, classes) in sorted(failures.items()):
+    for module, (stage, error, classes, unmatched) in sorted(failures.items()):
         lost = f"{', '.join(classes)} NOT TESTED" if classes else "classes unknown, NOT TESTED"
+        if unmatched:
+            lost += f"; {unmatched_opt_in_note(unmatched.split(','))}"
         parts.append(f"{module} ({stage} failed: {error}; {lost})")
     text = (
         f"attack modules: {len(failures)} failed to load [{NT_MODULE_LOAD_FAILED}]: "
@@ -565,10 +574,12 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
             f"{_codes_suffix(report.attempts)} "
             "(planted payload undelivered, no seed_arm, no plant/sink/recall "
             "surface, malformed seed metadata, an unresolvable seed, a planner "
-            "failure, or an unexpected error during invocation/judging) - those "
-            "seeds proved NOTHING. This is not a clean result for them; declare a "
-            "seed_arm (and for the tool-chaining / memory modes, ensure the target "
-            "exposes a plant + sink/recall surface), check each attempt's "
+            "failure, an attack module that failed to load, or an unexpected error "
+            "during invocation/judging) - those seeds proved NOTHING. This is not a "
+            "clean result for them; reinstall any attack module named on the "
+            "`attack modules:` line, declare a seed_arm (and for the tool-chaining / "
+            "memory modes, ensure the target exposes a plant + sink/recall surface), "
+            "check each attempt's "
             "verdict_reason/error_detail for the specific cause, then "
             "re-scan.[/bold red]",
         )

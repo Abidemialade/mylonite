@@ -137,8 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `verdicts.json`. A new `attack modules:` summary line names the module, the step
   that failed and the error type. A `scan` or `gate` with no finding exits `2`, as for
   any other incomplete coverage. A third-party module's classes can't be known when it
-  fails to load, so it shows as one NOT TESTED row in the `unknown` class; a module
-  nobody enabled stays a log warning, because it was never going to run.
+  fails to load, so it shows as one NOT TESTED row in the `unknown` class, and the
+  line names any `MYLONITE_ATTACK_MODULES` id that no loaded module provides. A module
+  nobody enabled stays a log warning, because it was never going to run. `mylonite
+  plugins` now lists a module that fails to import, or an attack module that fails to
+  construct, as `FAILED TO LOAD (<error type>)` instead of crashing on it.
 
 ## [0.10.5] - 2026-10-01
 

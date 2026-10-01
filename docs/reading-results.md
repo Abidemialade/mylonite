@@ -36,6 +36,7 @@ counted as clean). For a validation it shows the verdict and the evidence behind
     | `launch_failure` | the target's command never started — shown as `⚠ LAUNCH FAILED` |
     | `skipped_invalid_metadata` / `skipped_unknown_seed` | the attempt was malformed before it ran |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
+    | `error` with [`MYL-NT-015`](reason-codes.md#myl-nt-015) | the attack module for this class failed to load; the `attack modules:` line names it |
 
     Each NOT TESTED attempt also carries a reason code, such as `MYL-NT-005`, shown on
     the summary's `coverage:` line. Look it up in [Reason codes](reason-codes.md) for
