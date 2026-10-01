@@ -90,15 +90,36 @@ async def test_run_twins_runs_concurrently_and_preserves_order() -> None:
 
 @pytest.mark.asyncio
 async def test_run_twins_is_concurrent_not_sequential() -> None:
-    """Two 0.05s sleeps run in run_twins should take ~0.05s, not ~0.1s."""
-    start = asyncio.get_event_loop().time()
+    """``run_twins`` must run both coroutines concurrently, not one after the
+    other -- proven by overlap evidence, not a wall-clock threshold.
+
+    A wall-clock budget (e.g. "two 0.05s sleeps must finish in under 0.09s")
+    is flaky under a loaded machine (parallel test workers): the two sleeps
+    genuinely overlap but the elapsed wall time can still creep past a tight
+    threshold on scheduling delay alone (#230). Instead, each coroutine
+    records when it starts and stops on a shared timeline; concurrent
+    execution means both are "in flight" at the same instant (B starts
+    before A finishes), which a purely sequential ``await a; await b`` could
+    never produce regardless of machine speed.
+    """
+    events: list[tuple[str, str]] = []
 
     async def sleep_a() -> None:
+        events.append(("a", "start"))
         await asyncio.sleep(0.05)
+        events.append(("a", "stop"))
 
     async def sleep_b() -> None:
+        events.append(("b", "start"))
         await asyncio.sleep(0.05)
+        events.append(("b", "stop"))
 
     await run_twins(sleep_a(), sleep_b())
-    elapsed = asyncio.get_event_loop().time() - start
-    assert elapsed < 0.09  # would be >=0.1 if sequential
+
+    a_start, a_stop = events.index(("a", "start")), events.index(("a", "stop"))
+    b_start, b_stop = events.index(("b", "start")), events.index(("b", "stop"))
+    # Overlap means each one's start happened before the OTHER's stop. A
+    # sequential run (a fully, then b fully) would put one start after the
+    # other's stop instead.
+    assert a_start < b_stop
+    assert b_start < a_stop
