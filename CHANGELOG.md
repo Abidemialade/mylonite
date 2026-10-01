@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-10-01
+
+This release closes the false clean on MCP targets set up the way the docs describe.
+The agent's own tool-call trace now decides what an attempt did. An effect check's
+"no change" counts only after calibration has proved it sees a known write through the
+same tool. Anything unproven reads NOT TESTED, with a documented reason code and fix.
+Exit codes, flags and contracts are unchanged.
+
 ### Added
 
 - **A custom target's declared `effect_probe` is now calibrated with real
@@ -4785,7 +4793,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.10.5...HEAD
+[0.10.5]: https://github.com/Abidemialade/mylonite/compare/v0.10.4...v0.10.5
 [0.10.4]: https://github.com/Abidemialade/mylonite/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/Abidemialade/mylonite/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/Abidemialade/mylonite/compare/v0.10.1...v0.10.2
