@@ -24,15 +24,27 @@ gateway. Both are on the roadmap.
 name from a copied target file — before you ever spend an LLM call. A `seed_arm` plant
 call or an `effect_probe` verify call that the server itself refuses (errors) is also
 caught: the attempt is reported as a plant failure or an undecided (NOT TESTED) result,
-never as a clean pass. What's left, and what the planned wiring self-test (plant a
-harmless canary, confirm the probe sees it) still closes: a `verify_tool` that exists,
-never errors, but reads the *wrong* store — a name that happens to be valid but isn't
-the one the seed actually affects. Until that ships, confirm end-to-end wiring yourself:
-run the scan against a copy of your server where you know an attack lands, and check that
-the exploit records `effect_confirmed: "true"`. The probe reads the verify tool before
-and after the agent runs and only counts a NEW, attributed marker, so calling the tool by
-hand and seeing it return the marker does not confirm the wiring — the marker may already
-have been there from an earlier run.
+never as a clean pass.
+
+The wiring self-test now exists: `calibration` (`calibration.controls` in the target
+file; `mylonite check --authorize` runs it on its own) does real writes against the live
+target — a positive control (a fresh write through a consequential tool, carrying its
+own token) that the probe must see, and a negative control (two reads with nothing
+written between them) that it must not. It closes exactly the gap this caveat used to
+describe: a `verify_tool` that exists, never errors, but reads the *wrong* store, because
+the positive control's own write is what the probe is asked to find. A `seed_arm`'s
+recall path gets the same proof — a token planted through `seed_arm` must come back from
+a recall tool, or the attempt reads NOT TESTED with a reason code (see
+[Reason codes](reason-codes.md)) rather than a silent miss.
+
+What calibration does not cover: it only checks a "create" effect, never a destructive or
+egress one, and it needs authorization — `--authorize` on the driving command, or
+`calibration.controls: allow` to run it against a remote (`sse`/`http`) target at all
+(`auto`, the default, runs on an authorized `stdio` target only). Set `controls: skip` and
+an uncalibrated probe's "no change" can never certify a resisted attempt, by design — see
+[Calibration](target-file.md#calibration). Calibration is a real write: expect
+`myl-cal-`-prefixed records left behind in your target's state (see
+[SECURITY.md](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)).
 
 ## 1. On a single-build app, the strong claim is not available
 
@@ -267,6 +279,27 @@ in 0.10.3 too.
 error on that read, such as a rate limit, makes a marker already in state look new, so
 an earlier attempt's effect can be credited to this one when this attempt also links to
 it.
+
+## 9. A network failure can read the same as a refusal (W3)
+
+A consequential call that errors reads as resisted, labelled server-reported
+([`MYL-SRV-001`](reason-codes.md#myl-srv-001)) — see
+[How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided). For a
+W3 egress attempt, that same `isError` covers two different causes Mylonite cannot tell
+apart from the trace alone: the server's own allowlist refusing the call, and the call
+failing to reach the host at all — a DNS lookup that fails, a connection the sandbox
+blocks, a timeout against a host that would have answered given more time. Neither is
+proof the server would have refused a request that actually reached it.
+
+**What this means in practice:** a KEPT differential on W3 is still trustworthy, because
+it compares the *same* call against the vulnerable and guarded builds in the *same*
+network environment — a resisted call that was really a network failure fails the same
+way on both legs, so it never manufactures a false KEPT. The caveat is narrower: a
+single `scan` run (no differential) that reports a W3 attempt as resisted on
+`MYL-SRV-001` is not, on its own, proof the target's egress control did the resisting.
+Check the error text the server returned before trusting a W3 resisted result in
+isolation; a declared `effect_probe` that confirms no outbound call reached the
+disallowed host is the stronger proof (see [Calibration](target-file.md#calibration)).
 
 ## Reporting something missing
 
