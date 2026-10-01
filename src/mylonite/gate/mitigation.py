@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
-from mylonite._verdict import verdict_label
+from mylonite._verdict import KEPT, verdict_label, verdict_reason
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.mitigations import snippet as _snippet
@@ -181,8 +181,35 @@ def build_pr_body(
     is_control = bool(control)
     server_layer = _guarded_is_server_layer(report, guarded_is_server_layer)
     loc = localize(exploit, system_prompt=system_prompt)
+    # Only a KEPT verdict (a passing build and a passing differential or effect
+    # leg) earns a claim. A STABLE, NOT PROVEN or REJECTED report gets its label
+    # and the reason instead, the same rule SARIF and the JSON bundle follow.
+    label = verdict_label(report)
+    proven = label == KEPT
+    not_proven_line = f"**Verdict: {label}:** {verdict_reason(report)}"
 
-    if is_control:
+    if is_control and not proven:
+        repro = report.reproducibility
+        if repro is not None and repro.iterations:
+            stat = (
+                f"Attack `{exploit.pattern_id}` fired {repro.vuln_fired}/{repro.iterations} "
+                f"against your app; control **{control}** was applied on the guarded side."
+            )
+        else:
+            stat = f"Control **{control}** was tested for `{exploit.pattern_id}`."
+        head = [
+            "## Control efficacy not proven",
+            stat,
+            "",
+            not_proven_line,
+            "",
+            f"**Compliance:** {_compliance_line(exploit)}",
+            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
+            "",
+            "**Validation evidence:**",
+            _evidence_lines(report),
+        ]
+    elif is_control:
         repro = report.reproducibility
         if repro is not None and repro.iterations:
             raw_rate = (repro.vuln_fired or 0) / repro.iterations
@@ -243,9 +270,15 @@ def build_pr_body(
             _evidence_lines(report),
         ]
     else:
+        found = (
+            f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`."
+            if proven
+            else f"A weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`. "
+            + not_proven_line
+        )
         head = [
             "## What Mylonite found",
-            f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`.",
+            found,
             "",
             f"**Compliance:** {_compliance_line(exploit)}",
             f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
@@ -272,7 +305,7 @@ def build_pr_body(
         (
             "**Proven fix** — implement the control the differential verified load-bearing, "
             "server-side, then re-point the committed test at it:"
-            if is_control
+            if is_control and proven
             else "**Recommended fix** — implement this control server-side, then re-point the "
             "committed test at your implementation:"
         ),

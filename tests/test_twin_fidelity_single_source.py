@@ -227,3 +227,23 @@ def test_every_verdict_surface_still_makes_the_earned_claim() -> None:
     assert _STRONG_CLAIM.search(surfaces["sarif"]), "sarif dropped the earned claim"
     assert _STRONG_CLAIM.search(surfaces["pr_body"]), "pr_body dropped the earned claim"
     assert _STRONG_CLAIM.search(surfaces["bundle"]), "bundle dropped the earned claim"
+
+
+def test_no_surface_makes_the_claim_for_an_unproven_report() -> None:
+    """A server-layer report that is kept but has no passing build or proof leg
+    reads as STABLE, NOT PROVEN; a rejected one as REJECTED. Neither earns the
+    claim on any surface."""
+    from mylonite.contracts._types import ReproducibilityEvidence, ValidationReport
+
+    exploit, _ = _finding()
+    for kept, fired in ((True, 5), (False, 0)):
+        report = ValidationReport(
+            test_filename="test_security_finding.py",
+            kept=kept,
+            notes=format_marker(server_layer=True),
+            reproducibility=ReproducibilityEvidence(
+                iterations=5, vuln_fired=fired, guard_resisted=5, guard_fired=0
+            ),
+        )
+        for name, text in _rendered_surfaces(exploit, report).items():
+            assert not _STRONG_CLAIM.search(text), f"{name} claims on an unproven report"

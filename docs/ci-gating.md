@@ -156,7 +156,9 @@ for, not one you opt out of.
 > run, and scaffolded the workflow templates unless you passed `--no-workflows`.
 > If you relied on that, add `--open-pr` and `--workflows` explicitly.
 
-The PR body is itself a result surface (see [Reading the results](reading-results.md#the-gating-pr)):
+The PR body is itself a result surface (see [Reading the results](reading-results.md#the-gating-pr)).
+It states the guarded-twin claim only for a `KEPT` validation; any other verdict is named
+with its reason. It carries:
 
 - **The differential proof** — the fires/resists numbers and the `kept` formula, so a
   reviewer sees *why the test is trustworthy*, not just that it exists.
