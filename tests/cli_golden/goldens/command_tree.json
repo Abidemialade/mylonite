@@ -511,7 +511,7 @@
         {
           "default": "None",
           "envvar": null,
-          "help": "Target ID: 'reference:vulnerable' / 'reference:guarded', a bundled 'mcp:<family>[:<scope>]', or 'mcp:custom'. Omit when using --target-file. Non-reference targets require --authorize.",
+          "help": "Target ID: 'reference:vulnerable' / 'reference:guarded' or a bundled 'mcp:<family>[:<scope>]'. For a custom target, omit this and pass --target-file. Non-reference targets require --authorize.",
           "is_flag": false,
           "multiple": false,
           "name": "target",
