@@ -16,7 +16,9 @@ def test_validator_contract_version() -> None:
     # gating_legs, reproducibility, mutation_matrix).
     # 0.5.0: ReproducibilityEvidence gained guard_fired + rate_gap (statistical
     # success-rate differential).
-    assert validator.CONTRACT_VERSION == "0.5.0"
+    # 0.5.1: ValidationOutcome.metric's description corrected (discrimination
+    # strength, not "agreement fraction") — no shape change.
+    assert validator.CONTRACT_VERSION == "0.5.1"
 
 
 def test_validation_report_structured_evidence_round_trips() -> None:

@@ -35,7 +35,11 @@ from mylonite.contracts.target_adapter import TargetAdapter
 # oracle now gates on the success-RATE gap between the twins rather than a
 # count threshold (keeps probabilistic LLM-mediated exploits). Both fields are
 # optional/defaulted; existing reports stay valid.
-CONTRACT_VERSION: str = "0.5.0"
+# 0.5.0 -> 0.5.1: patch — ValidationOutcome.metric's description now says what
+# the "differential" stage's number actually is (discrimination strength: the
+# average of the vulnerable-fire rate and the guard-resist rate) instead of
+# "agreement fraction". No shape change.
+CONTRACT_VERSION: str = "0.5.1"
 
 
 class VulnerableOracle(Protocol):
