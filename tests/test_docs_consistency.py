@@ -452,18 +452,53 @@ def test_verification_runner_no_longer_advertises_a_json_flag() -> None:
 
 _README = _REPO_ROOT / "README.md"
 
-#: Fenced-block languages that hold shell commands worth checking.
-_SHELL_FENCES = ("bash", "sh", "shell", "console")
+#: Fenced-block languages that hold shell commands worth checking. PowerShell is
+#: here because `verification/EXTERNAL_DIFFERENTIAL.md` gives its recipes as
+#: ```powershell``` blocks (issue #231 extends this guard to `verification/*.md`).
+_SHELL_FENCES = ("bash", "sh", "shell", "console", "powershell", "pwsh", "ps1")
+
+
+def _join_line_continuations(lines: list[str]) -> list[str]:
+    """Join a PowerShell backtick (or shell backslash) line continuation into
+    one logical line, so a multi-line invocation like::
+
+        mylonite generate --latest --out .mylonite/generated/dvmcp-c3 `
+            --target-file verification/.cache/dvmcp/targets/c3.yaml
+
+    is seen as a single ``mylonite ...`` command rather than two fragments,
+    neither of which starts with ``mylonite ``.
+    """
+    out: list[str] = []
+    buf: str | None = None
+    for raw in lines:
+        line = raw.strip()
+        continued = line.endswith("`") or line.endswith("\\")
+        if continued:
+            line = line[:-1].rstrip()
+        buf = f"{buf} {line}".strip() if buf is not None else line
+        if continued:
+            continue
+        out.append(buf)
+        buf = None
+    if buf is not None:
+        out.append(buf)
+    return out
 
 
 def _markdown_mylonite_examples() -> list[tuple[str, str]]:
-    """Every `mylonite ...` invocation in README.md and docs/, as (where, cmd).
+    """Every `mylonite ...` invocation in README.md, docs/ and verification/, as
+    (where, cmd) pairs.
 
-    Collects both backtick-quoted spans and lines inside shell fences. Skips
-    `docs/superpowers/` (local working notes, not published) and `docs/reviews/`
-    (point-in-time records that intentionally quote historical commands).
+    Collects both backtick-quoted spans and lines inside shell fences (joining
+    a PowerShell/backslash line continuation first). Skips `docs/superpowers/`
+    (local working notes, not published) and `docs/reviews/` (point-in-time
+    records that intentionally quote historical commands).
     """
-    sources = [_README, *sorted(_DOCS_DIR.rglob("*.md"))]
+    sources = [
+        _README,
+        *sorted(_DOCS_DIR.rglob("*.md")),
+        *sorted(_VERIFICATION_DIR.rglob("*.md")),
+    ]
     found: list[tuple[str, str]] = []
     for path in sources:
         parts = path.parts
@@ -476,16 +511,24 @@ def _markdown_mylonite_examples() -> list[tuple[str, str]]:
             found.append((rel, match.group(1).strip()))
 
         in_shell = False
+        fence_lines: list[str] = []
         for raw in text.splitlines():
             stripped = raw.strip()
             if stripped.startswith("```"):
-                lang = stripped[3:].strip().lower()
-                in_shell = bool(lang) and lang in _SHELL_FENCES
+                if in_shell:
+                    for logical in _join_line_continuations(fence_lines):
+                        if logical.startswith("mylonite "):
+                            # Drop a trailing `# comment`, which these examples
+                            # use heavily.
+                            found.append((rel, logical.split("#", 1)[0].strip()))
+                    fence_lines = []
+                    in_shell = False
+                else:
+                    lang = stripped[3:].strip().lower()
+                    in_shell = bool(lang) and lang in _SHELL_FENCES
                 continue
-            if in_shell and stripped.startswith("mylonite "):
-                # Drop a trailing `# comment`, which these examples use heavily.
-                command = stripped.split("#", 1)[0].strip()
-                found.append((rel, command))
+            if in_shell:
+                fence_lines.append(raw)
     return found
 
 
@@ -557,8 +600,14 @@ def _assert_markdown_example(location: str, example: str) -> None:
 
 
 def test_markdown_mylonite_examples_parse() -> None:
-    """Every `mylonite ...` example in README.md and docs/ must resolve against the
-    CURRENT CLI — the drift class a docs audit found repeatedly.
+    """Every `mylonite ...` example in README.md, docs/ and verification/ must
+    resolve against the CURRENT CLI — the drift class a docs audit found
+    repeatedly.
+
+    `verification/*.md` carries the commands people run to reproduce the
+    published numbers (issue #231): `verification/README.md` once told a
+    reader to pass `scan --json`, which never existed, and nothing here
+    caught it until it was found and fixed by hand.
 
     An example carrying arguments is parsed in full, so a renamed or removed flag
     fails. A bare `mylonite <command>` reference is only resolved to its command,
@@ -566,8 +615,13 @@ def test_markdown_mylonite_examples_parse() -> None:
     """
     examples = _markdown_mylonite_examples()
     assert len(examples) >= 20, (
-        f"collected only {len(examples)} `mylonite ...` examples from README.md and "
-        "docs/; the collector has drifted and this guard is going vacuous"
+        f"collected only {len(examples)} `mylonite ...` examples from README.md, "
+        "docs/ and verification/; the collector has drifted and this guard is "
+        "going vacuous"
+    )
+    assert any(location.startswith("verification/") for location, _ in examples), (
+        "collected zero `mylonite ...` examples from verification/*.md (issue "
+        "#231) — the collector stopped reaching that directory"
     )
     checked_with_args = 0
     for location, example in examples:
