@@ -711,10 +711,11 @@ class DifferentialValidator(ValidatorBase):
         fire_tiers = [r.evidence_tier for r in runs if r.finding]
         all_judge_only = rests_on_judge_only(fire_tiers)
         # A black-box target can give nothing but the judge, so its judge-only
-        # fires still keep a test, capped at STABLE, NOT PROVEN (see
-        # `mylonite._verdict`). Every other target must confirm one run.
-        black_box_cap = all_judge_only and any(r.black_box for r in runs if r.finding)
-        judge_only = all_judge_only and not black_box_cap
+        # fires still keep a test, and every keep on it is capped at STABLE, NOT
+        # PROVEN (see `mylonite._verdict`) whatever its tiers read. Every other
+        # target must confirm one run.
+        black_box = any(r.black_box for r in runs if r.finding)
+        judge_only = all_judge_only and not black_box
         # A firing run counts toward the effect leg at its proof level (see
         # `_effect_proof_level`). Each level already ties the damage to that
         # attempt, so no level is required on top of the count: a target whose
@@ -934,8 +935,16 @@ class DifferentialValidator(ValidatorBase):
             if self._guarded_adapter_factory is None
             else ""
         )
+        black_box_cap = kept and black_box
+        # The marker rides on this report too, so the label written into the
+        # notes is the label the final report earns.
         label = verdict_label(
-            ValidationReport(test_filename=test.filename, outcomes=outcomes, kept=kept)
+            ValidationReport(
+                test_filename=test.filename,
+                outcomes=outcomes,
+                kept=kept,
+                notes=black_box_marker(black_box_cap),
+            )
         )
         notes = (
             f"custom target {test.exploit.target_id}: reproduced {fired}/{n}, "

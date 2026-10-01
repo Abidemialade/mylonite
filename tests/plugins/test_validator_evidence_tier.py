@@ -91,6 +91,53 @@ def test_a_black_box_target_keeps_a_judge_only_test_capped_at_stable_not_proven(
     assert "effect_probe" not in next_step_after_keep(report)
 
 
+@pytest.mark.parametrize("tier", [None, "state", "trace"])
+def test_every_keep_on_a_black_box_target_is_capped(tier: str | None) -> None:
+    """No exceptions: a rest run whose tier is missing or reads state still caps."""
+    report = _validate_custom([tier, tier], black_box=True)
+    assert report.kept is True
+    assert verdict_label(report) == STABLE_NOT_PROVEN
+    assert "black-box target" in verdict_reason(report)
+
+
+def test_a_black_box_keep_with_a_passing_differential_is_capped_in_its_notes() -> None:
+    """The real path, with a guarded twin that resists: the differential passes,
+    and both the label and the label written into the notes read STABLE, NOT PROVEN."""
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+
+    def _run(self: Any, target: Any, pattern_id: str, *, factory: Any = None) -> _CustomRun:
+        if factory is not None:  # the guarded side resists
+            return _CustomRun(
+                finding=False, effect_confirmed="unprobed", response=None, resisted=True
+            )
+        return _CustomRun(
+            finding=True,
+            effect_confirmed="unprobed",
+            response=None,
+            verdict_mechanism="llm",
+            evidence_tier="judge-only",
+            black_box=True,
+        )
+
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("true"),
+        control_weakness="W2",
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(DifferentialValidator, "_run_custom_iteration", _run, raising=True)
+        mp.setattr(DifferentialValidator, "_multi_judge_consensus", lambda self, runs, payload: 1.0)
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    assert next(o for o in report.outcomes if o.stage == "differential").passed is True
+    assert report.kept is True
+    assert verdict_label(report) == STABLE_NOT_PROVEN
+    assert "STABLE, NOT PROVEN (kept" in report.notes
+    assert "KEPT (kept" not in report.notes
+
+
 def test_a_black_box_cap_holds_even_when_every_other_leg_proves() -> None:
     """A passing differential (e.g. the input-framing one) never lifts the cap."""
     from mylonite.contracts import ValidationOutcome
