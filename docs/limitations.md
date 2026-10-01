@@ -306,6 +306,13 @@ Check the error text the server returned before trusting a W3 resisted result in
 isolation; a declared `effect_probe` that confirms no outbound call reached the
 disallowed host is the stronger proof (see [Calibration](target-file.md#calibration)).
 
+## 10. A probe can read before an asynchronous queue sends
+
+A "queued" reply counts as resisted only when the `effect_probe` saw the hold, or a
+calibrated probe saw no change (see [`MYL-INC-012`](reason-codes.md#myl-inc-012)). Even a
+calibrated "no change" can be read before an asynchronous queue sends the message, so a
+target that delivers late can still read `RESISTED (server-reported)`.
+
 ## Reporting something missing
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented

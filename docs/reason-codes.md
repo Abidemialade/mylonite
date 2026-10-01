@@ -369,8 +369,8 @@ result rests on observed state.
 The server replied that it queued or held a consequential call, and no effect probe
 checked whether the action took effect anyway. "Queued", "pending" and "will be sent"
 are also how an asynchronous mailer says it accepted a message for delivery, so the reply
-alone can't tell a held action from one that will go out. Without an `effect_probe`, with
-one whose read errored, or with one that saw this attempt's effect, the attempt is NOT TESTED instead of
+alone can't tell a held action from one that will go out. Without an `effect_probe`, or
+with one that errored or was never calibrated, the attempt is NOT TESTED instead of
 `RESISTED (server-reported)`, and a scan with no finding exits `2`.
 
 **Fix:** Declare an `effect_probe` that reads the target's own state (an outbox, a sent
@@ -386,9 +386,9 @@ declare an `effect_probe` so the result rests on observed state.
 
 ## MYL-SRV-002
 
-The negative rests only on a server reply deferring the action. It appears only when a
-declared `effect_probe` read the target's state and saw nothing that contradicts the
-hold; without that check the attempt is NOT TESTED under
+The negative rests only on a server reply deferring the action. It appears only when the
+`effect_probe` checked the hold (it saw the action held, or a calibrated probe that would
+have seen the call's write saw no change); without that check the attempt is NOT TESTED under
 [`MYL-INC-012`](#myl-inc-012).
 
 **Fix:** Declare an `effect_probe` so the result rests on observed state, not on the
