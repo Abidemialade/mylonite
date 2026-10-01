@@ -90,6 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a redacted one-line summary (the exception type name plus
   `redact_exception()`'s masked detail) with no `exc_info`, and still
   re-raise or return exactly as before.
+- **Redaction now catches a Google-style API key and a bare `key=` query
+  parameter.** `redact()` masked `sk-`/`sk-ant-`/AWS/Bearer/PEM shapes and
+  `api_key`/`token`/`secret`-named assignments, but missed a Gemini-style
+  `AIza...` key and the literal `key=` parameter name some providers use for
+  their own key (`?key=AIza...`) — both now masked wherever `redact()` or
+  `redact_exception()` runs, including inside a provider error's text. The
+  bare `key=` rule is scoped so it never fires inside an ordinary word or a
+  compound identifier (`monkey=`, `sort_key=`, `primary_key=` survive
+  untouched).
 
 ## [0.10.5] - 2026-10-01
 

@@ -63,6 +63,11 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     re.compile(r"sk-[A-Za-z0-9]{20,}"),
     # AWS access key id.
     re.compile(r"AKIA[0-9A-Z]{16}"),
+    # Google-style keys: AIza<...> (Gemini/Maps/etc). Same shape as the
+    # anchored rule `_API_KEY_SHAPES` uses for `looks_like_api_key`, but
+    # unanchored so it also catches one embedded mid-string (e.g. inside a
+    # provider error's message text, not just a bare standalone value).
+    re.compile(r"AIza[A-Za-z0-9_-]{30,}"),
     # Bearer tokens (Authorization header style).
     re.compile(r"Bearer [A-Za-z0-9._-]{20,}"),
     # PEM private-key blocks (any key type), across newlines.
@@ -93,6 +98,23 @@ def _mask_kv(match: re.Match[str]) -> str:
         f"{match.group('key')}{match.group('keyquote')}{match.group('sep')}"
         f"{match.group('valquote')}{REDACTION_PLACEHOLDER}"
     )
+
+
+# A bare ``key=``/``key:`` parameter -- the literal query-parameter name some
+# providers use for their own API key (Gemini: ``?key=AIza...``), distinct
+# from ``api_key``/``apikey`` above. ``_KV_KEYS`` deliberately has no bare
+# ``key`` alternative of its own: unlike ``api_key``, the single word "key" is
+# a common suffix/compound ("monkey", "sort_key", "primary_key", "cache_key"),
+# and matching it unconditionally would redact those ordinary identifiers'
+# values too. The negative lookbehind requires "key" to start a genuine word
+# -- not preceded by a letter/digit/underscore -- so "monkey=" and
+# "sort_key="/"primary_key=" (compound, underscore-joined) are left alone,
+# while "?key=", "&key=", "key=", "'key':" and "\"key\":" still match.
+_BARE_KEY_PATTERN: Final = re.compile(
+    rf"(?<![A-Za-z0-9_])(?P<key>key)(?P<keyquote>['\"]?)(?P<sep>\s*[:=]\s*)"
+    rf"(?P<valquote>['\"]?)(?P<val>{_KV_VALUE})",
+    re.IGNORECASE,
+)
 
 
 def _key_looks_secret(name: str) -> bool:
@@ -257,6 +279,7 @@ def redact(text: str) -> str:
         redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
     redacted = _URL_CRED_PATTERN.sub(_mask_url_cred, redacted)
     redacted = _KV_PATTERN.sub(_mask_kv, redacted)
+    redacted = _BARE_KEY_PATTERN.sub(_mask_kv, redacted)
     return redacted
 
 

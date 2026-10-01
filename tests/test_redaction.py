@@ -35,6 +35,7 @@ FAKE_ANTHROPIC = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 FAKE_OPENAI = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6"
 FAKE_AWS = "AKIA1234567890ABCDEF"
 FAKE_BEARER = "Bearer " + "abcDEF123456ghiJKL789mnoPQR0stu"
+FAKE_GOOGLE = "AIza" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7"  # pragma: allowlist secret
 
 
 def test_redact_masks_anthropic_key() -> None:
@@ -52,6 +53,12 @@ def test_redact_masks_generic_sk_key() -> None:
 def test_redact_masks_aws_access_key() -> None:
     out = redact(f"aws id {FAKE_AWS} here")
     assert FAKE_AWS not in out
+    assert REDACTION_PLACEHOLDER in out
+
+
+def test_redact_masks_google_key() -> None:
+    out = redact(f"calling Gemini with {FAKE_GOOGLE} now")
+    assert FAKE_GOOGLE not in out
     assert REDACTION_PLACEHOLDER in out
 
 
@@ -98,6 +105,40 @@ def test_redact_keeps_key_name_in_kv() -> None:
     out = redact("api_key=S3cr3tValue_12345")
     assert out.startswith("api_key=")
     assert out == f"api_key={REDACTION_PLACEHOLDER}"
+
+
+def test_redact_masks_bare_key_query_param() -> None:
+    """A bare ``key=`` parameter -- the literal query-param name some providers
+    use for their own API key (Gemini's URL is ``?key=AIza...``) -- is masked
+    the same as ``api_key=``, in every position a provider error's text might
+    embed it: a lone assignment, a URL query string with ``?``, and one
+    chained after ``&``."""
+    for text in (
+        f"key={FAKE_GOOGLE}",
+        f"key: {FAKE_GOOGLE}",
+        f"https://generativelanguage.googleapis.com/v1/models?key={FAKE_GOOGLE}",
+        f"...&key={FAKE_GOOGLE}&model=gemini-pro",
+    ):
+        out = redact(text)
+        assert FAKE_GOOGLE not in out, text
+        assert REDACTION_PLACEHOLDER in out, text
+
+
+def test_redact_bare_key_preserves_compound_identifiers() -> None:
+    """The bare ``key=`` rule must never fire on an ordinary word that merely
+    ends or compounds on "key" -- only a genuine standalone ``key`` parameter
+    name. ``primary_key``/``sort_key``/``cache_key`` are common non-secret log
+    fields (a database row id, a cache lookup key), and "monkey"/"keyword"
+    are plain English words that happen to contain the substring "key"."""
+    for text in (
+        "monkey=abcdefghijklmno",
+        "keyword=abcdefghijklmno",
+        "sort_key=abcdefghijklmno",
+        "primary_key=abcdefghijklmno",
+        "cache_key=abcdefghijklmno",
+    ):
+        assert redact(text) == text, text
+        assert REDACTION_PLACEHOLDER not in redact(text), text
 
 
 def test_redact_masks_quoted_dict_repr_kv() -> None:
