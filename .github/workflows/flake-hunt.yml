@@ -1,0 +1,55 @@
+# Flake hunt — OPT-IN repeated full-suite runs under the parallel test runner.
+#
+# Deliberately NOT triggered on push/PR: running the whole suite 20 times is
+# far more than any single check needs and would slow every PR down for no
+# reason. Manual dispatch only, so a maintainer can kick this off after fixing
+# a suspected intermittent failure (see #230) and get a real green/red signal
+# across many runs instead of one lucky pass.
+#
+# Not a required check: it exists to build confidence between releases or
+# after a flakiness fix, not to gate merges.
+name: flake-hunt
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "how many full-suite runs to loop (-n auto each time)"
+        default: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+      - name: Loop the full suite under -n auto
+        env:
+          RUNS: ${{ github.event.inputs.runs || '20' }}
+        run: |
+          fail=0
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::run $i/$RUNS"
+            if ! pytest -n auto --dist worksteal; then
+              echo "run $i FAILED"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" != "0" ]; then
+            echo "::error::at least one of the $RUNS runs failed; see the groups above."
+            exit 1
+          fi
+          echo "all $RUNS runs passed."
