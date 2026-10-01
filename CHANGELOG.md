@@ -91,7 +91,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `proof.status` (for example `not reproduced on this model`).
   `proven_control` follows the same rule: it is `null` unless the verdict is
   `KEPT`. `schema_version` moves to `1.4`; no field was renamed or removed.
-
 - **`mkdocs build --strict` now runs on every PR and push to main, docs-only
   changes included.** It moved from `docs.yml` (path-filtered, so a docs-only
   PR could pass with a broken nav or a dead link) to `ci.yml` as the
