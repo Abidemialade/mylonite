@@ -663,3 +663,45 @@ def test_reason_codes_documented() -> None:
     assert not no_fix, f"docs/reason-codes.md has no **Fix:** line for: {no_fix}"
     unknown = sorted(h for h in by_heading if h.startswith("MYL-") and h not in REGISTRY)
     assert not unknown, f"docs/reason-codes.md documents codes that do not exist: {unknown}"
+
+
+def _normalize_fix_words(text: str) -> set[str]:
+    """Strip markdown (code spans, bold, links) and punctuation, lower-case,
+    and split into a word set -- for a fuzzy, formatting-insensitive compare."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [label](url) -> label
+    text = text.replace("`", "").replace("**", "")
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return set(text.split())
+
+
+def test_reason_code_fix_lines_match_the_registry() -> None:
+    """Each `docs/reason-codes.md` `**Fix:**` line stays in sync with the
+    registry's `fix` text it was written from.
+
+    The doc's prose is hand-written (capitalised, back-ticked, sometimes
+    split across sentences), so this cannot be a byte-for-byte compare. It
+    instead checks that most of the registry fix's own words still appear in
+    the doc's Fix line -- so a `fix` edited in `reason_codes.py` without the
+    matching doc edit (or the reverse: a doc rewritten to say something the
+    code's fix no longer backs) fails here instead of drifting silently.
+    """
+    from mylonite.reason_codes import REGISTRY
+
+    page = (_DOCS_DIR / "reason-codes.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", page, flags=re.MULTILINE)
+    by_heading = {s.splitlines()[0].strip(): s for s in sections[1:]}
+
+    stale: list[str] = []
+    for code, rc in REGISTRY.items():
+        section = by_heading[code]
+        match = re.search(r"\*\*Fix:\*\*\s*(.+?)(?=\n\n|\Z)", section, re.DOTALL)
+        assert match, f"{code}: no **Fix:** line found"
+        doc_words = _normalize_fix_words(" ".join(match.group(1).split()))
+        registry_words = _normalize_fix_words(rc.fix)
+        overlap = len(registry_words & doc_words) / len(registry_words)
+        if overlap < 0.7:
+            stale.append(f"{code} ({overlap:.0%} word overlap)")
+    assert not stale, (
+        f"these docs/reason-codes.md Fix lines have drifted from REGISTRY[code].fix: {stale}"
+    )
