@@ -266,8 +266,10 @@ report, so the committed regression is honest about which version it gates.
 
 The bundled **reference agent** — [the reference app](quarry.md)'s `mcp_kitchen_sink`
 server in its vulnerable and guarded variants — remains the ground-truth pair for the
-seeded-vulnerability differential, which is why importing the testkit transitively
-imports the reference adapter. The machinery — differential, flakiness, mutation score,
+seeded-vulnerability differential, which is why importing the testkit eagerly imports
+the in-process reference adapter. The `mcp_kitchen_sink` package itself loads lazily
+(only when a guarded scan actually runs), so a bare `from mylonite import testkit`
+doesn't pull it in. The machinery — differential, flakiness, mutation score,
 honest-fail gate, control-efficacy check — is the part that generalises to a
 consumer-owned agent (via `--target-file` and the synthetic guarded build); the bundled
 reference app is the ground truth it is proven against.
