@@ -49,6 +49,7 @@ from mylonite.scan.coverage import (
     provider_abort_message,
 )
 from mylonite.scan.customiser import PayloadCustomiser
+from mylonite.scan.evidence_tier import EVIDENCE_TIER_KEY, evidence_tier
 from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
@@ -250,6 +251,14 @@ class _PerPayloadOutcome:
     customiser_fallback: bool = False
     #: (success_count, runs) when runs>1 and the runs disagreed (flakiness seen).
     run_disagreement: tuple[int, int] | None = None
+
+
+def _with_evidence_tier(judge_evidence: dict[str, str], mechanism: str | None) -> dict[str, str]:
+    """A copy of ``judge_evidence`` with the decided verdict's evidence tier stamped in."""
+    tier = evidence_tier(mechanism, judge_evidence)
+    if tier is None:
+        return judge_evidence
+    return {**judge_evidence, EVIDENCE_TIER_KEY: tier}
 
 
 @dataclass
@@ -1117,6 +1126,10 @@ class ScanEngine:
             proof_level = judge_evidence.get("proof_level")
             if proof_level:
                 provenance["proof_level"] = proof_level
+            # What the finding rests on: the target's state, the recorded trace,
+            # or the LLM judge alone. Free-form metadata, so no contract change.
+            judge_evidence = _with_evidence_tier(judge_evidence, verdict.mechanism)
+            provenance[EVIDENCE_TIER_KEY] = judge_evidence[EVIDENCE_TIER_KEY]
             tiered_payload = decisive.payload.model_copy(
                 update={"metadata": {**decisive.payload.metadata, **provenance}}
             )
@@ -1248,6 +1261,8 @@ class ScanEngine:
         # consumer cannot miss. The cause stays in `judge_evidence` for
         # diagnostics; the literal is what consumers gate on.
         undecided = any(bool(judge_evidence.get(key)) for key in NO_VERDICT_EVIDENCE_KEYS)
+        if not undecided:
+            judge_evidence = _with_evidence_tier(judge_evidence, verdict.mechanism)
         return _PerPayloadOutcome(
             attempt=ScanAttempt(
                 seed_id=seed_id,

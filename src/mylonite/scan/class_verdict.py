@@ -39,6 +39,7 @@ from mylonite.scan.coverage import (
     attempt_reached_no_verdict,
     reason_code_for_attempt,
 )
+from mylonite.scan.evidence_tier import EVIDENCE_TIERS, tier_counts
 from mylonite.scan.seeds import SEED_CATALOGUE
 
 STATUS_FINDING: Final = "FINDING"
@@ -142,6 +143,11 @@ class ClassVerdict:
     not_tested: int
     #: Attempts decided by the trace rule (they carry a ``trace_outcome``).
     trace_decided: int = field(default=0)
+    #: The class's findings counted by evidence tier, every tier present,
+    #: strongest first (see ``scan/evidence_tier.py``).
+    evidence_tiers: tuple[tuple[str, int], ...] = field(
+        default=tuple((tier, 0) for tier in EVIDENCE_TIERS)
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -155,6 +161,7 @@ class ClassVerdict:
                 "server_reported": self.server_reported,
                 "not_tested": self.not_tested,
             },
+            "evidence_tiers": dict(self.evidence_tiers),
             "trace_decided": self.trace_decided,
         }
 
@@ -259,6 +266,7 @@ def _one_class(
         server_reported=server_reported,
         not_tested=not_tested,
         trace_decided=sum(1 for a in attempts if a.judge_evidence.get("trace_outcome")),
+        evidence_tiers=tuple(tier_counts(a for a in attempts if a.outcome == "finding").items()),
     )
 
 
