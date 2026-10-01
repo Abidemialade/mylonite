@@ -151,6 +151,11 @@ def _one_attempt_per_bucket() -> list[ScanAttempt]:
     attempts += [
         _attempt("error", error_detail="AuthenticationError"),
         _attempt("error", error_detail="RuntimeError"),
+        _attempt(
+            "error",
+            error_detail="ImportError",
+            judge_evidence={"module_load_failure": "prompt_injection", "weakness": "W1"},
+        ),
         _attempt("undecided", judge_evidence={"fallback_cause": "call_raised"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "unparseable_output"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "effect_probe_errored"}),

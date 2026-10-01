@@ -130,6 +130,11 @@ two is a deliberate follow-up, not this release. Rejects an unknown or lowercase
 e.g. `w4`, naming it). For a custom target: `--command`, `--arg`,
 `--env`, `--scope`, `--system-prompt[-file]`, `--primary-tool`.
 
+If an attack module that would have run fails to import or construct, `scan` (and
+`gate`) runs the rest and reports each weakness class that module covers as NOT TESTED
+with [`MYL-NT-015`](reason-codes.md#myl-nt-015). An `attack modules:` line names the
+module, and a scan with no finding exits `2`.
+
 For a custom/`--target-file` target, `scan` (and `gate`) refuses before any LLM call if
 a declared `weakness_classes` entry has zero seeds this surface could ever run — see
 [Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).

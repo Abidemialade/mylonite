@@ -31,6 +31,7 @@ from mylonite.gate.orchestrator import ScanOutcomeBundle
 from mylonite.generate.wiring import _dispatch_emit, _map_compliance
 from mylonite.scan.assembly import (
     build_scan_engine,
+    load_attack_modules,
     no_usable_modules_message,
     select_attack_modules,
 )
@@ -140,7 +141,6 @@ def make_scan_fn(
     effective_policy: Any,
 ) -> Callable[[], ScanOutcomeBundle]:
     def scan_fn() -> ScanOutcomeBundle:
-        from mylonite.plugins.registry import discover
         from mylonite.scan._llm import llm_scope
         from mylonite.scan.coverage import ScanOutcome
         from mylonite.scan.engine import ScanConfig
@@ -155,14 +155,14 @@ def make_scan_fn(
             asyncio.run(calibrate_custom_target(adapter, authorized=True))
 
         try:
-            all_modules: list[Any] = discover("mylonite.attack_modules")
+            all_modules, module_load_failures = load_attack_modules()
         except Exception as exc:
             echo_exc("plugin discovery failed", exc)
             raise typer.Exit(code=EXIT_CONFIG) from exc
 
         attack_modules = select_attack_modules(all_modules)
         if not attack_modules:
-            echo_err(no_usable_modules_message())
+            echo_err(no_usable_modules_message(module_load_failures))
             raise typer.Exit(code=EXIT_CONFIG)
 
         config = ScanConfig(
@@ -201,6 +201,7 @@ def make_scan_fn(
             judge_model=effective_judge_model,
             purpose=purpose or (tf.purpose if tf else None),
             attack_modules=attack_modules,
+            module_load_failures=module_load_failures,
         )
         with llm_scope(policy=effective_policy):
             result = asyncio.run(engine.run())

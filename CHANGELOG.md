@@ -126,6 +126,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older report, or one from a third-party validator with no build or differential
   leg, may read differently than before. See
   [what the numbers mean](docs/validation.md#what-the-numbers-mean).
+### Fixed
+
+- **An attack module that fails to load no longer drops its weakness classes without
+  a word (#222).** A module that fails to import or construct used to be skipped with
+  a log warning, so its classes vanished from the result and the scan could read
+  clean. Now the other modules still run, and each class the failed module would have
+  covered on this target reads NOT TESTED with the new reason code
+  [`MYL-NT-015`](docs/reason-codes.md#myl-nt-015), in the class summary and in
+  `verdicts.json`. A new `attack modules:` summary line names the module, the step
+  that failed and the error type. A `scan` or `gate` with no finding exits `2`, as for
+  any other incomplete coverage. A third-party module's classes can't be known when it
+  fails to load, so it shows as one NOT TESTED row in the `unknown` class; a module
+  nobody enabled stays a log warning, because it was never going to run.
 
 ## [0.10.5] - 2026-10-01
 

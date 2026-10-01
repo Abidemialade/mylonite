@@ -96,6 +96,7 @@ NT_NO_ADJUDICATOR: Final = "MYL-NT-011"
 NT_UNDECIDED: Final = "MYL-NT-012"
 NT_INVALID_METADATA: Final = "MYL-NT-013"
 NT_UNKNOWN_SEED: Final = "MYL-NT-014"
+NT_MODULE_LOAD_FAILED: Final = "MYL-NT-015"
 
 _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     _rc(
@@ -169,6 +170,12 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
         "The seed could not be resolved from the catalogue, so the attack never ran.",
         "this looks like an internal defect; please file an issue",
     ),
+    _rc(
+        NT_MODULE_LOAD_FAILED,
+        "The attack module that covers this class failed to load, so its attacks never ran.",
+        "reinstall the module's package and its dependencies; the `attack modules:` line "
+        "names the module and the error type",
+    ),
 )
 
 #: The inconclusive codes the trace rule (``scan/effect_verdict.py``) stamps on
@@ -206,6 +213,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
+    "module_load_failed": NT_MODULE_LOAD_FAILED,
 }
 
 
