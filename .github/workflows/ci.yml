@@ -170,6 +170,51 @@ jobs:
       - name: Build the docs (strict)
         run: mkdocs build --strict
 
+  nr-ci:
+    # No-regression gate, stage 1 (see docs/contributing/CONTRIBUTING.md's "No-
+    # regression checks" section). No path filter and no `if:` here,
+    # deliberately: this must run -- and report a result -- on EVERY PR and
+    # push to main, docs-only included, so it is safe to mark required. See
+    # docs-build-strict's comment above for why a conditionally-skipped job can
+    # never become a required check. Kept to one Python (3.12) on ubuntu and a
+    # handful of cheap steps so it stays well under the ~3-minute budget.
+    runs-on: ubuntu-latest
+    env:
+      PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+      - name: CLI goldens (command tree, dry-run seed listings, demo replay)
+        run: pytest tests/cli_golden -q
+      - name: No hardcoded provider model or credential env var
+        run: python scripts/check_no_hardcoded_models.py
+      - name: "Demo replay wall time (bar: 10s)"
+        env:
+          ANTHROPIC_API_KEY: ""
+          OPENAI_API_KEY: ""
+        run: |
+          start_ms=$(date +%s%3N)
+          mylonite demo > /dev/null
+          end_ms=$(date +%s%3N)
+          elapsed_ms=$((end_ms - start_ms))
+          echo "demo replay wall time: ${elapsed_ms}ms"
+          if [ "$elapsed_ms" -gt 10000 ]; then
+            echo "::error::demo replay took ${elapsed_ms}ms, over the 10000ms (10s) bar"
+            exit 1
+          fi
+      - name: Test count floor (never drops without the tests-removed label)
+        run: python scripts/check_test_count.py --labels-env PR_LABELS
+
   docs-consistency:
     # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs)
     # against the real Typer app. Runs in
