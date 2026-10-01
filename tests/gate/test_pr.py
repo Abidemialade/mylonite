@@ -117,6 +117,47 @@ def test_print_path_warns_against_git_add_on_the_bare_gate_dir(tmp_path, capsys)
     assert str(paths.gate_dir) in out
 
 
+def test_print_path_lists_workflow_files_already_written(tmp_path, capsys):
+    """`--workflows` writes `.github/workflows/*` to disk unconditionally -- even
+    without `--open-pr`. The printed summary must say so and name the file(s),
+    not claim the repository was not modified when it was."""
+    paths = _make_artifacts(tmp_path)  # workflow_files is non-empty
+    open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        _run=_fake_runner_recording(),
+    )
+    out = capsys.readouterr().out
+    assert "Your repository was not modified" not in out
+    assert "mylonite-gate.yml" in out
+    assert "Nothing else in your repository was modified" in out
+
+
+def test_print_path_says_not_modified_when_no_workflows_were_written(tmp_path, capsys):
+    """Without `--workflows`, `workflow_files` is empty and the stronger claim holds."""
+    paths = _make_artifacts(tmp_path)
+    paths = GatePaths(
+        repo_root=paths.repo_root,
+        gate_dir=paths.gate_dir,
+        add_paths=paths.add_paths,
+        workflow_files=[],
+    )
+    open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        _run=_fake_runner_recording(),
+    )
+    out = capsys.readouterr().out
+    assert "Your repository was not modified" in out
+    assert "mylonite-gate.yml" not in out
+
+
 def test_gate_paths_add_paths_is_required(tmp_path) -> None:
     """`add_paths` names exactly what `git add` stages; there is no directory-
     sweep fallback for a caller that omits it -- the sole production caller

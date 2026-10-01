@@ -1,11 +1,16 @@
 """Branch + commit + PR for the gating artifacts. The only outward/git module.
 
 Every git subprocess in here is gated on ``open_pr``. With ``open_pr=False``
-NOTHING runs: the caller's repository is untouched and the full command sequence
-(checkout / add / commit / push / gh) is printed for the operator to run by
-hand. With ``open_pr=True`` the branch is created, the artifacts committed, and
-the PR opened via ``gh`` -- degrading to printing the last two commands when
-``gh`` is missing or unauthenticated.
+no git command runs here: the full command sequence (checkout / add / commit
+/ push / gh) is printed for the operator to run by hand instead. This module
+never writes ``.github/workflows/*`` itself -- the caller (``gate/wiring.py``)
+does that before reaching here when ``--workflows`` is passed, independently
+of ``open_pr`` -- so a ``--workflows``-only run DID already change the
+repository on disk by the time ``open_or_print_pr`` prints its summary, and
+the printed notice says so instead of claiming nothing was modified. With
+``open_pr=True`` the branch is created, the artifacts committed, and the PR
+opened via ``gh`` -- degrading to printing the last two commands when ``gh``
+is missing or unauthenticated.
 """
 
 from __future__ import annotations
@@ -203,9 +208,24 @@ def open_or_print_pr(
             f"  git push -u origin {shlex.quote(branch)}\n"
             f"  {gh_cmd}"
         )
+        # `--workflows` writes .github/workflows/* to disk unconditionally (it
+        # doesn't require --open-pr), so "Your repository was not modified" was
+        # false on exactly that run: the gate output directory wasn't the only
+        # thing that changed. List what was written instead of asserting
+        # nothing was, and only make the stronger claim when it's true.
+        if paths.workflow_files:
+            wf_lines = "\n".join(f"  {_relative(p, cwd)}" for p in paths.workflow_files)
+            modified_note = (
+                f"Gate artifacts written to '{paths.gate_dir}'. Also wrote the CI workflow "
+                f"file(s) requested by --workflows:\n{wf_lines}\n"
+                f"Nothing else in your repository was modified — no branch, no commit.\n"
+            )
+        else:
+            modified_note = (
+                f"Gate artifacts written to '{paths.gate_dir}'. Your repository was not modified.\n"
+            )
         echo(
-            f"\nGate artifacts written to '{paths.gate_dir}'. "
-            f"Your repository was not modified.\n"
+            f"\n{modified_note}"
             f"To commit them and open the gating PR, run:\n"
             f"  {manual}\n"
             f"Stage with the command above, not `git add {paths.gate_dir}` — the "
