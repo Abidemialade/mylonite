@@ -239,3 +239,36 @@ def test_collect_only_on_an_empty_file_is_no_tests(tmp_path: Path) -> None:
     result = run_test_file(f, collect_only=True)
     assert result.outcome is PytestOutcome.NO_TESTS
     assert result.collected is False
+
+
+def test_pass_count_in_a_warning_is_not_a_pass(tmp_path: Path) -> None:
+    """Only pytest's final summary line counts: a warning that says "3 passed"
+    on a file whose every test skipped must not read as a pass."""
+    f = _write(
+        tmp_path,
+        "test_warn.py",
+        "import warnings\n\nimport pytest\n\n\n"
+        "def test_a():\n"
+        "    warnings.warn('3 passed')\n"
+        "    pytest.skip('no target')\n",
+    )
+    result = run_test_file(f)
+    assert result.exit_code == 0
+    assert "3 passed" in result.stdout
+    assert result.outcome is PytestOutcome.ALL_SKIPPED
+    assert result.passed is False
+
+
+def test_inherited_pytest_addopts_is_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """-rA would print each test's captured output; it must not reach the child."""
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-rA")
+    f = _write(
+        tmp_path,
+        "test_skip_print.py",
+        "import pytest\n\n\ndef test_a():\n    print('1 passed')\n    pytest.skip('x')\n",
+    )
+    result = run_test_file(f)
+    assert result.outcome is PytestOutcome.ALL_SKIPPED
+    assert "SKIPPED" not in result.stdout

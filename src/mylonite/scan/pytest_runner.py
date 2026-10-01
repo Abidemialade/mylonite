@@ -173,9 +173,19 @@ _EXIT_CODE_PYTEST_UNAVAILABLE = -2
 #   4 USAGE_ERROR         — bad CLI usage
 #   5 NO_TESTS_COLLECTED  — file collected but contained no tests
 #: pytest's summary line counts, e.g. "1 passed, 2 skipped in 0.12s" or, under
-#: ``--collect-only``, "2 tests collected in 0.01s". The space before "passed" keeps "xpassed" out.
+#: ``--collect-only``, "2 tests collected in 0.01s". The space before "passed" keeps
+#: "xpassed" out. Only the final summary line is matched (:func:`_summary_line`): a
+#: warning or captured output earlier in stdout can say "3 passed" too.
 _PASSED_RE = re.compile(r"\b(\d+) passed\b")
 _COLLECTED_RE = re.compile(r"\b(\d+) tests? collected\b")
+
+
+def _summary_line(stdout: str) -> str:
+    """pytest's final summary line: the last non-empty line of ``stdout``."""
+    for line in reversed(stdout.splitlines()):
+        if line.strip():
+            return line
+    return ""
 
 
 def _classify(
@@ -191,11 +201,11 @@ def _classify(
     exit 0 is not taken as proof of anything."""
     if exit_code == 0:
         if collect_only:
-            found = _COLLECTED_RE.search(stdout)
+            found = _COLLECTED_RE.search(_summary_line(stdout))
             if found and int(found.group(1)) > 0:
                 return PytestOutcome.COLLECTED, f"{found.group(1)} collected, not run"
             return PytestOutcome.NO_TESTS, "no tests collected"
-        found = _PASSED_RE.search(stdout)
+        found = _PASSED_RE.search(_summary_line(stdout))
         if found and int(found.group(1)) > 0:
             return PytestOutcome.PASSED, "all tests passed"
         return (
@@ -312,9 +322,11 @@ def run_test_file(
     if collect_only:
         cmd.append("--collect-only")
 
-    # Force the child to speak UTF-8 on every platform (Windows A3 guard).
+    # Force the child to speak UTF-8 on every platform (Windows A3 guard). Drop
+    # PYTEST_ADDOPTS for the same reason `-o addopts=` drops the ini addopts: an
+    # inherited flag (say -rA) changes the output the pass check reads.
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"},
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
     }
