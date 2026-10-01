@@ -85,6 +85,9 @@ def _git(*args: str) -> str:
         encoding="utf-8",
         errors="replace",
         check=True,
+        # A stalled git (lock, credential prompt) fails the gate fast
+        # instead of hanging the CI job.
+        timeout=60,
     ).stdout
 
 
