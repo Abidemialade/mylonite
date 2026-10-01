@@ -598,7 +598,15 @@ class ScanEngine:
                 attempts.append(outcome.attempt)
                 if outcome.exploit is not None:
                     exploits.append(outcome.exploit)
-                if outcome.judge_fallback_cause is not None:
+                # A reason code as the cause (the trace rule's MYL-INC-*) is not a
+                # judge fallback: no LLM call was made, so nothing degraded. The
+                # attempt is still `undecided`, and coverage reports it as NOT
+                # TESTED under its own code; counting it here would print it as
+                # "failed LLM output".
+                if (
+                    outcome.judge_fallback_cause is not None
+                    and outcome.judge_fallback_cause not in reason_codes.REGISTRY
+                ):
                     inconclusive_attempts += 1
                     key = f"judge_{outcome.judge_fallback_cause}"
                     fallback_breakdown[key] = fallback_breakdown.get(key, 0) + 1
@@ -980,8 +988,16 @@ class ScanEngine:
             # they return `skipped_unknown_seed` above — but kept for safety).
             resolved_compliance = seed.compliance if seed is not None else compliance
             # Attack-tier provenance (no contract change — rides payload.metadata).
+            # The proof level rides next to it when the trace rule decided the
+            # attempt: how strongly the finding is shown (effect-confirmed,
+            # dispatched, or dispatched-tool-linked). Attempts with no trace
+            # (reference and REST targets) carry none, as before.
+            provenance = {"attack_tier": "static"}
+            proof_level = judge_evidence.get("proof_level")
+            if proof_level:
+                provenance["proof_level"] = proof_level
             tiered_payload = decisive.payload.model_copy(
-                update={"metadata": {**decisive.payload.metadata, "attack_tier": "static"}}
+                update={"metadata": {**decisive.payload.metadata, **provenance}}
             )
             exploit = ExploitRecord(
                 target_id=descriptor.target_id,
