@@ -72,6 +72,8 @@ def _flatten_nav_paths(nav: object) -> list[str]:
 def test_experimental_page_not_in_mkdocs_nav() -> None:
     config = yaml.safe_load(_MKDOCS_YML.read_text(encoding="utf-8"))
     paths = _flatten_nav_paths(config.get("nav", []))
+    # Guard against a vacuous pass: the walk must find pages that are in nav.
+    assert "quickstart.md" in paths and "cli-reference.md" in paths, paths
     assert "experimental.md" not in paths, (
         "docs/experimental.md (which now holds check's and ablate's reference "
         "sections) must stay out of the published nav -- it belongs in "
