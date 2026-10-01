@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -196,6 +195,32 @@ class _SleepyScriptedCompletion(_ScriptedCompletion):
     async def __call__(self, **kwargs: Any) -> SimpleNamespace:
         await asyncio.sleep(self._delay)
         return await super().__call__(**kwargs)
+
+
+class _PeakConcurrencySleepyCompletion(_SleepyScriptedCompletion):
+    """``_SleepyScriptedCompletion`` that tracks peak simultaneous calls.
+
+    A single twin's own completion-call chain is strictly sequential (the
+    planner's next step depends on the previous tool result), so one twin
+    alone can never have two of its own calls in flight at once. Because
+    this same instance is shared across BOTH twins in a paired run, a peak
+    of 2+ simultaneously in-flight calls is only possible if the two twins'
+    chains are genuinely running at the same time — proof that overlap
+    happened, independent of wall-clock timing or machine speed.
+    """
+
+    def __init__(self, *, delay: float, **kwargs: Any) -> None:
+        super().__init__(delay=delay, **kwargs)
+        self.active = 0
+        self.peak = 0
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            return await super().__call__(**kwargs)
+        finally:
+            self.active -= 1
 
 
 # --- helpers -----------------------------------------------------------------
@@ -404,51 +429,30 @@ def test_metamorphic_genuinely_drives_perturbed_body_through_twins() -> None:
 
 def test_run_perturbed_drives_twins_concurrently() -> None:
     """Perf regression guard: ``_run_perturbed`` must drive the vulnerable and
-    guarded twins CONCURRENTLY (via ``run_twins``), not one after another.
+    guarded twins CONCURRENTLY (via ``run_twins``), not one after another --
+    proven by overlap evidence, not a wall-clock budget (#230: a margin on
+    elapsed time flaked under `pytest -n auto` load on scheduling noise
+    alone, the two twins' calls having genuinely overlapped regardless).
 
-    Uses a completion_fn that genuinely ``await asyncio.sleep(delay)``s on
-    every call, so wall-clock time is a faithful proxy for how many completion
-    round-trips ran in serial vs. in parallel. Measures each twin ALONE (its
-    own sequential completion-call chain) to get a per-twin baseline, then
-    measures the PAIR via ``_run_perturbed``. If the pair were still
-    sequential (the pre-fix bug), pair time would be roughly
-    ``vuln_time + guard_time``; genuinely concurrent, it's roughly
-    ``max(vuln_time, guard_time)`` — asserted well under the sequential sum.
+    The SAME completion_fn instance is shared by both twins here (as
+    ``_run_perturbed`` does for real). Each twin's own call chain is
+    strictly sequential — the planner's next step depends on the previous
+    tool result — so one twin alone can never have two of ITS OWN calls in
+    flight at once. A peak of 2+ simultaneously in-flight calls is
+    therefore only possible if the two twins' chains are genuinely running
+    at the same time, which a sequential (vulnerable-then-guarded)
+    implementation could never produce, at any machine speed.
     """
     exploit = _build_exploit()
-    delay = 0.05
     payload = exploit.payload
+    completion = _PeakConcurrencySleepyCompletion(delay=0.05)
+    pair_validator = DifferentialValidator(iterations=1, completion_fn=completion)
 
-    vuln_validator = DifferentialValidator(
-        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
-    )
-    start = time.monotonic()
-    asyncio.run(vuln_validator._invoke_and_judge_async("vulnerable", payload))
-    vuln_elapsed = time.monotonic() - start
-
-    guard_validator = DifferentialValidator(
-        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
-    )
-    start = time.monotonic()
-    asyncio.run(guard_validator._invoke_and_judge_async("guarded", payload))
-    guard_elapsed = time.monotonic() - start
-
-    sequential_estimate = vuln_elapsed + guard_elapsed
-
-    pair_validator = DifferentialValidator(
-        iterations=1, completion_fn=_SleepyScriptedCompletion(delay=delay)
-    )
-    start = time.monotonic()
     pair_validator._run_perturbed(exploit, payload.body)
-    pair_elapsed = time.monotonic() - start
 
-    # Generous margin (0.75x) to absorb scheduling noise while still clearly
-    # distinguishing "concurrent" (~1x the slower twin) from "sequential"
-    # (~2x, i.e. the sum) — a regression back to sequential would fail this.
-    assert pair_elapsed < sequential_estimate * 0.75, (
-        f"pair={pair_elapsed:.3f}s not well under sequential estimate "
-        f"={sequential_estimate:.3f}s (vuln={vuln_elapsed:.3f}s, guard={guard_elapsed:.3f}s) "
-        "— twins may be running sequentially again"
+    assert completion.peak >= 2, (
+        f"peak simultaneous completion calls = {completion.peak} -- twins "
+        "may be running sequentially again"
     )
 
 
