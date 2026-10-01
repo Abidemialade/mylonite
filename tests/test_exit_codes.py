@@ -8,16 +8,32 @@ re-defines a code as a literal, or if the documented values drift.
 
 from __future__ import annotations
 
+import importlib.util
 import itertools
+import json
 import re
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from mylonite import cli, exit_codes
 from mylonite.gate import orchestrator
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "mylonite"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_SRC = _REPO_ROOT / "src" / "mylonite"
+_SNAPSHOT = _REPO_ROOT / "tests" / "fixtures" / "exit_codes.snapshot.json"
+
+
+def _load_script(relative: str, name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, _REPO_ROOT / relative)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
 
 # Every exit code defined today (0-8) -- see test_documented_values below.
 _ALL_CODES = [
@@ -113,6 +129,30 @@ def test_most_severe_is_order_independent() -> None:
 def test_most_severe_rejects_empty() -> None:
     with pytest.raises(ValueError):
         exit_codes.most_severe([])
+
+
+# -- frozen snapshot: the set of codes cannot drift silently -----------------
+#
+# test_documented_values (above) only pins the values of the codes it already
+# knows about. Adding, removing, or renumbering a code -- or reordering
+# SEVERITY_ORDER -- is a public-API change (the exit-code contract is
+# documented in docs/cli-reference.md and read by CI gates), so it must fail
+# here, following the same frozen-snapshot pattern as reason codes
+# (tests/test_reason_codes.py) and testkit signatures
+# (tests/testkit/test_testkit.py).
+
+
+def test_codes_match_the_frozen_snapshot() -> None:
+    """Update deliberately: ``python scripts/update_snapshots.py``, then add a
+    CHANGELOG.md line. A pull request also needs the snapshot-change label
+    (enforced by scripts/check_snapshot_changes.py in CI)."""
+    update_snapshots = _load_script("scripts/update_snapshots.py", "update_snapshots")
+    snapshot = json.loads(_SNAPSHOT.read_text(encoding="utf-8"))
+    current = update_snapshots.build_exit_codes()
+    assert current == snapshot, (
+        f"exit codes drifted from {_SNAPSHOT.name}. If intentional, update it "
+        "(python scripts/update_snapshots.py) and add a CHANGELOG.md line."
+    )
 
 
 def test_most_severe_rejects_unknown_codes() -> None:
