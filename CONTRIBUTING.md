@@ -307,7 +307,11 @@ They run nightly and in the `Canaries` workflow, never as a required check
   nothing to validate also meets the bar; only a live KEPT verdict (the fix
   regressed *and* the differential missed it) is a miss.
 - **Reference scan** — a full scan of `reference:vulnerable`. Bar: at least
-  4 findings.
+  2 findings, one of them the direct unconfirmed send (W4) with `trace` or
+  `state` evidence. The bar is the same for every model: a capable model
+  refuses planted injections that a small one obeys, so the raw count
+  varies (Haiku 4.5 finds 2, qwen3 4B finds 4 on the same build), while the
+  W4 send is proven from the recorded tool call on every model.
 - **Custom re-drive** — a custom target's generated tests, re-driven live
   against `reference_targets/mcp_kitchen_sink/canary.target.yaml` by
   default: a loopback stdio copy of the in-repo kitchen-sink server (the

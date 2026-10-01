@@ -49,8 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow.** Four checks that drive the real CLI against a real model and
   catch what the offline `nr-ci` job can't: a kept W4 finding staying kept,
   the already-fixed guarded W2 hallucination staying rejected (or not
-  resurfacing at all), the reference scan still reproducing at least 4
-  findings, and a custom-target live re-drive against a committed loopback
+  resurfacing at all), the reference scan still finding at least 2
+  exploits with the direct unconfirmed send (W4) proven from its recorded
+  tool call (one bar for every model: a capable model refuses planted
+  injections a small one obeys, so the raw count varies), and a custom-target live re-drive against a committed loopback
   stdio target (`reference_targets/mcp_kitchen_sink/canary.target.yaml`),
   overridable with a different target file. KEPT/REJECTED is decided from
   the persisted `validation_report.json`'s verdict label, never from
