@@ -15,11 +15,12 @@ minutes and API spend rather than seconds.
     large tool surface cannot let the first few seeds drain the pool and leave the
     others untried. Probes that chain two tools cost two or three calls each, so a
     server with many egress or action tools wants a larger budget than the default
-    of 50. If the budget runs out, the summary **names the seeds that never
-    started** — those proved nothing and are reported as NOT TESTED, never as
-    clean. The same holds for an attack module that fails to load: its classes read
-    NOT TESTED with [`MYL-NT-015`](reason-codes.md#myl-nt-015), so the gate does not
-    pass on a scan that never ran them.
+    of 50. If the budget still runs out, the whole scan aborts (exit code 3) and a
+    log line **names the seeds that never started** — they proved nothing, but they
+    are not reported as NOT TESTED rows; the report records only that the scan was
+    cut short by its budget. An attack module that fails to load is different: its
+    classes DO read NOT TESTED with [`MYL-NT-015`](reason-codes.md#myl-nt-015), so
+    the gate does not pass on a scan that never ran them.
 
     **`--max-llm-calls` is therefore a floor-adjusted budget, not a hard ceiling.**
     Worst case is `cap + (seeds - 1) × max(2, cap ÷ seeds)` — with `--max-llm-calls
