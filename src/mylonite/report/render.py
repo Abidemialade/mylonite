@@ -189,7 +189,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             diff_remediation = (
                 "differential fail: the SYNTHETIC boundary twin did not block the attack. "
                 "If your real control is server-layer (an approval gate / allowlist enforced "
-                "inside the server), declare control_env / vulnerable_launch in the target file "
+                "inside the server), declare control_env in the target file "
                 "so the differential measures it - the boundary twin cannot see server-side "
                 "guards, so this is NOT evidence your control is ineffective."
             )

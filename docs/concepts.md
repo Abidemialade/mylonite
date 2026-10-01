@@ -93,7 +93,11 @@ guards off**, and Mylonite drives a genuinely raw side:
   disables all of them; the "only control C" side leaves just C on. This restores
   per-control load-bearing/theater attribution on a server-layer architecture.
 - `vulnerable_launch` — an alternate `command`/`args`/`env` that starts a fully
-  **unguarded** variant. `validate` uses it as the raw side of its differential.
+  **unguarded** variant. `validate` uses it as the raw side of its differential —
+  on its own it changes only the raw side; the guarded side stays Mylonite's
+  boundary shim. Declaring `control_env` for the weakness is what makes the
+  guarded side your server's own guard, and that is what earns the
+  server-layer claim.
 
 ```yaml
 family: my-agent
