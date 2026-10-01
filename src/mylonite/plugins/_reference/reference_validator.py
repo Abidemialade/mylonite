@@ -79,6 +79,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal, get_args
 
 from mylonite._concurrency import gather_bounded, run_twins
+from mylonite._redaction import redact_exception
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
 from mylonite.contracts import (
@@ -995,8 +996,18 @@ class DifferentialValidator(ValidatorBase):
             return await coro
         except BudgetExceededError:
             raise
-        except Exception:
-            logger.exception("multi-judge consensus: judge.judge raised unexpectedly")
+        except Exception as exc:
+            # DCR-0016: logger.exception()'s implicit exc_info renders the raw
+            # (unredacted) exception text + traceback -- the SecretRedactingFilter
+            # installed on the "mylonite" logger only touches record.getMessage(),
+            # never the exc_info traceback a handler's Formatter renders
+            # separately, and a NonRecoverableProviderError's detail can carry
+            # an API key or a token-bearing URL. Log a redacted one-line
+            # summary (type name + redacted detail) instead, with no exc_info.
+            logger.error(
+                "multi-judge consensus: judge.judge raised unexpectedly: %s",
+                redact_exception(exc),
+            )
             return None
 
     def _multi_judge_consensus(self, firing_runs: list[_CustomRun], payload: Any) -> float:
@@ -1445,14 +1456,23 @@ class DifferentialValidator(ValidatorBase):
             response = await adapter.invoke(payload)
         except AdapterInvocationSkipped:
             return None
-        except Exception:
-            logger.exception("metamorphic: adapter.invoke raised unexpectedly")
+        except Exception as exc:
+            # DCR-0016: logger.exception()'s implicit exc_info renders the raw
+            # (unredacted) exception text + traceback -- the SecretRedactingFilter
+            # installed on the "mylonite" logger only touches record.getMessage(),
+            # never the exc_info traceback a handler's Formatter renders
+            # separately, and an adapter/provider error's detail can carry an
+            # API key or a token-bearing URL. Log a redacted one-line summary
+            # (type name + redacted detail) instead, with no exc_info.
+            logger.error(
+                "metamorphic: adapter.invoke raised unexpectedly: %s", redact_exception(exc)
+            )
             return None
         try:
             verdict = await judge.judge(payload, response)
         except BudgetExceededError:
             raise
-        except Exception:
+        except Exception as exc:
             # Same shape as the adapter.invoke() failure above (T4 follow-up —
             # reviewer-flagged: this call was completely unguarded, including
             # against `NonRecoverableProviderError`, which `run_twins`/
@@ -1460,8 +1480,10 @@ class DifferentialValidator(ValidatorBase):
             # let escape all the way to the `gate` CLI as a raw traceback).
             # `None` means "never judged" here too: this variant contributes
             # neither a fired nor a resisted result (DCR-0022) — a judge
-            # infra failure must not be misread as "the guard resisted".
-            logger.exception("metamorphic: judge.judge raised unexpectedly")
+            # infra failure must not be misread as "the guard resisted". DCR-0016
+            # (see adapter.invoke() above): log a redacted one-line summary,
+            # not the raw exception text, and no exc_info.
+            logger.error("metamorphic: judge.judge raised unexpectedly: %s", redact_exception(exc))
             return None
         if verdict.fallback_cause is not None:
             # The same failure as the `except` above, arriving by the other

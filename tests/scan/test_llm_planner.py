@@ -6,6 +6,7 @@ in v0.2.2 alongside the planner itself.
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,8 +14,13 @@ import pytest
 from mcp_kitchen_sink._store import NoteStore
 from mcp_kitchen_sink.server_vulnerable import VulnerableKitchenSinkServer
 
+from mylonite._redaction import REDACTION_PLACEHOLDER
 from mylonite.scan.llm_planner import DEFAULT_ITERATION_CAP, LLMPlanner
 from mylonite.scan.llm_types import ToolDescription, ToolResult
+
+# Fake, not a real credential -- assembled from fragments so no provider-key-
+# shaped literal sits whole in this file outside the redaction assertion below.
+_FAKE_KEY = "sk-ant-api03-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
 
 
 class _AsyncServerWrapper:
@@ -159,6 +165,40 @@ async def test_planner_raises_when_completion_raises() -> None:
     planner = LLMPlanner(server=server, model="stub", completion_fn=stub)
     with pytest.raises(RuntimeError, match="provider down"):
         await planner.run("anything")
+
+
+@pytest.mark.asyncio
+async def test_planner_exception_log_is_redacted_and_has_no_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A completion exception's logged summary never carries the raw secret text.
+
+    Regresses a review finding: the planner used to log the exception via
+    ``logger.exception(...)``, whose implicit traceback bypasses the
+    secret-redacting log filter entirely (the filter only touches a record's
+    rendered message, never ``exc_info``). A provider error embedding an API
+    key and a token-bearing URL must never reach a log record unredacted.
+    """
+    server = _AsyncServerWrapper(VulnerableKitchenSinkServer(store=NoteStore()))
+    fake_url = f"https://provider.example/v1/complete?api_key={_FAKE_KEY}"
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        raise RuntimeError(f"auth failed calling {fake_url} with key {_FAKE_KEY}")
+
+    planner = LLMPlanner(server=server, model="stub", completion_fn=stub)
+
+    with (
+        caplog.at_level(logging.ERROR, logger="mylonite.scan.llm_planner"),
+        pytest.raises(RuntimeError),
+    ):
+        await planner.run("anything")
+
+    assert _FAKE_KEY not in caplog.text
+    assert fake_url not in caplog.text
+    assert REDACTION_PLACEHOLDER in caplog.text
+    assert "RuntimeError" in caplog.text
+    for record in caplog.records:
+        assert record.exc_info is None
 
 
 def test_default_iteration_cap_is_documented() -> None:

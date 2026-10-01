@@ -25,6 +25,7 @@ import json
 import logging
 from typing import Any, Protocol
 
+from mylonite._redaction import redact_exception
 from mylonite.scan._llm import litellm_tool_call_async
 from mylonite.scan.llm_parse import _try_repair
 from mylonite.scan.llm_types import (
@@ -146,8 +147,22 @@ class LLMPlanner:
                     completion_fn=self._completion_fn,
                     timeout_s=self._completion_timeout_s,
                 )
-            except Exception:
-                logger.exception("LLMPlanner: completion raised on iteration %d", iteration)
+            except Exception as exc:
+                # DCR-0016: logger.exception()'s implicit exc_info renders the
+                # RAW (unredacted) exception text + traceback -- the
+                # SecretRedactingFilter installed on the "mylonite" logger only
+                # touches record.getMessage(), never the exc_info traceback a
+                # handler's Formatter renders separately (an API key, a
+                # ?api_key=... URL, or payload text embedded in a provider
+                # error would otherwise reach a log handler verbatim). Log a
+                # redacted one-line summary instead (type name + redacted
+                # detail, via the same helper the CLI's own error-echo path
+                # uses), with no exc_info.
+                logger.error(
+                    "LLMPlanner: completion raised on iteration %d: %s",
+                    iteration,
+                    redact_exception(exc),
+                )
                 steps.append(
                     PlannerStep(
                         kind="stop",
