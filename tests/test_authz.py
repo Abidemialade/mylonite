@@ -70,22 +70,11 @@ def test_error_names_the_command() -> None:
     assert "validate" in str(exc.value)
 
 
-def test_check_refusal_does_not_claim_it_sends_attack_payloads() -> None:
-    """`check --authorize` only runs the calibration controls (real writes plus
-    a seed plant-and-recall) -- it never drives an attack, unlike every other
-    command this gate guards. The refusal text must say that, not the
-    live-driving wording that fits scan/gate/ablate/validate."""
-    with pytest.raises(AuthorizationRefused) as exc:
-        check_authorization(family="fetch", scope=None, authorize=None, command="check")
-    message = str(exc.value)
-    assert "sends real attack payloads" not in message
-    assert "live-drives" not in message
-    assert "calibration controls" in message
-    assert "fetch" in message
-
-
 def test_other_commands_keep_the_live_driving_wording_byte_identical() -> None:
-    """The message for every command other than `check` must not change."""
+    """The message for every authorize-taking command must not change.
+
+    `check` is not one of them: it is a static pre-check that never drives
+    an attack, and takes no `--authorize` at all."""
     for command in ("scan", "gate", "ablate", "validate"):
         with pytest.raises(AuthorizationRefused) as exc:
             check_authorization(family="fetch", scope=None, authorize=None, command=command)
