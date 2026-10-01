@@ -103,9 +103,9 @@ The project enforces the following non-negotiables:
    targets as out-of-scope for live scans against shared infrastructure.
 
    **Calibration is live driving too.** Before trusting a custom target's
-   declared `effect_probe`, `scan`/`gate`/`validate`/`ablate` (and, on its
-   own, `mylonite check --authorize`) run a calibration step that makes REAL
-   writes through a consequential tool and, for W2 targets, plants and
+   declared `effect_probe`, `scan`/`gate`/`validate`/`ablate` run a
+   calibration step that makes REAL writes through a consequential tool
+   and, for W2 targets, plants and
    recalls a record via `seed_arm` — proving the probe can actually see a
    change before its "no change" is ever trusted. This is gated by the same
    `--authorize` rule as the rest of this section: it never runs without

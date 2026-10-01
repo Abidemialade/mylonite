@@ -177,7 +177,8 @@ carry no `trace_outcome` and are decided as before.
 `validate` counts a custom target's firing runs by these proof levels on its effect leg
 (see [Validation](validation.md)). When the leg fails because runs fired with nothing tying
 the damage to them (an LLM-judge verdict, say), the remediation line says so and points at an `{exfil_email}` or
-`{exfil_host}` marker and `mylonite check --authorize`.
+`{exfil_host}` marker and `mylonite scan --target-file <file> --authorize <family>` to
+calibrate the probe.
 
 ### The per-class summary
 
