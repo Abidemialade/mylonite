@@ -703,6 +703,29 @@ async def test_filesystem_corrected_fixture_certifies_and_resists(tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
+# 3. The committed corrected-filesystem YAML fixture (used by the live-smoke
+# workflow, which drives a real `mylonite scan` against a real npx server and
+# cannot import this module's Python builder) matches
+# `_corrected_filesystem_spec()` field for field, so the two can't silently
+# drift apart.
+# ---------------------------------------------------------------------------
+
+
+def test_filesystem_corrected_yaml_fixture_matches_the_builder() -> None:
+    tf = load_target_file(_FIXTURES / "filesystem.corrected.yaml")
+    from_yaml = build_target_spec(tf)
+    from_builder = _corrected_filesystem_spec()
+
+    assert from_yaml.family == from_builder.family
+    assert from_yaml.command == from_builder.command
+    assert from_yaml.args_template == from_builder.args_template
+    assert from_yaml.weakness_classes == from_builder.weakness_classes
+    assert from_yaml.control_config == from_builder.control_config
+    assert from_yaml.effect_probe == from_builder.effect_probe
+    assert from_yaml.calibration_controls == from_builder.calibration_controls == "allow"
+
+
+# ---------------------------------------------------------------------------
 # 4. A certified probe clears only what it was shown to see.
 # ---------------------------------------------------------------------------
 

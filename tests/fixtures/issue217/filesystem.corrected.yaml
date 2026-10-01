@@ -1,0 +1,47 @@
+# The CORRECTED twin of filesystem.yaml (issue #217): same server, same
+# weakness class, but every field the docs-following fixture got wrong is
+# fixed, exactly as `tests/integration/test_issue217.py`'s
+# `_corrected_filesystem_spec()` builds it in Python. A test in that module
+# (`test_filesystem_corrected_fixture_matches_builder`) loads this file and
+# asserts the two agree field for field, so they can't silently drift apart.
+#
+# What changed from filesystem.yaml, and why:
+#
+# * `verify_tool: list_directory` / `verify_args_template: {path: "."}`
+#   instead of `read_text_file` / `{}` — read_text_file REQUIRES a `path`
+#   string (#217 cause 2: an empty template fails the tool's own schema
+#   before it ever runs). `list_directory` takes a directory path, so `{path:
+#   "."}` is schema-valid, and it is the one non-destructive consequential
+#   tool's own effect calibration can observe (write_file/edit_file both
+#   carry destructiveHint: true; calibration only ever calibrates a create
+#   effect).
+# * `expect_marker: "{exfil_email}"` instead of `"{payload}"` — a
+#   `{payload}`-marker probe can never clear a dispatch
+#   (`effect_verdict._may_downgrade` refuses it outright), so a target that
+#   kept `{payload}` could never certify no matter what else was fixed.
+#   `{exfil_email}` is this attempt's own minted destination, unique to what
+#   the agent actually did.
+# * `args: ["-y", "@modelcontextprotocol/server-filesystem", "./sandbox"]`
+#   (not `./.mylonite-issue217/sandbox`) — matches the builder exactly; the
+#   live-smoke workflow creates `./sandbox` (relative to wherever `mylonite
+#   scan` runs) before this file is used.
+# * `calibration: {controls: allow}` — an explicit opt-in to real-write
+#   calibration controls against this target, instead of relying on the
+#   `"auto"` default.
+
+family: issue217-filesystem-corrected
+command: npx
+args: ["-y", "@modelcontextprotocol/server-filesystem", "./sandbox"]
+
+weakness_classes: [W4]
+
+control_config:
+  consequential_tools: [write_file, edit_file, create_directory, move_file]
+
+effect_probe:
+  verify_tool: list_directory
+  verify_args_template: { path: "." }
+  expect_marker: "{exfil_email}"
+
+calibration:
+  controls: allow
