@@ -36,14 +36,26 @@ egress.
 
 This is the common case, not an "enterprise" one: a proxy or local antivirus
 presents a MITM certificate whose CA lives in your **OS trust store** but not in
-Python's bundled `certifi` bundle, so HTTPS to the LLM provider fails with
-`CERTIFICATE_VERIFY_FAILED`. Mylonite ships [`truststore`](https://pypi.org/project/truststore/)
-as a **base dependency** and enables it automatically, so a plain
-`pip install mylonite` trusts your OS-installed CA out of the box — no cert files,
-and a no-op in CI (the runner's OS already trusts standard CAs). Escape hatches:
-`MYLONITE_NO_TRUSTSTORE=1` (disable) or `SSL_CERT_FILE=/path/to/ca.pem` (point at a
-specific CA bundle). The legacy `pip install "mylonite[enterprise]"` still works as
-a back-compat alias but is no longer required.
+Python's bundled `certifi` bundle, so HTTPS fails with `CERTIFICATE_VERIFY_FAILED`.
+Mylonite ships [`truststore`](https://pypi.org/project/truststore/) as a **base
+dependency** and enables it automatically, so a plain `pip install mylonite` trusts
+your OS-installed CA out of the box — no cert files, and a no-op in CI (the runner's
+OS already trusts standard CAs). This patches Python's `ssl` module process-wide
+(`truststore.inject_into_ssl()`), so it covers every outbound HTTPS call Mylonite's
+own process makes — the LLM provider **and** an `sse`/`http`/`rest` remote target's
+URL alike, since both run in-process. Escape hatches: `MYLONITE_NO_TRUSTSTORE=1`
+(disable) or `SSL_CERT_FILE=/path/to/ca.pem` (point at a specific CA bundle). The
+legacy `pip install "mylonite[enterprise]"` still works as a back-compat alias but is
+no longer required.
+
+**A `stdio` target's spawned child is a separate process and gets none of this.** The
+truststore patch lives in Mylonite's own interpreter; an `npx`/`uvx`-launched server
+runs its own runtime (Node's own TLS stack, a second Python interpreter, …) with its
+own, unpatched trust store. If that child itself calls out through the same
+TLS-inspecting proxy — reaching its own backend, an npm/PyPI registry on first
+install — declare its proxy/CA variables explicitly in the target file's `env:` block
+(`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `HTTPS_PROXY`, …); see
+[the `env` overlay](target-file.md#field-groups) in target.yaml.
 
 ## Not just GitHub
 
