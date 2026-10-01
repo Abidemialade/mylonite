@@ -146,6 +146,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed replay of that judge reply guards the fix.
 ### Security
 
+- **Secret masking now catches project-scoped `sk-` keys and Groq keys.** The
+  generic key rule accepted only letters and digits after `sk-`, so a key such
+  as `sk-proj-…` with hyphens or underscores was left in logs and messages;
+  it is now masked whole. `gsk_…` keys are masked too. A word that ends
+  in `sk` (`risk-…`) is left alone.
 - **A planner or judge provider-call failure no longer logs a raw traceback.**
   `LLMPlanner.run()`, and two judging paths the reference validator uses for
   multi-judge consensus and metamorphic robustness, called
