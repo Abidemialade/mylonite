@@ -204,12 +204,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never resisted; without a probe, a finding can't reach `effect-confirmed`. The
   warning now says exactly that.
 - **A "queued" reply no longer clears a W3/W4 call that no probe checked.** With no
-  `effect_probe`, or one that errored or was never calibrated, a server reply that
+  `effect_probe`, or with one whose read errored, a server reply that
   says it queued or held a consequential call used to read `RESISTED
   (server-reported)` and exit `0`. An asynchronous mailer says "queued" for a message
   it will still send, so the attempt now reads NOT TESTED under the new code
-  [MYL-INC-012](docs/reason-codes.md#myl-inc-012). A probe that saw the action held
-  still reads `RESISTED (server-reported)`.
+  [MYL-INC-012](docs/reason-codes.md#myl-inc-012). A declared probe that read the target's
+  state and saw nothing contradicting the hold still reads `RESISTED
+  (server-reported)`.
 - **`scan --scaffold` names a readback tool as the `effect_probe` candidate.** On
   a server with no outbox- or status-named tool (server-memory, for one) it named
   none, even though `read_graph` reads the whole store back. It now falls back to

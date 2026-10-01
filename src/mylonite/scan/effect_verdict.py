@@ -338,12 +338,14 @@ def _may_downgrade(evidence: EffectEvidence) -> bool:
 def _probe_checked_the_hold(evidence: EffectEvidence) -> bool:
     """Whether the effect probe, not just the server's reply, backs a "held" reading.
 
-    True when the probe saw the server record the action as held, or a
-    calibrated probe looked and saw no change. With no probe, an errored one,
-    or an uncalibrated "no change", only the reply says the action was held.
+    True when a declared probe read the target's state and saw nothing that
+    contradicts the hold: it saw the action held, saw no change, or saw a change
+    it could not tie to this attempt. With no probe, or one whose read errored,
+    only the reply says the action was held. A probe that saw this attempt's
+    effect contradicts the reply, so that is not a checked hold either (a
+    calibrated "true" is already a finding before this point).
     """
-    effect = evidence.effect_confirmed
-    return effect == "deferred" or (evidence.calibrated and effect == "false")
+    return evidence.effect_confirmed in ("deferred", "false", "unattributed")
 
 
 def decide(evidence: EffectEvidence, *, predicate: bool | None) -> EffectDecision:
@@ -361,8 +363,9 @@ def decide(evidence: EffectEvidence, *, predicate: bool | None) -> EffectDecisio
        complete, so it decides alone.
     3. ``dispatched-error``: resisted, resting on the server's own reply
        (``MYL-SRV-001``). ``dispatched-deferred``: resisted (``MYL-SRV-002``)
-       only when the effect probe checked the hold (it saw the action held, or a
-       calibrated probe saw no change). Otherwise inconclusive
+       only when a declared probe read the target's state and saw nothing that
+       contradicts the hold. With no probe, an errored probe, or a probe that
+       saw this attempt's effect: inconclusive
        (``MYL-INC-012``): "queued" and "will be sent" are also how an async
        mailer says it accepted the message, so a reply alone never clears a
        consequential call (#221 follow-up).
