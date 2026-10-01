@@ -573,7 +573,8 @@ async def test_empty_rendered_marker_with_no_change_is_false() -> None:
     meta = await _drive_with_empty_body(_Store(), _Script())
     assert meta["effect_confirmed"] == "false"
     # The {payload} shape is the weakest marker kind -- #217's "the plant
-    # reflects itself back" hazard (decision 4's downgrade rule, for T7).
+    # reflects itself back" hazard (the verdict rule's downgrade for a
+    # certified "no change").
     assert meta["marker_kind"] == "payload"
 
 
@@ -628,7 +629,7 @@ async def test_an_old_queued_item_does_not_mask_a_new_effect() -> None:
 @pytest.mark.asyncio
 async def test_a_new_deferral_is_deferred_even_with_the_marker() -> None:
     """A defended app: the target's own state names a held/queued action. This
-    is a DISTINCT outcome from a plain "false" (T5) -- the target told us
+    is a DISTINCT outcome from a plain "false" -- the target told us
     something concrete happened to the action, not merely that nothing changed."""
     _register(_DEFERRING_PROBE)
     store = _Store()
@@ -812,13 +813,13 @@ async def test_exfil_email_marker_links_a_send_to_a_minted_destination() -> None
     assert meta["link"] == "token-linked"
 
 
-# --- calibrated / seed_control reflect the T6/T11 calibration registry ---------
+# --- calibrated / seed_control reflect the calibration registry ---------------
 
 
 @pytest.mark.asyncio
 async def test_calibrated_and_seed_control_reflect_the_calibration_registry() -> None:
-    """``calibrated``/``seed_control`` (T5) read the process-level calibration
-    registry (T6/T11) for THIS target's spec+scope -- the adapter never
+    """``calibrated``/``seed_control`` read the process-level calibration
+    registry for THIS target's spec+scope -- the adapter never
     calibrates on its own, it only reports what calibration already found."""
     from mylonite.plugins._mcp import calibration
 

@@ -119,6 +119,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A deferred effect probe can no longer read as a finding.** The judge
+  handled `effect_confirmed` values `true`, `false` and `errored`, but not
+  `deferred` — a server that held or queued the consequential action through
+  a side channel fell through to the named predicate, which reads only this
+  attempt's own tool-call trace and could still call it a finding. `deferred`
+  is now decided the same way as `false`: not a finding, carrying reason code
+  `MYL-SRV-002` in its evidence.
 - **`check --authorize`'s refusal now says what `check` actually does.** A
   missing or wrong `--authorize` value used to print the same "live-drives
   ... and sends real attack payloads" wording as `scan`/`gate`/`validate`/

@@ -1079,7 +1079,7 @@ async def test_effect_probe_deferred_marker_overrides_expect_marker(tmp_path: Pa
 
     Regression: a result like "queued for approval: send to attacker@x.com" contains
     the expect_marker but the action did NOT execute — deferred_markers must win.
-    This is 'deferred' (T5), a DISTINCT outcome from 'false': the target's own
+    This is 'deferred', a DISTINCT outcome from 'false': the target's own
     state names a held/queued action, not merely an unchanged one.
     """
     from mylonite.plugins._mcp import target_registry

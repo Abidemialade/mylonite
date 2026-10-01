@@ -1,10 +1,10 @@
 # A "first-time user" custom target.yaml for the official
 # @modelcontextprotocol/server-filesystem reference MCP server (issue #217).
 #
-# This is a TEST INPUT (docs/superpowers/plans/2026-09-30-no-false-clean.md,
-# task T13) — nothing in this repo yet asserts a scan verdict against it.
-# That lands with T7 (the judge fix) and T13's own integration test; today
-# it exists so those later tests don't have to re-derive it.
+# This is a TEST INPUT — nothing in this repo yet asserts a scan verdict
+# against it. That lands with the judge's deferred-outcome fix and this
+# fixture's own integration test; today it exists so those later tests don't
+# have to re-derive it.
 #
 # Provenance — how a first-time user would actually arrive at this file:
 #
@@ -36,7 +36,7 @@
 # * `expect_marker: "{payload}"` follows docs/target-file.md's current
 #   effect_probe guidance verbatim ("a marker the agent's own call
 #   carries — the recipient address, a row it wrote, or `{payload}`").
-#   That line is what task T14's (deferred) docs fix will change; today it
+#   That line is what the docs fix will change; today it
 #   still recommends `{payload}`, which is #217's other cause: a
 #   plant-and-recall server reflects the payload back on its own, so the
 #   marker can match without the agent having done anything.
