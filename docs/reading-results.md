@@ -330,7 +330,9 @@ A single `finding.json` (versioned `schema_version`, currently `1.4`) with, per
 finding: `pattern_id`, `weakness_class`, `severity`, `attack_shape`, `proof_level`, the full
 `compliance` block, the R4 `localization` (tool/field/line), the `proof` (vuln/guard
 counts, `kept`, `verdict`, `status` and the `claim` the run earned), `guarded_twin_layer` (`server` or
-`boundary` — what played the guarded side), and the `proven_control`. `proof_level` is `null` for a finding with no tool-call trace. `guarded_twin_layer` is `null` when no guarded twin ran.
+`boundary` — what played the guarded side), and the `proven_control`. `severity` is the
+severity of the weakness class, not of this run: a rejected finding can still read `High`,
+so check `proof.verdict` before acting on it. `proof_level` is `null` for a finding with no tool-call trace. `guarded_twin_layer` is `null` when no guarded twin ran.
 
 `proof` is `null` for a scan finding that was never validated. For a validated one
 (its counts are `null` if the validation recorded no runs),
