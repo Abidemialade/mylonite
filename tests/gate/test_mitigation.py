@@ -139,6 +139,21 @@ def test_pr_body_is_deterministic():
     assert build_pr_body(ex, _report()) == build_pr_body(ex, _report())
 
 
+def test_pr_body_gating_section_names_the_default_gate_dir_when_unset():
+    """No ``gate_dir`` passed -- falls back to the literal default, not a crash."""
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    body = build_pr_body(ex, _report())
+    assert "under `.mylonite/gate/`" in body
+
+
+def test_pr_body_gating_section_names_the_real_out_dir():
+    """A non-default ``--out`` must show up here, not the hardcoded default (GT15)."""
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    body = build_pr_body(ex, _report(), gate_dir="build/ci-gate")
+    assert "under `build/ci-gate/`" in body
+    assert ".mylonite/gate" not in body
+
+
 def test_pr_body_surfaces_differential_oracle_evidence():
     """The gating PR shows the formula + reproducibility + kill matrix (PR2)."""
     from mylonite.contracts import ReproducibilityEvidence, SeedKill

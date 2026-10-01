@@ -431,6 +431,7 @@ def run_gate(
         completion_fn=mitigation_completion_fn,
         system_prompt=system_prompt,
         target=target_context,
+        gate_dir=out_dir,
     )
     body += _coverage_note(bundle.outcome)
     pr = open_pr_fn(out_dir=out_dir, findings=kept, kept_dirs=kept_dirs, body=body, open_pr=open_pr)

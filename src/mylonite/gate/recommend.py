@@ -23,8 +23,11 @@ is a defect — see ``tests/gate/test_recommend.py``'s import-boundary test).
 already cost the differential oracle real work must still produce SOMETHING
 usable, not a traceback.
 
-Not yet wired into ``build_pr_body`` (that is PR2) — this module is
-self-contained and independently testable via its own ``render_markdown``.
+Wired into ``build_pr_body`` (``gate/mitigation.py``), which calls
+``recommend()`` and renders its result with ``render_markdown()`` for the
+"Recommended fix" / "Proven fix" section of every gating PR. This module
+stays self-contained and independently testable via its own
+``render_markdown``.
 """
 
 from __future__ import annotations

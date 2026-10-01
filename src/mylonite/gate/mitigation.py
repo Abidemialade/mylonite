@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
@@ -31,6 +32,26 @@ _GUARDED_TWIN = "reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_
 #: same as before T14, when this was hardcoded with no way to override it at
 #: all -- see ``_llm_suggestion``'s docstring for why that was a leak path.
 DEFAULT_MITIGATION_MODEL = "claude-haiku-4-5-20251001"
+
+#: Fallback for the "How this is gated" section's directory mention when a
+#: caller has no real one to pass (GT15) — matches `gate`'s own CLI default
+#: for `--out`, so a bare `build_pr_body(...)` call (a test, or a library
+#: user with no gate_dir) still reads as a real-looking path.
+_DEFAULT_GATE_DIR_LABEL = ".mylonite/gate/"
+
+
+def _gate_dir_label(gate_dir: Path | str | None) -> str:
+    """Render ``gate_dir`` as the backtick-quoted path fragment the PR body
+    names in its "How this is gated" section, e.g. ``.mylonite/gate/``.
+
+    ``gate_dir`` is the directory the run actually wrote to (``gate``'s
+    resolved ``--out``), not a hardcoded literal — a run with a non-default
+    ``--out`` used to tell the reader the test lives under `.mylonite/gate/`
+    regardless of where it was actually written.
+    """
+    if gate_dir is None:
+        return _DEFAULT_GATE_DIR_LABEL
+    return f"{Path(gate_dir).as_posix().rstrip('/')}/"
 
 
 def weakness_class_for(exploit: ExploitRecord) -> str:
@@ -141,6 +162,7 @@ def build_pr_body(
     model: str = DEFAULT_MITIGATION_MODEL,
     guarded_is_server_layer: bool | None = None,
     target: Any | None = None,
+    gate_dir: Path | str | None = None,
 ) -> str:
     """Assemble the gating PR description (deterministic; opt-in LLM enrichment).
 
@@ -165,6 +187,11 @@ def build_pr_body(
     imported at module scope to avoid a needless import when a caller has none
     to pass — ``recommend()`` handles ``target=None`` gracefully by design
     (degraded evidence, lower confidence, never a crash).
+
+    ``gate_dir`` (GT15): the directory this run actually wrote to (``gate``'s
+    resolved ``--out``), so the "How this is gated" section names the real
+    path instead of a hardcoded ``.mylonite/gate/`` that drifted from a
+    non-default ``--out``. Defaults to that literal when omitted.
 
     PR11 (deliberate compat event): the fix section always renders
     :func:`mylonite.gate.recommend.render_markdown`'s target-specific,
@@ -325,23 +352,24 @@ def build_pr_body(
                 "> **Unverified LLM suggestion** (not validated by the oracle — review before applying):",
                 "> " + extra.replace("\n", "\n> "),
             ]
+    gate_dir_label = _gate_dir_label(gate_dir)
     if is_control and not proven:
         gating_desc = (
-            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives the attack with and "
+            f"`{report.test_filename}` (under `{gate_dir_label}`) re-drives the attack with and "
             f"without control **{control}**. This run has not yet shown that the control stops "
             "the attack, so a passing check does not show it either; re-run `mylonite validate` "
             "until the verdict is KEPT before relying on this gate."
         )
     elif is_control:
         gating_desc = (
-            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives the attack with and "
+            f"`{report.test_filename}` (under `{gate_dir_label}`) re-drives the attack with and "
             f"without control **{control}** and asserts it fires on the raw target but is "
             "resisted with the control applied. The committed per-PR workflow runs it on every "
             "PR; if the control stops carrying the security, the check fails."
         )
     else:
         gating_desc = (
-            f"`{report.test_filename}` (under `.mylonite/gate/`) re-drives this attack and "
+            f"`{report.test_filename}` (under `{gate_dir_label}`) re-drives this attack and "
             "asserts your agent resists it. The committed per-PR workflow runs it on every PR; "
             "a regression fails the check."
         )
@@ -359,6 +387,7 @@ def build_gate_pr_body(
     model: str = DEFAULT_MITIGATION_MODEL,
     guarded_is_server_layer: bool | None = None,
     target: Any | None = None,
+    gate_dir: Path | str | None = None,
 ) -> str:
     """Thin wrapper (#202): join each KEPT finding's :func:`build_pr_body`
     section, then list the REJECTED findings with their reason.
@@ -372,6 +401,10 @@ def build_gate_pr_body(
     finding plus a trailing "Other findings" section naming what was rejected
     and why — so a finding the oracle could not confirm is never silently
     dropped from the PR the way it used to be dropped from the gate entirely.
+
+    ``gate_dir`` (GT15) is forwarded to every :func:`build_pr_body` call
+    unchanged, so every finding's "How this is gated" section names the same
+    real output directory.
     """
     if len(kept) == 1 and not rejected:
         exploit, report = kept[0]
@@ -384,6 +417,7 @@ def build_gate_pr_body(
             model=model,
             guarded_is_server_layer=guarded_is_server_layer,
             target=target,
+            gate_dir=gate_dir,
         )
 
     sections = [f"# Mylonite gate: {len(kept)} finding(s) kept, {len(rejected)} rejected", ""]
@@ -400,6 +434,7 @@ def build_gate_pr_body(
                 model=model,
                 guarded_is_server_layer=guarded_is_server_layer,
                 target=target,
+                gate_dir=gate_dir,
             )
         )
         sections.append("")
