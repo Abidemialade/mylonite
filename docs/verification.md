@@ -12,9 +12,11 @@ This page is the scorecard. The numbers come from live runs between 25 June and
 layers; the InjecAgent layer was run against a self-hosted `llama3.2:3b`. Samples are
 small and cost-bounded. Read the caveats — several numbers mean less (or more) than they
 look. The latest release-gated result set lives in
-[`verification/results/0.10.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.10.0)
-(the earlier one in
-[`verification/results/0.9.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.9.0)),
+[`verification/results/0.11.0/`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.11.0),
+measured in CI with Haiku 4.5 recording InjecAgent: Haiku resisted every case, so judge
+agreement on InjecAgent is not exercised in 0.11.0 (earlier sets:
+[`0.10.0`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.10.0),
+[`0.9.0`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.9.0)),
 with a per-release trend table in
 [`TRENDS.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/TRENDS.md).
 
