@@ -279,6 +279,20 @@ def test_llm_enrichment_is_labelled_and_opt_in():
     assert calls["n"] == 1
 
 
+def test_llm_enrich_with_no_model_warns_instead_of_silently_skipping(capsys):
+    """Review follow-up: there is no default model, so `--llm-enrich` with
+    none configured must say so -- a bare silent skip reads as "nothing to
+    add" rather than "couldn't run it"."""
+    ex = _exploit_for("indirect-injection-note-body-direct")
+
+    body = build_pr_body(ex, _report(), llm_enrich=True, model=None)
+    assert "Unverified LLM suggestion" not in body
+
+    err = capsys.readouterr().err
+    assert "llm-enrich" in err.lower()
+    assert "no model" in err.lower()
+
+
 def test_pr_body_shows_attack_tier_and_nist():
     ex = _exploit_for("indirect-injection-note-body-direct")
     ex = ex.model_copy(

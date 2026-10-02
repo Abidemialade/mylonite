@@ -488,13 +488,22 @@ def _llm_suggestion(
     customiser/judge/planner use — rather than a bare ``litellm.completion``
     call, so it is a real, configurable, budget-counted/policy-kwarg'd call
     with a model the CALLER supplies (``gate`` threads its own resolved
-    ``--model`` through ``build_pr_body``/``build_gate_pr_body``). No default
-    provider or model (CLAUDE.md, 2026-09-30): with no ``model``, enrichment
-    is skipped -- ``completion_fn`` is still the offline test seam (passed
-    straight through); any failure (call exception, empty response) also
-    returns ``None`` — enrichment must never break body assembly.
+    ``--model`` through ``build_pr_body``/``build_gate_pr_body``). There is
+    no default provider or model: with no ``model``, enrichment is skipped
+    -- but LOUDLY, with one warning line (a caller asked for
+    ``llm_enrich=True`` and got no enrichment; silence there would read as
+    "nothing to add" rather than "couldn't run it"), not silently.
+    ``completion_fn`` is still the offline test seam (passed straight
+    through); any failure (call exception, empty response) also returns
+    ``None`` — enrichment must never break body assembly.
     """
     if model is None:
+        from mylonite._cli_io import echo_err
+
+        echo_err(
+            "warning: --llm-enrich was requested but no model is configured -- "
+            "skipping the LLM suggestion (the rest of the PR body is unaffected)."
+        )
         return None
     prompt = (
         "You are a security engineer. In 2-3 sentences, suggest a concrete, "
