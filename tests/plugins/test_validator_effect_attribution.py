@@ -285,6 +285,7 @@ def _validate(
         return run
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=iterations,
         completion_fn=_harness,
         run_build=False,

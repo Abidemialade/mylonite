@@ -1499,6 +1499,11 @@ def test_scan_key_and_model_preflight_runs_before_the_server_launches(
     if case == "bad_model":
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         argv += ["--model", "not-a-real/model"]
+    else:
+        # A model IS chosen here (no default provider/model any more) --
+        # this case tests the missing-CREDENTIAL path specifically, not the
+        # separate no-model-chosen-at-all one.
+        argv += ["--model", "anthropic/claude-haiku-4-5-20251001"]
     result = runner.invoke(app, argv)
     out = result.stderr or result.output
     assert result.exit_code == EXIT_CONFIG, out
@@ -6471,37 +6476,33 @@ def test_dispatch_emit_real_reference_generator_receives_context() -> None:
     assert "provider='openai'" in generated.source
 
 
-# --- the default model must be the same on every command ----------------------
+# --- no command may fall back to a hardcoded default model ---------------------
 
 
-def test_every_command_shares_one_default_model() -> None:
-    """`scan` drifted onto a different default from every sibling command.
+def test_no_command_falls_back_to_a_hardcoded_default_model() -> None:
+    """REG-1b (CLAUDE.md, 2026-09-30): there is no default provider or model.
 
-    `validate`, `gate`, `ablate` and `check` all defaulted to Haiku; `scan`
-    defaulted to Sonnet. That is roughly 3x the token cost, and because the
-    default model is also the PLANNER -- the agent under test -- the more
-    injection-resistant model made the same target yield fewer findings under
-    `scan` than the project's own published scorecard measured. A user budgeting
-    from the quickstart under-budgeted, on the one command meant to find things.
-
-    Pinning it here because the drift is invisible: nothing failed, the numbers
-    were just quietly different.
+    `scan`, `validate`, `gate` and `ablate` used to each have their own
+    ``base_model = model or "<literal>"`` fallback -- and disagreed with each
+    other (`scan` defaulted to Sonnet, the rest to Haiku, so a user budgeting
+    from the quickstart under-budgeted on the one command meant to find
+    things; this exact pin used to catch the disagreement, not the fallback
+    itself). None of the four has a fallback at all any more -- each resolves
+    `_require_model_chosen_or_exit`, which exits before any command disagrees
+    about a default by construction: there is nothing left to disagree
+    about. `scripts/check_no_hardcoded_models.py` is the broader, repo-wide
+    version of this same check.
     """
     import re
     from pathlib import Path
 
     source = Path(__file__).resolve().parents[1] / "src" / "mylonite" / "cli.py"
-    defaults = set(
-        re.findall(r'base_model = model or "([^"]+)"', source.read_text(encoding="utf-8"))
+    text = source.read_text(encoding="utf-8")
+    assert not re.search(r'base_model = model or "[^"]+"', text), (
+        'a hardcoded `base_model = model or "<literal>"` fallback reappeared in '
+        "cli.py -- use `_require_model_chosen_or_exit(model)` instead"
     )
-    assert len(defaults) == 1, (
-        f"commands disagree on the default model: {sorted(defaults)}. "
-        "Every command's default must match, and must match the documented one."
-    )
-    assert "haiku" in defaults.pop().lower(), (
-        "the documented default is Haiku (docs/quickstart.md, docs/validation.md); "
-        "changing it means changing those pages and the published cost guidance too"
-    )
+    assert "_require_model_chosen_or_exit" in text
 
 
 # --- 0.10.2: every missing --authorize error names the exact value ---

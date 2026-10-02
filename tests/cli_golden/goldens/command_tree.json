@@ -1121,7 +1121,7 @@
     },
     "validate": {
       "epilog": "Examples:\n\n`mylonite validate .mylonite/generated/<slug>` -- re-prove the emitted test (the validation engine).\n\n`mylonite validate <dir> --fast` -- skip the differential leg (faster, weaker guarantee).\n\n`mylonite validate <dir> --target-file app.yaml` -- re-drive YOUR real app, not the twin.\n\nExit codes: 0 kept | 2 config/usage | 4 provider unreachable | 5 not kept (rejected).",
-      "help": "Run a generated test through the differential-oracle validator (LIVE).\n\nRuns LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM\n(Haiku), plus the metamorphic re-drives, and needs a provider\n(ANTHROPIC_API_KEY). The LLM calls and tokens it used are printed when it\nfinishes. Validates the ACTUAL committed test on disk (no\nre-emit), then — on a clean discriminating run — RECORDS the canonical guarded\nfixtures into the generated dir's ``fixtures/`` and runs that on-disk test\noffline as a full-pass build, so the command leaves a ready-to-commit,\nreplayable test + fixtures behind. Renders a per-leg report (build /\ndifferential / flakiness / metamorphic) with the mutation score and the kept\nverdict. Exit 0 when the test is kept, 5 when it is cleanly rejected, 4 with\nno provider.",
+      "help": "Run a generated test through the differential-oracle validator (LIVE).\n\nRuns LIVE by default: ~``iterations`` iterations x 2 twins against the model\nyou chose, plus the metamorphic re-drives, and needs a configured provider\n(see ``docs/cli-reference.md``). The LLM calls and tokens it used are\nprinted when it finishes. Validates the ACTUAL committed test on disk (no\nre-emit), then — on a clean discriminating run — RECORDS the canonical guarded\nfixtures into the generated dir's ``fixtures/`` and runs that on-disk test\noffline as a full-pass build, so the command leaves a ready-to-commit,\nreplayable test + fixtures behind. Renders a per-leg report (build /\ndifferential / flakiness / metamorphic) with the mutation score and the kept\nverdict. Exit 0 when the test is kept, 5 when it is cleanly rejected, 4 with\nno provider.",
       "hidden": false,
       "name": "validate",
       "params": [
@@ -1284,7 +1284,7 @@
         {
           "default": "None",
           "envvar": null,
-          "help": "The dir (or test file) emitted by `mylonite generate`. Runs the differential-oracle validator LIVE by default — real LLM calls (Haiku): ~5 iterations x 2 twins plus metamorphic re-drives; the LLM calls and tokens used are printed when it finishes. Needs a provider (ANTHROPIC_API_KEY).",
+          "help": "The dir (or test file) emitted by `mylonite generate`. Runs the differential-oracle validator LIVE by default — real LLM calls against the model you chose: ~5 iterations x 2 twins plus metamorphic re-drives; the LLM calls and tokens used are printed when it finishes. Needs a configured provider -- see docs/cli-reference.md.",
           "is_flag": false,
           "multiple": false,
           "name": "target",

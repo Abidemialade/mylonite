@@ -71,6 +71,7 @@ def test_build_test_that_fails_or_skips_is_never_kept(
     exploit = _build_exploit()
     test = _emit_test(exploit).model_copy(update={"source": source})
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
         record_fixtures_dir=tmp_path / "gen" / "fixtures",
@@ -95,7 +96,7 @@ def test_skipped_build_is_not_a_plain_keep() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
-        iterations=2, completion_fn=_ScriptedCompletion(), run_build=False
+        model="stub", iterations=2, completion_fn=_ScriptedCompletion(), run_build=False
     )
     report = validator.validate(
         test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
@@ -152,7 +153,7 @@ def test_custom_keep_without_differential_or_effect_is_stable_not_proven(
     twin, no control, no effect probe. The judges are stubbed to agree."""
     test = ReferencePytestGenerator().emit(_custom_exploit())
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion
+        model="stub", iterations=2, vuln_threshold=2, completion_fn=_cust_completion
     )
     monkeypatch.setattr(validator, "_multi_judge_consensus", lambda runs, payload: 1.0)
     report = validator.validate(test, _FiringNoProbeAdapter(), ReferenceVulnerableOracle())
@@ -175,7 +176,7 @@ def test_custom_keep_with_effect_proof_is_kept() -> None:
     an effect probe that confirms the damage is the proof, so the label is KEPT."""
     test = ReferencePytestGenerator().emit(_custom_exploit())
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion
+        model="stub", iterations=2, vuln_threshold=2, completion_fn=_cust_completion
     )
     report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 

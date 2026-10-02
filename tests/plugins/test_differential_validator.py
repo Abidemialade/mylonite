@@ -273,6 +273,7 @@ def test_kept_happy_path() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=5,
         completion_fn=_ScriptedCompletion(),
     )
@@ -297,6 +298,7 @@ def test_sub_threshold_vuln_fire_rejects() -> None:
     test = _emit_test(exploit)
     # Only let the vulnerable twin fire twice across the 5 iterations.
     validator = DifferentialValidator(
+        model="stub",
         iterations=5,
         completion_fn=_ScriptedCompletion(vuln_fire_budget=2),
     )
@@ -322,6 +324,7 @@ def test_build_failure_rejects() -> None:
     # Corrupt the emitted source so pytest cannot collect it (syntax error).
     broken = good.model_copy(update={"source": "def test_x(:\n    pass\n"})
     validator = DifferentialValidator(
+        model="stub",
         iterations=5,
         completion_fn=_ScriptedCompletion(),
     )
@@ -340,6 +343,7 @@ def test_mutation_score_reflects_differential() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=3,
         completion_fn=_ScriptedCompletion(),
     )
@@ -358,6 +362,7 @@ def test_metamorphic_outcome_present() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
     )
@@ -376,6 +381,7 @@ def test_metamorphic_multiple_strategies_robustness() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
     )
@@ -409,7 +415,7 @@ def test_metamorphic_genuinely_drives_perturbed_body_through_twins() -> None:
     expected_perturbed = {name: transform(original_body) for name, transform in strategies.items()}
 
     spy = _ScriptedCompletion()
-    validator = DifferentialValidator(iterations=1, completion_fn=spy)
+    validator = DifferentialValidator(model="stub", iterations=1, completion_fn=spy)
     report = validator.validate(
         test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
     )
@@ -447,7 +453,7 @@ def test_run_perturbed_drives_twins_concurrently() -> None:
     exploit = _build_exploit()
     payload = exploit.payload
     completion = _PeakConcurrencySleepyCompletion(delay=0.05)
-    pair_validator = DifferentialValidator(iterations=1, completion_fn=completion)
+    pair_validator = DifferentialValidator(model="stub", iterations=1, completion_fn=completion)
 
     pair_validator._run_perturbed(exploit, payload.body)
 
@@ -471,7 +477,9 @@ def test_invoke_and_judge_async_returns_none_on_adapter_error(monkeypatch) -> No
     monkeypatch.setattr(reference_target_adapter.InProcessReferenceAdapter, "invoke", _boom)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
     assert result is None
 
@@ -498,7 +506,9 @@ def test_invoke_and_judge_async_returns_none_on_judge_non_recoverable_error(monk
     monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _boom)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
     assert result is None
 
@@ -517,7 +527,9 @@ def test_invoke_and_judge_async_reraises_budget_exceeded_from_judge(monkeypatch)
     monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _boom)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     with pytest.raises(BudgetExceededError):
         asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
 
@@ -550,7 +562,7 @@ def test_multi_judge_consensus_excludes_non_recoverable_judge_errors(monkeypatch
 
     exploit = _build_exploit()
     validator = DifferentialValidator(
-        iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
     )
     run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
     agree = validator._multi_judge_consensus([run], exploit.payload)
@@ -575,7 +587,7 @@ def test_multi_judge_consensus_returns_zero_when_every_judge_errors(monkeypatch)
 
     exploit = _build_exploit()
     validator = DifferentialValidator(
-        iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion(), consensus_judges=3
     )
     run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
     agree = validator._multi_judge_consensus([run], exploit.payload)
@@ -596,7 +608,9 @@ def test_multi_judge_consensus_reraises_budget_exceeded(monkeypatch) -> None:
     monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _budget_boom)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
     with pytest.raises(BudgetExceededError):
         validator._multi_judge_consensus([run], exploit.payload)
@@ -624,7 +638,9 @@ def test_run_perturbed_does_not_invert_a_guarded_adapter_error_into_resisted(mon
     )
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     _vuln_fired, guard_resisted, guard_fired = validator._run_perturbed(
         exploit, exploit.payload.body
     )
@@ -666,6 +682,7 @@ def test_metamorphic_gates_kept_when_robustness_below_threshold() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(vuln_fire_budget=2),
     )
@@ -748,6 +765,7 @@ def test_metamorphic_passed_is_threshold_based_not_all_or_nothing(
     _patch_run_perturbed_by_strategy(monkeypatch, exploit, names, outcome_for_name)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=1,
         completion_fn=_ScriptedCompletion(),
         metamorphic_strategies=names,
@@ -777,6 +795,7 @@ def test_metamorphic_detail_distinguishes_guard_bypassed_from_attack_malformed(
     _patch_run_perturbed_by_strategy(monkeypatch, exploit, names, outcome_for_name)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=1,
         completion_fn=_ScriptedCompletion(),
         metamorphic_strategies=names,
@@ -810,6 +829,7 @@ def test_metamorphic_inverted_case_guard_fired_without_vuln_corroboration_is_mal
     _patch_run_perturbed_by_strategy(monkeypatch, exploit, names, outcome_for_name)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=1,
         completion_fn=_ScriptedCompletion(),
         metamorphic_strategies=names,
@@ -874,6 +894,7 @@ def test_mutation_score_seed_level_and_matrix_surfaced() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=3,
         completion_fn=_ScriptedCompletion(),
     )
@@ -1016,7 +1037,11 @@ def test_validate_custom_target_keeps_when_effect_confirmed() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
     assert report.kept is True
@@ -1028,7 +1053,11 @@ def test_validate_custom_target_rejects_when_effect_not_confirmed() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     report = validator.validate(test, _FakeCustomAdapter("false"), ReferenceVulnerableOracle())
     assert report.kept is False
@@ -1072,7 +1101,11 @@ def test_validate_custom_target_effect_leg_is_report_only_when_unprobed() -> Non
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     report = validator.validate(test, _NoProbeButFiring(), ReferenceVulnerableOracle())
     effect = next(o for o in report.outcomes if o.stage == "effect")
@@ -1111,7 +1144,11 @@ def test_validate_custom_target_rejects_when_effect_probe_errored() -> None:
         return _CustomRun(finding=True, effect_confirmed="errored", response=None)
 
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
@@ -1134,11 +1171,14 @@ def test_vuln_threshold_default_is_non_trivial_at_iterations_one() -> None:
     (the fastest, weakest gate) genuinely meaningful: it still requires the
     attack to have fired at least once. At iterations >= 2 the original N-1
     formula is unaffected (already non-trivial there)."""
-    assert DifferentialValidator(iterations=1, run_build=False)._vuln_threshold == 1
-    assert DifferentialValidator(iterations=5, run_build=False)._vuln_threshold == 4
+    assert DifferentialValidator(model="stub", iterations=1, run_build=False)._vuln_threshold == 1
+    assert DifferentialValidator(model="stub", iterations=5, run_build=False)._vuln_threshold == 4
     # An explicit override still always wins over either formula.
     assert (
-        DifferentialValidator(iterations=1, vuln_threshold=0, run_build=False)._vuln_threshold == 0
+        DifferentialValidator(
+            model="stub", iterations=1, vuln_threshold=0, run_build=False
+        )._vuln_threshold
+        == 0
     )
 
 
@@ -1148,6 +1188,7 @@ def test_validate_custom_target_streams_progress() -> None:
     test = ReferencePytestGenerator().emit(exploit)
     seen: list[str] = []
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1174,6 +1215,7 @@ def test_validate_custom_target_iteration_timeout_aborts_cleanly() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1197,6 +1239,7 @@ def test_custom_differential_leg_keeps_when_control_resists() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1225,6 +1268,7 @@ def test_custom_differential_leg_rejects_when_control_is_theater() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1264,6 +1308,7 @@ def test_a_synthetic_twin_PASS_does_not_claim_the_users_control_carries_it() -> 
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1292,6 +1337,7 @@ def test_a_server_layer_PASS_still_makes_the_strong_claim() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1316,6 +1362,7 @@ def test_custom_differential_server_layer_reject_reads_honestly() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -1361,6 +1408,7 @@ def test_custom_differential_leg_metric_is_the_differential_metric_not_flakiness
         return _CustomRun(finding=pattern[idx], effect_confirmed="unprobed", response=None)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=n,
         vuln_threshold=1,
         completion_fn=_cust_completion,
@@ -1404,7 +1452,11 @@ def test_custom_no_guarded_factory_omits_differential_leg() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
-        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
@@ -1429,7 +1481,7 @@ def test_custom_build_leg_actually_runs_pytest() -> None:
     good = ReferencePytestGenerator().emit(exploit)
     broken = good.model_copy(update={"source": "def test_x(:\n    pass\n"})
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion
+        model="stub", iterations=1, vuln_threshold=1, completion_fn=_cust_completion
     )
     report = validator.validate(broken, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
@@ -1446,7 +1498,7 @@ def test_custom_build_leg_passes_for_well_formed_test() -> None:
     exploit = _custom_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion
+        model="stub", iterations=1, vuln_threshold=1, completion_fn=_cust_completion
     )
     report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
 
@@ -1507,7 +1559,9 @@ def test_invoke_and_judge_async_returns_none_when_no_verdict_was_reached(monkeyp
     monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _fallback_verdict)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
 
     assert result is None, "a non-verdict must not be reported as resistance"
@@ -1529,7 +1583,9 @@ def test_invoke_and_judge_async_still_returns_a_real_verdict(monkeypatch) -> Non
     monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _real_negative)
 
     exploit = _build_exploit()
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
 
     assert result is False
@@ -1658,7 +1714,9 @@ def test_kept_is_false_when_the_guard_never_reached_a_verdict() -> None:
     never written."""
     exploit = _build_exploit()
     test = _emit_test(exploit)
-    validator = DifferentialValidator(iterations=5, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=5, completion_fn=_ScriptedCompletion()
+    )
 
     with pytest.MonkeyPatch.context() as mp:
         # `_resisted` is not what's under test — the DECISION's use of it is.
@@ -1683,6 +1741,7 @@ def test_kept_is_false_for_an_undecided_guard_even_with_one_metamorphic_strategy
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=5,
         completion_fn=_ScriptedCompletion(),
         metamorphic_strategies=["paraphrase"],
@@ -1712,6 +1771,7 @@ def test_custom_path_does_not_fabricate_resistance_from_absent_findings() -> Non
         return _CustomRun(finding=factory is None, effect_confirmed="unprobed", response=None)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=n,
         vuln_threshold=1,
         completion_fn=_cust_completion,
@@ -1753,7 +1813,7 @@ def test_every_validation_call_runs_under_a_call_counter() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     completion = _CountedCompletion()
-    validator = DifferentialValidator(iterations=2, completion_fn=completion)
+    validator = DifferentialValidator(model="stub", iterations=2, completion_fn=completion)
     validator.validate(test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle())
     assert completion.uncounted_calls == 0
 
@@ -1764,6 +1824,7 @@ def test_metamorphic_stage_fails_closed_when_its_budget_is_reached() -> None:
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
         metamorphic_max_llm_calls=1,
@@ -1779,7 +1840,7 @@ def test_metamorphic_stage_fails_closed_when_its_budget_is_reached() -> None:
 
 def test_metamorphic_budget_must_be_positive() -> None:
     with pytest.raises(ValueError, match="metamorphic_max_llm_calls"):
-        DifferentialValidator(iterations=1, metamorphic_max_llm_calls=0)
+        DifferentialValidator(model="stub", iterations=1, metamorphic_max_llm_calls=0)
 
 
 def test_validated_model_stamp_names_one_model_when_roles_agree() -> None:
@@ -1818,6 +1879,7 @@ def _validate_with_runs(
         return next(it)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=iterations,
         vuln_threshold=vuln_threshold,
         completion_fn=_cust_completion,
@@ -2047,7 +2109,11 @@ def test_run_custom_iteration_pairs_the_evidence_with_its_own_exploit() -> None:
             return result
 
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
@@ -2064,7 +2130,11 @@ def test_run_custom_iteration_records_the_real_effect_value_for_a_non_finding() 
     """A defended run's effect value ("false") comes from the judge evidence, not
     a hard-coded "unprobed"."""
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     run = validator._run_custom_iteration(
         _FakeCustomAdapter("false"), "excessive-agency-send-email-direct-unconfirmed"
@@ -2088,7 +2158,11 @@ def test_run_custom_iteration_records_the_mechanism_for_an_unattributed_finding(
             )
 
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     run = validator._run_custom_iteration(
         _UnattributedButExecuted("unattributed"), "excessive-agency-send-email-direct-unconfirmed"
@@ -2151,7 +2225,7 @@ def test_contradicted_judge_success_does_not_count_as_a_fire(monkeypatch) -> Non
     monkeypatch.setattr(
         reference_target_adapter.InProcessReferenceAdapter, "invoke", _recorded_invoke
     )
-    validator = DifferentialValidator(iterations=1, completion_fn=replay)
+    validator = DifferentialValidator(model="stub", iterations=1, completion_fn=replay)
 
     fired = asyncio.run(validator._invoke_and_judge_async("vulnerable", payload))
 
@@ -2161,7 +2235,9 @@ def test_contradicted_judge_success_does_not_count_as_a_fire(monkeypatch) -> Non
 def test_contradicted_judge_success_gets_no_consensus_votes() -> None:
     """Repeated judging of the same contradicted success agrees 0 times."""
     payload, response, replay = _recorded_guarded_hallucination()
-    validator = DifferentialValidator(iterations=1, completion_fn=replay, consensus_judges=3)
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=replay, consensus_judges=3
+    )
     run = _CustomRun(finding=True, effect_confirmed="unprobed", response=response)
 
     assert validator._multi_judge_consensus([run], payload) == 0.0
@@ -2207,7 +2283,7 @@ def test_a_below_floor_judge_success_on_the_guarded_twin_is_not_resistance(
     exploit = _build_exploit()
     test = _emit_test(exploit)
     validator = DifferentialValidator(
-        iterations=3, completion_fn=_BelowFloorJudgeCompletion(), run_build=False
+        model="stub", iterations=3, completion_fn=_BelowFloorJudgeCompletion(), run_build=False
     )
     report = validator.validate(
         test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
@@ -2246,7 +2322,9 @@ class _CallCountingCompletion(_ScriptedCompletion):
 def test_reference_iteration_drives_only_the_findings_seed() -> None:
     """Each differential iteration attacks both twins with the finding's seed
     and nothing else, so the verdict is about the attack being validated."""
-    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
 
     tally = validator._run_iteration(_EXPLOIT_PATTERN_ID)
 
@@ -2275,7 +2353,7 @@ def test_every_differential_scan_is_scoped_to_the_findings_pattern(
     monkeypatch.setattr(rv, "build_scan", _spy)
     exploit = _build_exploit()
     validator = DifferentialValidator(
-        iterations=3, completion_fn=_ScriptedCompletion(), run_build=False
+        model="stub", iterations=3, completion_fn=_ScriptedCompletion(), run_build=False
     )
     report = validator.validate(
         _emit_test(exploit), ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
@@ -2295,7 +2373,9 @@ def test_scoped_iteration_makes_fewer_llm_calls_than_the_full_seed_bank() -> Non
     from mylonite.scan.wiring import build_scan, note_id_counter
 
     scoped = _CallCountingCompletion()
-    DifferentialValidator(iterations=1, completion_fn=scoped)._run_iteration(_EXPLOIT_PATTERN_ID)
+    DifferentialValidator(model="stub", iterations=1, completion_fn=scoped)._run_iteration(
+        _EXPLOIT_PATTERN_ID
+    )
 
     full = _CallCountingCompletion()
 
@@ -2344,10 +2424,10 @@ def test_no_metamorphic_request_repeats_a_differential_request() -> None:
     exploit = _build_exploit()
     differential, metamorphic = _KeySpy(), _KeySpy()
 
-    DifferentialValidator(iterations=1, completion_fn=differential)._run_iteration(
+    DifferentialValidator(model="stub", iterations=1, completion_fn=differential)._run_iteration(
         exploit.pattern_id
     )
-    validator = DifferentialValidator(iterations=1, completion_fn=metamorphic)
+    validator = DifferentialValidator(model="stub", iterations=1, completion_fn=metamorphic)
     validator._metamorphic_outcome(exploit)
 
     assert differential.keys and metamorphic.keys
@@ -2358,7 +2438,7 @@ def test_no_metamorphic_request_repeats_a_differential_request() -> None:
 def test_each_metamorphic_probe_gets_its_own_note_id_and_both_twins_share_it() -> None:
     exploit = _build_exploit()
     spy = _KeySpy()
-    validator = DifferentialValidator(iterations=1, completion_fn=spy)
+    validator = DifferentialValidator(model="stub", iterations=1, completion_fn=spy)
 
     validator._metamorphic_outcome(exploit)
     first_run = [t for t in spy.user_turns if "n_meta_" in t]
@@ -2383,7 +2463,7 @@ def test_a_pattern_no_seed_matches_is_never_kept() -> None:
     on either twin, so nothing fires and the test is rejected, never kept."""
     exploit = _build_exploit(pattern_id="no-bundled-seed-has-this-pattern")
     validator = DifferentialValidator(
-        iterations=2, completion_fn=_ScriptedCompletion(), run_build=False
+        model="stub", iterations=2, completion_fn=_ScriptedCompletion(), run_build=False
     )
 
     tally = validator._run_iteration(exploit.pattern_id)

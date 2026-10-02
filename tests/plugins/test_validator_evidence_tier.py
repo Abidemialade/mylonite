@@ -51,6 +51,7 @@ def _validate_custom(
         )
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=len(tiers),
         vuln_threshold=len(tiers),
         completion_fn=_cust_completion,
@@ -120,6 +121,7 @@ def test_a_black_box_keep_with_a_passing_differential_is_capped_in_its_notes() -
         )
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         vuln_threshold=2,
         completion_fn=_cust_completion,
@@ -173,7 +175,11 @@ def test_a_run_with_no_recorded_tier_is_not_judge_only() -> None:
 def test_a_real_custom_run_records_its_evidence_tier() -> None:
     """The effect probe confirmed the effect, so the run rests on state."""
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     run = validator._run_custom_iteration(_FakeCustomAdapter("true"), _custom_exploit().pattern_id)
     assert run.finding is True
@@ -219,7 +225,7 @@ def _validate_reference(vuln_mechanism: str) -> Any:
     from mylonite.contracts import ValidationOutcome
 
     passing = {"passed": True, "detail": "stub", "metric": 1.0}
-    validator = DifferentialValidator(iterations=2, completion_fn=_cust_completion)
+    validator = DifferentialValidator(model="stub", iterations=2, completion_fn=_cust_completion)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(DifferentialValidator, "_run_iteration", _iteration)
         mp.setattr(
@@ -276,7 +282,11 @@ def test_a_real_run_against_an_http_agent_is_marked_black_box() -> None:
             return TargetDescriptor(target_id="rest:agent", kind="http-agent")
 
     validator = DifferentialValidator(
-        iterations=1, vuln_threshold=1, completion_fn=_cust_completion, run_build=False
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
     )
     pid = _custom_exploit().pattern_id
     assert validator._run_custom_iteration(_HttpAgent("unprobed"), pid).black_box is True

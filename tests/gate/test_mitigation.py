@@ -271,7 +271,9 @@ def test_llm_enrichment_is_labelled_and_opt_in():
     assert calls["n"] == 0
 
     # opt-in: labelled block, completion called once
-    body_rich = build_pr_body(ex, _report(), llm_enrich=True, completion_fn=fake_completion)
+    body_rich = build_pr_body(
+        ex, _report(), llm_enrich=True, completion_fn=fake_completion, model="stub"
+    )
     assert "Unverified LLM suggestion" in body_rich
     assert "untrusted envelope" in body_rich
     assert calls["n"] == 1
@@ -466,7 +468,9 @@ def test_llm_suggestion_and_its_prompt_are_redacted():
 
         return _Resp()
 
-    body = build_pr_body(ex, _report(), llm_enrich=True, completion_fn=fake_completion)
+    body = build_pr_body(
+        ex, _report(), llm_enrich=True, completion_fn=fake_completion, model="stub"
+    )
     assert prompts and fake_key not in prompts[0]
     assert "Unverified LLM suggestion" in body
     assert fake_key not in body
