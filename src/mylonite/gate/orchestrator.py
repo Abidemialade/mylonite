@@ -234,11 +234,14 @@ def _process_one_finding(
     written = [test_path, exploit_path]
     _write_redacted_exploit(exploit_path, exploit)
 
-    report = validate_fn(generated)
-    # The validator may write its own copy of the exploit next to the test
-    # (the reference route records fixtures there). Write the redacted record
-    # again so whatever ends up committed, or kept for debugging, is redacted.
-    _write_redacted_exploit(exploit_path, exploit)
+    try:
+        report = validate_fn(generated)
+    finally:
+        # The validator may write its own copy of the exploit next to the test
+        # (the reference route records fixtures there). Write the redacted
+        # record again, even if validation raised, so whatever ends up
+        # committed or kept for debugging is redacted.
+        _write_redacted_exploit(exploit_path, exploit)
     if report is None:
         reason = "the validator returned nothing"
         message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."
