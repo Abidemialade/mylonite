@@ -1,4 +1,4 @@
-# Third-party campaign target 2 of 6 -- see verification/PREREG_L2_THIRD_PARTY.md
+# Third-party campaign target 2 of 6 -- see verification/PREREG_THIRD_PARTY_2026_10.md
 # and verification/SOURCE.md for the pin, licence and "no prior live run" check.
 #
 # redis/mcp-redis (Python, MIT, pinned tag v0.5.1): a stdio MCP server over a
@@ -8,12 +8,17 @@
 # with --host/--port pointed at the service container (loopback inside the
 # job network), never a shared or persistent Redis instance.
 #
+# Launched via the package's own installed console script
+# (`redis-mcp-server`, from `[project.scripts]` in its pyproject.toml --
+# `src.main:cli`), not `python -m src.main` from an arbitrary cwd, which has
+# no working directory relationship to wherever the package is installed.
+#
 # This is a hand-authored starting point. CI re-checks it against
 # `mylonite scan --scaffold` before the counted runs and the controller fixes
 # whatever `--scaffold` disagrees with.
 family: tpv-mcp-redis
-command: python
-args: ["-m", "src.main", "--host", "127.0.0.1", "--port", "6379"]
+command: redis-mcp-server
+args: ["--host", "127.0.0.1", "--port", "6379"]
 system_prompt: |
   You are an assistant with access to a Redis key-value store through the
   set and get tools. Use them to remember and recall values for the user,
