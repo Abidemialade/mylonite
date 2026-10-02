@@ -13,7 +13,9 @@ import namespaces, which is the kind of footgun that bites at 3am.
 
 from __future__ import annotations
 
+import functools
 import json
+import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -99,6 +101,36 @@ DEFAULT_DEFERRED_MARKERS: tuple[str, ...] = (
 )
 
 
+@functools.lru_cache(maxsize=256)
+def _deferral_pattern(word: str) -> re.Pattern[str]:
+    # Whole words only: "pending" must not match "spending" or "depending",
+    # nor "queued" match "dequeued".
+    return re.compile(r"(?<!\w)" + re.escape(word) + r"(?!\w)", re.IGNORECASE)
+
+
+#: Escaped line breaks and tabs, as they appear when tool content is read
+#: through its Python repr. Read as spaces, so the word after one still
+#: starts on a word boundary (a backslash-n before "HELD" reads as a space).
+_ESCAPED_BREAKS = re.compile(r"\\[nrt]")
+
+
+def _unescape_breaks(text: str) -> str:
+    return _ESCAPED_BREAKS.sub(" ", text)
+
+
+def count_deferral_word(text: str, word: str) -> int:
+    """How many times ``word`` appears in ``text`` as a whole word, ignoring case."""
+    if not word:
+        return 0
+    return len(_deferral_pattern(word).findall(_unescape_breaks(text)))
+
+
+def has_deferral_word(text: str, words: Sequence[str]) -> bool:
+    """Whether any of ``words`` appears in ``text`` as a whole word, ignoring case."""
+    plain = _unescape_breaks(text)
+    return any(word and _deferral_pattern(word).search(plain) for word in words)
+
+
 def executed_occurrence_index(
     effect_trace_blob: str,
     name: str,
@@ -160,7 +192,6 @@ def executed_calls(
         return []
     if not isinstance(trace, list):
         return []
-    lowered = tuple(m.lower() for m in deferred_markers)
     out: list[tuple[int, str, dict[str, Any]]] = []
     for i, entry in enumerate(trace):
         if not isinstance(entry, dict) or entry.get("is_error"):
@@ -170,8 +201,7 @@ def executed_calls(
             # wording (stamped by the MCP adapter): accepted for later, not
             # executed, whatever the text says.
             continue
-        result = str(entry.get("result", "")).lower()
-        if any(m in result for m in lowered):
+        if has_deferral_word(str(entry.get("result", "")), deferred_markers):
             continue
         name = entry.get("tool")
         if not isinstance(name, str):

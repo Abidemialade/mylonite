@@ -629,6 +629,10 @@ async def test_no_marker_probe_change_without_a_link_is_unattributed() -> None:
 # --- deferral markers compare B with A ----------------------------------------------
 
 
+_HELD_PROBE = EffectProbeSpec(
+    verify_tool="list_outbox", expect_marker=MARKER, deferred_markers=("held",)
+)
+
 _DEFERRING_PROBE = EffectProbeSpec(
     verify_tool="list_outbox", expect_marker=MARKER, deferred_markers=("queued for approval",)
 )
@@ -665,12 +669,72 @@ async def test_a_new_deferral_is_deferred_even_with_the_marker() -> None:
 @pytest.mark.parametrize("word", DEFAULT_DEFERRED_MARKERS)
 async def test_a_deferral_worded_reply_with_a_landed_effect_is_true(word: str) -> None:
     """The reply says the send is held or queued, but the record landed at once.
-    The call stays a candidate cause, so the probe credits the effect to it."""
-    _register(_OUTBOX_PROBE)
+    The probe names the word that marks a held item, and it did not grow, so the
+    new record is a landed send and the probe credits it to the call."""
+    _register(_HELD_PROBE)
     store = _Store(send_reply=f"{word}: will go out shortly")
     meta = await _invoke(store, _Script([_send()]))
     assert meta["trace_outcome"] == "dispatched-deferred"
     assert meta["effect_confirmed"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_a_new_record_after_a_deferred_reply_is_unattributed_without_held_markers() -> None:
+    """With no word that marks a held item, a new record after a "queued" reply
+    could be the held item itself in a view that lists both, so it is credited
+    to nothing (it reads NOT TESTED, never a finding)."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(send_reply="queued: will go out shortly")
+    meta = await _invoke(store, _Script([_send()]))
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_a_mixed_trace_reports_the_deferred_call() -> None:
+    """A queued send next to a call that went through reads dispatched-ok, and
+    the metadata still says a call was deferred."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(send_reply="queued: will go out shortly", drop_sends=True)
+    meta = await _invoke(store, _Script([_send(), ("log_event", {"text": "x"})]))
+    assert meta["trace_outcome"] == "dispatched-ok"
+    assert meta["any_deferred"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_a_plain_trace_reports_no_deferred_call() -> None:
+    _register(_OUTBOX_PROBE)
+    meta = await _invoke(_Store(), _Script([_send()]))
+    assert meta["any_deferred"] == "false"
+
+
+@pytest.mark.asyncio
+async def test_a_deferral_word_inside_another_word_is_not_a_deferral() -> None:
+    _register(_OUTBOX_PROBE)
+    store = _Store(send_reply="sent; spending report attached")
+    meta = await _invoke(store, _Script([_send()]))
+    assert meta["trace_outcome"] == "dispatched-ok"
+    assert meta["effect_confirmed"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_reply_only_words_make_a_call_deferred_but_never_mark_a_hold() -> None:
+    """A reply-only word classifies the reply; it is never a held-item word, so
+    the same word growing in the verify output does not read "deferred"."""
+    _register(
+        EffectProbeSpec(
+            verify_tool="list_outbox", expect_marker=MARKER, deferred_reply_words=("job accepted",)
+        )
+    )
+    store = _Store(send_reply="Job accepted. id=j-1")
+
+    def _job_listed() -> None:
+        store.outbox.append(f"Job accepted: to={MARKER}")
+
+    meta = await _invoke(store, _Script([_send()], hooks={1: _job_listed}))
+    assert meta["trace_outcome"] == "dispatched-deferred"
+    assert meta["effect_confirmed"] != "deferred"
+    (entry,) = json.loads(meta["effect_trace"])
+    assert entry["deferred"] is True
 
 
 @pytest.mark.asyncio

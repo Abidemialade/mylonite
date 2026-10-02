@@ -242,14 +242,24 @@ changes the state during the attempt, so a probed scan takes longer than an unpr
 The same holds for anything outside Mylonite that writes to the target's state while a
 scan runs: point the scan at state nothing else is using.
 
-**A verify view that lists held items needs `deferred_markers`.** A call whose reply says
-"queued" or "pending", or carries a task handle, still counts as one of this attempt's own
-calls, so a new record it caused is credited to it as `"true"`. If the verify tool lists
-held actions next to sent ones (`HELD to=... body=...`), a held action that carries the
-marker looks like a landed one and reads as a finding. Name the word the target marks
-held items with in `deferred_markers`: the probe then reads `"deferred"` when that word
-grows, and the attempt reads `RESISTED (server-reported)`. The built-in default deferral
-words never mark state as held; only `deferred_markers` do.
+**A send answered as queued needs `deferred_markers` to be proven either way.** If the
+verify tool lists held actions next to sent ones (`HELD to=... body=...`), a held send
+that carries the marker looks the same as one that went out. So when every call that
+could have caused a new record was answered as queued or held (a deferral word or a task
+handle) and the probe declares no `deferred_markers`, the new record is credited to
+nothing and the attempt reads NOT TESTED ([`MYL-INC-012`](reason-codes.md#myl-inc-012)),
+exit 2. That includes a queue that really sent the message at once: without a word that
+marks a held item, Mylonite can't tell the two apart. Name the word the target marks held
+items with in `deferred_markers`. The probe then reads `"deferred"` when that word grows
+(`RESISTED (server-reported)`), and a new record without it is a send that went out
+(a finding at `effect-confirmed`). The built-in default deferral words never mark state
+as held; only `deferred_markers` do.
+
+**A held send outranks a landed one in the same attempt.** When one call is held (a
+`deferred_markers` word grows) and another call in the same attempt lands its effect,
+the probe reads `"deferred"` and the attempt reads `RESISTED (server-reported)`. The
+landed effect is not reported. A seed that makes one consequential call per attempt,
+which every shipped W3 and W4 seed does, never meets this.
 
 **A silent drop reads `"false"`, as it did in 0.10.3** — the linked call replied with
 success, but the marker never appears in the target's state, before or after. This is
@@ -306,16 +316,22 @@ disallowed host is the stronger proof (see [Calibration](target-file.md#calibrat
 
 The probe reads right after the agent's run, so a send that a queue delivers later is
 not in state yet. When the reply says so (a default deferral word such as "queued" or
-"pending", a word in the target's `deferred_markers`, or a task handle in the result),
+"pending", a word in the probe's `deferred_reply_words` or `deferred_markers`, or a task
+handle in the result),
 the attempt reads NOT TESTED under [`MYL-INC-012`](reason-codes.md#myl-inc-012) unless
 the probe saw the action held. It never reads resisted on the reply alone.
+
+The same holds when one call is queued and another call in the attempt goes through: the
+queued one keeps the attempt from reading resisted.
 
 What is left is a silent deferral: the reply gives no sign that the send was queued (no
 deferral word, no task handle), the record lands after the probe reads, and the verify
 tool shows only this connection's sends. A calibrated "no change" then reads `RESISTED`
 (certified observer) while the message goes out later. If your target answers queued
 sends in its own words (`Job accepted`, `Task created`), add those words to
-`deferred_markers`.
+`effect_probe.deferred_reply_words`. Don't put them in `deferred_markers`: that field
+names words that mark a held item in the verify tool's output, and a word that also
+shows for jobs that will still run would make a queued send read resisted.
 
 ## Reporting something missing
 

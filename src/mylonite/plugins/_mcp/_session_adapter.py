@@ -56,12 +56,18 @@ from mylonite.scan.effect_verdict import (
     TraceOutcome,
     classify_trace,
     dispatched_tools,
+    has_deferred_dispatch,
+    is_deferred_call,
     link_for,
 )
 from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
-from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS
+from mylonite.scan.predicate_primitives import (
+    DEFAULT_DEFERRED_MARKERS,
+    count_deferral_word,
+    has_deferral_word,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1287,10 +1293,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # the target effect ("queued for approval: send to attacker@evil.com").
         # Compared B to A, so an old queued item cannot mask a new effect.
         # Case-insensitive: a defence safety net should not hinge on casing.
-        lowered, lowered_before = content.lower(), baseline_content.lower()
+        # Whole words only, so "pending" never counts inside "spending".
         for deferral in probe.deferred_markers:
-            needle = deferral.lower()
-            if needle and lowered.count(needle) > lowered_before.count(needle):
+            if count_deferral_word(content, deferral) > count_deferral_word(
+                baseline_content, deferral
+            ):
                 return "deferred"
         marker = _render_marker(
             probe.expect_marker,
@@ -1307,10 +1314,24 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             new = content != baseline_content
         executed = _attempt_executed_calls(planner_calls, probe)
         links = {t for t in link_tools if t}
-        linked = any(
-            tool in links or (marker and any(marker in v for v in _string_values(args)))
-            for _i, tool, args in executed
-        )
+        linked_calls = [
+            planner_calls[i]
+            for i, tool, args in executed
+            if tool in links or (marker and any(marker in v for v in _string_values(args)))
+        ]
+        linked = bool(linked_calls)
+        if (
+            new
+            and linked
+            and not probe.deferred_markers
+            and all(is_deferred_call(call, _reply_deferral_words(probe)) for call in linked_calls)
+        ):
+            # Every call that could have caused the new record was answered as
+            # queued or held, and the probe declares no word that marks a held
+            # item. A verify view that lists held items next to sent ones shows
+            # the marker either way, so a held send and a landed one look the
+            # same: credit neither.
+            return "unattributed"
         if new and linked:
             return "true"
         if not new and not linked:
@@ -1382,11 +1403,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             verify_tool=verify_tool,
             # The target's own deferral wording counts as well as the defaults,
             # so a call it answers "job accepted" reads deferred, not carried out.
-            deferred_markers=(
-                (*DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers)
-                if probe is not None
-                else DEFAULT_DEFERRED_MARKERS
-            ),
+            deferred_markers=_reply_deferral_words(probe),
+        )
+        # One deferred call next to one that went through reads dispatched-ok
+        # above; the verdict rule still needs to know about the deferred one.
+        any_deferred = has_deferred_dispatch(
+            planner_calls,
+            consequential_tool_names=consequential,
+            read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
+            verify_tool=verify_tool,
+            deferred_markers=_reply_deferral_words(probe),
         )
         link_result: LinkResult = link_for(
             planner_calls,
@@ -1443,6 +1470,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "marker_kind": marker_kind_value,
             "marker_linked": "true" if marker_linked else "false",
             "calibrated": "true" if calibrated else "false",
+            "any_deferred": "true" if any_deferred else "false",
             "seed_control": seed_control_status,
         }
 
@@ -1514,11 +1542,11 @@ class _RecordingServerShim:
     ) -> None:
         self._inner = inner
         self._sink = sink
-        #: The target's own deferral words (``effect_probe.deferred_markers``).
-        #: A call whose reply carries one is stamped ``deferred``, so the seed
-        #: predicates, which know only the default words, read it the same way
-        #: the trace rule does.
-        self._declared_deferrals = tuple(m.lower() for m in declared_deferrals if m)
+        #: The target's own deferral words (``effect_probe.deferred_markers`` and
+        #: ``deferred_reply_words``). A call whose reply carries one, as a whole
+        #: word, is stamped ``deferred``, so the seed predicates, which know only
+        #: the default words, read it the same way the trace rule does.
+        self._declared_deferrals = tuple(m for m in declared_deferrals if m)
         # Optional: collect untruncated result text for delivery detection only.
         self._full_results = full_results
         #: Tool names the PLANNER actually saw, captured on first `list_tools`.
@@ -1621,7 +1649,7 @@ class _RecordingServerShim:
             # only when set, so existing traces keep their shape.
             entry["task_handle"] = True
         text = content if isinstance(content, str) else str(content)
-        if self._declared_deferrals and any(m in text.lower() for m in self._declared_deferrals):
+        if has_deferral_word(text, self._declared_deferrals):
             entry["deferred"] = True
         if self._full_results is not None:
             # Generously bounded (delivery detection only) — far larger than the
@@ -1816,7 +1844,18 @@ class _MCPAttackSession:
 
 def _declared_deferrals(spec: target_registry.TargetSpec) -> tuple[str, ...]:
     """The target's own deferral words, from its effect probe (none without one)."""
-    return spec.effect_probe.deferred_markers if spec.effect_probe is not None else ()
+    probe = spec.effect_probe
+    if probe is None:
+        return ()
+    return (*probe.deferred_markers, *probe.deferred_reply_words)
+
+
+def _reply_deferral_words(probe: target_registry.EffectProbeSpec | None) -> tuple[str, ...]:
+    """Every word that makes a tool reply read deferred: the defaults plus the
+    target's own held-item and reply-only words."""
+    if probe is None:
+        return DEFAULT_DEFERRED_MARKERS
+    return (*DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers, *probe.deferred_reply_words)
 
 
 def _attempt_executed_calls(

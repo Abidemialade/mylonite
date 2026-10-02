@@ -661,6 +661,7 @@ _TRACE_METADATA_KEYS: Final = (
     "marker_linked",
     "calibrated",
     "seed_control",
+    "any_deferred",
 )
 
 
