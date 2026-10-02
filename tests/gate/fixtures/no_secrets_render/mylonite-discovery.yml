@@ -4,7 +4,9 @@
 # a suggested-fix description. Never blocks merges.
 #
 # Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open
-# the PR — no extra secret needed.
+# the PR — no extra secret needed. Pinned to the model this gate run used;
+# set a MYLONITE_MODEL repository variable to change it without editing this
+# file.
 name: Mylonite discovery
 on:
   schedule:
@@ -32,6 +34,7 @@ jobs:
         # it, so a value holding a quote or `;` would become shell syntax.
         env:
           MYLONITE_AUTHORIZE: ${{ vars.MYLONITE_AUTHORIZE }}
+          MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || 'anthropic/claude-haiku-4-5-20251001' }}
         run: >
           mylonite gate --target-file .mylonite/gate/target.yaml
           --authorize "$MYLONITE_AUTHORIZE" --open-pr

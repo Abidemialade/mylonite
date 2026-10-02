@@ -877,7 +877,11 @@ def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monke
         return _kept_report(generated.filename)
 
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=pr_mod
+        model="anthropic/claude-haiku-4-5-20251001",
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=pr_mod,
     )
     out_dir = tmp_path / ".mylonite" / "gate"
 

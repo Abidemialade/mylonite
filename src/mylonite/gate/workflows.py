@@ -89,6 +89,7 @@ def _relative_gate_dir(repo_root: Path, gate_dir: Path) -> Path:
 def write_workflows(
     repo_root: Path,
     *,
+    model: str,
     runs_on: str = "ubuntu-latest",
     gate_dir: Path = DEFAULT_LAYOUT.gate,
     target_env_vars: Sequence[str] = (),
@@ -112,6 +113,15 @@ def write_workflows(
     * ``__MYLONITE_VERSION__`` -> this package's ``__version__``, so the
       workflows install the release that wrote them rather than whatever PyPI
       serves on the day the job runs.
+    * ``__MYLONITE_MODEL__`` -> ``model`` -- the exact model THIS gate run
+      resolved (no default provider or model: ``gate`` always has a real one
+      by the time it writes workflows, see
+      ``cli._require_model_chosen_or_exit``). Rendered as
+      ``${{ vars.MYLONITE_MODEL || '<model>' }}`` in both templates, so the
+      scaffolded workflow never needs a model chosen for it at CI time (the
+      literal fallback keeps it working out of the box) while a repository
+      variable lets an operator change models later without editing the
+      file.
     * ``__TARGET_SECRETS_ENV__`` / ``__TARGET_SECRETS_ENV_LINES__`` ->
       (#185) an ``env:`` entry per ``${MYLONITE_TARGET_...}`` placeholder in
       the redacted ``target.yaml`` this run co-writes, mapped to
@@ -132,6 +142,7 @@ def write_workflows(
         "__RUNS_ON__": runs_on,
         "__GATE_DIR__": posix_gate_dir,
         "__MYLONITE_VERSION__": __version__,
+        "__MYLONITE_MODEL__": model,
     }
     # The templates spell these as full-line YAML comments
     # (``#__TARGET_SECRETS_ENV__``) so the RAW, unsubstituted template stays

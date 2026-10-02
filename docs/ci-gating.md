@@ -310,6 +310,19 @@ Outside these workflows (a local run, another CI system), an empty
   `mylonite gate --authorize` through an environment variable, so a value
   holding a quote or `;` stays one argument.
 
+**No default model, so both workflows pin the one `gate --workflows` used.**
+There is no default provider or model — a live command stops rather than
+guessing one (see "No model chosen at all?" in
+[the CLI reference](cli-reference.md)) — so a scaffolded workflow's own
+`mylonite gate`/re-drive step needs an explicit model to not hit that same
+stop the next time CI runs it. Both workflows set
+`MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '<model>' }}`, where `<model>`
+is the exact value the run that scaffolded them resolved. Add a repository
+**variable** named `MYLONITE_MODEL` to change models later without editing
+either file; leave it unset and the baked-in literal keeps working exactly
+as scaffolded. Re-run `gate --workflows` after choosing a different
+`--model` to re-bake the literal instead.
+
 Both workflows install the Mylonite release that wrote them:
 `pip install "mylonite==X.Y.Z"`, where `X.Y.Z` is the version that ran
 `gate --workflows`. A new Mylonite release never changes what your CI runs until

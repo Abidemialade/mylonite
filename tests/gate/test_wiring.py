@@ -74,7 +74,11 @@ def test_open_pr_fn_writes_target_before_workflows_and_threads_secret_vars(
     )
     pr_mod = _FakePrMod()
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=True, target_file=target_file, pr_mod=pr_mod
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod,
+        model="anthropic/claude-haiku-4-5-20251001",
     )
     out_dir = tmp_path / ".mylonite" / "gate"
     out_dir.mkdir(parents=True)
@@ -107,7 +111,11 @@ def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch
     monkeypatch.chdir(tmp_path)
     pr_mod = _FakePrMod()
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=pr_mod
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=pr_mod,
+        model="anthropic/claude-haiku-4-5-20251001",
     )
     out_dir = tmp_path / ".mylonite" / "gate"
     out_dir.mkdir(parents=True)
@@ -316,7 +324,11 @@ def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monke
     kept_report = ValidationReport(test_filename="x.py", kept=True)
 
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=target_file, pr_mod=real_pr_mod
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=target_file,
+        pr_mod=real_pr_mod,
+        model="anthropic/claude-haiku-4-5-20251001",
     )
     out_dir = Path(".mylonite") / "gate"
 
@@ -409,7 +421,11 @@ def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, m
     kept_report = ValidationReport(test_filename="x.py", kept=True)
 
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=target_file, pr_mod=real_pr_mod
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=target_file,
+        pr_mod=real_pr_mod,
+        model="anthropic/claude-haiku-4-5-20251001",
     )
     out_dir = Path(".mylonite") / "gate"
 

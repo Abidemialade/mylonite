@@ -23,24 +23,30 @@ def test_templates_are_valid_yaml_and_ship_as_package_data():
         doc = yaml.safe_load(text)
         assert "__RUNS_ON__" in text  # substitution token still present (rendered later)
         assert "__GATE_DIR__" in text  # ditto for the gate-dir token
+        assert "__MYLONITE_MODEL__" in text  # ditto for the model token
         assert "jobs" in doc
 
 
 def test_write_workflows_creates_both_with_runs_on(tmp_path):
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     names = {p.name for p in written}
     assert names == {"mylonite-gate.yml", "mylonite-discovery.yml"}
     for p in written:
         assert p.parent == tmp_path / ".github" / "workflows"
         text = p.read_text(encoding="utf-8")
         assert "__RUNS_ON__" not in text  # token substituted
+        assert "__MYLONITE_MODEL__" not in text  # ditto for the model token
         doc = yaml.safe_load(text)
         job = next(iter(doc["jobs"].values()))
         assert job["runs-on"] == "ubuntu-latest"
 
 
 def test_write_workflows_self_hosted_runner(tmp_path):
-    written = write_workflows(tmp_path, runs_on="[self-hosted, linux]")
+    written = write_workflows(
+        tmp_path, runs_on="[self-hosted, linux]", model="anthropic/claude-haiku-4-5-20251001"
+    )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     job = next(iter(doc["jobs"].values()))
@@ -49,7 +55,9 @@ def test_write_workflows_self_hosted_runner(tmp_path):
 
 def test_write_workflows_defaults_gate_dir_to_dot_mylonite_gate(tmp_path):
     """No gate_dir passed -> the historical default, rendered via the token."""
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     text = gate.read_text(encoding="utf-8")
     assert "__GATE_DIR__" not in text
@@ -62,7 +70,12 @@ def test_workflow_gate_dir_is_substituted(tmp_path):
     reference that ACTUAL directory, not the hardcoded default baked into the
     template.
     """
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest", gate_dir=Path("custom") / "gate")
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        gate_dir=Path("custom") / "gate",
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
     names = {p.name: p for p in written}
     gate_text = names["mylonite-gate.yml"].read_text(encoding="utf-8")
     discovery_text = names["mylonite-discovery.yml"].read_text(encoding="utf-8")
@@ -81,7 +94,9 @@ def test_workflow_gate_dir_is_substituted(tmp_path):
 
 def test_gate_workflow_requires_the_gate_to_run(tmp_path):
     """The per-PR gate job sets MYLONITE_REQUIRE_GATE_RUN and prints skip reasons."""
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     job = doc["jobs"]["gate"]
@@ -94,7 +109,9 @@ def test_gate_workflow_requires_the_gate_to_run(tmp_path):
 def test_emitted_workflows_pin_the_package(tmp_path, name):
     """Emitted workflows install the release that wrote them, not whatever
     PyPI serves on the day the job runs."""
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
     assert f'"mylonite=={__version__}"' in text
     assert '"mylonite" ' not in text
@@ -104,7 +121,9 @@ def test_emitted_workflows_pin_the_package(tmp_path, name):
 def test_discovery_passes_authorize_through_env(tmp_path):
     """No `${{ }}` inside `run:`: GitHub substitutes it textually before bash
     parses the script. The value travels through env, as in gate-action."""
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     job = yaml.safe_load(discovery.read_text(encoding="utf-8"))["jobs"]["discover"]
     step = job["steps"][-1]
@@ -113,10 +132,83 @@ def test_discovery_passes_authorize_through_env(tmp_path):
     assert '--authorize "$MYLONITE_AUTHORIZE" --open-pr' in step["run"]
 
 
+@pytest.mark.parametrize(
+    ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
+)
+def test_rendered_workflow_carries_the_gates_model(tmp_path, name, job):
+    """REG-1b follow-up: there is no default model any more, so a workflow
+    `gate --workflows` writes must carry the EXACT model that run resolved --
+    otherwise the committed workflow would re-trigger the new "no model
+    chosen" exit the next time it ran in CI. A repository `MYLONITE_MODEL`
+    variable, when set, wins over the baked-in literal, so an operator can
+    change models later without editing the file."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest", model="openai/gpt-4o-mini")
+    rendered = next(p for p in written if p.name == name).read_text(encoding="utf-8")
+    assert "__MYLONITE_MODEL__" not in rendered
+
+    doc = yaml.safe_load(rendered)
+    if name == "mylonite-gate.yml":
+        env = doc["jobs"][job]["env"]
+    else:
+        env = doc["jobs"][job]["steps"][-1]["env"]
+    assert env["MYLONITE_MODEL"] == "${{ vars.MYLONITE_MODEL || 'openai/gpt-4o-mini' }}"
+
+
+def test_a_scaffolded_workflow_always_sets_a_model(tmp_path):
+    """REG-1b follow-up: `write_workflows` has no default for `model` --
+    every caller must supply the gate's own resolved model, so a rendered
+    workflow can never ship with the substitution token still in it (which
+    would make `mylonite gate`/the committed test's live re-drive hit the
+    "no model chosen" exit the next time CI runs it). Calling without
+    `model` is a TypeError, not a silently-blank/token-shaped render."""
+    import inspect
+
+    from mylonite.gate.workflows import write_workflows as wf
+
+    assert inspect.signature(wf).parameters["model"].default is inspect.Parameter.empty
+
+    with pytest.raises(TypeError):
+        wf(tmp_path, runs_on="ubuntu-latest")  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("name", ["mylonite-gate.yml", "mylonite-discovery.yml"])
+def test_a_scan_or_gate_from_the_template_is_never_left_with_no_model_configured(
+    tmp_path, monkeypatch, name
+):
+    """End-to-end version of the test above: feed the rendered
+    `MYLONITE_MODEL` expression's two cases (no repository variable set; one
+    set) into the SAME resolution `mylonite gate`/the committed test would
+    see, and confirm a model is always present -- it is impossible for a
+    run driven by this template to hit the "no model chosen" exit, because
+    the template itself always sets the variable one way or the other."""
+    from mylonite.config import env_run_config
+
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    rendered = next(p for p in written if p.name == name).read_text(encoding="utf-8")
+    assert (
+        "MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || 'anthropic/claude-haiku-4-5-20251001' }}"
+        in (rendered)
+    )
+
+    # Case 1: no `vars.MYLONITE_MODEL` repository variable -- GitHub Actions'
+    # `||` falls through to the literal baked in at scaffold time.
+    monkeypatch.setenv("MYLONITE_MODEL", "anthropic/claude-haiku-4-5-20251001")
+    assert env_run_config().model is not None
+
+    # Case 2: an operator DID set a repository variable -- it wins, and is
+    # still a real, non-None model, never the unresolved token.
+    monkeypatch.setenv("MYLONITE_MODEL", "openai/gpt-4o-mini")
+    assert env_run_config().model == "openai/gpt-4o-mini"
+
+
 def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
     """#185: a target with no secrets renders nothing extra — the gate job
     step keeps no ``env:`` key at all, matching pre-#185 output."""
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     step = doc["jobs"]["gate"]["steps"][-1]
@@ -125,7 +217,7 @@ def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
     dstep = ddoc["jobs"]["discover"]["steps"][-1]
-    assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE"}
+    assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE", "MYLONITE_MODEL"}
 
 
 def test_write_workflows_no_secrets_is_byte_identical_to_the_vendored_render(tmp_path):
@@ -146,7 +238,9 @@ def test_write_workflows_no_secrets_is_byte_identical_to_the_vendored_render(tmp
         base_text = (_NO_SECRETS_RENDER_DIR / name).read_text(encoding="utf-8")
         base_text = base_text.replace('"mylonite==0.10.4"', f'"mylonite=={__version__}"')
 
-        written = write_workflows(tmp_path, runs_on="ubuntu-latest")
+        written = write_workflows(
+            tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+        )
         actual_text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
 
         assert actual_text == base_text, name
@@ -157,6 +251,7 @@ def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
     repository secret of the same name, in the step that runs pytest."""
     written = write_workflows(
         tmp_path,
+        model="anthropic/claude-haiku-4-5-20251001",
         runs_on="ubuntu-latest",
         target_env_vars=["MYLONITE_TARGET_HEADERS_X_API_KEY"],
     )
@@ -189,7 +284,12 @@ def test_write_workflows_relativizes_an_absolute_gate_dir(tmp_path):
     never the machine-local absolute path."""
     repo_root = tmp_path
     absolute_gate_dir = repo_root / ".mylonite" / "gate"
-    written = write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=absolute_gate_dir)
+    written = write_workflows(
+        repo_root,
+        runs_on="ubuntu-latest",
+        gate_dir=absolute_gate_dir,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
 
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     text = gate.read_text(encoding="utf-8")
@@ -207,7 +307,12 @@ def test_write_workflows_relativizes_from_a_nested_absolute_gate_dir(tmp_path):
     accidentally-hardcoded '.mylonite/gate' rather than a genuine relativize."""
     repo_root = tmp_path
     absolute_gate_dir = repo_root / "custom" / "out" / "gate"
-    written = write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=absolute_gate_dir)
+    written = write_workflows(
+        repo_root,
+        runs_on="ubuntu-latest",
+        gate_dir=absolute_gate_dir,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     text = gate.read_text(encoding="utf-8")
     assert str(absolute_gate_dir) not in text
@@ -222,7 +327,12 @@ def test_write_workflows_raises_when_gate_dir_is_outside_the_repo_root(tmp_path)
     outside_gate_dir = tmp_path / "elsewhere" / "gate"
 
     with pytest.raises(GatePrError, match="not inside the repository root"):
-        write_workflows(repo_root, runs_on="ubuntu-latest", gate_dir=outside_gate_dir)
+        write_workflows(
+            repo_root,
+            runs_on="ubuntu-latest",
+            gate_dir=outside_gate_dir,
+            model="anthropic/claude-haiku-4-5-20251001",
+        )
 
 
 def test_write_workflows_end_to_end_from_a_subdirectory_stays_relative(tmp_path, monkeypatch):
@@ -243,7 +353,7 @@ def test_write_workflows_end_to_end_from_a_subdirectory_stays_relative(tmp_path,
     assert out.is_absolute()
     root = pr_mod.resolve_repo_root()
 
-    written = write_workflows(root, gate_dir=out)
+    written = write_workflows(root, gate_dir=out, model="anthropic/claude-haiku-4-5-20251001")
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     text = gate.read_text(encoding="utf-8")
     assert str(tmp_path) not in text
@@ -261,7 +371,12 @@ def test_target_secrets_are_checked_non_empty_before_the_gate_runs(tmp_path, nam
     import shutil
 
     names = ["MYLONITE_TARGET_HEADERS_X_API_KEY", "MYLONITE_TARGET_ENV_DB_TOKEN"]
-    written = write_workflows(tmp_path, runs_on="ubuntu-latest", target_env_vars=names)
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        target_env_vars=names,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
     doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
     steps = doc["jobs"][job]["steps"]
     check = steps[-2]
