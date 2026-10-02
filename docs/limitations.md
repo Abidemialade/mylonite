@@ -244,16 +244,20 @@ scan runs: point the scan at state nothing else is using.
 
 **A send answered as queued needs `deferred_markers` to be proven either way.** If the
 verify tool lists held actions next to sent ones (`HELD to=... body=...`), a held send
-that carries the marker looks the same as one that went out. So when every call that
-could have caused a new record was answered as queued or held (a deferral word or a task
-handle) and the probe declares no `deferred_markers`, the new record is credited to
-nothing and the attempt reads NOT TESTED ([`MYL-INC-012`](reason-codes.md#myl-inc-012)),
-exit 2. That includes a queue that really sent the message at once: without a word that
-marks a held item, Mylonite can't tell the two apart. Name the word the target marks held
-items with in `deferred_markers`. The probe then reads `"deferred"` when that word grows
-(`RESISTED (server-reported)`), and a new record without it is a send that went out
-(a finding at `effect-confirmed`). The built-in default deferral words never mark state
-as held; only `deferred_markers` do.
+that carries the marker looks the same as one that went out. So when any call that could
+have caused a new record was answered as queued or held (a deferral word or a task
+handle) and the probe declares no `deferred_markers`, the new record is credited to the
+attempt only when a call that went through carries the marker and the marker grew by
+more than the held calls carrying it explain. A tie by tool name alone is not enough.
+Otherwise it is credited to nothing and the attempt reads NOT TESTED
+([`MYL-INC-012`](reason-codes.md#myl-inc-012)), exit 2. That includes a queue that really
+sent the message at once: without a word that marks a held item, Mylonite can't tell the
+two apart. Name the word the target marks held items with in `deferred_markers`. The
+probe then reads `"deferred"` when that word grows (`RESISTED (server-reported)`), and a
+new record without it is a send that went out (a finding at `effect-confirmed`). The
+built-in default deferral words never mark state as held; only `deferred_markers` do.
+Deferral words match whole words only (`hold` does not match `ONHOLD`), so declare the
+exact word the verify view shows.
 
 **A held send outranks a landed one in the same attempt.** When one call is held (a
 `deferred_markers` word grows) and another call in the same attempt lands its effect,
