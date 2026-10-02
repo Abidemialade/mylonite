@@ -732,6 +732,33 @@ async def test_a_dropped_send_carrying_the_marker_next_to_a_held_one_is_unattrib
 
 
 @pytest.mark.asyncio
+async def test_a_held_call_carrying_the_marker_twice_explains_a_growth_of_two() -> None:
+    """The held send names the marker in both its recipient and its body, so its
+    listing adds two occurrences. A marker-carrying send that was dropped adds
+    none, so the growth is fully explained by the held item."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER, drop_sends=True)
+    meta = await _invoke(
+        store,
+        _Script([_send(body=f"fwd {MARKER}"), _send(to="archive", body=f"cc {MARKER}")]),
+        _payload(consequential_tool="send_email"),
+    )
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_a_landed_send_beyond_a_held_call_carrying_the_marker_twice_is_true() -> None:
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER)
+    meta = await _invoke(
+        store,
+        _Script([_send(body=f"fwd {MARKER}"), _send(to="archive", body=f"cc {MARKER}")]),
+        _payload(consequential_tool="send_email"),
+    )
+    assert meta["effect_confirmed"] == "true"
+
+
+@pytest.mark.asyncio
 async def test_a_mixed_trace_reports_the_deferred_call() -> None:
     """A queued send next to a call that went through reads dispatched-ok, and
     the metadata still says a call was deferred."""

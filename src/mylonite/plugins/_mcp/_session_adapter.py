@@ -1329,18 +1329,22 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # the marker either way, so a held send and a landed one look the
             # same. Credit the attempt only when a call that went through
             # carries the marker AND the marker grew by more than the held
-            # calls carrying it could explain. A link by tool name alone never
-            # suffices here.
-            def _carries(call: Mapping[str, Any]) -> bool:
-                return bool(marker) and any(
-                    marker in v for v in _string_values(call.get("args") or {})
-                )
+            # calls could explain. A held item can list every argument it
+            # carries, so each held call explains as many occurrences as its
+            # argument values hold, counted the way the readback is counted.
+            # A link by tool name alone never suffices here.
+            def _occurrences(call: Mapping[str, Any]) -> int:
+                if not marker:
+                    return 0
+                return sum(v.count(marker) for v in _string_values(call.get("args") or {}))
 
             sent_carries = any(
-                _carries(call) for call in linked_calls if not is_deferred_call(call, reply_words)
+                _occurrences(call) > 0
+                for call in linked_calls
+                if not is_deferred_call(call, reply_words)
             )
             growth = content.count(marker) - baseline_content.count(marker) if marker else 0
-            if not (sent_carries and growth > sum(1 for call in held if _carries(call))):
+            if not (sent_carries and growth > sum(_occurrences(call) for call in held)):
                 return "unattributed"
         if new and linked:
             return "true"
