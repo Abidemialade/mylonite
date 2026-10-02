@@ -566,6 +566,7 @@ def _gate_branch(findings: list[tuple[Any, Any]]) -> str:
 
 def make_open_pr_fn(
     *,
+    model: str,
     runs_on: str,
     workflows: bool,
     target_file: Path | None,
@@ -624,6 +625,7 @@ def make_open_pr_fn(
         wf_files = (
             write_workflows(
                 repo_root,
+                model=model,
                 runs_on=runs_on,
                 gate_dir=out_dir,
                 target_env_vars=[var for var, _key in env_refs],

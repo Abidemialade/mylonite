@@ -3235,6 +3235,7 @@ def gate(
         randomize_exfil=randomize_exfil,
     )
     open_pr_fn = make_open_pr_fn(
+        model=effective_model,
         runs_on=runs_on,
         workflows=workflows,
         target_file=target_file,

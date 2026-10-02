@@ -4,7 +4,9 @@
 # model, 1 iteration). A regression fails this check, and so does a gate test
 # that did not run (MYLONITE_REQUIRE_GATE_RUN).
 #
-# Requires one secret: MYLONITE_API_KEY (your LLM provider key).
+# Requires one secret: MYLONITE_API_KEY (your LLM provider key). Pinned to
+# the model this gate run used; set a MYLONITE_MODEL repository variable to
+# change it without editing this file.
 #
 # Enterprise / air-gapped: if your MCP server's backend is behind a corporate
 # network, change `runs-on` below to a self-hosted runner inside your perimeter,
@@ -22,6 +24,7 @@ jobs:
     env:
       MYLONITE_LIVE_TARGET: "1"
       MYLONITE_REQUIRE_GATE_RUN: "1"
+      MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '__MYLONITE_MODEL__' }}
       ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
     steps:
       - uses: actions/checkout@v6
