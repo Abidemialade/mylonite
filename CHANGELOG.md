@@ -273,6 +273,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded in `verification/PREREG_THIRD_PARTY_2026_10.md`'s "Pilot result"
   subsection. No counted run has been dispatched yet.
 
+### Documentation
+
+- **The testkit API has its own page.** `docs/testkit.md` documents every
+  public assertion (`assert_guard_holds`, `assert_target_resists`,
+  `assert_control_holds`), `load_exploit`, `pending_fix`, and the four
+  exception types, with signatures, the re-drive attempts/cost table, every
+  `MYLONITE_*` environment variable the testkit reads, the `pending_fix`
+  lifecycle, and runnable examples. `docs/validation.md`'s former "testkit
+  API" section is now a pointer to it.
+- **A how-to for giving your own guard a kill switch.** `docs/concepts.md`
+  gains "Add a kill switch to your own guard": Python and TypeScript examples
+  of reading one environment variable to disable your server-side guard, so
+  declaring `control_env` lets Mylonite toggle your real control instead of
+  its own boundary stand-in — the difference between "a canonical control
+  closes this" and "your own implementation is load-bearing".
+- **A coverage-by-app-shape table.** `docs/index.md` states plainly which
+  weakness classes are testable on an MCP server (local or remote), a plain
+  HTTP agent (`W2` only), a framework-based agent with no MCP or HTTP
+  endpoint (none, as-is), and agent-side guardrails (never reached by any
+  transport today).
+- **Compliance tags are now labelled as Mylonite's own mapping.**
+  `docs/standards-mapping.md` gains a weakness-class-to-IDs table and states
+  the real coverage honestly: 3 of 10 OWASP LLM Top 10 entries, 4 of 10 OWASP
+  ASI Top 10 entries, and 2 MITRE ATLAS techniques are ever emitted, and `W4`
+  carries no ATLAS technique at all. `docs/reading-results.md`'s compliance
+  section links to it with the same wording.
+
 ## [0.11.0] - 2026-10-01
 
 This release makes every result say what proved it, and stops reporting what was never
