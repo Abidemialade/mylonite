@@ -320,9 +320,45 @@ bar and is not one of the N re-drives for target 2.
    counted run dispatched before this commit exists is invalid for this prereg's
    purposes -- re-dispatch it after the ceilings are committed.
 
-*(This section is filled in by the controller when the pilot runs. As written now,
-no pilot has been dispatched and the ceilings in use are the pre-pilot defaults
-above.)*
+### Pilot result (recorded before the first counted run)
+
+The pilot ran once, uncounted, before any N=3 or N=1 dispatch against targets
+1-6.
+
+- **Dispatch.** https://github.com/Abidemialade/mylonite/actions/runs/37050385269
+  -- `target=tpv-mcp-redis`, `provider=openai` (gpt-4o-mini),
+  `scan_ceiling=120`, `validate_ceiling=80`, ref
+  `f32906b0604869a4363b8383bd3f5b174c5699d9`. This result does not count
+  toward target 2's N=3 bar.
+- **Spend.** `scan`: 14 calls (1 customiser, 13 planner), 74,822 input / 411
+  output tokens. `validate`: 13 calls (13 planner), 64,862 input / 280 output
+  tokens. Total: 27 calls, $0.021. Neither stage tripped its ceiling.
+- **Outcome (not counted toward any bar).** KEPT, W4, on the unconfirmed-delete
+  seed -- but the effect probe's calibration failed (`MYL-INC-005`), so the
+  keep rests on the differential leg against Mylonite's synthetic boundary
+  shim, not on a state read-back confirming the delete actually happened. W2
+  read NOT TESTED (`MYL-NT-006`). No traceback anywhere in the captured log;
+  `scan`, `generate` and `validate` all exited 0.
+- **Ceilings for the counted runs: `scan_ceiling=60`, `validate_ceiling=40`.**
+  This is not the mechanical "about 1.5x" step above -- 1.5x of the pilot's
+  measured calls is 21 (scan) and 20 (validate, 19.5 rounded up). The pilot
+  ran on target 2 only, and the "Sizing the two ceilings" estimate earlier in
+  this file puts redis's seed count at the low end: targets 1 and 5 carry
+  roughly 10-13 seeds against redis's smaller count. Applying 21/20 to targets
+  1 and 5 would predictably trip the ceiling there, turning counted runs into
+  NOT TESTED before they produced a verdict -- the thing this pilot exists to
+  prevent. 60 and 40 instead track that section's own realistic estimate for a
+  full journey (~50 scan calls, ~40 validate calls), with headroom on scan.
+  Both stay under the hard clamps (150 / 100):
+  - **Realistic cost per cell at 60/40** (the file's own ~1,500 input / ~250
+    output tokens per call): Haiku 4.5 (`$1`/`$5` per M) $0.28; gpt-4o-mini
+    (`$0.15`/`$0.60` per M) $0.04.
+  - **Worst-case cost per cell at 60/40** (all 100 calls maxed at 8k input /
+    2048 output tokens): Haiku 4.5 $1.82; gpt-4o-mini $0.24.
+
+  60/40 is a hard bound for the counted runs regardless of the figures above:
+  a run that still trips it reads NOT TESTED on `MYL-ABT-001`, per "Rules for
+  the runs."
 
 ## Other spend controls
 

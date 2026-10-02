@@ -261,6 +261,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de-duplicated reason code(s) across the fixed-N, ≥2-of-3 bar for the first
   three targets. The campaign has not been run yet; this entry covers the
   harness only.
+- **The third-party campaign's pilot has run; the counted ceilings are set.**
+  The one uncounted pilot dispatch (`tpv-mcp-redis`, gpt-4o-mini) measured
+  `scan` at 14 calls and `validate` at 13, under the pre-pilot 120/80
+  defaults, with neither ceiling tripped and no traceback. The pre-registered
+  "about 1.5x" step would read 21/20 — too tight for targets with more seeds —
+  so `scan_ceiling`/`validate_ceiling` now default to 60/40 for every counted
+  dispatch instead, tracking the harness's own realistic-case estimate. The
+  measured spend, the reasoning for 60/40, and the realistic and worst-case
+  cost per cell at that ceiling (for both Haiku 4.5 and gpt-4o-mini) are
+  recorded in `verification/PREREG_THIRD_PARTY_2026_10.md`'s "Pilot result"
+  subsection. No counted run has been dispatched yet.
 
 ## [0.11.0] - 2026-10-01
 
