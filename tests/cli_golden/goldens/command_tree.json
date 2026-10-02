@@ -299,6 +299,20 @@
         {
           "default": "None",
           "envvar": null,
+          "help": "Branch the gating PR targets. Defaults to the repository's default branch (origin/HEAD, else the current branch's upstream, else main).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "base",
+          "opts": [
+            "--base"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "StringParamType"
+        },
+        {
+          "default": "None",
+          "envvar": null,
           "help": "Override the model that CRAFTS/REFINES attack payloads (the red-team / attacker side). Defaults to --model.",
           "is_flag": false,
           "multiple": false,

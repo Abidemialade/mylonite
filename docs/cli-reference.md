@@ -286,17 +286,22 @@ one, run `scan` first and pass the `target.yaml` it writes to `gate`.
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:
 
-1. `--out` containment: with `--open-pr` or `--workflows`, an output directory outside
-   the repository exits `8`.
+1. The repository checks, each exiting `8`: a `--base` that is empty, contains
+   whitespace or starts with `-`; with `--open-pr` or `--workflows`, an output
+   directory outside the repository; with `--open-pr`, a working tree with staged
+   files or uncommitted changes to tracked files.
 2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
    exiting `2`.
 
-So when both kinds of problem are present, the `--out` error is the one you see first.
+So when both kinds of problem are present, the exit-`8` error is the one you see first.
 
 Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
 target's `scope`, or its family when it declares no scope); `--open-pr` (create the branch,
-commit, push, and open the PR via `gh`); `--config`; `--model` (any LiteLLM provider via
+commit, push, and open the PR via `gh`; refused on a tree with staged or uncommitted
+changes, and a rollback never deletes a branch the run didn't create); `--base BRANCH`
+(the branch the PR targets; defaults to the repository's default branch: `origin/HEAD`,
+else the current branch's upstream, else `main`); `--config`; `--model` (any LiteLLM provider via
 a `provider/model` prefix); `--planner-model`, `--customiser-model`, `--judge-model`
 (the three [model roles](attack-modes.md#composing-the-model-roles), each defaulting
 to `--model`, same split as `scan`); `--purpose "…"` (a one-line description of what

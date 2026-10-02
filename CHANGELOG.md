@@ -34,8 +34,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AssertionError` as "not fixed yet" and keeps the run green, so such a
   test used to stay green while proving nothing. The testkit signature
   snapshot gains the new name.
+### Added
+
+- **`gate --base <branch>` picks the branch the gating PR targets.** Without
+  it, `gate` now uses your repository's default branch: `origin/HEAD`, else
+  the branch your current branch tracks, else `main`. It used to target
+  `main` every time. The `command_tree.json` CLI golden gains the new option.
 
 ### Fixed
+
+- **`gate --open-pr` no longer deletes a branch it didn't create.** When a
+  re-run hit a gate branch left over from an earlier run, `git checkout -b`
+  failed and the rollback then ran `git branch -D` on that older branch,
+  throwing away any commits you had not pushed. Rollback now deletes a branch
+  only when this run created it; the older branch and its commits are kept.
+
+- **`gate --open-pr` refuses a tree with staged or uncommitted changes, before
+  any LLM call.** `git commit` commits everything staged, so a file you had
+  staged for your own work went into the gating PR, and uncommitted edits
+  moved onto the new branch. `gate` now stops at pre-flight on exit code 8
+  with one line naming the problem. Untracked files are fine: `gate` only
+  ever stages the files it wrote.
 
 - **The AgentDojo verification adapter read its own benchmark label backwards.**
   `verification/layer2_datasets/agentdojo.py` treated `security == False` as "the

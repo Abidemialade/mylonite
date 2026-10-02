@@ -419,7 +419,9 @@ def make_validate_fn(
     return validate_fn
 
 
-def resolve_gate_out_dir(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
+def resolve_gate_out_dir(
+    out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any, base: str | None = None
+) -> Path:
     """Anchor ``out`` at the git repository root, and confirm it stays there,
     whenever either ``--open-pr`` or ``--workflows`` was requested.
 
@@ -440,23 +442,33 @@ def resolve_gate_out_dir(out: Path, *, open_pr: bool, workflows: bool, pr_mod: A
     called before ``scan_fn``/``validate_fn``/``open_pr_fn`` are even built,
     so the failure is reported before any scan or LLM spend, not after
     paying for the whole pipeline.
+
+    The same pre-flight also rejects a malformed ``--base``, and, with
+    ``--open-pr``, a working tree with staged or uncommitted changes to
+    tracked files (``pr.ensure_clean_tree``): the PR flow switches branch and
+    commits, so it must not sweep the operator's own work into the gate PR.
     """
+    if base is not None:
+        pr_mod.validate_base(base)
     if not (open_pr or workflows):
         return out
     root = Path(pr_mod.resolve_repo_root())
-    if not out.is_absolute():
-        return root / out
-    try:
-        out.relative_to(root)
-    except ValueError as exc:
-        raise pr_mod.GatePrError(
-            f"--out {out} is not inside the repository root {root} — gate cannot "
-            "commit or scaffold workflows outside the repository."
-        ) from exc
-    return out
+    if out.is_absolute():
+        try:
+            out.relative_to(root)
+        except ValueError as exc:
+            raise pr_mod.GatePrError(
+                f"--out {out} is not inside the repository root {root} — gate cannot "
+                "commit or scaffold workflows outside the repository."
+            ) from exc
+    if open_pr:
+        pr_mod.ensure_clean_tree(root)
+    return out if out.is_absolute() else root / out
 
 
-def resolve_gate_out_dir_or_exit(out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any) -> Path:
+def resolve_gate_out_dir_or_exit(
+    out: Path, *, open_pr: bool, workflows: bool, pr_mod: Any, base: str | None = None
+) -> Path:
     """``resolve_gate_out_dir`` wrapped in ``gate()``'s own error handling, so
     its call site in ``cli.py`` is one line: reports a ``GatePrError`` as the
     named, actionable error every other repo-boundary failure in this
@@ -464,7 +476,9 @@ def resolve_gate_out_dir_or_exit(out: Path, *, open_pr: bool, workflows: bool, p
     exception past the CLI layer.
     """
     try:
-        return resolve_gate_out_dir(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
+        return resolve_gate_out_dir(
+            out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod, base=base
+        )
     except pr_mod.GatePrError as exc:
         echo_err(f"\nerror: {exc}")
         raise typer.Exit(code=EXIT_PR_FAILED) from exc
@@ -538,6 +552,7 @@ def make_open_pr_fn(
     workflows: bool,
     target_file: Path | None,
     pr_mod: Any,
+    base: str | None = None,
 ) -> Callable[..., Any]:
     def open_pr_fn(
         *,
@@ -643,6 +658,9 @@ def make_open_pr_fn(
             pr_title=pr_title,
             pr_body=body,
             open_pr=open_pr,
+            # --base wins; otherwise the repo's own default branch (read-only
+            # git queries that fall back to "main"), never a hardcoded name.
+            base=base if base is not None else pr_mod.resolve_default_base(repo_root),
         )
         # R4: best-effort inline check-run annotation on the exact prompt line, when
         # the AI layer is a committed file GitHub can render against. Tool loci (a

@@ -126,8 +126,16 @@ def _relative(path: Path, cwd: Path) -> Path:
     return path.relative_to(cwd) if path.is_absolute() else path
 
 
-def _rollback(*, cwd: Path, original_branch: str, branch: str, _run: Runner) -> None:
-    """Best-effort: restore ``original_branch`` and delete the half-created ``branch``.
+def _rollback(
+    *, cwd: Path, original_branch: str, branch: str, delete_branch: bool, _run: Runner
+) -> None:
+    """Best-effort: restore ``original_branch`` and, only when this run created
+    it, delete the half-created ``branch``.
+
+    ``delete_branch`` is False when ``git checkout -b`` itself failed — most
+    often because ``branch`` already exists from an earlier run. That branch
+    is not this run's to delete: it may carry commits that exist nowhere
+    else, and ``git branch -D`` would throw them away.
 
     Uses raw ``_run`` (not :func:`_git`) so a failure HERE never raises and masks
     the original ``GatePrError`` that triggered the rollback. But a silently
@@ -146,12 +154,89 @@ def _rollback(*, cwd: Path, original_branch: str, branch: str, _run: Runner) -> 
             f"error — the repo may still be on branch '{branch}': {stderr}"
         )
 
+    if not delete_branch:
+        return
     delete_cp = _run(["git", "branch", "-D", branch], cwd=str(cwd))
     if getattr(delete_cp, "returncode", 1) != 0:
         stderr = redact((getattr(delete_cp, "stderr", "") or "").strip())
         echo_err(
             f"warning: rollback failed to delete half-created branch '{branch}' after a "
             f"gate PR error — retrying may fail with 'branch already exists': {stderr}"
+        )
+
+
+_STAGED_MESSAGE = (
+    "{what} staged in git; --open-pr would commit them into the gate PR. "
+    "Commit or unstage them (git restore --staged <path>), then re-run."
+)
+
+
+def ensure_clean_tree(repo_root: Path, *, _run: Runner = _default_run) -> None:
+    """Refuse a working tree with staged or uncommitted changes to tracked files.
+
+    ``--open-pr`` switches branch and runs ``git commit``: anything already
+    staged would be committed into the gate PR, and uncommitted edits would
+    ride along onto the new branch. Untracked files are allowed — ``git add``
+    only ever takes the explicit paths the gate wrote, so they never reach the
+    commit. Raises :class:`GatePrError` with a one-line message.
+    """
+    cp = _run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=str(repo_root))
+    if getattr(cp, "returncode", 1) != 0:
+        stderr = redact((getattr(cp, "stderr", "") or "").strip())
+        raise GatePrError(f"git status failed (rc={cp.returncode}): {stderr}")
+    lines = [ln for ln in (getattr(cp, "stdout", "") or "").splitlines() if ln.strip()]
+    if not lines:
+        return
+    staged = sum(1 for ln in lines if ln[:1] not in (" ", "?"))
+    if staged:
+        raise GatePrError(_STAGED_MESSAGE.format(what=f"{staged} file(s) are"))
+    raise GatePrError(
+        f"the working tree has uncommitted changes to {len(lines)} tracked file(s); "
+        "--open-pr switches branch and commits. Commit or stash them, then re-run."
+    )
+
+
+def _git_out(args: list[str], *, cwd: Path, _run: Runner) -> str:
+    """stdout of a read-only git query, or "" when it fails."""
+    try:
+        cp = _run(["git", *args], cwd=str(cwd))
+    except OSError:
+        return ""
+    if getattr(cp, "returncode", 1) != 0:
+        return ""
+    return str(getattr(cp, "stdout", "") or "").strip()
+
+
+def resolve_default_base(repo_root: Path, *, _run: Runner = _default_run) -> str:
+    """The branch a gate PR targets when ``--base`` is not given.
+
+    In order: the remote's default branch (``refs/remotes/origin/HEAD``, set
+    by ``git clone``); else the branch the current branch tracks; else
+    ``main``. Read-only, and never raises.
+    """
+    origin_head = _git_out(
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        cwd=repo_root,
+        _run=_run,
+    )
+    prefix = "origin/"
+    if origin_head.startswith(prefix) and len(origin_head) > len(prefix):
+        return origin_head[len(prefix) :]
+    current = _git_out(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo_root, _run=_run)
+    if current:
+        merge = _git_out(["config", "--get", f"branch.{current}.merge"], cwd=repo_root, _run=_run)
+        heads = "refs/heads/"
+        if merge.startswith(heads) and len(merge) > len(heads):
+            return merge[len(heads) :]
+    return "main"
+
+
+def validate_base(base: str) -> None:
+    """Reject a ``--base`` value git or gh could misread as an option."""
+    if not base or base.startswith("-") or any(ch.isspace() for ch in base):
+        raise GatePrError(
+            f"--base {base!r} is not a branch name: it must be non-empty, contain no "
+            "whitespace, and not start with '-'."
         )
 
 
@@ -241,17 +326,35 @@ def open_or_print_pr(
     # from the branch the operator actually had checked out).
     original_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, _run=_run).stdout.strip()
 
+    # The pre-flight already refused a staged tree, but `git commit` below
+    # commits EVERYTHING staged, so check again right before branching: the
+    # run itself never stages anything, so a staged file here is not ours.
+    staged_cp = _run(["git", "diff", "--cached", "--quiet"], cwd=str(cwd))
+    if getattr(staged_cp, "returncode", 1) != 0:
+        raise GatePrError(_STAGED_MESSAGE.format(what="Files are"))
+
+    # Only a branch THIS run created may be deleted on rollback: when
+    # `checkout -b` fails because the branch already exists (a re-run), that
+    # branch may hold commits that exist nowhere else.
+    created = False
     try:
         _git(["checkout", "-b", branch], cwd=cwd, _run=_run)
+        created = True
         _git(["add", *rels], cwd=cwd, _run=_run)
         _git(["commit", "-m", pr_title], cwd=cwd, _run=_run)
     except GatePrError:
         # Best-effort rollback: leave the repo back on the branch it started
-        # on and delete the half-created branch so a retry with the same
+        # on and delete the branch this run created, so a retry with the same
         # deterministic branch name doesn't immediately fail (DCR-0017). Never
         # raises — a rollback-step failure is warned about, not raised, so it
         # can't mask the original error re-raised below.
-        _rollback(cwd=cwd, original_branch=original_branch, branch=branch, _run=_run)
+        _rollback(
+            cwd=cwd,
+            original_branch=original_branch,
+            branch=branch,
+            delete_branch=created,
+            _run=_run,
+        )
         raise
 
     if not gh_available(_run=_run):

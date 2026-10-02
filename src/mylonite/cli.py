@@ -2764,6 +2764,16 @@ def gate(
             help="Push a branch and open the gating PR via gh (opt-in).",
         ),
     ] = False,
+    base: Annotated[
+        str | None,
+        typer.Option(
+            "--base",
+            help=(
+                "Branch the gating PR targets. Defaults to the repository's default "
+                "branch (origin/HEAD, else the current branch's upstream, else main)."
+            ),
+        ),
+    ] = None,
     model: Annotated[
         str | None,
         typer.Option("--model", help="Model identifier passed to LiteLLM."),
@@ -2945,7 +2955,9 @@ def gate(
     out = out if out is not None else layout.gate
 
     # #203: anchor a relative --out at the repo root (scan_fn/open_pr_fn close over it).
-    out = resolve_gate_out_dir_or_exit(out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod)
+    out = resolve_gate_out_dir_or_exit(
+        out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod, base=base
+    )
 
     base_model = model or "claude-haiku-4-5-20251001"
     _validate_model_string(base_model)
@@ -3188,6 +3200,7 @@ def gate(
         workflows=workflows,
         target_file=target_file,
         pr_mod=pr_mod,
+        base=base,
     )
 
     from mylonite.scan._llm import llm_scope

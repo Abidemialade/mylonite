@@ -38,6 +38,9 @@ class _FakePrMod:
     def resolve_repo_root(self) -> Path:
         return Path.cwd()
 
+    def resolve_default_base(self, repo_root: Path) -> str:
+        return "detected-default"
+
     def open_or_print_pr(self, paths: Any, **kwargs: Any) -> Any:
         self.calls.append({"paths": paths, **kwargs})
         return SimpleNamespace(opened=False, branch=kwargs.get("branch"))
@@ -473,3 +476,80 @@ def _found_outcome_2():
         exit_code=0,
         operator_message=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# --open-pr pre-flight: a dirty or staged tree, and --base.
+# ---------------------------------------------------------------------------
+
+
+def _committed_repo(repo: Path) -> Path:
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+
+    repo.mkdir(parents=True, exist_ok=True)
+    git("init")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("config", "commit.gpgsign", "false")
+    (repo / "README.md").write_text("init\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "init")
+    return repo
+
+
+def test_resolve_gate_out_dir_refuses_a_dirty_tree_with_open_pr(tmp_path, monkeypatch):
+    repo = _committed_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("edited\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    with pytest.raises(pr_mod.GatePrError, match="uncommitted changes"):
+        resolve_gate_out_dir(
+            Path(".mylonite") / "gate", open_pr=True, workflows=False, pr_mod=pr_mod
+        )
+
+
+def test_resolve_gate_out_dir_allows_a_dirty_tree_without_open_pr(tmp_path, monkeypatch):
+    """`--workflows` alone never commits, so a dirty tree is fine there."""
+    repo = _committed_repo(tmp_path / "repo")
+    (repo / "README.md").write_text("edited\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    resolved = resolve_gate_out_dir(
+        Path(".mylonite") / "gate", open_pr=False, workflows=True, pr_mod=pr_mod
+    )
+    assert resolved.resolve() == (repo / ".mylonite" / "gate").resolve()
+
+
+@pytest.mark.parametrize("bad", ["", "-x", "--force", "two words"])
+def test_resolve_gate_out_dir_rejects_a_malformed_base(tmp_path, monkeypatch, bad):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(pr_mod.GatePrError, match="--base"):
+        resolve_gate_out_dir(
+            Path(".mylonite") / "gate", open_pr=False, workflows=False, pr_mod=pr_mod, base=bad
+        )
+
+
+def _run_open_pr_fn(tmp_path: Path, monkeypatch: Any, *, base: str | None) -> _FakePrMod:
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=fake, base=base
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="body\n",
+        open_pr=False,
+    )
+    return fake
+
+
+def test_open_pr_fn_passes_an_explicit_base(tmp_path: Path, monkeypatch: Any) -> None:
+    fake = _run_open_pr_fn(tmp_path, monkeypatch, base="release/2.x")
+    assert fake.calls[0]["base"] == "release/2.x"
+
+
+def test_open_pr_fn_defaults_to_the_detected_base(tmp_path: Path, monkeypatch: Any) -> None:
+    fake = _run_open_pr_fn(tmp_path, monkeypatch, base=None)
+    assert fake.calls[0]["base"] == "detected-default"

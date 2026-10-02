@@ -159,3 +159,65 @@ def test_gate_rejects_bundled_mcp_target_with_autodiscovered_target_file(tmp_pat
     assert res.exit_code == 2, res.output
     assert "mcp:filesystem:/scope" in res.output
     assert "mylonite.yaml" in res.output
+
+
+def _repo_with_one_commit(repo):
+    import subprocess
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True)
+
+    git("init")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("config", "commit.gpgsign", "false")
+    (repo / "README.md").write_text("init\n", encoding="utf-8")
+    git("add", "README.md")
+    git("commit", "-m", "init")
+    return git
+
+
+def _fail_if_scanned(monkeypatch):
+    import pytest
+
+    from mylonite.scan.engine import ScanEngine
+
+    async def _boom(self):
+        pytest.fail("gate scanned before refusing the working tree")
+
+    monkeypatch.setattr(ScanEngine, "run", _boom)
+
+
+def test_gate_open_pr_refuses_a_dirty_tree_before_any_scan(tmp_path, monkeypatch):
+    _repo_with_one_commit(tmp_path)
+    (tmp_path / "README.md").write_text("edited\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    _fail_if_scanned(monkeypatch)
+    res = runner.invoke(app, ["gate", "reference:vulnerable", "--open-pr"])
+    assert res.exit_code == 8, res.output
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "uncommitted changes" in (res.stderr or res.output)
+
+
+def test_gate_open_pr_refuses_a_staged_file_before_any_scan(tmp_path, monkeypatch):
+    git = _repo_with_one_commit(tmp_path)
+    (tmp_path / "notes.txt").write_text("staged\n", encoding="utf-8")
+    git("add", "notes.txt")
+    monkeypatch.chdir(tmp_path)
+    _fail_if_scanned(monkeypatch)
+    res = runner.invoke(app, ["gate", "reference:vulnerable", "--open-pr"])
+    assert res.exit_code == 8, res.output
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "staged" in (res.stderr or res.output)
+
+
+def test_gate_rejects_a_base_that_looks_like_an_option(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _fail_if_scanned(monkeypatch)
+    res = runner.invoke(app, ["gate", "reference:vulnerable", "--base=-x"])
+    assert res.exit_code == 8, res.output
+    assert "--base" in (res.stderr or res.output)
+
+
+def test_gate_exposes_base_option():
+    assert "--base" in _gate_option_names()
