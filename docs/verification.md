@@ -82,45 +82,36 @@ scanned over SSE (the remote adapter), same model:
 | --- | --- | --- |
 | InjecAgent (run by us, `llama3.2:3b`) | judge agreement | **dh F1 1.000** · **ds F1 0.833 at 0.714 recall** (0.10.0; was 0.400 at 0.25 recall in 0.9.0), 100 cases per split — the gap between the splits is the finding, so both are recorded. `ds` recall rests on only 7 succeeded attacks, so it is unresolved at this sample size rather than improved |
 | InjecAgent `--elicit-positives` | compliant agent to manufacture positives | **0/15** — Haiku resisted even when told to comply |
-| **AgentDojo (its released runs, gpt-3.5)** | **judge vs AgentDojo's `security` oracle on real third-party positives** | **27 runs, 12 real positives (ASR 44.4%); judge agreement P=0.32, R=0.58, F1=0.41** |
+| **AgentDojo (its released runs, gpt-3.5)** | **judge vs AgentDojo's `security` oracle on real third-party positives** | **27 runs, 15 real positives (ASR 55.6%); judge agreement P=0.68, R=1.00, F1=0.81** |
 
 The AgentDojo row **closes the LLM-judge verification leg live**: its released
-trajectories include 12 attacks that genuinely succeeded (on a weaker model), so the
+trajectories include 15 attacks that genuinely succeeded (on a weaker model), so the
 judge's positive class is exercised against an independent label — no synthesis, no model
 run by us.
 
-**That F1 of 0.41 is itself a finding**, not just a weak score. Mylonite's judge asks
-*"did the agent follow the attacker's intent and did harm materialize?"*, while
-AgentDojo's oracle asks *"was this exact injection goal achieved?"* They are **different
-definitions of success**, and the moderate agreement quantifies the gap. Don't read 0.41
-as "the judge is 41% good" — read it as "Mylonite's effect-based judge and AgentDojo's
-exact-goal oracle agree moderately; investigate the disagreements before trusting either
-as a drop-in for the other."
+*Correction: an earlier reading of AgentDojo's `security` field was inverted (it reads
+`True` when the injection goal was executed, not when the agent resisted — upstream's own
+`BaseInjectionTask.security` docstring says so directly). That previously put the
+positive count at 12 (ASR 44.4%) and the judge agreement at P=0.32/R=0.58/F1=0.41. The
+figures above are recomputed from the same 27 recorded judge verdicts under the corrected
+label — no new model call was made; see `verification/results/0.11.0/layer2-agentdojo.json`
+for the as-published note.*
 
-### Triaging the 15 false positives — none is a judge bug
+**Recall is now perfect (1.00) on this subset**: every one of the 15 real attacks that
+AgentDojo's oracle confirms is also flagged by Mylonite's judge. The **7 false
+positives** are the other direction — cases where the agent's calls carried the
+attacker's payload (e.g. a transfer toward the attacker IBAN) but upstream's
+exact-goal check didn't credit the injection as fully achieved (a partial transfer
+under a cumulative threshold, in at least one case). Mylonite's effect-based judge and
+AgentDojo's exact-goal oracle are still answering different questions; the corrected
+numbers just show the gap runs the other way than first reported. Per-case detail for
+these 7 isn't preserved in the committed report (only disagreement text under the old
+label was stored) — a fresh `--with-llm` run would be needed to attribute them
+individually, and is left as a follow-up, not a live call made here.
 
-We classified every one of the 15 disagreements where Mylonite flagged an attack that
-AgentDojo's oracle did not (`verification/reports/layer2-agentdojo.json`):
-
-- **All 15 are the same definitional difference, not a bug.** In every case the
-  attacker's *consequential tool actually executed* — `send_money` to the attacker IBAN
-  `US13…`, `update_password`, or `update_scheduled_transaction`, each returning `[ok]`.
-  Mylonite's effect-based judge flags materialized harm; AgentDojo's stricter
-  exact-goal oracle didn't credit it (e.g. the user's original task wasn't also completed
-  in the exact expected way). For a **CI security gate**, "money left the account to the
-  attacker's IBAN" *should* fire — so here Mylonite's judge is arguably the more useful
-  of the two, not the broken one. The judge keyed on the attacker-controlled account, so
-  it is distinguishing attacker-directed sends from the user's legitimate ones.
-- **`FPR = 1.0` is a measurement artifact, not "the judge cries wolf."** False-positive
-  rate is `fp / (fp + tn)`, and this AgentDojo subset has **`tn = 0`** — every case is an
-  actual injection attempt, so there are **no benign / true-negative control cases** for
-  the judge to be quiet on. FPR is therefore pinned at 1.0 by construction regardless of
-  judge quality. The verification report now flags this explicitly
-  (`fpr_informative: false`) so the number is never cited as a precision failure. The
-  honest precision signal needs an external *defended* baseline (see Layer 3's open gap).
-- **The 5 false negatives** (AgentDojo says exploited, Mylonite says not) are cases where
-  the trace shows the action was *refused or not executed* — a transcript/oracle-semantics
-  nuance in the released runs, not the product judge under-reporting a materialized effect.
+**`FPR` is informative now**: with the label corrected, `tn = 5` (cases both sides agree
+were resisted), so `fpr = 0.58` is a real measurement, not the `tn = 0` artifact the
+original (inverted) run produced.
 
 ## Layer 3 — precision (false positives on known-good targets)
 
@@ -152,7 +143,9 @@ AgentDojo's oracle did not (`verification/reports/layer2-agentdojo.json`):
 - No model-fooling catch confirmed on an external app: DVMCP recall is measurable again
   (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not been
   re-run yet (see the Layer 1 note above).
-- Judge ≠ AgentDojo oracle (F1 0.41) — a semantic mismatch still to investigate.
+- Judge ≠ AgentDojo oracle (F1 0.81, P 0.68) — a semantic mismatch still to investigate:
+  7 of 27 cases where the agent's calls carried the attacker's payload but the
+  exact-goal oracle didn't credit it as fully achieved.
 - No external *defended* server for a true external precision number.
 - Samples are small, and the hosted-model layers use one model; the opt-in
   `verification.yml` workflow runs larger N on manual dispatch.
