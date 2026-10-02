@@ -1,5 +1,8 @@
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 from mylonite.version import __version__
@@ -55,3 +58,53 @@ def test_action_warns_on_a_non_default_mode_or_runs_on():
     assert "::warning::" in blob
     assert '$MODE" != "discovery"' in blob
     assert '$RUNS_ON" != "ubuntu-latest"' in blob
+
+
+def _rendered_args(**env: str) -> list[str]:
+    """Execute the action's own run script (swapping the final `mylonite
+    gate "${args[@]}"` line for one that just prints the built array) under
+    the given env, and return the resulting argv list.
+
+    Proves what the composite action's ACTUAL bash does, not a re-
+    implementation of it -- the same shape of check
+    test_target_secrets_are_checked_non_empty_before_the_gate_runs in
+    test_workflows.py already runs.
+    """
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available to execute the rendered run script")
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    run_script = doc["runs"]["steps"][-1]["run"]
+    script = run_script.replace('mylonite gate "${args[@]}"', 'printf "%s\\n" "${args[@]}"')
+    base_env = {"PATH": __import__("os").environ.get("PATH", "")}
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={**base_env, "MODE": "discovery", "RUNS_ON": "ubuntu-latest", **env},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result.stdout.splitlines()
+
+
+def test_model_flag_is_appended_when_the_input_is_non_empty() -> None:
+    """GitHub does not enforce `required: true` on a composite action's
+    input -- a caller can still wire an empty string. When MODEL IS set,
+    --model must still reach mylonite gate."""
+    args = _rendered_args(
+        TARGET_FILE="target.yaml",
+        AUTHORIZE="my-app",
+        MODEL="anthropic/claude-haiku-4-5",
+        OPEN_PR="",
+    )
+    assert "--model" in args
+    assert "anthropic/claude-haiku-4-5" in args
+
+
+def test_model_flag_is_omitted_when_the_input_is_empty() -> None:
+    """An empty MODEL (an unset secret/variable, a blank matrix cell) must
+    NOT become `--model ""` -- that exits 2 ("invalid --model") instead of
+    the clearer exit 4 + approved-provider-list message a genuinely missing
+    model gets from mylonite gate itself."""
+    args = _rendered_args(TARGET_FILE="target.yaml", AUTHORIZE="my-app", MODEL="", OPEN_PR="")
+    assert "--model" not in args
