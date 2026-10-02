@@ -192,18 +192,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference ever appears in a step `if:`, which GitHub rejects outright), a
   non-zero exit from `scan`/`generate`/`validate` is captured and scored
   rather than failing the step, and the Ollama/redis service containers are
-  digest-pinned rather than an unpinned install script. `max_llm_calls` is
-  hard-clamped and also sets a placeholder `MYLONITE_MAX_LLM_REQUESTS` env var
-  for the process-wide hard ceiling a separate, in-progress change
-  (BUDGET-1) is adding — a documented no-op until that lands, with the job's
-  30-minute timeout as today's real stop. The score and cost steps run with
-  `if: always()` so a crashed or aborted run still gets scored. It writes a
+  digest-pinned rather than an unpinned install script. A clean scan that finds
+  nothing no longer fails the step under `bash`'s `-eo pipefail` (the no-match
+  glob now goes through `compgen -G ... || true`, not a bare `ls`). `scan` and
+  `validate` (two separate processes; `generate` makes no LLM call) each get a
+  placeholder `MYLONITE_MAX_LLM_REQUESTS=30` for the per-process hard ceiling a
+  separate, in-progress change (BUDGET-1) is adding — a documented no-op until
+  that lands, with the job's 30-minute timeout as today's real stop; the prereg
+  restates the per-cell worst case as `ceiling x processes x (max input x input
+  price + max tokens x output price)` with an 8k-token input assumption, for
+  both Haiku 4.5 and gpt-4o-mini. The score and cost steps run with `if:
+  always()` so a crashed or aborted run still gets scored. It writes a
   `cost.json` per run — computed from the token counts `scan`/`validate`
-  already print, with no change to `src/mylonite`, and it fails loudly rather
-  than reporting $0 when no spend line is found. The new
-  `scripts/score_third_party.py` treats any Python traceback anywhere in the
-  log as an unconditional product defect, checked before anything else;
-  otherwise it classifies a run against `mylonite._verdict.verdict_label` (so
+  already print, with no change to `src/mylonite`; it writes a zero-cost
+  `cost.json` with a reason when `run.log` itself never existed (an earlier
+  step failed first), but still fails loudly when the log exists with no spend
+  line. The new `scripts/score_third_party.py` treats a Python traceback with
+  a `mylonite` stack frame as an unconditional product defect, checked before
+  anything else; a traceback with no such frame (the stdio adapter does not
+  separate a spawned target server's stderr from Mylonite's own, a `src/`
+  fix not made here) is recorded as target noise and never blocks the cell.
+  Otherwise it classifies a run against `mylonite._verdict.verdict_label` (so
   a `STABLE, NOT PROVEN` result reads not-kept, per never-keep-unproven), a
   never-keep-unproven candidate, NOT TESTED (which now REQUIRES a reason
   code, found in the report or the log, or the result is a product defect
