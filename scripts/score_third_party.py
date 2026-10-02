@@ -81,6 +81,25 @@ Classification, in order of precedence
    identical situation with none found is PRODUCT_DEFECT (#1), never a
    silent, code-free NOT_TESTED.
 
+Which stage's log a reason code comes from
+------------------------------------------
+``scan`` and ``validate`` are two processes with their own captured logs
+(``scan.log`` and ``validate.log``; ``run.log`` holds both, and is kept for
+the traceback check and the cost step). A reason code only counts for the
+stage that printed it. Without this, a run whose ``validate`` stopped would
+carry every code its ``scan`` printed, and two re-drives whose scans
+skipped different seeds would disagree on the N=3 bar for a reason that
+has nothing to do with the result being scored.
+
+When ``validate`` ran (``validate.log`` exists) but wrote no
+``validation_report.json`` -- it raises on an abort, such as its hard LLM
+request ceiling, and exits 3 -- the result is decided by ``validate.log``
+alone, never by the trimmed ``{model, provider}`` ``scan_report.json`` that
+``generate`` leaves in the same directory. An abort code (``MYL-ABT-*``;
+``MYL-ABT-001`` for the ceiling) makes it NOT_TESTED keyed on exactly those
+abort codes. Otherwise it is INVALID with an infrastructure signature, or
+PRODUCT_DEFECT.
+
 Usage
 -----
 
@@ -88,7 +107,8 @@ Usage
 
     # one run (the directory `validate` wrote validation_report.json into)
     python scripts/score_third_party.py score out/generated/<slug>/ \\
-        --target tpv-server-memory --run-log run.log --out score-run1.json
+        --target tpv-server-memory --run-log run.log \\
+        --scan-log scan.log --validate-log validate.log --out score-run1.json
 
     # combine N re-drives of the same cell (targets 1-3: N=3, bar 2/3)
     python scripts/score_third_party.py rollup \\
@@ -119,6 +139,7 @@ FOUND_UNVALIDATED = "FOUND_UNVALIDATED"
 NOT_TESTED = "NOT_TESTED"
 
 _REASON_CODE_RE = re.compile(r"MYL-[A-Z]+-\d+")
+_ABORT_CODE_RE = re.compile(r"MYL-ABT-\d+")
 
 #: Outcomes a "real" judged attempt can have. Everything else (skip/error/
 #: undecided/not_applicable variants) needs a reason code to count as
@@ -258,11 +279,72 @@ def _classify_missing_report(run_dir: Path, log_text: str) -> dict[str, object]:
     }
 
 
-def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object]:
-    """Classify one run directory per the prereg's pass rule."""
-    log_text = ""
-    if run_log is not None and run_log.is_file():
-        log_text = run_log.read_text(encoding="utf-8", errors="replace")
+def _read_log(path: Path | None) -> str | None:
+    """The log's text, or None when no path was given or the file does not
+    exist (the stage never ran)."""
+    if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _classify_validate_without_report(run_dir: Path, validate_text: str) -> dict[str, object]:
+    """``validate`` ran but wrote no ``validation_report.json``.
+
+    Decided by ``validate.log`` alone -- see the module docstring's "Which
+    stage's log a reason code comes from". An abort code keys NOT_TESTED on
+    exactly the abort codes ``validate`` printed, so N re-drives that all
+    tripped the same ceiling agree whatever their scans printed.
+    """
+    abort_codes = _dedupe(_ABORT_CODE_RE.findall(validate_text))
+    if abort_codes:
+        return {
+            "classification": NOT_TESTED,
+            "stage": "validate",
+            "reason": (
+                "validate stopped early (MYL-ABT-001 is its LLM request ceiling) and "
+                "wrote no validation_report.json"
+            ),
+            "reason_codes": abort_codes,
+        }
+    signature = _infra_signature_in(validate_text)
+    if signature is not None:
+        return {
+            "classification": INVALID,
+            "stage": "validate",
+            "reason": (
+                f"{run_dir}: validate wrote no validation_report.json; infra signature in "
+                f"validate.log: {signature!r}"
+            ),
+        }
+    return {
+        "classification": PRODUCT_DEFECT,
+        "stage": "validate",
+        "reason": (
+            f"{run_dir}: validate ran but wrote no validation_report.json, with no abort "
+            "code and no recognised infrastructure signature in validate.log"
+        ),
+    }
+
+
+def score_run(
+    run_dir: Path,
+    *,
+    run_log: Path | None = None,
+    scan_log: Path | None = None,
+    validate_log: Path | None = None,
+) -> dict[str, object]:
+    """Classify one run directory per the prereg's pass rule.
+
+    ``run_log`` is the whole captured output, used for the traceback check
+    and, when no ``scan_log`` is given, for scan-stage reason codes.
+    ``scan_log`` and ``validate_log`` are each stage's own output; a
+    ``validate_log`` path whose file does not exist means validate never ran.
+    """
+    scan_text = _read_log(scan_log)
+    validate_text = _read_log(validate_log)
+    log_text = _read_log(run_log)
+    if log_text is None:
+        log_text = "\n".join(t for t in (scan_text, validate_text) if t is not None)
 
     # Rule #1, checked before anything else: a traceback with a mylonite
     # stack frame anywhere is a product defect, full stop -- see the module
@@ -282,15 +364,29 @@ def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object
             }
         target_noise_traceback = True
 
-    result = _score_run_normally(run_dir, log_text)
+    if validate_text is not None and not (run_dir / "validation_report.json").is_file():
+        result = _classify_validate_without_report(run_dir, validate_text)
+    else:
+        # Reason codes come from the stage whose result is being scored:
+        # validate's log when it wrote the report, otherwise scan's.
+        if validate_text is not None:
+            codes_text = validate_text
+        elif scan_text is not None:
+            codes_text = scan_text
+        else:
+            codes_text = log_text
+        result = _score_run_normally(run_dir, log_text, codes_text)
     if target_noise_traceback:
         result["target_noise_traceback"] = True
     return result
 
 
-def _score_run_normally(run_dir: Path, log_text: str) -> dict[str, object]:
+def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[str, object]:
     """Every classification branch except rule #1 (the traceback check,
-    handled by the caller, :func:`score_run`, before this is reached)."""
+    handled by the caller, :func:`score_run`, before this is reached).
+    ``log_text`` is the whole log, searched for infra signatures;
+    ``codes_text`` is the scored stage's own log, the only place reason
+    codes are read from."""
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
 
@@ -310,7 +406,7 @@ def _score_run_normally(run_dir: Path, log_text: str) -> dict[str, object]:
     raw_report: dict = {}
     if report_path.is_file():
         raw_report = json.loads(report_path.read_text(encoding="utf-8"))
-    log_reason_codes = _REASON_CODE_RE.findall(log_text)
+    log_reason_codes = _REASON_CODE_RE.findall(codes_text)
     reason_codes = _dedupe(_reason_codes_in_attempts(raw_report) + log_reason_codes)
     weakness_classes = sorted(scan_result.weakness_classes) if scan_result is not None else []
 
@@ -450,6 +546,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Captured stdout log for this run -- required to distinguish a traceback-"
         "driven product defect or an infra failure from a clean result.",
     )
+    score_p.add_argument(
+        "--scan-log",
+        type=Path,
+        default=None,
+        help="scan's own captured output; scan-stage reason codes are read from it.",
+    )
+    score_p.add_argument(
+        "--validate-log",
+        type=Path,
+        default=None,
+        help="validate's own captured output; a missing file means validate never ran.",
+    )
     score_p.add_argument("--out", type=Path, required=True)
 
     rollup_p = sub.add_parser(
@@ -463,7 +571,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "score":
-        result = score_run(args.run_dir, run_log=args.run_log)
+        result = score_run(
+            args.run_dir,
+            run_log=args.run_log,
+            scan_log=args.scan_log,
+            validate_log=args.validate_log,
+        )
         result["target"] = args.target
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, indent=2))
