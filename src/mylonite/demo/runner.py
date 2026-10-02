@@ -89,7 +89,7 @@ DEMO_PROVIDER = "ollama"
 #: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is  # allow-literal: example
 #: what Ollama's own tool-calling support targets — and the demo is entirely a
 #: tool-calling exercise. See docs/self-hosted-models.md.
-DEMO_MODEL = "ollama_chat/qwen3:4b-instruct-2507-q4_K_M"
+DEMO_MODEL = "ollama_chat/qwen3:4b-instruct-2507-q4_K_M"  # allow-literal: example -- the replay fixtures' own recorded identity, not a default (see the REPLAY INVARIANT docstring above); never read without --live, which carries its own choose-a-model requirement
 
 #: The two reference variants the demo runs, in render order.
 _VARIANTS: tuple[Literal["vulnerable", "guarded"], ...] = ("vulnerable", "guarded")

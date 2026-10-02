@@ -4,7 +4,7 @@
 # model, 1 iteration). A regression fails this check, and so does a gate test
 # that did not run (MYLONITE_REQUIRE_GATE_RUN).
 #
-# Requires one secret: MYLONITE_API_KEY (your LLM provider key). Pinned to
+# Requires one secret: MYLONITE_API_KEY (your LLM provider key). Pinned to  # allow-literal: example
 # the model this gate run used; set a MYLONITE_MODEL repository variable to
 # change it without editing this file.
 #

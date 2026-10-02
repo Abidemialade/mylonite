@@ -29,7 +29,7 @@
 # allowlisting its rows one by one here would just restate its own typed
 # fields.
 
-# REG-1b (2026-10-02): every row below this point was either fixed outright
+# NOTE (2026-10-02): every row below this point was either fixed outright
 # or converted to an inline `# allow-literal: example` marker on its own
 # source line (see check_no_hardcoded_models.py's module docstring) -- the
 # allowlist for src/ is now empty. mylonite._redaction is exempt by path,
