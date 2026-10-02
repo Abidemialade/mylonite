@@ -9,27 +9,22 @@ both import from here.
 from __future__ import annotations
 
 import re
+import sys
 
-# Default API-key env var(s) per provider. Bedrock uses the AWS credential
-# chain (two vars); local servers (ollama/vllm) and a litellm proxy need none.
-# This is the "explicit map" layer: it stays a CLOSED, hand-maintained set
-# deliberately (used by `doctor`'s key-SHAPE sanity check, which must only
-# look at vars that are actually meant to hold a secret key -- see
-# `required_env_vars` below for the broader "everything this provider needs"
-# view, which is NOT scoped the same way). New providers not yet added here
-# still get picked up by `looks_like_provider_env_var`'s pattern matching --
-# see its docstring for why an allowlist alone silently drops keys.
+from mylonite.providers.registry import PROVIDERS
+
+# Bare API-key env var(s) per provider, read from the approved-provider
+# registry (:mod:`mylonite.providers.registry`) -- that module is now the
+# single source of truth; this name and shape stay the same so every
+# existing importer (``doctor``'s key-SHAPE sanity check among them, which
+# must only look at vars that are actually meant to hold a secret key --
+# see `required_env_vars` below for the broader "everything this provider
+# needs" view, which is NOT scoped the same way) keeps working unchanged.
+# ``stub`` is a test-only sentinel provider (no real credential, ever) and
+# isn't part of the approved registry, so it's added here explicitly.
 PROVIDER_ENV_VARS: dict[str, tuple[str, ...]] = {
-    "anthropic": ("ANTHROPIC_API_KEY",),
-    "openai": ("OPENAI_API_KEY",),
-    "azure": ("AZURE_API_KEY",),
-    "google": ("GEMINI_API_KEY",),  # GOOGLE_API_KEY is also accepted by LiteLLM
-    "bedrock": ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
-    "ollama": (),
-    "vllm": (),
-    "litellm-proxy": (),
-    "stub": (),
-}
+    provider_id: info.key_env for provider_id, info in PROVIDERS.items()
+} | {"stub": ()}
 
 # Vars a provider needs BEYOND the bare API key to actually route a call --
 # e.g. Azure also needs its endpoint + API version (LiteLLM reads
@@ -131,16 +126,38 @@ def env_vars_for(provider: str | None, override: str | None = None) -> tuple[str
 
 def required_env_vars(provider: str | None, override: str | None = None) -> tuple[str, ...]:
     """Every env var ``provider`` needs to actually route a call -- the API
-    key (:func:`env_vars_for`) plus anything else LiteLLM reads for it, e.g.
-    Azure's endpoint + API version. This is what :meth:`ModelRef.env_vars`
-    reports; ``doctor``'s key-shape check deliberately keeps using
-    ``env_vars_for`` instead (see :data:`_EXTRA_ENV_VARS`'s docstring).
+    key plus anything else LiteLLM reads for it, e.g. Azure's endpoint +
+    API version. This is what :meth:`ModelRef.env_vars` reports; ``doctor``'s
+    key-shape check deliberately keeps using ``env_vars_for`` instead (see
+    :data:`_EXTRA_ENV_VARS`'s docstring).
+
+    A recognised provider (anything in :data:`PROVIDER_ENV_VARS`, which is
+    derived from the approved-provider registry) reads its key plus extra
+    vars straight from there. A provider id LiteLLM itself would route but
+    that isn't in the registry (xAI, Groq, Mistral, DeepSeek, OpenRouter, a
+    newer OpenAI-compatible host, ...) used to silently return no required
+    vars here, so the credential preflight passed and the run failed later,
+    deep inside the live call, with a traceback instead of a clear "missing
+    FOO_API_KEY". It now falls back to LiteLLM's own ``<PROVIDER>_API_KEY``
+    naming convention (the same pattern :func:`looks_like_provider_env_var`
+    already recognises) and prints one warning line to stderr -- the
+    preflight still fires, just without registry-backed extra vars.
     """
-    base = env_vars_for(provider, override)
+    if override:
+        return (override,)
     p = _normalise_provider(provider)
     if p is None:
-        return base
-    return base + _EXTRA_ENV_VARS.get(p, ())
+        return ()
+    if p in PROVIDER_ENV_VARS:
+        return PROVIDER_ENV_VARS[p] + _EXTRA_ENV_VARS.get(p, ())
+    fallback = f"{p.upper().replace('-', '_')}_API_KEY"
+    print(
+        f"mylonite: provider {p!r} is not in the approved registry; checking "
+        f"for {fallback} (LiteLLM's own key-variable naming convention). "
+        "Results from an unlisted provider are unverified.",
+        file=sys.stderr,
+    )
+    return (fallback,)
 
 
 def model_is_routable(model: str, *, api_base: str | None = None) -> bool:
