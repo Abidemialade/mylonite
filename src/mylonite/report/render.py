@@ -23,12 +23,45 @@ from mylonite._twin_fidelity import (
 )
 from mylonite._verdict import (
     KEPT,
+    REJECTED,
     STABLE_NOT_PROVEN,
     has_proof,
     is_black_box_keep,
     verdict_label,
     verdict_reason,
 )
+
+#: The legs whose remediation assumes the attack landed at least once. When the
+#: unguarded side fired 0 times, each of them fails for that one reason, and
+#: their own lines would send the operator after the guard or the seed wording.
+_NEEDS_A_LANDED_ATTACK = frozenset(
+    {"differential", "flakiness", "stability", "effect", "consensus", "metamorphic"}
+)
+
+
+def _own_seed_id(report: Any, matrix: list[Any]) -> str | None:
+    """The pattern_id of the seed this report's test was written for, if known.
+
+    The generator names the test ``test_security_<slug(pattern_id)>.py``, so the
+    seed is the matrix row whose slug matches the report's file name. ``None``
+    when no row matches (a hand-built report, say): the matrix then renders as
+    it always did, without claiming which seeds ran.
+    """
+    from mylonite.plugins._reference.reference_pytest_generator import _slugify
+
+    filename = getattr(report, "test_filename", "") or ""
+    for seed in matrix:
+        if filename == f"test_security_{_slugify(seed.pattern_id)}.py":
+            return str(seed.pattern_id)
+    return None
+
+
+def _attack_never_landed(report: Any) -> int | None:
+    """The iteration count when the unguarded side fired 0 times, else ``None``."""
+    repro = getattr(report, "reproducibility", None)
+    if repro is None or not repro.iterations or repro.vuln_fired:
+        return None
+    return int(repro.iterations)
 
 
 def _render_validation_report(report: Any, console: Console | None = None) -> None:
@@ -142,20 +175,49 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 "against the real target (no in-repo guarded twin)",
             )
 
-    if report.mutation_score is not None:
-        console_print(console, f"mutation score: {report.mutation_score:.2f}")
-
-    # Per-seed kill matrix — the oracle's discrimination, seed by seed.
+    # Per-seed kill matrix — the oracle's discrimination, seed by seed. The
+    # differential attacks with the test's own seed only, so every other seed
+    # was never run: it is "not run", not a miss, and the mutation score covers
+    # the own seed alone. A seed marked killed did run (an older report from a
+    # whole-bank run), so it keeps its mark.
     matrix = getattr(report, "mutation_matrix", None) or []
+    own = _own_seed_id(report, matrix)
+    if report.mutation_score is not None:
+        if own is not None:
+            console_print(
+                console,
+                f"mutation score: {report.mutation_score:.2f} (seeds killed out of all "
+                f"{len(matrix)} in the bank; this test runs only its own seed, so "
+                f"1/{len(matrix)} is the most it can score)",
+            )
+        else:
+            console_print(console, f"mutation score: {report.mutation_score:.2f}")
     if matrix:
         killed = sum(1 for s in matrix if s.killed)
-        console_print(
-            console,
-            f"kill matrix ({killed}/{len(matrix)} seeds killed = "
-            "fired-on-vulnerable, resisted-on-guarded):",
-        )
-        for seed in matrix:
-            console_print(console, f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
+        if own is None:
+            console_print(
+                console,
+                f"kill matrix ({killed}/{len(matrix)} seeds killed = "
+                "fired-on-vulnerable, resisted-on-guarded):",
+            )
+            for seed in matrix:
+                console_print(console, f"  {_mark(seed.killed)} {seed.weakness}:{seed.pattern_id}")
+        else:
+            not_run = sum(1 for s in matrix if s.pattern_id != own and not s.killed)
+            console_print(
+                console,
+                f"kill matrix (this test's own seed; {not_run} not run; killed = fired on "
+                "the vulnerable side and resisted on the guarded side):",
+            )
+            for seed in matrix:
+                name = f"{seed.weakness}:{seed.pattern_id}"
+                if seed.pattern_id == own:
+                    state = "killed" if seed.killed else "not killed"
+                    console_print(console, f"  {_mark(seed.killed)} {name}  {state}")
+                elif seed.killed:
+                    console_print(console, f"  {_mark(True)} {name}  killed")
+                else:
+                    console_print(console, f"  - {name}  not run")
 
     # Metamorphic robustness gates kept (M2) — say so explicitly so a failing
     # metamorphic row below IS read as a gate failure, not just a footnote.
@@ -167,6 +229,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         )
 
     label = verdict_label(report)
+    notes = getattr(report, "notes", "") or ""
     if label == KEPT:
         console_print(console, f"[green]verdict: KEPT {dash} {verdict_reason(report)}[/green]")
     elif label == STABLE_NOT_PROVEN:
@@ -191,7 +254,6 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         # The differential remediation must not accuse a real (server-layer) control
         # of being theater when the guarded side was only the SYNTHETIC boundary shim.
         # The validator stamps a [guarded-twin=...] marker into notes; key off it.
-        notes = getattr(report, "notes", "") or ""
         if MARKER_SYNTHETIC in notes:
             diff_remediation = (
                 "differential fail: the SYNTHETIC boundary twin did not block the attack. "
@@ -256,9 +318,40 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 "over-fit to the exact seed wording; try a paraphrase-robust payload."
             ),
         }
+        never_landed = _attack_never_landed(report)
         for outcome in report.outcomes:
+            if never_landed is not None and outcome.stage in _NEEDS_A_LANDED_ATTACK:
+                continue
             if not outcome.passed and not outcome.report_only and outcome.stage in _remediation:
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
+        if never_landed is not None:
+            # The attack never fired on the unguarded side, so every leg that
+            # compares sides failed for that one reason. Say it once, and point at
+            # what decides whether an attack lands: the model and its prompt.
+            console_print(
+                console,
+                f"[red]  remediation: the attack never landed on the unguarded side "
+                f"(fired 0/{never_landed}), so this run says nothing about the guard. "
+                "Try a different planner model (--planner-model) or system prompt, "
+                "then re-run `mylonite validate`.[/red]",
+            )
+
+    if label != REJECTED and MARKER_SYNTHETIC in notes:
+        # The guarded side was Mylonite's own boundary guard, not the user's. In
+        # its default mode it refuses the attack's tool call outright, so the
+        # guarded side resists by design: the pass proves the attack is real and
+        # that this kind of guard stops it, never that the user's guard does.
+        console_print(
+            console,
+            "guarded side: a stand-in. Mylonite's boundary guard played the guarded "
+            "build; in its default mode it refuses the attack's tool call by design, "
+            "so that side resists by construction.",
+        )
+        console_print(
+            console,
+            f"  what this pass shows: {proof_claim('boundary')}. Declare control_env "
+            "in the target file to test your own guard.",
+        )
 
 
 #: How each guarded side is described on the ablation matrix. Ablation's own

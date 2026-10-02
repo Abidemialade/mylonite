@@ -90,6 +90,17 @@ reproducibility: vulnerable fired 5/5, guarded resisted 5/5
 mutation score: 0.11   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
 ```
 
+The kill matrix below the panel lists every seed in the bundled bank. The differential
+attacks with the test's own seed only, so that row reads `killed` or `not killed`, and
+every other row reads `not run`: no attack was tried, so it is not a miss. The mutation
+score is labelled the same way. A test that holds scores 1 out of the bank size, which
+is the most it can score.
+
+When a test is **REJECTED** because the attack never landed on the unguarded side
+(fired 0 of N runs), you get one remediation line saying so, not one per failed leg.
+That run says nothing about the guard. Whether an attack lands depends on the model
+and its prompt, so try a different `--planner-model` or system prompt and re-run.
+
 The verdict at the end of the gate line is **KEPT**, **STABLE, NOT PROVEN** or
 **REJECTED**. STABLE, NOT PROVEN is a kept test with no proof behind it: the attack
 reproduced, but no guarded side or effect probe showed a safeguard stops it, or the
@@ -470,6 +481,12 @@ Both are KEPT: the attack fired, a control stopped it, and the emitted regressio
 worth gating on either way. To upgrade a synthetic result to the strong claim, declare
 `control_env` in your `target.yaml` so Mylonite can toggle your real control — see
 [target.yaml](target-file.md).
+
+When the guarded side was the synthetic twin, `validate` adds a `guarded side: a
+stand-in` line under a passing verdict. In its default mode Mylonite's boundary guard
+refuses the attack's tool call by design, so that side resists by construction. The pass
+shows the attack is real and that this kind of guard stops it. It does not show that
+your own guard holds.
 
 A **rejection** on a synthetic twin is likewise not evidence your control is ineffective:
 the boundary shim cannot see a guard enforced inside your server. The reject message says

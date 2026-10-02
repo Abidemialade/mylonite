@@ -21,6 +21,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comes up now exits `2` (`MYL-ABT-006`) after the first run, instead of
   running every iteration and reporting that the attack did not reproduce. The
   hard request ceiling still exits `3` with its own single line.
+- **The `validate` report no longer counts seeds it never ran as misses.**
+  Each validation attacks with the test's own seed only, but the kill matrix
+  marked the other eight seeds as not killed, and the mutation score read as
+  if the test covered the bank. Those rows now read `not run`, and the score
+  says it covers the test's own seed. The gate's pull-request body is
+  unchanged for now.
+- **A rejection where the attack never landed now says so.** When the
+  unguarded side fired 0 of N runs, `validate` prints one remediation line:
+  the run says nothing about the guard, so try a different `--planner-model`
+  or system prompt. It used to blame the guard ("did not discriminate") and
+  the seed ("too flaky").
+- **A pass against Mylonite's stand-in guard says what it proves.** When the
+  guarded side was the boundary guard, `validate` now adds a line under a
+  passing verdict: in its default mode that guard refuses the attack's tool
+  call by design, so the pass shows the attack is real and that this kind of
+  guard stops it, not that your own guard holds.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after
