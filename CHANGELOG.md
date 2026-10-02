@@ -37,8 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read again after the agent ran, or was not compared in a known form" (reason-code
   snapshot updated). A `null` top-level field or annotation hint counts the same as an
   absent one; `required` and `enum` are compared as sets only inside a tool's input and
-  output schemas; and a long or non-ASCII key name appears in a diff pointer as a short
-  hash.
+  output schemas (not inside a `default`, `const` or `examples` value); a tool whose
+  fields could not be read in full reads NOT TESTED, never stable; and a long or
+  non-ASCII key name appears in a diff pointer as a short hash.
 
 ### Added
 

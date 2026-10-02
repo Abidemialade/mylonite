@@ -249,6 +249,10 @@ def _tool_surface_metadata(
         return {}
     elif relist_failed:
         return {"tool_surface_mutated": "errored"}
+    elif not all_fields:
+        # A tool's wire fields could not be read, so only the converted fields
+        # were compared: that is not proof of a stable surface.
+        return {"tool_surface_mutated": "unsigned"}
     else:
         out = {"tool_surface_mutated": "false"}
     out["tool_surface_form"] = tool_surface.SURFACE_FORM
@@ -693,24 +697,41 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                         # The verdict compares the planner's view (after the
                         # control shim) on every field; the server's own change
                         # below the shim is kept as evidence only.
-                        tool_surface_mutation = tool_surface.diff_surfaces(
-                            recording_shim.first_surface, current
-                        )
                         if (
-                            recording_shim.first_wire_surface
+                            recording_shim.first_surface_has_wire
+                            and recording_shim.current_surface_has_wire
+                        ):
+                            tool_surface_mutation = tool_surface.diff_surfaces(
+                                recording_shim.first_surface, current
+                            )
+                        else:
+                            # A tool's wire fields could not be read on one of
+                            # the listings: compare only the converted fields on
+                            # both, so the missing dump is never itself a change.
+                            tool_surface_mutation = tool_surface.diff_surfaces(
+                                recording_shim.first_converted_surface or {},
+                                recording_shim.current_converted_surface or {},
+                            )
+                        if (
+                            recording_shim.first_surface_has_wire
+                            and recording_shim.current_surface_has_wire
+                            and recording_shim.first_wire_surface is not None
                             and recording_shim.current_wire_surface is not None
                         ):
                             tool_surface_wire_mutation = tool_surface.diff_surfaces(
                                 recording_shim.first_wire_surface,
                                 recording_shim.current_wire_surface,
                             )
-                    except Exception:
+                    except Exception as exc:
                         # A re-list failure must not fail the attempt, but it must
                         # not read as a stable surface either: nothing was compared.
                         tool_surface_relist_failed = True
-                        logger.info(
-                            "%s: rug-pull re-list failed; surface check is inconclusive",
+                        logger.warning(
+                            "%s: rug-pull re-list or comparison failed (%s: %s); "
+                            "surface check is inconclusive",
                             type(self).__name__,
+                            type(exc).__name__,
+                            redact(str(exc))[:200],
                         )
                 tool_list_truncated = shim.truncated
 
@@ -892,7 +913,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     relist_failed=tool_surface_relist_failed,
                     listed=recording_shim.first_surface is not None,
                     wire_mutation=tool_surface_wire_mutation,
-                    all_fields=recording_shim.first_surface_has_wire,
+                    all_fields=(
+                        recording_shim.first_surface_has_wire
+                        and recording_shim.current_surface_has_wire
+                    ),
                 ),
             },
         )
@@ -1507,6 +1531,12 @@ class _RecordingServerShim:
         self.first_surface_has_wire = False
         #: The wire view of the most recent ``current_surface`` re-list.
         self.current_wire_surface: dict[str, Any] | None = None
+        #: Whether every tool on that re-list carried its wire dump.
+        self.current_surface_has_wire = False
+        #: Both listings signed on the converted fields only, compared instead
+        #: when a wire dump is missing on either side.
+        self.first_converted_surface: dict[str, Any] | None = None
+        self.current_converted_surface: dict[str, Any] | None = None
 
     async def list_tools(self) -> list[ToolDescription]:
         tools = await self._inner.list_tools()
@@ -1522,6 +1552,7 @@ class _RecordingServerShim:
             self.first_surface = tool_surface.surface_views(tools)
             self.first_wire_surface = tool_surface.surface_views(tools, wire_only=True)
             self.first_surface_has_wire = tool_surface.has_wire(tools)
+            self.first_converted_surface = tool_surface.surface_views(tools, converted_only=True)
         return tools
 
     async def current_surface(self) -> dict[str, Any]:
@@ -1531,6 +1562,8 @@ class _RecordingServerShim:
         same listing is kept on ``current_wire_surface`` as evidence."""
         tools = await self._inner.list_tools()
         self.current_wire_surface = tool_surface.surface_views(tools, wire_only=True)
+        self.current_surface_has_wire = tool_surface.has_wire(tools)
+        self.current_converted_surface = tool_surface.surface_views(tools, converted_only=True)
         return tool_surface.surface_views(tools)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
