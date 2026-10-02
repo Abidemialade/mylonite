@@ -2376,3 +2376,25 @@ def test_each_metamorphic_probe_gets_its_own_note_id_and_both_twins_share_it() -
     assert next(iter(per_id.values())) % 2 == 0
     # Deterministic per run, so a recorded run replays.
     assert sorted(second_run) == sorted(first_run)
+
+
+def test_a_pattern_no_seed_matches_is_never_kept() -> None:
+    """Scoped to a pattern no bundled seed carries, the differential runs nothing
+    on either twin, so nothing fires and the test is rejected, never kept."""
+    exploit = _build_exploit(pattern_id="no-bundled-seed-has-this-pattern")
+    validator = DifferentialValidator(
+        iterations=2, completion_fn=_ScriptedCompletion(), run_build=False
+    )
+
+    tally = validator._run_iteration(exploit.pattern_id)
+    assert tally.vuln_result.report.attempts == []
+    assert tally.guard_result.report.attempts == []
+
+    report = validator.validate(
+        _emit_test(exploit), ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+    assert report.kept is False
+    assert _outcome(report, "differential").passed is False
+    assert report.reproducibility is not None
+    assert report.reproducibility.vuln_fired == 0
+    assert report.reproducibility.guard_resisted == 0

@@ -1345,7 +1345,9 @@ class DifferentialValidator(ValidatorBase):
     #: differential already sent on the same twin. A recording stores one answer
     #: per request, so a repeat would break the probe whenever the model answered
     #: the two differently. Reset at the start of every stage, so the ids are the
-    #: same on every run and a recorded stage replays.
+    #: same on every run and a recorded stage replays. It is per-instance mutable
+    #: state, so one validator must not run two validations on different threads
+    #: at once: build one validator per concurrent run.
     _metamorphic_probe_seq: int = 0
 
     def _metamorphic_outcome(self, exploit: ExploitRecord) -> ValidationOutcome:
