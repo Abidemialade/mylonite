@@ -386,3 +386,69 @@ def test_a_git_error_checking_the_index_is_not_reported_as_staged_files(tmp_path
     with pytest.raises(GatePrError, match="rc=128") as excinfo:
         _open(_init_repo(tmp_path / "repo"), run)
     assert "staged" not in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Git errors on the guard paths are reported as git errors.
+# ---------------------------------------------------------------------------
+
+
+def _failing_git(fail_cmd: list[str], *, rc: int = 128, stderr: str = "fatal: boom"):
+    """Runs git for real, except ``fail_cmd``, which returns ``rc``."""
+
+    def run(cmd, **kwargs):
+        if list(cmd) == fail_cmd:
+
+            class _CP:
+                returncode = rc
+                stdout = ""
+
+            _CP.stderr = stderr
+            return _CP()
+        if cmd[0] == "gh":
+            return _real_git_fake_gh()(cmd, **kwargs)
+        return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)
+
+    return run
+
+
+def test_a_failing_git_status_is_a_git_error_not_a_clean_tree(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    run = _failing_git(["git", "status", "--porcelain", "--untracked-files=no"])
+    with pytest.raises(GatePrError, match=r"git status failed \(rc=128\): fatal: boom"):
+        ensure_clean_tree(repo, _run=run)
+
+
+def test_a_failing_git_status_exits_8_at_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import typer
+
+    from mylonite.gate.wiring import resolve_gate_out_dir_or_exit
+
+    repo = _init_repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    run = _failing_git(["git", "status", "--porcelain", "--untracked-files=no"])
+    real = pr_mod.ensure_clean_tree
+    monkeypatch.setattr(pr_mod, "ensure_clean_tree", lambda root: real(root, _run=run))
+
+    with pytest.raises(typer.Exit) as excinfo:
+        resolve_gate_out_dir_or_exit(
+            Path(".mylonite") / "gate", open_pr=True, workflows=False, pr_mod=pr_mod
+        )
+    assert excinfo.value.exit_code == 8
+
+
+def test_a_failing_rev_parse_after_the_commit_still_returns_to_the_original_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    repo = _init_repo(tmp_path / "repo")
+    _with_local_origin(tmp_path, repo)
+
+    with pytest.raises(GatePrError, match="git rev-parse HEAD failed") as excinfo:
+        _open(repo, _failing_git(["git", "rev-parse", "HEAD"]))
+
+    assert "'mylonite/gate-x' is kept" in str(excinfo.value)
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"

@@ -381,11 +381,11 @@ def open_or_print_pr(
     # The gate commit exists from here on. Whatever happens next (push, gh,
     # or success), the gate branch is KEPT and the operator is put back where
     # they started, so their next commit doesn't land on the gate branch.
-    commit_sha = (
-        str(getattr(_git(["rev-parse", "HEAD"], cwd=cwd, _run=_run), "stdout", "") or "").strip()
-        or None
-    )
+    # Every git step after the commit sits inside this `try`, so the return
+    # to the starting branch runs whichever one fails.
     try:
+        head_cp = _git(["rev-parse", "HEAD"], cwd=cwd, _run=_run)
+        commit_sha = str(getattr(head_cp, "stdout", "") or "").strip() or None
         result = _publish(
             cwd=cwd,
             branch=branch,
