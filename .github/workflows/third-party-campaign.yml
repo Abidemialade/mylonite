@@ -279,7 +279,7 @@ jobs:
         if: steps.guard.outputs.run == 'true' && (env.TPV_PROVIDER == 'ollama' || env.TPV_TARGET == 'tpv-agents-sdk-ollama')
         shell: bash
         run: |
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
           curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}'
 
       - name: "Target 2: install redis/mcp-redis (its own console script, not `python -m` from an arbitrary cwd)"
@@ -301,7 +301,7 @@ jobs:
           git -C "$RUNNER_TEMP/python-sdk" checkout --quiet 9972c21aa42054fb1450c5fc614761ed11847ec6
           python -m pip install -e "$RUNNER_TEMP/python-sdk/examples/servers/simple-streamablehttp"
           mcp-simple-streamablehttp --port 3000 &
-          for i in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:3000/mcp && break; sleep 1; done
+          for _ in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:3000/mcp && break; sleep 1; done
 
       - name: "Target 5: build the Go SDK's own memory example"
         if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-go-memory'
@@ -323,7 +323,7 @@ jobs:
           python -m pip install "openai-agents[litellm]==0.22.3" "fastapi==0.142.2" "uvicorn==0.54.0" "litellm==1.103.2"
           python -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
             --host 127.0.0.1 --port 8099 &
-          for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
 
       # --- scaffold sanity check (no provider key; see the prereg) ----------
 
