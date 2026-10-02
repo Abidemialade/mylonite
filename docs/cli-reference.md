@@ -16,7 +16,8 @@ counted. `--max-llm-calls` is a softer per-scan budget, described below.
 
 **Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
-empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` provider unreachable · `5` test rejected
+empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` no model
+chosen, or the chosen provider unreachable · `5` test rejected
 (not kept) · `6` `gate`: the test generator returned nothing (internal collaborator
 failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
 `gate`: the git/gh step failed (your findings and validation report are still in `--out`).
@@ -27,17 +28,27 @@ runs out of `--max-llm-calls` still exits `3`. On `gate`, the finding is still t
 a test, validated, and gated (the PR is opened or printed) before that exit code is
 returned — see [the gate page's precedence note](ci-gating.md#budget-exhaustion-and-findings).
 
-**No LLM credential configured?** `scan`, `gate`, `validate` and `ablate` all check
-every model they will call before doing any work and exit `2` naming the missing
-environment variable. The message also offers a way past it that needs no key at
-all: `--model ollama_chat/llama3.2:3b` with [Ollama running](self-hosted-models.md)
-locally, or, on `scan` only, `--dry-run` to preview the run with no LLM calls.
-`validate`'s exit `4` (a credential IS set but the provider can't be reached, on
-either the custom-target or the reference-target path) points at the same
-local model and names the API-key variable for the model's own provider. When the
-provider refused the check with a rate limit (HTTP 429), could not be reached, or
-stalled, exit `4` says that instead, names the provider and model, and says what to
-do; see
+**No model chosen at all?** There is no default provider or model. `scan`, `gate`,
+`validate` and `ablate` each need one picked before touching a target — via
+`--model`, `mylonite.yaml`'s `model:` key, or `MYLONITE_MODEL`. With all three
+unset, the command prints one line naming every approved provider, an example
+`--model` value and the environment variable it needs, then exits `4` — before
+any adapter, subprocess or LLM call, `--dry-run` included. `check`, `scan
+--scaffold` (introspection only — no LLM call either way) and `mylonite demo`'s
+offline replay never need a model and keep working with nothing configured.
+
+**Model chosen, no credential for it?** `scan`, `gate`, `validate` and `ablate`
+all check every model they will call before doing any other work and exit `2`
+naming the missing environment variable. The message also offers a way past it
+that needs no key at all: `--model ollama_chat/llama3.2:3b` with [Ollama
+running](self-hosted-models.md) locally, or, on `scan` only, `--dry-run` to
+preview the run with no LLM calls (this credential check, unlike the one above,
+is skipped under `--dry-run`). `validate`'s exit `4` (a credential IS set but
+the provider can't be reached, on either the custom-target or the
+reference-target path) points at the same local model and names the API-key
+variable for the model's own provider. When the provider refused the check
+with a rate limit (HTTP 429), could not be reached, or stalled, exit `4` says
+that instead, names the provider and model, and says what to do; see
 [When the provider rate-limits or drops the run](reading-results.md#when-the-provider-rate-limits-or-drops-the-run).
 
 **Which variable does it check?** A provider in Mylonite's approved table (Anthropic,

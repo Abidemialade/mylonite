@@ -204,6 +204,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-ASCII key name appears in a diff pointer as a short hash.
 ### Changed
 
+- **No default model, anywhere — behaviour change.** `scan`, `validate`, `gate`
+  and `ablate` used to fall back to a hardcoded Haiku model (Sonnet, for
+  `scan`) when `--model`, `mylonite.yaml`'s `model:` and `MYLONITE_MODEL` were
+  all unset. They now stop before touching a target or making a call, with one
+  line naming every approved provider — an example `--model` value and the
+  environment variable it needs, built from the provider registry — and exit
+  `4`, the same code a live command already used for an unreachable provider.
+  `check`, `scan --scaffold` (introspection only; no LLM call either way) and
+  `mylonite demo`'s offline replay make no LLM call and still need no model.
+  `gate-action`'s `model` input is now required, with no default. Bedrock's
+  credential check now accepts a named `AWS_PROFILE`, an
+  `AWS_BEARER_TOKEN_BEDROCK` bearer token, or an OIDC role
+  (`AWS_ROLE_ARN`+`AWS_WEB_IDENTITY_TOKEN_FILE`), not only the static
+  access/secret keypair — AWS's own credential chain always accepted all
+  four; requiring the static pair specifically rejected the other three. See
+  "No model chosen at all?" in `docs/cli-reference.md`.
+
 - **`validate` on the reference app now attacks with the finding's own seed, and
   nothing else.** Each differential run used to scan both builds with the whole
   bank of nine seeds and then look for the finding's result. Now every run drives

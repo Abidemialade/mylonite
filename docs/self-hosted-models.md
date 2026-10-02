@@ -63,6 +63,13 @@ that maps a provider's own LiteLLM routing prefix (`hosted_vllm` for vLLM,
 `ollama_chat` for Ollama, and so on) back to its row, are both generated
 from it, so the three never drift apart.
 
+Bedrock is the one row with more than one accepted credential form: the
+static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` pair, a named
+`AWS_PROFILE`, an `AWS_BEARER_TOKEN_BEDROCK` bearer token, or an OIDC role
+(`AWS_ROLE_ARN` plus `AWS_WEB_IDENTITY_TOKEN_FILE`) — any ONE, complete form
+is sufficient; Mylonite doesn't demand the static pair specifically just
+because it's the row's canonical/first-listed one.
+
 A provider id outside this table isn't unchecked, but Mylonite never asks
 LiteLLM what it needs — an earlier approach did, and `litellm.get_llm_provider`
 for a route like `chatgpt/` or `github_copilot/` starts an interactive
