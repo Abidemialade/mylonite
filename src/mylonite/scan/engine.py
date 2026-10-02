@@ -38,6 +38,7 @@ from mylonite.scan._llm import (
     LiteLLMCallCounter,
     LLMSpend,
     llm_scope,
+    request_ceiling_hit,
     seed_scope,
 )
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
@@ -844,6 +845,12 @@ class ScanEngine:
         # report alongside the other fallback causes.
         if counter.tool_schema_sanitised:
             fallback_breakdown["tool_schema_sanitised"] = counter.tool_schema_sanitised
+
+        # The hard request ceiling refused a request in this process. Some
+        # attempt was cut short even if no handler here saw the refusal, so the
+        # run is incomplete and must not read as a finished scan.
+        if aborted is None and request_ceiling_hit() is not None:
+            aborted = AbortReason.BUDGET_EXCEEDED
 
         return self._finalize(
             attempts,

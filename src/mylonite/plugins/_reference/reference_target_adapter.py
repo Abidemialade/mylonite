@@ -45,6 +45,7 @@ from mylonite.contracts import (
     ToolSpec,
 )
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
+from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterInvocationSkipped
 from mylonite.scan.llm_planner import DEFAULT_SYSTEM_PROMPT, LLMPlanner
 from mylonite.scan.llm_types import CompletionFn, ToolDescription, ToolResult
@@ -329,6 +330,10 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         user_message = _drive_user_message(drive, note_id, payload.body)
         try:
             trace = await planner.run(user_message)
+        except BudgetExceededError:
+            # A spent budget stops the run; read as a skip, the attempt it cut
+            # short would count as tested.
+            raise
         except Exception as exc:
             logger.info("InProcessReferenceAdapter: planner.run raised — skipping attempt")
             raise AdapterInvocationSkipped(

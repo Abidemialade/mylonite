@@ -4,7 +4,7 @@ Every command, its key options, and a worked example. Run `mylonite COMMAND --he
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
-**Hard spend limit.** `mylonite --max-llm-requests N COMMAND`, or
+**Hard spend limit.** The global option `--max-llm-requests N` (before the command), or
 `MYLONITE_MAX_LLM_REQUESTS=N`, caps every LLM request the whole run sends, retries
 included, across scan, validation and gate. It is the hard ceiling:
 request N+1 is never sent. The run stops, exits `3`, prints one

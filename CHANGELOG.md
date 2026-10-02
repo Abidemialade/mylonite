@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry the corrected figures; the already-published `verification/results/*/`
   snapshots keep their original numbers with a correction note attached, since
   reproducing them exactly would need a fresh judge run against a live model.
+- **A spent LLM budget now always stops the run; it is never read as a
+  skipped or unjudged attempt.** On the bundled practice app, a planner call
+  refused by the budget was recorded as a skipped attempt, and the metamorphic
+  stage of `validate` read it as "never judged", so a validation cut short by
+  its budget could still come back kept. Both now stop the run with exit `3`,
+  and `validate` returns no verdict for a run the request ceiling cut short.
 
 - **`scan --scaffold` checks the output path before launching your server, and
   writes atomically.** A bad `--scaffold` path (a directory, or one Mylonite
@@ -105,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The testkit signature snapshot gains `pending_fix`. See "A finding you
   haven't fixed yet" in `docs/ci-gating.md`.
 - **A hard spend limit: `MYLONITE_MAX_LLM_REQUESTS` (or `mylonite --max-llm-requests N`).**
+- **A hard spend limit: `MYLONITE_MAX_LLM_REQUESTS` (or the global `--max-llm-requests N` option).**
   One ceiling for the whole run counts every LLM request sent to a provider,
   retries included, across scan, validation and gate, and never sends one past
   the limit. Before, the only budget was `--max-llm-calls`, which bounds the scan
