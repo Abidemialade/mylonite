@@ -65,6 +65,7 @@ from mylonite.scan.seeds import (
     seeds_for_descriptor,
     target_family,
 )
+from mylonite.scan.weakness import EFFECTFUL_WEAKNESS_CLASSES
 from mylonite.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -485,10 +486,6 @@ def _unemitted_class_attempts(
     return attempts
 
 
-#: Classes whose finding turns on a real side effect (a send, a fetch, a write).
-_EFFECTFUL_CLASSES = frozenset({"W3", "W4"})
-
-
 def _effect_unconfirmable_attempts(
     descriptor: TargetDescriptor,
     payloads: Iterable[Payload],
@@ -496,32 +493,41 @@ def _effect_unconfirmable_attempts(
     effect_probe_declared: object,
     seeds_by_id: Mapping[str, Any] | None = None,
 ) -> list[ScanAttempt]:
-    """One NOT TESTED attempt per W3/W4 class whose effect nothing can read back.
+    """One NOT TESTED attempt per W3/W4 class that ran with no effect_probe.
 
-    Applies only when the adapter says no ``effect_probe`` is declared
-    (its ``declares_effect_probe`` is ``False``; an adapter that does not say is left
-    alone), the target declares its weakness classes, and its tool surface has
-    no readback tool -- the same detector ``scan --scaffold`` uses to propose an
-    effect_probe, so the two agree. Such a server gives no way to confirm or
-    rule out an effect, so the class must never read as resisted. An attempt in
-    the class that fired still makes the class a finding: this adds a NOT
-    TESTED row, it does not change any attempt's verdict.
+    Applies only on a custom target (one that declares its weakness classes)
+    whose adapter says no ``effect_probe`` is in effect for this run (its
+    ``declares_effect_probe`` is ``False``; an adapter that does not say, such
+    as a reference or REST one, is left alone). With no probe, nothing reads
+    the target's own state, so a W3/W4 class cannot read resisted from the
+    trace alone. An attempt in the class that fired still makes the class a
+    finding: this adds a NOT TESTED row and changes no attempt's verdict. The
+    reason names the readback the scaffold would propose
+    (:func:`~mylonite.scan.tool_roles.effect_readback`), so the two agree.
     """
-    from mylonite.scan.tool_roles import readback_tool
+    from mylonite.scan.tool_roles import effect_readback
 
     if effect_probe_declared is not False or not descriptor.weakness_classes:
         return []
-    if not descriptor.tools or readback_tool(list(descriptor.tools)) is not None:
-        return []
     by_id = {s.pattern_id: s for s in SEED_CATALOGUE} | dict(seeds_by_id or {})
     emitted = {w for p in payloads if (w := _payload_weakness(p, by_id))}
+    effectful = sorted(emitted & EFFECTFUL_WEAKNESS_CLASSES)
+    if not effectful:
+        return []
+    readback = effect_readback(list(descriptor.tools))
+    if readback is not None and readback.tied:
+        why = f"declare an effect_probe on {readback.tool!r} to confirm it"
+    elif readback is not None:
+        why = f"{readback.tool!r} reads state back but is not tied to a consequential tool"
+    else:
+        why = "no tool on this server is safe to read its state back"
     attempts: list[ScanAttempt] = []
-    for weakness in sorted(emitted & _EFFECTFUL_CLASSES):
+    for weakness in effectful:
         seed_id = f"effect-unconfirmable:{weakness}"
         reason = reason_codes.tag(
             reason_codes.NT_EFFECT_UNCONFIRMABLE,
-            f"no tool on this server reads its state back and no effect_probe is "
-            f"declared, so a {weakness} effect could not be confirmed or ruled out.",
+            f"no effect_probe was in effect, so a {weakness} effect could not be "
+            f"confirmed or ruled out ({why}).",
         )
         attempts.append(
             ScanAttempt(

@@ -164,7 +164,8 @@ def test_rendered_verify_args_template_is_never_bare_empty_for_a_tool_with_requi
     # Force the role onto the specific verify tool under test so the assertion
     # is meaningful regardless of what the name-hint auto-detection happened
     # to pick for this particular surface.
-    roles = roles._replace(verify_tool=verify_tool_name)
+    from mylonite.scan.tool_roles import ReadbackChoice
+
     rendered = _render_target_scaffold(
         tf=_fake_tf(family="custom", command=command, args=args),
         tool_names=[t.name for t in server_tools],
@@ -172,6 +173,7 @@ def test_rendered_verify_args_template_is_never_bare_empty_for_a_tool_with_requi
         system_prompt_file=None,
         roles=roles,
         tools=server_tools,
+        readback=ReadbackChoice(tool=verify_tool_name, tied=True, needs_args=True),
     )
     m = re.search(r"verify_args_template: (\{.*\})\n", rendered)
     assert m is not None, rendered

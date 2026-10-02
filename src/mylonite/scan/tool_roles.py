@@ -67,7 +67,9 @@ _READBACK_NAME_HINTS = _words("read get list search find view show lookup")
 #: attempt, so a write picked here would run over and over (``get_or_create_user``,
 #: ``search_and_delete``, a ``delete_all`` that claims ``readOnlyHint``).
 _WRITE_VERB_HINTS = _words(
-    "create update write add set insert put execute run exec open delete remove send post"
+    "create update write add set insert put execute run exec open delete remove send post "
+    "clear reset deploy logout login signout revoke approve purge drop truncate cancel "
+    "archive move rename kill stop start restart"
 )
 _SINK_NAME_HINTS = _words(
     "send email post publish pay transfer purchase execute "
@@ -433,15 +435,113 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
     )
 
 
-def readback_tool(tools: list[Any]) -> str | None:
+class ReadbackChoice(NamedTuple):
     """The tool an effect_probe would read the target's state back through.
 
-    The single detector shared by ``scan --scaffold`` (which proposes an
-    effect_probe on it) and the scan (which reads a W3/W4 class NOT TESTED
-    when a server has none and no effect_probe is declared), so the two agree.
-    ``None`` when no tool on the surface reads state back without an id.
+    ``tied`` says the readback is tied to a consequential tool, so a W3/W4
+    effect through that tool would show in it; only a tied readback is safe to
+    propose live. ``needs_args`` says the tool has required arguments the
+    scaffold can only stub.
     """
-    return _classify_tools(tools).verify_tool
+
+    tool: str
+    tied: bool
+    needs_args: bool
+
+
+#: Words a readback name uses for what a consequential verb produced: a
+#: ``sent_log`` or ``outbox`` reports what ``send_email`` sent.
+_EFFECT_WORDS_BY_VERB: dict[str, frozenset[str]] = {
+    "send": frozenset({"sent", "outbox", "outgoing", "delivered", "deliveries"}),
+    "email": frozenset({"sent", "outbox", "outgoing", "mail", "mails", "emails"}),
+    "post": frozenset({"posted", "posts", "outbox", "published"}),
+    "publish": frozenset({"published", "posts"}),
+    "create": frozenset({"created"}),
+    "write": frozenset({"written", "writes"}),
+    "delete": frozenset({"deleted", "trash"}),
+    "remove": frozenset({"removed"}),
+    "pay": frozenset({"payments", "paid", "transactions"}),
+    "transfer": frozenset({"transfers", "transactions"}),
+    "fetch": frozenset({"fetched", "requests", "fetches"}),
+    "dispatch": frozenset({"dispatched", "dispatches"}),
+}
+#: Tokens that never tie two tools (generic verbs and filler).
+_TIE_STOPWORDS = frozenset(
+    {*_READBACK_NAME_HINTS, *_WRITE_VERB_HINTS, *_SINK_NAME_HINTS, *_OBSERVE_NAME_HINTS}
+    | {"all", "my", "the", "a", "an", "by", "to", "of", "for", "new", "item", "items"}
+)
+
+
+def _stem(token: str) -> str:
+    return token[:-1] if len(token) > 3 and token.endswith("s") else token
+
+
+def _tie_strength(readback: str, consequential: str) -> int:
+    """2: the readback names what the consequential tool produces (a shared
+    noun, or a word for its verb's result). 0: no tie by name."""
+    r_tokens = _tokens(readback)
+    c_tokens = _tokens(consequential)
+    r_nouns = {_stem(t) for t in r_tokens - _TIE_STOPWORDS}
+    c_nouns = {_stem(t) for t in c_tokens - _TIE_STOPWORDS}
+    if r_nouns & c_nouns:
+        return 2
+    effect_words = set().union(*(_EFFECT_WORDS_BY_VERB.get(t, frozenset()) for t in c_tokens))
+    return 2 if r_tokens & effect_words else 0
+
+
+def _is_safe_readback(tool: Any, consequential: set[str]) -> bool:
+    """The strict rules a tool must pass before the scan may call it before
+    and after every attempt: no write or destructive annotation, not
+    consequential, no write verb in its name, a whole-word read name (or a
+    ``readOnlyHint``), and no record id it would need to know."""
+    name = getattr(tool, "name", "") or ""
+    annotations = getattr(tool, "annotations", None) or {}
+    if not name or name in consequential:
+        return False
+    if annotations.get("readOnlyHint") is False or annotations.get("destructiveHint"):
+        return False
+    if _names_a_write(name) or _requires_id(tool):
+        return False
+    return annotations.get("readOnlyHint") is True or _hints_match(
+        name, _OBSERVE_NAME_HINTS + _READBACK_NAME_HINTS
+    )
+
+
+def effect_readback(tools: list[Any]) -> ReadbackChoice | None:
+    """The readback an effect_probe should use, or ``None`` when no tool is safe.
+
+    The single detector shared by ``scan --scaffold`` (which writes a probe
+    live only on a tied readback that needs no arguments) and the scan's
+    effect-unconfirmable message, so the two agree. A candidate must pass
+    :func:`_is_safe_readback`. Among those, one tied to a consequential tool
+    wins over listing order: first by name (``sent_log`` for ``send_email``,
+    ``list_issues`` for ``create_issue``), then as the id-free recall of a
+    store that a consequential tool writes (``read_graph`` for
+    ``create_entities``). Then a tool with no required argument wins.
+    """
+    from mylonite.scan.control_shim import consequential_tool_names
+
+    consequential = {name for name, _reason in consequential_tool_names(tools)}
+    roles = _classify_tools(tools)
+    store_pair_recall = (
+        roles.retrieve_tool
+        if roles.seed_arm_tool is not None and roles.seed_arm_tool in consequential
+        else None
+    )
+    ranked: list[tuple[int, int, int, str, bool]] = []
+    for index, tool in enumerate(tools):
+        if not _is_safe_readback(tool, consequential):
+            continue
+        name = getattr(tool, "name", "") or ""
+        tie = max((_tie_strength(name, c) for c in consequential), default=0)
+        if tie == 0 and name == store_pair_recall:
+            tie = 1
+        needs_args = bool(_schema_required(tool))
+        ranked.append((-tie, 1 if needs_args else 0, index, name, needs_args))
+    if not ranked:
+        return None
+    neg_tie, _args, _index, name, needs_args = min(ranked)
+    return ReadbackChoice(tool=name, tied=neg_tie < 0, needs_args=needs_args)
 
 
 # --- delivery-channel detectors (v0.7.x) -------------------------------------
@@ -550,6 +650,7 @@ def _read_by_id_tool(tools: list[Any]) -> str | None:
 
 __all__ = [
     "_STORE_NAME_HINTS",
+    "ReadbackChoice",
     "_ToolRoles",
     "_classify_tools",
     "_content_param",
@@ -559,5 +660,5 @@ __all__ = [
     "_requires_id",
     "_schema_props",
     "_schema_required",
-    "readback_tool",
+    "effect_readback",
 ]

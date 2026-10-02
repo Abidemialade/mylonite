@@ -83,20 +83,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
-  scan would wire on its own, and an `effect_probe` on a readback tool that
-  needs no arguments, are now written live and tagged `# auto-detected`,
-  instead of commented out for you to edit. On server-memory, for example,
-  the file plants through `create_entities` and confirms effects through
-  `read_graph` with no hand edits. A readback tool that needs arguments stays
-  commented with its arguments stubbed. The proposed probe declares no
-  deferral words, so a "queued" reply still reads NOT TESTED.
-- **A W3 or W4 class whose effect nothing can read back reads NOT TESTED.**
-  On a custom MCP server with no tool that reads its state back and no
-  `effect_probe`, each W3/W4 class that ran gets one NOT TESTED row under the
-  new reason code `MYL-NT-017`, so the class reads as a finding or NOT
-  TESTED, never resisted, and the scan cannot read clean. `scan --scaffold`
-  marks such classes "effect unconfirmable" and uses the same readback
-  detector. The reason-code snapshot gains the new code.
+  scan would wire on its own is now written live, tagged `# auto-detected`,
+  instead of commented out for you to edit. So is an `effect_probe`, when a
+  tool reads back what the server's consequential tools change (a shared
+  noun or result word such as `sent_log` for `send_email`, or the recall
+  tool of a store a consequential tool writes), needs no arguments, and is
+  safe to call over and over: a whole-word read name, no write or
+  destructive annotation, not consequential itself. On server-memory, for
+  example, the file plants through `create_entities` and confirms effects
+  through `read_graph` with no hand edits. Any other readback stays a
+  commented hint. The proposed probe declares no deferral words, so a
+  "queued" reply still reads NOT TESTED.
+- **A live probe turns on calibration, which makes real calls.** Before it
+  trusts the probe, the first scan of such a file calls up to five of the
+  server's consequential tools for real (never one marked destructive), with
+  `myl-cal-` marker values, to prove the probe sees a change. Add
+  `calibration: {controls: skip}` to turn that off; a probe's "no change"
+  then never clears a call (`MYL-INC-002`). See `docs/target-file.md`.
+  Attempts on a target with an `effect_probe` run one at a time.
+- **A W3 or W4 class with no `effect_probe` reads NOT TESTED, not
+  RESISTED.** On a custom MCP target, each W3/W4 class that ran without an
+  `effect_probe` in effect gets one NOT TESTED row under the new reason code
+  `MYL-NT-017`, whether or not the server has a readback tool. Nothing read
+  the target's state, so the class reads as a finding or NOT TESTED, never
+  resisted from the trace alone. A scan whose only gap is this code now
+  exits `2` where it used to exit `0`; declare an `effect_probe` (the
+  scaffold proposes one) to get a clean result. The scan's missing-probe
+  warning names the code, and `scan --scaffold` marks such classes "effect
+  unconfirmable". The reason-code snapshot gains the new code.
 - **`gate --base <branch>` picks the branch the gating PR targets.** Without
   it, `gate` now uses your repository's default branch: `origin/HEAD`, else
   the branch your current branch tracks, else `main`. It used to target
@@ -133,6 +147,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pair it warned that W2 could not be covered while the real scan wired and
   ran it. The dry run now wires it too; detection reads the tool list and
   makes no LLM call.
+- **A consequential tool named as the probe's `verify_tool` still counts as
+  a dispatch.** A call to it used to read as a read, so a misconfigured
+  probe could hide the agent's own consequential call and the attempt could
+  read resisted.
 - **`gate --open-pr` no longer deletes a branch it didn't create.** When a
   re-run hit a gate branch left over from an earlier run, `git checkout -b`
   failed and the rollback then ran `git branch -D` on that older branch,

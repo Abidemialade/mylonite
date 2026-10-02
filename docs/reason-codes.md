@@ -173,10 +173,11 @@ remove the class from `weakness_classes`.
 
 ## MYL-NT-017
 
-No tool on this server reads its state back and no `effect_probe` is declared, so a W3
-or W4 effect could not be confirmed or ruled out. Such a server gives Mylonite no way to
-see whether a send, fetch or write took effect, so the class reads NOT TESTED instead of
-resisted. If an attempt in the class fired, the finding still stands.
+No `effect_probe` was in effect for this run, so a W3 or W4 effect could not be
+confirmed or ruled out. Nothing read the target's own state, so a custom target's class
+reads NOT TESTED instead of resisted, whether or not the server has a readback tool. If an
+attempt in the class fired, the finding still stands. A scan whose only gap is this code
+exits `2`.
 
 ```text
 classes:
@@ -184,8 +185,8 @@ classes:
   W4  NOT TESTED [MYL-NT-017] (1 resisted, 1 not tested)
 ```
 
-`scan --scaffold` marks such a class "effect unconfirmable" in the file it writes. The
-check uses the same readback detector the scaffold uses to propose an `effect_probe`.
+`scan --scaffold` marks such a class "effect unconfirmable" when it writes no live
+probe. The reason names the readback the scaffold would propose, when there is one.
 
 **Fix:** Declare an `effect_probe` whose `verify_tool` reads back what the attack would
 change (see [Target file](target-file.md)), or remove the class from `weakness_classes`.

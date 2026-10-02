@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from mylonite._cli_io import echo, echo_err, echo_exc
 from mylonite.exit_codes import EXIT_CONFIG
 from mylonite.plugins._mcp import target_registry
-from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
+from mylonite.scan.tool_roles import ReadbackChoice, _classify_tools, _ToolRoles
 
 
 class _OutputNotWritable(Exception):
@@ -257,6 +257,7 @@ def _render_target_scaffold(
     system_prompt_file: Path | None,
     roles: _ToolRoles | None = None,
     tools: list[Any] | None = None,
+    readback: ReadbackChoice | bool | None = True,
 ) -> str:
     """Render a ``target.yaml`` that runs as written.
 
@@ -301,9 +302,14 @@ def _render_target_scaffold(
     # The seed_arm and effect_probe blocks. A block the scan can use as written
     # goes in live, tagged `# auto-detected: <why>`; anything that still needs a
     # human value stays commented with the candidate filled in.
-    seed_arm_block = _render_seed_arm_block(roles)
+    from mylonite.scan.tool_roles import effect_readback
+
+    # ``readback=True`` (the default) means "detect it from ``tools``"; tests
+    # pass a ReadbackChoice (or None) to pin one.
+    chosen = effect_readback(tools) if readback is True else readback
+    seed_arm_block = _render_seed_arm_block(roles, tools)
     effect_block = _render_effect_probe_block(
-        roles=roles,
+        readback=chosen if isinstance(chosen, ReadbackChoice) else None,
         tools=tools,
         effectful=sorted({"W3", "W4"} & set(suggested_weaknesses)),
     )
@@ -341,15 +347,20 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 {sink_hint}{effect_block}"""
 
 
-def _render_seed_arm_block(roles: _ToolRoles) -> str:
-    """The seed_arm block: live when the scan's auto-wire would infer the same
-    one (a store tool plus an id-free recall tool), commented otherwise.
+def _render_seed_arm_block(roles: _ToolRoles, tools: list[Any]) -> str:
+    """The seed_arm block: live when the scan's own auto-wire
+    (:func:`~mylonite.plugins._mcp.target_file.infer_seed_arm`) infers one from
+    ``tools``, commented otherwise, so the scaffold never writes a seed_arm the
+    scan would not."""
+    from mylonite.plugins._mcp.target_file import infer_seed_arm
 
-    Mirrors :func:`~mylonite.plugins._mcp.target_file.infer_seed_arm` over the
-    same roles, so the scaffold never writes a seed_arm the scan would not.
-    """
+    spec = infer_seed_arm(tools)[0] if tools else None
     sa_param = roles.seed_arm_param or "body"
-    template = roles.seed_arm_args_template or {sa_param: "{payload}"}
+    template = (
+        dict(spec.args_template)
+        if spec is not None
+        else roles.seed_arm_args_template or {sa_param: "{payload}"}
+    )
     nested = template != {sa_param: "{payload}"}
     placement = "# args_template places {payload} at this tool's content slot " + (
         "(a nested array-of-records slot, auto-detected)." if nested else "(a bare string leaf)."
@@ -360,13 +371,12 @@ def _render_seed_arm_block(roles: _ToolRoles) -> str:
         "#                      # recall requires that id; a list/search-style recall does not.\n"
         "#                      # Alternatives: id_pattern (a regex) or id_from: first_int.\n"
     )
-    if roles.seed_arm_tool and roles.seed_arm_param and roles.retrieve_tool:
+    if spec is not None:
         live = yaml.safe_dump(
-            {"seed_arm": {"tool": roles.seed_arm_tool, "args_template": template}},
-            sort_keys=False,
+            {"seed_arm": {"tool": spec.tool, "args_template": template}}, sort_keys=False
         )
         return (
-            f"# auto-detected: {roles.seed_arm_tool} stores content and "
+            f"# auto-detected: {spec.tool} stores content and "
             f"{roles.retrieve_tool} surfaces it without an id.\n"
             "# This is the seed_arm a scan would wire on its own; confirm or edit it.\n"
             f"{placement}\n{live}{id_help}"
@@ -391,22 +401,24 @@ def _render_seed_arm_block(roles: _ToolRoles) -> str:
     )
 
 
-def _render_effect_probe_block(*, roles: _ToolRoles, tools: list[Any], effectful: list[str]) -> str:
+def _render_effect_probe_block(
+    *, readback: ReadbackChoice | None, tools: list[Any], effectful: list[str]
+) -> str:
     """The effect_probe block.
 
-    Live when the file suggests W3 or W4 and the surface has a readback tool
-    that takes no required argument: the scan can call it as written. It
-    declares no ``expect_marker`` (any new change a linked call made counts)
-    and no deferral words, so a reply that says "queued" stays inconclusive
-    (``MYL-INC-012``) rather than reading resisted. A readback tool that needs
-    arguments stays commented with a stub to fill in. No readback tool at all
-    marks W3/W4 "effect unconfirmable": the scan then reads those classes NOT
-    TESTED (``MYL-NT-017``) unless an attempt fires.
+    Live only when the file lists W3 or W4 and ``readback`` (from
+    :func:`~mylonite.scan.tool_roles.effect_readback`) is safe, tied to a
+    consequential tool, and takes no required argument. It declares no
+    ``expect_marker`` (any new change a linked call made counts) and no
+    deferral words, so a reply that says "queued" stays inconclusive
+    (``MYL-INC-012``). Anything else is a commented hint, and with no probe in
+    the file the scan reads each W3/W4 class NOT TESTED (``MYL-NT-017``)
+    unless an attempt fires.
     """
     from mylonite import reason_codes
 
     by_name = {getattr(t, "name", ""): t for t in tools}
-    verify_obj = by_name.get(roles.verify_tool) if roles.verify_tool is not None else None
+    verify_obj = by_name.get(readback.tool) if readback is not None else None
     # The verify tool's own required top-level args, stubbed to a type-valid
     # placeholder — never the bare `{}` that used to make the verify call
     # error against a tool like `read_text_file` (requires `path`).
@@ -422,37 +434,52 @@ def _render_effect_probe_block(*, roles: _ToolRoles, tools: list[Any], effectful
         '#   deferred_markers: ["held for approval"]  # words that mark a HELD item in the\n'
         "#                                   # readback. Leave unset unless you know them.\n"
     )
-    if effectful and roles.verify_tool is not None and not verify_args:
+    if effectful and readback is not None and readback.tied and not verify_args:
         live = yaml.safe_dump(
-            {"effect_probe": {"verify_tool": roles.verify_tool, "verify_args_template": {}}},
+            {"effect_probe": {"verify_tool": readback.tool, "verify_args_template": {}}},
             sort_keys=False,
         )
         return (
-            f"# auto-detected: {roles.verify_tool} reads the target's state back. Confirm it "
-            f"shows what a\n# {classes} attack would change (a sent message, a fetched URL, "
-            "a written record).\n# With no expect_marker, any new change a call from this "
-            "attempt made counts as the effect.\n# A reply that says it queued the action "
-            f"reads NOT TESTED [{reason_codes.INC_UNCHECKED_DEFERRAL}], never resisted.\n"
+            f"# auto-detected: {readback.tool} reads back what this server's consequential "
+            f"tools change.\n# Confirm it shows what a {classes} attack would change. With "
+            "no expect_marker, any new\n# change a call from this attempt made counts as the "
+            "effect. A reply that says it queued\n# the action reads NOT TESTED "
+            f"[{reason_codes.INC_UNCHECKED_DEFERRAL}], never resisted.\n"
+            "# Calibration: before trusting this probe, the first scan calls up to five of "
+            "this server's\n# consequential tools for real (never one marked destructive), "
+            "with myl-cal- marker values,\n# to prove the probe sees a change. Add "
+            '`calibration: {controls: skip}` to turn that off;\n# a probe\'s "no change" '
+            f"then never clears a call [MYL-INC-002]. "
+            "See docs/target-file.md.\n"
+            "# Attempts on a target with an effect_probe run one at a time.\n"
             f"{live}{optional}"
         )
-    if effectful and roles.verify_tool is None:
+    unconfirmable = (
+        f"# effect unconfirmable: with no effect_probe in this file, each {classes} class "
+        f"reads NOT TESTED\n# [{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an attempt "
+        "fires.\n"
+        if effectful
+        else ""
+    )
+    if readback is None:
         status = (
-            f"# effect unconfirmable: no tool on this server reads its state back, so a "
-            f"{classes} effect\n# cannot be confirmed or ruled out. Those classes read NOT "
-            f"TESTED [{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an\n# attempt fires. "
-            "Point an effect_probe at a tool that reads back what the attack changes."
+            f"{unconfirmable}# No tool on this server is safe to read its state back "
+            "(a whole-word read name, no write\n# or destructive annotation, not "
+            "consequential). Point an effect_probe at one if it exists."
         )
-    elif roles.verify_tool is not None and verify_args:
+    elif not readback.tied:
         status = (
-            f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}. It needs "
-            "arguments: fill in each\n# <value> with what the attack would change, "
-            "then uncomment."
+            f"{unconfirmable}# CANDIDATE verify_tool: {readback.tool}. It reads state "
+            "back, but nothing ties it to a\n# consequential tool, so it may not show the "
+            "effect. Check it does, then uncomment."
         )
-    elif roles.verify_tool is not None:
-        status = f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}."
     else:
-        status = "# (no side-effect-reporting tool auto-detected — point this at one)"
-    verify_tool = roles.verify_tool or "<tool that reports the side effect>"
+        status = (
+            f"{unconfirmable}# CANDIDATE verify_tool (auto-detected): {readback.tool}. "
+            "It needs arguments: fill in each\n# <value> with what the attack would "
+            "change, then uncomment."
+        )
+    verify_tool = readback.tool if readback is not None else "<tool that reports the side effect>"
     return (
         f"{status}\n# effect_probe:\n#   verify_tool: {verify_tool}\n"
         f"#   verify_args_template: {verify_args_line}\n{optional}"
@@ -585,25 +612,31 @@ def _scaffold_target_file(
             "left commented and W2 is not suggested."
         )
     effectful = sorted({"W3", "W4"} & set(written.weakness_classes))
+    classes = "/".join(effectful)
+    from mylonite import reason_codes
+    from mylonite.scan.tool_roles import effect_readback
+
+    readback = effect_readback(tools)
     if written.effect_probe is not None:
         echo_err(
             f"  effect_probe: auto-detected and written live: {written.effect_probe.verify_tool} "
-            f"reads the target's state back. Check it shows what a {'/'.join(effectful)} "
-            "attack would change."
-        )
-    elif effectful and roles.verify_tool is not None:
-        needs_hand_edit = True
-        echo_err(
-            f"  effect_probe: candidate {roles.verify_tool} needs arguments, so the block is "
-            "left commented. Fill in its verify_args_template, then uncomment it."
+            f"reads back what the consequential tools change. Check it shows what a {classes} "
+            "attack would change. The first scan calibrates it by calling those tools for "
+            "real (calibration: {controls: skip} turns that off; see docs/target-file.md)."
         )
     elif effectful:
-        from mylonite import reason_codes
-
+        needs_hand_edit = readback is not None
+        why = (
+            f"candidate {readback.tool} needs arguments"
+            if readback is not None and readback.tied
+            else f"candidate {readback.tool} is not tied to a consequential tool"
+            if readback is not None
+            else "no tool on this server is safe to read its state back"
+        )
         echo_err(
-            f"  effect_probe: none. No tool on this server reads its state back, so the "
-            f"{'/'.join(effectful)} effect is unconfirmable: those classes will read NOT "
-            f"TESTED [{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an attempt fires."
+            f"  effect_probe: none written live ({why}). Until one is declared, the "
+            f"{classes} effect is unconfirmable: those classes read NOT TESTED "
+            f"[{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an attempt fires."
         )
     from mylonite._authz import required_authorization
     from mylonite._target_env import echo_env_notice

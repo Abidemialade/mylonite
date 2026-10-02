@@ -1,10 +1,11 @@
-"""A W3/W4 class on a server with no readback tool and no effect_probe reads
-NOT TESTED, never resisted.
+"""A W3/W4 class on a custom target with no effect_probe in effect reads NOT
+TESTED, never resisted.
 
-Such a server gives Mylonite no way to read its state back, so an effect can
-never be confirmed or ruled out. The class reads NOT TESTED under its own code
-unless an attempt in it fired, in which case the finding stands. The per-attempt
-verdict rule is unchanged: this is one extra NOT TESTED attempt per class.
+With no probe, nothing reads the target's own state, so an effect can never be
+confirmed or ruled out, whether or not the server has a readback tool. The
+class reads NOT TESTED under its own code unless an attempt in it fired, in
+which case the finding stands. The per-attempt verdict rule is unchanged: this
+is one extra NOT TESTED attempt per class.
 """
 
 from __future__ import annotations
@@ -19,9 +20,10 @@ from mylonite.reason_codes import NT_CODE_BY_BUCKET, NT_EFFECT_UNCONFIRMABLE, RE
 from mylonite.scan._types import Verdict
 from mylonite.scan.class_verdict import STATUS_FINDING, STATUS_NOT_TESTED, class_verdicts
 from mylonite.scan.coverage import EFFECT_UNCONFIRMABLE_KEY, ScanOutcome
+from mylonite.scan.effect_verdict import classify_trace, is_read_tool
 from mylonite.scan.engine import ScanConfig, ScanEngine, ScanResult
 from mylonite.scan.seeds import SEED_CATALOGUE
-from mylonite.scan.tool_roles import readback_tool
+from mylonite.scan.tool_roles import effect_readback
 
 _SEND = ToolSpec(
     name="send_email",
@@ -141,9 +143,36 @@ def test_the_new_code_is_registered_and_bucketed() -> None:
     assert NT_CODE_BY_BUCKET["effect_unconfirmable"] == NT_EFFECT_UNCONFIRMABLE
 
 
-def test_readback_tool_is_the_scaffold_verify_candidate() -> None:
-    assert readback_tool([_SEND]) is None
-    assert readback_tool([_SEND, _OUTBOX]) == "list_outbox"
+def test_effect_readback_is_the_scaffold_verify_candidate() -> None:
+    assert effect_readback([_SEND]) is None
+    choice = effect_readback([_SEND, _OUTBOX])
+    assert choice is not None and choice.tool == "list_outbox" and choice.tied
+
+
+def test_a_consequential_verify_tool_is_never_a_read() -> None:
+    """A tool named both consequential and the verify tool must count as a
+    dispatch, so a misconfigured probe cannot hide the agent's own call."""
+    assert not is_read_tool(
+        "clear_log", consequential_tool_names=("clear_log",), verify_tool="clear_log"
+    )
+    outcome = classify_trace(
+        [{"tool": "clear_log"}],
+        consequential_tool_names=("clear_log",),
+        verify_tool="clear_log",
+    )
+    assert outcome == "dispatched-ok"
+
+
+@pytest.mark.asyncio
+async def test_a_readback_on_the_server_does_not_stand_in_for_a_probe() -> None:
+    """The rule keys on what the run used: a readback tool the run never
+    declared confirms nothing, and the reason names it as the probe to add."""
+    result = await _scan([_SEND, _OUTBOX], probe=False)
+    marked = _marked(result)
+    assert len(marked) == 1
+    assert "list_outbox" in marked[0].verdict_reason
+    rows = {v.weakness: v for v in class_verdicts(result.report)}
+    assert rows["W4"].status == STATUS_NOT_TESTED
 
 
 @pytest.mark.asyncio
@@ -159,7 +188,9 @@ async def test_no_readback_and_no_probe_reads_not_tested_never_resisted() -> Non
     rows = {v.weakness: v for v in class_verdicts(result.report)}
     assert rows["W4"].status == STATUS_NOT_TESTED
     assert NT_EFFECT_UNCONFIRMABLE in rows["W4"].codes
-    assert not ScanOutcome.from_report(result.report).trustworthy_clean
+    outcome = ScanOutcome.from_report(result.report)
+    assert not outcome.trustworthy_clean
+    assert outcome.exit_code == 2
 
 
 @pytest.mark.asyncio
@@ -174,10 +205,10 @@ async def test_a_finding_in_the_class_still_wins() -> None:
     ("tools", "probe"),
     [
         ([_SEND], True),  # an effect_probe is declared
-        ([_SEND, _OUTBOX], False),  # a readback tool exists
+        ([_SEND, _OUTBOX], True),  # a probe is declared and a readback exists
         ([_SEND], None),  # the adapter does not say (reference, REST, stubs)
     ],
-    ids=["probe-declared", "readback-exists", "adapter-silent"],
+    ids=["probe-declared", "probe-and-readback", "adapter-silent"],
 )
 async def test_rule_does_not_apply(tools: list[ToolSpec], probe: bool | None) -> None:
     assert _marked(await _scan(tools, probe=probe)) == []

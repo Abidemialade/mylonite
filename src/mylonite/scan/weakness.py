@@ -36,6 +36,11 @@ class WeaknessClass(StrEnum):
 #: (``"W2" in WEAKNESS_CLASSES``). Derived from the enum, never re-spelled.
 WEAKNESS_CLASSES: frozenset[str] = frozenset(WeaknessClass)
 
+#: Classes whose finding turns on a real side effect materialising: a URL
+#: actually fetched (W3), a message actually sent (W4). Only a probe of the
+#: target's own state can confirm that effect.
+EFFECTFUL_WEAKNESS_CLASSES: frozenset[str] = frozenset({"W3", "W4"})
+
 
 def validate_weakness_class_flag_or_exit(values: Iterable[str]) -> None:
     """CLI pre-flight for ``--weakness-class`` (#205c): exit ``EXIT_CONFIG``
