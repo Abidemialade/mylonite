@@ -52,6 +52,7 @@ def _post_gate_annotations(
     pr_mod: Any,
     *,
     gate_dir: Path,
+    head_sha: str | None = None,
 ) -> None:
     """Best-effort GitHub check-run annotation for every KEPT finding that maps
     to a committed prompt line (R4). Untestable live glue (needs a real PR +
@@ -99,8 +100,12 @@ def _post_gate_annotations(
         )
         if not anns:
             return
-        head = pr_mod._default_run(["git", "rev-parse", "HEAD"], cwd=str(repo_root))
-        head_sha = (getattr(head, "stdout", "") or "").strip()
+        # The gate commit's SHA comes from the PR result: `--open-pr` returns
+        # to the operator's original branch after committing, so HEAD is no
+        # longer the commit the PR (and its check run) points at.
+        if not head_sha:
+            head = pr_mod._default_run(["git", "rev-parse", "HEAD"], cwd=str(repo_root))
+            head_sha = (getattr(head, "stdout", "") or "").strip()
         if not head_sha:
             return
         payload = check_run_payload(
@@ -667,7 +672,14 @@ def make_open_pr_fn(
         # remote MCP description/handler/return path) have no source line and ride in
         # the PR body + SARIF instead. Live-only glue; never fails the gate.
         if open_pr and getattr(pr, "opened", False):
-            _post_gate_annotations(repo_root, findings, target_file, pr_mod, gate_dir=out_dir)
+            _post_gate_annotations(
+                repo_root,
+                findings,
+                target_file,
+                pr_mod,
+                gate_dir=out_dir,
+                head_sha=getattr(pr, "commit_sha", None),
+            )
         return pr
 
     return open_pr_fn

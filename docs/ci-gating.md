@@ -191,7 +191,13 @@ Two flags opt in to the rest, independently:
 
 - **`--open-pr`** creates the branch, commits the gate directory, pushes, and
   opens the PR via `gh`. If `gh` is missing or unauthenticated it still commits
-  and prints the remaining two commands.
+  and prints the remaining two commands. Once the commit exists, `gate` checks
+  out the branch you started on (or, on a detached HEAD, the same commit),
+  whether the PR opened or the push or `gh` step failed. The gate branch is
+  kept, and the output names it: "The gate branch 'mylonite/gate-…' is kept
+  with the committed gate output; you are back on 'main'." The committed gate
+  output now lives on that branch, so it leaves your working tree; run
+  `git checkout <gate branch>` to look at it.
 - **`--workflows`** scaffolds the two `.github/workflows/` templates described
   below — this writes to disk whether or not `--open-pr` is also set. Pass
   `--workflows` alone and the printed summary lists the workflow file(s) it
@@ -313,7 +319,9 @@ satisfy automatically but a local or non-GitHub run must provide itself:
 - **The right PR base.** The PR targets your repository's default branch:
   `origin/HEAD`, else the branch your current branch tracks, else `main`. Pass
   `--base <branch>` to target another branch. The printed `gh pr create`
-  command uses the same base.
+  command uses the same base. Running from a feature branch? Pass `--base`:
+  the gate branch is cut from the commit you have checked out, so against the
+  default branch the PR also carries your feature branch's unmerged commits.
 - **A fresh gate branch.** If the gate branch (`mylonite/gate-…`) already
   exists from an earlier run, `git checkout -b` fails and `gate` stops on exit
   code `8`. It leaves that branch and its commits alone; it deletes a branch
@@ -333,8 +341,10 @@ satisfy automatically but a local or non-GitHub run must provide itself:
 A failure in any of these is reported as a named error on **exit code 8**, not
 a traceback, and the findings, the generated test and the validation report are
 all written to `--out` *before* any git command runs — so a git failure costs
-you no evidence. Re-run the printed `git`/`gh` commands by hand once the
-precondition is fixed.
+you no evidence. If the failure comes after the commit (the push or `gh`
+step), the evidence is on the kept gate branch the error names, and you are
+back on your original branch. Re-run the printed `git`/`gh` commands by hand
+once the precondition is fixed.
 
 ### The reusable Action
 
