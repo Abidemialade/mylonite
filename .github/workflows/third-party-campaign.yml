@@ -327,12 +327,18 @@ jobs:
           OLLAMA_API_BASE: http://127.0.0.1:11434
           MYLONITE_MAX_TOKENS: "2048"
           # Placeholder for BUDGET-1 (a separate, in-progress PR adding a
-          # hard, process-wide LLM-call ceiling counted across
-          # scan+generate+validate+retries). MYLONITE_MAX_LLM_REQUESTS is
-          # this workflow's one guess at the real name; it is a no-op today
-          # (nothing in src/ reads it yet) and appears in exactly this one
-          # place so the controller can align the name once BUDGET-1 lands.
-          MYLONITE_MAX_LLM_REQUESTS: ${{ steps.inputs.outputs.max_llm_calls }}
+          # hard LLM-call ceiling applied PER PROCESS, including retries).
+          # MYLONITE_MAX_LLM_REQUESTS is this workflow's one guess at the
+          # real name; it is a no-op today (nothing in src/ reads it yet)
+          # and appears in exactly this one place so the controller can
+          # align the name once BUDGET-1 lands. scan and validate are two
+          # SEPARATE processes that both read this same value, so the
+          # per-cell worst case is 2x this ceiling, not 1x -- deliberately
+          # hardcoded to 30 (half the dispatch's own clamped max_llm_calls,
+          # NOT driven by that input) so the 2-process total lands back near
+          # the single-process ballpark the prereg's budget section targets;
+          # see "Budget and the hard ceiling" there for the worked numbers.
+          MYLONITE_MAX_LLM_REQUESTS: "30"
           TPV_MODEL: ${{ steps.model.outputs.model }}
           TPV_MAX_LLM_CALLS: ${{ steps.inputs.outputs.max_llm_calls }}
         run: |
@@ -346,13 +352,18 @@ jobs:
             *) echo "::error::unknown target $TPV_TARGET"; exit 1 ;;
           esac
 
-          # Nothing below lets scan/generate/validate's own exit code fail
-          # THIS STEP -- each is captured with `set +e` / PIPESTATUS and
-          # logged, never re-raised. A budget/provider abort, a rejected
-          # validate, or an actual crash are all legitimate, scoreable
-          # outcomes (see scripts/score_third_party.py), not step failures;
-          # letting any of them fail this step would skip the scoring and
-          # cost steps that follow and silently lose the result.
+          # Nothing below lets scan/generate/validate's own exit code, OR a
+          # clean "nothing matched" from a glob under this step's
+          # `-eo pipefail`, fail THIS STEP -- each command is captured with
+          # `set +e` / PIPESTATUS and logged, never re-raised, and every
+          # glob below is `compgen -G ... || true`, never a bare `ls`. A
+          # budget/provider abort, a rejected validate, an actual crash, OR
+          # a clean scan that found nothing to generate from are all
+          # legitimate, scoreable outcomes (see scripts/score_third_party.py),
+          # not step failures; letting any of them fail this step would skip
+          # the scoring and cost steps that follow and silently lose the
+          # result -- including the expected, honest "the target resisted"
+          # outcome, which must read green, not red.
           mkdir -p out
           set +e
           "$MYLONITE" scan \
@@ -378,7 +389,14 @@ jobs:
             # single-finding mode, which writes flat into --out. Known,
             # documented scope limit: with multiple findings in one scan,
             # only the first is validated and scored this round.
-            exploit_path="$(ls "$scan_dir"/exploit_*.json 2>/dev/null | sort | head -1)"
+            # `compgen -G` (not `ls`) to list matches: under this step's
+            # `-eo pipefail`, `ls` on a genuinely clean scan (no
+            # exploit_*.json at all -- the expected resist outcome) exits
+            # non-zero even with its own message redirected away, and that
+            # non-zero status propagates through the pipe into `sort`/`head`
+            # and kills this whole step, exactly the bug this `|| true`
+            # closes (a clean resist must never read as a failed job).
+            exploit_path="$(compgen -G "$scan_dir/exploit_*.json" | sort | head -1 || true)"
             if [ -n "$exploit_path" ]; then
               set +e
               "$MYLONITE" generate "$exploit_path" --out generated \
@@ -415,9 +433,12 @@ jobs:
       # check): scan/generate/validate's exit codes never fail the run step
       # above, but `always()` means score.json/cost.json are still written
       # even if some EARLIER, unrelated step (checkout, the wheel build, a
-      # server launch) failed -- the scorer's own missing-report path
-      # handles that case (PRODUCT_DEFECT or INVALID, never silently
-      # nothing).
+      # server launch) failed before run.log ever existed -- the scorer's
+      # own missing-report path handles that case (PRODUCT_DEFECT or
+      # INVALID, never silently nothing), and compute_run_cost.py writes a
+      # zero-cost cost.json with a reason instead of raising when run.log
+      # itself is missing (never the same thing as a log that EXISTS with
+      # no spend line, which still raises -- see that script's docstring).
 
       - name: Score the run against the prereg
         if: always() && steps.guard.outputs.run == 'true'
