@@ -120,6 +120,73 @@ carry secrets). If a declared raw launch doesn't actually disable the guard, the
 raw side simply never fires and Mylonite says so rather than reporting a wrong
 verdict.
 
+### Add a kill switch to your own guard
+
+`control_env` only works if your server actually reads the variable and turns
+the guard off when it's set. That's a small, deliberate change to your code —
+not a target-file setting Mylonite can apply for you. Until you make it,
+Mylonite's control-efficacy check runs against its own boundary stand-in: a
+canonical W1–W4 control it applies at the adapter layer, between your server
+and the planner. That proves the attack is real and that *this kind* of
+control closes it. It does not prove **your** implementation is what's holding
+— for that, Mylonite has to be able to switch your guard off and on itself.
+
+The change is the same shape in any language: read one environment variable,
+once, at the point your guard would otherwise run, and skip it when the
+variable is set.
+
+**Python** (an illustrative data-marking guard, the same shape as the boundary
+stand-in's own `quarantine()` — see
+[`mylonite.scan._control_primitives`](https://github.com/Abidemialade/mylonite/blob/main/src/mylonite/scan/_control_primitives.py)):
+
+```python
+import os
+
+DISABLE_DATA_MARKING = os.environ.get("DISABLE_DATA_MARKING") == "1"
+
+
+def quarantine(content: str, *, source: str) -> str:
+    """Mark content read from an untrusted source so a later turn can refuse
+    to act on it. The guard Mylonite's control-efficacy check is proving."""
+    if DISABLE_DATA_MARKING:
+        return content  # kill switch: behave exactly like the unguarded build
+    return f"<untrusted source={source}>{content}</untrusted>"
+```
+
+**TypeScript** (an MCP server built on `@modelcontextprotocol/sdk`):
+
+```typescript
+const disableDataMarking = process.env.DISABLE_DATA_MARKING === "1";
+
+function quarantine(content: string, source: string): string {
+  if (disableDataMarking) {
+    return content; // kill switch: behave exactly like the unguarded build
+  }
+  return `<untrusted source="${source}">${content}</untrusted>`;
+}
+```
+
+Then declare the same variable in your target file, scoped to the weakness
+class it disables:
+
+```yaml
+control_env:
+  W2: { DISABLE_DATA_MARKING: "1" }
+```
+
+With that in place, `mylonite validate` / `gate` / `ablate` launch your server
+twice — once with the variable set (your guard off) and once without (your
+guard on) — and the kept finding's claim upgrades from "a canonical control of
+this class stops the attack" to **"your own control is load-bearing"** — the
+only claim surface that earns that wording (see
+[Which claim you earned](reading-results.md#which-claim-you-earned)). The same
+toggle is what `testkit.assert_control_holds` re-drives in the committed gate
+test — see [the testkit API](testkit.md#assert_control_holds-live-the-control-efficacy-gate).
+
+A kill switch is a test-time escape hatch, not a runtime feature: gate it
+behind an environment variable nothing in production sets, keep it out of your
+default config, and never let a request header or user input reach it.
+
 ## Built to extend
 
 Everything above is reached through five versioned extension contracts — attack
