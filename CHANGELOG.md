@@ -71,7 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   word from your `effect_probe.deferred_reply_words` or `deferred_markers`, or a task
   handle (`resultType: "task"` or a `task` field, whatever its text) reads NOT TESTED
   under `MYL-INC-012` and the scan exits 2, unless the probe saw the action held. One
-  queued call is enough, even when another call in the same attempt went through.
+  queued call is enough, even when another call in the same attempt went through; then
+  only a call that went through can tie the attempt to a finding, and a tie by tool name
+  alone reads NOT TESTED.
   Deferral words now match whole words only, so "spending" no longer counts as
   "pending". Proven end to end through the real CLI against a stdio server that queues
   sends; the guarded reference agent still reads resisted in the differential oracle.

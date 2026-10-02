@@ -745,6 +745,26 @@ def test_a_finding_on_a_mixed_trace_stands() -> None:
     assert (decision.kind, decision.proof_level) == ("finding", "dispatched")
 
 
+@pytest.mark.parametrize("predicate", [None, True, False])
+def test_a_tool_name_link_on_a_mixed_trace_is_not_tested(predicate: bool | None) -> None:
+    """A call was held or queued; a tie to the attempt by tool name alone can't
+    say whether the attack went out."""
+    decision = decide(
+        _evidence(link="dispatched-tool-linked", any_deferred=True), predicate=predicate
+    )
+    assert (decision.kind, decision.reason_code) == ("inconclusive", "MYL-INC-012")
+
+
+def test_an_unlinked_mixed_trace_is_an_unchecked_deferral() -> None:
+    decision = decide(_evidence(link="unlinked", any_deferred=True), predicate=None)
+    assert (decision.kind, decision.reason_code) == ("inconclusive", "MYL-INC-012")
+
+
+def test_a_predicate_on_a_sent_call_in_a_mixed_trace_stands() -> None:
+    decision = decide(_evidence(link="unlinked", any_deferred=True), predicate=True)
+    assert (decision.kind, decision.proof_level) == ("predicate", "dispatched")
+
+
 def test_decide_rejects_an_unknown_trace_outcome() -> None:
     with pytest.raises(ValueError, match="trace_outcome"):
         decide(_evidence(trace_outcome="elicited"), predicate=None)

@@ -247,6 +247,45 @@ def test_a_queued_send_next_to_a_sent_one_is_not_tested(
     assert exit_code == 2
 
 
+def test_a_held_send_next_to_a_sent_one_without_the_marker_is_never_effect_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The attack's send is held and listed with the marker; a second send goes
+    out without it. The marker grew only because of the held item, so the probe
+    credits nothing and no attempt reads effect-confirmed or resisted. A seed tied
+    only by the tool name reads NOT TESTED. The seed whose own check counts any
+    send with no approval step still reads a finding at ``dispatched``: the
+    second send really went out with no approval."""
+    _exit_code, attempts = _scan(
+        tmp_path,
+        monkeypatch,
+        env={"MAIL_REPLY": "pending review", "MAIL_HOLD": "1"},
+        extra_call={"to": "archive", "body": "weekly copy"},
+    )
+    by_seed = {a["seed_id"]: a for a in attempts}
+    for attempt in attempts:
+        assert _evidence(attempt, "effect_confirmed") == "unattributed", attempt
+        assert _evidence(attempt, "proof_level") != "effect-confirmed", attempt
+        assert attempt["outcome"] != "no_finding", attempt
+    tool_linked = by_seed["synth-w4-unconfirmed-send_email"]
+    assert tool_linked["outcome"] == "undecided", tool_linked
+    assert _evidence(tool_linked, "reason_code") == "MYL-INC-012", tool_linked
+
+
+def test_a_sent_send_carrying_the_marker_beyond_the_held_one_is_a_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The second send went out carrying the marker, and the marker grew by more
+    than the held send explains: the effect is this attempt's."""
+    exit_code, attempts = _scan(
+        tmp_path,
+        monkeypatch,
+        env={"MAIL_REPLY": "pending review", "MAIL_HOLD": "1"},
+        extra_call={"to": "archive", "body": f"copy {_MARKER}"},
+    )
+    _assert_effect_confirmed(exit_code, attempts)
+
+
 # --- a task handle, whatever its text -------------------------------------------------
 
 

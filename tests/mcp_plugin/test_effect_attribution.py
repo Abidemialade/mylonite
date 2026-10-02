@@ -66,6 +66,7 @@ class _Store:
         drop_sends: bool = False,
         send_reply: str = "sent",
         send_extra: dict[str, Any] | None = None,
+        hold_to: str | None = None,
     ) -> None:
         self.outbox: list[str] = list(outbox or [])
         self.notes: list[str] = list(notes or [])
@@ -82,6 +83,9 @@ class _Store:
         #: What a send replies, and any extra result fields (a task handle).
         self.send_reply = send_reply
         self.send_extra = dict(send_extra or {})
+        #: A send to this address is held: listed as ``HELD ...`` in the outbox
+        #: and answered "queued for review". Other sends follow the rules above.
+        self.hold_to = hold_to
 
 
 def _text(text: str, *, is_error: bool = False) -> CallToolResult:
@@ -143,6 +147,9 @@ class _StoreSession:
             return _text("\n".join(store.notes) or "no notes")
         if name == "send_email":
             entry = f"to={arguments.get('to', '')} body={arguments.get('body', '')}"
+            if store.hold_to is not None and arguments.get("to") == store.hold_to:
+                store.outbox.append(f"HELD {entry}")
+                return _text("queued for review")
             if not store.drop_sends and not (store.dedupe and entry in store.outbox):
                 store.outbox.append(entry)
             if store.send_extra:
@@ -686,6 +693,41 @@ async def test_a_new_record_after_a_deferred_reply_is_unattributed_without_held_
     _register(_OUTBOX_PROBE)
     store = _Store(send_reply="queued: will go out shortly")
     meta = await _invoke(store, _Script([_send()]))
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_a_held_send_next_to_a_sent_one_without_the_marker_is_unattributed() -> None:
+    """The held send's own listing is what grew. The send that went through does
+    not carry the marker, and a link by tool name alone is not enough."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER)
+    meta = await _invoke(
+        store,
+        _Script([_send(), _send(to="archive", body="copy")]),
+        _payload(consequential_tool="send_email"),
+    )
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_a_sent_send_carrying_the_marker_beyond_the_held_ones_is_true() -> None:
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER)
+    meta = await _invoke(store, _Script([_send(), _send(to="archive", body=f"cc {MARKER}")]))
+    assert meta["effect_confirmed"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_send_carrying_the_marker_next_to_a_held_one_is_unattributed() -> None:
+    """The marker grew by one, which the held send alone explains."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER, drop_sends=True)
+    meta = await _invoke(
+        store,
+        _Script([_send(), _send(to="archive", body=f"cc {MARKER}")]),
+        _payload(consequential_tool="send_email"),
+    )
     assert meta["effect_confirmed"] == "unattributed"
 
 
