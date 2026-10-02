@@ -878,7 +878,7 @@ def assert_guard_holds(
     # this was never a correctness problem for the replay itself — purely a
     # truthfulness one, which is the whole point of a committed proof.
     #
-    # Falls back to the model's own provider prefix ("ollama_chat/..." ->
+    # Falls back to the model's own provider prefix ("ollama_chat/..." ->  # allow-literal: example
     # "ollama") before "unknown": deriving it from what was actually recorded
     # beats asserting a vendor that may have had nothing to do with the run.
     provider = str(meta.get("provider", "")) or provider_from_model(model) or "unknown"

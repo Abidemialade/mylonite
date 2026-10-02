@@ -23,19 +23,28 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import check_no_hardcoded_models as gate  # noqa: E402
 
-#: The allowlist may only shrink. Lower these whenever an entry is removed
-#: or its count drops (a hardcoded model/key got fixed, or a stale entry
-#: got deleted); never raise them to make room for a new, unreviewed hit --
-#: add a real reason to the allowlist file instead and raise these in the
-#: same PR, so the ratchet is a deliberate, reviewable act rather than a
-#: silent widening.
-#: REG-1b (2026-10-02): drained to 0 -- every row became either a fix or an
-#: inline `# allow-literal: example` marker on its own source line (see
+#: The main allowlist may only shrink. Lower these whenever an entry is
+#: removed or its count drops (a hardcoded model/key got fixed, or a stale
+#: entry got deleted); never raise them to make room for a new, unreviewed
+#: hit -- add a real reason to the allowlist file instead and raise these
+#: in the same PR, so the ratchet is a deliberate, reviewable act rather
+#: than a silent widening. Drained to 0 -- every row became either a fix or
+#: an inline `# allow-literal: example` marker on its own source line (see
 #: check_no_hardcoded_models.py's module docstring). A future PR may add a
 #: row back for a genuine case the marker/path exemptions don't cover; it
 #: should raise these ceilings explicitly, in the same PR, with a reason.
 ALLOWLIST_ROW_COUNT_CEILING = 0
 ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 0
+
+#: scripts/workflow_key_literals_allowlist.txt's OWN ratchet -- a separate
+#: file and a separate ceiling, never merged with the pair above, so this
+#: tracked-for-removal debt (the scaffolded workflows' own hardcoded
+#: Anthropic key-variable mapping) can never be mistaken for the main
+#: allowlist's "zero rows, all clean" state. Same shrink-only rule: fixing a
+#: row lowers the count (or deletes it) and lowers this ceiling in the same
+#: change; never raise it to excuse a new, unreviewed hit.
+WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING = 2
+WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 4
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
@@ -233,16 +242,18 @@ def test_a_regex_entry_can_cover_more_than_one_literal_matched_text() -> None:
 
 
 def test_the_real_tree_has_no_unlisted_hits_over_limit_or_stale_entries() -> None:
-    hits = gate.scan()
-    entries = gate.load_allowlist()
+    hits = gate.scan_all()
+    entries = gate.load_all_allowlists()
     problems = gate.unmatched_hits(hits, entries)
     assert problems == [], (
         "new hardcoded provider model(s)/credential read(s) found; add them to "
-        "scripts/hardcoded_models_allowlist.txt with a reason, or fix them: "
+        "scripts/hardcoded_models_allowlist.txt (or scripts/"
+        "workflow_key_literals_allowlist.txt for a scaffolded-workflow key-"
+        "variable line) with a reason, or fix them: "
         f"{problems}"
     )
     over = gate.over_limit_entries(hits, entries)
-    assert over == [], f"more occurrences than the allowlist's count permits: {over}"
+    assert over == [], f"more occurrences than an allowlist's count permits: {over}"
     stale = gate.stale_entries(hits, entries)
     assert stale == [], (
         "stale allowlist entries no longer match anything in the named file; update "
@@ -266,5 +277,66 @@ def test_the_allowlist_has_not_grown() -> None:
     )
 
 
+def test_the_workflow_key_allowlist_has_not_grown() -> None:
+    """scripts/workflow_key_literals_allowlist.txt's own ratchet -- separate
+    from the main allowlist's (which must stay empty), tracking the
+    scaffolded workflows' real, known debt instead."""
+    entries = gate.load_allowlist(gate.WORKFLOW_KEY_ALLOWLIST_PATH)
+    assert len(entries) <= WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING, (
+        f"scripts/workflow_key_literals_allowlist.txt grew to {len(entries)} rows "
+        f"(ceiling {WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING}). Raise the ceiling in "
+        "this test only alongside a deliberate, reviewed addition."
+    )
+    total = sum(e.count for e in entries)
+    assert total <= WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING, (
+        f"scripts/workflow_key_literals_allowlist.txt's total permitted occurrences "
+        f"grew to {total} (ceiling {WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING})."
+    )
+
+
 def test_main_exits_zero_against_the_real_tree() -> None:
     assert gate.main([]) == 0
+
+
+# --- yml scanning and the registry-built prefix set -----------------------
+
+
+def test_yml_files_under_src_are_scanned(tmp_path: Path) -> None:
+    _write(tmp_path, "gate/templates/fake.yml", "MODEL: claude-haiku-4-5\n")
+    hits = gate.scan(tmp_path)
+    assert any(h.matched == "claude-" for h in hits)
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ["ollama_chat/", "hosted_vllm/", "gemini/", "azure/", "vertex_ai/", "bedrock_converse/"],
+)
+def test_every_registry_routing_prefix_is_flagged(tmp_path: Path, prefix: str) -> None:
+    """The hand-maintained regex used to miss every one of these -- now
+    built from the registry's own model_prefix values plus
+    EXTRA_ROUTING_ALIASES, so a new provider row (or alias) is covered for
+    free, with nothing to hand-update here."""
+    _write(tmp_path, "a.py", f'MODEL = "{prefix}some-model"\n')
+    hits = gate.scan(tmp_path)
+    assert any(h.matched == prefix for h in hits), f"{prefix!r} was not flagged"
+
+
+def test_the_real_gate_action_file_is_scanned() -> None:
+    """gate-action/action.yml is a sibling of src/mylonite, not under it --
+    scan_all() must still read it (see the module docstring's "what it
+    flags"). Checked via file enumeration, not hits: today's action.yml has
+    only a marked example line, so an unmarked-hits check couldn't tell
+    "scanned, nothing unmarked" apart from "never read"."""
+    scanned = gate.iter_scanned_files(gate.GATE_ACTION_ROOT)
+    assert gate.GATE_ACTION_ROOT / "action.yml" in scanned
+
+
+def test_gate_action_s_own_example_line_is_marked_not_a_real_default(tmp_path: Path) -> None:
+    """A synthetic stand-in for gate-action/action.yml's own --model example
+    text: the marker exempts it, the same mechanism a .py file uses."""
+    _write(
+        tmp_path,
+        "action.yml",
+        'description: "e.g. anthropic/claude-haiku-4-5"  # allow-literal: example\n',
+    )
+    assert gate.scan(tmp_path) == []

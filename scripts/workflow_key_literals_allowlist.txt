@@ -1,0 +1,21 @@
+# TRACKED FOR REMOVAL.
+#
+# Same format as scripts/hardcoded_models_allowlist.txt:
+#   <path> | <matched text or a stable regex> | <count> | <reason>
+#
+# Kept as a SEPARATE file, never merged into hardcoded_models_allowlist.txt,
+# so this real, tracked debt is never mistaken for that file's "all clean"
+# zero rows. Every row below is a workflow template (or the composite
+# action) that hardcodes one specific provider's credential env var for the
+# gate it drives, rather than mapping the CHOSEN provider's own variable the
+# way the CLI itself does. A follow-up should read the model's resolved
+# provider and emit the matching key variable instead.
+#
+# This list may only shrink (both the number of rows and the sum of their
+# counts are pinned as ceilings in tests/test_check_no_hardcoded_models.py).
+# Fixing a row means lowering the matching count (or deleting the row) and
+# lowering the ceiling in the same change. Never raise it to make room for a
+# new, unreviewed hit.
+
+src/mylonite/gate/templates/mylonite-gate.yml | ANTHROPIC_API_KEY|MYLONITE_API_KEY | 2 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose
+src/mylonite/gate/templates/mylonite-discovery.yml | ANTHROPIC_API_KEY|MYLONITE_API_KEY | 2 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose

@@ -4,23 +4,31 @@ env var directly, outside the approved-provider registry.
 
 Why this exists
 ----------------
-CLAUDE.md's "no default provider" rule (2026-09-30): never hardcode a
-provider/model default or assume ``ANTHROPIC_API_KEY`` is set.
-``mylonite.scan.providers`` is the one registry allowed to name providers and
-their credential env vars; ``mylonite.config.MyloniteSettings.require_llm()``
+There is no default provider or model: never hardcode a provider/model
+default, and never assume one specific provider's key env var is set.
+``mylonite.providers.registry`` is the one table allowed to name providers
+and their credential env vars; ``mylonite.config.require_llm_configured()``
 is the one place that decides there is no default. Everything else should
 receive a model/provider through that registry rather than spelling one out,
-so a new hardcoded default anywhere in ``src/mylonite`` is exactly the defect
+so a new hardcoded default anywhere this check scans is exactly the defect
 this rule exists to prevent, and nothing before this check caught it
 mechanically.
 
 What it flags
 --------------
-Every ``*.py`` file under ``src/mylonite`` (never ``tests/`` or ``docs/`` --
-example strings and fixtures there legitimately name a model), per occurrence:
+Every ``*.py``/``*.yml`` file under ``src/mylonite`` and every ``*.yml`` file
+under ``gate-action/`` (never ``tests/`` or ``docs/`` -- example strings and
+fixtures there legitimately name a model), per occurrence:
 
-1. A provider-prefixed model literal: ``claude-``, ``gpt-``, ``gemini-``,
-   ``ollama/``, ``anthropic/``, ``openai/``, ``bedrock/``.
+1. A provider-prefixed model literal: a bare model-family prefix
+   (``claude-``, ``gpt-``, ``gemini-``) or a provider ROUTING prefix --
+   every approved row's own :attr:`~mylonite.providers.registry.
+   ProviderInfo.model_prefix` plus the LiteLLM routing aliases in
+   :data:`mylonite.providers.registry.EXTRA_ROUTING_ALIASES`
+   (``azure_ai/``, ``bedrock_converse/``, the legacy ``ollama/`` route) --
+   built from the registry so this list can't drift out of sync with it the
+   way the previous hand-maintained version did (missing ``ollama_chat/``,
+   ``hosted_vllm/``, ``gemini/``, ``azure/`` and ``vertex_ai/`` entirely).
 2. A provider credential env var -- recognised the same way
    ``mylonite.scan.providers.looks_like_provider_env_var`` recognises one
    (the ``<PROVIDER>_API_KEY`` convention, the ``AZURE_*`` family, and the
@@ -28,8 +36,8 @@ example strings and fixtures there legitimately name a model), per occurrence:
    this check can never drift from what the CLI itself treats as a
    provider credential.
 
-Two exemption mechanisms (2026-10, REG-1b: the allowlist file is now EMPTY
-for ``src/`` -- every hit is fixed outright or exempted one of these two ways)
+Three exemption mechanisms (the main allowlist file is now EMPTY for
+``src/`` -- every hit there is fixed outright or exempted one of these ways)
 ----------------------------------------------------------------------------
 1. **By path.** :mod:`mylonite.providers.registry` (the approved-provider
    registry -- naming a provider's model prefix/credential env var(s) is its
@@ -45,6 +53,13 @@ for ``src/`` -- every hit is fixed outright or exempted one of these two ways)
    not a file-wide or block one: it says "this exact line is an example",
    nothing broader, so it can't accidentally excuse a real default added
    later in the same function.
+3. **`scripts/workflow_key_literals_allowlist.txt`** -- a SEPARATE file,
+   never merged into the main one, for the scaffolded workflow templates'
+   and ``gate-action``'s own hardcoded ``ANTHROPIC_API_KEY: ${{ secrets....
+   }}`` lines: real, tracked debt (the key variable should be the chosen
+   provider's own, not always Anthropic's) rather than an example, and kept
+   visibly separate so it is never mistaken for "clean" alongside the main
+   allowlist's zero rows. Its own ratchet test may only shrink.
 
 ``scripts/hardcoded_models_allowlist.txt`` still exists for anything that is
 neither of the above (a functional reason the marker/path exemptions don't
@@ -87,13 +102,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = ROOT / "src" / "mylonite"
+GATE_ACTION_ROOT = ROOT / "gate-action"
 ALLOWLIST_PATH = ROOT / "scripts" / "hardcoded_models_allowlist.txt"
+WORKFLOW_KEY_ALLOWLIST_PATH = ROOT / "scripts" / "workflow_key_literals_allowlist.txt"
 
-#: Provider-prefixed model literals. Deliberately this exact, short list --
-#: see the module docstring. A plain "anthropic" or "openai" with no
-#: following "/" is not flagged: that matches ordinary prose ("the anthropic
-#: provider") far more often than a hardcoded model string.
-_MODEL_LITERAL_RE = re.compile(r"claude-|gpt-|gemini-|ollama/|anthropic/|openai/|bedrock/")
+
+def _model_literal_pattern() -> str:
+    """Build the provider-routing half of :data:`_MODEL_LITERAL_RE` from the
+    registry, so it can't silently drift out of sync with it (see the module
+    docstring)."""
+    from mylonite.providers.registry import ALL_MODEL_PREFIXES
+
+    return "|".join(re.escape(prefix) for prefix in ALL_MODEL_PREFIXES)
+
+
+#: Model literals: a bare model-FAMILY prefix (deliberately this exact, short
+#: list -- a plain "anthropic" or "openai" with no following "/" is not
+#: flagged, since that matches ordinary prose far more often than a
+#: hardcoded model string) plus every provider-ROUTING prefix the registry
+#: knows about (see :func:`_model_literal_pattern`).
+_MODEL_LITERAL_RE = re.compile(r"claude-|gpt-|gemini-|" + _model_literal_pattern())
 
 #: Candidate env-var-shaped identifiers: ALL_CAPS_WITH_UNDERSCORES, at least
 #: two words. Each candidate is then checked against
@@ -154,13 +182,16 @@ def _hits_in_line(line: str) -> list[str]:
     return matches
 
 
-def iter_py_files(root: Path = SRC_ROOT) -> list[Path]:
-    return sorted(root.rglob("*.py"))
+def iter_scanned_files(root: Path = SRC_ROOT) -> list[Path]:
+    """Every file this check reads under ``root``: ``*.py`` (the product
+    code) and ``*.yml`` (the scaffolded workflow templates, and
+    ``gate-action/action.yml`` when ``root`` is :data:`GATE_ACTION_ROOT`)."""
+    return sorted(root.rglob("*.py")) + sorted(root.rglob("*.yml"))
 
 
 def scan(root: Path = SRC_ROOT) -> list[Hit]:
     hits: list[Hit] = []
-    for path in iter_py_files(root):
+    for path in iter_scanned_files(root):
         if path.resolve() in (_SELF, _REGISTRY_PATH, _REDACTION_PATH):
             continue
         resolved = path.resolve()
@@ -240,6 +271,22 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> list[AllowlistEntry]:
     return parse_allowlist(path.read_text(encoding="utf-8"))
 
 
+def scan_all() -> list[Hit]:
+    """Every file the real check reads: ``src/mylonite`` (product code and
+    the scaffolded workflow templates) plus ``gate-action/`` (the composite
+    action -- a sibling of ``src/``, so a separate :func:`scan` call)."""
+    return scan(SRC_ROOT) + scan(GATE_ACTION_ROOT)
+
+
+def load_all_allowlists() -> list[AllowlistEntry]:
+    """Both allowlist files, combined -- see the module docstring's
+    exemption (3): ``workflow_key_literals_allowlist.txt`` is kept as a
+    SEPARATE file (never merged on disk) so its tracked debt is never
+    mistaken for the main list's zero rows, but a hit covered by EITHER
+    file is equally not a new, unreviewed one."""
+    return load_allowlist(ALLOWLIST_PATH) + load_allowlist(WORKFLOW_KEY_ALLOWLIST_PATH)
+
+
 def _entry_covers(entry: AllowlistEntry, hit: Hit) -> bool:
     return entry.path == hit.path and re.fullmatch(entry.pattern, hit.matched) is not None
 
@@ -273,11 +320,11 @@ def stale_entries(hits: list[Hit], entries: list[AllowlistEntry]) -> list[Allowl
 
 def main(argv: list[str] | None = None) -> int:
     del argv
-    hits = scan()
+    hits = scan_all()
     try:
-        entries = load_allowlist()
+        entries = load_all_allowlists()
     except AllowlistError as exc:
-        print(f"scripts/hardcoded_models_allowlist.txt is malformed: {exc}", file=sys.stderr)
+        print(f"an allowlist file is malformed: {exc}", file=sys.stderr)
         return 1
 
     problems = unmatched_hits(hits, entries)
