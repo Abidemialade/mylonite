@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A gate run on the reference target with two or more findings now writes a
+  directory that passes `pytest` on its first run.** Each kept finding's replay
+  fixtures are recorded in that finding's own folder,
+  `.mylonite/gate/<finding>/fixtures/`, beside the test that reads them, and
+  that folder is what gets committed. Before, every finding recorded into one
+  shared `fixtures/` at the gate root: each recording overwrote the last
+  one's `_meta.json`, so every test but the last failed in CI, and a copy of
+  each test written at the root stopped pytest from collecting the directory.
+  A new offline test runs a two-finding gate and then `pytest` on its output,
+  with no provider key.
+
 - **`gate --open-pr` no longer deletes a branch it didn't create.** When a
   re-run hit a gate branch left over from an earlier run, `git checkout -b`
   failed and the rollback then ran `git branch -D` on that older branch,

@@ -324,7 +324,7 @@ def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monke
         out_dir=out_dir,
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome_2(), exploits=exploits),
         generate_fn=ReferencePytestGenerator().emit,
-        validate_fn=lambda generated: kept_report.model_copy(
+        validate_fn=lambda generated, _finding_dir: kept_report.model_copy(
             update={"test_filename": generated.filename}
         ),
         open_pr_fn=open_pr_fn,
@@ -417,7 +417,7 @@ def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, m
         out_dir=out_dir,
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome_2(), exploits=exploits),
         generate_fn=ReferencePytestGenerator().emit,
-        validate_fn=lambda generated: kept_report.model_copy(
+        validate_fn=lambda generated, _finding_dir: kept_report.model_copy(
             update={"test_filename": generated.filename}
         ),
         open_pr_fn=open_pr_fn,
@@ -553,3 +553,41 @@ def test_open_pr_fn_passes_an_explicit_base(tmp_path: Path, monkeypatch: Any) ->
 def test_open_pr_fn_defaults_to_the_detected_base(tmp_path: Path, monkeypatch: Any) -> None:
     fake = _run_open_pr_fn(tmp_path, monkeypatch, base=None)
     assert fake.calls[0]["base"] == "detected-default"
+
+
+def test_open_pr_commits_each_findings_own_fixtures_not_a_stale_root_dir(tmp_path):
+    """Each kept finding's `fixtures/` is committed with it. A `fixtures/` left
+    at the gate root by an earlier run belongs to no kept test and stays out."""
+    from mylonite.contracts import ValidationReport
+
+    out_dir = tmp_path / "gate"
+    dirs = [out_dir / "a", out_dir / "b"]
+    for d in [*dirs, out_dir]:
+        (d / "fixtures").mkdir(parents=True)
+    captured: list[Any] = []
+    fake_pr = SimpleNamespace(
+        GatePaths=pr_mod.GatePaths,
+        open_or_print_pr=lambda paths, **_k: captured.append(paths),
+        resolve_repo_root=lambda: tmp_path,
+        resolve_default_base=lambda _root: "main",
+    )
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=fake_pr
+    )
+    findings = [
+        (
+            _real_exploit("indirect-injection-note-body-direct"),
+            ValidationReport(test_filename="a.py", kept=True),
+        ),
+        (
+            _real_exploit("indirect-injection-note-body-roleplay"),
+            ValidationReport(test_filename="b.py", kept=True),
+        ),
+    ]
+
+    open_pr_fn(out_dir=out_dir, findings=findings, body="b", open_pr=False, kept_dirs=dirs)
+
+    add_paths = captured[0].add_paths
+    assert dirs[0] / "fixtures" in add_paths
+    assert dirs[1] / "fixtures" in add_paths
+    assert out_dir / "fixtures" not in add_paths
