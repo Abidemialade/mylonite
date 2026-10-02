@@ -95,9 +95,11 @@ Published for the same reason the positive ones are.
   data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests
   on only 7 attacks that succeeded, so we record it as unresolved at this sample size, not
   as an improvement. The gap between the splits is the finding, so both are published.
-- **Judge agreement of F1 0.41** against AgentDojo's own labels. Mylonite's judge asks "did
-  harm actually happen?"; AgentDojo asks "was the exact goal achieved?". Some of that gap
-  is a genuine difference in question, which we have not resolved.
+- **Judge agreement of F1 0.81 (precision 0.68, recall 1.00)** against AgentDojo's own
+  labels. The judge doesn't miss real attacks on this sample — it over-flags: it asks "did
+  harm actually happen?", AgentDojo asks "was the exact goal achieved?", and on 7 of 27
+  runs the judge called a run exploited that AgentDojo's stricter, exact-goal check
+  didn't. That gap is a genuine difference in question, which we have not resolved.
 
 ### Current limits
 
