@@ -157,7 +157,7 @@
   },
   "MYL-INC-012": {
     "category": "inconclusive",
-    "summary": "The server replied that it queued or held a consequential call, and no effect probe checked whether the action took effect anyway."
+    "summary": "The server replied that it queued or held a consequential call, and the effect probe did not see the action held, so it may still take effect."
   },
   "MYL-SRV-001": {
     "category": "server-reported",

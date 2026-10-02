@@ -72,6 +72,9 @@ class ToolResult(BaseModel):
     content: str
     isError: bool = False
     blocked_by: str | None = None
+    #: The server answered with a task handle: it accepted the call for later
+    #: rather than carrying it out. Structural, so it holds whatever the text says.
+    task_handle: bool = False
 
 
 class PlannerStep(BaseModel):

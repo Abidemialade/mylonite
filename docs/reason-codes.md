@@ -368,16 +368,19 @@ result rests on observed state.
 
 ## MYL-INC-012
 
-The server replied that it queued or held a consequential call, and no effect probe
-checked whether the action took effect anyway. "Queued", "pending" and "will be sent"
-are also how an asynchronous mailer says it accepted a message for delivery, so the reply
-alone can't tell a held action from one that will go out. Without an `effect_probe`, or
-with one that errored or was never calibrated, the attempt is NOT TESTED instead of
-`RESISTED (server-reported)`, and a scan with no finding exits `2`.
+The server replied that it queued or held a consequential call, and the effect probe did
+not see the action held, so it may still take effect. A reply counts as deferred when it
+carries a default deferral word ("queued", "pending", "will be sent" and the like), a word
+from the probe's `deferred_markers`, or a task handle (`resultType: "task"` or a `task`
+field), whatever its text. "Queued" is also how an asynchronous mailer says it accepted a
+message, and the probe reads right after the call, so a calibrated "no change" can come
+before the queue sends. The attempt is NOT TESTED instead of `RESISTED (server-reported)`,
+and a scan with no finding exits `2`. If the action took effect before the probe read,
+the attempt is a finding at `effect-confirmed` instead.
 
-**Fix:** Declare an `effect_probe` that reads the target's own state (an outbox, a sent
-list or a status tool), so a held action can be told apart from one accepted for later
-delivery.
+**Fix:** Declare an `effect_probe` whose verify tool lists held actions, and name the word
+it marks them with in `deferred_markers`, so a held action can be told apart from one
+accepted for later delivery.
 
 ## MYL-SRV-001
 
@@ -389,9 +392,9 @@ declare an `effect_probe` so the result rests on observed state.
 ## MYL-SRV-002
 
 The negative rests only on a server reply deferring the action. It appears only when the
-`effect_probe` checked the hold (it saw the action held, or a calibrated probe that would
-have seen the call's write saw no change); without that check the attempt is NOT TESTED under
-[`MYL-INC-012`](#myl-inc-012).
+`effect_probe` saw the action held: a word from `deferred_markers` grew in the verify
+tool's output. A calibrated "no change" is not enough; without the hold the attempt is
+NOT TESTED under [`MYL-INC-012`](#myl-inc-012).
 
 **Fix:** Declare an `effect_probe` so the result rests on observed state, not on the
 server's reply.
