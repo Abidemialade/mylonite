@@ -30,6 +30,17 @@ stalled, exit `4` says that instead, names the provider and model, and says what
 do; see
 [When the provider rate-limits or drops the run](reading-results.md#when-the-provider-rate-limits-or-drops-the-run).
 
+**Which variable does it check?** A provider in Mylonite's approved table (Anthropic,
+Ollama, OpenAI, Gemini, Azure OpenAI, Vertex AI, Bedrock, vLLM/any OpenAI-compatible
+endpoint, a LiteLLM proxy) is checked for that table's own variable(s) — a self-hosted
+route like Ollama/vLLM needs none. A provider outside the table falls back to LiteLLM's
+own `<PROVIDER>_API_KEY` naming convention and warns once, the first time. Either way,
+this is a local name lookup: Mylonite never calls the provider to run the check.
+Vertex AI authenticates via Application Default Credentials, not a key, so it's checked
+for `VERTEXAI_PROJECT`/`VERTEXAI_LOCATION` instead. See "The approved-provider registry"
+in [self-hosted models](self-hosted-models.md#the-approved-provider-registry) for the
+full table — its own page is a later addition.
+
 ---
 
 ## `demo` — the reference-app playground
