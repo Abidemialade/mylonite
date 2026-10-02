@@ -157,7 +157,9 @@ the target file's `timeout_s` is larger — see
 [target-file.md](target-file.md#mcp-session-timeout)); a first-run `npx`/`uvx` server
 download can genuinely take that long. A timeout there names `timeout_s` and says to
 re-run (the download is cached after that) or raise `timeout_s`, and exits — never the
-misleading "add a seed_arm" advice.
+misleading "add a seed_arm" advice. `--dry-run` runs the auto-wire too (it reads the
+tool list and makes no LLM call; the model check is skipped), so a dry run previews W2
+the way the real scan will run it.
 
 Every model `scan` resolves (`--model`/`--planner-model`/`--customiser-model`/
 `--judge-model`) is checked against LiteLLM's own provider registry once, before any
@@ -168,10 +170,11 @@ of a live call failing (and repeating) once per seed.
 
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
-commented starter `target.yaml` with suggested `weakness_classes` and auto-detected
-`seed_arm`/`effect_probe` candidates — only classes the introspected surface can
-actually cover are suggested. Add `--force` to overwrite. Edit it, then scan
-with `--target-file`.
+`target.yaml` that runs as written: the `weakness_classes` the introspected surface can
+cover, plus a `seed_arm` and an `effect_probe` written live, tagged `# auto-detected`,
+when it finds them (see [target-file.md](target-file.md)). A candidate that still needs
+a value from you stays commented. Add `--force` to overwrite. Review it, then scan with
+`--target-file`.
 
 To scaffold a REST/HTTP agent instead of an MCP server, pass `--rest-url URL` (no
 `--command` needed) — add `--rest-body` for a request-body template other than the
