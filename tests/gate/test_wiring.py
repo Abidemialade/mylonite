@@ -548,7 +548,12 @@ def _run_open_pr_fn(tmp_path: Path, monkeypatch: Any, *, base: str | None) -> _F
     monkeypatch.chdir(tmp_path)
     fake = _FakePrMod()
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=fake, base=base
+        model="anthropic/claude-haiku-4-5-20251001",
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=fake,
+        base=base,
     )
     out_dir = tmp_path / ".mylonite" / "gate"
     out_dir.mkdir(parents=True)
