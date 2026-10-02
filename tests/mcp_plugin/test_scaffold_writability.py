@@ -113,6 +113,87 @@ def test_scaffold_rejects_a_directory_output_before_launching_the_server(
     assert fake.describe_calls == 0
 
 
+def test_scaffold_exits_cleanly_when_the_parent_directory_cannot_be_created(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_check_output_writable`'s `parent.mkdir(...)` call can itself raise
+    (e.g. a permission error) -- a config error (exit 2, one line, no
+    traceback), discovered before the fake adapter's `describe()` is ever
+    called, same as every other `--scaffold` preflight failure."""
+    fake = _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "newdir" / "target.yaml"
+
+    def _boom(_self: Path, *_args: Any, **_kwargs: Any) -> None:
+        raise OSError("simulated mkdir failure")
+
+    monkeypatch.setattr(Path, "mkdir", _boom)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--scaffold",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    lines = [line for line in result.output.splitlines() if line.strip()]
+    assert len(lines) == 1, result.output
+    assert "Traceback" not in result.output
+    assert fake.init_calls == 0
+    assert fake.describe_calls == 0
+
+
+def test_scaffold_exits_cleanly_when_the_probe_write_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_check_output_writable`'s own probe-file write can raise (a
+    permission error an existence check alone would miss) -- a config error
+    (exit 2, one line, no traceback), discovered before any server launch.
+    Only the probe file is made to fail; every other `Path.write_text` call
+    (including the eventual real write, if the preflight ever got there)
+    still goes to the real method."""
+    fake = _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    original_write_text = Path.write_text
+
+    def _boom(self: Path, *args: Any, **kwargs: Any) -> int:
+        if "mylonite-scaffold-writecheck" in self.name:
+            raise OSError("simulated permission error")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _boom)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--scaffold",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    lines = [line for line in result.output.splitlines() if line.strip()]
+    assert len(lines) == 1, result.output
+    assert "Traceback" not in result.output
+    assert fake.init_calls == 0
+    assert fake.describe_calls == 0
+
+
 def test_atomic_write_leaves_the_old_file_intact_on_a_simulated_crash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -125,6 +206,37 @@ def test_atomic_write_leaves_the_old_file_intact_on_a_simulated_crash(
     monkeypatch.setattr(Path, "replace", _boom)
 
     with pytest.raises(OSError):
+        _atomic_write_text(out, "NEW CONTENT")
+
+    assert out.read_text(encoding="utf-8") == "ORIGINAL"
+    leftovers = [p for p in tmp_path.iterdir() if p.name != "target.yaml"]
+    assert leftovers == []
+
+
+def test_atomic_write_removes_the_temp_file_when_the_write_itself_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The failure can happen earlier than the `replace` -- in the temp
+    file's own `write_text` call, before `_atomic_write_text` ever reaches
+    the rename. The destination must stay untouched, the (really written)
+    temp file must be cleaned up, and the original error must surface
+    unwrapped -- never silently swallowed or replaced by a cleanup error."""
+    out = tmp_path / "target.yaml"
+    out.write_text("ORIGINAL", encoding="utf-8")
+    original_write_text = Path.write_text
+
+    def _boom(self: Path, *args: Any, **kwargs: Any) -> int:
+        if ".mylonite-tmp-" in self.name:
+            # The temp file really gets created on disk before the
+            # simulated failure, so the cleanup branch has something to
+            # remove -- not just a no-op on a file that never existed.
+            original_write_text(self, *args, **kwargs)
+            raise OSError("simulated disk full mid-write")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _boom)
+
+    with pytest.raises(OSError, match="simulated disk full mid-write"):
         _atomic_write_text(out, "NEW CONTENT")
 
     assert out.read_text(encoding="utf-8") == "ORIGINAL"
