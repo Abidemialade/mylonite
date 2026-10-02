@@ -212,7 +212,7 @@ def run_reference_gate(out_dir: Path, *, root: Path = ROOT) -> GateRun:
         out_dir=out_dir,
         scan_fn=lambda: ScanOutcomeBundle(outcome=outcome, exploits=picked),
         generate_fn=ReferencePytestGenerator().emit,
-        validate_fn=lambda generated: validator.validate(
+        validate_fn=lambda generated, _finding_dir: validator.validate(
             generated,
             ReferenceVulnerableOracle().adapter(),
             ReferenceVulnerableOracle(),
