@@ -1,4 +1,10 @@
 {
+  "TestkitAttackNotReproduced": {
+    "bases": [
+      "mylonite.testkit.TestkitFixtureError"
+    ],
+    "kind": "exception"
+  },
   "TestkitConfigError": {
     "bases": [
       "builtins.ValueError"

@@ -18,13 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there with an error, never a pass, and spends nothing more on a target
   that may be hung. Set the number with the new `attempts=`
   keyword or the `MYLONITE_REDRIVE_ATTEMPTS` environment variable (for
-  example `1` on every pull request and the default on a nightly job). A
+  example `1` on every pull request and the default on a nightly job),
+  from 1 to 20. A
   passing check now costs up to three re-drives (`assert_control_holds`: one
   raw re-drive plus three guarded ones); a check the attack lands on still
   costs one. Both signatures gain `attempts`, so the testkit signature
   snapshot changed. Under `@testkit.pending_fix`, the first landing is the
   expected failure, and "remove the marker" appears only after every attempt
   resisted. The offline `assert_guard_holds` replay is unchanged.
+- **A control test that can no longer show the attack works now fails, even
+  under `@testkit.pending_fix`.** When the attack does not land on the raw
+  target on any attempt, `testkit.assert_control_holds` raises the new
+  `testkit.TestkitAttackNotReproduced` (a `TestkitFixtureError` subclass)
+  instead of `AssertionError`. A pending-fix marker reads an
+  `AssertionError` as "not fixed yet" and keeps the run green, so such a
+  test used to stay green while proving nothing. The testkit signature
+  snapshot gains the new name.
 
 ### Fixed
 

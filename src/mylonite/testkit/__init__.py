@@ -140,6 +140,11 @@ DEFAULT_REDRIVE_ATTEMPTS = 3
 #: committed tests.
 REDRIVE_ATTEMPTS_ENV = "MYLONITE_REDRIVE_ATTEMPTS"
 
+#: The most re-drive attempts a LIVE check accepts. Each attempt can take up to
+#: ``TESTKIT_REDRIVE_TIMEOUT_S`` and ``TESTKIT_REDRIVE_MAX_LLM_CALLS`` provider
+#: calls, so a mistyped ``1000`` would hold a CI job for hours.
+MAX_REDRIVE_ATTEMPTS = 20
+
 
 class TestkitFixtureError(FixtureError):
     """Raised when the offline gate cannot trust its replay fixtures.
@@ -171,6 +176,19 @@ class TestkitRedriveAborted(TestkitFixtureError):
     because the live path uses no fixtures at all.
 
     Both still FAIL. An unfinished re-drive is not evidence of resistance.
+    """
+
+
+class TestkitAttackNotReproduced(TestkitFixtureError):
+    """Raised when :func:`assert_control_holds` cannot show the attack still
+    works on the raw target, so there is nothing for the control to stop.
+
+    Deliberately NOT an ``AssertionError``: under :func:`pending_fix` an
+    ``AssertionError`` is the expected "not fixed yet" failure and keeps the
+    run green, so a control test that no longer proves anything would stay
+    green forever. This fails the test instead. A subclass of
+    :class:`TestkitFixtureError` because, like an inconclusive run, it means
+    the check could not reach a verdict; it is not a fixture problem.
     """
 
 
@@ -478,28 +496,29 @@ def _resolve_attempts(attempts: int | None) -> int:
 
     An explicit ``attempts=`` wins, then :data:`REDRIVE_ATTEMPTS_ENV` (an empty
     value counts as unset), then :data:`DEFAULT_REDRIVE_ATTEMPTS`. Anything
-    other than a whole number of at least 1 raises :class:`TestkitConfigError`
-    before any re-drive runs: a misspelt override must never quietly become a
-    different number of attempts.
+    other than a whole number from 1 to :data:`MAX_REDRIVE_ATTEMPTS` raises
+    :class:`TestkitConfigError` before any re-drive runs: a misspelt override
+    must never quietly become a different number of attempts. The variable
+    must be plain ASCII digits, so forms ``int()`` would also accept, such as
+    ``+3`` or ``3_0``, are refused.
     """
+    allowed = f"a whole number from 1 to {MAX_REDRIVE_ATTEMPTS}"
     if attempts is not None:
-        if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
-            raise TestkitConfigError(
-                f"attempts must be a whole number of at least 1, got {attempts!r}."
-            )
+        if (
+            isinstance(attempts, bool)
+            or not isinstance(attempts, int)
+            or not 1 <= attempts <= MAX_REDRIVE_ATTEMPTS
+        ):
+            raise TestkitConfigError(f"attempts must be {allowed}, got {attempts!r}.")
         return attempts
     raw = os.environ.get(REDRIVE_ATTEMPTS_ENV, "").strip()
     if not raw:
         return DEFAULT_REDRIVE_ATTEMPTS
-    try:
-        value = int(raw)
-    except ValueError:
-        value = 0
-    if value < 1:
+    value = int(raw) if raw.isascii() and raw.isdigit() else 0
+    if not 1 <= value <= MAX_REDRIVE_ATTEMPTS:
         raise TestkitConfigError(
-            f"{REDRIVE_ATTEMPTS_ENV}={raw!r} is not a whole number of at least 1. "
-            f"Set it to the number of re-drive attempts (default "
-            f"{DEFAULT_REDRIVE_ATTEMPTS}), or unset it."
+            f"{REDRIVE_ATTEMPTS_ENV}={raw!r} is not {allowed}. Set it to the number "
+            f"of re-drive attempts (default {DEFAULT_REDRIVE_ATTEMPTS}), or unset it."
         )
     return value
 
@@ -532,11 +551,17 @@ class _AttemptTally:
         try:
             _assert_from_result(result, exploit, **wording)
         except TestkitFixtureError as exc:
-            raise type(exc)(
-                f"{exc} (re-drive attempt {attempt} of {self.attempts} was inconclusive "
+            # Re-raise the same exception with the tally added to its message,
+            # rather than building a new one: that keeps its type and traceback
+            # and assumes nothing about a subclass's constructor.
+            tally = (
+                f"(re-drive attempt {attempt} of {self.attempts} was inconclusive "
                 f"after {self.resisted} resisted; the check stops at the first "
                 "inconclusive attempt, since every attempt must resist for it to pass.)"
-            ) from exc
+            )
+            first = f"{exc.args[0]} {tally}" if exc.args else tally
+            exc.args = (first, *exc.args[1:])
+            raise
         except AssertionError as exc:
             raise AssertionError(
                 f"{exc} The attack landed on re-drive attempt {attempt} of "
@@ -1040,8 +1065,11 @@ def assert_control_holds(
     Raises
     ------
     AssertionError:
-        The control did not hold (guarded variant fired on an attempt), or the
-        attack did not land on the raw target on any attempt.
+        The control did not hold (the guarded variant fired on an attempt).
+    TestkitAttackNotReproduced:
+        The attack did not land on the raw target on any attempt, so the test
+        could not show the control matters. Not an ``AssertionError``, so
+        :func:`pending_fix` never turns it into an expected failure.
     TestkitFixtureError:
         A guarded attempt was inconclusive (only skip/error outcomes); the
         check stops there.
@@ -1195,7 +1223,7 @@ def assert_control_holds(
         target_registry.clear_runtime_targets()
 
     if not raw_fired:
-        raise AssertionError(
+        raise TestkitAttackNotReproduced(
             f"control {control!r} could not be shown load-bearing: the attack "
             f"{exploit.pattern_id!r} no longer fires against the RAW target (it did not "
             f"land on any of {n_attempts} re-drive attempts), so there is nothing for the "
@@ -1295,6 +1323,7 @@ def pending_fix(reason: str) -> Callable[[TestFunction], TestFunction]:
 
 
 __all__ = [
+    "TestkitAttackNotReproduced",
     "TestkitConfigError",
     "TestkitFixtureError",
     "TestkitRedriveAborted",

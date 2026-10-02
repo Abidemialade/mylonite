@@ -150,13 +150,17 @@ def test_control_not_load_bearing_names_the_real_target_and_control(
 def test_raises_when_attack_does_not_reproduce_on_raw(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Raw target no longer fires → the test would be theater → AssertionError."""
+    """Raw target no longer fires → the test would be theater → its own error,
+    deliberately not an AssertionError (so a pending-fix marker can't hide it)."""
     target_file = _write_target_yaml(tmp_path)
     _patch_scans(monkeypatch, raw=_resisted(), guarded=_resisted())
-    with pytest.raises(AssertionError, match="no longer fires against the RAW target"):
+    with pytest.raises(
+        testkit.TestkitAttackNotReproduced, match="no longer fires against the RAW target"
+    ) as excinfo:
         testkit.assert_control_holds(
             _exploit(), target_file=target_file, control="W2", model="stub-model", provider="stub"
         )
+    assert not isinstance(excinfo.value, AssertionError)
 
 
 def test_unimplemented_control_raises_value_error(tmp_path: Path) -> None:
