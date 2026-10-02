@@ -1338,6 +1338,20 @@
         "required": false,
         "secondary_opts": [],
         "type": "TyperPath"
+      },
+      {
+        "default": "None",
+        "envvar": null,
+        "help": "Hard ceiling on LLM requests for this whole run, retries included (also MYLONITE_MAX_LLM_REQUESTS). Hitting it stops the run: exit 3, NOT TESTED. Default: no ceiling.",
+        "is_flag": false,
+        "multiple": false,
+        "name": "max_llm_requests",
+        "opts": [
+          "--max-llm-requests"
+        ],
+        "required": false,
+        "secondary_opts": [],
+        "type": "IntRange"
       }
     ]
   }

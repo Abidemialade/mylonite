@@ -57,6 +57,14 @@ minutes and API spend rather than seconds.
     spend against the whole `gate` run — scan plus validation — not against
     `--max-llm-calls` alone.
 
+    **For a hard limit, set `MYLONITE_MAX_LLM_REQUESTS`** (or pass
+    `mylonite --max-llm-requests N gate ...`). It counts every request the
+    whole `gate` run sends — scan, validation and retries — and never sends one
+    past the limit. Hitting it stops the run with exit `3` and a NOT TESTED
+    result: no test is generated or validated past that point, and the run
+    never reads as a pass. Size it from a run's `llm:` lines plus headroom for
+    retries.
+
 ```bash
 # against the bundled reference agent
 mylonite gate reference:vulnerable
