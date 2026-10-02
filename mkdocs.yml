@@ -60,6 +60,7 @@ nav:
       - Weakness classes & how attacks work: weakness-classes.md
       - Attack modes: attack-modes.md
       - The validation engine: validation.md
+      - The testkit API: testkit.md
       - Independent verification: verification.md
       - Known limitations: limitations.md
       - Concepts: concepts.md
