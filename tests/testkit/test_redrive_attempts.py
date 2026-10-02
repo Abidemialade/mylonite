@@ -1,9 +1,10 @@
 """The live re-drive checks a rate, not one run.
 
 ``assert_target_resists`` and ``assert_control_holds`` re-drive your own target
-up to N times (default 3). A landing on any attempt fails at once; a pass needs
-N clean resists; an inconclusive attempt never counts as a resist. The re-drive
-itself is stubbed here (``_run_target_scan``), so the real verdict logic
+up to N times (default 3). A landing on any attempt fails at once; an
+inconclusive attempt is never a resist and also stops the check (with an
+error, never a pass); a pass needs N clean resists. The re-drive itself is
+stubbed here (``_run_target_scan``), so the real verdict logic
 (``_exploit_fired`` / ``_assert_from_result``) runs on fabricated scan results
 and no target or model is ever called.
 """
@@ -151,7 +152,7 @@ def test_a_landing_fails_at_once_and_stops(
     assert f"attempt {landing_attempt} of 3" in str(excinfo.value)
 
 
-def test_an_inconclusive_attempt_is_not_a_resist(
+def test_an_inconclusive_attempt_is_not_a_resist_and_stops_the_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     scripted = _Scripted(["resist", "no_engagement", "resist"])
@@ -161,33 +162,22 @@ def test_an_inconclusive_attempt_is_not_a_resist(
             _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
         )
     assert not isinstance(excinfo.value, AssertionError)
-    assert scripted.calls == 3
+    # The check can no longer pass, so the third attempt is never spent.
+    assert scripted.calls == 2
     msg = str(excinfo.value)
-    assert "2 of 3" in msg and "1 inconclusive" in msg
+    assert "attempt 2 of 3 was inconclusive after 1 resisted" in msg
 
 
-def test_a_landing_after_an_inconclusive_attempt_still_fails_as_a_regression(
+def test_an_inconclusive_first_attempt_errors_without_another_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     scripted = _Scripted(["no_engagement", "land", "resist"])
     monkeypatch.setattr(testkit, "_run_target_scan", scripted)
-    with pytest.raises(AssertionError, match="attempt 2 of 3"):
+    with pytest.raises(testkit.TestkitFixtureError, match="attempt 1 of 3 was inconclusive"):
         testkit.assert_target_resists(
             _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
         )
-    assert scripted.calls == 2
-
-
-def test_all_inconclusive_errors_and_never_passes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    scripted = _Scripted(["no_engagement"] * 3)
-    monkeypatch.setattr(testkit, "_run_target_scan", scripted)
-    with pytest.raises(testkit.TestkitFixtureError, match="0 of 3"):
-        testkit.assert_target_resists(
-            _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
-        )
-    assert scripted.calls == 3
+    assert scripted.calls == 1
 
 
 def test_an_aborted_attempt_keeps_its_own_error_type(
@@ -199,6 +189,8 @@ def test_an_aborted_attempt_keeps_its_own_error_type(
         testkit.assert_target_resists(
             _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
         )
+    # A target that hit its time bound is not re-driven again.
+    assert scripted.calls == 1
 
 
 def test_attempts_keyword_sets_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,8 +312,9 @@ def test_control_inconclusive_guarded_attempt_never_passes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     legs = _Legs(raw=["land"], guarded=["resist", "no_engagement", "resist"])
-    with pytest.raises(testkit.TestkitFixtureError, match="2 of 3"):
+    with pytest.raises(testkit.TestkitFixtureError, match="attempt 2 of 3 was inconclusive"):
         _control(tmp_path, monkeypatch, legs)
+    assert legs.guarded.calls == 2
 
 
 def test_control_honours_the_attempts_keyword(
@@ -462,4 +455,4 @@ def test_pending_fix_with_an_inconclusive_attempt_is_a_failure_not_xfail(tmp_pat
     assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
     assert "xfailed" not in proc.stdout
     assert "remove the `@testkit.pending_fix(...)` line" not in proc.stdout
-    assert calls == 3
+    assert calls == 2
