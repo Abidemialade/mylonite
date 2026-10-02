@@ -32,7 +32,10 @@ from mylonite.contracts._types import (
     ComplianceTags,
     ExploitRecord,
     Payload,
+    ScanAttempt,
+    ScanReport,
 )
+from mylonite.scan.engine import ScanResult
 from mylonite.testkit import assert_guard_holds, load_exploit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -279,6 +282,73 @@ def test_guard_fails_raises_assertion_error() -> None:
     """A planner that drives the exploit through the guard → AssertionError."""
     with pytest.raises(AssertionError, match="guard did not hold"):
         assert_guard_holds(_exploit(), _completion_fn=_GuardedFiresFn())
+
+
+def test_guard_fails_default_message_pins_the_practice_app_wording() -> None:
+    """code-expert fix wave: nothing pinned `assert_guard_holds`'s DEFAULT
+    message (no caller overrides `subject`/`regression_detail` here, unlike
+    `assert_target_resists`/`assert_control_holds`), so a future edit to
+    `_assert_from_result`'s default parameters could silently change what the
+    bundled reference app's own gate says, with no test catching it.
+
+    Drives the same exploit-fired path as `test_guard_fails_raises_assertion_error`
+    and pins the exact default `subject` ("the guarded twin") and
+    `regression_detail` ("The guarded reference agent followed the attacker's
+    intent — this is a regression in the guard.") wording — this IS a twin, so
+    this is the one caller allowed to say so.
+    """
+    with pytest.raises(AssertionError) as excinfo:
+        assert_guard_holds(_exploit(), _completion_fn=_GuardedFiresFn())
+    msg = str(excinfo.value)
+    assert "fired against the guarded twin." in msg
+    assert (
+        "The guarded reference agent followed the attacker's intent — this "
+        "is a regression in the guard."
+    ) in msg
+
+
+def test_guard_inconclusive_default_message_pins_the_rerecord_hint() -> None:
+    """Same code-expert ask, for the third default parameter (`rerecord_hint`).
+
+    `rerecord_hint` only surfaces on the generic inconclusive fallback inside
+    `_assert_from_result` (an outcome none of the named branches recognise,
+    e.g. a bare ``"error"``) — not on the exploit-fired path above. Driving
+    that branch through the full engine is impractical (it needs an outcome no
+    completion double naturally produces), so this calls `_assert_from_result`
+    directly with NO overrides, exactly as `assert_guard_holds` itself does,
+    following the same direct-call pattern `test_bounded_redrive.py` already
+    uses to pin the abort-branch messages.
+    """
+    exploit = _exploit()
+    report = ScanReport(
+        target_id=exploit.target_id,
+        attack_modules=["mylonite.prompt-injection"],
+        provider="stub",
+        model="stub-model",
+        elapsed_seconds=0.1,
+        attempts=[
+            ScanAttempt(
+                seed_id=exploit.pattern_id,
+                pattern_id=exploit.pattern_id,
+                outcome="error",
+                verdict_mechanism="predicate",
+                verdict_reason="x",
+                error_detail="simulated",
+            )
+        ],
+        findings_count=0,
+        aborted=None,
+        single_run=True,
+        mylonite_version="0.0.0-test",
+    )
+    result = ScanResult(report=report, exploits=[])
+
+    with pytest.raises(testkit.TestkitFixtureError) as excinfo:
+        testkit._assert_from_result(result, exploit)
+    msg = str(excinfo.value)
+    assert "against the guarded twin" in msg
+    assert testkit.TESTKIT_RERECORD_HINT in msg
+    assert "mylonite validate" in msg
 
 
 def test_r4_missing_fixture_raises_not_pass(tmp_path: Path) -> None:
