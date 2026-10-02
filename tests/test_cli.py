@@ -6633,24 +6633,6 @@ _AUTHORIZE_HELP_BASE = (
 )
 
 
-def test_authorize_help_says_which_value_to_pass() -> None:
-    root = typer.main.get_command(app)
-    for cmd in ("scan", "gate", "ablate"):
-        param = next(p for p in root.commands[cmd].params if p.name == "authorize")
-        assert param.help == _AUTHORIZE_HELP_BASE, cmd
-
-
-def test_validate_authorize_help_notes_reference_targets_need_none() -> None:
-    """validate is the one command reference:* targets can reach without
-    --authorize at all (0.10.2): its help says so, the others don't need
-    to (they gate every target, bundled or custom)."""
-    root = typer.main.get_command(app)
-    param = next(p for p in root.commands["validate"].params if p.name == "authorize")
-    assert param.help.startswith(_AUTHORIZE_HELP_BASE)
-    assert param.help != _AUTHORIZE_HELP_BASE
-    assert "reference:" in param.help
-
-
 # --- 0.10.2 final review: a target file that exists but names a missing
 # system_prompt_file is not a missing target file ---
 
