@@ -267,88 +267,12 @@ report, so the committed regression is honest about which version it gates.
 ## The testkit API
 
 `mylonite generate` writes tests that import `mylonite.testkit`. Its public surface
-is frozen the same way `mylonite.contracts` is (see the module's own docstring) —
-a consumer repo imports these names and calls them positionally/by keyword, so a
-silent signature change breaks every downstream regression gate.
-
-- **`testkit.load_exploit(path)`** — reads an `exploit_*.json` artefact (written by
-  `mylonite scan`) into an `ExploitRecord`. Raises `FileNotFoundError` if the file
-  is missing, `ValueError` if it isn't a valid record.
-- **`testkit.assert_guard_holds(exploit, *, fixtures_dir=None, _completion_fn=None)`**
-  — the offline gate for a bundled reference target. See
-  ["Isn't this a tautology?"](#isnt-this-a-tautology) above.
-- **`testkit.assert_target_resists(exploit, *, target_file, model=None, provider=None, attempts=None, _completion_fn=None)`**
-  — the LIVE regression check for a custom target. See
-  [Tier 2: the committed regression test](#two-tiers-live-discovery-offline-gate) above.
-- **`testkit.assert_control_holds(exploit, *, target_file, control, model=None, provider=None, attempts=None, _completion_fn=None)`**
-  — the LIVE control-efficacy check. See [the control-efficacy check](#the-control-efficacy-check)
-  above.
-
-Both live checks re-drive your target up to 3 times, because discovery proved a
-rate and one clean run proves little against an attack that lands some of the
-time:
-
-| What happens | Result |
-|---|---|
-| The attack lands on attempt *k* | `AssertionError` at once, naming attempt *k*; no further attempt runs |
-| Every attempt resists | Pass |
-| Attempt *k* is inconclusive (no verdict, no tool call, a hit bound) | That attempt's `TestkitFixtureError` (or `TestkitRedriveAborted`) at once, with the tally so far ("attempt 2 of 3 was inconclusive after 1 resisted"); no further attempt runs, and it is never a pass |
-
-An inconclusive attempt stops the check because it can no longer pass, and
-another attempt on a hung target would only spend more time. `assert_control_holds`
-runs its guarded leg on every attempt and its raw leg only until the attack has
-landed on it once, so a pass costs one raw re-drive plus one guarded re-drive per
-attempt. If the raw leg never lands on any attempt, the check raises
-`TestkitAttackNotReproduced`: the test can no longer show the control matters. The effect probe
-is calibrated once, before the first attempt, and each attempt has its own
-12-call and 180-second bound.
-
-`attempts=` sets the number for one test. Otherwise `MYLONITE_REDRIVE_ATTEMPTS`
-sets it for the whole run, and with neither it is 3. A value that is not a whole
-number from 1 to 20 (the variable must be plain digits) raises `TestkitConfigError`
-before anything runs. See
-[the cost note in CI gating](ci-gating.md#what-a-live-gate-costs).
-- **`testkit.pending_fix(reason)`** — a decorator for a committed gate test whose
-  finding isn't fixed yet. While the check raises `AssertionError` (the attack
-  still lands) the test is an expected failure and the run stays green; a live
-  check raises on the first attempt the attack lands on. Once the check passes,
-  which for a live check means every attempt resisted, the test fails with a
-  message telling you to remove the
-  `@testkit.pending_fix(...)` line if your fix has landed; with the line removed
-  it is a regular gate.
-  Any other exception still fails the test, so an inconclusive run is never
-  green. The test also gets the `mylonite_pending_fix` marker, so
-  `pytest -m mylonite_pending_fix` lists what is still open. `mylonite gate`
-  adds it to the `assert_target_resists` test of every finding it commits on
-  your own target; see [A finding you haven't fixed yet](ci-gating.md#a-finding-you-havent-fixed-yet).
-- **`testkit.TestkitFixtureError`** — raised when `assert_guard_holds` cannot trust
-  its replay evidence (a missing, corrupt or version-mismatched fixture, or an
-  inconclusive run). Subclasses `mylonite._replay.FixtureError`.
-- **`testkit.TestkitRedriveAborted`** — a `TestkitFixtureError` subclass raised when
-  a LIVE re-drive is cut short by its own budget/timeout bound rather than a fixture
-  problem — there is nothing to re-record. When `MYLONITE_MAX_LLM_REQUESTS` stopped it,
-  the message names that ceiling instead; the ceiling covers the whole pytest session,
-  so every later live re-drive in the session stops the same way.
-- **`testkit.TestkitAttackNotReproduced`** — a `TestkitFixtureError` subclass raised
-  by `assert_control_holds` when the attack did not land on the raw target on any
-  attempt, so there is nothing for the control to stop. It is not an
-  `AssertionError`, so `@testkit.pending_fix` never treats it as "not fixed yet":
-  a control test that proves nothing fails instead of staying green.
-- **`testkit.TestkitConfigError`** — raised when the model/provider an emitted LIVE
-  test needs to re-drive its target cannot be resolved from any source (an explicit
-  keyword argument, the exploit's own execution-context metadata, or a sibling
-  `scan_report.json`). A `ValueError` subclass.
-
-Every one of these is honest-fail (R4): a stale or missing fixture, or a run that
-never reached a verdict, raises — it never reports a silent pass.
-
-Each assertion's failure message names what it actually re-drove. `assert_guard_holds`
-fails against "the guarded twin" (the bundled reference app is genuinely a twin), while
-`assert_target_resists` and `assert_control_holds` name your own declared target (and,
-for `assert_control_holds`, the control that stopped holding) — neither is a twin, so
-neither message calls your app one. A missing or stale fixture's error points at
-`mylonite validate <dir or test file>`, the command that records fixtures; running
-`mylonite generate` again does not fix it, since `generate` only emits the test file.
+is frozen the same way `mylonite.contracts` is — a consumer repo imports these
+names and calls them positionally/by keyword, so a silent signature change
+breaks every downstream regression gate. Full reference — every assertion's
+signature, the four exception types, the env vars, the re-drive cost table, and
+the `pending_fix` lifecycle, with runnable examples — now lives on its own page:
+[**The testkit API**](testkit.md).
 
 ## The bundled reference app (the reference/demo differential)
 
