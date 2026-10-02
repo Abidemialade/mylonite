@@ -63,16 +63,17 @@ that maps a provider's own LiteLLM routing prefix (`hosted_vllm` for vLLM,
 `ollama_chat` for Ollama, and so on) back to its row, are both generated
 from it, so the three never drift apart.
 
-A provider id outside this table isn't necessarily unchecked: if LiteLLM
-itself still routes it (xAI, Groq, Mistral, DeepSeek, OpenRouter, Cohere's
-chat route, ...), Mylonite asks LiteLLM's own local key-presence check for
-the right variable instead of guessing. Only when LiteLLM knows nothing
-about the provider either does it fall back to LiteLLM's own
-`<PROVIDER>_API_KEY` naming convention and print one warning line (through
-the same redacting output boundary every other Mylonite message uses, and
-only once per provider id, not once per check), so the credential check
-still runs instead of skipping silently and failing later, mid-scan, with a
-traceback.
+A provider id outside this table isn't unchecked, but Mylonite never asks
+LiteLLM what it needs — an earlier approach did, and `litellm.get_llm_provider`
+for a route like `chatgpt/` or `github_copilot/` starts an interactive
+OAuth device-code sign-in and blocks, while `litellm.validate_environment`
+has no explicit check for roughly 75 of LiteLLM's own providers and
+silently reports "nothing missing" for every one of them. Instead, Mylonite
+falls back to LiteLLM's own `<PROVIDER>_API_KEY` naming convention and
+prints one warning line (through the same redacting output boundary every
+other Mylonite message uses, and only once per provider id, not once per
+check), so the credential check still runs instead of skipping silently and
+failing later, mid-scan, with a traceback.
 
 ## Model-size guidance if you're running this in CI
 

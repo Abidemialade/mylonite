@@ -165,36 +165,38 @@ def _unlisted_provider_fallback(p: str) -> tuple[str, ...]:
     """The last resort for a provider id that's neither in the approved
     registry nor one of :data:`_KNOWN_KEYLESS_PROVIDERS`.
 
-    First asks LiteLLM itself, via a synthetic ``f"{p}/x"`` probe model:
+    Deliberately does NOT ask LiteLLM anything -- an earlier version of
+    this fallback probed ``litellm.get_llm_provider``/
+    ``litellm.validate_environment`` first, which turned out to be neither
+    safe nor reliable: ``get_llm_provider`` for routes like ``chatgpt/`` or
+    ``github_copilot/`` starts an interactive OAuth device-code sign-in and
+    BLOCKS (found live, through this exact fallback), and
+    ``validate_environment`` has no explicit branch for roughly 75 of
+    LiteLLM's own providers (``cohere_chat``, ``databricks``, ``watsonx``,
+    ``sambanova``, ``friendliai``, ``sagemaker_chat``, ``hyperbolic``, ...),
+    silently reporting "no missing keys" for every one of them -- exactly
+    the silent-pass bug this whole module exists to fix, just moved one
+    layer down.
 
-    * If LiteLLM can route it at all (:func:`model_is_routable`), trust
-      ITS OWN key-presence check, :func:`litellm.validate_environment` (a
-      local lookup table, no network call) -- this is what actually gets
-      xAI/Groq/Mistral/DeepSeek/OpenRouter/Cohere's chat route/etc. the
-      RIGHT credential var, rather than a guess that might not match
-      LiteLLM's real one.
-    * Only when LiteLLM knows NOTHING about ``p`` either does this guess a
-      ``<PROVIDER>_API_KEY``-shaped var (the same pattern
-      :func:`looks_like_provider_env_var` already recognises) and warn, once
-      per provider id -- the preflight still fires for a genuinely new or
-      misspelled provider, instead of silently requiring nothing.
+    Provider identification elsewhere in this module (``_normalise_provider``/
+    ``provider_from_model``) stays string-only too: a ``provider/model``
+    string is split on its first ``/``, never resolved by asking LiteLLM,
+    so an unlisted route is never probed at all. The only remaining
+    consultation is guessing LiteLLM's own ``<PROVIDER>_API_KEY`` naming
+    convention (the same pattern :func:`looks_like_provider_env_var`
+    already recognises) -- less precise than LiteLLM's real answer would
+    be, but it never blocks and never silently passes. Warns once per
+    provider id, so the preflight still fires for a genuinely new or
+    misspelled provider instead of silently requiring nothing.
     """
-    probe_model = f"{p}/x"
-    if model_is_routable(probe_model):
-        import litellm  # deferred: several seconds to import, needed only here
-
-        result = litellm.validate_environment(probe_model)
-        return tuple(result["missing_keys"])
-
     fallback = f"{p.upper().replace('-', '_')}_API_KEY"
     if p not in _WARNED_UNLISTED_PROVIDERS:
         _WARNED_UNLISTED_PROVIDERS.add(p)
         from mylonite._cli_io import echo_err  # deferred -- avoid pulling in typer/rich eagerly
 
         echo_err(
-            f"mylonite: provider {p!r} is not in the approved registry, and "
-            f"LiteLLM itself doesn't recognise it either; checking for {fallback} "
-            "(LiteLLM's own key-variable naming convention) as a last resort. "
+            f"mylonite: provider {p!r} is not in the approved registry; checking "
+            f"for {fallback} (LiteLLM's own key-variable naming convention). "
             "Results from an unlisted provider are unverified."
         )
     return (fallback,)
@@ -207,14 +209,19 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
     key-shape check deliberately keeps using ``env_vars_for`` instead (see
     :data:`_EXTRA_ENV_VARS`'s docstring).
 
-    A recognised provider (anything in :data:`PROVIDER_ENV_VARS`, which is
-    derived from the approved-provider registry) reads its key plus extra
-    vars straight from there. A known-keyless local/OpenAI-compatible route
-    (:data:`_KNOWN_KEYLESS_PROVIDERS`) needs none. Anything else used to
-    silently return no required vars here, so the credential preflight
-    passed and the run failed later, deep inside the live call, with a
-    traceback instead of a clear, named missing variable -- see
-    :func:`_unlisted_provider_fallback` for what replaces that silence.
+    Three cases, in order, and NEVER a LiteLLM call:
+
+    1. A recognised provider (anything in :data:`PROVIDER_ENV_VARS`, which
+       is derived from the approved-provider registry) reads its key plus
+       extra vars straight from there.
+    2. A known-keyless local/OpenAI-compatible route
+       (:data:`_KNOWN_KEYLESS_PROVIDERS`) needs none.
+    3. Anything else used to silently return no required vars here, so the
+       credential preflight passed and the run failed later, deep inside
+       the live call, with a traceback instead of a clear, named missing
+       variable -- see :func:`_unlisted_provider_fallback` for the guess
+       (never a real LiteLLM lookup; see its docstring for why) that
+       replaces that silence.
     """
     if override:
         return (override,)
