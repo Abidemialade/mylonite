@@ -43,7 +43,10 @@ async def test_assert_target_resists_calibrates_inside_a_running_loop(
 
     monkeypatch.setattr(calibration, "calibrate_custom_target", _fake_calibrate)
     monkeypatch.setattr(testkit, "_run_target_scan", lambda **kwargs: object())
-    monkeypatch.setattr(testkit, "_assert_from_result", lambda result, exploit: None)
+    # TK-1 gives `assert_target_resists` a context-accurate `_assert_from_result`
+    # call (extra keyword-only args naming the real target), so the double must
+    # accept and ignore them too.
+    monkeypatch.setattr(testkit, "_assert_from_result", lambda *args, **kwargs: None)
 
     testkit.assert_target_resists(
         _exploit(), target_file=target, model="stub-model", provider="anthropic"

@@ -383,6 +383,43 @@ def test_assert_target_resists_raises_when_attack_lands(tmp_path: Path) -> None:
     assert session.check_sent_calls >= 1, "effect probe must have been called"
 
 
+def test_assert_target_resists_failure_names_the_real_target_not_a_twin(
+    tmp_path: Path,
+) -> None:
+    """TK1: the failure message must not call the user's own app a "twin".
+
+    ``assert_target_resists`` re-drives the OPERATOR's declared target, not
+    the bundled practice app's guarded reference agent. Before this fix, the
+    message it raised on a regression was copy-pasted from
+    ``assert_guard_holds`` ("fired against the guarded twin. The guarded
+    reference agent followed the attacker's intent...") -- wrong on a custom
+    target, where nothing was guarded and nothing is a twin. It must instead
+    name the real target (``family`` from the target file).
+    """
+    target_file = _write_target_yaml(tmp_path)
+    session = _CountingFakeSession(effect_lands=True)
+    fake_open = _TrackingFakeOpen(session)
+    completion = _ScriptedCompletion()
+
+    with (
+        patch.object(stdio_adapter, "_open_mcp_session", fake_open),
+        pytest.raises(AssertionError) as excinfo,
+    ):
+        testkit.assert_target_resists(
+            _exploit(),
+            target_file=target_file,
+            model="stub-model",
+            provider="stub",
+            _completion_fn=completion,
+        )
+
+    msg = str(excinfo.value)
+    assert "guard did not hold" in msg
+    assert "myapp-email" in msg
+    assert "guarded twin" not in msg
+    assert "guarded reference agent" not in msg
+
+
 def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
     """``assert_target_resists`` invokes the engine exactly once (no N-iteration loop).
 

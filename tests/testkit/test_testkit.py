@@ -296,7 +296,13 @@ def test_r4_missing_fixture_raises_not_pass(tmp_path: Path) -> None:
     )
     with pytest.raises(_FixtureError) as excinfo:
         assert_guard_holds(_exploit(), fixtures_dir=tmp_path)
-    assert "mylonite generate" in str(excinfo.value)
+    msg = str(excinfo.value)
+    # G1: `mylonite generate` only emits the test file and leaves `fixtures/`
+    # empty — it is `mylonite validate` that records them. The hint must send
+    # the reader to the command that actually fixes the problem, not loop them
+    # back to the one that doesn't.
+    assert "mylonite validate" in msg
+    assert "Regenerate the fixtures with `mylonite generate`" not in msg
 
 
 def test_inconclusive_skip_only_raises(tmp_path: Path) -> None:
