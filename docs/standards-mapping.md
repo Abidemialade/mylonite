@@ -68,7 +68,9 @@ published crosswalk:
 ## Weakness class to standards IDs
 
 The four weakness classes Mylonite tests ([W1–W4](weakness-classes.md)) carry
-a fixed set of IDs, consistent across every bundled target family:
+a fixed set of IDs, consistent across every bundled target family. Where a
+class has several seeds, the row lists every ID any of them carries; a single
+finding carries only its own seed's IDs:
 
 | Class | OWASP LLM | OWASP ASI | MITRE ATLAS |
 |---|---|---|---|

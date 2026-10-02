@@ -106,6 +106,10 @@ Published for the same reason the positive ones are.
 - **Against a single-build app, only the weaker statement is available.** With no
   `control_env` to switch, the safeguard is Mylonite's stand-in rather than your code, and
   no output will claim otherwise.
+- **Mylonite tests your tools and server-side safeguards, not guardrails inside your agent.**
+  Its planner replaces your agent loop, so input filters, tool-call policies and host approval
+  steps are never exercised. Coverage per app shape is in
+  [the docs](./docs/index.md#coverage-by-app-shape).
 - **Finding nothing is the normal outcome** for a well-built app on a robust model. See
   [below](#finding-nothing-is-also-a-result).
 - **The evidence rests largely on one model** — Claude Haiku 4.5 — at small, deliberately
