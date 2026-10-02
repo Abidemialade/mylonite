@@ -92,8 +92,8 @@ class RunConfig(BaseModel):
         target_file: ./target.yaml
         authorize: my-app
         provider: anthropic
-        model: claude-sonnet-4-6
-        planner_model: claude-opus-4-1
+        model: claude-sonnet-4-6  # allow-literal: example
+        planner_model: claude-opus-4-1  # allow-literal: example
         max_llm_calls: 50
         api_base: https://my-litellm-proxy.internal/v1
         max_tokens: 4096
@@ -277,32 +277,59 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
     shaped var as a last resort when it doesn't -- see
     :func:`~mylonite.scan.providers.required_env_vars`.
 
-    Uses :func:`~mylonite.scan.providers.required_env_vars` (the key PLUS
-    anything else LiteLLM needs to actually route a call, e.g. Azure's
-    endpoint/API-version pair) and requires ALL of them to be set, not just
-    one — ``env_vars_for`` alone plus an ``any()`` check would (a) pass a
-    Bedrock setup with only ``AWS_ACCESS_KEY_ID`` set, silently missing the
-    also-required ``AWS_SECRET_ACCESS_KEY`` (every current
-    ``PROVIDER_ENV_VARS`` entry with more than one var means ALL of them are
-    required together, never "any one of"), and (b) pass an Azure setup with
-    only ``AZURE_API_KEY`` set, which still fails the live call this
-    pre-flight exists to prevent because ``AZURE_API_BASE``/
-    ``AZURE_API_VERSION`` are also unset.
+    Splits :func:`~mylonite.scan.providers.required_env_vars`'s result (the
+    key PLUS anything else LiteLLM needs to route a call, e.g. Azure's
+    endpoint/API-version pair) into two independently-checked parts:
+
+    1. The credential itself, via
+       :func:`~mylonite.scan.providers.credential_configured` -- ANY ONE of
+       the provider's :func:`~mylonite.scan.providers.credential_sets_for`
+       must be FULLY present. Most providers have exactly one set (so this
+       is "all of key_env, together" exactly like before); Bedrock has
+       several (the static keypair, OR ``AWS_PROFILE`` alone, OR a bearer  # allow-literal: example
+       token alone, OR an OIDC role pair) -- requiring the static pair
+       specifically used to reject every other legitimate AWS credential
+       form.
+    2. Anything ELSE the provider always needs regardless of which
+       credential form is used (Azure's endpoint/API-version pair, Vertex's
+       project/location) -- these are not part of any credential
+       alternative, so ALL of them are still required together, same as
+       before. An Azure setup with only ``AZURE_API_KEY`` set still fails  # allow-literal: example
+       here because ``AZURE_API_BASE``/``AZURE_API_VERSION`` are also unset.  # allow-literal: example
     """
-    from mylonite.scan.providers import provider_from_model, required_env_vars
+    from mylonite.scan.providers import (
+        credential_configured,
+        credential_sets_for,
+        provider_from_model,
+        required_env_vars,
+    )
 
     resolved = provider_from_model(model, declared=provider)
     needed = required_env_vars(resolved)
     if not needed:
         return
-    missing = [var for var in needed if not os.environ.get(var)]
-    if not missing:
+    sets = credential_sets_for(resolved)
+    canonical = sets[0] if sets else ()
+    extra = tuple(v for v in needed if v not in canonical)
+    # Trivially satisfied when `sets` is empty (an unregistered provider's
+    # guessed `<PROVIDER>_API_KEY` fallback, which isn't a registry row) --
+    # that single guessed var then lands entirely in `extra` above instead,
+    # so it is still checked, just through the "always required" path.
+    credential_ok = credential_configured(resolved) if sets else True
+    missing_extra = [var for var in extra if not os.environ.get(var)]
+    if credential_ok and not missing_extra:
         return
+    missing_primary = [] if credential_ok else [v for v in canonical if not os.environ.get(v)]
+    missing = missing_primary + missing_extra
+    alt_hint = ""
+    if len(sets) > 1:
+        forms = " or ".join("+".join(alt) for alt in sets[1:])
+        alt_hint = f" (or one of: {forms})"
     msg = (
         f"no LLM credential configured for model {model!r} (resolved provider: "
-        f"{resolved or 'unknown'}). Missing: {', '.join(missing)} "
+        f"{resolved or 'unknown'}). Missing: {', '.join(missing)}{alt_hint} "
         "-- via your shell env, --api-key-file, --env-file, or a CI secret -- "
-        "or point --model (a provider-prefixed model, e.g. openai/gpt-4o; or "
+        "or point --model (a provider-prefixed model, e.g. openai/gpt-4o; or "  # allow-literal: example
         "mylonite.yaml's model:) at a provider that IS configured."
     )
     raise LLMNotConfiguredError(msg)

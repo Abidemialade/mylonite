@@ -48,6 +48,18 @@ class ProviderInfo:
     provider needs on every request, e.g. an Anthropic workspace id -- empty
     for every row here; wiring an actual ``--llm-header``/env-var path for
     one is a later PR in this track.
+
+    ``key_env_alternatives`` lists OTHER sets of env vars that, on their own,
+    are each independently sufficient proof of a credential for this
+    provider -- every set (the canonical ``key_env`` plus each of these) is
+    checked with ALL-of-its-own-vars-present, and the provider is considered
+    configured if ANY one set is fully present. Bedrock is the motivating
+    case: AWS's credential chain accepts a static access/secret keypair, OR
+    a named ``AWS_PROFILE``, OR an AWS Bedrock API key/bearer token, OR an
+    OIDC role (the env-detectable form: ``AWS_ROLE_ARN`` +
+    ``AWS_WEB_IDENTITY_TOKEN_FILE``) -- requiring the static pair alone
+    rejected every other legitimate form. Empty for every other row here
+    (their one ``key_env`` set is the only form).
     """
 
     id: str
@@ -58,6 +70,7 @@ class ProviderInfo:
     extra_headers: tuple[str, ...] = ()
     example_model: str | None = None
     local: bool = False
+    key_env_alternatives: tuple[tuple[str, ...], ...] = ()
 
 
 PROVIDERS: dict[str, ProviderInfo] = {
@@ -101,7 +114,16 @@ PROVIDERS: dict[str, ProviderInfo] = {
         id="bedrock",
         tier="supported",
         model_prefix="bedrock/",
+        # The static keypair is kept as the CANONICAL set (what an error
+        # message/the docs show as "the" credential) -- but see
+        # `key_env_alternatives` below: any ONE of several AWS credential
+        # forms satisfies this provider, not just the static pair.
         key_env=("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
+        key_env_alternatives=(
+            ("AWS_PROFILE",),
+            ("AWS_BEARER_TOKEN_BEDROCK",),
+            ("AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"),
+        ),
     ),
     "vllm": ProviderInfo(
         id="vllm",
