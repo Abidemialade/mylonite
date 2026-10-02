@@ -9,7 +9,6 @@ both import from here.
 from __future__ import annotations
 
 import re
-import sys
 
 from mylonite.providers.registry import PROVIDERS
 
@@ -137,11 +136,12 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
     that isn't in the registry (xAI, Groq, Mistral, DeepSeek, OpenRouter, a
     newer OpenAI-compatible host, ...) used to silently return no required
     vars here, so the credential preflight passed and the run failed later,
-    deep inside the live call, with a traceback instead of a clear "missing
-    FOO_API_KEY". It now falls back to LiteLLM's own ``<PROVIDER>_API_KEY``
-    naming convention (the same pattern :func:`looks_like_provider_env_var`
-    already recognises) and prints one warning line to stderr -- the
-    preflight still fires, just without registry-backed extra vars.
+    deep inside the live call, with a traceback instead of a clear, named
+    missing variable. It now falls back to LiteLLM's own
+    ``<PROVIDER>_API_KEY`` naming convention (the same pattern
+    :func:`looks_like_provider_env_var` already recognises) and prints one
+    warning line to stderr -- the preflight still fires, just without
+    registry-backed extra vars.
     """
     if override:
         return (override,)
@@ -150,12 +150,13 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
         return ()
     if p in PROVIDER_ENV_VARS:
         return PROVIDER_ENV_VARS[p] + _EXTRA_ENV_VARS.get(p, ())
+    from mylonite._cli_io import echo_err  # deferred -- avoid pulling in typer/rich eagerly
+
     fallback = f"{p.upper().replace('-', '_')}_API_KEY"
-    print(
+    echo_err(
         f"mylonite: provider {p!r} is not in the approved registry; checking "
         f"for {fallback} (LiteLLM's own key-variable naming convention). "
-        "Results from an unlisted provider are unverified.",
-        file=sys.stderr,
+        "Results from an unlisted provider are unverified."
     )
     return (fallback,)
 

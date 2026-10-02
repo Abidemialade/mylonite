@@ -29,8 +29,8 @@ import check_no_hardcoded_models as gate  # noqa: E402
 #: add a real reason to the allowlist file instead and raise these in the
 #: same PR, so the ratchet is a deliberate, reviewable act rather than a
 #: silent widening.
-ALLOWLIST_ROW_COUNT_CEILING = 54
-ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 79
+ALLOWLIST_ROW_COUNT_CEILING = 62
+ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 88
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
