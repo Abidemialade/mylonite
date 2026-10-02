@@ -144,71 +144,109 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
   with different reason codes do NOT agree, and do not count toward the bar together.
   **N = 1** for targets 4-6; their result is recorded as a smoke-cell pass/fail (did
   it crash) with no verdict.
-- **No extra runs.** A re-run is allowed only for a named infrastructure failure
-  (runner crash, provider 5xx outage, the `redis:7`/`ollama` service container or the
-  shim failing to start) and is logged with its reason in the committed results
-  write-up. A result nobody likes is never grounds for a re-run. A crash with no
-  identifiable infrastructure cause (a traceback with no provider/network signature in
-  it) is a **product defect**, not an infrastructure failure: it is logged as a GitHub
-  issue, scored as not counted toward the bar, and is explicitly NOT auto-re-run --
-  re-running a product crash as if it were a flaky runner would silently hide the bug
-  this campaign exists to surface.
+- **No extra runs.** A re-run is allowed only for a named infrastructure failure,
+  positively evidenced by an anchored signature in the captured log (a specific
+  provider/network exception class name, or a specific line such as a DNS-resolution
+  failure or a GitHub Actions runner-shutdown notice -- never a bare word or number
+  like "timeout" or "503", which can appear in ordinary log text, e.g. a token count),
+  and is logged with its reason in the committed results write-up. A result nobody
+  likes is never grounds for a re-run. **Any Python traceback anywhere in the
+  captured log is a product defect, full stop** -- this check runs BEFORE the infra
+  signature check and overrides it: Mylonite's own code is designed to catch and
+  cleanly report provider/config errors, so a raw traceback means something it did
+  not anticipate, whatever the traceback's own text says. A product defect is logged
+  as a GitHub issue, scored as not counted toward the bar, and is explicitly NOT
+  auto-re-run -- re-running a product crash as if it were a flaky runner would
+  silently hide the bug this campaign exists to surface.
 - **All outcomes are published**, kept or not, under
   `verification/results/<version>/third-party/`.
 - **Every command carries `--authorize <family>`**, matching the target's `family`
   field exactly (see the table above and `SECURITY.md`).
-- **Reason codes, not silence.** Every NOT TESTED attempt in a published result names
-  its reason code (see `docs/reason-codes.md`). Separately: if a scan's attempts
-  include one whose outcome is anything other than `finding`/`no_finding` (a skip, an
-  error, `undecided`, `not_applicable`) with **no** reason code attached, that
-  attempt's gap is never silently absorbed into a clean 0-findings result -- the whole
-  run is scored as a product defect (see above) rather than counted as NOT_KEPT or
-  NOT_TESTED, even if some OTHER attempt in the same run was cleanly judged.
+- **Reason codes, not silence.** NOT_TESTED REQUIRES a reason code (see
+  `docs/reason-codes.md`) -- an aborted scan or one that was never exercised, with no
+  reason code found anywhere (an attempt's own text, or the abort's own code printed
+  to the log; `scan_report.json` itself never carries the abort's `MYL-ABT-*` code),
+  is a **product defect**, never a silent, code-free NOT_TESTED. Separately: if a
+  scan's attempts include one whose outcome is anything other than `finding`/
+  `no_finding` (a skip, an error, `undecided`, `not_applicable`) with **no** reason
+  code attached, that attempt's gap is never silently absorbed into a clean
+  0-findings result -- the whole run is scored as a product defect rather than
+  counted as NOT_KEPT or NOT_TESTED, even if some OTHER attempt in the same run was
+  cleanly judged.
+- **Multiple findings in one scan: only the first is validated and scored.** `generate`
+  writes each finding into its own `generated/<slug>/` subdirectory once there are
+  two or more, and pointing `validate` at the parent directory in that case finds no
+  `exploit_*.json` and fails -- so the workflow passes one explicit `exploit_*.json`
+  path (sorted first by pattern_id) rather than `--latest`/a bare scan directory. This
+  is a known, documented scope limit for this round, not a crash: a cell with more
+  than one finding reports a verdict for the first finding only.
 
 ## Budget and the hard ceiling
 
-**No change needed in `src/`:** `mylonite` has no hard ceiling on LLM calls or spend
-today. `--max-llm-calls` is explicitly documented as "not a hard ceiling" (each seed
-keeps a small floor, so the worst case is higher than the number passed), and there is
-no `--max-budget`/spend-cap option anywhere in the CLI, config, or `LLMPolicy` (which
-forwards only a fixed allowlist of LiteLLM kwargs: `api_base`, `max_tokens`,
-`temperature`, `timeout`, `num_retries` -- not LiteLLM's own `max_budget`). This is
-reported, not patched, here; a real hard ceiling is a `src/` change for a later PR.
+**Today, with no hard ceiling landed, the real worst case is far above the naive
+"60 calls" estimate an earlier draft of this section used.** `--max-llm-calls` bounds
+only the scan phase's planner loop, and even there "not a hard ceiling": each seed
+keeps its own floor (`60 + (S-1)*max(2, 60/S)`, about 258 calls at 100 seeds).
+`validate` runs with **no budget at all** -- 6 re-drives (3 iterations x 2 twins) each
+against the default `ScanConfig` cap of 50, plus up to 3 consensus-judge calls per
+firing run, roughly 310 more calls -- and LiteLLM's own `num_retries=2` is not counted
+in any of the above, so a billed-retry run can cost up to 3x again. **Worst case today
+is on the order of 570 counted calls per cell**, which at 2048 output tokens and
+3k-8k input tokens per call is roughly **$7.5-10.4 on Haiku 4.5** and **$0.96-1.39 on
+gpt-4o-mini** -- up to 3x either figure with billed retries. One Haiku cell can
+therefore use the whole $4.50 Anthropic allocation and most of the $10 total. This is
+reported here, not hidden; it is the reason Critical B of the fix-round-1 re-review
+exists.
 
-Given that, this campaign's actual hard stops are, in order:
+**No change needed in `src/` for this PR.** `mylonite` has no hard ceiling on LLM
+calls or spend today: there is no `--max-budget`/spend-cap option anywhere in the
+CLI, config, or `LLMPolicy` (which forwards only a fixed allowlist of LiteLLM kwargs
+-- `api_base`, `max_tokens`, `temperature`, `timeout`, `num_retries` -- not LiteLLM's
+own `max_budget`). **BUDGET-1, a separate PR, is adding a hard, process-wide LLM
+request ceiling** counted across `scan` + `generate` + `validate` + retries, read
+from an environment variable. This workflow already wires a placeholder for it:
+`MYLONITE_MAX_LLM_REQUESTS`, set on the run step from the same clamped
+`max_llm_calls` dispatch input that already drives `scan --max-llm-calls`, in exactly
+one place in the workflow file (a single line), so the controller can correct the
+name to whatever BUDGET-1 actually lands with. Until that PR lands, the env var is a
+harmless no-op -- nothing in `src/` reads it yet -- and today's only two REAL stops
+are:
 
-1. **One target, one provider, no model override, per dispatch.** No "all"/"both"
-   fan-out and no free-text model input -- the model is fixed per provider
-   (`claude-haiku-4-5-20251001` for Anthropic, `gpt-4o-mini` for OpenAI; see
-   "Provider and model" below) so the cost-per-call estimate below cannot be
-   invalidated by a dispatch picking an expensive model.
-2. **`max_llm_calls` is clamped server-side to a hard maximum of 60** (the workflow's
-   own validation step rejects non-integer input and clamps anything above 60),
-   roughly the built-in CLI default of 50 plus headroom, not the "every seed gets its
-   own floor" unbounded worst case the CLI help warns about.
-3. **`MYLONITE_MAX_TOKENS=2048`** is set on the one step that calls the CLI, bounding
-   each call's OUTPUT tokens (there is no `--max-tokens` CLI flag; this is the
-   documented env-var equivalent -- see `config.py`'s `MYLONITE_MAX_TOKENS`).
-4. **Worst-case cost per cell**, call count (60) x max output tokens (2048) x the
-   provider's output rate, plus an estimated ~3k input tokens/call (not capped by
-   `max_tokens`, which only bounds output): Anthropic (`$1`/`$5` per M)
-   `60 * (3000*1 + 2048*5) / 1e6` ~= **$0.79**; OpenAI `gpt-4o-mini` (`$0.15`/`$0.60`
-   per M) `60 * (3000*0.15 + 2048*0.60) / 1e6` ~= **$0.065**. Both are well inside a
-   single cell's share of the whole-campaign budget below.
-5. **A step-level `timeout-minutes` wall-clock cap** on the job (30 minutes) is the
-   true backstop against a stuck call looping past the above estimate.
-6. **A provider-side spend limit on both keys is the only GENUINE hard stop** that
-   does not depend on Mylonite's own behaviour. The keys this campaign uses
+1. **A 30-minute job `timeout-minutes`.** Given the worst case above, this is the one
+   backstop that does not depend on any of Mylonite's own budget flags landing or
+   working as documented.
+2. **A provider-side spend limit on both keys.** The keys this campaign uses
    (`MYLONITE_LLM_KEY`, `MYLONITE_OPENAI_KEY`) should carry a provider-configured
    spend cap; this is an operational step for whoever provisions the keys, not
-   something this workflow can enforce itself.
+   something this workflow can enforce itself, and it is the only stop that is
+   genuinely independent of a bug anywhere in this chain.
 
-Total campaign budget: $4.50 Anthropic + $5.00 OpenAI across targets 1-6 (the public
-commitment is "every live call runs in CI, costed, and published"; the internal
-per-use breakdown lives in the maintainer's own planning notes, not reproduced here).
-Target 6's own-agent inference runs on Ollama at zero cost regardless of which
-provider drives Mylonite's own `scan`/`validate` calls; only those calls (Anthropic or
-OpenAI) count against this budget.
+**Once BUDGET-1 lands and the env var name is aligned, the per-cell worst case
+restates cleanly as ceiling x max tokens x price** (the simplest conservative bound:
+treating `max_tokens` as capping both legs, which overstates input but never
+understates the total): at the already-wired ceiling of 60 and
+`MYLONITE_MAX_TOKENS=2048`, Haiku 4.5 (`$1`/`$5` per M, summed `$6`/M) is
+`60 * 2048 * 6 / 1e6` ~= **$0.74**; gpt-4o-mini (`$0.15`/`$0.60` per M, summed
+`$0.75`/M) is `60 * 2048 * 0.75 / 1e6` ~= **$0.09**. Both are well inside a single
+cell's share of the campaign budget below -- but this number is **not yet real**
+until BUDGET-1 actually enforces the ceiling; until then, see the worst case stated
+above and rely on the job timeout.
+
+**Other spend controls already in place, independent of BUDGET-1:**
+
+- **One target, one provider, no model override, per dispatch.** No "all"/"both"
+  fan-out and no free-text model input -- the model is fixed per provider
+  (`claude-haiku-4-5-20251001` for Anthropic, `gpt-4o-mini` for OpenAI; see
+  "Provider and model" below) so neither worst-case estimate above can be invalidated
+  by a dispatch picking an expensive model.
+- **`MYLONITE_MAX_TOKENS=2048`** is set on the one step that calls the CLI, bounding
+  each call's OUTPUT tokens (there is no `--max-tokens` CLI flag; this is the
+  documented env-var equivalent -- see `config.py`'s `MYLONITE_MAX_TOKENS`).
+
+Total campaign budget: $4.50 Anthropic + $5.00 OpenAI across targets 1-6. Target 6's
+own-agent inference runs on Ollama at zero cost regardless of which provider drives
+Mylonite's own `scan`/`validate` calls; only those calls (Anthropic or OpenAI) count
+against this budget.
 
 ## Provider and model
 
