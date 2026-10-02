@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The release verification campaign now runs in CI.** The new
+  `verification-campaign` workflow (manual dispatch, `model` required) builds the
+  wheel from `ref`, installs it into a clean venv, runs the three layer-2
+  benchmarks the release gate requires (AgentDojo, InjecAgent `dh` and `ds`), and
+  uploads `verification/results/<version>/` as an artifact for a maintainer to
+  commit. It proves the result first with `scripts/check_verification_freshness.py`.
+  `python -m verification.campaign` is the new command that assembles scored layer
+  reports into that directory, asserting the installed-wheel silo before it writes
+  anything. See "Running the release campaign in CI" in `verification/README.md`.
+
 ## [0.11.0] - 2026-10-01
 
 This release makes every result say what proved it, and stops reporting what was never

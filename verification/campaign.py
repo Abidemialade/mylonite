@@ -31,6 +31,12 @@ of a chosen target. Pass the artefacts in with ``--layer1-reports`` /
 ``--layer3-scan`` and they are folded in; omit them and they are recorded as
 ``not-run``.
 
+On the command line (what ``.github/workflows/verification-campaign.yml`` runs)
+every layer arrives as an already-scored report from ``verification.runner``:
+``python -m verification.campaign --mylonite-version X.Y.Z --model M --report
+layer2-agentdojo=<report.json> ...``. A layer with no ``--report`` is recorded
+as ``not-run``.
+
 A layer that did not run is NEVER absent from ``meta.json`` and never a zero. The
 project's rule is that NOT-TESTED is not clean, and a missing layer that reads as
 0% recall would be a false claim about coverage.
@@ -45,14 +51,16 @@ adds a field later -- a denylist only catches what its author thought of.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from verification import _sanitise
-from verification._provenance import assert_siloed, build_meta
+from verification._provenance import SiloViolation, assert_siloed, build_meta
 
 #: Result filenames. Must match ``verification.trends._LAYER_FILES``; a test
 #: pins the two together so a rename cannot silently orphan the trend table.
@@ -217,3 +225,99 @@ def start(version: str) -> None:
     response to that -- relabel it -- is exactly the dishonesty this guards.
     """
     assert_siloed(expected_version=version)
+
+
+_DEFAULT_RESULTS_ROOT = Path(__file__).with_name("results")
+
+
+def _report_spec(spec: str) -> tuple[str, Path]:
+    """Parse ``LAYER=PATH``. An unknown layer is a usage error, never a new key."""
+    layer, sep, path = spec.partition("=")
+    if not sep or not path:
+        raise argparse.ArgumentTypeError(f"expected LAYER=PATH, got {spec!r}")
+    if layer not in LAYER_FILES:
+        raise argparse.ArgumentTypeError(
+            f"unknown layer {layer!r}; expected one of {sorted(LAYER_FILES)}"
+        )
+    return layer, Path(path)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="verification.campaign",
+        description="Assemble a versioned verification result set from scored layer reports.",
+    )
+    parser.add_argument(
+        "--mylonite-version",
+        required=True,
+        help="the release being measured; must equal the installed mylonite",
+    )
+    parser.add_argument(
+        "--model", required=True, help="model(s) used, recorded verbatim in meta.json"
+    )
+    parser.add_argument(
+        "--report",
+        action="append",
+        default=[],
+        type=_report_spec,
+        metavar="LAYER=PATH",
+        help="a scored report for one layer; repeat per layer. Unlisted layers are 'not-run'.",
+    )
+    parser.add_argument("--results-root", type=Path, default=_DEFAULT_RESULTS_ROOT)
+    parser.add_argument(
+        "--force", action="store_true", help="replace an existing result set for this version"
+    )
+    parser.add_argument(
+        "--silo-only",
+        action="store_true",
+        help="assert the installed-wheel silo and exit without writing anything",
+    )
+    return parser
+
+
+def run(
+    *,
+    version: str,
+    model: str,
+    reports: list[tuple[str, Path]],
+    results_root: Path,
+    force: bool,
+) -> Path:
+    """Assert the silo, fold in each report, then write ``meta.json`` last."""
+    start(version)
+    seen: set[str] = set()
+    for layer, _path in reports:
+        if layer in seen:
+            raise CampaignError(f"{layer}: a report was passed more than once")
+        seen.add(layer)
+    results_dir = prepare_results_dir(results_root, version, force=force)
+    layers = dict.fromkeys(LAYER_FILES, "not-run")
+    for layer, path in reports:
+        layers[layer] = fold_in_prebuilt(results_dir, layer, path)
+    return finalise(results_dir, version=version, model=model, layers=layers)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        if args.silo_only:
+            start(args.mylonite_version)
+            print(f"silo ok: mylonite {args.mylonite_version} is an installed package")
+            return 0
+        meta = run(
+            version=args.mylonite_version,
+            model=args.model,
+            reports=args.report,
+            results_root=args.results_root,
+            force=args.force,
+        )
+    except (CampaignError, SiloViolation, _sanitise.FieldNotAllowed) as exc:
+        print(f"campaign: {exc}", file=sys.stderr)
+        return 2
+    print(f"wrote {meta.parent.name}/meta.json")
+    print(json.dumps(json.loads(meta.read_text(encoding="utf-8"))["layers"], indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

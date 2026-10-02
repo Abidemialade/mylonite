@@ -1,0 +1,144 @@
+# Release verification campaign: produces verification/results/<version>/ for
+# scripts/check_verification_freshness.py, measured against a wheel built from
+# `ref` and installed into a clean venv -- never the working tree.
+#
+# What runs (layer 2, the three layers the freshness gate requires):
+#   - AgentDojo: score Mylonite's judge (LLM leg, `model`) on released runs;
+#   - InjecAgent dh + ds: record `limit` cases per split with `model`, then
+#     score with the deterministic judge.
+# Layers 1 and 3 are recorded as not-run (the gate treats them as best-effort).
+#
+# Manual dispatch only: it spends tokens and needs the MYLONITE_LLM_KEY repo
+# secret. A dispatch with no key skips with a notice instead of failing.
+# The sanitised result directory is uploaded as an artifact; a maintainer
+# reviews and commits it. This workflow never writes to the repository.
+name: verification-campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "litellm model id (e.g. anthropic/claude-haiku-4-5-20251001)"
+        required: true
+      limit:
+        description: "cases per InjecAgent split"
+        default: "100"
+      ref:
+        description: "branch, tag or sha to build and measure"
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
+    steps:
+      - name: Guard -- skip (not fail) a dispatch with no key configured
+        id: guard
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::MYLONITE_LLM_KEY is not set; skipping the verification campaign."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.ref }}
+          # Full history and tags, so meta.json's git_sha can resolve the
+          # release tag rather than falling back to HEAD.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.guard.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+      - name: Read the version being measured
+        if: steps.guard.outputs.run == 'true'
+        id: version
+        run: |
+          version="$(sed -n 's/^__version__ = "\([0-9.]*\)"$/\1/p' src/mylonite/version.py)"
+          if [ -z "$version" ]; then
+            echo "::error::could not read __version__ from src/mylonite/version.py"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "VENV=$RUNNER_TEMP/campaign-venv" >> "$GITHUB_ENV"
+      - name: Build the wheel
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir "$RUNNER_TEMP/dist"
+      # The venv lives outside the checkout and holds only the wheel and its
+      # dependencies. `verification` resolves from the checkout (the cwd, via
+      # `python -m`); `mylonite` resolves from the venv's site-packages, because
+      # src/ is never on sys.path. That is what assert_siloed checks.
+      - name: Install the wheel into a clean venv
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          python -m venv "$VENV"
+          "$VENV/bin/python" -m pip install --upgrade pip
+          "$VENV/bin/python" -m pip install "$RUNNER_TEMP"/dist/mylonite-*.whl
+      - name: Assert the silo before measuring anything
+        if: steps.guard.outputs.run == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          "$VENV/bin/python" -m verification.campaign --silo-only \
+            --mylonite-version "$VERSION" --model "$MODEL"
+      # Dispatch inputs arrive through env, never through `${{ }}` inside a
+      # run: script -- they are free text, substituted before bash parses the
+      # line, and this job holds a provider key.
+      - name: Layer 2 -- AgentDojo (judge on released runs, LLM leg)
+        if: steps.guard.outputs.run == 'true'
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          "$VENV/bin/python" -m verification.runner fetch --dataset agentdojo \
+            --out verification/reports/agentdojo.jsonl
+          "$VENV/bin/python" -m verification.runner score \
+            --transcripts verification/reports/agentdojo.jsonl --with-llm --model "$MODEL" \
+            --out verification/reports/layer2_agentdojo.json
+      - name: Layer 2 -- InjecAgent dh + ds (record, then deterministic score)
+        if: steps.guard.outputs.run == 'true'
+        env:
+          MODEL: ${{ inputs.model }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          "$VENV/bin/python" -m verification.runner fetch --dataset injecagent
+          for split in dh ds; do
+            "$VENV/bin/python" -m verification.runner record --dataset injecagent \
+              --split "$split" --model "$MODEL" --limit "$LIMIT" \
+              --out "verification/reports/${split}.jsonl"
+            "$VENV/bin/python" -m verification.runner score \
+              --transcripts "verification/reports/${split}.jsonl" \
+              --out "verification/reports/layer2_${split}.json"
+          done
+      - name: Assemble the result set
+        if: steps.guard.outputs.run == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MODEL: ${{ inputs.model }}
+        run: |
+          "$VENV/bin/python" -m verification.campaign \
+            --mylonite-version "$VERSION" \
+            --model "$MODEL (agentdojo judge, injecagent record)" \
+            --report layer2-agentdojo=verification/reports/layer2_agentdojo.json \
+            --report layer2-injecagent-dh=verification/reports/layer2_dh.json \
+            --report layer2-injecagent-ds=verification/reports/layer2_ds.json
+      - name: Prove the release gate would pass
+        if: steps.guard.outputs.run == 'true'
+        run: python scripts/check_verification_freshness.py --check
+      - name: Upload the result set
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verification-results-${{ steps.version.outputs.version }}
+          path: verification/results/${{ steps.version.outputs.version }}/
+          if-no-files-found: error

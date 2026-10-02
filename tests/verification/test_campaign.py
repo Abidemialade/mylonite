@@ -184,3 +184,128 @@ def test_finalise_records_a_skipped_layer_and_validates(tmp_path: Path) -> None:
     assert meta["mylonite_version"] == "0.9.0"
     assert meta["git_sha"]
     assert meta["harness_sha"] == "abc1234"
+
+
+# --- the command line the release workflow runs ------------------------------
+
+
+def _layer2_report(tmp_path: Path, name: str) -> Path:
+    """A scored layer-2 report shaped like ``runner score`` output."""
+    path = tmp_path / name
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "layer": "layer2-judge-agreement",
+                "dataset": "injecagent",
+                "model": "",
+                "cases": 2,
+                "positive_cases": 1,
+                "negative_cases": 1,
+                "benchmark_asr": 0.5,
+                "benchmark_metric": "asr-all",
+                "judge_mode": "deterministic",
+                "judge_agreement_exercised": True,
+                "fpr_informative": True,
+                "judge_agreement": {"tp": 1, "fp": 0, "fn": 0, "tn": 1},
+                "disagreements": [],
+                "synthetic": False,
+                "note": "n",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.fixture
+def _siloed(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Stand in for an installed wheel; record the versions the silo was asked about."""
+    asked: list[str] = []
+    monkeypatch.setattr(
+        campaign, "assert_siloed", lambda expected_version: asked.append(expected_version)
+    )
+    monkeypatch.setattr(campaign, "_rev_parse", lambda rev: "abc1234")
+    return asked
+
+
+def test_cli_folds_in_reports_and_records_the_rest_as_not_run(
+    tmp_path: Path, _siloed: list[str]
+) -> None:
+    """The three core layers land as 'ran'; layers not passed are present as 'not-run'."""
+    root = tmp_path / "results"
+    argv = ["--mylonite-version", "0.11.0", "--model", "anthropic/m", "--results-root", str(root)]
+    for layer in ("layer2-agentdojo", "layer2-injecagent-dh", "layer2-injecagent-ds"):
+        argv += ["--report", f"{layer}={_layer2_report(tmp_path, layer + '.json')}"]
+
+    assert campaign.main(argv) == 0
+
+    assert _siloed == ["0.11.0"], "the silo must be asserted against the filed version"
+    meta = json.loads((root / "0.11.0" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["layers"] == {
+        "layer1": "not-run",
+        "layer2-agentdojo": "ran",
+        "layer2-injecagent-dh": "ran",
+        "layer2-injecagent-ds": "ran",
+        "layer3": "not-run",
+    }
+    assert meta["model"] == "anthropic/m"
+    for layer in ("layer2-agentdojo", "layer2-injecagent-dh", "layer2-injecagent-ds"):
+        assert (root / "0.11.0" / campaign.LAYER_FILES[layer]).is_file()
+
+
+def test_cli_writes_nothing_when_the_silo_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A working-tree import must stop the run before any result file exists."""
+
+    def refuse(expected_version: str) -> None:
+        raise campaign.SiloViolation("imported from the working tree")
+
+    monkeypatch.setattr(campaign, "assert_siloed", refuse)
+    root = tmp_path / "results"
+    report = _layer2_report(tmp_path, "dh.json")
+    argv = ["--mylonite-version", "0.11.0", "--model", "m", "--results-root", str(root)]
+    argv += ["--report", f"layer2-injecagent-dh={report}"]
+
+    assert campaign.main(argv) == 2
+    assert not root.exists()
+    assert "working tree" in capsys.readouterr().err
+
+
+def test_cli_silo_only_checks_and_writes_nothing(tmp_path: Path, _siloed: list[str]) -> None:
+    root = tmp_path / "results"
+    argv = ["--mylonite-version", "0.11.0", "--model", "m", "--results-root", str(root)]
+    assert campaign.main([*argv, "--silo-only"]) == 0
+    assert _siloed == ["0.11.0"]
+    assert not root.exists()
+
+
+def test_cli_refuses_a_report_for_an_unknown_layer(tmp_path: Path, _siloed: list[str]) -> None:
+    argv = ["--mylonite-version", "0.11.0", "--model", "m", "--results-root", str(tmp_path)]
+    with pytest.raises(SystemExit):
+        campaign.main([*argv, "--report", "layer9=x.json"])
+
+
+def test_cli_refuses_the_same_layer_twice(
+    tmp_path: Path, _siloed: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Two reports for one layer would leave the second silently overwriting the first."""
+    root = tmp_path / "results"
+    report = _layer2_report(tmp_path, "dh.json")
+    argv = ["--mylonite-version", "0.11.0", "--model", "m", "--results-root", str(root)]
+    argv += ["--report", f"layer2-injecagent-dh={report}"] * 2
+
+    assert campaign.main(argv) == 2
+    assert not (root / "0.11.0" / "meta.json").exists()
+    assert "more than once" in capsys.readouterr().err
+
+
+def test_cli_leaves_no_meta_when_a_report_is_missing(tmp_path: Path, _siloed: list[str]) -> None:
+    """A half-built set has no meta.json, which the freshness gate reads as absent."""
+    root = tmp_path / "results"
+    argv = ["--mylonite-version", "0.11.0", "--model", "m", "--results-root", str(root)]
+    argv += ["--report", f"layer2-agentdojo={tmp_path / 'absent.json'}"]
+
+    assert campaign.main(argv) == 2
+    assert not (root / "0.11.0" / "meta.json").exists()

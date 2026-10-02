@@ -152,6 +152,39 @@ python -m verification.runner layer1 score --reports verification/reports/dvmcp
   network). It is **not** a third-party number. Real numbers come from `fetch`
   + `record`.
 
+## Running the release campaign in CI
+
+A minor or major release needs `verification/results/<version>/` before
+`scripts/check_verification_freshness.py` lets it ship. One dispatch produces it:
+
+```bash
+gh workflow run verification-campaign.yml -f model=anthropic/claude-haiku-4-5-20251001
+```
+
+The `verification-campaign` workflow builds the wheel from `ref` (default `main`),
+installs it into a clean venv outside the checkout, and checks the silo before it
+measures anything. It then runs:
+
+- AgentDojo: the judge's LLM leg on the released runs, with `model`;
+- InjecAgent `dh` and `ds`: `limit` cases each (default 100), recorded with `model`
+  and scored with the deterministic judge;
+- `python -m verification.campaign`, which folds the three reports into the result
+  set and writes `meta.json` last;
+- `scripts/check_verification_freshness.py --check`, so the run fails if the gate would.
+
+Layers 1 and 3 are recorded as `not-run`. Download the
+`verification-results-<version>` artifact, review it, and commit it under
+`verification/results/<version>/`. The workflow never writes to the repository.
+It needs the `MYLONITE_LLM_KEY` secret and skips with a notice when it is unset.
+A run costs well under a dollar on Claude Haiku 4.5 and takes about 10 to 15 minutes.
+
+**Not like-for-like with 0.10.0 on the InjecAgent record step.** 0.10.0 recorded
+InjecAgent on `ollama/llama3.2:3b`; this workflow records with `model`. Haiku resisted
+every case in an earlier 60-case sample, so its InjecAgent reports may carry
+`judge_agreement_exercised: false`. The gate still passes, but those agreement
+numbers are vacuous and must not be cited (see the honesty caveats above).
+AgentDojo scoring is unaffected: it uses released third-party runs.
+
 ## CI, sampling, and the opt-in workflow
 
 Two tiers, on purpose:
