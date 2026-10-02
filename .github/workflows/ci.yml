@@ -31,9 +31,11 @@ jobs:
   # which a docs change cannot affect differently. Pushes to main and release runs
   # (workflow_call) always run everything.
   #
-  # Steps are skipped rather than whole jobs: a skipped MATRIX job reports one
-  # unexpanded check ("test"), so the required "test (3.11)" would never report
-  # and would block the merge.
+  # Steps are skipped rather than whole jobs for `test`/`test-windows`: a
+  # skipped MATRIX job reports one unexpanded check ("test"), so the required
+  # "test (3.11)" would never report and would block the merge. `demo` is not
+  # in that required-checks list, so it skips outright instead -- see its own
+  # comment below.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -401,7 +403,14 @@ jobs:
   # a green pytest run does not cover this. Do not "fix" a red demo job by
   # widening that skip - re-record instead:
   #   python scripts/record_demo_fixtures.py     (needs a provider key)
+  #
+  # Gated on `changes.outputs.code`, unlike `test`/`test-windows`: this job is
+  # not in the branch ruleset's required status checks, so unlike those two it
+  # can skip outright (no echo step) on a docs-only PR without leaving a
+  # required check unreported.
   demo:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # Linux and Windows: the README's first command is a uvx one-liner, and
     # Windows is where a console encoding or a wrap would break it for a user.
     strategy:
@@ -448,13 +457,30 @@ jobs:
         # nothing, so the next step's greps must hold at 80 columns. This used to
         # be 200 only to keep Rich from wrapping the headline; an 80-column run
         # that needs a wider terminal to pass is now a failure.
+        #
+        # The retry loop covers PyPI index lag right after a mcp-kitchen-sink
+        # release (see #199): the `[demo]` extra's `==` pin can name a version
+        # uv's resolver can't see yet on the index edge it hits, for up to about
+        # ten minutes. Each attempt's output goes to demo-output.txt only via
+        # `tee`, so a failed attempt's partial or empty output is overwritten by
+        # the next attempt rather than read by the next step's greps. `pipefail`
+        # makes the pipeline report the demo's exit status, not `tee`'s, so
+        # `break` only fires once the demo actually succeeded.
         env:
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
           COLUMNS: "80"
         run: |
           set -o pipefail
-          uvx --from ".[demo]" mylonite demo | tee demo-output.txt
+          for i in 1 2 3 4 5; do
+            uvx --from ".[demo]" mylonite demo | tee demo-output.txt && break
+            if [ "$i" = 5 ]; then
+              echo "::error::demo failed via uvx after 5 attempts (PyPI index lag right after a mcp-kitchen-sink release is the known cause -- see #199)."
+              exit 1
+            fi
+            echo "uvx demo failed (attempt $i); retrying in 30s in case the PyPI index is still catching up"
+            sleep 30
+          done
       - name: The vulnerable twin must actually find something
         # Exit code alone is not enough. The staleness guard detects fixture
         # MISSES, not SILENCE: if drift ever made the vulnerable variant issue
@@ -505,9 +531,27 @@ jobs:
         #
         # The `test` and `test-windows` jobs still install the local editable
         # copy, so ordinary development of the reference target is unaffected.
+        #
+        # The retry loop covers the same PyPI index lag as the uvx step above
+        # (see #199), with one addition this step needs and the uvx step
+        # doesn't: `cache: pip` on this job's setup-python restores pip's HTTP
+        # cache from an earlier run, which can hold a conditionally-cached
+        # index page for mcp-kitchen-sink from before the new version
+        # published. A plain retry would keep revalidating against that same
+        # stale cache entry, so `pip cache purge` runs between attempts to
+        # force the next one onto the network instead of a cached response.
         run: |
           python -m pip install --upgrade pip
-          pip install ".[demo]"
+          for i in 1 2 3 4 5; do
+            pip install ".[demo]" && break
+            if [ "$i" = 5 ]; then
+              echo "::error::pip install \".[demo]\" failed after 5 attempts (PyPI index lag right after a mcp-kitchen-sink release is the known cause -- see #199)."
+              exit 1
+            fi
+            echo "pip install failed (attempt $i); purging pip's cache in case it's serving a stale index page, then retrying in 30s"
+            pip cache purge
+            sleep 30
+          done
           python -c "import mcp_kitchen_sink, importlib.metadata as m; print('kitchen-sink', m.version('mcp-kitchen-sink'), 'from', mcp_kitchen_sink.__file__)"
       - name: The pip route must find something too
         # Positive control for the check below: the documented `pip install`
