@@ -1227,3 +1227,82 @@ def test_gate_pr_body_has_no_coverage_note_on_a_complete_scan(tmp_path):
         open_pr=False,
     )
     assert "Coverage was incomplete" not in seen["body"]
+
+
+# #223: everything the gate writes for a commit must be redacted. A target that
+# echoes a credential into its reply or a validator error must not push it into
+# exploit_<id>.json or PR_BODY.md.
+_FAKE_KEY = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+
+
+def _exploit_carrying_a_secret(pattern_id: str = "indirect-injection-note-body-direct"):
+    return ExploitRecord(
+        target_id="mcp:custom",
+        pattern_id=pattern_id,
+        payload=Payload(
+            pattern_id=pattern_id,
+            channel="user-message",
+            body=f"injected body that quotes {_FAKE_KEY}",
+            metadata={"customised_prompt": f"use key {_FAKE_KEY}"},
+        ),
+        response=AdapterResponse(
+            payload_pattern_id=pattern_id,
+            raw_response=f"the env says OPENAI_API_KEY={_FAKE_KEY}",
+            tool_calls=["send_email"],
+            metadata={"transcript": f"tool returned {_FAKE_KEY}"},
+        ),
+        success_reason=f"agent leaked {_FAKE_KEY}",
+        compliance=ComplianceTags(owasp_asi=["ASI01"]),
+    )
+
+
+def _run_gate_with_secret(tmp_path, report: ValidationReport) -> dict:
+    seen: dict = {}
+
+    def fake_open_pr(*, body, **_):
+        seen["body"] = body
+        return "printed"
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(
+            outcome=_found_outcome(), exploits=[_exploit_carrying_a_secret()]
+        ),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t: report,
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    return seen
+
+
+def test_gate_exploit_json_is_redacted_before_it_is_written(tmp_path):
+    _run_gate_with_secret(tmp_path, _kept_report())
+    path = tmp_path / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
+    text = path.read_text(encoding="utf-8")
+    assert _FAKE_KEY not in text
+    assert "***REDACTED***" in text
+    # Redaction never changes the structure: the file still loads as a record.
+    record = ExploitRecord.model_validate(json.loads(text))
+    assert record.pattern_id == "indirect-injection-note-body-direct"
+    assert record.response.tool_calls == ["send_email"]
+
+
+def test_gate_pr_body_evidence_lines_are_redacted(tmp_path):
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        kept=True,
+        outcomes=[
+            ValidationOutcome(
+                stage="stability",
+                passed=True,
+                detail=f"1/1 (target error: bad key {_FAKE_KEY})",
+                metric=1.0,
+            )
+        ],
+    )
+    seen = _run_gate_with_secret(tmp_path, report)
+    assert _FAKE_KEY not in seen["body"]
+    assert "***REDACTED***" in seen["body"]

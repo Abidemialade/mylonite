@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from mylonite._redaction import redact
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
 from mylonite._verdict import KEPT, verdict_label, verdict_reason
 from mylonite.contracts import ExploitRecord, ValidationReport
@@ -97,8 +98,12 @@ def _guarded_is_server_layer(
 
 
 def _evidence_lines(report: ValidationReport) -> str:
+    # ``detail`` is free text that can carry a credential the target echoed
+    # (#223). The PR body is committed and sent to GitHub, so it gets the same
+    # ``redact()`` pass ``validation_report.json`` gets before it is written.
     rows = [
-        f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {o.detail}" for o in report.outcomes
+        f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {redact(o.detail)}"
+        for o in report.outcomes
     ]
     # The differential-oracle evidence (PR2): the gate with live per-leg marks,
     # the fires/resists counts, and the per-seed kill matrix — so the PR shows

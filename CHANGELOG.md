@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reports into that directory, asserting the installed-wheel silo before it writes
   anything. See "Running the release campaign in CI" in `verification/README.md`.
 
+### Fixed
+
+- **`gate` no longer commits a secret the target echoed.** The exploit JSON
+  (`exploit_<pattern_id>.json`) and the evidence lines in `PR_BODY.md` now go
+  through the same redaction as the validation report, so a key in the target's
+  reply, a tool result or a validator error is written as `***REDACTED***`. The
+  exploit JSON keeps its structure and still loads. Closes #223.
+
 ## [0.11.0] - 2026-10-01
 
 This release makes every result say what proved it, and stops reporting what was never

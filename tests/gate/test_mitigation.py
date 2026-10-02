@@ -420,3 +420,24 @@ def test_pr_body_non_control_finding_names_an_unproven_verdict():
     body = build_pr_body(ex, _unproven_report(kept=True, vuln_fired=3))
     assert "A validated weakness" not in body
     assert "**Verdict: STABLE, NOT PROVEN:**" in body
+
+
+def test_pr_body_evidence_lines_redact_validator_detail():
+    """#223: validator detail can carry a live key echoed by the target; the PR
+    body is committed and sent to GitHub, so it must be redacted like
+    validation_report.json is."""
+    fake_key = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected"),
+            ValidationOutcome(
+                stage="effect", passed=True, detail=f"probe saw token={fake_key}", metric=1.0
+            ),
+        ],
+        kept=True,
+    )
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, report)
+    assert fake_key not in body
+    assert "- **effect**: pass — probe saw token=***REDACTED***" in body
