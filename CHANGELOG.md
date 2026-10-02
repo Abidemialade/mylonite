@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`validate --iteration-timeout` now bounds the reference differential too.**
+  It used to reach only the provider check and custom targets, so a slow
+  model could stall a reference `validate` run past the limit you set. Each
+  twin's run is now cut off at the limit and counts as no verdict, so a
+  cut-off run can never help a test get kept. The option's help text changed,
+  so the command-tree snapshot changed.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after

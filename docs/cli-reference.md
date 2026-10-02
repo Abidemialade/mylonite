@@ -231,9 +231,10 @@ differential to measure whether that input defence is load-bearing; a no-op once
 `--fast` has already skipped the differential leg); `--randomize-exfil/--no-randomize-exfil`
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
-reference/replay path); `--iteration-timeout S` (default 120s — a custom target's
-per-run wall-clock budget; a stuck or slow real target aborts that run cleanly
-instead of hanging open-ended).
+reference/replay path); `--iteration-timeout S` (default 120s — the wall-clock budget for each
+validation run, on a custom target and on the bundled reference twins alike; a
+stuck or slow run is cut off cleanly, counts as no verdict, and never hangs
+the job).
 
 The report's notes record the models the test was proved against
 (`validated against model: <planner>`, plus the customiser and judge when they differ).
