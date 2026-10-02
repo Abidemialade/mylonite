@@ -186,6 +186,52 @@ every case in an earlier 60-case sample, so its InjecAgent reports may carry
 numbers are vacuous and must not be cited (see the honesty caveats above).
 AgentDojo scoring is unaffected: it uses released third-party runs.
 
+## The third-party verification campaign
+
+The release campaign above re-measures Mylonite's judge against third-party
+*benchmarks*. The third-party verification campaign is different: it runs
+Mylonite's own `scan`/`generate`/`validate` commands, unmodified, against six
+real systems Mylonite has never run against before — not DVMCP, MCPSecBench,
+the Enkrypt gateway, `mcp-server-email`, `server-filesystem`,
+`mcp-server-fetch`, `server-github`, `git`/`sqlite`/`time`/`markitdown`,
+InjecAgent or AgentDojo (all run previously; see `CAPABILITY_MATRIX.md`).
+
+The six targets, each pinned by commit or published-package version with its
+licence recorded in [`SOURCE.md`](SOURCE.md):
+
+| # | Target | Shape | What it proves |
+| --- | --- | --- | --- |
+| 1 | `@modelcontextprotocol/server-memory` | Node stdio | the headline W2/W4 proof: a real reference server's knowledge graph |
+| 2 | `redis/mcp-redis`, against a real `redis:7` container | Python stdio | the effect-probe path against a real store, not a mock |
+| 3 | the MCP Python SDK's `simple-streamablehttp` example | streamable-HTTP | the `transport: http` path on code we didn't write |
+| 4 | `@modelcontextprotocol/server-everything` | Node stdio | breadth: resources, prompts, sampling, elicitation |
+| 5 | the MCP Go SDK's own memory example | Go stdio | a different runtime, no external writes |
+| 6 | an OpenAI Agents SDK agent, inference on Ollama | REST, thin disclosed shim | the black-box REST path, at zero model cost |
+
+The pass rule is pre-registered in
+[`PREREG_L2_THIRD_PARTY.md`](PREREG_L2_THIRD_PARTY.md) before any counted run:
+expected weakness classes per target, what counts as a pass (KEPT, or
+not-kept/NOT TESTED with a named reason code — never a silent clean result or
+a traceback), a precision arm (a benign configuration must yield 0 findings),
+and a differential arm. Targets 1-3 run a fixed N=3 with a ≥2-of-3 bar, the
+same bar the in-repo oracle itself uses; targets 4-6 are N=1 smoke cells that
+prove the harness runs end-to-end on that system without claiming a verdict.
+A re-run is allowed only for a named infrastructure failure, and every
+outcome — kept or not — is published.
+
+Run it with `gh workflow run third-party-campaign.yml -f targets=all -f provider=both`.
+Every LLM call happens inside that CI run: the workflow maps the
+`MYLONITE_LLM_KEY`/`MYLONITE_OPENAI_KEY` repo secrets to the provider the
+dispatch asks for and skips (not fails) a cell whose key isn't set. One
+additional cell drives target 1 with a local Ollama model at zero cost. Each
+cell's run log, `scan_report.json`/`validation_report.json`, and a `cost.json`
+(tokens and $, computed from the token counts `scan`/`gate` already print — no
+change to `src/mylonite`) are uploaded as artifacts; nothing is written back
+to the repository from the workflow. `scripts/score_third_party.py` classifies
+each run against the prereg and rolls up the N=3 cells; a maintainer reviews
+the artifacts and commits the result under
+`verification/results/<version>/third-party/`.
+
 ## CI, sampling, and the opt-in workflow
 
 Two tiers, on purpose:

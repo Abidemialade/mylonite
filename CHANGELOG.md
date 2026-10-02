@@ -176,6 +176,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validator error is written as `***REDACTED***`. The exploit JSON keeps its
   structure, still loads, and the committed test still passes against it.
   Closes #223.
+- **A third-party verification campaign is pre-registered.** Six systems Mylonite
+  has never run against before — the official `server-memory` and
+  `server-everything` reference servers, `redis/mcp-redis` against a real
+  `redis:7` container, the MCP Python SDK's streamable-HTTP example, the MCP Go
+  SDK's own memory example (no external writes), and an OpenAI Agents SDK agent
+  whose own inference runs on a local Ollama model at zero cost — have pinned
+  target files under `verification/third_party/`, a pass rule in the new
+  `verification/PREREG_L2_THIRD_PARTY.md`, and licence/pin/no-prior-run
+  provenance in `verification/SOURCE.md`. The new `third-party-campaign` workflow
+  (manual dispatch) runs every cell with its LLM call made in CI, maps the
+  `MYLONITE_LLM_KEY`/`MYLONITE_OPENAI_KEY` secrets to the provider the dispatch
+  asks for, and writes a `cost.json` per run — computed from the token counts
+  `scan`/`gate` already print, with no change to `src/mylonite`. The new
+  `scripts/score_third_party.py` classifies a run (KEPT, not-kept, a
+  never-keep-unproven candidate, or NOT TESTED with its reason code) and rolls up
+  the fixed-N, ≥2-of-3 bar the prereg sets for the first three targets. The
+  campaign has not been run yet; this entry covers the harness only.
 
 ## [0.11.0] - 2026-10-01
 
