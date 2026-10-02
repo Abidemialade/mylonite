@@ -77,18 +77,6 @@ def _atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def _with_scaffold_markers(text: str) -> str:
-    """Wrap scaffold-written YAML with the header/footer sentinel pair
-    ``target_file.load_target_file`` checks for, so a truncated write is
-    detectable on load (S15). Applied only at the final write -- the
-    ``_render_target_scaffold`` unit tests assert on the unwrapped text."""
-    from mylonite.plugins._mcp.target_file import SCAFFOLD_MARKER_FOOTER, SCAFFOLD_MARKER_HEADER
-
-    if not text.endswith("\n"):
-        text += "\n"
-    return SCAFFOLD_MARKER_HEADER + text + SCAFFOLD_MARKER_FOOTER
-
-
 def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
     """Env keys whose value looks like a SQLite DB referenced by a NON-absolute
     path — the #18 Windows footgun (a relative sqlite path silently opens a
@@ -511,7 +499,7 @@ def _scaffold_target_file(
         echo_exc("internal error: scaffolded YAML failed validation", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    _atomic_write_text(output, _with_scaffold_markers(yaml_text))
+    _atomic_write_text(output, yaml_text)
     echo(f"wrote {output} — {len(tool_names)} tools discovered.")
     echo_err(
         "  suggested weakness_classes "
@@ -656,7 +644,7 @@ def _scaffold_rest_target_file(
     from mylonite._target_env import echo_env_notice
 
     text = header + dump_target_file(tf)
-    _atomic_write_text(output, _with_scaffold_markers(text))
+    _atomic_write_text(output, text)
     echo(f"wrote runnable HTTP-agent target -> {output}")
     echo_env_notice(text, output)
     echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")
