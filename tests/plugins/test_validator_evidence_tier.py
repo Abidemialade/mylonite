@@ -207,7 +207,7 @@ def _validate_reference(vuln_mechanism: str) -> Any:
     pid = exploit.pattern_id
     test = ReferencePytestGenerator().emit(exploit)
 
-    def _iteration(self: Any, pattern_id: str) -> _IterationTally:
+    def _iteration(self: Any, pattern_id: str, replay: Any = None) -> _IterationTally:
         return _IterationTally(
             vuln_fired=True,
             guard_resisted=True,

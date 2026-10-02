@@ -6,10 +6,11 @@ demo/) so non-demo consumers don't import the playground surface.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from itertools import count
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
+from mylonite.contracts import AttackPattern, Payload, TargetDescriptor
 from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
 from mylonite.plugins._reference.prompt_injection_module import PromptInjectionAttackModule
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
@@ -37,6 +38,38 @@ def note_id_counter() -> Callable[[], str]:
     return factory
 
 
+class _ReplayCommittedBody:
+    """Wrap an attack module so one seed is driven with a committed payload body.
+
+    Every payload the inner module emits for ``replay.pattern_id`` is replaced by
+    ``replay`` with customisation switched off, so the planner sees exactly that
+    text. The inner module still decides whether the seed applies at all: a
+    pattern_id it does not emit is not invented here, so a scan for an unknown
+    seed still runs nothing. Metadata and compliance come from the inner module,
+    so the attempt is recorded under the same module and tags as before.
+    """
+
+    def __init__(self, inner: Any, replay: Payload) -> None:
+        self._inner = inner
+        self._replay = replay.model_copy(
+            update={"metadata": {**replay.metadata, "needs_customisation": "false"}}
+        )
+
+    def attack_metadata(self) -> AttackPattern:
+        metadata: AttackPattern = self._inner.attack_metadata()
+        return metadata
+
+    def generate_payloads(self, target: TargetDescriptor) -> Iterable[Payload]:
+        for payload in self._inner.generate_payloads(target):
+            if payload.pattern_id == self._replay.pattern_id:
+                yield self._replay
+            else:
+                yield payload
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 def build_scan(
     variant: Literal["vulnerable", "guarded"],
     *,
@@ -50,6 +83,7 @@ def build_scan(
     pattern_id_filter: str | None = None,
     llm_assist: bool = True,
     wall_clock_timeout_s: float | None = None,
+    replay_payload: Payload | None = None,
 ) -> ScanEngine:
     """Build a ready-to-run ``ScanEngine`` for one reference variant.
 
@@ -69,7 +103,9 @@ def build_scan(
     making it robust to the now-working parsers.
 
     ``wall_clock_timeout_s`` bounds the whole scan (``ScanConfig``'s field of
-    the same name); ``None`` keeps it unbounded.
+    the same name); ``None`` keeps it unbounded. ``replay_payload`` drives its
+    seed with that exact body and no customisation, so two scans given the same
+    payload attack with the same text (see :class:`_ReplayCommittedBody`).
     """
     # Role-separated models (each defaults to ``model``). The planner is the
     # agent-under-test decision-maker — pointing it at a representatively
@@ -97,6 +133,9 @@ def build_scan(
         customise=llm_assist,
         wall_clock_timeout_s=wall_clock_timeout_s,
     )
+    modules: list[Any] = [PromptInjectionAttackModule(), ExcessiveAgencyAttackModule()]
+    if replay_payload is not None:
+        modules = [_ReplayCommittedBody(module, replay_payload) for module in modules]
     # Delegate engine assembly to the single builder, passing the reference
     # attack modules explicitly (deterministic — no entry-point discovery) so
     # the demo/replay wiring stays reproducible.
@@ -107,7 +146,7 @@ def build_scan(
         customiser_model=resolved_customiser,
         judge_model=resolved_judge,
         llm_fallback=llm_assist,
-        attack_modules=[PromptInjectionAttackModule(), ExcessiveAgencyAttackModule()],
+        attack_modules=modules,
     )
 
 

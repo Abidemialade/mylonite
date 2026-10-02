@@ -67,7 +67,8 @@ committed:
 1. **The differential proof.** At validation time the
    [`DifferentialValidator`](concepts.md#the-validation-engine)
    runs the *same* attack against **both** sides — the *unguarded* one and the
-   *guarded* one. On a real single-build app those two sides come from the
+   *guarded* one. On the bundled reference app that is the committed exploit
+   body, word for word, on every run and on both sides. On a real single-build app those two sides come from the
    [control-efficacy check](#the-control-efficacy-check) toggling the
    safeguard; the bundled reference app supplies them as two builds directly. A
    test is only kept if the exploit **fires unguarded and resists guarded**. A

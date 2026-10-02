@@ -49,6 +49,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict adds what the pass shows; it never says your own guard holds. The
   report's notes now carry the guard's mode, and a custom-target report no
   longer prints a bare `mutation score: 0.00`.
+  the seed ("too flaky").
+- **A pass against Mylonite's stand-in guard says what it proves.** When the
+  guarded side was the boundary guard, `validate` now adds a line under a
+  passing verdict: in its default mode that guard refuses the attack's tool
+  call by design, so the pass shows the attack is real and that this kind of
+  guard stops it, not that your own guard holds.
+- **Every reference validation run now replays the committed exploit.** The
+  differential used to ask the customiser for a fresh rewording of the seed
+  on each run and for each side separately, so the two sides could be
+  attacked with different text and neither was the attack the test was
+  written for. Both sides now get the committed exploit body, word for word,
+  on every run, and the customiser makes no calls there.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after
