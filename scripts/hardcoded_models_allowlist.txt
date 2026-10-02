@@ -27,12 +27,7 @@
 # The one file allowed to name a provider's identity, default model family,
 # or credential env var(s) by design (see its own module docstring).
 src/mylonite/scan/providers.py | ANTHROPIC_API_KEY | 2 | the approved-provider registry
-src/mylonite/scan/providers.py | OPENAI_API_KEY | 1 | the approved-provider registry
 src/mylonite/scan/providers.py | AZURE_API_KEY | 3 | the approved-provider registry
-src/mylonite/scan/providers.py | GEMINI_API_KEY | 1 | the approved-provider registry
-src/mylonite/scan/providers.py | GOOGLE_API_KEY | 1 | the approved-provider registry (LiteLLM also accepts this name)
-src/mylonite/scan/providers.py | AWS_ACCESS_KEY_ID | 1 | the approved-provider registry (Bedrock's credential pair)
-src/mylonite/scan/providers.py | AWS_SECRET_ACCESS_KEY | 1 | the approved-provider registry (Bedrock's credential pair)
 src/mylonite/scan/providers.py | AZURE_API_BASE | 3 | the approved-provider registry
 src/mylonite/scan/providers.py | AZURE_API_VERSION | 3 | the approved-provider registry
 src/mylonite/scan/providers.py | AWS_REGION_NAME | 2 | the approved-provider registry (REQUIRED_EXTRA_ENV_VARS, and its own docstring)
@@ -42,6 +37,24 @@ src/mylonite/scan/providers.py | openai/ | 1 | the approved-provider registry's 
 src/mylonite/scan/providers.py | bedrock/ | 1 | the approved-provider registry's own docstring, listing providers it covers
 src/mylonite/scan/providers.py | ollama/ | 2 | the approved-provider registry's own docstring and comment, listing providers it covers
 src/mylonite/scan/providers.py | STRIPE_API_KEY | 1 | docstring example of an unrelated credential that happens to match the *_API_KEY shape, not a provider
+
+# --- providers/registry.py: the typed provider table itself ---------------
+# The new approved-provider data table (mylonite.providers.registry) --
+# scan/providers.py derives PROVIDER_ENV_VARS from it now instead of
+# hand-listing these literals itself.
+src/mylonite/providers/registry.py | anthropic/ | 2 | the provider registry's own rows (model_prefix and the Haiku example model)
+src/mylonite/providers/registry.py | ANTHROPIC_API_KEY | 1 | the provider registry
+src/mylonite/providers/registry.py | claude- | 1 | the provider registry's small-tier example model
+src/mylonite/providers/registry.py | openai/ | 1 | the provider registry
+src/mylonite/providers/registry.py | OPENAI_API_KEY | 1 | the provider registry
+src/mylonite/providers/registry.py | GEMINI_API_KEY | 1 | the provider registry
+src/mylonite/providers/registry.py | GOOGLE_API_KEY | 1 | the provider registry's comment noting LiteLLM also accepts this name
+src/mylonite/providers/registry.py | AZURE_API_KEY | 1 | the provider registry
+src/mylonite/providers/registry.py | AZURE_API_BASE | 1 | the provider registry
+src/mylonite/providers/registry.py | AZURE_API_VERSION | 1 | the provider registry
+src/mylonite/providers/registry.py | bedrock/ | 1 | the provider registry
+src/mylonite/providers/registry.py | AWS_ACCESS_KEY_ID | 1 | the provider registry (Bedrock's credential pair)
+src/mylonite/providers/registry.py | AWS_SECRET_ACCESS_KEY | 1 | the provider registry (Bedrock's credential pair)
 
 # --- user-facing text naming an env var so a human knows what to set ------
 # Error remedies and --help text that tell the USER which credential to

@@ -64,7 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table yet now falls back to LiteLLM's own `<PROVIDER>_API_KEY` naming
   convention and prints one warning line, instead of silently skipping the
   credential check and failing later, mid-scan, with a traceback. See
-  "The approved-provider registry" in `docs/self-hosted-models.md`.
+  "The approved-provider registry" in `docs/self-hosted-models.md`. The
+  fallback's warning line routes through the same redacting output boundary
+  as every other Mylonite message, and
+  `scripts/hardcoded_models_allowlist.txt` now tracks the registry module's
+  own provider/credential literals instead of `scan/providers.py`'s.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and

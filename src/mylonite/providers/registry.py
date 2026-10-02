@@ -8,7 +8,7 @@ and CI templates, docs and error messages each repeated their own partial
 list. A provider LiteLLM happily routes but that wasn't in the hand-written
 table (xAI, Groq, Mistral, DeepSeek, OpenRouter, ...) silently skipped the
 credential preflight and failed deep inside a live call instead, with a
-traceback instead of "missing FOO_API_KEY".
+traceback instead of one clear line naming the missing credential.
 
 This table is the one place that answers it. ``tier`` distinguishes
 providers Mylonite has run its own verification campaign against
@@ -83,7 +83,7 @@ PROVIDERS: dict[str, ProviderInfo] = {
         id="google",
         tier="supported",
         model_prefix="gemini/",
-        key_env=("GEMINI_API_KEY",),
+        key_env=("GEMINI_API_KEY",),  # GOOGLE_API_KEY is also accepted by LiteLLM
     ),
     "azure": ProviderInfo(
         id="azure",

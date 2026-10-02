@@ -353,7 +353,8 @@ not reach the provider and points at the provider's status page and this machine
 connection instead. Any other cause, such as a rejected key, keeps the credentials
 message, which names the API-key variable for the model's provider — for a provider
 outside Mylonite's approved list, that's LiteLLM's own `<PROVIDER>_API_KEY` naming
-convention rather than a silently skipped check (see
+convention rather than a silently skipped check, surfaced through the same redacting
+output boundary as every other message (see
 [Self-hosted models](self-hosted-models.md#the-approved-provider-registry)). The message describes
 the last failed call, so a streak that mixed causes is reported by its final one. `validate` checks the provider before it starts and
 gives the same messages; for a rate limit it suggests fewer `--iterations`, and a check
