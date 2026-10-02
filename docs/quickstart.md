@@ -65,6 +65,30 @@ pip install -e ./reference_targets/mcp_kitchen_sink
 
 Contributors should also run `pre-commit install` after installing.
 
+## Choose a model
+
+`demo` replays a recording and needs no model. Every other live command
+(`scan`, `validate`, `gate`, `ablate`) needs one picked — there is no
+default provider or model. Set it once so you don't have to repeat it on
+every command:
+
+```bash
+export MYLONITE_MODEL=anthropic/claude-haiku-4-5-20251001   # needs ANTHROPIC_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Any LiteLLM provider works the same way: a `provider/model` prefix (e.g.
+`--model openai/gpt-4o`) plus that provider's own key env var — `--model`
+and `mylonite.yaml`'s `model:` key both work instead of the environment
+variable, same precedence as everywhere else in the CLI. No key at all? Run
+a local model instead: `--model ollama_chat/llama3.2:3b` with
+[Ollama running](self-hosted-models.md). With none of the three set, every
+live command stops before touching a target, naming the approved providers
+and exiting `4` — see "No model chosen at all?" in
+[the CLI reference](cli-reference.md) for the exact message. This key pays
+for Mylonite's own planner, customiser and judge calls, never for a call
+your app's own agent made.
+
 ## Commands that work today
 
 ```bash
@@ -78,11 +102,8 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
 - `mylonite scan <target>` — run the live exploit-finding loop. On an MCP
   target, Mylonite drives your tools itself with its own agent (the planner),
   reading your system prompt and tool descriptions — it is not your app's own
-  model or framework making the calls. Needs an LLM API key:
-  `ANTHROPIC_API_KEY` for the default provider, or another LiteLLM provider
-  via `--model` with a `provider/model` prefix (e.g. `--model openai/gpt-4o`)
-  plus that provider's own key env var. That key pays for Mylonite's own
-  planner, customiser and judge calls, not for a call your app's agent made.
+  model or framework making the calls. Needs the model and key from
+  [Choose a model](#choose-a-model) above.
   Targets: `reference:vulnerable` / `reference:guarded`
   (the in-process reference app builds), and the bundled MCP (Model Context
   Protocol) stdio families
@@ -130,7 +151,8 @@ mylonite validate .mylonite\generated\indirect_injection_note_body_direct
   dir instead if you prefer.
 - `mylonite validate <dir>` — runs the `DifferentialValidator` (the
   [validation engine](validation.md)). **Live** — it makes real LLM calls
-  (Haiku by default — `claude-haiku-4-5`), so it needs an API key; it states the work it will
+  against the model you chose in [Choose a model](#choose-a-model), so it
+  needs that provider's API key; it states the work it will
   run up front and reports the LLM calls and tokens it used at the end. It runs the finding's own attack against *both* reference builds across a
   5-run flakiness filter and reports `kept` plus the mutation score. Exits `0`
   when the test is kept and `5` when it is cleanly rejected.

@@ -368,6 +368,7 @@ once the precondition is fixed.
   with:
     target-file: .mylonite/gate/target.yaml
     authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
+    model: anthropic/claude-haiku-4-5           # no default -- pick one: see "Choose a model"
     open-pr: "true"
 ```
 
