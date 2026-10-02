@@ -148,7 +148,9 @@ three are N=1 smoke cells that claim no verdict. `scan` and `validate` each
 get their own hard call ceiling (`scan_ceiling`/`validate_ceiling` dispatch
 inputs), sized from a `src/`-derived estimate and refined by one uncounted
 pilot dispatch before the first counted run — see the prereg's "Pilot
-procedure". A non-zero exit from `scan`/`generate`/`validate`, or a clean
+procedure". A stage that reaches its ceiling stops with `MYL-ABT-001` and
+the run reads NOT TESTED; reason codes are read only from the scored
+stage's own log. A non-zero exit from `scan`/`generate`/`validate`, or a clean
 scan finding nothing, is captured and scored rather than failing the
 workflow step. A Python traceback with an actual `mylonite` stack frame
 (a `File "...mylonite/....py"` reference, not a bare substring match)

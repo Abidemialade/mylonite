@@ -173,6 +173,27 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
   0-findings result -- the whole run is scored as a product defect rather than
   counted as NOT_KEPT or NOT_TESTED, even if some OTHER attempt in the same run was
   cleanly judged.
+- **A reason code counts only for the stage that printed it.** `scan`, `generate`
+  and `validate` each write their own log (`scan.log`, `generate.log`,
+  `validate.log`) beside the combined `run.log`. A result scored from the scan
+  directory takes its reason codes from `scan.log`; a result scored from
+  `validate`'s directory takes them from `validate.log`. So the N=3 agreement key
+  for a `validate` result never depends on which seeds that run's `scan` happened
+  to skip.
+- **A `validate` that stops at its ceiling is NOT_TESTED, keyed on `MYL-ABT-001`.**
+  When `validate` reaches its request ceiling it prints one `[MYL-ABT-001]` line,
+  exits 3 and writes no `validation_report.json`. The cell then reads NOT_TESTED
+  with exactly the abort code(s) in `validate.log` (`MYL-ABT-001` for the ceiling),
+  whether or not `generate`'s trimmed `scan_report.json` sits in the same
+  directory. A `validate` that writes no report and prints no abort code is
+  INVALID if `validate.log` carries an infrastructure signature, otherwise a
+  product defect.
+- **A scan that stopped at its ceiling but still recorded a finding goes on to
+  `validate`, and the cell is scored on the `validate` outcome.** The finding is
+  real evidence, whatever cut the scan short, so `generate` and `validate` run on
+  it as usual, and the scan's abort code plays no part in the cell's key. A scan
+  that stopped with no finding is scored from the scan directory: NOT_TESTED with
+  the scan's abort code.
 - **Multiple findings in one scan: only the first is validated and scored.** `generate`
   writes each finding into its own `generated/<slug>/` subdirectory once there are
   two or more, and pointing `validate` at the parent directory in that case finds no
@@ -183,22 +204,24 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
 
 ## Budget and the hard ceiling
 
-**No change needed in `src/` for this PR.** `mylonite` has no hard ceiling on LLM
-calls or spend today: there is no `--max-budget`/spend-cap option anywhere in the
-CLI, config, or `LLMPolicy` (which forwards only a fixed allowlist of LiteLLM kwargs
--- `api_base`, `max_tokens`, `temperature`, `timeout`, `num_retries` -- not LiteLLM's
-own `max_budget`). **BUDGET-1, a separate PR, is adding a hard LLM-call ceiling,
-applied per process** (including retries). `generate` makes no LLM call at all
-(`cli.py:1566` -- it is offline and deterministic), so the two processes that matter
-are `scan` and `validate`, run one after the other, each its own process with its
-own ceiling -- a per-cell bound is therefore **the sum of the two ceilings**, not a
-single shared counter across all three commands. This workflow already wires a
-placeholder for the env var name, `MYLONITE_MAX_LLM_REQUESTS`, set as a one-off
-override on each command individually (`MYLONITE_MAX_LLM_REQUESTS=$X "$MYLONITE"
-scan ...`, and again for `validate`, each with its OWN value -- not a single shared
-step-level value), from the `scan_ceiling`/`validate_ceiling` dispatch inputs, so
-the controller can correct the env var's name once BUDGET-1 lands. Until it does,
-the env var is a harmless no-op -- nothing in `src/` reads it yet.
+**The hard ceiling is Mylonite's own request ceiling (#282).** Setting
+`MYLONITE_MAX_LLM_REQUESTS` (or the global `--max-llm-requests` flag) caps the LLM
+requests one process may send, retries included. The request past the ceiling is
+refused before it is sent; the process prints one `[MYL-ABT-001]` line, exits 3, and
+the result is NOT TESTED. The ceiling counts requests, not dollars: there is still
+no spend cap in the CLI, config or `LLMPolicy`, so the dollar bound below is
+ceiling x price per request.
+
+`generate` makes no LLM call at all (`cli.py:1566`; it is offline and
+deterministic), so the two processes that spend are `scan` and `validate`. They run
+one after the other, each its own process with its own ceiling, so a cell's bound
+is **the sum of the two ceilings**, not one counter shared by all three commands.
+The workflow sets each as a one-off override on its own command
+(`MYLONITE_MAX_LLM_REQUESTS=$X "$MYLONITE" scan ...`, and again for `validate` with
+its own value), from the `scan_ceiling` and `validate_ceiling` dispatch inputs. A
+trip never fails the workflow step: the exit code is captured like any other, and
+the scorer reads `MYL-ABT-001` from that stage's own log (see "Rules for the
+runs").
 
 **Sizing the two ceilings, from `src/` (not yet from a live measurement -- see
 "Pilot procedure" below for how the real values get set).** A seed's live cost is
@@ -250,8 +273,8 @@ calls total):**
   earlier draft of this section said so, which 12 cells x ~$1 contradicts): **the
   provider-side spend cap on both keys is the real stop for the worst case**, not
   this workflow's own ceilings, which are sized for the realistic case.
-- **A 30-minute job `timeout-minutes`** is the backstop that does not depend on any
-  of Mylonite's own budget flags landing or working as documented.
+- **A 30-minute job `timeout-minutes`** is the outer backstop, independent of
+  Mylonite's own ceiling.
 
 **These estimates are uncertain** (redis's larger tool schemas, for one, may push
 real input above the ~1,500-token assumption) -- see "Pilot procedure" below for how
@@ -265,18 +288,28 @@ cheaper provider, for the pilot's own cost), with the `scan_ceiling`/
 `validate_ceiling` defaults above (120/80). This result does not count toward any
 bar and is not one of the N re-drives for target 2.
 
-1. **Read the pilot's actual calls and tokens from the spend line** (the `llm: N
-   calls | P in / C out tokens` text `scan`/`validate` print, captured in `run.log`
-   and parsed into `cost.json` by `scripts/compute_run_cost.py` -- see `calls` in
-   its output).
+1. **Read scan's and validate's spend separately.** Each prints its own `llm: N
+   calls | P in / C out tokens` line: read scan's from `scan.log` and validate's
+   from `validate.log`. Do not use `cost.json`'s `calls`, which is the two added
+   together.
 2. **Set each process's real ceiling to about 1.5x what it actually used**, capped
    at the hard clamps (150 for scan, 100 for validate) -- e.g. if the pilot's scan
    used 65 calls, set `scan_ceiling` to 98 for the counted runs (65 x 1.5), not
    above 150 regardless of the multiple.
+   - **If the pilot trips a ceiling** (that stage's log has `[MYL-ABT-001]` and it
+     exited 3), its count is the ceiling, not what the stage needed. Raise that
+     ceiling (scan to 150, validate to 100 at most) and re-run the pilot once.
+     Record both pilot runs. If the re-run trips again at the clamp, the clamp
+     stands and the prereg says so; the clamp is not raised for the counted runs.
+   - **If the scan finds nothing on target 2**, `validate` never runs and cannot be
+     measured. Keep validate's ceiling at the estimate from `src/` above (80) and
+     say so in the recorded result.
 3. **Commit the pilot's result and the chosen ceilings to this file, before
    dispatching the first counted run.** Record: the pilot's dispatch (run URL),
-   the measured `calls`/`prompt_tokens`/`completion_tokens` for scan and for
-   validate, the computed 1.5x ceilings, and the commit SHA of that update. A
+   the measured calls and input/output tokens for scan and for validate (each
+   from its own log), whether either stage tripped its ceiling and was re-run,
+   the computed 1.5x ceilings (or the estimate kept for an unmeasured validate),
+   and the commit SHA of that update. A
    counted run dispatched before this commit exists is invalid for this prereg's
    purposes -- re-dispatch it after the ceilings are committed.
 
