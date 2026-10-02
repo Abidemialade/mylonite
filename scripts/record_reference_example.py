@@ -251,10 +251,15 @@ def _main(argv: list[str] | None = None) -> int:
     # rather than leave a KEPT-less example that a reader would reasonably take
     # as evidence of one.
     if not report.kept:
-        legs = ", ".join(f"{k}={v}" for k, v in sorted(report.gating_legs.items()))
+        legs = "; ".join(
+            f"{o.stage}={'pass' if o.passed else 'FAIL'}"
+            + (" (report-only)" if o.report_only else "")
+            + f": {o.detail}"
+            for o in report.outcomes
+        )
         raise RecordingFailed(
             f"the validator did NOT keep the test, so there is no proof to commit. "
-            f"Gating legs: {legs}. Notes: {report.notes}"
+            f"Legs: {legs}. Notes: {report.notes}"
         )
     # `cache_misses == 0` is what turns 'one flat directory is probably safe for
     # planner/customiser/judge calls' into *verified* for this artefact: every
