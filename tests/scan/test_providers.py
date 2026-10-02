@@ -1,7 +1,14 @@
 """`_ALIASES`/`required_env_vars` for providers outside -- or at the edges
 of -- the approved registry.
 
-Three tiers, each needing a different check:
+Three tiers, each needing a different check, and NONE of them may ever ask
+LiteLLM anything (an earlier version of the fallback did, via
+``litellm.get_llm_provider``/``litellm.validate_environment``, and that
+turned out to both BLOCK -- ``chatgpt/`` and ``github_copilot/`` start an
+interactive OAuth device-code sign-in -- and silently pass roughly 75 other
+LiteLLM providers that have no explicit branch in ``validate_environment``.
+Provider identification stays string-only: a ``provider/model`` string is
+split on its first ``/``, never resolved by calling LiteLLM):
 
 1. A registry row's OWN `model_prefix` (``hosted_vllm`` for the ``vllm``
    row, ``ollama_chat`` for ``ollama``, ...) must resolve back to that row,
@@ -11,19 +18,62 @@ Three tiers, each needing a different check:
 2. A known-keyless local/OpenAI-compatible route with no registry row of
    its own (LM Studio, llamafile, the generic "openai_like" prefix) needs
    nothing.
-3. Anything else: LiteLLM itself may still know it (xAI, Groq, Mistral,
-   DeepSeek, OpenRouter, Cohere's chat route, ...), in which case its own
-   key-presence check wins; only when LiteLLM knows NOTHING about the
-   provider either does this fall back to a guessed credential var, with a
-   warning.
+3. Anything else: a guessed ``<PROVIDER>_API_KEY``-shaped var, with a
+   warning the first time, silent on every repeat for that provider id.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from mylonite.providers.registry import PROVIDERS
+from mylonite.scan import providers as providers_module
 from mylonite.scan.providers import provider_from_model, required_env_vars
+
+
+@pytest.fixture(autouse=True)
+def _clear_warned_providers_set() -> Iterator[None]:
+    """The once-per-provider warning (`required_env_vars`'s unlisted-provider
+    fallback) is tracked in a module-level set that persists across calls --
+    deliberately, that's the point of "once per provider", but it makes
+    tests order-fragile against each other without this reset."""
+    providers_module._WARNED_UNLISTED_PROVIDERS.clear()
+    yield
+    providers_module._WARNED_UNLISTED_PROVIDERS.clear()
+
+
+# Every env var any test below reasons about, so a real value sitting in
+# this machine's/CI's shell -- plausible for ANTHROPIC_API_KEY, OPENAI_API_KEY
+# etc. in a dev environment -- can never change what these assertions see.
+# `required_env_vars` itself never reads `os.environ` today (it only names
+# vars, never checks them), so none of this should matter yet, but these
+# tests assert NAMES, and guarding against a future implementation change
+# that starts reading the environment here is cheap and keeps the suite
+# honest about what it depends on.
+_ENV_VARS_TESTS_REASON_ABOUT = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_API_KEY",
+    "AZURE_API_BASE",
+    "AZURE_API_VERSION",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "VERTEXAI_PROJECT",
+    "VERTEXAI_LOCATION",
+    "XAI_API_KEY",
+    "MY_CUSTOM_KEY",
+    "ZZZ_DEFINITELY_NOT_A_REAL_PROVIDER_API_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in _ENV_VARS_TESTS_REASON_ABOUT:
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.mark.parametrize("provider_id", list(PROVIDERS))
@@ -72,28 +122,48 @@ def test_known_keyless_local_routes_need_nothing(
     assert capsys.readouterr().err == ""
 
 
-def test_a_provider_litellm_knows_but_the_registry_does_not_uses_litellms_own_key_var(
+@pytest.mark.parametrize(
+    "provider_id,expected_var",
+    [
+        ("xai", "XAI_API_KEY"),
+        ("zzz-definitely-not-a-real-provider", "ZZZ_DEFINITELY_NOT_A_REAL_PROVIDER_API_KEY"),
+    ],
+)
+def test_unlisted_provider_falls_back_to_a_guessed_var_and_warns_once(
+    provider_id: str,
+    expected_var: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """xAI isn't an approved-registry row, but LiteLLM itself routes it and
-    knows its real credential var -- that must win over a guess, and
-    without a warning (LiteLLM genuinely knows this one)."""
-    assert required_env_vars("xai") == ("XAI_API_KEY",)
-    assert capsys.readouterr().err == ""
-
-
-def test_a_provider_litellm_knows_nothing_about_falls_back_and_warns_once(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert required_env_vars("zzz-definitely-not-a-real-provider") == (
-        "ZZZ_DEFINITELY_NOT_A_REAL_PROVIDER_API_KEY",
-    )
+    """Not in the registry, not in the keyless set: xAI is a real LiteLLM
+    provider and the fabricated id is not, but BOTH get the same treatment
+    now -- a guessed var, never a real LiteLLM lookup (see the module
+    docstring for why asking LiteLLM was unsafe)."""
+    assert required_env_vars(provider_id) == (expected_var,)
     first_err = capsys.readouterr().err
-    assert "ZZZ_DEFINITELY_NOT_A_REAL_PROVIDER_API_KEY" in first_err
+    assert expected_var in first_err
 
     # A second call for the SAME provider id warns no further.
-    required_env_vars("zzz-definitely-not-a-real-provider")
+    required_env_vars(provider_id)
     assert capsys.readouterr().err == ""
+
+
+def test_the_chatgpt_route_never_touches_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression test: `litellm.get_llm_provider` for the `chatgpt/` route
+    starts an interactive OAuth device-code sign-in and blocks -- this is
+    what broke when the fallback used to probe LiteLLM first. Patch BOTH
+    functions the old probe used to raise if called at all, so this test
+    fails loudly (not hangs) if that probe ever comes back."""
+
+    def _raise_if_called(*args: object, **kwargs: object) -> object:
+        raise AssertionError("required_env_vars must never call into litellm")
+
+    monkeypatch.setattr(providers_module, "model_is_routable", _raise_if_called, raising=True)
+    import litellm
+
+    monkeypatch.setattr(litellm, "get_llm_provider", _raise_if_called)
+    monkeypatch.setattr(litellm, "validate_environment", _raise_if_called)
+
+    assert required_env_vars("chatgpt/x") == ("CHATGPT/X_API_KEY",)
 
 
 def test_stub_sentinel_provider_still_needs_no_key_and_warns_nothing(

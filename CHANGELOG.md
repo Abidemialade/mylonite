@@ -62,13 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proxy. `mylonite.scan.providers.PROVIDER_ENV_VARS` and its credential-var
   alias table are both generated from it, so a provider's own routing
   prefix (`hosted_vllm`, `ollama_chat`, ...) always resolves to its row. A
-  provider the registry doesn't list but LiteLLM itself still routes (xAI,
-  Groq, Mistral, DeepSeek, OpenRouter, ...) now checks LiteLLM's own
-  key-presence map instead of silently requiring nothing; only when LiteLLM
-  knows nothing about the provider either does it fall back to a guessed
-  `<PROVIDER>_API_KEY`-shaped variable, warning once per provider rather
-  than on every check. See "The approved-provider registry" in
-  `docs/self-hosted-models.md`.
+  provider the registry doesn't list falls back to LiteLLM's own
+  `<PROVIDER>_API_KEY` naming convention, warning once per provider rather
+  than on every check — never by asking LiteLLM itself, which for some
+  routes starts an interactive sign-in and blocks. See "The
+  approved-provider registry" in `docs/self-hosted-models.md`.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and
