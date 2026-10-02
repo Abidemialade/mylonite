@@ -448,6 +448,7 @@ def test_public_surface() -> None:
         "assert_guard_holds",
         "assert_target_resists",
         "load_exploit",
+        "pending_fix",
     ]
     assert callable(testkit.assert_control_holds)
     assert callable(testkit.assert_guard_holds)

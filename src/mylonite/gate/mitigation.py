@@ -55,6 +55,20 @@ def _gate_dir_label(gate_dir: Path | str | None) -> str:
     return f"{Path(gate_dir).as_posix().rstrip('/')}/"
 
 
+def commits_as_pending(exploit: ExploitRecord) -> bool:
+    """Whether ``gate`` commits this finding's test as a pending fix.
+
+    True for a finding on the user's own target that has no control-efficacy
+    differential: its committed test re-drives the attack on the user's app,
+    which still lets it through, so a plain test would be red the moment the
+    gate PR lands. A reference-twin test and a control-efficacy test both pass
+    on the current build, so neither is pending.
+    """
+    if exploit.target_id.startswith("reference:"):
+        return False
+    return not exploit.payload.metadata.get("synthetic_control")
+
+
 def weakness_class_for(exploit: ExploitRecord) -> str:
     """Return the W1-W4 class for an exploit, or 'generic' if unknown.
 
@@ -373,6 +387,16 @@ def build_pr_body(
             f"without control **{control}** and asserts it fires on the raw target but is "
             "resisted with the control applied. The committed per-PR workflow runs it on every "
             "PR; if the control stops carrying the security, the check fails."
+        )
+    elif commits_as_pending(exploit):
+        gating_desc = (
+            f"`{report.test_filename}` (under `{gate_dir_label}`) re-drives this attack and "
+            "asserts your agent resists it. Your agent does not resist it yet, so the test is "
+            "committed as a pending fix (`@testkit.pending_fix`): it is an expected failure "
+            "and the per-PR check stays green. Once your fix lands the test passes and fails "
+            "the check on purpose, with a message telling you to delete the "
+            "`@testkit.pending_fix(...)` line. From then on it is a regular gate, and a "
+            "regression fails the check."
         )
     else:
         gating_desc = (

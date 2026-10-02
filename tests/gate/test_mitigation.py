@@ -471,3 +471,28 @@ def test_llm_suggestion_and_its_prompt_are_redacted():
     assert "Unverified LLM suggestion" in body
     assert fake_key not in body
     assert "Rotate the key ***REDACTED***" in body
+
+
+def test_pr_body_says_a_custom_target_test_is_committed_as_a_pending_fix():
+    from mylonite.gate.mitigation import commits_as_pending
+
+    ex = _exploit_for("indirect-injection-note-body-direct", target_id="mcp:custom")
+    assert commits_as_pending(ex)
+    body = build_pr_body(ex, _report())
+    gated = body.split("## How this is gated", 1)[1]
+    assert "pending fix" in gated
+    assert "@testkit.pending_fix" in gated
+
+
+def test_pr_body_reference_target_is_not_pending():
+    from mylonite.gate.mitigation import commits_as_pending
+
+    ex = _exploit_for("indirect-injection-note-body-direct")  # reference:vulnerable
+    assert not commits_as_pending(ex)
+    assert "pending_fix" not in build_pr_body(ex, _report())
+
+
+def test_control_finding_is_not_pending():
+    from mylonite.gate.mitigation import commits_as_pending
+
+    assert not commits_as_pending(_control_finding())

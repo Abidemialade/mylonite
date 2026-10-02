@@ -1366,3 +1366,54 @@ def test_gate_rewrites_a_redacted_exploit_even_when_the_validator_raises(tmp_pat
     text = path.read_text(encoding="utf-8")
     assert _FAKE_KEY not in text
     assert "***REDACTED***" in text
+
+
+def _gate_once(tmp_path, exploit):
+    """Run one finding through ``run_gate``; return the exploit ``generate_fn``
+    saw and the exploit JSON ``gate`` left on disk."""
+    seen = {}
+
+    def fake_generate(e):
+        seen["exploit"] = e
+        return GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="# t\n", exploit=e
+        )
+
+    out = tmp_path / "gate"
+    result = run_gate(
+        out_dir=out,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[exploit]),
+        generate_fn=fake_generate,
+        validate_fn=lambda t: (seen.__setitem__("validated", t.exploit), _kept_report())[1],
+        open_pr_fn=lambda **_: "printed",
+        open_pr=False,
+    )
+    assert result.exit_code == 0
+    on_disk = json.loads((out / f"exploit_{exploit.pattern_id}.json").read_text("utf-8"))
+    # The validator never sees the pending tag: it only shapes the emitted test.
+    assert seen["validated"] == exploit
+    return seen["exploit"], on_disk
+
+
+def test_gate_commits_a_custom_target_finding_as_a_pending_fix(tmp_path):
+    """The finding still works on the user's app, so its test is committed as a
+    pending fix; the committed exploit record itself stays untagged."""
+    from mylonite.plugins._reference.reference_pytest_generator import PENDING_FIX_METADATA_KEY
+
+    generated_from, on_disk = _gate_once(tmp_path, _exploit())
+    assert generated_from.payload.metadata.get(PENDING_FIX_METADATA_KEY)
+    assert PENDING_FIX_METADATA_KEY not in on_disk["payload"]["metadata"]
+
+
+@pytest.mark.parametrize("kind", ["reference", "control"])
+def test_gate_never_marks_a_test_that_already_passes_as_pending(tmp_path, kind):
+    from mylonite.plugins._reference.reference_pytest_generator import PENDING_FIX_METADATA_KEY
+
+    ex = _exploit()
+    if kind == "reference":
+        ex = ex.model_copy(update={"target_id": "reference:vulnerable"})
+    else:
+        meta = {"synthetic_control": "W2"}
+        ex = ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
+    generated_from, _ = _gate_once(tmp_path, ex)
+    assert PENDING_FIX_METADATA_KEY not in generated_from.payload.metadata

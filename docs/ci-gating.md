@@ -101,6 +101,34 @@ finding keeps the historical `mylonite/gate-<pattern_id>`; gating several uses
 `mylonite/gate-` prefix, so anything that matches on it (a branch-protection rule,
 a script) keeps working either way.
 
+### A finding you haven't fixed yet
+
+`gate` commits the test for a finding that still works on your app as a
+**pending fix**, so the gate PR doesn't turn CI red the day it merges. The test
+carries one extra line, `@testkit.pending_fix(...)`, and moves through three
+states:
+
+1. **Not fixed yet.** The attack still lands, so the test is an expected
+   failure (`xfail`) and the check stays green. `pytest -ra` lists it as
+   `XFAIL ... pending fix: ...`.
+2. **Fixed.** The attack stops, the test passes, and the check fails on
+   purpose with: *The attack did not land on this run. If your fix has landed,
+   remove the `@testkit.pending_fix(...)` line above this test.* One passing
+   live run is not proof on its own, so if you haven't shipped a fix, re-run
+   the check first.
+3. **Marker removed.** The test is a regular gate. It passes while the fix
+   holds and fails the check if the attack works again.
+
+This applies to findings on your own target that the gate re-drives with
+`testkit.assert_target_resists`. A control-efficacy test
+(`assert_control_holds`) and a test against the bundled reference agent
+already pass on your current build, so they are committed without the marker.
+`pytest -m mylonite_pending_fix` lists every test still waiting on a fix. A
+check that never reached a verdict (a missing fixture, an unresolved model, a
+target that didn't start) still fails; only the attack landing counts as "not
+fixed yet". The `PR_BODY.md` "How this is gated" section says which tests are
+pending.
+
 ### Budget exhaustion and findings
 
 `--max-llm-calls` bounds the *scan* phase (see the sizing box above). If the
@@ -224,7 +252,10 @@ Outside these workflows (a local run, another CI system), an empty
   test for a custom target is *skipped*, not run. It also sets
   `MYLONITE_REQUIRE_GATE_RUN=1`, which makes the job fail if a Mylonite gate test
   was skipped or none was collected, so the check can only go green by running
-  the gate. `pytest -ra` prints the reason if it does.
+  the gate. `pytest -ra` prints the reason if it does. A pending-fix test that
+  ran and failed as expected counts as a run, not a skip. A
+  `@pytest.mark.xfail` you add by hand does not: it can hide a check that never
+  reached a verdict, so it still fails the job.
 
     The re-drive carries a **hard call budget and a wall-clock timeout**. It is
     scoped to the single already-known pattern, so a healthy run is a customiser
