@@ -65,7 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider the registry doesn't list falls back to LiteLLM's own
   `<PROVIDER>_API_KEY` naming convention, warning once per provider rather
   than on every check — never by asking LiteLLM itself, which for some
-  routes starts an interactive sign-in and blocks. See "The
+  routes starts an interactive sign-in and blocks. **Behaviour change for
+  Vertex AI:** it used to be silently treated as Gemini and checked for
+  `GEMINI_API_KEY`; it now has its own row and is checked for
+  `VERTEXAI_PROJECT`/`VERTEXAI_LOCATION` instead (Vertex authenticates via
+  Application Default Credentials, not a bearer key). See "The
   approved-provider registry" in `docs/self-hosted-models.md`.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
