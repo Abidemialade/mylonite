@@ -183,21 +183,6 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
 
 ## Budget and the hard ceiling
 
-**Today, with no hard ceiling landed, the real worst case is far above the naive
-"60 calls" estimate an earlier draft of this section used.** `--max-llm-calls` bounds
-only the scan phase's planner loop, and even there "not a hard ceiling": each seed
-keeps its own floor (`60 + (S-1)*max(2, 60/S)`, about 258 calls at 100 seeds).
-`validate` runs with **no budget at all** -- 6 re-drives (3 iterations x 2 twins) each
-against the default `ScanConfig` cap of 50, plus up to 3 consensus-judge calls per
-firing run, roughly 310 more calls -- and LiteLLM's own `num_retries=2` is not counted
-in any of the above, so a billed-retry run can cost up to 3x again. **Worst case today
-is on the order of 570 counted calls per cell**, which at 2048 output tokens and
-3k-8k input tokens per call is roughly **$7.5-10.4 on Haiku 4.5** and **$0.96-1.39 on
-gpt-4o-mini** -- up to 3x either figure with billed retries. One Haiku cell can
-therefore use the whole $4.50 Anthropic allocation and most of the $10 total. This is
-reported here, not hidden; it is the reason Critical B of the fix-round-1 re-review
-exists.
-
 **No change needed in `src/` for this PR.** `mylonite` has no hard ceiling on LLM
 calls or spend today: there is no `--max-budget`/spend-cap option anywhere in the
 CLI, config, or `LLMPolicy` (which forwards only a fixed allowlist of LiteLLM kwargs
@@ -206,74 +191,110 @@ own `max_budget`). **BUDGET-1, a separate PR, is adding a hard LLM-call ceiling,
 applied per process** (including retries). `generate` makes no LLM call at all
 (`cli.py:1566` -- it is offline and deterministic), so the two processes that matter
 are `scan` and `validate`, run one after the other, each its own process with its
-own ceiling -- a per-cell bound is therefore **ceiling x 2**, not a single shared
-counter across all three commands (an earlier draft of this section wrongly said
-"counted across scan + generate + validate"; fixed here). This workflow already
-wires a placeholder for the env var name: `MYLONITE_MAX_LLM_REQUESTS`, set
-identically on both processes (they share the run step's `env:`) from a single
-hardcoded value (not the dispatch's own `max_llm_calls` input -- see why below), in
-exactly one place in the workflow file, so the controller can correct the name to
-whatever BUDGET-1 actually lands with. Until that PR lands, the env var is a
-harmless no-op -- nothing in `src/` reads it yet -- and today's only two REAL stops
-are:
+own ceiling -- a per-cell bound is therefore **the sum of the two ceilings**, not a
+single shared counter across all three commands. This workflow already wires a
+placeholder for the env var name, `MYLONITE_MAX_LLM_REQUESTS`, set as a one-off
+override on each command individually (`MYLONITE_MAX_LLM_REQUESTS=$X "$MYLONITE"
+scan ...`, and again for `validate`, each with its OWN value -- not a single shared
+step-level value), from the `scan_ceiling`/`validate_ceiling` dispatch inputs, so
+the controller can correct the env var's name once BUDGET-1 lands. Until it does,
+the env var is a harmless no-op -- nothing in `src/` reads it yet.
 
-1. **A 30-minute job `timeout-minutes`.** Given the worst case above, this is the one
-   backstop that does not depend on any of Mylonite's own budget flags landing or
-   working as documented.
-2. **A provider-side spend limit on both keys.** The keys this campaign uses
-   (`MYLONITE_LLM_KEY`, `MYLONITE_OPENAI_KEY`) should carry a provider-configured
-   spend cap; this is an operational step for whoever provisions the keys, not
-   something this workflow can enforce itself, and it is the only stop that is
-   genuinely independent of a bug anywhere in this chain.
+**Sizing the two ceilings, from `src/` (not yet from a live measurement -- see
+"Pilot procedure" below for how the real values get set).** A seed's live cost is
+roughly: 1 customiser call, 1-8 planner calls (`DEFAULT_ITERATION_CAP=8`, about 3
+typical), 0-1 judge call -- call it **4 calls/seed realistic, 10 at worst**. Scan's
+own seed count, from synthesis (`seed_synth.py:303-405`, `seeds.py:860+`): kitchen W2
+(3) + kitchen W4 (<=2) + synthesised W4 (cap 8) gives roughly 10-13 seeds for targets
+1, 2 and 5 (memory, redis, go-memory); target 3 likely has few or none; target 6 has
+1. So **scan needs about 1 preflight + 12 x 4 ~= 50 calls realistically, and ~110 at
+worst.** `validate` (custom-target path, `reference_validator.py:692-870`, with
+`--prove-control`, `--iterations 3`) runs 3 raw + 3 guarded single-seed scans at
+about 5 calls each, plus up to 9 consensus-judge calls (3 x 3) and 1 preflight --
+**about 40 calls realistically, 70 at worst.** `--iterations` stays at 3 (not
+dropped to 2): a lower `--iterations` also lowers `vuln_threshold` to 1, a weaker
+bar than this campaign wants.
 
-**The per-cell worst case, once BUDGET-1 lands, restates as**
+**The two ceilings, chosen with headroom over those estimates:**
 
-```
-ceiling x processes x (max_input_tokens x input_price + max_output_tokens x output_price)
-```
+- **scan: `MYLONITE_MAX_LLM_REQUESTS=120`**, with `--max-llm-calls` fixed at `60`
+  (no longer dispatch-driven).
+- **validate: `MYLONITE_MAX_LLM_REQUESTS=80`**, at `--iterations` fixed at `3`.
 
-with **processes = 2** (`scan`, `validate` -- `generate` makes none), **max_input_tokens
-= 8,000** (the top of this section's own 3k-8k/call estimate; `max_tokens` bounds only
-the OUTPUT leg, so input is NOT capped by it -- an earlier draft of this section
-wrongly claimed `max_tokens` "overstates input but never understates the total",
-which is false whenever actual input exceeds `max_tokens`, as it does here) and
-**max_output_tokens = 2,048** (`MYLONITE_MAX_TOKENS`).
+Exposed as two clamped `workflow_dispatch` inputs, `scan_ceiling` (default 120, hard
+cap 150) and `validate_ceiling` (default 80, hard cap 100), so the pilot result
+below can be applied by re-dispatching with different input values -- no code
+change needed. **A ceiling of 30 for both processes (an earlier draft of this
+section) starves targets 1-2 and 5: every realistic scan or validate run would hit
+the ceiling and read NOT TESTED while still spending the money to get there.**
 
-**`MYLONITE_MAX_LLM_REQUESTS` is set to a hardcoded `30` (half the dispatch's own
-clamped `max_llm_calls`, and NOT driven by that input)** specifically so the
-2-process total lands back near the single-process ballpark an earlier draft of
-this section assumed, keeping the whole cell inside a sensible share of the totals
-below -- no single cell's hard-ceiling exposure should be able to consume more than
-roughly a quarter of the whole campaign's allocation for one provider, even in the
-genuine worst case (every call maxed out on every retry, which the typical ~$0.005/
-call figure elsewhere in this repo says is far from the expected case):
+**Realistic and worst-case cost per cell, per-call cost `$1`/`$5` per M (Haiku 4.5)
+and `$0.15`/`$0.60` per M (gpt-4o-mini), assuming ~1,500 input / ~250 output tokens
+per call on average (cheaper than the 8k/2048 ceiling-based bound further down,
+which prices the theoretical maximum, not the typical call):**
 
-| Model | `30 x 2 x (8000 x in + 2048 x out) / 1e6` | Worst case per cell |
-|---|---|---|
-| Haiku 4.5 (`$1`/`$5` per M) | `30 * 2 * (8000*1 + 2048*5) / 1e6` | **~$1.09** |
-| gpt-4o-mini (`$0.15`/`$0.60` per M) | `30 * 2 * (8000*0.15 + 2048*0.60) / 1e6` | **~$0.15** |
+| Cell | Calls (realistic / cap) | Realistic cost (Haiku / mini) | Worst-case cost (Haiku / mini) |
+|---|---|---|---|
+| Full journey (scan + validate, targets 1-2) | ~90 / 200 | $0.41 / $0.06 | $3.65 / $0.49 |
+| Scan only (smoke targets) | ~50 / 120 | $0.23 / $0.03 | $2.19 / $0.29 |
 
-Both are well inside a single cell's share of the campaign budget below -- but
-neither number is **real** until BUDGET-1 actually lands and enforces the ceiling;
-until then, see the worst case stated above (570 calls, no per-process ceiling) and
-rely on the job timeout.
+**Campaign fit, for one provider (N=3 for targets 1-3, N=1 for targets 4-6, ~800
+calls total):**
 
-**Other spend controls already in place, independent of BUDGET-1:**
+- **Realistically, about $3.6 on Haiku 4.5** -- fits the $4.50 allocation with
+  roughly 20% headroom and no re-runs. gpt-4o-mini comes to about $0.50 and fits
+  easily.
+- **At the worst case (every call maxed on every retry), Haiku comes to about $39
+  and gpt-4o-mini to about $5.2** -- both over their allocations. This is why the
+  worst-case figures above are never described as "well inside a cell's share" (an
+  earlier draft of this section said so, which 12 cells x ~$1 contradicts): **the
+  provider-side spend cap on both keys is the real stop for the worst case**, not
+  this workflow's own ceilings, which are sized for the realistic case.
+- **A 30-minute job `timeout-minutes`** is the backstop that does not depend on any
+  of Mylonite's own budget flags landing or working as documented.
+
+**These estimates are uncertain** (redis's larger tool schemas, for one, may push
+real input above the ~1,500-token assumption) -- see "Pilot procedure" below for how
+the real ceilings get set before any counted run.
+
+## Pilot procedure (run before any counted run, and never itself counted)
+
+Before targets 1-3's N=3 runs or targets 4-6's N=1 runs begin, dispatch **one
+uncounted pilot cell**: `target=tpv-mcp-redis`, `provider=openai` (gpt-4o-mini, the
+cheaper provider, for the pilot's own cost), with the `scan_ceiling`/
+`validate_ceiling` defaults above (120/80). This result does not count toward any
+bar and is not one of the N re-drives for target 2.
+
+1. **Read the pilot's actual calls and tokens from the spend line** (the `llm: N
+   calls | P in / C out tokens` text `scan`/`validate` print, captured in `run.log`
+   and parsed into `cost.json` by `scripts/compute_run_cost.py` -- see `calls` in
+   its output).
+2. **Set each process's real ceiling to about 1.5x what it actually used**, capped
+   at the hard clamps (150 for scan, 100 for validate) -- e.g. if the pilot's scan
+   used 65 calls, set `scan_ceiling` to 98 for the counted runs (65 x 1.5), not
+   above 150 regardless of the multiple.
+3. **Commit the pilot's result and the chosen ceilings to this file, before
+   dispatching the first counted run.** Record: the pilot's dispatch (run URL),
+   the measured `calls`/`prompt_tokens`/`completion_tokens` for scan and for
+   validate, the computed 1.5x ceilings, and the commit SHA of that update. A
+   counted run dispatched before this commit exists is invalid for this prereg's
+   purposes -- re-dispatch it after the ceilings are committed.
+
+*(This section is filled in by the controller when the pilot runs. As written now,
+no pilot has been dispatched and the ceilings in use are the pre-pilot defaults
+above.)*
+
+## Other spend controls
 
 - **One target, one provider, no model override, per dispatch.** No "all"/"both"
   fan-out and no free-text model input -- the model is fixed per provider
   (`claude-haiku-4-5-20251001` for Anthropic, `gpt-4o-mini` for OpenAI; see
-  "Provider and model" below) so neither worst-case estimate above can be invalidated
-  by a dispatch picking an expensive model.
+  "Provider and model" below) so neither cost estimate above can be invalidated by
+  a dispatch picking an expensive model.
 - **`MYLONITE_MAX_TOKENS=2048`** is set on the one step that calls the CLI, bounding
   each call's OUTPUT tokens (there is no `--max-tokens` CLI flag; this is the
   documented env-var equivalent -- see `config.py`'s `MYLONITE_MAX_TOKENS`). It does
-  NOT bound input tokens, which is why the restated formula above prices the input
-  leg separately at 8k rather than reusing this same figure.
-- **`scan --max-llm-calls` stays driven by the (separately clamped-to-60) dispatch
-  input**, representing the user's intended scan budget; `MYLONITE_MAX_LLM_REQUESTS`
-  is a stricter, independently-sized hard backstop underneath it, not the same
-  number re-used for two different purposes.
+  NOT bound input tokens.
 
 Total campaign budget: $4.50 Anthropic + $5.00 OpenAI across targets 1-6. Target 6's
 own-agent inference runs on Ollama at zero cost regardless of which provider drives
@@ -308,11 +329,13 @@ against this budget.
 - **Target pins:** exact commit or published-package version per target, recorded in
   `verification/SOURCE.md` before this prereg was committed.
 - **Iterations:** N=3 for targets 1-3, N=1 for targets 4-6 (see "Rules for the runs").
-  Targets 1-3 run the full journey -- `scan` then `generate --latest` then
-  `validate --iterations 3` (keeps the live differential loop's own call count
-  bounded, separate from the N=3 workflow-dispatch re-drive count above). Targets
-  4-6 run `scan` only: they claim no verdict, and `generate`/`validate` need an
-  actual finding to operate on, which a smoke cell makes no promise of producing.
+  Targets 1-3 run the full journey -- `scan` then `generate` (on one explicit
+  `exploit_*.json` path, not `--latest`/a bare scan dir -- see "Rules for the runs"'
+  multi-finding note) then `validate --iterations 3` (keeps the live differential
+  loop's own call count bounded, separate from the N=3 workflow-dispatch re-drive
+  count above). Targets 4-6 run `scan` only: they claim no verdict, and
+  `generate`/`validate` need an actual finding to operate on, which a smoke cell
+  makes no promise of producing.
 - **State:** every run starts from fresh state -- target 1's `MEMORY_FILE_PATH` is a
   freshly-generated per-run path, passed to the target file via its `${TPV_MEMORY_FILE}`
   expansion (see `docs/target-file.md`'s `${VAR}` mechanism -- a value only set on the
