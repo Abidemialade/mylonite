@@ -195,23 +195,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   digest-pinned rather than an unpinned install script. A clean scan that finds
   nothing no longer fails the step under `bash`'s `-eo pipefail` (the no-match
   glob now goes through `compgen -G ... || true`, not a bare `ls`). `scan` and
-  `validate` (two separate processes; `generate` makes no LLM call) each get a
-  placeholder `MYLONITE_MAX_LLM_REQUESTS=30` for the per-process hard ceiling a
-  separate, in-progress change (BUDGET-1) is adding — a documented no-op until
-  that lands, with the job's 30-minute timeout as today's real stop; the prereg
-  restates the per-cell worst case as `ceiling x processes x (max input x input
-  price + max tokens x output price)` with an 8k-token input assumption, for
-  both Haiku 4.5 and gpt-4o-mini. The score and cost steps run with `if:
-  always()` so a crashed or aborted run still gets scored. It writes a
-  `cost.json` per run — computed from the token counts `scan`/`validate`
-  already print, with no change to `src/mylonite`; it writes a zero-cost
-  `cost.json` with a reason when `run.log` itself never existed (an earlier
-  step failed first), but still fails loudly when the log exists with no spend
-  line. The new `scripts/score_third_party.py` treats a Python traceback with
-  a `mylonite` stack frame as an unconditional product defect, checked before
-  anything else; a traceback with no such frame (the stdio adapter does not
-  separate a spawned target server's stderr from Mylonite's own, a `src/`
-  fix not made here) is recorded as target noise and never blocks the cell.
+  `validate` (two separate processes; `generate` makes no LLM call) each get
+  their own placeholder `MYLONITE_MAX_LLM_REQUESTS` for the per-process hard
+  ceiling a separate, in-progress change (BUDGET-1) is adding — sized from a
+  `src/`-derived call estimate (scan 120 with `--max-llm-calls` fixed at 60,
+  validate 80 at `--iterations` fixed at 3, exposed as two clamped dispatch
+  inputs, `scan_ceiling`/`validate_ceiling`) and refined by one uncounted pilot
+  dispatch before the first counted run (see the prereg's "Pilot procedure").
+  It is a documented no-op until BUDGET-1 lands, with the job's 30-minute
+  timeout and a provider-side spend cap as today's real stops; the prereg
+  states the realistic and worst-case cost per cell and the campaign-wide fit
+  (~$3.6 realistic against the $4.50 Anthropic allocation), for both Haiku 4.5
+  and gpt-4o-mini. The score and cost steps run with `if: always()` so a
+  crashed or aborted run still gets scored. It writes a `cost.json` per run —
+  computed from the token counts `scan`/`validate` already print, with no
+  change to `src/mylonite`; it writes a zero-cost `cost.json` with a reason
+  when `run.log` itself never existed (an earlier step failed first), but
+  still fails loudly when the log exists with no spend line. The new
+  `scripts/score_third_party.py` treats a Python traceback with an actual
+  `mylonite` stack frame (a quoted `File "...mylonite/....py"` reference, not
+  a bare substring match that a target's own echoed content could trigger) as
+  an unconditional product defect, checked before anything else; a traceback
+  with no such frame (the stdio adapter does not separate a spawned target
+  server's stderr from Mylonite's own, a `src/` fix not made here) is
+  recorded as target noise and never blocks the cell.
   Otherwise it classifies a run against `mylonite._verdict.verdict_label` (so
   a `STABLE, NOT PROVEN` result reads not-kept, per never-keep-unproven), a
   never-keep-unproven candidate, NOT TESTED (which now REQUIRES a reason

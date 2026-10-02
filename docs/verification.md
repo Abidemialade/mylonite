@@ -144,12 +144,17 @@ gh workflow run third-party-campaign.yml -f target=tpv-server-memory -f provider
 
 The first three targets run at a fixed N=3 with a ≥2-of-3 bar (three separate
 dispatches, combined with `scripts/score_third_party.py rollup`); the last
-three are N=1 smoke cells that claim no verdict. A non-zero exit from
-`scan`/`generate`/`validate`, or a clean scan finding nothing, is captured
-and scored rather than failing the workflow step. A Python traceback with a
-`mylonite` stack frame anywhere in the run's log is an unconditional product
-defect (never auto-re-run, never counted toward the bar); a traceback with
-no such frame — a spawned target server's own crash, whose stderr isn't yet
+three are N=1 smoke cells that claim no verdict. `scan` and `validate` each
+get their own hard call ceiling (`scan_ceiling`/`validate_ceiling` dispatch
+inputs), sized from a `src/`-derived estimate and refined by one uncounted
+pilot dispatch before the first counted run — see the prereg's "Pilot
+procedure". A non-zero exit from `scan`/`generate`/`validate`, or a clean
+scan finding nothing, is captured and scored rather than failing the
+workflow step. A Python traceback with an actual `mylonite` stack frame
+(a `File "...mylonite/....py"` reference, not a bare substring match)
+anywhere in the run's log is an unconditional product defect (never
+auto-re-run, never counted toward the bar); a traceback with no such frame —
+a spawned target server's own crash, whose stderr isn't yet
 separated from Mylonite's own — is recorded as target noise and never blocks
 the cell. NOT TESTED requires a reason code or the same rule applies. This
 section will be updated with the results once the campaign has run; until then, nothing on this page
