@@ -56,6 +56,7 @@ from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._types import SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.control_shim import _DESTRUCTIVE_HINTS, consequential_tool_names
+from mylonite.scan.predicate_primitives import count_deferral_word
 from mylonite.scan.tool_classifier import hint_matches
 from mylonite.scan.tool_roles import _classify_tools, _content_slot_template
 
@@ -652,10 +653,8 @@ async def _control_one_tool(
     written = await adapter._probe_verify_content(session, probe, token)
     if written is None:
         return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
-    before_write, after_write = after.lower(), written.lower()
     for deferral in probe.deferred_markers:
-        needle = deferral.lower()
-        if needle and after_write.count(needle) > before_write.count(needle):
+        if count_deferral_word(written, deferral) > count_deferral_word(after, deferral):
             return failed(INC_POSITIVE_FAILED, f"the control write was deferred ({deferral!r})")
     if not (_changed(after, written, marker) and written.count(token) > after.count(token)):
         return failed(

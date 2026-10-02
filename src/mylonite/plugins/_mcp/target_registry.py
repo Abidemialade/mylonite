@@ -118,6 +118,13 @@ class EffectProbeSpec(BaseModel):
     instead of "a tool was named". The structural ``isError`` flag and this
     probe are the deterministic signals; ``deferred_markers`` is only an
     overridable, per-target heuristic fallback (no English/app assumption).
+
+    ``deferred_markers`` are words that mark a HELD item in the verify tool's
+    output: when one grows, the probe reads "deferred" and the attempt can read
+    resisted. Never list a word that also shows for items that will still go
+    out. ``deferred_reply_words`` are words the server puts in a tool REPLY when
+    it accepts a call for later ("Job accepted"); they only make the call read
+    deferred, never resisted on their own.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -126,6 +133,7 @@ class EffectProbeSpec(BaseModel):
     verify_args_template: dict[str, Any] = {}
     expect_marker: str | None = None  # may reference {payload}/{scope}
     deferred_markers: tuple[str, ...] = ()
+    deferred_reply_words: tuple[str, ...] = ()
 
 
 class CalibrationSettings(BaseModel):

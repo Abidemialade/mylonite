@@ -371,12 +371,15 @@ result rests on observed state.
 The server replied that it queued or held a consequential call, and the effect probe did
 not see the action held, so it may still take effect. A reply counts as deferred when it
 carries a default deferral word ("queued", "pending", "will be sent" and the like), a word
-from the probe's `deferred_markers`, or a task handle (`resultType: "task"` or a `task`
-field), whatever its text. "Queued" is also how an asynchronous mailer says it accepted a
+from the probe's `deferred_reply_words` or `deferred_markers`, or a task handle
+(`resultType: "task"` or a `task` field), whatever its text. One queued call is enough,
+even when another call in the same attempt went through. "Queued" is also how an asynchronous mailer says it accepted a
 message, and the probe reads right after the call, so a calibrated "no change" can come
 before the queue sends. The attempt is NOT TESTED instead of `RESISTED (server-reported)`,
 and a scan with no finding exits `2`. If the action took effect before the probe read,
-the attempt is a finding at `effect-confirmed` instead.
+the attempt is a finding at `effect-confirmed` instead, once the probe declares the word
+that marks a held item; without it, a new record after a queued reply can't be told from
+the held item and the attempt stays NOT TESTED.
 
 **Fix:** Declare an `effect_probe` whose verify tool lists held actions, and name the word
 it marks them with in `deferred_markers`, so a held action can be told apart from one
