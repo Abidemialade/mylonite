@@ -145,7 +145,7 @@
   },
   "MYL-INC-009": {
     "category": "inconclusive",
-    "summary": "The tool list could not be read again after the agent ran, so a mid-session change to the tools was not checked."
+    "summary": "The tool list could not be read again after the agent ran, or was not compared in a known form, so a mid-session change to the tools was not checked."
   },
   "MYL-INC-010": {
     "category": "inconclusive",

@@ -174,10 +174,23 @@ MEANING_CHANGES: list[tuple[str, Mutator, str]] = [
     ("meta", _set(["_meta"], {"com.example/policy": "open"}), "/send_note/_meta"),
     ("icons", _set(["icons"], [{"src": "https://example.test/i.png"}]), "/send_note/icons"),
     ("execution", _set(["execution"], {"taskSupport": "required"}), "/send_note/execution"),
-    ("explicit_null_title", _set(["title"], None), "/send_note/title"),
+    (
+        "schema_default_null",
+        _set(["inputSchema", "properties", "region", "default"], None),
+        "/send_note/inputSchema/properties/region/default",
+    ),
     ("add_tool", _add_tool, "/export_all"),
     ("remove_tool", _remove_tool, "/read_note"),
 ]
+
+
+def _on_read_note(key: str, value: Any) -> Mutator:
+    # read_note declares no title and no annotations, so a null here is the
+    # same as the key being absent.
+    def _m(tools: list[dict[str, Any]]) -> None:
+        tools[1][key] = value
+
+    return _m
 
 
 def _reorder_props(tools: list[dict[str, Any]]) -> None:
@@ -208,6 +221,9 @@ BENIGN_CHANGES: list[tuple[str, Mutator]] = [
     ("reorder_enum", _reorder_enum),
     ("reorder_tools", _reorder_tools),
     ("reorder_top_level_keys", _reorder_top_keys),
+    ("explicit_null_title", _on_read_note("title", None)),
+    ("explicit_null_hints", _on_read_note("annotations", {"readOnlyHint": None})),
+    ("explicit_null_hint_beside_others", _set(["annotations", "idempotentHint"], None)),
 ]
 
 
@@ -442,20 +458,54 @@ def test_every_wire_key_reaches_the_signed_view() -> None:
     assert set(view) == set(raw)
 
 
-def test_an_explicit_null_differs_from_an_absent_key() -> None:
-    a = _tool_to_description(MCPTool.model_validate({"name": "t", "inputSchema": {}}))
-    b = _tool_to_description(
-        MCPTool.model_validate({"name": "t", "inputSchema": {}, "title": None})
+def _surface(raw: dict[str, Any]) -> dict[str, Any]:
+    return tool_surface.surface_views([_tool_to_description(MCPTool.model_validate(raw))])
+
+
+def test_a_null_top_level_field_or_hint_counts_as_absent() -> None:
+    bare = _surface({"name": "t", "inputSchema": {}})
+    assert _surface({"name": "t", "inputSchema": {}, "title": None}) == bare
+    assert _surface({"name": "t", "inputSchema": {}, "annotations": {"readOnlyHint": None}}) == (
+        bare
     )
-    assert tool_surface.surface_views([a]) != tool_surface.surface_views([b])
+
+
+def test_a_null_inside_a_schema_or_meta_still_counts() -> None:
+    def schema(prop: dict[str, Any]) -> dict[str, Any]:
+        return {"type": "object", "properties": {"x": prop}}
+
+    base = _surface({"name": "t", "inputSchema": schema({"type": "string"})})
+    assert _surface({"name": "t", "inputSchema": schema({"type": "string", "default": None})}) != (
+        base
+    )
+    assert _surface({"name": "t", "inputSchema": {}, "_meta": {"k": None}}) != _surface(
+        {"name": "t", "inputSchema": {}, "_meta": {}}
+    )
 
 
 def test_required_and_enum_are_sets_but_other_arrays_keep_order() -> None:
-    c = tool_surface.canonicalise
+    def c(value: Any) -> Any:
+        return tool_surface.canonicalise(value, in_schema=True)
+
     assert c({"required": ["b", "a", "a"]}) == c({"required": ["a", "b"]})
     assert c({"enum": [2, 1]}) == c({"enum": [1, 2]})
+    assert c({"$defs": {"I": {"enum": [2, 1]}}}) == c({"$defs": {"I": {"enum": [1, 2]}}})
     assert c({"type": ["string", "null"]}) != c({"type": ["null", "string"]})
     assert c({"examples": ["b", "a"]}) != c({"examples": ["a", "b"]})
+
+
+def test_set_comparison_is_scoped_to_the_two_schema_fields() -> None:
+    def tool(**extra: Any) -> dict[str, Any]:
+        return tool_surface.canonical_tool({"name": "t", "inputSchema": {}, **extra})
+
+    assert tool(outputSchema={"required": ["b", "a"]}) == tool(
+        outputSchema={"required": ["a", "b"]}
+    )
+    assert tool(_meta={"enum": ["b", "a"]}) != tool(_meta={"enum": ["a", "b"]})
+    assert tool(annotations={"required": ["b", "a"]}) != tool(annotations={"required": ["a", "b"]})
+    assert tool(**{"x-vendor": {"required": ["b", "a"]}}) != tool(
+        **{"x-vendor": {"required": ["a", "b"]}}
+    )
 
 
 def test_a_ref_is_signed_as_text_and_never_resolved() -> None:
@@ -473,6 +523,21 @@ def test_a_pointer_escapes_slash_and_tilde() -> None:
     assert diff["paths"] == ["/a~1b/x~0y"]
 
 
+@pytest.mark.parametrize("key", ["k" * 65, "caf\u00e9", "tab\there"])
+def test_a_long_or_unprintable_pointer_segment_is_hashed(key: str) -> None:
+    diff = tool_surface.diff_surfaces({"t": {key: 1}}, {"t": {key: 2}})
+    assert diff is not None
+    (path,) = diff["paths"]
+    assert key not in path
+    assert path.startswith("/t/#sha256:") and len(path) == len("/t/#sha256:") + 12
+
+
+def test_a_short_printable_segment_is_kept_as_text() -> None:
+    key = "k" * 64
+    diff = tool_surface.diff_surfaces({"t": {key: 1}}, {"t": {key: 2}})
+    assert diff is not None and diff["paths"] == [f"/t/{key}"]
+
+
 def test_a_large_change_lists_a_bounded_number_of_paths() -> None:
     first = {"t": {f"k{i}": 0 for i in range(80)}}
     current = {"t": {f"k{i}": 1 for i in range(80)}}
@@ -485,8 +550,31 @@ def test_a_large_change_lists_a_bounded_number_of_paths() -> None:
 # --- the predicate ----------------------------------------------------------------
 
 
-def test_a_stable_marker_without_a_form_version_is_not_read_as_stable() -> None:
-    assert _verdict({"tool_surface_mutated": "false"}) is None
+@pytest.mark.parametrize("form", [None, "v1", ""])
+def test_a_stable_marker_in_an_unknown_form_is_not_tested_never_stable(form: str | None) -> None:
+    from mylonite import reason_codes
+
+    meta = {"tool_surface_mutated": "false"}
+    if form is not None:
+        meta["tool_surface_form"] = form
+    verdict = _verdict(meta)
+    assert verdict is not None
+    assert verdict.success is False
+    assert verdict.fallback_cause == reason_codes.INC_RELIST_FAILED
+    assert "unknown form" in verdict.reason
+
+
+def test_a_found_result_says_what_was_signed() -> None:
+    verdict = _verdict(
+        {
+            "tool_surface_mutated": "true",
+            "tool_surface_diff": "{}",
+            "tool_surface_form": "v2",
+            "tool_surface_signed": tool_surface.SIGNED_CONVERTED_FIELDS,
+        }
+    )
+    assert verdict is not None and verdict.success is True
+    assert verdict.evidence["tool_surface_signed"] == tool_surface.SIGNED_CONVERTED_FIELDS
 
 
 def test_a_stable_marker_on_converted_fields_says_what_was_signed() -> None:

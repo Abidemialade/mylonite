@@ -193,7 +193,8 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
 INC_UNLINKED_DISPATCH: Final = "MYL-INC-001"
 INC_PAYLOAD_MARKER: Final = "MYL-INC-008"
 #: Stamped by the ``tool_surface_mutated_mid_session`` predicate when the
-#: tool list could not be read again after the agent ran.
+#: tool list could not be read again after the agent ran, or was compared in
+#: an unknown signature form.
 INC_RELIST_FAILED: Final = "MYL-INC-009"
 #: Stamped by the judge on a non-finding when the server's tool list was read
 #: only in part (page cap or a repeated cursor).
@@ -411,10 +412,11 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
     ),
     _rc(
         INC_RELIST_FAILED,
-        "The tool list could not be read again after the agent ran, so a mid-session "
-        "change to the tools was not checked.",
+        "The tool list could not be read again after the agent ran, or was not compared "
+        "in a known form, so a mid-session change to the tools was not checked.",
         "Check that the server still answers tools/list after a few tool calls (it may have "
-        "crashed or closed the session), then re-run.",
+        "crashed or closed the session), then re-run. A result replayed from an older run "
+        "carries no signature form; re-run the scan to compare every tool field.",
     ),
     _rc(
         INC_TOOL_LIST_TRUNCATED,

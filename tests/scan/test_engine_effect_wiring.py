@@ -311,6 +311,14 @@ async def test_a_failed_relist_makes_the_class_not_tested_under_its_code() -> No
 
 
 @pytest.mark.asyncio
+async def test_a_stable_surface_in_an_unknown_form_is_not_tested_never_cleared() -> None:
+    result = await _scan(_rug_pull_payload(), [_surface_response(tool_surface_mutated="false")])
+    attempt = result.report.attempts[0]
+    assert attempt.outcome == "undecided"
+    assert _w1(result).codes == (reason_codes.INC_RELIST_FAILED,)
+
+
+@pytest.mark.asyncio
 async def test_a_stable_surface_on_a_partial_tool_list_is_not_tested() -> None:
     result = await _scan(
         _rug_pull_payload(),
