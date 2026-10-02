@@ -195,6 +195,18 @@ The opt-in `.github/workflows/verification.yml` runs the larger-N live numbers o
 removed in August 2026 — and it needs a provider key configured as a repository secret
 before it can run at all.
 
+Each minor or major release ships a result set in `verification/results/<version>/`,
+measured against the built wheel rather than the source tree. The
+`verification-campaign` workflow produces it on manual dispatch:
+
+```bash
+gh workflow run verification-campaign.yml -f model=anthropic/claude-haiku-4-5-20251001
+```
+
+It runs the three layer-2 benchmarks the release gate requires and uploads the result
+set for a maintainer to commit. The harness README covers what it records and why its
+InjecAgent numbers are not like-for-like with 0.10.0.
+
 ## Bottom line
 
 The verification system works and earns its keep as an **independent honesty + coverage
