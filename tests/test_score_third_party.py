@@ -420,6 +420,159 @@ def test_missing_report_with_runner_shutdown_line_is_invalid(tmp_path: Path) -> 
     assert result["classification"] == scorer.INVALID
 
 
+# --- each stage's reason codes come from its own log ------------------------
+
+_CEILING_LINE = "error: [MYL-ABT-001] LLM request ceiling of {n} reached; NOT TESTED\n"
+
+
+def _write_trimmed_generate_report(run_dir: Path) -> None:
+    """The ``{model, provider}`` scan_report.json generate leaves beside the
+    test it wrote."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "scan_report.json").write_text(
+        json.dumps({"model": "openai/gpt-4o-mini", "provider": "openai"}), encoding="utf-8"
+    )
+
+
+def _scan_log_with_skips(tmp_path: Path, name: str, *codes: str) -> Path:
+    lines = [f"seed s{i} skipped [{code}]" for i, code in enumerate(codes)]
+    return _write_log(tmp_path, "\n".join(lines) + "\nscan found 1 finding\n", name)
+
+
+def _validate_trip(tmp_path: Path, run: str, *, trimmed_report: bool, scan_codes: tuple[str, ...]):
+    run_dir = tmp_path / run / "generated"
+    if trimmed_report:
+        _write_trimmed_generate_report(run_dir)
+    else:
+        run_dir.mkdir(parents=True)
+    scan_log = _scan_log_with_skips(tmp_path / run, "scan.log", *scan_codes)
+    validate_log = _write_log(
+        tmp_path / run, "validating test_example.py\n" + _CEILING_LINE.format(n=80), "validate.log"
+    )
+    run_log = _write_log(
+        tmp_path / run,
+        scan_log.read_text(encoding="utf-8") + validate_log.read_text(encoding="utf-8"),
+    )
+    return run_dir, run_log, scan_log, validate_log
+
+
+@pytest.mark.parametrize("trimmed_report", [True, False])
+def test_a_validate_ceiling_trip_is_not_tested_keyed_on_the_abort_code(
+    tmp_path: Path, trimmed_report: bool
+) -> None:
+    """validate raises at its ceiling and writes no validation_report.json.
+    With or without generate's trimmed scan_report.json beside the test, the
+    result is NOT_TESTED keyed on MYL-ABT-001 alone: not the "never
+    exercised" fallback, not PRODUCT_DEFECT, and no scan-phase codes."""
+    run_dir, run_log, scan_log, validate_log = _validate_trip(
+        tmp_path, "run1", trimmed_report=trimmed_report, scan_codes=("MYL-NT-016",)
+    )
+    result = scorer.score_run(
+        run_dir, run_log=run_log, scan_log=scan_log, validate_log=validate_log
+    )
+    assert result["classification"] == scorer.NOT_TESTED
+    assert result["stage"] == "validate"
+    assert result["reason_codes"] == ["MYL-ABT-001"]
+    assert "ceiling" in str(result["reason"])
+    assert "no attempt reached a verdict" not in str(result["reason"])
+
+
+def test_validate_with_no_report_and_no_abort_code_is_a_product_defect(tmp_path: Path) -> None:
+    """validate ran, wrote nothing and printed no abort code: a crash the
+    scan-stage codes must not paper over as NOT_TESTED."""
+    run_dir = tmp_path / "generated"
+    _write_trimmed_generate_report(run_dir)
+    scan_log = _scan_log_with_skips(tmp_path, "scan.log", "MYL-NT-016")
+    validate_log = _write_log(tmp_path, "validating test_example.py\n", "validate.log")
+    result = scorer.score_run(run_dir, scan_log=scan_log, validate_log=validate_log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+    assert result["stage"] == "validate"
+
+
+def test_validate_with_no_report_and_an_infra_signature_is_invalid(tmp_path: Path) -> None:
+    run_dir = tmp_path / "generated"
+    _write_trimmed_generate_report(run_dir)
+    validate_log = _write_log(
+        tmp_path, "litellm.APIConnectionError: connection refused\n", "validate.log"
+    )
+    result = scorer.score_run(run_dir, validate_log=validate_log)
+    assert result["classification"] == scorer.INVALID
+
+
+def test_a_scan_ceiling_trip_is_not_tested_with_the_scan_logs_codes(tmp_path: Path) -> None:
+    """validate never ran (no validate.log), so the scan directory is scored
+    from scan.log."""
+    run_dir = tmp_path / "out" / "scan1"
+    _write_scan_report(run_dir, aborted="budget_exceeded")
+    scan_log = _write_log(tmp_path, _CEILING_LINE.format(n=120), "scan.log")
+    result = scorer.score_run(
+        run_dir,
+        run_log=scan_log,
+        scan_log=scan_log,
+        validate_log=tmp_path / "validate.log",  # never written
+    )
+    assert result["classification"] == scorer.NOT_TESTED
+    assert result["reason_codes"] == ["MYL-ABT-001"]
+
+
+def test_a_kept_validate_reads_codes_from_validate_log_only(tmp_path: Path) -> None:
+    run_dir = tmp_path / "generated"
+    _write_trimmed_generate_report(run_dir)
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    scan_log = _scan_log_with_skips(tmp_path, "scan.log", "MYL-NT-016")
+    validate_log = _write_log(tmp_path, "validated test_example.py\n", "validate.log")
+    result = scorer.score_run(run_dir, scan_log=scan_log, validate_log=validate_log)
+    assert result["classification"] == scorer.KEPT
+    assert result["reason_codes"] == []
+
+
+def test_validate_trips_agree_across_three_runs_whatever_their_scans_printed(
+    tmp_path: Path,
+) -> None:
+    """Three re-drives whose scans skipped different seeds for different
+    reasons, but whose validate all hit the ceiling, agree on the N=3 bar."""
+    scan_codes = [("MYL-NT-016",), ("MYL-INC-002", "MYL-NT-016"), ()]
+    scores = []
+    for i, codes in enumerate(scan_codes):
+        run_dir, run_log, scan_log, validate_log = _validate_trip(
+            tmp_path, f"run{i}", trimmed_report=True, scan_codes=codes
+        )
+        scores.append(
+            scorer.score_run(run_dir, run_log=run_log, scan_log=scan_log, validate_log=validate_log)
+        )
+    result = scorer.rollup(scores, bar_numerator=2, bar_denominator=3)
+    assert result["met_bar"] is True
+    assert result["result"] == scorer.NOT_TESTED
+    assert result["reason_codes"] == ["MYL-ABT-001"]
+
+
+def test_cli_passes_the_stage_logs_through(tmp_path: Path) -> None:
+    run_dir, run_log, scan_log, validate_log = _validate_trip(
+        tmp_path, "run1", trimmed_report=True, scan_codes=("MYL-NT-016",)
+    )
+    out_file = tmp_path / "score.json"
+    rc = scorer.main(
+        [
+            "score",
+            str(run_dir),
+            "--target",
+            "tpv-mcp-redis",
+            "--run-log",
+            str(run_log),
+            "--scan-log",
+            str(scan_log),
+            "--validate-log",
+            str(validate_log),
+            "--out",
+            str(out_file),
+        ]
+    )
+    assert rc == 0
+    written = json.loads(out_file.read_text(encoding="utf-8"))
+    assert written["classification"] == scorer.NOT_TESTED
+    assert written["reason_codes"] == ["MYL-ABT-001"]
+
+
 # --- rollup -------------------------------------------------------------------
 
 
