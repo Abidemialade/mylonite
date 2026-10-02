@@ -248,7 +248,8 @@ that carries the marker looks the same as one that went out. So when any call th
 have caused a new record was answered as queued or held (a deferral word or a task
 handle) and the probe declares no `deferred_markers`, the new record is credited to the
 attempt only when a call that went through carries the marker and the marker grew by
-more than the held calls carrying it explain. A tie by tool name alone is not enough.
+more than the held calls' own arguments carry it (a held call that names the marker twice
+explains two). A tie by tool name alone is not enough.
 Otherwise it is credited to nothing and the attempt reads NOT TESTED
 ([`MYL-INC-012`](reason-codes.md#myl-inc-012)), exit 2. That includes a queue that really
 sent the message at once: without a word that marks a held item, Mylonite can't tell the
