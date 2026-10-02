@@ -32,15 +32,38 @@ The phased build plan lives in
     The app's design decides — see the full [independent scorecard](verification.md),
     negatives included.
 
+## Coverage by app shape
+
+What Mylonite can test depends on how your app is reachable — not every shape
+gets the same classes, and some get a weaker claim than you might expect:
+
+| App shape | How Mylonite connects | What's testable | What reads NOT TESTED |
+|---|---|---|---|
+| MCP server, local process | `transport: stdio` — Mylonite drives your real tools with its own planner | W1–W4 against the server's declared tools and prompt; server-side guards | Guardrails that live in your **agent or host**, not the server — Mylonite's planner replaces your agent loop, so an approval UI, an input filter, or a model-side guardrail call in your own agent code is never exercised |
+| MCP server, remote | `sse` / `http`, static-token auth | Same as local | Same as local; no OAuth sign-in yet |
+| Plain HTTP agent, no tool surface | `transport: rest` — one endpoint, a prompt in, a reply out | **W2 only** (direct prompt injection, judged on the reply text) | W1 (tool-description poisoning), W3 (egress), W4 (consequential action) — a black box has no tool surface and no side-effect probe by default to test them against |
+| Agent built on a framework (in-process tools, no MCP, no HTTP endpoint) | No adapter | Nothing, as-is | Everything — wrap the agent in an HTTP endpoint for W2, or expose its tools over MCP for the full W1–W4 surface |
+| Agent-side guardrails (input filters, tool-call policies, host approval steps) | Not reached by any transport above | — | Always, today — these guardrails sit in your agent process, which Mylonite's planner replaces rather than drives |
+
+A kept W1–W4 finding also only earns the strongest claim — "your own control is
+load-bearing" — once you declare `control_env` so Mylonite can switch your real
+guard off; see
+[Add a kill switch to your own guard](concepts.md#add-a-kill-switch-to-your-own-guard).
+Without it, a KEPT verdict proves the attack is real and that a canonical
+control of that class closes it, not that your specific implementation does.
+
 ## Where to go next
 
 - [Quickstart](quickstart.md) — install and run the end-to-end pipeline in a few commands.
 - [Try it — the reference app](quarry.md) — run Mylonite against a deliberately
   vulnerable reference agent.
 - [Test your own app](test-your-app.md) — point Mylonite at your MCP server.
+- [Coverage by app shape](#coverage-by-app-shape) — which weakness classes are
+  testable on your app, and which read NOT TESTED.
 - [Weakness classes](weakness-classes.md) — what's tested and how an attack is proven.
 - [Attack modes](attack-modes.md) — the single-shot W1–W4 attack engine.
 - [The validation engine](validation.md) — the control-efficacy check and the differential.
+- [The testkit API](testkit.md) — every assertion an emitted test can call, by hand.
 - [Independent verification](verification.md) — the honest scorecard against ground truth Mylonite didn't author.
 - [Re-validate on a new model](model-upgrade.md) — re-prove a committed test when the model changes.
 - [CLI reference](cli-reference.md) · [Architecture](architecture.md) · [Plugin authoring](plugin-authoring.md).
