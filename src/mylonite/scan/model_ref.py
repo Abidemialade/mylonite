@@ -33,7 +33,7 @@ def route_model(provider_hint: str | None, model: str) -> str:
     set and ``model`` doesn't already carry a ``provider/`` prefix.
 
     LiteLLM routes by model-string prefix; some Anthropic aliases (e.g.
-    ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM
+    ``claude-3-5-haiku-latest``) aren't auto-routed and fail with "LLM  # allow-literal: example
     Provider NOT provided". When a caller passes an explicit provider hint
     (see :mod:`mylonite.scan.model_ref`'s module docstring for the
     remaining, deprecated sources of one) and the model carries no
@@ -87,7 +87,7 @@ class ModelRef:
                 "'<provider>/' prefix, no provider hint was given, and LiteLLM "
                 "doesn't recognise it as a known model id. Use a "
                 "provider-prefixed model string instead (e.g. "
-                "'anthropic/claude-haiku-4-5')."
+                "'anthropic/claude-haiku-4-5')."  # allow-literal: example
             )
         return cls(raw=route_model(provider_hint, model), provider=provider)
 

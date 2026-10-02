@@ -63,7 +63,7 @@ def unreachable_hint(provider: str | None, model: str) -> str:
     return redact(
         f"no provider reachable for --model {model}: check that {key} is set and valid, "
         "or pass --model provider/modelname for another LiteLLM provider "
-        "(e.g. --model openai/gpt-4o)."
+        "(e.g. --model openai/gpt-4o)."  # allow-literal: example
     )
 
 

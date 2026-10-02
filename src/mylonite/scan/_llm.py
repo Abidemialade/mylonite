@@ -1235,7 +1235,7 @@ def litellm_text_call(
     ``litellm_json_call`` — budget-counted, policy-kwarg'd, provider-error
     classified — for a caller that wants prose rather than a structured
     verdict, e.g. ``gate.mitigation``'s best-effort fix suggestion (H2/T14:
-    that call site used to hardcode ``litellm.completion(model="claude-
+    that call site used to hardcode ``litellm.completion(model="claude-  # allow-literal: example
     haiku-4-5-20251001", ...)`` directly, with no budget counting, no policy
     kwargs, and — critically — no way to route through a self-hosted/proxy
     ``api_base`` at all).

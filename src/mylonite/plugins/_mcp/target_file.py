@@ -408,7 +408,7 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     SSTI/template-injection test payloads in fields like ``system_prompt``,
     ``purpose``, ``args``, or ``request.body`` — those are the tool's actual
     attack-payload surface — and a CI gate runner has real secrets
-    (``ANTHROPIC_API_KEY``, ``GH_TOKEN``, ...) set in its environment
+    (``ANTHROPIC_API_KEY``, ``GH_TOKEN``, ...) set in its environment  # allow-literal: example
     (``SECURITY.md``). Expanding ``${VAR}`` outside the credential fields would
     either silently substitute a live secret into an unrelated string headed
     for the target under test, or raise a confusing "undefined variable" error

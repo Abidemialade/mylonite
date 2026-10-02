@@ -367,7 +367,7 @@ def _emit_generated_test(
         # pytest, a provider key, a runnable MCP server, and the co-located YAML.
         echo("Next - this is a LIVE custom-target test. To run it you need:")
         echo("  - pytest + mylonite installed in the consuming environment")
-        echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")
+        echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")  # allow-literal: example
         echo("  - your target's MCP server runnable, and target.yaml co-located")
         echo("Then:")
         echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
