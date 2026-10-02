@@ -30,7 +30,11 @@ import pytest
 
 from mylonite.providers.registry import PROVIDERS
 from mylonite.scan import providers as providers_module
-from mylonite.scan.providers import provider_from_model, required_env_vars
+from mylonite.scan.providers import (
+    looks_like_provider_env_var,
+    provider_from_model,
+    required_env_vars,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -206,3 +210,62 @@ def test_an_explicit_override_wins_over_the_fallback(
 
 def test_no_provider_resolved_still_requires_nothing() -> None:
     assert required_env_vars(None) == ()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "MYLONITE_API_KEY",  # the scaffolded workflows' own CI secret name
+        "MYLONITE_MODEL",
+        "MYLONITE_OFFLINE_E2E",
+    ],
+)
+def test_mylonite_s_own_vars_never_look_like_a_provider_credential(key: str) -> None:
+    """A Mylonite-namespaced var is never a THIRD-PARTY provider's
+    credential, even one shaped like ``<X>_API_KEY`` -- the exact false
+    positive the re-review caught (the hardcoded-models check flagged
+    ``MYLONITE_API_KEY`` inside the scaffolded workflow templates, which
+    are rendered verbatim into a user's own repo, as if it were a hardcoded
+    provider default)."""
+    assert looks_like_provider_env_var(key) is False
+
+
+def test_a_real_provider_key_var_still_looks_like_one() -> None:
+    """Guards against the fix above over-reaching: only the MYLONITE_*
+    namespace is exempt -- an ordinary ``<PROVIDER>_API_KEY`` must still be
+    recognised."""
+    assert looks_like_provider_env_var("ANTHROPIC_API_KEY") is True
+
+
+def test_approved_providers_help_text_never_over_claims_bedrock_s_key() -> None:
+    """Bedrock never blocks on a missing env var (several credential forms
+    are accepted -- see `ProviderInfo.credential_best_effort`), so the help
+    text must not say it "needs AWS_ACCESS_KEY_ID": that's only the
+    canonical `key_env[0]`, not a requirement, and claiming otherwise is
+    exactly the over-claim the re-review caught."""
+    text = providers_module.approved_providers_help_text()
+    assert "AWS credentials" in text
+    assert "AWS_ACCESS_KEY_ID" not in text
+
+
+def test_approved_providers_help_text_names_every_provider_once() -> None:
+    text = providers_module.approved_providers_help_text()
+    for info in PROVIDERS.values():
+        assert text.count(info.id) >= 1, f"{info.id!r} missing from: {text!r}"
+
+
+def test_approved_providers_help_text_never_calls_vertex_self_hosted() -> None:
+    """`vertex_ai` authenticates via Application Default Credentials, not a
+    bare key -- it falls into the same keyless branch as a self-hosted
+    LiteLLM proxy, but it is a hosted Google service, so its own clause must
+    not describe it as self-hosted. (The doc page it points to is titled
+    ``self-hosted-models.md``, so the substring legitimately appears
+    elsewhere in the text -- only vertex_ai's OWN clause is checked here.)"""
+    text = providers_module.approved_providers_help_text()
+    assert "vertex_ai (" in text
+    clause = text.split("vertex_ai (", 1)[1].split(")", 1)[0]
+    # Strip the doc-link tail before checking: the page it points to is
+    # named ``self-hosted-models.md``, so the substring is expected to
+    # appear THERE -- only the credential description itself must avoid it.
+    need_description = clause.split(" -- see docs", 1)[0]
+    assert "self-hosted" not in need_description, need_description
