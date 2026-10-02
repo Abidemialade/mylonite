@@ -3238,7 +3238,7 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
-    from mylonite.scan._llm import BudgetExceededError, usage_tally
+    from mylonite.scan._llm import BudgetExceededError, LLMRequestCeilingError, usage_tally
     from mylonite.scan.artefacts import spend_summary
 
     spend_started = time.monotonic()
@@ -3263,7 +3263,10 @@ def gate(
     except BudgetExceededError as exc:
         # One decision, one exit code. Raised inside the validator this used to
         # escape uncaught and exit 1, while the same exhaustion seen first by
-        # the engine exits EXIT_BUDGET. Both now report the same way.
+        # the engine exits EXIT_BUDGET. Both now report the same way. A hard
+        # ceiling stop gets one line, printed by the root group.
+        if isinstance(exc, LLMRequestCeilingError):
+            raise typer.Exit(code=EXIT_BUDGET) from exc
         echo_err(f"\nerror: LLM call budget exhausted: {exc}")
         echo_err(budget_hint(routed_to, target_file))
         raise typer.Exit(code=EXIT_BUDGET) from exc

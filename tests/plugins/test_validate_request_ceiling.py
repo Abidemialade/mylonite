@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from tests.plugins.test_differential_validator import (
     _emit_test,
     _ScriptedCompletion,
 )
+from tests.plugins.test_record_during_validate import _install_fake_acompletion
 
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
 from mylonite.plugins._reference.reference_validator import (
@@ -100,3 +102,26 @@ def test_a_scan_the_ceiling_cut_short_reads_budget_exceeded(
     assert _scan().report.aborted is None
     monkeypatch.setattr(engine_mod, "request_ceiling_hit", lambda: 7)
     assert _scan().report.aborted == AbortReason.BUDGET_EXCEEDED
+
+
+@pytest.mark.parametrize("fraction", [0.5, 0.9, 0.99])
+def test_a_validation_the_ceiling_stopped_writes_no_test_or_exploit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fraction: float
+) -> None:
+    """Nothing on disk may look like a validated, committed test."""
+    total = _uncapped_requests()
+    monkeypatch.setenv(REQUEST_CEILING_ENV, str(max(1, int(total * fraction))))
+    _install_fake_acompletion(monkeypatch)
+    fixtures = tmp_path / "gen" / "fixtures"
+    validator = DifferentialValidator(
+        iterations=3, completion_fn=_ScriptedCompletion(), record_fixtures_dir=fixtures
+    )
+    with pytest.raises(LLMRequestCeilingError):
+        validator.validate(
+            _emit_test(_build_exploit()),
+            ReferenceVulnerableOracle().adapter(),
+            ReferenceVulnerableOracle(),
+        )
+    written = sorted(p.name for p in tmp_path.rglob("*") if p.is_file())
+    assert not [n for n in written if n.endswith(".py") or n.startswith("exploit")], written
+    assert "_meta.json" not in written

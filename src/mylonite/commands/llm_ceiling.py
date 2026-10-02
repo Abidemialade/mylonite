@@ -59,7 +59,20 @@ class CeilingGuardGroup(TyperGroup):
             result = super().invoke(ctx)
         except LLMRequestCeilingError as exc:
             raise _abort(exc.limit) from exc
+        except InvalidRequestCeilingError as exc:
+            # A ceiling Mylonite cannot enforce (a bad value, or a global
+            # LiteLLM retry count it could not count) is a usage error.
+            echo_err(f"error: {exc}")
+            raise typer.Exit(code=EXIT_CONFIG) from exc
         except typer.Exit as exc:
+            limit = request_ceiling_hit()
+            if limit is not None:
+                raise _abort(limit) from exc
+            raise
+        except Exception as exc:
+            # Anything else that escapes after a refusal (a wrapped refusal, a
+            # stage that broke on partial tallies, an ExceptionGroup from a
+            # transport task group) is still a run the ceiling cut short.
             limit = request_ceiling_hit()
             if limit is not None:
                 raise _abort(limit) from exc

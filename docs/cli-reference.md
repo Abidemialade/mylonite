@@ -16,7 +16,7 @@ counted. `--max-llm-calls` is a softer per-scan budget, described below.
 
 **Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
-empty scan) · `3` LLM-call budget exceeded · `4` provider unreachable · `5` test rejected
+empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` provider unreachable · `5` test rejected
 (not kept) · `6` `gate`: the test generator returned nothing (internal collaborator
 failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
 `gate`: the git/gh step failed (your findings and validation report are still in `--out`).

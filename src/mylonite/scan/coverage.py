@@ -329,6 +329,12 @@ _EXIT_CODE_BY_ABORT: Final[dict[AbortReason, int]] = {
 # `provider_unreachable` had the same gap until reason codes gave it a fix.
 
 
+def _request_ceiling_tripped() -> bool:
+    from mylonite.scan._llm import request_ceiling_hit
+
+    return request_ceiling_hit() is not None
+
+
 def _abort_message(code: str, what: str) -> str:
     return reason_codes.tag(code, f"error: {what} {reason_codes.get(code).fix}")
 
@@ -819,6 +825,11 @@ class ScanOutcome:
             # A detail the engine already coded (a specific `no_payloads` cause)
             # keeps its code; any other detail gets the abort's own code.
             message = abort_detail or _OPERATOR_MESSAGE_BY_ABORT[abort]
+            if abort is AbortReason.BUDGET_EXCEEDED and _request_ceiling_tripped():
+                # The CLI prints the one line that names the ceiling; this
+                # message would tell the operator to raise --max-llm-calls,
+                # which cannot help.
+                message = None
             operator_message = (
                 reason_codes.tag(reason_codes.ABT_CODE_BY_ABORT[abort.value], message)
                 if message

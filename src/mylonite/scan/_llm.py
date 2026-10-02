@@ -30,10 +30,14 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import datetime
+import email.utils
 import hashlib
 import json
 import logging
 import os
+import random
+import sys
 import threading
 import time
 from collections.abc import Iterable, Iterator, Mapping
@@ -124,8 +128,15 @@ class BudgetExceededError(RuntimeError):
 #: same ceiling for one invocation and wins over the variable.
 REQUEST_CEILING_ENV: Final = "MYLONITE_MAX_LLM_REQUESTS"
 
-#: Upper bound on one backoff sleep between retries, in seconds.
-_MAX_RETRY_BACKOFF_S: Final = 8.0
+#: Upper bound on one wait between retries, in seconds, even when a provider's
+#: ``Retry-After`` asks for longer.
+_MAX_RETRY_WAIT_S: Final = 60.0
+
+#: Exception modules whose "unknown" failures can be transient provider or
+#: transport errors, and so are worth another try. Anything else that lands in
+#: "unknown" (Mylonite's own replay errors, a stub's ``TypeError``) is a bug or
+#: a missing fixture, and retrying it only spends the ceiling.
+_PROVIDER_EXC_MODULES: Final = ("litellm", "openai", "anthropic", "httpx", "httpcore", "aiohttp")
 
 
 class InvalidRequestCeilingError(ValueError):
@@ -170,6 +181,9 @@ class _RequestCeiling:
     explicit: int | None = None
     sent: int = 0
     hit: int | None = None
+    #: The last env value parsed and its result, so the variable is parsed
+    #: once per value rather than on every request.
+    env_cache: tuple[str, int | None] | None = None
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
@@ -188,7 +202,12 @@ def request_ceiling() -> int | None:
     if _CEILING.explicit is not None:
         return _CEILING.explicit
     raw = os.environ.get(REQUEST_CEILING_ENV, "").strip()
-    return parse_request_ceiling(raw) if raw else None
+    cached = _CEILING.env_cache
+    if cached is not None and cached[0] == raw:
+        return cached[1]
+    value = parse_request_ceiling(raw) if raw else None
+    _CEILING.env_cache = (raw, value)
+    return value
 
 
 def requests_sent() -> int:
@@ -207,6 +226,7 @@ def reset_request_ceiling() -> None:
         _CEILING.explicit = None
         _CEILING.sent = 0
         _CEILING.hit = None
+        _CEILING.env_cache = None
 
 
 def _charge_request() -> None:
@@ -225,10 +245,16 @@ def _charge_request() -> None:
 
 def _refuse_if_spent() -> None:
     """Refuse a call outright, before it is counted as a call, once the ceiling
-    has nothing left. Keeps the spend line honest: a refused call never ran."""
+    has nothing left. Keeps the spend line honest: a refused call never ran.
+
+    Runs before each chokepoint's ``try``, so a bad ceiling value or a global
+    LiteLLM retry count fails here, loudly, instead of being swallowed into a
+    fallback verdict.
+    """
     limit = request_ceiling()
     if limit is None:
         return
+    _require_no_global_litellm_retries()
     with _CEILING.lock:
         if _CEILING.hit is not None or _CEILING.sent >= limit:
             _CEILING.hit = limit
@@ -244,18 +270,96 @@ def _send_plan(call_kwargs: dict[str, Any]) -> tuple[dict[str, Any], int]:
     return {**call_kwargs, "num_retries": 0, "max_retries": 0}, attempts
 
 
+def _require_no_global_litellm_retries() -> None:
+    """Refuse to run under a ceiling if ``litellm.num_retries`` is set globally.
+
+    LiteLLM's sync wrapper reads ``kwargs["num_retries"] or litellm.num_retries``,
+    so the ``num_retries=0`` sent under a ceiling falls through to a global
+    count, and those retries happen where Mylonite cannot count them. Mylonite
+    never sets the global; a caller that did would silently break the ceiling.
+    """
+    litellm = sys.modules.get("litellm")
+    if litellm is not None and getattr(litellm, "num_retries", None):
+        msg = (
+            f"{REQUEST_CEILING_ENV} cannot be enforced while litellm.num_retries is set "
+            f"globally ({litellm.num_retries!r}): those retries would not be counted. "
+            "Unset it, or set num_retries in mylonite.yaml instead."
+        )
+        raise InvalidRequestCeilingError(msg)
+
+
 def _retryable(exc: BaseException, model: str) -> bool:
-    """True when a failed send may succeed on another try (not auth/tls/...)."""
-    return _failure_category(exc, model) not in _NON_RECOVERABLE_CATEGORIES
+    """True when a failed send may succeed on another try.
+
+    Never auth/tls/context-window/bad-request. An "unknown" failure is retried
+    only when it came from the provider or transport stack, not from Mylonite's
+    own code or a test stub.
+    """
+    category = _failure_category(exc, model)
+    if category in _NON_RECOVERABLE_CATEGORIES:
+        return False
+    if category in ("rate_limit", "network"):
+        return True
+    return type(exc).__module__.split(".")[0] in _PROVIDER_EXC_MODULES
 
 
-def _retry_backoff_s(attempt: int) -> float:
-    return float(min(_MAX_RETRY_BACKOFF_S, 0.5 * 2**attempt))
+def _header_lookup(exc: BaseException) -> Any:
+    """The response headers a provider exception carries, or ``None``."""
+    for source in (getattr(exc, "response", None), exc):
+        headers = getattr(source, "headers", None)
+        if headers:
+            return headers
+    return getattr(exc, "litellm_response_headers", None) or None
 
 
-#: Indirections so tests can skip the wait between retries.
+def _retry_after_s(exc: BaseException) -> float | None:
+    """The wait a provider asked for (``retry-after-ms`` / ``retry-after``), if any."""
+    headers = _header_lookup(exc)
+    get = getattr(headers, "get", None)
+    if get is None:
+        return None
+    raw_ms = get("retry-after-ms")
+    if raw_ms is not None:
+        try:
+            return max(0.0, float(raw_ms) / 1000.0)
+        except (TypeError, ValueError):
+            pass
+    raw = get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, (when - datetime.datetime.now(datetime.UTC)).total_seconds())
+
+
+def _retry_wait_s(exc: BaseException, attempt: int, model: str) -> float:
+    """How long to wait before retry ``attempt + 1``.
+
+    Exponential backoff (0.5 s, 1 s, 2 s, ...). On a rate limit, the larger of
+    that and the provider's ``Retry-After``. Up to 25% jitter so parallel
+    attempts do not retry in lockstep. Never more than ``_MAX_RETRY_WAIT_S``.
+    """
+    wait = 0.5 * 2**attempt
+    if _failure_category(exc, model) == "rate_limit":
+        asked = _retry_after_s(exc)
+        if asked is not None:
+            wait = max(wait, asked)
+    wait *= 1.0 + 0.25 * _jitter()
+    return float(min(_MAX_RETRY_WAIT_S, wait))
+
+
+#: Indirections so tests can skip the wait between retries and pin the jitter.
 _sleep = time.sleep
 _async_sleep = asyncio.sleep
+_jitter = random.random
 
 
 def _send(fn: CompletionFn, call_kwargs: dict[str, Any], *, model: str) -> Any:
@@ -268,7 +372,7 @@ def _send(fn: CompletionFn, call_kwargs: dict[str, Any], *, model: str) -> Any:
         except Exception as exc:
             if attempt + 1 >= attempts or not _retryable(exc, model):
                 raise
-            _sleep(_retry_backoff_s(attempt))
+            _sleep(_retry_wait_s(exc, attempt, model))
     raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover
 
 
@@ -282,7 +386,7 @@ async def _send_async(fn: AsyncCompletionFn, call_kwargs: dict[str, Any], *, mod
         except Exception as exc:
             if attempt + 1 >= attempts or not _retryable(exc, model):
                 raise
-            await _async_sleep(_retry_backoff_s(attempt))
+            await _async_sleep(_retry_wait_s(exc, attempt, model))
     raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover
 
 
