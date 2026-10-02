@@ -258,12 +258,13 @@ def _render_target_scaffold(
     roles: _ToolRoles | None = None,
     tools: list[Any] | None = None,
 ) -> str:
-    """Render a commented, ready-to-edit ``target.yaml`` starter.
+    """Render a ``target.yaml`` that runs as written.
 
-    When ``roles`` is supplied, the ``seed_arm`` and ``effect_probe`` blocks are
-    pre-filled with concrete candidates auto-detected from the tool schemas
-    (still commented — the operator confirms and uncomments), instead of blank
-    placeholders. ``tools`` (the same list ``roles`` was classified from) drives
+    When ``roles`` is supplied, a ``seed_arm`` the scan's auto-wire would infer
+    and an ``effect_probe`` on a no-argument readback tool are written live,
+    each tagged ``# auto-detected``; a candidate that still needs a human value
+    stays commented (see ``_render_seed_arm_block`` and
+    ``_render_effect_probe_block``). ``tools`` (the same list ``roles`` was classified from) drives
     two things that must never diverge from what a live scan would do: the
     "consequential tools detected" hint (``control_shim.consequential_tool_names``
     — the SAME classifier the runtime W4 control and ``mylonite check`` use, so
@@ -297,64 +298,24 @@ def _render_target_scaffold(
     )
     scope_line = f"scope: {tf.scope}\n" if tf.scope is not None else "# scope: my-scope\n"
 
-    # Pre-fill seed_arm/effect_probe from the detected roles (commented — confirm
-    # then uncomment). Concrete tool + param names beat blank placeholders.
-    sa_tool = roles.seed_arm_tool or "<tool that stores/accepts untrusted content>"
-    sa_param = roles.seed_arm_param or "body"
-    if roles.seed_arm_tool is not None and roles.retrieve_tool is not None:
-        sa_status = (
-            f"# CANDIDATE (auto-detected): {roles.seed_arm_tool} stores content; "
-            f"{roles.retrieve_tool} surfaces it without an id."
-        )
-    elif roles.seed_arm_tool is not None:
-        sa_status = (
-            f"# CANDIDATE (auto-detected): {roles.seed_arm_tool} — WARNING: no id-free retrieval "
-            "tool detected, so the planted poison may never be readable back (save_note trap)."
-        )
-    else:
-        sa_status = (
-            "# (no content-storing tool auto-detected — fill in the tool that ingests content)"
-        )
-    # The args_template to suggest: the NESTED template the auto-wire path
-    # (tool_roles._content_slot_template) computes for a batched array-of-records
-    # write, else the flat single-string form. The scaffold used to hard-code the
-    # flat `{param: "{payload}"}` even for a tool whose content slot is nested
-    # (server-memory's create_entities), producing a template the server's own
-    # schema rejects — and a comment insisting on a "BARE string leaf" that is
-    # impossible for such a tool. Reuse exactly what the live scan would infer.
-    import yaml as _yaml
-
-    _template = getattr(roles, "seed_arm_args_template", None) or {sa_param: "{payload}"}
-    _nested = _template != {sa_param: "{payload}"}
-    sa_args_block = "\n".join(
-        f"#     {line}" for line in _yaml.safe_dump(_template, sort_keys=False).splitlines()
-    )
-    sa_placement_note = "# args_template below places {payload} at this tool's content slot " + (
-        "(a nested array-of-records slot, auto-detected)." if _nested else "(a bare string leaf)."
-    )
-    verify_tool = roles.verify_tool or "<tool that reports the side effect>"
-    ep_status = (
-        f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}."
-        if roles.verify_tool is not None
-        else "# (no side-effect-reporting tool auto-detected — point this at one)"
+    # The seed_arm and effect_probe blocks. A block the scan can use as written
+    # goes in live, tagged `# auto-detected: <why>`; anything that still needs a
+    # human value stays commented with the candidate filled in.
+    seed_arm_block = _render_seed_arm_block(roles)
+    effect_block = _render_effect_probe_block(
+        roles=roles,
+        tools=tools,
+        effectful=sorted({"W3", "W4"} & set(suggested_weaknesses)),
     )
     sink_hint = (
         f"# Consequential-action tools detected (W4 candidates): {', '.join(consequential_tools)}.\n"
         if consequential_tools
         else ""
     )
-    # The verify tool's own required top-level args, stubbed to a type-valid
-    # placeholder — never the bare `{}` that used to make the verify call
-    # error against a tool like `read_text_file` (requires `path`).
-    by_name = {getattr(t, "name", ""): t for t in tools}
-    verify_tool_obj = by_name.get(roles.verify_tool) if roles.verify_tool is not None else None
-    verify_args = _verify_args_stub(verify_tool_obj) if verify_tool_obj is not None else {}
-    verify_args_line = (
-        _yaml.safe_dump(verify_args, default_flow_style=True).strip() if verify_args else "{}"
-    )
     return f"""\
 # Mylonite custom-target scaffold — generated by `mylonite scan --scaffold`.
-# Review and EDIT before scanning: the suggestions below are hints, not gospel.
+# Blocks tagged `# auto-detected` are live: the scan uses them as written.
+# Review them, and edit anything that does not match your server.
 family: {tf.family}
 command: {tf.command}
 args: {args_line}
@@ -364,7 +325,7 @@ args: {args_line}
 # Use weakness_classes to control what gets tested.
 primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
 
-# Weakness classes this target exposes (SUGGESTED — confirm/edit):
+# Weakness classes this target exposes (only classes this surface can be tested for):
 #   W1 tool-description instruction smuggling · W2 indirect injection
 #   W3 unrestricted egress / SSRF · W4 unconfirmed consequential action
 weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else "[]"}
@@ -372,28 +333,130 @@ weakness_classes: {_yaml_list(suggested_weaknesses) if suggested_weaknesses else
 # How to plant untrusted content for indirect-injection (W2) seeds. {{payload}}
 # is replaced per attempt with a natural-language payload. It goes at the tool's
 # free-text content slot — a bare string leaf for a simple tool, or a nested
-# array/object slot for a batched-record tool (shown below, matching the tool's
-# own schema; do NOT flatten it to a string).
-{sa_status}
-{sa_placement_note}
-# seed_arm:
-#   tool: {sa_tool}
-#   args_template:
-{sa_args_block}
-#   id_key: id           # the field in the store tool's RESULT holding the new record's
-#                        # handle (look for: id, uuid, note_id, key, _id). ONLY needed when
-#                        # recall requires that id; a list/search-style recall does not.
-#                        # Alternatives: id_pattern (a regex) or id_from: first_int.
-
+# array/object slot for a batched-record tool (matching the tool's own schema;
+# do NOT flatten it to a string).
+{seed_arm_block}
 # How to CONFIRM the damage materialised end-to-end (the effect probe). After the
-# attack, re-query the target and check the damaging side effect is present.
-{ep_status}
-{sink_hint}# effect_probe:
-#   verify_tool: {verify_tool}
-#   verify_args_template: {verify_args_line}
-#   expect_marker: "<a string proving the effect, e.g. the attacker recipient>"
-#   deferred_markers: ["queued for approval", "pending review"]  # mark a DEFENDED result
-"""
+# attack, the scan re-reads the target's state and checks the side effect is new.
+{sink_hint}{effect_block}"""
+
+
+def _render_seed_arm_block(roles: _ToolRoles) -> str:
+    """The seed_arm block: live when the scan's auto-wire would infer the same
+    one (a store tool plus an id-free recall tool), commented otherwise.
+
+    Mirrors :func:`~mylonite.plugins._mcp.target_file.infer_seed_arm` over the
+    same roles, so the scaffold never writes a seed_arm the scan would not.
+    """
+    sa_param = roles.seed_arm_param or "body"
+    template = roles.seed_arm_args_template or {sa_param: "{payload}"}
+    nested = template != {sa_param: "{payload}"}
+    placement = "# args_template places {payload} at this tool's content slot " + (
+        "(a nested array-of-records slot, auto-detected)." if nested else "(a bare string leaf)."
+    )
+    id_help = (
+        "#   id_key: id         # the field in the store tool's RESULT holding the new record's\n"
+        "#                      # handle (look for: id, uuid, note_id, key, _id). ONLY needed when\n"
+        "#                      # recall requires that id; a list/search-style recall does not.\n"
+        "#                      # Alternatives: id_pattern (a regex) or id_from: first_int.\n"
+    )
+    if roles.seed_arm_tool and roles.seed_arm_param and roles.retrieve_tool:
+        live = yaml.safe_dump(
+            {"seed_arm": {"tool": roles.seed_arm_tool, "args_template": template}},
+            sort_keys=False,
+        )
+        return (
+            f"# auto-detected: {roles.seed_arm_tool} stores content and "
+            f"{roles.retrieve_tool} surfaces it without an id.\n"
+            "# This is the seed_arm a scan would wire on its own; confirm or edit it.\n"
+            f"{placement}\n{live}{id_help}"
+        )
+    if roles.seed_arm_tool is not None:
+        status = (
+            f"# CANDIDATE: {roles.seed_arm_tool} stores content, but no id-free retrieval "
+            "tool was detected, so a\n# planted payload may never be read back: the agent "
+            "never learns a new record's id.\n# Left commented, and W2 is not suggested "
+            "above for that reason. Declare a seed_arm\n# by hand if your server can "
+            "recall what it stores."
+        )
+    else:
+        status = "# (no content-storing tool auto-detected — fill in the tool that ingests content)"
+    tool = roles.seed_arm_tool or "<tool that stores/accepts untrusted content>"
+    args = "\n".join(
+        f"#     {line}" for line in yaml.safe_dump(template, sort_keys=False).splitlines()
+    )
+    return (
+        f"{status}\n{placement}\n# seed_arm:\n#   tool: {tool}\n#   args_template:\n"
+        f"{args}\n{id_help}"
+    )
+
+
+def _render_effect_probe_block(*, roles: _ToolRoles, tools: list[Any], effectful: list[str]) -> str:
+    """The effect_probe block.
+
+    Live when the file suggests W3 or W4 and the surface has a readback tool
+    that takes no required argument: the scan can call it as written. It
+    declares no ``expect_marker`` (any new change a linked call made counts)
+    and no deferral words, so a reply that says "queued" stays inconclusive
+    (``MYL-INC-012``) rather than reading resisted. A readback tool that needs
+    arguments stays commented with a stub to fill in. No readback tool at all
+    marks W3/W4 "effect unconfirmable": the scan then reads those classes NOT
+    TESTED (``MYL-NT-017``) unless an attempt fires.
+    """
+    from mylonite import reason_codes
+
+    by_name = {getattr(t, "name", ""): t for t in tools}
+    verify_obj = by_name.get(roles.verify_tool) if roles.verify_tool is not None else None
+    # The verify tool's own required top-level args, stubbed to a type-valid
+    # placeholder — never the bare `{}` that used to make the verify call
+    # error against a tool like `read_text_file` (requires `path`).
+    verify_args = _verify_args_stub(verify_obj) if verify_obj is not None else {}
+    verify_args_line = (
+        yaml.safe_dump(verify_args, default_flow_style=True).strip() if verify_args else "{}"
+    )
+    classes = "/".join(effectful)
+    optional = (
+        '#   expect_marker: "{exfil_email}"  # optional: "{exfil_email}" for a send (W4),\n'
+        '#                                   # "{exfil_host}" for a fetch (W3). Ties the\n'
+        "#                                   # effect to this attempt's own destination.\n"
+        '#   deferred_markers: ["held for approval"]  # words that mark a HELD item in the\n'
+        "#                                   # readback. Leave unset unless you know them.\n"
+    )
+    if effectful and roles.verify_tool is not None and not verify_args:
+        live = yaml.safe_dump(
+            {"effect_probe": {"verify_tool": roles.verify_tool, "verify_args_template": {}}},
+            sort_keys=False,
+        )
+        return (
+            f"# auto-detected: {roles.verify_tool} reads the target's state back. Confirm it "
+            f"shows what a\n# {classes} attack would change (a sent message, a fetched URL, "
+            "a written record).\n# With no expect_marker, any new change a call from this "
+            "attempt made counts as the effect.\n# A reply that says it queued the action "
+            f"reads NOT TESTED [{reason_codes.INC_UNCHECKED_DEFERRAL}], never resisted.\n"
+            f"{live}{optional}"
+        )
+    if effectful and roles.verify_tool is None:
+        status = (
+            f"# effect unconfirmable: no tool on this server reads its state back, so a "
+            f"{classes} effect\n# cannot be confirmed or ruled out. Those classes read NOT "
+            f"TESTED [{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an\n# attempt fires. "
+            "Point an effect_probe at a tool that reads back what the attack changes."
+        )
+    elif roles.verify_tool is not None and verify_args:
+        status = (
+            f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}. It needs "
+            "arguments: fill in each\n# <value> with what the attack would change, "
+            "then uncomment."
+        )
+    elif roles.verify_tool is not None:
+        status = f"# CANDIDATE verify_tool (auto-detected): {roles.verify_tool}."
+    else:
+        status = "# (no side-effect-reporting tool auto-detected — point this at one)"
+    verify_tool = roles.verify_tool or "<tool that reports the side effect>"
+    return (
+        f"{status}\n# effect_probe:\n#   verify_tool: {verify_tool}\n"
+        f"#   verify_args_template: {verify_args_line}\n{optional}"
+    )
 
 
 def _scaffold_target_file(
@@ -495,7 +558,7 @@ def _scaffold_target_file(
     from mylonite.plugins._mcp.target_file import TargetFile
 
     try:
-        TargetFile.model_validate(yaml.safe_load(yaml_text))
+        written = TargetFile.model_validate(yaml.safe_load(yaml_text))
     except Exception as exc:  # pragma: no cover - defensive; the scaffold is fixed-shape
         echo_exc("internal error: scaffolded YAML failed validation", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
@@ -503,42 +566,57 @@ def _scaffold_target_file(
     _atomic_write_text(output, yaml_text)
     echo(f"wrote {output} — {len(tool_names)} tools discovered.")
     echo_err(
-        "  suggested weakness_classes "
-        f"{suggested_weaknesses or '[]'} (hints — confirm/edit before scanning)."
+        f"  weakness_classes {suggested_weaknesses or '[]'}: the classes this surface "
+        "can be tested for."
     )
-    if roles.seed_arm_tool is not None:
+    # Describe what was WRITTEN (the round-tripped file), so these lines can
+    # never disagree with the file or with what the scan then does.
+    needs_hand_edit = False
+    if written.seed_arm is not None:
         echo_err(
-            f"  seed_arm candidate: {roles.seed_arm_tool}(...{roles.seed_arm_param}='{{payload}}') "
-            f"+ retrieval via {roles.retrieve_tool!r}."
-            if roles.retrieve_tool is not None
-            else (
-                f"  seed_arm candidate: {roles.seed_arm_tool} — but NO id-free retrieval tool was "
-                "found to surface what it stores. The planner never learns a new record's id, so a "
-                "store whose only readback needs that id (the save_note/read_note trap) will never "
-                "deliver the poison. Confirm a list/recall/search-style tool exists, or expect those "
-                "seeds to report NOT TESTED."
-            )
+            f"  seed_arm: auto-detected and written live: {written.seed_arm.tool} plants "
+            f"content, {roles.retrieve_tool} recalls it."
         )
-    elif "W2" in suggested_weaknesses:
+    elif roles.seed_arm_tool is not None:
         echo_err(
-            "  no obvious content-storing tool found for the seed_arm — fill it in by hand "
-            "(the tool that ingests untrusted content), or W2 seeds will report NOT TESTED."
+            f"  seed_arm: {roles.seed_arm_tool} stores content, but no id-free retrieval tool "
+            "was found to read it back. The agent never learns a new record's id, so a store "
+            "whose only readback needs that id cannot deliver a planted payload. The block is "
+            "left commented and W2 is not suggested."
         )
-    if roles.verify_tool is not None and {"W3", "W4"} & set(suggested_weaknesses):
+    effectful = sorted({"W3", "W4"} & set(written.weakness_classes))
+    if written.effect_probe is not None:
         echo_err(
-            f"  effect_probe candidate: {roles.verify_tool} (left commented). Check that it "
-            "reads back what a W3/W4 attack would change, then uncomment it."
+            f"  effect_probe: auto-detected and written live: {written.effect_probe.verify_tool} "
+            f"reads the target's state back. Check it shows what a {'/'.join(effectful)} "
+            "attack would change."
+        )
+    elif effectful and roles.verify_tool is not None:
+        needs_hand_edit = True
+        echo_err(
+            f"  effect_probe: candidate {roles.verify_tool} needs arguments, so the block is "
+            "left commented. Fill in its verify_args_template, then uncomment it."
+        )
+    elif effectful:
+        from mylonite import reason_codes
+
+        echo_err(
+            f"  effect_probe: none. No tool on this server reads its state back, so the "
+            f"{'/'.join(effectful)} effect is unconfirmable: those classes will read NOT "
+            f"TESTED [{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an attempt fires."
         )
     from mylonite._authz import required_authorization
     from mylonite._target_env import echo_env_notice
 
     echo_env_notice(yaml_text, output)
-    echo_err(
-        "  next: fill in the seed_arm (how to plant untrusted content) and the "
-        "effect_probe (how to confirm damage), then run "
+    run = (
         f"`mylonite scan --target-file {output} "
-        f"--authorize {required_authorization(family=spec.family, scope=tf.scope)}`."
+        f"--authorize {required_authorization(family=spec.family, scope=tf.scope)}`"
     )
+    if needs_hand_edit:
+        echo_err(f"  next: fill in the commented effect_probe, then run {run}.")
+    else:
+        echo_err(f"  next: review the auto-detected blocks, then run {run}.")
 
 
 _RESERVED_FAMILIES = frozenset({"filesystem", "fetch", "github", "target", "app"})

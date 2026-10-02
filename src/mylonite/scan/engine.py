@@ -44,6 +44,7 @@ from mylonite.scan._llm import (
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.coverage import (
+    EFFECT_UNCONFIRMABLE_KEY,
     MODULE_LOAD_FAILURE_KEY,
     NO_ATTACK_EMITTED_KEY,
     NO_VERDICT_EVIDENCE_KEYS,
@@ -484,6 +485,57 @@ def _unemitted_class_attempts(
     return attempts
 
 
+#: Classes whose finding turns on a real side effect (a send, a fetch, a write).
+_EFFECTFUL_CLASSES = frozenset({"W3", "W4"})
+
+
+def _effect_unconfirmable_attempts(
+    descriptor: TargetDescriptor,
+    payloads: Iterable[Payload],
+    *,
+    effect_probe_declared: object,
+    seeds_by_id: Mapping[str, Any] | None = None,
+) -> list[ScanAttempt]:
+    """One NOT TESTED attempt per W3/W4 class whose effect nothing can read back.
+
+    Applies only when the adapter says no ``effect_probe`` is declared
+    (its ``declares_effect_probe`` is ``False``; an adapter that does not say is left
+    alone), the target declares its weakness classes, and its tool surface has
+    no readback tool -- the same detector ``scan --scaffold`` uses to propose an
+    effect_probe, so the two agree. Such a server gives no way to confirm or
+    rule out an effect, so the class must never read as resisted. An attempt in
+    the class that fired still makes the class a finding: this adds a NOT
+    TESTED row, it does not change any attempt's verdict.
+    """
+    from mylonite.scan.tool_roles import readback_tool
+
+    if effect_probe_declared is not False or not descriptor.weakness_classes:
+        return []
+    if not descriptor.tools or readback_tool(list(descriptor.tools)) is not None:
+        return []
+    by_id = {s.pattern_id: s for s in SEED_CATALOGUE} | dict(seeds_by_id or {})
+    emitted = {w for p in payloads if (w := _payload_weakness(p, by_id))}
+    attempts: list[ScanAttempt] = []
+    for weakness in sorted(emitted & _EFFECTFUL_CLASSES):
+        seed_id = f"effect-unconfirmable:{weakness}"
+        reason = reason_codes.tag(
+            reason_codes.NT_EFFECT_UNCONFIRMABLE,
+            f"no tool on this server reads its state back and no effect_probe is "
+            f"declared, so a {weakness} effect could not be confirmed or ruled out.",
+        )
+        attempts.append(
+            ScanAttempt(
+                seed_id=seed_id,
+                pattern_id=seed_id,
+                outcome="not_applicable",
+                verdict_reason=reason,
+                not_applicable_reason=reason,
+                judge_evidence={EFFECT_UNCONFIRMABLE_KEY: "true", "weakness": weakness},
+            )
+        )
+    return attempts
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -667,6 +719,14 @@ class ScanEngine:
                         descriptor,
                         all_payloads,
                         already_lost=lost,
+                        seeds_by_id=self._seeds_by_id,
+                    )
+                )
+                attempts.extend(
+                    _effect_unconfirmable_attempts(
+                        descriptor,
+                        all_payloads,
+                        effect_probe_declared=getattr(self._adapter, "declares_effect_probe", None),
                         seeds_by_id=self._seeds_by_id,
                     )
                 )

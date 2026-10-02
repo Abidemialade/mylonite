@@ -43,6 +43,7 @@ from mylonite.scan.class_verdict import (
 )
 from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
+    EFFECT_UNCONFIRMABLE_KEY,
     MODULE_LOAD_FAILURE_KEY,
     NO_ATTACK_EMITTED_KEY,
     AttemptClass,
@@ -325,7 +326,11 @@ def _has_class_summary(result: ScanResult) -> bool:
         has_trace_outcome(result.report)
         or result.calibration is not None
         or bool(_load_failures(result.report))
-        or any(a.judge_evidence.get(NO_ATTACK_EMITTED_KEY) for a in result.report.attempts)
+        or any(
+            a.judge_evidence.get(NO_ATTACK_EMITTED_KEY)
+            or a.judge_evidence.get(EFFECT_UNCONFIRMABLE_KEY)
+            for a in result.report.attempts
+        )
     )
 
 

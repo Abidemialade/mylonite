@@ -5,6 +5,26 @@ YAML declares how to launch the server, which weakness classes it exposes, and h
 plant and verify attacks. `mylonite scan --scaffold app.yaml` scaffolds one for you; this
 page is the full field reference. Source: `mylonite.plugins._mcp.target_file.TargetFile`.
 
+The scaffold writes a file that runs as written. What it detects goes in live,
+each block tagged `# auto-detected`:
+
+- a `seed_arm` when the server has a tool that stores content and a tool that reads it
+  back without an id. It is the same `seed_arm` a scan would wire on its own, so the
+  scaffold and the scan agree.
+- an `effect_probe` when the file lists W3 or W4 and a tool reads the server's state back
+  with no required argument (`verify_args_template: {}`). It sets no `expect_marker`, so
+  any new change a call from the attempt made counts as the effect, and no deferral words,
+  so a reply that says "queued" reads NOT TESTED
+  ([`MYL-INC-012`](reason-codes.md#myl-inc-012)), never resisted.
+
+A readback tool that needs arguments is written commented, with its required arguments
+stubbed: fill them in and uncomment the block. A server with no readback tool at all gets
+W3 and W4 marked "effect unconfirmable": nothing can confirm or rule out their effect, so
+the scan reads those classes NOT TESTED
+([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt fires. A store tool whose
+only readback needs the new record's id (the agent never learns it) gets a commented
+`seed_arm`, and W2 is left out of `weakness_classes`.
+
 `--scaffold` checks the output path is writable (not a directory, parent creatable)
 before it launches your server, so a bad path fails fast with one line, not a
 traceback after the launch cost. The write itself is atomic — a crash mid-write
@@ -216,9 +236,12 @@ for a `vulnerable_launch` twin.
   [How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided)).
   `mylonite scan --scaffold` names a candidate `verify_tool`: a tool that reports what was
   sent (an outbox, a status or history tool), or else a readback of the store that needs
-  no record id, such as `read_graph`, preferring one with no required arguments. It is
-  written commented out; check that it reads back what an attack would change, then
-  uncomment it. Not available on a `transport: rest` target, where W3 and W4 read NOT
+  no record id, such as `read_graph`, preferring one with no required arguments. One with
+  no required arguments is written live when the file lists W3 or W4; one that needs
+  arguments is written commented out. Check that it reads back what an attack would
+  change. With no `effect_probe` and no such tool on the server, a W3 or W4 class reads
+  NOT TESTED ([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt in it fires.
+  Not available on a `transport: rest` target, where W3 and W4 read NOT
   TESTED ([`MYL-NT-016`](reason-codes.md#myl-nt-016)). `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success. List in `deferred_markers` only
   words that mark a held item in the verify tool's output, never a word that also shows for

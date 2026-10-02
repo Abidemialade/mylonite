@@ -480,6 +480,12 @@ MODULE_LOAD_FAILURE_KEY: Final = "module_load_failure"
 #: from a seed that missed a capability by this ``judge_evidence`` key.
 _NO_ATTACK_EMITTED_BUCKET: Final = "no_attack_emitted"
 NO_ATTACK_EMITTED_KEY: Final = "no_attack_emitted"
+#: The engine records one ``outcome == "not_applicable"`` attempt per W3/W4
+#: class on a server that has no tool to read its state back and no declared
+#: effect_probe: the class's effect can be neither confirmed nor ruled out, so
+#: it must never read as resisted. Told apart by this ``judge_evidence`` key.
+_EFFECT_UNCONFIRMABLE_BUCKET: Final = "effect_unconfirmable"
+EFFECT_UNCONFIRMABLE_KEY: Final = "effect_unconfirmable"
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -570,6 +576,9 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     "skipped_unknown_seed": "could not be resolved from the seed catalogue",
     _MODULE_LOAD_FAILED_BUCKET: "belong to an attack module that failed to load",
     _NO_ATTACK_EMITTED_BUCKET: "stand for a class no attack module in this run emitted an attack for",
+    _EFFECT_UNCONFIRMABLE_BUCKET: (
+        "stand for a class whose effect no tool on this server can read back"
+    ),
 }
 
 _BUCKET_REMEDY: Final[dict[str, str]] = {
@@ -622,6 +631,8 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
         evidence = getattr(attempt, "judge_evidence", None) or {}
         if evidence.get(NO_ATTACK_EMITTED_KEY):
             return _NO_ATTACK_EMITTED_BUCKET
+        if evidence.get(EFFECT_UNCONFIRMABLE_KEY):
+            return _EFFECT_UNCONFIRMABLE_BUCKET
     return str(outcome)
 
 

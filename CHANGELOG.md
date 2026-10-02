@@ -82,6 +82,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot gains the new name.
 ### Added
 
+- **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
+  scan would wire on its own, and an `effect_probe` on a readback tool that
+  needs no arguments, are now written live and tagged `# auto-detected`,
+  instead of commented out for you to edit. On server-memory, for example,
+  the file plants through `create_entities` and confirms effects through
+  `read_graph` with no hand edits. A readback tool that needs arguments stays
+  commented with its arguments stubbed. The proposed probe declares no
+  deferral words, so a "queued" reply still reads NOT TESTED.
+- **A W3 or W4 class whose effect nothing can read back reads NOT TESTED.**
+  On a custom MCP server with no tool that reads its state back and no
+  `effect_probe`, each W3/W4 class that ran gets one NOT TESTED row under the
+  new reason code `MYL-NT-017`, so the class reads as a finding or NOT
+  TESTED, never resisted, and the scan cannot read clean. `scan --scaffold`
+  marks such classes "effect unconfirmable" and uses the same readback
+  detector. The reason-code snapshot gains the new code.
 - **`gate --base <branch>` picks the branch the gating PR targets.** Without
   it, `gate` now uses your repository's default branch: `origin/HEAD`, else
   the branch your current branch tracks, else `main`. It used to target
