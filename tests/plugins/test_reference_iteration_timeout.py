@@ -8,7 +8,6 @@ Offline: a scripted completion function stands in for every LLM call.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 import pytest
@@ -25,6 +24,7 @@ from mylonite.plugins._reference import reference_validator as rv
 from mylonite.plugins._reference.reference_validator import (
     DifferentialValidator,
     ReferenceVulnerableOracle,
+    unguarded_no_verdict,
 )
 
 
@@ -78,12 +78,15 @@ def test_a_slow_reference_run_is_cut_off_and_fails_closed(
         iteration_timeout_s=0.05,
     )
 
-    started = time.monotonic()
     report = _validate(validator, _build_exploit())
 
-    assert time.monotonic() - started < 2.0
     assert report.kept is False
-    assert _outcome(report, "differential").passed is False
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    # The cut-off unguarded run is counted as reaching no verdict, not as an
+    # attack that never landed.
+    assert "reached no verdict 1/1" in differential.detail
+    assert unguarded_no_verdict(report.notes) == 1
 
 
 def test_an_exploit_for_an_unknown_seed_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,3 +145,63 @@ def test_a_custom_adapter_factory_that_raises_is_a_target_launch_error() -> None
 
     with pytest.raises(TargetLaunchError):
         validator.validate(test, object(), ReferenceVulnerableOracle())  # type: ignore[arg-type]
+
+
+def test_the_custom_differential_stamps_the_stand_in_guard_mode() -> None:
+    from tests.plugins.test_differential_validator import (
+        _cust_completion,
+        _custom_exploit,
+        _FakeCustomAdapter,
+    )
+
+    from mylonite._twin_fidelity import guard_mode_in
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+
+    validator = DifferentialValidator(
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=lambda: _FakeCustomAdapter("true"),
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("false"),
+        control_weakness="W4",
+        guard_mode="approve-policy",
+    )
+    report = validator.validate(
+        ReferencePytestGenerator().emit(_custom_exploit()),
+        _FakeCustomAdapter("true"),
+        ReferenceVulnerableOracle(),
+    )
+
+    assert guard_mode_in(report.notes) == "approve-policy"
+
+
+def test_a_target_that_goes_down_mid_loop_names_the_runs_it_discarded() -> None:
+    from tests.plugins.test_differential_validator import (
+        _cust_completion,
+        _custom_exploit,
+        _FakeCustomAdapter,
+    )
+
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+    from mylonite.plugins._reference.reference_validator import TargetLaunchError
+
+    class _DiesOnThirdRun(_FakeCustomAdapter):
+        calls = 0
+
+        async def describe(self) -> Any:
+            type(self).calls += 1
+            if type(self).calls >= 3:
+                raise OSError("server exited")
+            return await super().describe()
+
+    validator = DifferentialValidator(
+        iterations=3, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+    )
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+
+    with pytest.raises(TargetLaunchError) as caught:
+        validator.validate(test, _DiesOnThirdRun("true"), ReferenceVulnerableOracle())
+
+    assert caught.value.completed_runs == 2
+    assert "after 2 of 3 runs finished, 2 of them fired" in str(caught.value)

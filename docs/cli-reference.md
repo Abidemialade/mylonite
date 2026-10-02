@@ -232,9 +232,10 @@ differential to measure whether that input defence is load-bearing; a no-op once
 (mint a unique exfil address per run so the finding proves the target blocks ANY attacker
 destination, not one demo literal — **defaults ON for live custom-target runs**, off for the
 reference/replay path); `--iteration-timeout S` (default 120s — the wall-clock budget for each
-validation run, on a custom target and on the bundled reference twins alike; a
-stuck or slow run is cut off cleanly, counts as no verdict, and never hangs
-the job).
+differential run, on a custom target and on the bundled reference twins alike; a
+stuck or slow run is cut off cleanly, is reported as reaching no verdict, never
+counts as the guard resisting, and never hangs the job. The robustness re-drives
+and the fixture recording have their own call budget instead).
 
 The report's notes record the models the test was proved against
 (`validated against model: <planner>`, plus the customiser and judge when they differ).
@@ -248,8 +249,11 @@ guarded side or an `effect_probe`.
 
 A run that cannot reach a verdict stops with one line and no traceback. It exits `3`
 (`MYL-ABT-001`) when the LLM call budget runs out mid-run, and `2` (`MYL-ABT-006`)
-when a custom target never comes up, so no run could even describe it. Neither is
-reported as a rejected test.
+when a custom target does not come up, so a run could not even describe it. If the
+target went down after some runs finished, the line says how many and that their
+results were discarded. Neither is reported as a rejected test. `gate` reports a
+target that does not come up the same way, and says later findings were not
+validated.
 
 When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
 tokens the provider reported, and the wall-clock time. The metamorphic stage runs under

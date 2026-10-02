@@ -26,6 +26,7 @@ elsewhere in ``src/``.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 #: Which build the guarded side of a differential actually was.
@@ -50,6 +51,38 @@ PROOF_CLAIM_BOUNDARY = (
     "side was Mylonite's boundary shim, not your implementation, so this does not "
     "establish that your own control carries the security"
 )
+
+
+#: How a synthetic guarded side decides, stamped next to the twin marker so a
+#: report can say what a pass against it shows. ``block``: refuses every
+#: consequential call. ``approve-deny``: approve mode with the default deny-all
+#: policy, which refuses every call too. ``allowlist``: refuses egress to any
+#: host outside a fixed allowlist. ``approve-policy``: an approval policy decides
+#: each call. ``observe``: records and never refuses. ``pin``: refuses a call to
+#: a tool whose description changed. ``input-frame``: wraps the input as data,
+#: and the agent still decides.
+GuardMode = Literal[
+    "block", "approve-deny", "allowlist", "approve-policy", "observe", "pin", "input-frame"
+]
+
+#: The modes whose guarded side resists this attack by construction: the guard
+#: refuses the call whatever the model does, so a pass shows the attack is real
+#: and that this kind of guard stops it, and nothing about a guard that decides.
+REFUSES_BY_DESIGN: frozenset[str] = frozenset({"block", "approve-deny", "allowlist"})
+
+_GUARD_MODE_PREFIX = "guard-mode="
+_GUARD_MODE_RE = re.compile(r"\[" + re.escape(_GUARD_MODE_PREFIX) + r"([a-z-]+)\]")
+
+
+def format_guard_mode(mode: str) -> str:
+    """The bracketed guard-mode marker to append to ``ValidationReport.notes``."""
+    return f"[{_GUARD_MODE_PREFIX}{mode}]"
+
+
+def guard_mode_in(notes: str | None) -> str | None:
+    """The guard mode a report's notes carry, or ``None`` (older reports)."""
+    match = _GUARD_MODE_RE.search(notes or "")
+    return match.group(1) if match else None
 
 
 def format_marker(*, server_layer: bool) -> str:

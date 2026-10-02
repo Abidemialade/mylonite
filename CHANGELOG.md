@@ -12,15 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
   model could stall a reference `validate` run past the limit you set. Each
-  twin's run is now cut off at the limit and counts as no verdict, so a
-  cut-off run can never help a test get kept. The option's help text changed,
-  so the command-tree snapshot changed.
-- **`validate` stops with one line, not a traceback, when it cannot reach a
-  verdict.** A spent LLM call budget now exits `3` (`MYL-ABT-001`); it used to
-  print a traceback and exit `1`, the findings code. A custom target that never
-  comes up now exits `2` (`MYL-ABT-006`) after the first run, instead of
-  running every iteration and reporting that the attack did not reproduce. The
-  hard request ceiling still exits `3` with its own single line.
+  twin's differential run is now cut off at the limit. A cut-off run never
+  counts as the guard resisting, so it can never help a test get kept, and
+  the report counts cut-off unguarded runs separately from runs where the
+  attack did not land. The robustness re-drives and the fixture recording
+  are bounded by their own call budget, not this limit. The option's help
+  text changed, so the command-tree snapshot changed.
+- **`validate` and `gate` stop with one line, not a traceback, when a run
+  cannot reach a verdict.** In `validate`, a spent LLM call budget now exits
+  `3` (`MYL-ABT-001`); it used to print a traceback and exit `1`, the findings
+  code. In both commands, a custom target that does not come up now exits `2`
+  (`MYL-ABT-006`) at the first failed run, instead of running every iteration
+  and reporting that the attack did not reproduce. If it went down after some
+  runs finished, the line says how many and that their results were
+  discarded. Under `gate`, the line also says later findings were not
+  validated. The hard request ceiling still exits `3` with its own single line.
 - **The `validate` report no longer counts seeds it never ran as misses.**
   Each validation attacks with the test's own seed only, but the kill matrix
   marked the other eight seeds as not killed, and the mutation score read as
@@ -31,12 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unguarded side fired 0 of N runs, `validate` prints one remediation line:
   the run says nothing about the guard, so try a different `--planner-model`
   or system prompt. It used to blame the guard ("did not discriminate") and
-  the seed ("too flaky").
-- **A pass against Mylonite's stand-in guard says what it proves.** When the
-  guarded side was the boundary guard, `validate` now adds a line under a
-  passing verdict: in its default mode that guard refuses the attack's tool
-  call by design, so the pass shows the attack is real and that this kind of
-  guard stops it, not that your own guard holds.
+  the seed ("too flaky"). When some of those runs were cut off by the time
+  limit or the call budget instead, the line says so and points at
+  `--iteration-timeout`.
+- **A non-rejected result against Mylonite's stand-in guard says what that
+  guard was.** When the guarded side was a Mylonite guard rather than yours,
+  `validate` names how it decided. In block mode, or approve mode with the
+  default deny-all policy, it refuses every consequential call by design, so
+  that side resists by construction. An approval policy, observe mode or
+  input data-framing get their own wording without that claim. Only a KEPT
+  verdict adds what the pass shows; it never says your own guard holds. The
+  report's notes now carry the guard's mode, and a custom-target report no
+  longer prints a bare `mutation score: 0.00`.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after

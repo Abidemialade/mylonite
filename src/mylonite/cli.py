@@ -1860,12 +1860,16 @@ def _validate_custom(
         guarded_is_server_layer=plan.guarded_is_server_layer,
         control_context=plan.control_context,
         iteration_timeout_s=iteration_timeout_s,
+        guard_mode=plan.guard_mode,
         progress_cb=lambda msg: echo_err(f"  … {msg}"),
     )
+    from mylonite.plugins._reference.reference_validator import build_target_or_raise
     from mylonite.scan._llm import llm_scope
 
     with llm_scope(policy=policy):
-        return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+        return validator.validate(
+            generated, build_target_or_raise(_factory), ReferenceVulnerableOracle()
+        )
 
 
 def _locate_generated(target: Path) -> tuple[Path, Path]:
@@ -2059,10 +2063,10 @@ def validate(
         typer.Option(
             "--iteration-timeout",
             help=(
-                "Per-scan wall-clock budget (seconds) for each validation run, on "
-                "a custom target and on the bundled reference twins. A stuck or "
+                "Wall-clock budget (seconds) for each differential run, on a "
+                "custom target and on the bundled reference twins. A stuck or "
                 "slow run is cut off cleanly instead of hanging open-ended and "
-                "counts as no verdict; the loop still completes and reports. "
+                "is reported as reaching no verdict; the loop still completes. "
                 "Defaults to a sane non-zero bound (DCR-0010) — a CI job must not "
                 "be able to hang indefinitely just because this flag was left "
                 "unset; pass a larger value for a target known to need more time."
@@ -3257,6 +3261,8 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
+    from mylonite.commands.validate_errors import target_launch_line
+    from mylonite.plugins._reference.reference_validator import TargetLaunchError
     from mylonite.scan._llm import BudgetExceededError, LLMRequestCeilingError, usage_tally
     from mylonite.scan.artefacts import spend_summary
 
@@ -3289,6 +3295,12 @@ def gate(
         echo_err(f"\nerror: LLM call budget exhausted: {exc}")
         echo_err(budget_hint(routed_to, target_file))
         raise typer.Exit(code=EXIT_BUDGET) from exc
+    except TargetLaunchError as exc:
+        # The target did not come up while a finding was being validated. The
+        # orchestrator does not catch it, so the remaining findings stop here;
+        # say so in the one line rather than leave a traceback.
+        echo_err(target_launch_line(exc, gate_out=str(out)))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
     except pr_mod.GatePrError as exc:
         # The git/gh step is the LAST thing gate does, so by the time it fails
         # the scan, generation and validation have all been paid for and their

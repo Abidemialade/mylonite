@@ -247,12 +247,13 @@ Two honesty properties make this trustworthy:
   A KEPT verdict from a synthetic twin therefore says a *canonical* control of
   that class stops the attack with your model held constant; it does **not** say
   your own implementation carries the security, and the wording does not claim
-  otherwise. In its default mode the boundary guard refuses the attack's tool
-  call by design, so the guarded side resists by construction; `validate` prints
-  a `guarded side: a stand-in` line under a passing verdict to say so. Set
-  `enforcement_mode` and `approval_policy` in the target file for a guard that
-  has to decide, or declare `control_env` to test your own. Only a server-layer twin (`control_env`, where Mylonite toggles your
-  real control) earns that sentence. The reject side has always drawn this
+  otherwise. In its default block mode the boundary guard refuses the attack's
+  tool call by design, so the guarded side resists by construction; `validate`
+  prints a `guarded side: a stand-in` line that names the guard's mode and says
+  so. Set `enforcement_mode` and `approval_policy` in the target file for a
+  guard that has to decide, or declare `control_env` to test your own. Only a
+  server-layer twin (`control_env`, where Mylonite toggles your real control)
+  earns that sentence. The reject side has always drawn this
   distinction; as of 0.8.5 the pass side does too, on the validator detail, the
   SARIF message and the gating PR headline alike. See
   [Which claim you earned](reading-results.md#which-claim-you-earned).

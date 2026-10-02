@@ -306,6 +306,7 @@ def make_validate_fn(
         from mylonite.plugins._reference.reference_validator import (
             DifferentialValidator,
             ReferenceVulnerableOracle,
+            build_target_or_raise,
         )
         from mylonite.scan._llm import llm_scope
 
@@ -424,11 +425,14 @@ def make_validate_fn(
             control_weakness=plan.control_weakness,
             guarded_is_server_layer=plan.guarded_is_server_layer,
             control_context=plan.control_context,
+            guard_mode=plan.guard_mode,
             randomize_exfil=randomize_exfil,
             progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
         with llm_scope(policy=effective_policy):
-            return validator.validate(generated, _factory(), ReferenceVulnerableOracle())
+            return validator.validate(
+                generated, build_target_or_raise(_factory), ReferenceVulnerableOracle()
+            )
 
     return validate_fn
 
