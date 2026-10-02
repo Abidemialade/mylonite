@@ -199,7 +199,8 @@ Every validation reports three headline figures.
   denominator is the seed count, not the four classes. It is computed for free
   from the scans already run. Each differential run attacks with the test's own
   seed only, so a test that holds scores 1/9: it catches its own seed and makes
-  no claim about the other eight.
+  no claim about the other eight. The report's kill matrix marks those eight
+  `not run`, and the score's label says it covers the test's own seed.
 
 A fourth stage, **metamorphic**, is **gating**. It applies several deterministic,
 semantically-neutral rewrites of the exploit body — paraphrase, casing, whitespace,
@@ -246,7 +247,11 @@ Two honesty properties make this trustworthy:
   A KEPT verdict from a synthetic twin therefore says a *canonical* control of
   that class stops the attack with your model held constant; it does **not** say
   your own implementation carries the security, and the wording does not claim
-  otherwise. Only a server-layer twin (`control_env`, where Mylonite toggles your
+  otherwise. In its default mode the boundary guard refuses the attack's tool
+  call by design, so the guarded side resists by construction; `validate` prints
+  a `guarded side: a stand-in` line under a passing verdict to say so. Set
+  `enforcement_mode` and `approval_policy` in the target file for a guard that
+  has to decide, or declare `control_env` to test your own. Only a server-layer twin (`control_env`, where Mylonite toggles your
   real control) earns that sentence. The reject side has always drawn this
   distinction; as of 0.8.5 the pass side does too, on the validator detail, the
   SARIF message and the gating PR headline alike. See
