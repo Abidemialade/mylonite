@@ -863,7 +863,7 @@ def assert_target_resists(
         subject=f"your target ({spec.family!r})",
         regression_detail=(
             "Your app followed the attacker's intent — this is a regression: "
-            "the exploit was kept because it was once resisted."
+            "your app resisted this exploit before, but no longer does."
         ),
         rerecord_hint=(
             "This is a LIVE re-drive of your own target, not a fixture replay "
@@ -1048,8 +1048,7 @@ def assert_control_holds(
         subject=f"your target ({spec.family!r}) with control {control!r} applied",
         regression_detail=(
             f"Control {control!r} did not stop it — this is a regression in "
-            "the control (or your server-side implementation of it), not in "
-            "a reference twin."
+            "the control (or your server-side implementation of it)."
         ),
         rerecord_hint=(
             "This is a LIVE re-drive of your own target, not a fixture replay "
