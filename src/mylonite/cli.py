@@ -46,6 +46,7 @@ from mylonite._cli_io import (
 )
 from mylonite._experimental import hidden_command as _hidden_experimental_command
 from mylonite.commands.check import check
+from mylonite.commands.llm_ceiling import CeilingGuardGroup, apply_request_ceiling
 from mylonite.exit_codes import (
     EXIT_BUDGET,
     EXIT_CONFIG,
@@ -141,6 +142,7 @@ app = typer.Typer(
     ),
     add_completion=False,
     no_args_is_help=True,
+    cls=CeilingGuardGroup,
 )
 
 # Exit codes: defined once in mylonite.exit_codes (imported at the top of this
@@ -417,6 +419,18 @@ def _root(
             help="Load provider API-key vars from a .env file (only known key names).",
         ),
     ] = None,
+    max_llm_requests: Annotated[
+        int | None,
+        typer.Option(
+            "--max-llm-requests",
+            min=1,
+            help=(
+                "Hard ceiling on LLM requests for this whole run, retries included "
+                "(also MYLONITE_MAX_LLM_REQUESTS). Hitting it stops the run: exit 3, "
+                "NOT TESTED. Default: no ceiling."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run before every command; normalise stdio + install secret redaction.
 
@@ -442,6 +456,7 @@ def _root(
         _load_env_file(env_file)
     if api_key_file is not None:
         _load_api_key_file(api_key_file)
+    apply_request_ceiling(max_llm_requests)
 
 
 @app.command()

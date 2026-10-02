@@ -4,6 +4,16 @@ Every command, its key options, and a worked example. Run `mylonite COMMAND --he
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
 
+**Hard spend limit.** `mylonite --max-llm-requests N COMMAND`, or
+`MYLONITE_MAX_LLM_REQUESTS=N`, caps every LLM request the whole run sends, retries
+included, across scan, validation and gate. It is the hard ceiling:
+request N+1 is never sent. The run stops, exits `3`, prints one
+[`MYL-ABT-001`](reason-codes.md#myl-abt-001) line naming the limit, and reads NOT
+TESTED, never clean. The global option wins over the variable; with neither set
+there is no ceiling. While a ceiling is set, Mylonite makes the provider retries itself
+(`num_retries` from `mylonite.yaml` or `MYLONITE_NUM_RETRIES`) so each one is
+counted. `--max-llm-calls` is a softer per-scan budget, described below.
+
 **Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
 empty scan) · `3` LLM-call budget exceeded · `4` provider unreachable · `5` test rejected
@@ -96,7 +106,8 @@ form), `--model` (any LiteLLM
 provider via a `provider/model` prefix, e.g. `openai/gpt-4o`),
 `--planner-model`, `--customiser-model`, `--judge-model`, `--max-llm-calls N`
 (a budget, not a hard ceiling — every seed keeps a floor of it, so the worst
-case is higher; see [Sizing --max-llm-calls](ci-gating.md)),
+case is higher; see [Sizing --max-llm-calls](ci-gating.md); for a hard limit use
+`--max-llm-requests` above),
 `--max-concurrent N` (capped at 1 when the target declares an `effect_probe`, since a
 concurrent attempt's change to shared state can't be told apart from this attempt's; see
 [What the effect probe still cannot see](limitations.md#8-what-the-effect-probe-still-cannot-see)),
@@ -291,7 +302,8 @@ a `provider/model` prefix); `--planner-model`, `--customiser-model`, `--judge-mo
 to `--model`, same split as `scan`); `--purpose "…"` (a one-line description of what
 the app is for; tailors the probes to its domain — overrides `purpose` in the target
 file); `--out PATH`; `--max-llm-calls` (a budget for the scan
-phase, not a hard ceiling — see [Sizing --max-llm-calls](ci-gating.md));
+phase, not a hard ceiling — see [Sizing --max-llm-calls](ci-gating.md); the
+global `--max-llm-requests` caps scan and validation together);
 `--iterations N` (validation-leg iterations, **default 3** — the kept verdict reflects
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
