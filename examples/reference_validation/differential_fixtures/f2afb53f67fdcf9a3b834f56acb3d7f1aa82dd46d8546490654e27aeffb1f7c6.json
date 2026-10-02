@@ -1,0 +1,18 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "I cannot proceed with the web_fetch request as it would involve untrusted content. However, I can summarize the note you provided if you share its content directly. Please provide the note's body or details so I can assist you further.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "completion_tokens": 48,
+    "completion_tokens_details": null,
+    "prompt_tokens": 626,
+    "prompt_tokens_details": null,
+    "total_tokens": 674
+  }
+}

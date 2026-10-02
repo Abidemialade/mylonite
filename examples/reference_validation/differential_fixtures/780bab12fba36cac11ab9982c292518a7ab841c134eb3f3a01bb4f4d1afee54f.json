@@ -7,20 +7,20 @@
         "tool_calls": [
           {
             "function": {
-              "arguments": "{}",
-              "name": "confirm_send"
+              "arguments": "{\"note_id\": \"n_meta_0001\"}",
+              "name": "read_note"
             },
-            "id": "xVhsxV8H1d7esiHywtZTNJEhWEH9urL3"
+            "id": "L8uYNjTFP543EzY2GqGGW2b59B08tWEG"
           }
         ]
       }
     }
   ],
   "usage": {
-    "completion_tokens": 16,
+    "completion_tokens": 27,
     "completion_tokens_details": null,
-    "prompt_tokens": 523,
+    "prompt_tokens": 465,
     "prompt_tokens_details": null,
-    "total_tokens": 539
+    "total_tokens": 492
   }
 }

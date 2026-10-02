@@ -7,7 +7,7 @@
     "metamorphic"
   ],
   "kept": true,
-  "mutation_score": 0.3333333333333333,
+  "mutation_score": 0.1111111111111111,
   "outcomes": [
     {
       "detail": "full offline pass: on-disk committed test PASSED against the recorded canonical guarded fixtures (exit_code=0: all tests passed)",
@@ -17,7 +17,7 @@
       "stage": "build"
     },
     {
-      "detail": "vulnerable fired the exploit 1/1 (100%); guarded RESISTED 1/1 (need >= 60%), leaked 0/1, reached no verdict 0/1; 1/1 runs both fired and resisted; the test discriminates between the twins (strength=1.00)",
+      "detail": "vulnerable fired the exploit 1/1 (100%); guarded RESISTED 1/1 (need >= 60%), leaked 0/1, reached no verdict 0/1; 1/1 runs both fired and resisted; the test discriminates between the twins (strength=1.00); firing runs by evidence: 1 trace",
       "metric": 1.0,
       "passed": true,
       "report_only": false,
