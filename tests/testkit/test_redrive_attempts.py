@@ -204,12 +204,18 @@ def test_env_override_sets_n_when_no_keyword(
     assert _resists(tmp_path, monkeypatch, ["resist"]).calls == 1
 
 
+def test_the_cap_itself_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(testkit.REDRIVE_ATTEMPTS_ENV, str(testkit.MAX_REDRIVE_ATTEMPTS))
+    n = testkit.MAX_REDRIVE_ATTEMPTS
+    assert _resists(tmp_path, monkeypatch, ["resist"] * n).calls == n
+
+
 def test_keyword_wins_over_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(testkit.REDRIVE_ATTEMPTS_ENV, "1")
     assert _resists(tmp_path, monkeypatch, ["resist"] * 2, attempts=2).calls == 2
 
 
-@pytest.mark.parametrize("bad", ["0", "-1", "three", "2.5", ""])
+@pytest.mark.parametrize("bad", ["0", "-1", "three", "2.5", "+3", "3_0", "21", "1000", ""])
 def test_a_bad_env_value_fails_before_any_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str
 ) -> None:
@@ -230,7 +236,7 @@ def test_a_bad_env_value_fails_before_any_run(
     assert scripted.calls == 0
 
 
-@pytest.mark.parametrize("bad", [0, -2, True])
+@pytest.mark.parametrize("bad", [0, -2, True, "3", 2.5, 21])
 def test_a_bad_keyword_value_fails_before_any_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: Any
 ) -> None:
@@ -303,8 +309,12 @@ def test_control_fails_when_raw_never_lands(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     legs = _Legs(raw=["resist"] * 3, guarded=["resist"] * 3)
-    with pytest.raises(AssertionError, match="no longer fires against the RAW target"):
+    with pytest.raises(
+        testkit.TestkitAttackNotReproduced, match="no longer fires against the RAW target"
+    ) as excinfo:
         _control(tmp_path, monkeypatch, legs)
+    # Its own error, not an AssertionError, so a pending-fix marker can't hide it.
+    assert not isinstance(excinfo.value, AssertionError)
     assert legs.raw.calls == 3
 
 
@@ -315,6 +325,18 @@ def test_control_inconclusive_guarded_attempt_never_passes(
     with pytest.raises(testkit.TestkitFixtureError, match="attempt 2 of 3 was inconclusive"):
         _control(tmp_path, monkeypatch, legs)
     assert legs.guarded.calls == 2
+
+
+def test_control_inconclusive_guarded_attempt_before_raw_lands_is_inconclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guarded leg was inconclusive before the raw leg ever landed: no
+    evidence either way, so the check errors on that attempt and stops."""
+    legs = _Legs(raw=["resist"], guarded=["no_engagement"])
+    with pytest.raises(testkit.TestkitFixtureError, match="attempt 1 of 3 was inconclusive") as exc:
+        _control(tmp_path, monkeypatch, legs)
+    assert not isinstance(exc.value, testkit.TestkitAttackNotReproduced)
+    assert legs.order == ["raw", "guarded"]
 
 
 def test_control_honours_the_attempts_keyword(
@@ -396,19 +418,14 @@ def test_gate():
 """
 
 
-def _pending_run(tmp_path: Path, outcomes: str) -> tuple[subprocess.CompletedProcess[str], int]:
-    (tmp_path / "conftest.py").write_text(_CONFTEST, encoding="utf-8")
-    (tmp_path / "test_pending_gate.py").write_text(_TEST, encoding="utf-8")
-    (tmp_path / "exploit.json").write_text(_exploit().model_dump_json(), encoding="utf-8")
-    _target(tmp_path)
-    (tmp_path / "OUTCOMES").write_text(outcomes, encoding="utf-8")
+def _pytest(tmp_path: Path) -> subprocess.CompletedProcess[str]:
     env = {
         k: v
         for k, v in os.environ.items()
         if k not in {"MYLONITE_REQUIRE_GATE_RUN", testkit.REDRIVE_ATTEMPTS_ENV, "PYTEST_ADDOPTS"}
     }
     env["PYTHONUTF8"] = "1"
-    proc = subprocess.run(
+    return subprocess.run(
         [
             sys.executable,
             "-m",
@@ -429,6 +446,15 @@ def _pending_run(tmp_path: Path, outcomes: str) -> tuple[subprocess.CompletedPro
         encoding="utf-8",
         check=False,
     )
+
+
+def _pending_run(tmp_path: Path, outcomes: str) -> tuple[subprocess.CompletedProcess[str], int]:
+    (tmp_path / "conftest.py").write_text(_CONFTEST, encoding="utf-8")
+    (tmp_path / "test_pending_gate.py").write_text(_TEST, encoding="utf-8")
+    (tmp_path / "exploit.json").write_text(_exploit().model_dump_json(), encoding="utf-8")
+    _target(tmp_path)
+    (tmp_path / "OUTCOMES").write_text(outcomes, encoding="utf-8")
+    proc = _pytest(tmp_path)
     calls_file = tmp_path / "CALLS"
     calls = int(calls_file.read_text()) if calls_file.exists() else 0
     return proc, calls
@@ -456,3 +482,59 @@ def test_pending_fix_with_an_inconclusive_attempt_is_a_failure_not_xfail(tmp_pat
     assert "xfailed" not in proc.stdout
     assert "remove the `@testkit.pending_fix(...)` line" not in proc.stdout
     assert calls == 2
+
+
+_CONTROL_CONFTEST = """
+from types import SimpleNamespace
+
+from mylonite import testkit
+
+_PID = "indirect-injection-note-body-direct"
+
+
+def _fake_run(**_kwargs):
+    # Neither leg lands: the attack no longer works even without the control.
+    attempt = SimpleNamespace(pattern_id=_PID, outcome="no_finding")
+    return SimpleNamespace(exploits=[], report=SimpleNamespace(attempts=[attempt], aborted=None))
+
+
+testkit._run_target_scan = _fake_run
+"""
+
+_CONTROL_TEST = """
+from pathlib import Path
+
+import pytest
+
+from mylonite import testkit
+from mylonite.contracts._types import ExploitRecord
+
+_HERE = Path(__file__).parent
+
+
+@pytest.mark.mylonite_security
+@testkit.pending_fix("the control was not in place when this test was committed")
+def test_control_gate():
+    exploit = ExploitRecord.model_validate_json((_HERE / "exploit.json").read_text())
+    testkit.assert_control_holds(
+        exploit,
+        target_file=_HERE / "target.yaml",
+        control="W2",
+        model="stub-model",
+        provider="stub",
+    )
+"""
+
+
+def test_pending_fix_control_test_whose_raw_leg_never_lands_fails_red(tmp_path: Path) -> None:
+    """A control test that can no longer show the attack works proves nothing.
+    Under a pending-fix marker it must fail, never sit green as an expected
+    failure."""
+    (tmp_path / "conftest.py").write_text(_CONTROL_CONFTEST, encoding="utf-8")
+    (tmp_path / "test_pending_control.py").write_text(_CONTROL_TEST, encoding="utf-8")
+    (tmp_path / "exploit.json").write_text(_exploit().model_dump_json(), encoding="utf-8")
+    _target(tmp_path)
+    proc = _pytest(tmp_path)
+    assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
+    assert "xfailed" not in proc.stdout
+    assert "TestkitAttackNotReproduced" in proc.stdout

@@ -466,9 +466,12 @@ def test_assert_target_resists_runs_the_engine_once_per_attempt(
         f"expected {2 * attempts} planner calls (one two-turn conversation per attempt), "
         f"got {completion.planner_calls}"
     )
-    # Every LLM call scales with the attempt count, and nothing else does: the
-    # customiser, planner and judge run once per attempt, never once per check.
-    assert completion.total_calls % attempts == 0
+    # Every LLM call scales with the attempt count, and nothing else does. This
+    # stub's attempt is one customiser call plus the two-turn conversation (the
+    # effect probe decides, so no judge call), so the total is exactly 3 per attempt.
+    assert completion.total_calls == 3 * attempts, (
+        f"expected {3 * attempts} LLM calls (3 per attempt), got {completion.total_calls}"
+    )
 
 
 def test_assert_target_resists_stops_at_the_first_landing(tmp_path: Path) -> None:

@@ -298,13 +298,15 @@ An inconclusive attempt stops the check because it can no longer pass, and
 another attempt on a hung target would only spend more time. `assert_control_holds`
 runs its guarded leg on every attempt and its raw leg only until the attack has
 landed on it once, so a pass costs one raw re-drive plus one guarded re-drive per
-attempt. If the raw leg never lands, the check fails as before. The effect probe
+attempt. If the raw leg never lands on any attempt, the check raises
+`TestkitAttackNotReproduced`: the test can no longer show the control matters. The effect probe
 is calibrated once, before the first attempt, and each attempt has its own
 12-call and 180-second bound.
 
 `attempts=` sets the number for one test. Otherwise `MYLONITE_REDRIVE_ATTEMPTS`
 sets it for the whole run, and with neither it is 3. A value that is not a whole
-number of at least 1 raises `TestkitConfigError` before anything runs. See
+number from 1 to 20 (the variable must be plain digits) raises `TestkitConfigError`
+before anything runs. See
 [the cost note in CI gating](ci-gating.md#what-a-live-gate-costs).
 - **`testkit.pending_fix(reason)`** — a decorator for a committed gate test whose
   finding isn't fixed yet. While the check raises `AssertionError` (the attack
@@ -327,6 +329,11 @@ number of at least 1 raises `TestkitConfigError` before anything runs. See
   problem — there is nothing to re-record. When `MYLONITE_MAX_LLM_REQUESTS` stopped it,
   the message names that ceiling instead; the ceiling covers the whole pytest session,
   so every later live re-drive in the session stops the same way.
+- **`testkit.TestkitAttackNotReproduced`** — a `TestkitFixtureError` subclass raised
+  by `assert_control_holds` when the attack did not land on the raw target on any
+  attempt, so there is nothing for the control to stop. It is not an
+  `AssertionError`, so `@testkit.pending_fix` never treats it as "not fixed yet":
+  a control test that proves nothing fails instead of staying green.
 - **`testkit.TestkitConfigError`** — raised when the model/provider an emitted LIVE
   test needs to re-drive its target cannot be resolved from any source (an explicit
   keyword argument, the exploit's own execution-context metadata, or a sibling

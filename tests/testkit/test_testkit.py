@@ -441,6 +441,7 @@ def test_load_exploit_invalid_raises(tmp_path: Path) -> None:
 def test_public_surface() -> None:
     """The stability-promised surface: the helpers + error class."""
     assert testkit.__all__ == [
+        "TestkitAttackNotReproduced",
         "TestkitConfigError",
         "TestkitFixtureError",
         "TestkitRedriveAborted",
