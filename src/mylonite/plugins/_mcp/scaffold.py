@@ -12,6 +12,8 @@ exactly as they were in ``cli``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,68 @@ from mylonite._cli_io import echo, echo_err, echo_exc
 from mylonite.exit_codes import EXIT_CONFIG
 from mylonite.plugins._mcp import target_registry
 from mylonite.scan.tool_roles import _classify_tools, _ToolRoles
+
+
+class _OutputNotWritable(Exception):
+    """Raised by :func:`_check_output_writable` -- a clear, one-line reason the
+    ``--scaffold`` output path cannot be used, caught at the call site and
+    turned into an ``EXIT_CONFIG`` exit before anything expensive happens."""
+
+
+def _check_output_writable(output: Path) -> None:
+    """Fail fast and clearly if ``output`` cannot be written, *before* the
+    caller does anything expensive (launching the target MCP server -- S14).
+
+    Checks, in order: the path is not an existing directory; its parent
+    directory exists or can be created; a real probe file can be written in
+    that directory (catches permission errors a mere existence check misses).
+    """
+    if output.exists() and output.is_dir():
+        raise _OutputNotWritable(f"{output} is a directory, not a file.")
+
+    parent = output.parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise _OutputNotWritable(f"cannot create directory {parent}: {exc}") from exc
+
+    probe = parent / f".mylonite-scaffold-writecheck-{os.getpid()}.tmp"
+    try:
+        probe.write_text("", encoding="utf-8")
+    except OSError as exc:
+        raise _OutputNotWritable(f"{output} is not writable: {exc}") from exc
+    finally:
+        with contextlib.suppress(OSError):
+            probe.unlink()
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically (S15): write a temp file beside
+    ``path``, then rename it into place with ``Path.replace`` (``os.replace``
+    under the hood). A crash or interruption mid-write leaves the temp file
+    orphaned (best-effort cleaned up below) and any pre-existing ``path``
+    untouched -- never a truncated ``path``.
+    """
+    tmp = path.with_name(f".{path.name}.mylonite-tmp-{os.getpid()}")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _with_scaffold_markers(text: str) -> str:
+    """Wrap scaffold-written YAML with the header/footer sentinel pair
+    ``target_file.load_target_file`` checks for, so a truncated write is
+    detectable on load (S15). Applied only at the final write -- the
+    ``_render_target_scaffold`` unit tests assert on the unwrapped text."""
+    from mylonite.plugins._mcp.target_file import SCAFFOLD_MARKER_FOOTER, SCAFFOLD_MARKER_HEADER
+
+    if not text.endswith("\n"):
+        text += "\n"
+    return SCAFFOLD_MARKER_HEADER + text + SCAFFOLD_MARKER_FOOTER
 
 
 def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
@@ -378,6 +442,12 @@ def _scaffold_target_file(
         echo_err(f"{output} already exists — pass --force to overwrite.")
         raise typer.Exit(code=EXIT_CONFIG)
 
+    try:
+        _check_output_writable(output)
+    except _OutputNotWritable as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
     tf = _target_file_from_flags(
         command=command,
         args=arg,
@@ -441,7 +511,7 @@ def _scaffold_target_file(
         echo_exc("internal error: scaffolded YAML failed validation", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
 
-    output.write_text(yaml_text, encoding="utf-8")
+    _atomic_write_text(output, _with_scaffold_markers(yaml_text))
     echo(f"wrote {output} — {len(tool_names)} tools discovered.")
     echo_err(
         "  suggested weakness_classes "
@@ -541,6 +611,12 @@ def _scaffold_rest_target_file(
         echo_err(f"{output} already exists — pass --force to overwrite.")
         raise typer.Exit(code=EXIT_CONFIG)
 
+    try:
+        _check_output_writable(output)
+    except _OutputNotWritable as exc:
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
     body = rest_body or '{"prompt": "{prompt}"}'
     if "{prompt}" not in body:
         echo_err("--rest-body must contain a {prompt} placeholder.")
@@ -580,7 +656,7 @@ def _scaffold_rest_target_file(
     from mylonite._target_env import echo_env_notice
 
     text = header + dump_target_file(tf)
-    output.write_text(text, encoding="utf-8")
+    _atomic_write_text(output, _with_scaffold_markers(text))
     echo(f"wrote runnable HTTP-agent target -> {output}")
     echo_env_notice(text, output)
     echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")
