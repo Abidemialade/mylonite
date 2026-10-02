@@ -84,7 +84,7 @@ def provider_preflight_direct(
     hard exit 2 without it. This does the same reachability check with a single
     minimal LLM completion instead. Returns True iff the provider answered.
     """
-    from mylonite.scan._llm import litellm_tool_call_async
+    from mylonite.scan._llm import BudgetExceededError, litellm_tool_call_async
     from mylonite.scan.diagnostics import classify_provider_error
     from mylonite.scan.providers import provider_from_model
 
@@ -102,6 +102,8 @@ def provider_preflight_direct(
                 caller="planner",
                 timeout_s=timeout_s,
             )
+        except BudgetExceededError:
+            raise  # a spent budget is not an unreachable provider
         except Exception as exc:
             if failure is not None:
                 diagnosis = classify_provider_error(exc, provider=provider_from_model(model))
@@ -111,6 +113,8 @@ def provider_preflight_direct(
 
     try:
         return asyncio.run(_ping())
+    except BudgetExceededError:
+        raise
     except Exception:
         return False
 

@@ -103,7 +103,13 @@ from mylonite.contracts import (
 from mylonite.contracts.target_adapter import TargetAdapter
 from mylonite.contracts.validator import CONTRACT_VERSION, VulnerableOracle
 from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
-from mylonite.scan._llm import BudgetExceededError, LiteLLMCallCounter, llm_scope
+from mylonite.scan._llm import (
+    BudgetExceededError,
+    LiteLLMCallCounter,
+    LLMRequestCeilingError,
+    llm_scope,
+    request_ceiling_hit,
+)
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
 from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.effect_verdict import ProofLevel
@@ -541,8 +547,17 @@ class DifferentialValidator(ValidatorBase):
         # kitchen-sink reference does.
         del oracle  # the reference path drives both twins itself by variant
         if not test.exploit.target_id.startswith("reference:"):
-            return self._validate_custom_target(test, target)
-        return self._validate_reference(test)
+            report = self._validate_custom_target(test, target)
+        else:
+            report = self._validate_reference(test)
+        # The hard request ceiling refused a request somewhere in this run. A
+        # twin scan the engine cut short returns a result rather than raising,
+        # so the stages above may have tallied partial evidence. No verdict may
+        # stand on it: the run is NOT TESTED.
+        limit = request_ceiling_hit()
+        if limit is not None:
+            raise LLMRequestCeilingError(limit)
+        return report
 
     def _validate_reference(self, test: GeneratedTest) -> ValidationReport:
         pattern_id = test.exploit.pattern_id
@@ -1570,6 +1585,8 @@ class DifferentialValidator(ValidatorBase):
             response = await adapter.invoke(payload)
         except AdapterInvocationSkipped:
             return None
+        except BudgetExceededError:
+            raise  # a spent budget fails the stage closed (see _metamorphic), never "unjudged"
         except Exception as exc:
             # DCR-0016: logger.exception()'s implicit exc_info renders the raw
             # (unredacted) exception text + traceback -- the SecretRedactingFilter

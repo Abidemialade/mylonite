@@ -514,8 +514,8 @@ so re-running the same command picks them back up. Because the budget-exhausted 
 the one most likely to also carry findings, the terminal trust panel leads with the
 findings, ahead of the seeds that never got to run, when both are present.
 
-**The hard request ceiling stops everything.** When `MYLONITE_MAX_LLM_REQUESTS` (or
-`mylonite --max-llm-requests`) runs out, no further LLM request is sent, so nothing
+**The hard request ceiling stops everything.** When `MYLONITE_MAX_LLM_REQUESTS` (or the
+global `--max-llm-requests` option) runs out, no further LLM request is sent, so nothing
 after that point is judged or validated. The scan report records
 `aborted: budget_exceeded`, the run exits `3`, and a last
 `[MYL-ABT-001] ... LLM request ceiling of N reached` line names the limit. A run that

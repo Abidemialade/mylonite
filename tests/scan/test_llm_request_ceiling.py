@@ -229,3 +229,14 @@ def test_a_refused_call_is_not_counted_as_a_call(monkeypatch: pytest.MonkeyPatch
             with pytest.raises(LLMRequestCeilingError):
                 _json_call(_Recorder())
     assert counter.count == 2
+
+
+def test_preflight_reports_a_spent_ceiling_not_an_unreachable_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mylonite.scan.preflight import provider_preflight_direct
+
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "1")
+    _json_call(_Recorder())
+    with pytest.raises(LLMRequestCeilingError):
+        provider_preflight_direct("openai", "gpt-4o", timeout_s=5.0)
