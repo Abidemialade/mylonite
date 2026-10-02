@@ -152,3 +152,44 @@ def test_cli_fails_loudly_when_no_spend_line_is_present(tmp_path: Path) -> None:
 
     assert rc != 0
     assert not out_file.exists()
+
+
+def test_build_result_for_missing_log_is_zero_cost_not_an_error() -> None:
+    result = cost.build_result_for_missing_log(
+        model="anthropic/claude-haiku-4-5-20251001", ref="abc123"
+    )
+    assert result["calls"] == 0
+    assert result["cost_usd"] == 0.0
+    assert "reason" in result
+
+
+def test_cli_writes_a_zero_cost_json_when_run_log_does_not_exist(tmp_path: Path) -> None:
+    """An earlier workflow step failing before any mylonite command ran
+    means run.log never existed -- genuinely $0, not an error to raise
+    about (unlike a run.log that EXISTS with no spend line, which still
+    raises -- see the previous test)."""
+    missing_log = tmp_path / "run.log"
+    out_file = tmp_path / "cost.json"
+    assert not missing_log.exists()
+
+    rc = cost.main(
+        [
+            str(missing_log),
+            "--model",
+            "openai/gpt-4o-mini",
+            "--in-rate",
+            "0.15",
+            "--out-rate",
+            "0.60",
+            "--ref",
+            "deadbeef",
+            "--out",
+            str(out_file),
+        ]
+    )
+
+    assert rc == 0
+    written = json.loads(out_file.read_text(encoding="utf-8"))
+    assert written["calls"] == 0
+    assert written["cost_usd"] == 0.0
+    assert "reason" in written
