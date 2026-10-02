@@ -6480,7 +6480,7 @@ def test_dispatch_emit_real_reference_generator_receives_context() -> None:
 
 
 def test_no_command_falls_back_to_a_hardcoded_default_model() -> None:
-    """REG-1b (CLAUDE.md, 2026-09-30): there is no default provider or model.
+    """There is no default provider or model.
 
     `scan`, `validate`, `gate` and `ablate` used to each have their own
     ``base_model = model or "<literal>"`` fallback -- and disagreed with each
