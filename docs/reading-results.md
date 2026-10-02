@@ -352,9 +352,10 @@ A run stopped by network errors, timeouts or provider outages (HTTP 5xx) says it
 not reach the provider and points at the provider's status page and this machine's
 connection instead. Any other cause, such as a rejected key, keeps the credentials
 message, which names the API-key variable for the model's provider — for a provider
-outside Mylonite's approved list, that's LiteLLM's own `<PROVIDER>_API_KEY` naming
-convention rather than a silently skipped check, surfaced through the same redacting
-output boundary as every other message (see
+outside Mylonite's approved list, that's LiteLLM's own choice of variable when LiteLLM
+itself knows the provider, or its `<PROVIDER>_API_KEY` naming convention when it
+doesn't, rather than a silently skipped check either way, surfaced through the same
+redacting output boundary as every other message (see
 [Self-hosted models](self-hosted-models.md#the-approved-provider-registry)). The message describes
 the last failed call, so a streak that mixed causes is reported by its final one. `validate` checks the provider before it starts and
 gives the same messages; for a rate limit it suggests fewer `--iterations`, and a check

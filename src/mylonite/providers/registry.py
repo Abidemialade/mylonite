@@ -44,6 +44,10 @@ class ProviderInfo:
     ``extra_env`` is anything else LiteLLM needs to actually route a call
     beyond the key (Azure's endpoint + API version) -- never key-shaped, so
     kept in a separate field rather than folded into ``key_env``.
+    ``extra_headers`` names any HTTP header (beyond a bare API key) a
+    provider needs on every request, e.g. an Anthropic workspace id -- empty
+    for every row here; wiring an actual ``--llm-header``/env-var path for
+    one is a later PR in this track.
     """
 
     id: str
@@ -51,6 +55,7 @@ class ProviderInfo:
     model_prefix: str
     key_env: tuple[str, ...]
     extra_env: tuple[str, ...] = ()
+    extra_headers: tuple[str, ...] = ()
     example_model: str | None = None
     local: bool = False
 
@@ -110,5 +115,18 @@ PROVIDERS: dict[str, ProviderInfo] = {
         tier="supported",
         model_prefix="litellm_proxy/",
         key_env=(),
+    ),
+    "vertex_ai": ProviderInfo(
+        id="vertex_ai",
+        tier="supported",
+        model_prefix="vertex_ai/",
+        # No bearer key: Vertex authenticates via Application Default
+        # Credentials (gcloud's own file/metadata-based auth, not an env
+        # var Mylonite can check for), so `key_env` stays empty. The project
+        # + location pair IS a hard precondition LiteLLM's own
+        # `validate_environment` checks for this provider, so it goes in
+        # `extra_env`, the same way Azure's endpoint + API version do.
+        key_env=(),
+        extra_env=("VERTEXAI_PROJECT", "VERTEXAI_LOCATION"),
     ),
 }

@@ -22,6 +22,7 @@ def test_registry_has_exactly_the_approved_providers() -> None:
         "bedrock",
         "vllm",
         "litellm-proxy",
+        "vertex_ai",
     }
 
 
@@ -31,7 +32,8 @@ def test_measured_providers_are_tagged_measured(provider_id: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "provider_id", ["openai", "google", "azure", "bedrock", "vllm", "litellm-proxy"]
+    "provider_id",
+    ["openai", "google", "azure", "bedrock", "vllm", "litellm-proxy", "vertex_ai"],
 )
 def test_the_rest_are_tagged_supported(provider_id: str) -> None:
     assert PROVIDERS[provider_id].tier == "supported"
@@ -71,6 +73,22 @@ def test_anthropic_example_model_is_the_small_tier() -> None:
 
 def test_openai_example_model_is_left_unset_pending_a_pricing_check() -> None:
     assert PROVIDERS["openai"].example_model is None
+
+
+def test_vertex_authenticates_via_adc_not_a_bearer_key() -> None:
+    """Vertex has no API-key env var at all (Application Default
+    Credentials -- file/metadata-based, not something to check for in
+    `os.environ`); its project + location pair is the hard precondition
+    instead, in `extra_env` the same way Azure's endpoint + API version
+    are."""
+    vertex = PROVIDERS["vertex_ai"]
+    assert vertex.key_env == ()
+    assert vertex.extra_env == ("VERTEXAI_PROJECT", "VERTEXAI_LOCATION")
+
+
+def test_extra_headers_defaults_to_empty_for_every_row() -> None:
+    for info in PROVIDERS.values():
+        assert info.extra_headers == ()
 
 
 def test_provider_info_is_frozen() -> None:

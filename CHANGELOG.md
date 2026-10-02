@@ -58,17 +58,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An approved-provider registry.** `mylonite.providers.registry` is now the
   one table of providers Mylonite backs — Anthropic and Ollama with
   dedicated verification evidence, plus OpenAI, Gemini, Azure OpenAI,
-  Bedrock, vLLM/any OpenAI-compatible endpoint and a LiteLLM proxy.
-  `mylonite.scan.providers.PROVIDER_ENV_VARS` is generated from it, so the
-  two can't drift. A provider LiteLLM itself can route but that isn't in the
-  table yet now falls back to LiteLLM's own `<PROVIDER>_API_KEY` naming
-  convention and prints one warning line, instead of silently skipping the
-  credential check and failing later, mid-scan, with a traceback. See
-  "The approved-provider registry" in `docs/self-hosted-models.md`. The
-  fallback's warning line routes through the same redacting output boundary
-  as every other Mylonite message, and
-  `scripts/hardcoded_models_allowlist.txt` now tracks the registry module's
-  own provider/credential literals instead of `scan/providers.py`'s.
+  Vertex AI, Bedrock, vLLM/any OpenAI-compatible endpoint and a LiteLLM
+  proxy. `mylonite.scan.providers.PROVIDER_ENV_VARS` and its credential-var
+  alias table are both generated from it, so a provider's own routing
+  prefix (`hosted_vllm`, `ollama_chat`, ...) always resolves to its row. A
+  provider the registry doesn't list but LiteLLM itself still routes (xAI,
+  Groq, Mistral, DeepSeek, OpenRouter, ...) now checks LiteLLM's own
+  key-presence map instead of silently requiring nothing; only when LiteLLM
+  knows nothing about the provider either does it fall back to a guessed
+  `<PROVIDER>_API_KEY`-shaped variable, warning once per provider rather
+  than on every check. See "The approved-provider registry" in
+  `docs/self-hosted-models.md`.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and

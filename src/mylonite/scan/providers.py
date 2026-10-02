@@ -27,13 +27,15 @@ PROVIDER_ENV_VARS: dict[str, tuple[str, ...]] = {
 
 # Vars a provider needs BEYOND the bare API key to actually route a call --
 # e.g. Azure also needs its endpoint + API version (LiteLLM reads
-# AZURE_API_BASE / AZURE_API_VERSION alongside AZURE_API_KEY). Kept separate
-# from PROVIDER_ENV_VARS (rather than folded in) because that map also backs
-# `doctor`'s "does this look like an API key" sanity check -- a URL or a
-# version string never looks key-shaped, so checking it there would be a
-# false-positive warning, not a real diagnostic.
+# AZURE_API_BASE / AZURE_API_VERSION alongside AZURE_API_KEY), and Vertex
+# needs its project + location pair instead of a bearer key at all. Read from
+# the registry's `extra_env` column -- kept separate from PROVIDER_ENV_VARS
+# (rather than folded in) because that map also backs `doctor`'s "does this
+# look like an API key" sanity check -- a URL or a version string never
+# looks key-shaped, so checking it there would be a false-positive warning,
+# not a real diagnostic.
 _EXTRA_ENV_VARS: dict[str, tuple[str, ...]] = {
-    "azure": ("AZURE_API_BASE", "AZURE_API_VERSION"),
+    provider_id: info.extra_env for provider_id, info in PROVIDERS.items() if info.extra_env
 }
 
 #: OPTIONAL provider vars: recognised by :func:`looks_like_provider_env_var` so
@@ -62,24 +64,52 @@ _OPTIONAL_ENV_VARS: tuple[str, ...] = (
 _RE_API_KEY_VAR: re.Pattern[str] = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_API_KEY$")
 _RE_AZURE_VAR: re.Pattern[str] = re.compile(r"^AZURE_[A-Z0-9_]+$")
 
-# LiteLLM's internal provider spellings differ from our config Literal
-# (``gemini`` vs ``google``, ``litellm_proxy`` vs ``litellm-proxy``); normalise
-# both into the keys of PROVIDER_ENV_VARS.
+# LiteLLM's internal provider spellings differ from our registry ids
+# (``gemini`` vs ``google``, ``litellm_proxy`` vs ``litellm-proxy``,
+# ``hosted_vllm`` vs ``vllm``, ...); normalise all of them into the keys of
+# PROVIDER_ENV_VARS. Built FROM the registry itself: each row's own
+# `model_prefix` (minus the trailing "/") is also accepted as a raw provider
+# id, so a provider id LiteLLM reports that doesn't match any registry id
+# but IS one of the registry's own routing prefixes still resolves to that
+# row instead of falling through to the no-vars-known/guess path below.
+#
+# A registry row missing from this derivation is exactly how the `vllm` row
+# stopped covering `hosted_vllm` (its OWN model_prefix) when this dict was
+# still hand-maintained: LiteLLM routes the self-hosted/OpenAI-compatible
+# prefix `docs/self-hosted-models.md` tells users to set
+# (`hosted_vllm/<model>`), but the hand-written alias only had the SHORTER,
+# undocumented spelling `vllm`, so `required_env_vars("hosted_vllm")`
+# silently fell through to demanding a nonexistent, guessed credential var
+# -- see the test that pins every row's own prefix as an accepted alias.
+#
+# LiteLLM also routes the same local Ollama server under two spellings:
+# "ollama" (the legacy /api/generate route) and "ollama_chat" (the
+# /api/chat one we use, and the registry's own `model_prefix`). Only the
+# bare "ollama" matches our registry id directly (via the identity
+# fallback in `_normalise_provider` below) -- deriving a provider from an
+# `ollama_chat/...` model used to report the ROUTE as if it were the
+# provider before this dict covered it, visible in `demo --live`, which
+# printed `live (ollama_chat/...)` for a run whose provider is `ollama`,
+# and stamped that into ScanReport.provider.
 _ALIASES: dict[str, str] = {
-    "gemini": "google",
-    # LiteLLM routes the same local server under two spellings: "ollama" (the
-    # legacy /api/generate route) and "ollama_chat" (the /api/chat one we use).
-    # Only the first matches our config id, so deriving a provider from an
-    # `ollama_chat/...` model reported the route as if it were the provider —
-    # visible in `demo --live`, which printed `live (ollama_chat/...)` for a run
-    # whose provider is `ollama`, and stamped that into ScanReport.provider.
-    "ollama_chat": "ollama",
-    "vertex_ai": "google",
-    "google": "google",
-    "litellm_proxy": "litellm-proxy",
-    "litellm-proxy": "litellm-proxy",
+    info.model_prefix.rstrip("/"): provider_id for provider_id, info in PROVIDERS.items()
+} | {
+    # Manual extras LiteLLM also accepts for a registry provider that
+    # AREN'T that row's own `model_prefix`, so they can't be derived above.
     "azure_ai": "azure",
+    "bedrock_converse": "bedrock",
 }
+
+# Self-hosted/OpenAI-compatible LiteLLM routes that need no key, but that
+# (unlike vllm/ollama) don't get their own approved-registry row: LM
+# Studio, llamafile, and the generic "openai_like" prefix for any other
+# local OpenAI-compatible server. Checked explicitly, before the
+# LiteLLM-itself-knows-it fallback below, rather than relying on
+# `litellm.validate_environment` reporting "no missing keys" for these by
+# having no dedicated branch either -- that happens to be true today, but
+# silently relying on an absence of a check is exactly the shape of bug
+# this module exists to avoid.
+_KNOWN_KEYLESS_PROVIDERS: frozenset[str] = frozenset({"lm_studio", "llamafile", "openai_like"})
 
 
 def _normalise_provider(name: str | None) -> str | None:
@@ -123,6 +153,53 @@ def env_vars_for(provider: str | None, override: str | None = None) -> tuple[str
     return PROVIDER_ENV_VARS.get(p, ())
 
 
+#: Providers this process has already warned about via the unlisted-provider
+#: fallback below -- printed once per provider id, not once per
+#: `required_env_vars` call (which runs per role model, e.g. once each for
+#: the planner/customiser/judge in a single scan/validate/gate invocation,
+#: so an unwarned repeat would otherwise print the same line 3+ times).
+_WARNED_UNLISTED_PROVIDERS: set[str] = set()
+
+
+def _unlisted_provider_fallback(p: str) -> tuple[str, ...]:
+    """The last resort for a provider id that's neither in the approved
+    registry nor one of :data:`_KNOWN_KEYLESS_PROVIDERS`.
+
+    First asks LiteLLM itself, via a synthetic ``f"{p}/x"`` probe model:
+
+    * If LiteLLM can route it at all (:func:`model_is_routable`), trust
+      ITS OWN key-presence check, :func:`litellm.validate_environment` (a
+      local lookup table, no network call) -- this is what actually gets
+      xAI/Groq/Mistral/DeepSeek/OpenRouter/Cohere's chat route/etc. the
+      RIGHT credential var, rather than a guess that might not match
+      LiteLLM's real one.
+    * Only when LiteLLM knows NOTHING about ``p`` either does this guess a
+      ``<PROVIDER>_API_KEY``-shaped var (the same pattern
+      :func:`looks_like_provider_env_var` already recognises) and warn, once
+      per provider id -- the preflight still fires for a genuinely new or
+      misspelled provider, instead of silently requiring nothing.
+    """
+    probe_model = f"{p}/x"
+    if model_is_routable(probe_model):
+        import litellm  # deferred: several seconds to import, needed only here
+
+        result = litellm.validate_environment(probe_model)
+        return tuple(result["missing_keys"])
+
+    fallback = f"{p.upper().replace('-', '_')}_API_KEY"
+    if p not in _WARNED_UNLISTED_PROVIDERS:
+        _WARNED_UNLISTED_PROVIDERS.add(p)
+        from mylonite._cli_io import echo_err  # deferred -- avoid pulling in typer/rich eagerly
+
+        echo_err(
+            f"mylonite: provider {p!r} is not in the approved registry, and "
+            f"LiteLLM itself doesn't recognise it either; checking for {fallback} "
+            "(LiteLLM's own key-variable naming convention) as a last resort. "
+            "Results from an unlisted provider are unverified."
+        )
+    return (fallback,)
+
+
 def required_env_vars(provider: str | None, override: str | None = None) -> tuple[str, ...]:
     """Every env var ``provider`` needs to actually route a call -- the API
     key plus anything else LiteLLM reads for it, e.g. Azure's endpoint +
@@ -132,16 +209,12 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
 
     A recognised provider (anything in :data:`PROVIDER_ENV_VARS`, which is
     derived from the approved-provider registry) reads its key plus extra
-    vars straight from there. A provider id LiteLLM itself would route but
-    that isn't in the registry (xAI, Groq, Mistral, DeepSeek, OpenRouter, a
-    newer OpenAI-compatible host, ...) used to silently return no required
-    vars here, so the credential preflight passed and the run failed later,
-    deep inside the live call, with a traceback instead of a clear, named
-    missing variable. It now falls back to LiteLLM's own
-    ``<PROVIDER>_API_KEY`` naming convention (the same pattern
-    :func:`looks_like_provider_env_var` already recognises) and prints one
-    warning line to stderr -- the preflight still fires, just without
-    registry-backed extra vars.
+    vars straight from there. A known-keyless local/OpenAI-compatible route
+    (:data:`_KNOWN_KEYLESS_PROVIDERS`) needs none. Anything else used to
+    silently return no required vars here, so the credential preflight
+    passed and the run failed later, deep inside the live call, with a
+    traceback instead of a clear, named missing variable -- see
+    :func:`_unlisted_provider_fallback` for what replaces that silence.
     """
     if override:
         return (override,)
@@ -150,15 +223,9 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
         return ()
     if p in PROVIDER_ENV_VARS:
         return PROVIDER_ENV_VARS[p] + _EXTRA_ENV_VARS.get(p, ())
-    from mylonite._cli_io import echo_err  # deferred -- avoid pulling in typer/rich eagerly
-
-    fallback = f"{p.upper().replace('-', '_')}_API_KEY"
-    echo_err(
-        f"mylonite: provider {p!r} is not in the approved registry; checking "
-        f"for {fallback} (LiteLLM's own key-variable naming convention). "
-        "Results from an unlisted provider are unverified."
-    )
-    return (fallback,)
+    if p in _KNOWN_KEYLESS_PROVIDERS:
+        return ()
+    return _unlisted_provider_fallback(p)
 
 
 def model_is_routable(model: str, *, api_base: str | None = None) -> bool:

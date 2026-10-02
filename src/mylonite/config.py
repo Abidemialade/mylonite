@@ -264,12 +264,18 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
     for ``model``'s effective provider.
 
     A local/self-hosted/proxy provider (ollama, vllm, a litellm-proxy — see
-    ``scan.providers.PROVIDER_ENV_VARS``) needs no key and always passes. An
-    unrecognised model/provider also passes (nothing to check) — deliberately
-    permissive there, since ``ModelRef``/LiteLLM itself is the source of
-    truth for "is this a valid model", not this function; this only checks
-    "is there evidently a credential for it", the narrower question the
-    deleted ``require_llm()`` asked.
+    ``scan.providers.PROVIDER_ENV_VARS``) needs no key and always passes. A
+    model with NO derivable provider at all (``provider_from_model`` returns
+    ``None`` — nothing to resolve a credential var against) also passes,
+    nothing to check — deliberately permissive there, since ``ModelRef``/
+    LiteLLM itself is the source of truth for "is this a valid model", not
+    this function; this only checks "is there evidently a credential for
+    it", the narrower question the deleted ``require_llm()`` asked. A
+    provider id that DOES resolve but isn't in the approved registry is
+    still checked: against LiteLLM's own key-presence map when LiteLLM
+    itself recognises the provider, or a guessed ``<PROVIDER>_API_KEY``-
+    shaped var as a last resort when it doesn't -- see
+    :func:`~mylonite.scan.providers.required_env_vars`.
 
     Uses :func:`~mylonite.scan.providers.required_env_vars` (the key PLUS
     anything else LiteLLM needs to actually route a call, e.g. Azure's
