@@ -160,6 +160,10 @@ def _one_attempt_per_bucket() -> list[ScanAttempt]:
             "not_applicable",
             judge_evidence={"no_attack_emitted": "true", "weakness": "W4"},
         ),
+        _attempt(
+            "not_applicable",
+            judge_evidence={"effect_unconfirmable": "true", "weakness": "W4"},
+        ),
         _attempt("undecided", judge_evidence={"fallback_cause": "call_raised"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "unparseable_output"}),
         _attempt("undecided", judge_evidence={"fallback_cause": "effect_probe_errored"}),

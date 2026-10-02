@@ -433,6 +433,17 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
     )
 
 
+def readback_tool(tools: list[Any]) -> str | None:
+    """The tool an effect_probe would read the target's state back through.
+
+    The single detector shared by ``scan --scaffold`` (which proposes an
+    effect_probe on it) and the scan (which reads a W3/W4 class NOT TESTED
+    when a server has none and no effect_probe is declared), so the two agree.
+    ``None`` when no tool on the surface reads state back without an id.
+    """
+    return _classify_tools(tools).verify_tool
+
+
 # --- delivery-channel detectors (v0.7.x) -------------------------------------
 # These widen Mylonite beyond the kitchen-sink store->recall shape so seeds can
 # be delivered through the channels a REAL target actually exposes:
@@ -548,4 +559,5 @@ __all__ = [
     "_requires_id",
     "_schema_props",
     "_schema_required",
+    "readback_tool",
 ]

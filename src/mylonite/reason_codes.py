@@ -98,6 +98,7 @@ NT_INVALID_METADATA: Final = "MYL-NT-013"
 NT_UNKNOWN_SEED: Final = "MYL-NT-014"
 NT_MODULE_LOAD_FAILED: Final = "MYL-NT-015"
 NT_NO_ATTACK_EMITTED: Final = "MYL-NT-016"
+NT_EFFECT_UNCONFIRMABLE: Final = "MYL-NT-017"
 
 _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     _rc(
@@ -185,6 +186,13 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
         "what ran); on a `transport: rest` target scan the agent's MCP server instead; or "
         "remove it from weakness_classes",
     ),
+    _rc(
+        NT_EFFECT_UNCONFIRMABLE,
+        "No tool on this server reads its state back and no effect_probe is declared, so "
+        "this class's effect could not be confirmed or ruled out.",
+        "declare an effect_probe whose verify_tool reads back what the attack would change "
+        "(see docs/target-file.md), or remove the class from weakness_classes",
+    ),
 )
 
 #: The inconclusive codes the trace rule (``scan/effect_verdict.py``) stamps on
@@ -234,6 +242,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
     "module_load_failed": NT_MODULE_LOAD_FAILED,
     "no_attack_emitted": NT_NO_ATTACK_EMITTED,
+    "effect_unconfirmable": NT_EFFECT_UNCONFIRMABLE,
 }
 
 

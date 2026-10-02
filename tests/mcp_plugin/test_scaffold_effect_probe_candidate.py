@@ -1,10 +1,11 @@
 """The scaffold names a readback tool as the effect_probe candidate when the
-surface has one, and leaves the block commented.
+surface has one.
 
 server-memory has no tool whose name reads like an outbox or a status report,
 so the scaffold used to print "no side-effect-reporting tool auto-detected" even
 though ``read_graph`` reads the whole store back. A first W4 scan then ran with
-no probe. The candidate is a suggestion only: the file never enables a probe.
+no probe. A readback that needs no argument is now written as a live
+effect_probe (see test_scaffold_live_blocks.py).
 """
 
 from __future__ import annotations
@@ -88,11 +89,9 @@ def test_readback_fallback_ignores_a_read_only_claim_on_a_write_name() -> None:
     assert _classify_tools(tools).verify_tool is None
 
 
-def test_scaffold_suggests_the_probe_but_never_enables_it() -> None:
+def test_scaffold_writes_a_no_argument_readback_as_a_live_probe() -> None:
     rendered = _render(memory_tools())
-    assert "# CANDIDATE verify_tool (auto-detected): read_graph." in rendered
-    assert "#   verify_tool: read_graph" in rendered
-    # Every effect_probe line stays commented, so loading the file declares no probe.
-    assert not any(line.startswith("effect_probe") for line in rendered.splitlines())
+    assert "# auto-detected: read_graph reads the target's state back." in rendered
     loaded = TargetFile.model_validate(yaml.safe_load(rendered))
-    assert loaded.effect_probe is None
+    assert loaded.effect_probe is not None
+    assert loaded.effect_probe.verify_tool == "read_graph"
