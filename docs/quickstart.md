@@ -77,6 +77,8 @@ export MYLONITE_MODEL=anthropic/claude-haiku-4-5-20251001   # needs ANTHROPIC_AP
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+The full provider table, and how to hand over a key, is on [Choose a model](choose-a-model.md).
+
 Any LiteLLM provider works the same way: a `provider/model` prefix (e.g.
 `--model openai/gpt-4o`) plus that provider's own key env var — `--model`
 and `mylonite.yaml`'s `model:` key both work instead of the environment

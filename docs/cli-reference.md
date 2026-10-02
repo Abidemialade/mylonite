@@ -58,9 +58,10 @@ route like Ollama/vLLM needs none. A provider outside the table falls back to Li
 own `<PROVIDER>_API_KEY` naming convention and warns once, the first time. Either way,
 this is a local name lookup: Mylonite never calls the provider to run the check.
 Vertex AI authenticates via Application Default Credentials, not a key, so it's checked
-for `VERTEXAI_PROJECT`/`VERTEXAI_LOCATION` instead. See "The approved-provider registry"
-in [self-hosted models](self-hosted-models.md#the-approved-provider-registry) for the
-full table — its own page is a later addition.
+for `VERTEXAI_PROJECT`/`VERTEXAI_LOCATION` instead. See [Choose a model](choose-a-model.md)
+for the full provider table, how `--env-file`/`--api-key-file` and the ambient shell
+environment stack up when more than one sets the same variable, and a per-command
+needs-a-key table.
 
 ---
 

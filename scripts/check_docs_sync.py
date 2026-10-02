@@ -104,6 +104,11 @@ DOC_RULES: tuple[DocRule, ...] = (
         "the approved-provider registry and LLM credential wiring",
     ),
     DocRule(
+        "src/mylonite/providers/",
+        ("docs/choose-a-model.md",),
+        "the approved-provider table (run scripts/gen_provider_table.py after editing it)",
+    ),
+    DocRule(
         "src/mylonite/reason_codes.py",
         ("docs/reason-codes.md",),
         "the reason-code registry",

@@ -87,6 +87,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the branch your current branch tracks, else `main`. It used to target
   `main` every time. The `command_tree.json` CLI golden gains the new option.
 
+- **A "Choose a model" docs page.** One page for picking a provider, handing
+  over a key and checking whether a command needs one at all:
+  [`docs/choose-a-model.md`](https://github.com/Abidemialade/mylonite/blob/main/docs/choose-a-model.md).
+  Its provider table is generated straight from
+  `mylonite.providers.registry.PROVIDERS` by
+  `scripts/gen_provider_table.py`, so it can't silently fall behind the
+  registry the way a hand-written table could — a committed drift between
+  the two now fails the test suite. Linked from the quickstart and the CLI
+  reference wherever a model is first needed.
+
 ### Fixed
 
 - **A gate run on the reference target with two or more findings now writes a
