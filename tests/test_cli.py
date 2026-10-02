@@ -2887,7 +2887,8 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert "differential" in result.output
     assert "flakiness" in result.output
-    assert "mutation score" in result.output
+    # The canned report carries no kill matrix, so no mutation score is shown
+    # (a bare score with nothing behind it reads as coverage).
     assert "KEPT" in result.output
 
 
