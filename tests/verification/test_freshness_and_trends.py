@@ -373,6 +373,39 @@ def test_render_trends_annotates_the_known_defective_0_9_0_layer1_result(
     assert "FINDINGS.md" in cells[4]
 
 
+def test_render_judge_f1_known_defective_pair_renders_the_correction() -> None:
+    """Direct unit test for the _KNOWN_DEFECTIVE branch _render_judge_f1 gained
+    for the AgentDojo label-polarity fix (the other tests here only exercise
+    it indirectly through render_trends + a tmp_path fixture). The check runs
+    before anything else in the function, so it must win even with an empty
+    meta and a directory that holds no result file at all."""
+    from verification.trends import _KNOWN_DEFECTIVE, _render_judge_f1
+
+    rendered = _render_judge_f1(Path("unused"), {}, "layer2-agentdojo", "0.9.0")
+
+    assert rendered == _KNOWN_DEFECTIVE[("0.9.0", "layer2-agentdojo")]
+    assert "41.2%" in rendered  # the figure as originally published
+    assert "label inverted" in rendered  # why it's annotated, not bare
+    assert "81.1%" in rendered  # the corrected figure, recomputed offline
+
+
+def test_render_judge_f1_non_defective_version_still_renders_plainly(tmp_path: Path) -> None:
+    """A version/layer pair absent from _KNOWN_DEFECTIVE must fall through to
+    the ordinary numeric rendering -- the registry is an allowlist of known
+    bad numbers, not a filter that swallows every call."""
+    from verification.trends import _render_judge_f1
+
+    meta = {"layers": {"layer2-agentdojo": "ran"}}
+    (tmp_path / "layer2-agentdojo.json").write_text(
+        json.dumps({"judge_agreement_exercised": True, "judge_agreement": {"f1": 0.75}}),
+        encoding="utf-8",
+    )
+
+    # A made-up version: see the comment on the "not_run" test above -- the
+    # three real released versions are all in _KNOWN_DEFECTIVE for this layer.
+    assert _render_judge_f1(tmp_path, meta, "layer2-agentdojo", "0.50.0") == "75.0%"
+
+
 # --- TRENDS.md is generated, so pin that it is current ----------------------
 #
 # `verification/TRENDS.md` says "GENERATED FILE. Do not edit by hand." and
