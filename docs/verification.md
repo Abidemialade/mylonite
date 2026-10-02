@@ -124,6 +124,28 @@ original (inverted) run produced.
   differential. A gateway-defended-versus-raw run needs a vendor API key and has not
   been run.
 
+## A second third-party campaign (pre-registered, not yet run)
+
+A further six systems Mylonite has never run against before — the official
+`server-memory` and `server-everything` reference servers, `redis/mcp-redis`
+against a real Redis instance, the MCP Python SDK's streamable-HTTP example,
+the MCP Go SDK's own memory example, and an OpenAI Agents SDK agent whose own
+inference runs on a local Ollama model — have a committed pass rule
+([`verification/PREREG_L2_THIRD_PARTY.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_L2_THIRD_PARTY.md))
+and pinned target files
+([`verification/third_party/`](https://github.com/Abidemialade/mylonite/tree/main/verification/third_party)),
+each with its licence and pin recorded in `verification/SOURCE.md` before any
+run. Every LLM call happens in CI, via the `third-party-campaign` workflow:
+
+```bash
+gh workflow run third-party-campaign.yml -f targets=all -f provider=both
+```
+
+The first three targets run at a fixed N=3 with a ≥2-of-3 bar; the last three
+are N=1 smoke cells that claim no verdict. This section will be updated with
+the results once the campaign has run; until then, nothing on this page
+reflects it.
+
 ## Where the value is real vs. open
 
 **Real, demonstrated:**
