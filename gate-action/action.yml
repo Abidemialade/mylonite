@@ -8,7 +8,7 @@ inputs:
     description: "Authorization scope/family (you must own the target)."
     required: true
   model:
-    description: "LiteLLM model id (provider-prefixed, e.g. anthropic/claude-haiku-4-5). No default -- see docs/cli-reference.md for the approved providers."
+    description: "LiteLLM model id (provider-prefixed, e.g. anthropic/claude-haiku-4-5). No default -- see docs/cli-reference.md for the approved providers."  # allow-literal: example
     required: true
   open-pr:
     description: "Open the gating PR (true) or just write artifacts (false)."
@@ -72,8 +72,16 @@ runs:
         args=(
           --target-file "$TARGET_FILE"
           --authorize "$AUTHORIZE"
-          --model "$MODEL"
         )
+        # GitHub does not actually enforce `required: true` on a composite
+        # action's input -- a caller can still wire an empty string (an
+        # unset secret/variable, a blank matrix cell). `--model ""` exits 2
+        # ("invalid --model") instead of the clearer exit 4 + approved-
+        # provider-list message a genuinely MISSING model gets, so only pass
+        # the flag at all when there is something to pass.
+        if [ -n "$MODEL" ]; then
+          args+=(--model "$MODEL")
+        fi
         # Opt-in, and only on an exact match: any other value (including the
         # empty string a caller gets from an unset variable) must not open a PR.
         if [ "$OPEN_PR" = "true" ]; then
