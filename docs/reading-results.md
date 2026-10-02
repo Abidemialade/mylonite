@@ -473,8 +473,15 @@ so explicitly.
 Every emitted artefact — exploit JSON, validation report, SARIF, JSON bundle, PR
 body — carries the compliance mapping for the finding: **OWASP LLM Top 10 (2025)**,
 **OWASP ASI (2026)**, a **NIST AI RMF** function tag, and **MITRE ATLAS** technique IDs where the class has them mapped (W1-W3 do; the W4 seeds carry none).
-This is near-free at generation time and is the foundation of audit/compliance reporting
-— see [Standards mapping](standards-mapping.md).
+This is near-free at generation time and is the foundation of audit/compliance reporting.
+
+These tags are **Mylonite's own mapping, hand-assigned per seed** — not a
+crosswalk the standards bodies themselves publish — and they cover only the
+four weakness classes the attack library tests (3 of 10 OWASP LLM entries, 4
+of 10 OWASP ASI entries, 2 MITRE ATLAS techniques). See
+[Standards mapping](standards-mapping.md#coverage-is-partial-by-design) for
+the full class-to-IDs table and what the coverage figures mean before citing
+them.
 
 ## Exit codes (for CI)
 
