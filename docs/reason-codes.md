@@ -341,11 +341,12 @@ instead of `{payload}`.
 
 ## MYL-INC-009
 
-The tool list could not be read again after the agent ran, so a mid-session change
-to the tools was not checked.
+The tool list could not be read again after the agent ran, or was not compared in a
+known form, so a mid-session change to the tools was not checked.
 
 **Fix:** Check that the server still answers `tools/list` after a few tool calls (it
-may have crashed or closed the session), then re-run.
+may have crashed or closed the session), then re-run. A result replayed from an older
+run carries no signature form; re-run the scan to compare every tool field.
 
 ## MYL-INC-010
 

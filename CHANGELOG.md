@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   annotations when it rewrites its description. See "Reading a rug-pull result" in
   `docs/reading-results.md`.
 
+- **A rug-pull result compared in an unknown form now reads NOT TESTED, never
+  stable.** A "stable" result with no signature form, such as one replayed from an
+  older run, is recorded under `MYL-INC-009`, whose summary now reads "could not be
+  read again after the agent ran, or was not compared in a known form" (reason-code
+  snapshot updated). A `null` top-level field or annotation hint counts the same as an
+  absent one; `required` and `enum` are compared as sets only inside a tool's input and
+  output schemas; and a long or non-ASCII key name appears in a diff pointer as a short
+  hash.
+
 ### Added
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,

@@ -8,9 +8,14 @@ not just the description.
 
 The recipe (form ``v2``) is documented so anyone can recompute a digest:
 
-* the tool as the server sent it, every top-level key, explicit ``null`` kept
-  distinct from an absent key;
-* object keys sorted; ``required`` and ``enum`` arrays compared as sets;
+* the tool as the server sent it, every top-level key;
+* a ``null`` top-level field or annotation hint is dropped, because MCP reads an
+  optional field set to ``null`` the same as an absent one; inside
+  ``inputSchema``, ``outputSchema`` and ``_meta`` a ``null`` is kept, because
+  ``default: null``, ``const: null`` and ``enum: [null]`` carry meaning;
+* object keys sorted; inside ``inputSchema`` and ``outputSchema`` (including
+  ``$defs``) the ``required`` and ``enum`` arrays are compared as sets; every
+  other array keeps its order;
 * ``$ref`` kept as literal text and never dereferenced;
 * tools keyed by name, so listing order does not matter;
 * ``sha256`` over compact JSON, prefixed ``v2:sha256:``.
@@ -18,7 +23,10 @@ The recipe (form ``v2``) is documented so anyone can recompute a digest:
 The diff names each changed field as a JSON pointer (RFC 6901), for example
 ``/send_note/annotations/destructiveHint``. It never carries field values, so
 injected text in a description or title is not repeated in the evidence; a
-changed description is shown only as a digest and a length.
+changed description is shown only as a digest and a length. A pointer segment
+is a key the server chose, so one longer than 64 characters, or holding a
+character outside printable ASCII, is replaced by ``#sha256:`` and the first 12
+hex digits of its sha256.
 """
 
 from __future__ import annotations
@@ -50,8 +58,13 @@ RECOGNISED_TOOL_FIELDS: tuple[str, ...] = (
     "_meta",
 )
 
-#: Array-valued keys whose order carries no meaning, compared as sets.
+#: Array-valued JSON Schema keys whose order carries no meaning, compared as
+#: sets inside the two schema fields only.
 _SET_KEYS = frozenset({"required", "enum"})
+_SCHEMA_FIELDS = frozenset({"inputSchema", "outputSchema"})
+
+#: Longest pointer segment shown as text; longer ones are hashed.
+MAX_SEGMENT_CHARS = 64
 
 #: Most JSON pointers listed in one diff; the rest are counted, not listed.
 MAX_DIFF_PATHS = 50
@@ -109,13 +122,36 @@ def tool_view(tool: ToolDescription) -> dict[str, Any]:
     return view
 
 
-def canonicalise(value: object, key: str | None = None) -> object:
-    """Sorted-key, set-aware canonical form of a JSON value (``$ref`` is text)."""
+def _drop_null_fields(view: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop ``null`` top-level fields and ``null`` annotation hints (the schema
+    and ``_meta`` subtrees are left alone)."""
+    out = {k: v for k, v in view.items() if v is not None}
+    annotations = out.get("annotations")
+    if isinstance(annotations, dict):
+        stripped = _strip_none(annotations)
+        if stripped:
+            out["annotations"] = stripped
+        else:
+            out.pop("annotations")
+    return out
+
+
+def canonical_tool(view: Mapping[str, Any]) -> dict[str, Any]:
+    """The canonical form of one tool view (form ``v2``, see the module doc)."""
+    return {
+        k: canonicalise(v, k, in_schema=k in _SCHEMA_FIELDS)
+        for k, v in sorted(_drop_null_fields(view).items())
+    }
+
+
+def canonicalise(value: object, key: str | None = None, *, in_schema: bool = False) -> object:
+    """Sorted-key canonical form of a JSON value (``$ref`` is text). With
+    ``in_schema``, ``required`` and ``enum`` arrays are compared as sets."""
     if isinstance(value, dict):
-        return {k: canonicalise(v, k) for k, v in sorted(value.items())}
+        return {k: canonicalise(v, k, in_schema=in_schema) for k, v in sorted(value.items())}
     if isinstance(value, list):
-        items = [canonicalise(v) for v in value]
-        if key in _SET_KEYS:
+        items = [canonicalise(v, in_schema=in_schema) for v in value]
+        if in_schema and key in _SET_KEYS:
             unique = {_dumps(v): v for v in items}
             return [unique[k] for k in sorted(unique)]
         return items
@@ -134,9 +170,9 @@ def surface_views(tools: Iterable[ToolDescription], *, wire_only: bool = False) 
         if wire_only:
             if t.wire is None:
                 continue
-            out[t.name] = canonicalise(t.wire)
+            out[t.name] = canonical_tool(t.wire)
         else:
-            out[t.name] = canonicalise(tool_view(t))
+            out[t.name] = canonical_tool(tool_view(t))
     return out
 
 
@@ -151,8 +187,14 @@ def digest(view: object) -> str:
     return f"{SURFACE_FORM}:sha256:" + hashlib.sha256(_dumps(view).encode("utf-8")).hexdigest()
 
 
+def _segment(part: str) -> str:
+    if len(part) > MAX_SEGMENT_CHARS or any(not (0x20 <= ord(ch) <= 0x7E) for ch in part):
+        return "#sha256:" + hashlib.sha256(part.encode("utf-8")).hexdigest()[:12]
+    return part.replace("~", "~0").replace("/", "~1")
+
+
 def _pointer(parts: Iterable[str]) -> str:
-    return "".join("/" + p.replace("~", "~0").replace("/", "~1") for p in parts)
+    return "".join("/" + _segment(p) for p in parts)
 
 
 def _changed_paths(a: object, b: object, parts: list[str], out: list[str]) -> None:

@@ -258,12 +258,17 @@ them again after, and compares every field of every tool: `name`, `title`,
 `_meta` and any other key the server sends. An added parameter, a widened `enum`, a
 flipped `destructiveHint` or a new `outputSchema` is a finding, as is a changed
 description or an added or removed tool. Key order, the order of the tool list, and the
-order inside a `required` or `enum` list don't count.
+order inside a schema's `required` or `enum` list don't count.
 
 The finding's `tool_surface_diff` names each changed field as a JSON pointer, such as
 `/send_note/annotations/destructiveHint`, with a `v2:sha256:` digest of each changed tool
 before and after. It never repeats a field's value: a changed description shows only its
-digest and length. A stable result says what was signed and the form, for example
+digest and length. A key name longer than 64 characters, or one with characters outside
+printable ASCII, appears in a pointer as `#sha256:` and the first 12 hex digits of its
+hash. A `null` top-level field or annotation hint counts the same as an absent one; inside
+a schema, `null` is kept, so a new `default: null` is a change. A stable result with no
+signature form, such as one replayed from an older run, reads NOT TESTED
+([`MYL-INC-009`](reason-codes.md#myl-inc-009)), never stable. A stable result says what was signed and the form, for example
 "every tool field signed, form v2".
 
 On a guarded run the comparison uses the tools as the agent saw them after the guard.
