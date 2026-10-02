@@ -45,7 +45,7 @@ from mylonite.contracts import (
     ToolSpec,
 )
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
-from mylonite.plugins._mcp import target_registry
+from mylonite.plugins._mcp import target_registry, tool_surface
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
@@ -225,20 +225,41 @@ def _user_message_for_drive(
 
 
 def _tool_surface_metadata(
-    mutation: dict[str, list[str]] | None, *, relist_failed: bool, listed: bool
+    mutation: dict[str, Any] | None,
+    *,
+    relist_failed: bool,
+    listed: bool,
+    wire_mutation: dict[str, Any] | None = None,
+    all_fields: bool = False,
 ) -> dict[str, str]:
     """The rug-pull evidence keys for one attempt's response metadata.
 
-    ``"true"`` (plus the diff) when the surface changed, ``"errored"`` when the
-    re-list raised, ``"false"`` only when a re-list ran and matched, and nothing
-    when the planner never listed. A failed re-list compared nothing, so it is
-    stamped as an error the predicate treats as inconclusive, never as stable.
+    ``"true"`` (plus the field-level diff) when the surface changed,
+    ``"errored"`` when the re-list raised, ``"false"`` only when a re-list ran
+    and matched, and nothing when the planner never listed. A failed re-list
+    compared nothing, so it is stamped as an error the predicate treats as
+    inconclusive, never as stable. A compared result also carries the signature
+    form and what was signed, plus the server's own change below the control
+    shim (``tool_surface_wire_diff``) when it differs from the planner's view,
+    as evidence only.
     """
     if mutation is not None:
-        return {"tool_surface_mutated": "true", "tool_surface_diff": json.dumps(mutation)}
-    if not listed:
+        out = {"tool_surface_mutated": "true", "tool_surface_diff": json.dumps(mutation)}
+    elif not listed:
         return {}
-    return {"tool_surface_mutated": "errored" if relist_failed else "false"}
+    elif relist_failed:
+        return {"tool_surface_mutated": "errored"}
+    else:
+        out = {"tool_surface_mutated": "false"}
+    out["tool_surface_form"] = tool_surface.SURFACE_FORM
+    out["tool_surface_signed"] = (
+        tool_surface.SIGNED_ALL_FIELDS if all_fields else tool_surface.SIGNED_CONVERTED_FIELDS
+    )
+    # Only when it differs from the verdict's diff (a guard changed the view);
+    # on an unguarded run the two are the same and one copy is enough.
+    if wire_mutation is not None and wire_mutation != mutation:
+        out["tool_surface_wire_diff"] = json.dumps(wire_mutation)
+    return out
 
 
 def _render_seed_args(
@@ -581,7 +602,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         probe_baseline_content: str | None = ""
         #: Non-None when the tool surface changed between the planner's first
         #: list_tools and a re-list after it ran — a mid-session rug-pull.
-        tool_surface_mutation: dict[str, list[str]] | None = None
+        tool_surface_mutation: dict[str, Any] | None = None
+        #: The server's own change below the control shim, evidence only.
+        tool_surface_wire_mutation: dict[str, Any] | None = None
         #: True when the re-list raised, so nothing was compared. Stamped as
         #: "errored" (never "false"): a check that could not run is not a pass.
         tool_surface_relist_failed = False
@@ -666,19 +689,21 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     try:
                         # Bounded: with pagination a re-list can be many requests,
                         # and a hung one must read as inconclusive, not stall.
-                        current = await self._bounded(recording_shim.current_surface_signature())
-                        first = recording_shim.first_surface
-                        added = sorted(set(current) - set(first))
-                        removed = sorted(set(first) - set(current))
-                        changed = sorted(
-                            n for n in current if n in first and current[n] != first[n]
+                        current = await self._bounded(recording_shim.current_surface())
+                        # The verdict compares the planner's view (after the
+                        # control shim) on every field; the server's own change
+                        # below the shim is kept as evidence only.
+                        tool_surface_mutation = tool_surface.diff_surfaces(
+                            recording_shim.first_surface, current
                         )
-                        if added or removed or changed:
-                            tool_surface_mutation = {
-                                "added": added,
-                                "removed": removed,
-                                "changed": changed,
-                            }
+                        if (
+                            recording_shim.first_wire_surface
+                            and recording_shim.current_wire_surface is not None
+                        ):
+                            tool_surface_wire_mutation = tool_surface.diff_surfaces(
+                                recording_shim.first_wire_surface,
+                                recording_shim.current_wire_surface,
+                            )
                     except Exception:
                         # A re-list failure must not fail the attempt, but it must
                         # not read as a stable surface either: nothing was compared.
@@ -866,6 +891,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     tool_surface_mutation,
                     relist_failed=tool_surface_relist_failed,
                     listed=recording_shim.first_surface is not None,
+                    wire_mutation=tool_surface_wire_mutation,
+                    all_fields=recording_shim.first_surface_has_wire,
                 ),
             },
         )
@@ -1465,19 +1492,21 @@ class _RecordingServerShim:
         #: trace rule can honour a server's ``readOnlyHint``. Uniform SDK
         #: defaults are cleared first, exactly as ``describe()`` does.
         self.tool_annotations: dict[str, dict[str, object]] = {}
-        #: Signature of the tool surface the planner saw on FIRST list_tools —
-        #: {tool_name: sha256(description)}. Lets the adapter detect a mid-session
-        #: rug-pull (a server that mutates its own tool descriptions / adds a tool
-        #: after a few calls) by re-listing after the planner and diffing.
-        self.first_surface: dict[str, str] | None = None
-
-    @staticmethod
-    def _surface_sig(tools: list[ToolDescription]) -> dict[str, str]:
-        import hashlib
-
-        return {
-            t.name: hashlib.sha256((t.description or "").encode("utf-8")).hexdigest() for t in tools
-        }
+        #: The tool surface the planner saw on FIRST list_tools, in canonical
+        #: form ({tool_name: canonical view of every field}, see
+        #: ``tool_surface``). Lets the adapter detect a mid-session rug-pull (a
+        #: server that changes any tool field, or adds or removes a tool, after a
+        #: few calls) by re-listing after the planner and diffing. This is the
+        #: view AFTER the control shim, which decides the verdict.
+        self.first_surface: dict[str, Any] | None = None
+        #: The same first listing as the server sent it, below the control
+        #: shim. Diffed only as evidence, never for the verdict.
+        self.first_wire_surface: dict[str, Any] | None = None
+        #: Whether every tool on the first listing carried its wire dump, i.e.
+        #: whether every field was signed or only the converted ones.
+        self.first_surface_has_wire = False
+        #: The wire view of the most recent ``current_surface`` re-list.
+        self.current_wire_surface: dict[str, Any] | None = None
 
     async def list_tools(self) -> list[ToolDescription]:
         tools = await self._inner.list_tools()
@@ -1490,14 +1519,19 @@ class _RecordingServerShim:
             if t.annotations
         }
         if self.first_surface is None:
-            self.first_surface = self._surface_sig(tools)
+            self.first_surface = tool_surface.surface_views(tools)
+            self.first_wire_surface = tool_surface.surface_views(tools, wire_only=True)
+            self.first_surface_has_wire = tool_surface.has_wire(tools)
         return tools
 
-    async def current_surface_signature(self) -> dict[str, str]:
-        """Re-list the tools NOW and return the current signature (for rug-pull
+    async def current_surface(self) -> dict[str, Any]:
+        """Re-list the tools NOW and return their canonical surface (for rug-pull
         detection). Goes through the same control-guarded inner shim the planner
-        used, so what a control hides/rewrites is reflected."""
-        return self._surface_sig(await self._inner.list_tools())
+        used, so what a control hides/rewrites is reflected. The wire view of the
+        same listing is kept on ``current_wire_surface`` as evidence."""
+        tools = await self._inner.list_tools()
+        self.current_wire_surface = tool_surface.surface_views(tools, wire_only=True)
+        return tool_surface.surface_views(tools)
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
         # Record the call, then the RESULT + protocol error flag so the judge and

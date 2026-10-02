@@ -665,7 +665,9 @@ class DescriptionIntegrityControl(BoundaryControl):
         cleaned = sanitize_tool_description(tool.description)
         if cleaned == tool.description:
             return tool
-        return ToolDescription(name=tool.name, description=cleaned, input_schema=tool.input_schema)
+        # Rewrite only the description; every other field (annotations, the wire
+        # dump the rug-pull check signs) is carried through.
+        return tool.model_copy(update={"description": cleaned})
 
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult | None:
         if name not in self._violations:
@@ -698,7 +700,9 @@ class ToolDescriptionSanitizer(BoundaryControl):
         cleaned = sanitize_tool_description(tool.description)
         if cleaned == tool.description:
             return tool
-        return ToolDescription(name=tool.name, description=cleaned, input_schema=tool.input_schema)
+        # Rewrite only the description; every other field (annotations, the wire
+        # dump the rug-pull check signs) is carried through.
+        return tool.model_copy(update={"description": cleaned})
 
 
 class EgressAllowlistControl(BoundaryControl):

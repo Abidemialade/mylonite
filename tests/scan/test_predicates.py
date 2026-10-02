@@ -609,7 +609,7 @@ def test_tool_surface_mutated_predicate_fires_on_mutation() -> None:
         payload_pattern_id="x",
         raw_response="",
         tool_calls=[],
-        metadata={"tool_surface_mutated": "false"},
+        metadata={"tool_surface_mutated": "false", "tool_surface_form": "v2"},
     )
     v2 = fn(payload, stable)
     assert v2 is not None and v2.success is False

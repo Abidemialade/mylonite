@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 #: The LLM transport seam: a litellm-compatible completion callable injected in
 #: place of a live model call (tests pass a stub; production passes
@@ -50,6 +50,12 @@ class ToolDescription(BaseModel):
     inform classification but never override an operator's own declaration —
     see ``tool_classifier.classify``.
     """
+    wire: dict[str, Any] | None = Field(default=None, exclude=True, repr=False)
+    """The tool exactly as the server sent it (every key, wire names), or None
+    when the source was not an MCP listing. Read only by the rug-pull check,
+    which signs every field, not just the ones above. Excluded from dumps so
+    nothing that serialises a ``ToolDescription`` changes shape; a control that
+    rewrites a tool must carry it through (``model_copy``)."""
 
 
 class ToolCall(BaseModel):

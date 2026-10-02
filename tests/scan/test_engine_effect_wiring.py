@@ -314,7 +314,11 @@ async def test_a_failed_relist_makes_the_class_not_tested_under_its_code() -> No
 async def test_a_stable_surface_on_a_partial_tool_list_is_not_tested() -> None:
     result = await _scan(
         _rug_pull_payload(),
-        [_surface_response(tool_surface_mutated="false", tool_list_truncated="true")],
+        [
+            _surface_response(
+                tool_surface_mutated="false", tool_surface_form="v2", tool_list_truncated="true"
+            )
+        ],
     )
     attempt = result.report.attempts[0]
     assert attempt.outcome == "undecided"

@@ -23,6 +23,7 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
+from mylonite.plugins._mcp.tool_surface import wire_tool_dump
 from mylonite.scan.llm_types import ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,9 @@ def _tool_to_description(t: MCPTool) -> ToolDescription:
     undeclared hint absent instead of an explicit null, which matters because
     "the server said nothing" and "the server said false" are different signals
     to ``tool_classifier.classify``.
+
+    The tool as the server sent it is kept on ``wire`` (every key), so the
+    rug-pull check can sign fields this model does not carry.
     """
     annotations: dict[str, object] | None = None
     raw = getattr(t, "annotations", None)
@@ -137,6 +141,7 @@ def _tool_to_description(t: MCPTool) -> ToolDescription:
         description=t.description or "",
         input_schema=t.inputSchema or {"type": "object", "properties": {}},
         annotations=annotations,
+        wire=wire_tool_dump(t),
     )
 
 
