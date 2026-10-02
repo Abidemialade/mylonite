@@ -7,11 +7,17 @@
 # no "all"/"both" fan-out and no free-text model override (both were cut
 # after review: an unbounded fan-out times an unbounded --max-llm-calls
 # times an overridable model was an unbounded spend). The model is fixed
-# per provider below. `max_llm_calls` is hard-clamped to 60. See the
-# prereg's "Budget and the hard ceiling" section for the worst-case math,
-# the pending BUDGET-1 hard ceiling this workflow already wires a
+# per provider below. scan's own --max-llm-calls is fixed at 60 and
+# validate's --iterations is fixed at 3 -- neither is dispatch-configurable
+# any more. What IS dispatch-configurable, and hard-clamped, is each
+# process's own MYLONITE_MAX_LLM_REQUESTS ceiling (scan_ceiling <= 150,
+# validate_ceiling <= 100; see the prereg's "Pilot procedure" for how the
+# real values get set from one uncounted dispatch before any counted run).
+# See the prereg's "Budget and the hard ceiling" section for the worst-case
+# math, the pending BUDGET-1 hard ceiling this workflow already wires a
 # placeholder env var for, and an honest statement of today's actual hard
-# stop (the 30-minute job timeout; mylonite has no --max-budget yet).
+# stop (the 30-minute job timeout, and a provider-side spend cap; mylonite
+# has no --max-budget yet).
 #
 # Every live cell needs a repo secret (MYLONITE_LLM_KEY for Anthropic,
 # MYLONITE_OPENAI_KEY for OpenAI) and a dispatch with the matching key unset
@@ -76,14 +82,27 @@ on:
           - anthropic
           - openai
           - ollama
-      max_llm_calls:
+      scan_ceiling:
         description: >-
-          LLM call budget, hard-clamped to 60. Drives both scan's own
-          --max-llm-calls and the placeholder process-wide ceiling env var
-          (see the prereg's "Budget and the hard ceiling").
+          Per-process hard LLM-request ceiling for the scan phase
+          (MYLONITE_MAX_LLM_REQUESTS), clamped to <=150. scan's own soft
+          --max-llm-calls stays fixed at 60 regardless of this value. The
+          default (120) is a pre-pilot estimate -- see the prereg's "Pilot
+          procedure" section for how the real value gets set before any
+          counted run.
         required: true
         type: number
-        default: 30
+        default: 120
+      validate_ceiling:
+        description: >-
+          Per-process hard LLM-request ceiling for the validate phase
+          (MYLONITE_MAX_LLM_REQUESTS), clamped to <=100. validate's own
+          --iterations stays fixed at 3 regardless of this value. The
+          default (80) is a pre-pilot estimate -- see the prereg's "Pilot
+          procedure" section.
+        required: true
+        type: number
+        default: 80
       ref:
         description: "branch, tag or sha to build and measure"
         default: "main"
@@ -122,25 +141,46 @@ jobs:
       TPV_TARGET: ${{ inputs.target }}
       TPV_PROVIDER: ${{ inputs.provider }}
     steps:
-      - name: Validate inputs -- hard-clamp max_llm_calls; reject a bad target/provider combo
+      - name: Validate inputs -- hard-clamp both ceilings; reject a bad target/provider combo
         id: inputs
         shell: bash
         env:
-          TPV_MAX_LLM_CALLS_RAW: ${{ inputs.max_llm_calls }}
+          TPV_SCAN_CEILING_RAW: ${{ inputs.scan_ceiling }}
+          TPV_VALIDATE_CEILING_RAW: ${{ inputs.validate_ceiling }}
         run: |
-          n="$TPV_MAX_LLM_CALLS_RAW"
-          case "$n" in
+          # Inlined twice rather than factored into a shell function: a
+          # function's `exit` inside a `$(...)` command substitution only
+          # terminates that subshell, not this step, which would silently
+          # swallow a bad-input error instead of failing the step on it.
+
+          scan_ceiling="$TPV_SCAN_CEILING_RAW"
+          case "$scan_ceiling" in
             ''|*[!0-9]*)
-              echo "::error::max_llm_calls must be a positive integer, got '$n'"
+              echo "::error::scan_ceiling must be a positive integer, got '$scan_ceiling'"
               exit 1
               ;;
           esac
-          if [ "$n" -lt 1 ]; then n=1; fi
-          if [ "$n" -gt 60 ]; then
-            echo "::notice::max_llm_calls $n exceeds the hard cap of 60 (see verification/PREREG_THIRD_PARTY_2026_10.md's budget math); clamping to 60."
-            n=60
+          if [ "$scan_ceiling" -lt 1 ]; then scan_ceiling=1; fi
+          if [ "$scan_ceiling" -gt 150 ]; then
+            echo "::notice::scan_ceiling $scan_ceiling exceeds the hard cap of 150 (see verification/PREREG_THIRD_PARTY_2026_10.md's Pilot procedure); clamping to 150."
+            scan_ceiling=150
           fi
-          echo "max_llm_calls=$n" >> "$GITHUB_OUTPUT"
+          echo "scan_ceiling=$scan_ceiling" >> "$GITHUB_OUTPUT"
+
+          validate_ceiling="$TPV_VALIDATE_CEILING_RAW"
+          case "$validate_ceiling" in
+            ''|*[!0-9]*)
+              echo "::error::validate_ceiling must be a positive integer, got '$validate_ceiling'"
+              exit 1
+              ;;
+          esac
+          if [ "$validate_ceiling" -lt 1 ]; then validate_ceiling=1; fi
+          if [ "$validate_ceiling" -gt 100 ]; then
+            echo "::notice::validate_ceiling $validate_ceiling exceeds the hard cap of 100 (see verification/PREREG_THIRD_PARTY_2026_10.md's Pilot procedure); clamping to 100."
+            validate_ceiling=100
+          fi
+          echo "validate_ceiling=$validate_ceiling" >> "$GITHUB_OUTPUT"
+
           if [ "$TPV_PROVIDER" = "ollama" ] && [ "$TPV_TARGET" != "tpv-server-memory" ]; then
             echo "::error::provider=ollama is only valid with target=tpv-server-memory (see the prereg)."
             exit 1
@@ -326,21 +366,23 @@ jobs:
           OPENAI_API_KEY: ${{ env.TPV_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
           OLLAMA_API_BASE: http://127.0.0.1:11434
           MYLONITE_MAX_TOKENS: "2048"
-          # Placeholder for BUDGET-1 (a separate, in-progress PR adding a
-          # hard LLM-call ceiling applied PER PROCESS, including retries).
-          # MYLONITE_MAX_LLM_REQUESTS is this workflow's one guess at the
-          # real name; it is a no-op today (nothing in src/ reads it yet)
-          # and appears in exactly this one place so the controller can
-          # align the name once BUDGET-1 lands. scan and validate are two
-          # SEPARATE processes that both read this same value, so the
-          # per-cell worst case is 2x this ceiling, not 1x -- deliberately
-          # hardcoded to 30 (half the dispatch's own clamped max_llm_calls,
-          # NOT driven by that input) so the 2-process total lands back near
-          # the single-process ballpark the prereg's budget section targets;
-          # see "Budget and the hard ceiling" there for the worked numbers.
-          MYLONITE_MAX_LLM_REQUESTS: "30"
           TPV_MODEL: ${{ steps.model.outputs.model }}
-          TPV_MAX_LLM_CALLS: ${{ steps.inputs.outputs.max_llm_calls }}
+          # scan and validate are two SEPARATE processes, each getting its
+          # OWN MYLONITE_MAX_LLM_REQUESTS ceiling -- set as a one-off
+          # per-command env override below (`MYLONITE_MAX_LLM_REQUESTS=...
+          # "$MYLONITE" scan ...`), never a single shared step-level value,
+          # since a step's `env:` can only hold one value per name and the
+          # two processes need different ones (scan has more seeds to
+          # drive than validate has re-drives). MYLONITE_MAX_LLM_REQUESTS
+          # is this workflow's one guess at the real BUDGET-1 env var name
+          # (a separate, in-progress PR adding a hard, per-process LLM-call
+          # ceiling); it is a no-op today (nothing in src/ reads it yet).
+          # The pre-pilot defaults (120/80) are sized from a from-`src/`
+          # estimate of realistic/worst-case calls per process -- see the
+          # prereg's "Pilot procedure", which sets the REAL values from one
+          # uncounted dispatch before any counted run.
+          TPV_SCAN_CEILING: ${{ steps.inputs.outputs.scan_ceiling }}
+          TPV_VALIDATE_CEILING: ${{ steps.inputs.outputs.validate_ceiling }}
         run: |
           case "$TPV_TARGET" in
             tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
@@ -366,9 +408,9 @@ jobs:
           # outcome, which must read green, not red.
           mkdir -p out
           set +e
-          "$MYLONITE" scan \
+          MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
-            --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls "$TPV_MAX_LLM_CALLS" \
+            --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
             --output-dir out 2>&1 | tee run.log
           scan_rc=${PIPESTATUS[0]}
           set -e
@@ -406,7 +448,7 @@ jobs:
               echo "generate exited $generate_rc" >> run.log
               if [ "$generate_rc" -eq 0 ]; then
                 set +e
-                "$MYLONITE" validate generated \
+                MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate generated \
                   --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
                   --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log
                 validate_rc=${PIPESTATUS[0]}
