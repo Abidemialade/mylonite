@@ -186,7 +186,8 @@ in the target file for a custom one. Then re-run.
 LLM provider calls failed several times in a row, so the scan stopped early. Exit
 code `4`.
 
-**Fix:** Check the provider credentials (for example `ANTHROPIC_API_KEY`) and
+**Fix:** Check your provider's credentials (its own key environment variable --
+see [self-hosted models](self-hosted-models.md) for the approved providers) and
 `--model`, and that this machine can reach the provider. Behind a proxy, see
 [Enterprise networking](enterprise-networking.md). Then re-run.
 
