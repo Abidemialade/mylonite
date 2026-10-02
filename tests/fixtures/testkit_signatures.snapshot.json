@@ -51,6 +51,12 @@
         "name": "provider"
       },
       {
+        "annotation": "int | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "attempts"
+      },
+      {
         "annotation": "CompletionFn | None",
         "default": "None",
         "kind": "KEYWORD_ONLY",
@@ -109,6 +115,12 @@
         "default": "None",
         "kind": "KEYWORD_ONLY",
         "name": "provider"
+      },
+      {
+        "annotation": "int | None",
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "attempts"
       },
       {
         "annotation": "CompletionFn | None",

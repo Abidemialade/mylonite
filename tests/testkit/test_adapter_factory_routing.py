@@ -147,7 +147,12 @@ def test_testkit_threads_control_env(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(testkit, "_run_target_scan", fake_run_target_scan)
 
     testkit.assert_control_holds(
-        exploit, target_file=target_file, control="W2", model="stub-model", provider="stub"
+        exploit,
+        target_file=target_file,
+        control="W2",
+        model="stub-model",
+        provider="stub",
+        attempts=1,  # one raw + one guarded leg: this pins routing, not attempts
     )
 
     # Exactly two legs (raw, guarded); the raw leg must carry disable_controls
@@ -235,7 +240,12 @@ def test_assert_control_holds_routes_through_plan_twins(
     monkeypatch.setattr(testkit, "_run_target_scan", fake_run_target_scan)
 
     testkit.assert_control_holds(
-        exploit, target_file=target_file, control="W2", model="stub-model", provider="stub"
+        exploit,
+        target_file=target_file,
+        control="W2",
+        model="stub-model",
+        provider="stub",
+        attempts=1,  # one raw + one guarded leg: this pins routing, not attempts
     )
 
     assert plan_calls == [{"weakness": "W2", "fast": False}]

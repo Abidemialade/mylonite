@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A committed live gate now re-drives your app up to 3 times, not once.**
+  `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
+  the first attempt the attack lands on and stop there, and pass only after
+  every attempt resisted. An attack that lands 40% of the time used to slip
+  past a single clean run more often than not; it now has three chances to
+  show. An inconclusive attempt never counts as a resist, so a run with one
+  ends in an error, never a pass. Set the number with the new `attempts=`
+  keyword or the `MYLONITE_REDRIVE_ATTEMPTS` environment variable (for
+  example `1` on every pull request and the default on a nightly job). A
+  passing check now costs up to three re-drives (`assert_control_holds`: one
+  raw re-drive plus three guarded ones); a check the attack lands on still
+  costs one. Both signatures gain `attempts`, so the testkit signature
+  snapshot changed. Under `@testkit.pending_fix`, the first landing is the
+  expected failure, and "remove the marker" appears only after every attempt
+  resisted. The offline `assert_guard_holds` replay is unchanged.
+
 ### Fixed
 
 - **The AgentDojo verification adapter read its own benchmark label backwards.**
