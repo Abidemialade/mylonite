@@ -136,7 +136,7 @@ def test_discovery_passes_authorize_through_env(tmp_path):
     ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
 )
 def test_rendered_workflow_carries_the_gates_model(tmp_path, name, job):
-    """REG-1b follow-up: there is no default model any more, so a workflow
+    """Review follow-up: there is no default model any more, so a workflow
     `gate --workflows` writes must carry the EXACT model that run resolved --
     otherwise the committed workflow would re-trigger the new "no model
     chosen" exit the next time it ran in CI. A repository `MYLONITE_MODEL`
@@ -155,7 +155,7 @@ def test_rendered_workflow_carries_the_gates_model(tmp_path, name, job):
 
 
 def test_a_scaffolded_workflow_always_sets_a_model(tmp_path):
-    """REG-1b follow-up: `write_workflows` has no default for `model` --
+    """Review follow-up: `write_workflows` has no default for `model` --
     every caller must supply the gate's own resolved model, so a rendered
     workflow can never ship with the substitution token still in it (which
     would make `mylonite gate`/the committed test's live re-drive hit the
@@ -171,36 +171,58 @@ def test_a_scaffolded_workflow_always_sets_a_model(tmp_path):
         wf(tmp_path, runs_on="ubuntu-latest")  # type: ignore[call-arg]
 
 
-@pytest.mark.parametrize("name", ["mylonite-gate.yml", "mylonite-discovery.yml"])
-def test_a_scan_or_gate_from_the_template_is_never_left_with_no_model_configured(
-    tmp_path, monkeypatch, name
-):
-    """End-to-end version of the test above: feed the rendered
-    `MYLONITE_MODEL` expression's two cases (no repository variable set; one
-    set) into the SAME resolution `mylonite gate`/the committed test would
-    see, and confirm a model is always present -- it is impossible for a
-    run driven by this template to hit the "no model chosen" exit, because
-    the template itself always sets the variable one way or the other."""
+def test_discovery_workflow_never_runs_gate_with_no_model_configured(tmp_path, monkeypatch):
+    """`mylonite-discovery.yml`'s `mylonite gate --target-file ... --open-pr`
+    step is the ONE place either template actually READS `MYLONITE_MODEL`
+    (review follow-up -- `mylonite-gate.yml`'s per-PR pytest re-drive takes
+    its model from the exploit's own recorded execution context, never an
+    env var, so testing it the same way would be asserting something the
+    code never does; see "What the variable controls" in docs/ci-gating.md).
+
+    EXTRACTS the literal GitHub Actions would fall through to from the
+    RENDERED text (a regex over the actual output), rather than asserting
+    the same string the test itself chose to pass in twice -- so this fails
+    if the rendered expression's shape ever changes, not just if the
+    literal happens to not match a second hardcoded copy of it."""
+    import re
+
     from mylonite.config import env_run_config
 
-    written = write_workflows(
-        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
-    )
-    rendered = next(p for p in written if p.name == name).read_text(encoding="utf-8")
-    assert (
-        "MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || 'anthropic/claude-haiku-4-5-20251001' }}"
-        in (rendered)
-    )
+    written_model = "anthropic/claude-haiku-4-5-20251001"
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest", model=written_model)
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    rendered = discovery.read_text(encoding="utf-8")
 
-    # Case 1: no `vars.MYLONITE_MODEL` repository variable -- GitHub Actions'
-    # `||` falls through to the literal baked in at scaffold time.
-    monkeypatch.setenv("MYLONITE_MODEL", "anthropic/claude-haiku-4-5-20251001")
-    assert env_run_config().model is not None
+    match = re.search(r"MYLONITE_MODEL: \$\{\{ vars\.MYLONITE_MODEL \|\| '([^']+)' \}\}", rendered)
+    assert match is not None, "no MYLONITE_MODEL fallback expression found in the rendered workflow"
+    rendered_literal = match.group(1)
+    assert rendered_literal == written_model
+
+    # Case 1: no `vars.MYLONITE_MODEL` repository variable set -- GitHub
+    # Actions' `||` falls through to the literal this test just extracted
+    # from the ACTUAL rendered file, not a second hand-typed copy of it.
+    monkeypatch.setenv("MYLONITE_MODEL", rendered_literal)
+    assert env_run_config().model == written_model
 
     # Case 2: an operator DID set a repository variable -- it wins, and is
     # still a real, non-None model, never the unresolved token.
     monkeypatch.setenv("MYLONITE_MODEL", "openai/gpt-4o-mini")
     assert env_run_config().model == "openai/gpt-4o-mini"
+
+
+def test_gate_workflow_s_model_variable_is_set_but_unread_by_the_pytest_step(tmp_path):
+    """The per-PR job sets `MYLONITE_MODEL` in its `env:` block (for
+    consistency, and in case a future committed test needs it as a
+    fallback), but the step that actually runs is a bare `pytest` -- no
+    `mylonite` CLI invocation that would read the variable at all."""
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    job = doc["jobs"]["gate"]
+    assert "MYLONITE_MODEL" in job["env"]
+    assert job["steps"][-1]["run"] == "pytest .mylonite/gate -q -ra"
 
 
 def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
