@@ -1233,7 +1233,10 @@ class DifferentialValidator(ValidatorBase):
         """Build and await one attack scan for ``variant``, scoped to ``pattern_id``.
 
         Only the finding's seed runs (``pattern_id_filter``), as on the custom
-        path. No internal ``asyncio.run`` — callers that want to run this
+        path. The scan is bounded by ``iteration_timeout_s``
+        (``--iteration-timeout``), as on the custom path; a cut-off scan records
+        no verdict, so the iteration fails closed.
+        No internal ``asyncio.run`` — callers that want to run this
         concurrently with its twin (``_run_iteration``) drive both from a single
         event loop.
         """
@@ -1247,6 +1250,7 @@ class DifferentialValidator(ValidatorBase):
             customiser_model=self._customiser_model,
             judge_model=self._judge_model,
             pattern_id_filter=pattern_id,
+            wall_clock_timeout_s=self._iteration_timeout_s,
         )
         return await engine.run()
 

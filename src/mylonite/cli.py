@@ -2059,9 +2059,10 @@ def validate(
         typer.Option(
             "--iteration-timeout",
             help=(
-                "Per-scan wall-clock budget (seconds) for a CUSTOM-target run. A "
-                "stuck or slow real target aborts that run cleanly instead of "
-                "hanging open-ended; the loop still completes and reports. "
+                "Per-scan wall-clock budget (seconds) for each validation run, on "
+                "a custom target and on the bundled reference twins. A stuck or "
+                "slow run is cut off cleanly instead of hanging open-ended and "
+                "counts as no verdict; the loop still completes and reports. "
                 "Defaults to a sane non-zero bound (DCR-0010) — a CI job must not "
                 "be able to hang indefinitely just because this flag was left "
                 "unset; pass a larger value for a target known to need more time."

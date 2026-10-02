@@ -49,6 +49,7 @@ def build_scan(
     judge_model: str | None = None,
     pattern_id_filter: str | None = None,
     llm_assist: bool = True,
+    wall_clock_timeout_s: float | None = None,
 ) -> ScanEngine:
     """Build a ready-to-run ``ScanEngine`` for one reference variant.
 
@@ -66,6 +67,9 @@ def build_scan(
     inert in the recorded demo (their fenced output was silently discarded
     before the JSON-fence parse fix), so it changes nothing the demo shows while
     making it robust to the now-working parsers.
+
+    ``wall_clock_timeout_s`` bounds the whole scan (``ScanConfig``'s field of
+    the same name); ``None`` keeps it unbounded.
     """
     # Role-separated models (each defaults to ``model``). The planner is the
     # agent-under-test decision-maker — pointing it at a representatively
@@ -91,6 +95,7 @@ def build_scan(
         max_concurrent=1,
         pattern_id_filter=pattern_id_filter,
         customise=llm_assist,
+        wall_clock_timeout_s=wall_clock_timeout_s,
     )
     # Delegate engine assembly to the single builder, passing the reference
     # attack modules explicitly (deterministic — no entry-point discovery) so
