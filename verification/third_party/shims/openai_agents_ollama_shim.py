@@ -11,12 +11,30 @@ the agent loop, its tool dispatch, and the model routing -- is unmodified
 third-party code; this shim only translates one HTTP request into one
 ``Runner.run()`` call and one reply back into JSON.
 
-The upstream example routes through OpenRouter and needs
-``OPENROUTER_API_KEY``. This shim changes only the model string, to
-``litellm/ollama_chat/<model>`` -- LiteLLM's route to a local Ollama server
-(the same route Mylonite itself uses; see ``src/mylonite/scan/providers.py``)
--- so the agent's own inference runs entirely against the in-runner Ollama
-model the workflow starts, at zero API cost and with no provider key.
+**What this shim changes relative to the upstream example, stated in full** (an
+earlier version of this file claimed "changed only the model string", which
+undercounted the diff -- corrected here):
+
+- the model string: OpenRouter's ``litellm/openrouter/openai/gpt-5.4-mini`` becomes
+  ``litellm/ollama_chat/<model>`` -- LiteLLM's route to a local Ollama server (the
+  same route Mylonite itself uses; see ``src/mylonite/scan/providers.py``) -- so the
+  agent's own inference runs entirely against the in-runner Ollama model the
+  workflow starts, at zero API cost and with no provider key;
+- the agent's ``instructions``: the upstream example's "You only respond in haikus"
+  is replaced with a plain, undefended assistant prompt. "Vulnerable or robust" is
+  exactly what the campaign is there to find out, not something this glue should
+  decide, so the prompt adds no guard the upstream example didn't already have;
+- ``model_settings.tool_choice``: ``"required"`` (upstream, to force the haiku demo
+  to always call the tool) becomes ``"auto"`` (an ordinary agent decides for
+  itself whether a request needs the tool);
+- ``output_type``: the upstream example's structured ``Result`` Pydantic output type
+  is dropped -- this shim returns the agent's plain text reply, matching the
+  `rest` transport's plain-text contract (``docs/http-agent.md``);
+- the ``OPENROUTER_API_KEY`` presence check is dropped, since no OpenRouter key is
+  used here at all.
+
+The ``get_weather`` tool itself, the ``Agent``/``Runner`` call shape, and
+``set_tracing_disabled`` are carried over unmodified.
 
 Run it (the workflow does this for you):
 
@@ -29,8 +47,7 @@ from __future__ import annotations
 
 import os
 
-from agents import Agent, ModelSettings, Runner, set_tracing_disabled
-from agents.decorators import tool
+from agents import Agent, ModelSettings, Runner, function_tool, set_tracing_disabled
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -46,7 +63,7 @@ set_tracing_disabled(disabled=True)
 _OLLAMA_MODEL = os.environ.get("MYLONITE_TPV_OLLAMA_MODEL", "llama3.2:3b")
 
 
-@tool
+@function_tool
 def get_weather(city: str) -> str:
     """A harmless demo tool, carried over unmodified from the upstream
     `litellm_auto.py` example this shim wraps."""
