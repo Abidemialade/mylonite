@@ -65,6 +65,10 @@ _ENV_VARS_TESTS_REASON_ABOUT = (
     "VERTEXAI_PROJECT",
     "VERTEXAI_LOCATION",
     "XAI_API_KEY",
+    "CHATGPT_API_KEY",
+    "GITHUB_COPILOT_API_KEY",
+    "COHERE_CHAT_API_KEY",
+    "DATABRICKS_API_KEY",
     "MY_CUSTOM_KEY",
     "ZZZ_DEFINITELY_NOT_A_REAL_PROVIDER_API_KEY",
 )
@@ -147,23 +151,43 @@ def test_unlisted_provider_falls_back_to_a_guessed_var_and_warns_once(
     assert capsys.readouterr().err == ""
 
 
-def test_the_chatgpt_route_never_touches_litellm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression test: `litellm.get_llm_provider` for the `chatgpt/` route
-    starts an interactive OAuth device-code sign-in and blocks -- this is
-    what broke when the fallback used to probe LiteLLM first. Patch BOTH
-    functions the old probe used to raise if called at all, so this test
-    fails loudly (not hangs) if that probe ever comes back."""
+@pytest.mark.parametrize(
+    "route,expected_var",
+    [
+        ("chatgpt", "CHATGPT_API_KEY"),
+        ("github_copilot", "GITHUB_COPILOT_API_KEY"),
+        ("xai", "XAI_API_KEY"),
+        ("cohere_chat", "COHERE_CHAT_API_KEY"),
+        ("databricks", "DATABRICKS_API_KEY"),
+    ],
+)
+def test_unlisted_routes_never_touch_litellm(
+    route: str, expected_var: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test: `litellm.get_llm_provider` for a route like
+    `chatgpt/` or `github_copilot/` starts an interactive OAuth device-code
+    sign-in and blocks -- this is what broke when the fallback used to
+    probe LiteLLM first. Patch both functions the old probe used to raise
+    if called at all, so this test fails loudly (not hangs) if that probe
+    ever comes back.
+
+    Resolved through the NORMAL path (`provider_from_model` on a real
+    `route/model` string, then `required_env_vars` on the provider id it
+    returns) rather than handing `required_env_vars` the raw
+    `"route/model"` string directly, so the asserted fallback variable is
+    the real one a live run would check for (``CHATGPT_API_KEY``), not an
+    artefact of a synthetic probe string (``CHATGPT/X_API_KEY``)."""
 
     def _raise_if_called(*args: object, **kwargs: object) -> object:
-        raise AssertionError("required_env_vars must never call into litellm")
+        raise AssertionError("must never call into litellm")
 
-    monkeypatch.setattr(providers_module, "model_is_routable", _raise_if_called, raising=True)
     import litellm
 
     monkeypatch.setattr(litellm, "get_llm_provider", _raise_if_called)
     monkeypatch.setattr(litellm, "validate_environment", _raise_if_called)
 
-    assert required_env_vars("chatgpt/x") == ("CHATGPT/X_API_KEY",)
+    provider = provider_from_model(f"{route}/some-model")
+    assert required_env_vars(provider) == (expected_var,)
 
 
 def test_stub_sentinel_provider_still_needs_no_key_and_warns_nothing(
