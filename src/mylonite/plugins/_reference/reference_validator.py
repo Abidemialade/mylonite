@@ -91,6 +91,7 @@ from mylonite._verdict import (
     verdict_label,
 )
 from mylonite.contracts import (
+    AbortReason,
     ExploitRecord,
     GeneratedTest,
     Payload,
@@ -387,6 +388,16 @@ class _Decision:
     differential_metric: float
     flakiness_passed: bool
     flakiness_metric: float
+
+
+class TargetLaunchError(RuntimeError):
+    """The custom target never came up, so no run could reach a verdict.
+
+    Raised when the adapter factory fails or a run's scan aborts because the
+    target could not be described. Every later run would fail the same way and
+    read as "the attack did not reproduce", which blames the attack for a
+    launch problem. The CLI maps it to exit ``2`` with one line.
+    """
 
 
 def _raise_if_request_ceiling_hit() -> None:
@@ -1005,7 +1016,12 @@ class DifferentialValidator(ValidatorBase):
         from mylonite.scan.engine import ScanConfig
 
         chosen_factory = factory or self._target_adapter_factory
-        adapter = chosen_factory() if chosen_factory else target
+        try:
+            adapter = chosen_factory() if chosen_factory else target
+        except Exception as exc:
+            raise TargetLaunchError(
+                f"the target could not be built: {redact_exception(exc)}"
+            ) from exc
         config = ScanConfig(
             target_id="mcp:custom",  # report id; seed selection uses the descriptor
             provider=self._provider,
@@ -1025,6 +1041,11 @@ class DifferentialValidator(ValidatorBase):
             judge_model=self._judge_model,
         )
         result = asyncio.run(engine.run())
+        if result.report.aborted == AbortReason.DESCRIBE_FAILED:
+            raise TargetLaunchError(
+                result.abort_detail
+                or "the target could not be launched or described, so no run reached a verdict"
+            )
         black_box = result.descriptor is not None and result.descriptor.kind == "http-agent"
         # The judged attempt for this seed carries the verdict mechanism and the
         # judge evidence, which holds the adapter's effect value for every

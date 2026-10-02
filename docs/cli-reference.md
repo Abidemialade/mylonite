@@ -246,6 +246,11 @@ effect proof, see [what the numbers mean](validation.md#what-the-numbers-mean)),
 `validate` says the committed test would gate reproduction only, and points you at a
 guarded side or an `effect_probe`.
 
+A run that cannot reach a verdict stops with one line and no traceback. It exits `3`
+(`MYL-ABT-001`) when the LLM call budget runs out mid-run, and `2` (`MYL-ABT-006`)
+when a custom target never comes up, so no run could even describe it. Neither is
+reported as a rejected test.
+
 When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
 tokens the provider reported, and the wall-clock time. The metamorphic stage runs under
 its own call budget; if that budget is reached before every perturbation has run, the
