@@ -467,11 +467,11 @@ class DifferentialValidator(ValidatorBase):
     path (real ``litellm.acompletion``); an injected callable is the
     deterministic offline seam the unit tests use.
 
-    ``model`` defaults to ``"stub"`` -- :mod:`mylonite.scan.providers`'s
-    test-only sentinel provider id, never a real model -- NOT a real
-    provider (CLAUDE.md, 2026-09-30: no default provider or model).
-    ``cli.py`` always threads its own resolved ``--model`` through here on
-    every real invocation; the default exists only so this class stays
+    ``model`` and ``provider`` both default to ``"stub"`` --
+    :mod:`mylonite.scan.providers`'s test-only sentinel provider id, never a
+    real model or provider: there is no default provider or model. ``cli.py``
+    always threads its own resolved ``--model``/``--provider`` through here
+    on every real invocation; the default exists only so this class stays
     zero-argument-constructible for the plugin registry's entry-point
     discovery (``ValidatorBase`` subclasses must be, per its own contract --
     config flows through the contract's methods, not ``__init__``), and so
@@ -490,7 +490,7 @@ class DifferentialValidator(ValidatorBase):
         min_vuln_rate: float = 0.4,
         max_guard_leak: float = 0.0,
         min_guard_resist_rate: float = 0.6,
-        provider: str = "anthropic",
+        provider: str = "stub",
         model: str = "stub",
         planner_model: str | None = None,
         customiser_model: str | None = None,
