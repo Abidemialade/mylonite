@@ -24,12 +24,7 @@ from mylonite.plugins._mcp.scaffold import (
     _atomic_write_text,
     _check_output_writable,
     _OutputNotWritable,
-    _with_scaffold_markers,
-)
-from mylonite.plugins._mcp.target_file import (
-    SCAFFOLD_MARKER_FOOTER,
-    SCAFFOLD_MARKER_HEADER,
-    load_target_file,
+    _scaffold_rest_target_file,
 )
 
 runner = CliRunner()
@@ -143,27 +138,44 @@ def test_atomic_write_writes_a_fresh_file(tmp_path: Path) -> None:
     assert out.read_text(encoding="utf-8") == "hello"
 
 
-def test_scaffold_marker_round_trip_detects_a_truncated_write(tmp_path: Path) -> None:
-    text = _with_scaffold_markers("family: custom\ncommand: python\n")
-    assert text.startswith(SCAFFOLD_MARKER_HEADER)
-    assert text.endswith(SCAFFOLD_MARKER_FOOTER)
+def test_scaffold_rest_rejects_a_directory_output(tmp_path: Path) -> None:
+    """The REST scaffold path (no server to launch) gets the same preflight
+    as the MCP path: an existing directory is a config error, not a crash."""
+    out = tmp_path / "adir"
+    out.mkdir()
 
-    good = tmp_path / "good.yaml"
-    good.write_text(text + "\nweakness_classes: []\n", encoding="utf-8")
-    tf = load_target_file(good)
-    assert tf.family == "custom"
+    result = runner.invoke(
+        app,
+        ["scan", "--scaffold", str(out), "--rest-url", "https://agent.example/chat"],
+    )
 
-    # Simulate a crash mid-write: the footer marker never got written.
-    truncated = tmp_path / "truncated.yaml"
-    truncated.write_text(SCAFFOLD_MARKER_HEADER + "family: custom\ncomma", encoding="utf-8")
-    with pytest.raises(ValueError, match="scaffold"):
-        load_target_file(truncated)
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "Traceback" not in (result.output + (result.stderr or ""))
 
 
-def test_hand_written_target_file_without_any_marker_still_loads(tmp_path: Path) -> None:
-    """A file nobody ran `--scaffold` on never carries the header marker, so
-    the missing-footer check must never fire for it."""
-    hand = tmp_path / "hand.yaml"
-    hand.write_text("family: custom\ncommand: python\n", encoding="utf-8")
-    tf = load_target_file(hand)
-    assert tf.family == "custom"
+def test_scaffold_rest_write_is_atomic_on_a_simulated_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The REST scaffold's write goes through the same `_atomic_write_text`
+    helper as the MCP path: a crash mid-write leaves a pre-existing output
+    file untouched instead of truncated."""
+    out = tmp_path / "myagent.yaml"
+    out.write_text("ORIGINAL", encoding="utf-8")
+
+    def _boom(_self: Path, _dst: object) -> None:
+        raise OSError("simulated crash mid-write")
+
+    monkeypatch.setattr(Path, "replace", _boom)
+
+    with pytest.raises(OSError):
+        _scaffold_rest_target_file(
+            output=out,
+            rest_url="https://agent.example/chat",
+            rest_body=None,
+            rest_response_path=None,
+            force=True,
+        )
+
+    assert out.read_text(encoding="utf-8") == "ORIGINAL"
+    leftovers = [p for p in tmp_path.iterdir() if p.name != "myagent.yaml"]
+    assert leftovers == []

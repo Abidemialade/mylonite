@@ -8,10 +8,8 @@ page is the full field reference. Source: `mylonite.plugins._mcp.target_file.Tar
 `--scaffold` checks the output path is writable (not a directory, parent creatable)
 before it launches your server, so a bad path fails fast with one line, not a
 traceback after the launch cost. The write itself is atomic — a crash mid-write
-leaves any existing file untouched — and the file it writes carries an end-of-file
-marker, so a truncated write is caught on the next load instead of silently parsing
-as a short-but-valid target. A hand-written `target.yaml` never carries that marker,
-so this never affects a file you wrote yourself.
+leaves any existing file untouched, never truncated. Both the MCP scaffold and
+the `--rest-url` scaffold get the same check.
 
 ## Minimal
 
