@@ -166,12 +166,29 @@ def test_require_llm_configured_passes_for_an_unrecognised_model(monkeypatch) ->
     require_llm_configured(model="totally-unknown-model-xyz")  # must not raise
 
 
+#: Every Bedrock credential env var across every accepted form -- cleared
+#: before each of the tests below so one form's ambient value in the test
+#: environment can't make a DIFFERENT form's test pass by accident.
+_ALL_BEDROCK_CREDENTIAL_VARS = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_PROFILE",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_ROLE_ARN",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+)
+
+
+def _clear_bedrock_credentials(monkeypatch) -> None:
+    for var in _ALL_BEDROCK_CREDENTIAL_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+
 def test_require_llm_configured_bedrock_requires_both_aws_vars(monkeypatch) -> None:
     """Code-review follow-up: Bedrock needs BOTH AWS_ACCESS_KEY_ID and
     AWS_SECRET_ACCESS_KEY -- a naive `any()` over the pair would wrongly pass
     with only one set. Must require ALL of a multi-var provider's vars."""
-    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
-    monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
+    _clear_bedrock_credentials(monkeypatch)
 
     with pytest.raises(LLMNotConfiguredError) as excinfo:
         require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")
@@ -188,6 +205,47 @@ def test_require_llm_configured_bedrock_requires_both_aws_vars(monkeypatch) -> N
     # BOTH set -- passes.
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fake-secret")
     require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")  # must not raise
+
+
+@pytest.mark.parametrize(
+    ("env_vars"),
+    [
+        {"AWS_PROFILE": "my-named-profile"},
+        {"AWS_BEARER_TOKEN_BEDROCK": "fake-bearer-token"},
+        {
+            "AWS_ROLE_ARN": "arn:aws:iam::123456789012:role/my-role",
+            "AWS_WEB_IDENTITY_TOKEN_FILE": "/var/run/token",
+        },
+    ],
+    ids=["aws-profile", "bearer-token", "oidc-role-pair"],
+)
+def test_require_llm_configured_bedrock_accepts_alternative_credential_forms(
+    monkeypatch, env_vars: dict[str, str]
+) -> None:
+    """Registry review follow-up: AWS's credential chain accepts more than
+    the static access/secret keypair -- a named profile, an API bearer
+    token, or an OIDC role all legitimately configure Bedrock, and requiring
+    the static pair specifically used to reject every one of them."""
+    _clear_bedrock_credentials(monkeypatch)
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")  # must not raise
+
+
+def test_require_llm_configured_bedrock_with_no_credential_form_names_the_static_pair(
+    monkeypatch,
+) -> None:
+    """With nothing set, the error still names the CANONICAL (static-pair)
+    form as what's missing, plus names the alternatives exist."""
+    _clear_bedrock_credentials(monkeypatch)
+
+    with pytest.raises(LLMNotConfiguredError) as excinfo:
+        require_llm_configured(model="bedrock/anthropic.claude-3-sonnet")
+    msg = str(excinfo.value)
+    assert "AWS_ACCESS_KEY_ID" in msg
+    assert "AWS_SECRET_ACCESS_KEY" in msg
+    assert "AWS_PROFILE" in msg  # named as an alternative, not just silently omitted
 
 
 def test_require_llm_configured_azure_requires_base_and_version_too(monkeypatch) -> None:

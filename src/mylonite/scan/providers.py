@@ -1,14 +1,16 @@
 """Provider identity → API-key env var mapping (cross-LLM).
 
 So error remedies name the RIGHT environment variable for whichever provider
-is in use — not always ``ANTHROPIC_API_KEY``. Kept apart
+is in use — not always ``ANTHROPIC_API_KEY``. Kept apart  # allow-literal: example
 from ``config.py`` (pure schema) and ``diagnostics.py`` to avoid import cycles;
 both import from here.
 """
 
 from __future__ import annotations
 
+import os
 import re
+from collections.abc import Mapping
 
 from mylonite.providers.registry import PROVIDERS
 
@@ -27,7 +29,7 @@ PROVIDER_ENV_VARS: dict[str, tuple[str, ...]] = {
 
 # Vars a provider needs BEYOND the bare API key to actually route a call --
 # e.g. Azure also needs its endpoint + API version (LiteLLM reads
-# AZURE_API_BASE / AZURE_API_VERSION alongside AZURE_API_KEY), and Vertex
+# AZURE_API_BASE / AZURE_API_VERSION alongside AZURE_API_KEY), and Vertex  # allow-literal: example
 # needs its project + location pair instead of a bearer key at all. Read from
 # the registry's `extra_env` column -- kept separate from PROVIDER_ENV_VARS
 # (rather than folded in) because that map also backs `doctor`'s "does this
@@ -49,11 +51,22 @@ _EXTRA_ENV_VARS: dict[str, tuple[str, ...]] = {
 _OPTIONAL_ENV_VARS: tuple[str, ...] = (
     # Bedrock's region. LiteLLM defaults it, so it is optional -- but it ships
     # in .env.example and `--env-file` used to reject it.
-    "AWS_REGION_NAME",
+    "AWS_REGION_NAME",  # allow-literal: example
     # An OpenAI-compatible endpoint (a local vLLM/Ollama shim, a gateway). The
     # AZURE_* family got recognition for free from its own regex; OpenAI's
     # equivalent matched nothing.
-    "OPENAI_API_BASE",
+    "OPENAI_API_BASE",  # allow-literal: example
+)
+
+#: Every var named in some provider's `key_env_alternatives` (e.g. Bedrock's
+#: `AWS_PROFILE` / `AWS_BEARER_TOKEN_BEDROCK` / `AWS_ROLE_ARN` +  # allow-literal: example
+#: `AWS_WEB_IDENTITY_TOKEN_FILE`), flattened -- recognised by  # allow-literal: example
+#: `looks_like_provider_env_var` the same way `_EXTRA_ENV_VARS` is, so
+#: `--env-file` loads them instead of dropping them as unrecognised. None of
+#: these match the `*_API_KEY`/`AZURE_*` patterns, and none is the provider's
+#: canonical `key_env`, which is already covered via `PROVIDER_ENV_VARS`.
+_ALTERNATIVE_ENV_VARS: tuple[str, ...] = tuple(
+    var for info in PROVIDERS.values() for alt_set in info.key_env_alternatives for var in alt_set
 )
 
 # Pattern layer for `looks_like_provider_env_var` (the env-file/`--env-file`
@@ -235,6 +248,46 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
     return _unlisted_provider_fallback(p)
 
 
+def credential_sets_for(provider: str | None) -> tuple[tuple[str, ...], ...]:
+    """Every independently-sufficient set of env vars for ``provider``'s
+    credential: the canonical :attr:`ProviderInfo.key_env` set (first, if
+    non-empty) plus each of its :attr:`~ProviderInfo.key_env_alternatives`.
+
+    Most providers have exactly one set (their ``key_env``) — only Bedrock
+    (today) has more than one. An unrecognised/local-keyless provider
+    returns ``()`` (nothing to check, same as :func:`required_env_vars`
+    returning no vars for it).
+    """
+    p = _normalise_provider(provider)
+    if p is None or p not in PROVIDERS:
+        return ()
+    info = PROVIDERS[p]
+    sets: tuple[tuple[str, ...], ...] = (info.key_env,) if info.key_env else ()
+    return sets + info.key_env_alternatives
+
+
+def credential_configured(
+    provider: str | None, *, environ: Mapping[str, str] | None = None
+) -> bool:
+    """True if ANY one of :func:`credential_sets_for`'s sets is FULLY present
+    in ``environ`` (default :data:`os.environ`) -- e.g. Bedrock is configured
+    by the static keypair, OR ``AWS_PROFILE`` alone, OR the bearer token  # allow-literal: example
+    alone, OR the OIDC role-arn pair; any ONE complete set is sufficient.
+
+    A provider with no declared credential sets at all (nothing recognised,
+    or a local/keyless route) is trivially "configured" here — this
+    function only judges credential PRESENCE among declared sets; whether a
+    provider needs a credential at all is :func:`required_env_vars`'s
+    question, which callers check first (see
+    :func:`~mylonite.config.require_llm_configured`).
+    """
+    env = environ if environ is not None else os.environ
+    sets = credential_sets_for(provider)
+    if not sets:
+        return True
+    return any(all(env.get(var) for var in s) for s in sets)
+
+
 def model_is_routable(model: str, *, api_base: str | None = None) -> bool:
     """True if LiteLLM's OWN resolver, ``litellm.get_llm_provider``, can route
     ``model`` at all -- called on the FULL string, unlike
@@ -301,6 +354,40 @@ def preflight_model_or_exit(*models: str, api_base: str | None = None) -> None:
         raise typer.Exit(code=EXIT_CONFIG)
 
 
+def approved_providers_help_text() -> str:
+    """One line per approved provider: an example ``--model`` value and which
+    credential it needs, built from the registry so adding, removing or
+    re-tiering a provider there is the only edit this text ever needs.
+
+    Used by :func:`no_model_configured_message` and anywhere else that must
+    name "the providers Mylonite supports" without hardcoding any of them.
+    """
+    parts = []
+    for info in PROVIDERS.values():
+        example = info.example_model or f"{info.model_prefix}<model>"
+        if info.local:
+            need = "no key, local"
+        elif info.key_env:
+            need = info.key_env[0]
+        else:
+            need = "see docs/self-hosted-models.md"
+        parts.append(f"{info.id} ({example}, needs {need})")
+    return "; ".join(parts)
+
+
+def no_model_configured_message() -> str:
+    """The one line printed, then ``EXIT_PROVIDER``, when a live command
+    resolves no model at all from ``--model``/``mylonite.yaml``'s ``model:``/
+    ``MYLONITE_MODEL`` -- CLAUDE.md's "no default provider" rule means there
+    is nothing left to silently fall back to.
+    """
+    return (
+        "no model configured -- choose one: --model <provider/model> "
+        f"({approved_providers_help_text()}), mylonite.yaml's `model:` key, "
+        "or the MYLONITE_MODEL env var."
+    )
+
+
 LOCAL_MODEL_HINT = (  # keep in sync with docs/self-hosted-models.md
     "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
     "(needs Ollama running; see docs/self-hosted-models.md)."
@@ -351,10 +438,10 @@ def looks_like_provider_env_var(key: str) -> bool:
 
     The env-file loader (``mylonite.cli._load_env_file``) used to accept ONLY
     names appearing somewhere in :data:`PROVIDER_ENV_VARS` -- a ~9-entry map
-    covering just anthropic/openai/azure/google/bedrock/ollama/vllm/
+    covering just anthropic/openai/azure/google/bedrock/ollama/vllm/  # allow-literal: example
     litellm-proxy/stub. Any other provider's key (Groq, Mistral, DeepSeek,
-    OpenRouter, ...) was SILENTLY dropped, and Azure's ``AZURE_API_BASE`` /
-    ``AZURE_API_VERSION`` were dropped too (only ``AZURE_API_KEY`` was in the
+    OpenRouter, ...) was SILENTLY dropped, and Azure's ``AZURE_API_BASE`` /  # allow-literal: example
+    ``AZURE_API_VERSION`` were dropped too (only ``AZURE_API_KEY`` was in the  # allow-literal: example
     map) -- the same closed-allowlist-that-cannot-fail-loudly shape as the
     ``NOT_TESTED_OUTCOMES`` bug.
 
@@ -367,7 +454,7 @@ def looks_like_provider_env_var(key: str) -> bool:
 
     Accepted tradeoff: the ``*_API_KEY`` pattern is intentionally broader
     than "known LLM provider" -- it also matches an unrelated credential
-    that happens to be shaped the same way (e.g. ``STRIPE_API_KEY`` sitting
+    that happens to be shaped the same way (e.g. ``STRIPE_API_KEY`` sitting  # allow-literal: example
     in a ``.env`` reused from a wider project) and `_load_env_file` WILL load
     it. This trades the old allowlist's narrower false-negative surface
     (silently dropping a real, unlisted provider key) for a broader
@@ -380,9 +467,16 @@ def looks_like_provider_env_var(key: str) -> bool:
     if any(key in variables for variables in PROVIDER_ENV_VARS.values()):
         return True
     # ...plus the non-key vars a provider needs to route a call, and the
-    # optional ones. Neither map was consulted here, so AWS_REGION_NAME and
-    # OPENAI_API_BASE were dropped from `--env-file` while Azure's equivalents
+    # optional ones. Neither map was consulted here, so AWS_REGION_NAME and  # allow-literal: example
+    # OPENAI_API_BASE were dropped from `--env-file` while Azure's equivalents  # allow-literal: example
     # passed only by accident of the AZURE_* regex.
     if any(key in variables for variables in _EXTRA_ENV_VARS.values()):
+        return True
+    # ...plus a provider's ALTERNATIVE credential forms (Bedrock's
+    # AWS_PROFILE / AWS_BEARER_TOKEN_BEDROCK / AWS_ROLE_ARN +  # allow-literal: example
+    # AWS_WEB_IDENTITY_TOKEN_FILE) -- none of these match the patterns above,  # allow-literal: example
+    # so without this they'd be dropped from `--env-file` the same way
+    # AWS_REGION_NAME/OPENAI_API_BASE used to be.  # allow-literal: example
+    if key in _ALTERNATIVE_ENV_VARS:
         return True
     return key in _OPTIONAL_ENV_VARS
