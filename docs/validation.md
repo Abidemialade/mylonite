@@ -299,7 +299,9 @@ silent signature change breaks every downstream regression gate.
   inconclusive run). Subclasses `mylonite._replay.FixtureError`.
 - **`testkit.TestkitRedriveAborted`** — a `TestkitFixtureError` subclass raised when
   a LIVE re-drive is cut short by its own budget/timeout bound rather than a fixture
-  problem — there is nothing to re-record.
+  problem — there is nothing to re-record. When `MYLONITE_MAX_LLM_REQUESTS` stopped it,
+  the message names that ceiling instead; the ceiling covers the whole pytest session,
+  so every later live re-drive in the session stops the same way.
 - **`testkit.TestkitConfigError`** — raised when the model/provider an emitted LIVE
   test needs to re-drive its target cannot be resolved from any source (an explicit
   keyword argument, the exploit's own execution-context metadata, or a sibling

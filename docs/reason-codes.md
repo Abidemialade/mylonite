@@ -176,9 +176,10 @@ remove the class from `weakness_classes`.
 The scan used up its LLM call budget and stopped early; coverage is incomplete. Exit
 code `3`.
 
-**Fix:** Raise `--max-llm-calls`, or run fewer weakness classes: `--weakness-class` on
-a reference or bundled target, `weakness_classes` in the target file for a custom one.
-Then re-run.
+**Fix:** Raise `--max-llm-calls` (the per-scan budget), or the hard request ceiling
+(`--max-llm-requests` or `MYLONITE_MAX_LLM_REQUESTS`) when the run names it, or run fewer
+weakness classes: `--weakness-class` on a reference or bundled target, `weakness_classes`
+in the target file for a custom one. Then re-run.
 
 ## MYL-ABT-002
 

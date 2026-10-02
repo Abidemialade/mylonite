@@ -240,3 +240,138 @@ def test_preflight_reports_a_spent_ceiling_not_an_unreachable_provider(
     _json_call(_Recorder())
     with pytest.raises(LLMRequestCeilingError):
         provider_preflight_direct("openai", "gpt-4o", timeout_s=5.0)
+
+
+# --- retries under a ceiling -------------------------------------------------
+
+
+class _Headers(dict[str, str]):
+    pass
+
+
+def _rate_limit_with(headers: dict[str, str]) -> BaseException:
+    exc = _rate_limit()
+    exc.response = SimpleNamespace(headers=_Headers(headers))  # type: ignore[attr-defined]
+    return exc
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ({"retry-after": "5"}, 5.0),
+        ({"retry-after-ms": "2500"}, 2.5),
+        ({"retry-after": "600"}, 60.0),  # capped
+        ({"retry-after": "0"}, 0.5),  # never less than the backoff
+        ({}, 0.5),
+    ],
+)
+def test_rate_limit_wait_honours_retry_after(
+    monkeypatch: pytest.MonkeyPatch, headers: dict[str, str], expected: float
+) -> None:
+    monkeypatch.setattr(_llm, "_jitter", lambda: 0.0)
+    assert _llm._retry_wait_s(_rate_limit_with(headers), 0, "gpt-4o") == pytest.approx(expected)
+
+
+def test_retry_after_http_date_is_understood(monkeypatch: pytest.MonkeyPatch) -> None:
+    import email.utils
+    import time
+
+    monkeypatch.setattr(_llm, "_jitter", lambda: 0.0)
+    when = email.utils.formatdate(time.time() + 20, usegmt=True)
+    wait = _llm._retry_wait_s(_rate_limit_with({"retry-after": when}), 0, "gpt-4o")
+    assert 15.0 <= wait <= 21.0
+
+
+def test_backoff_grows_and_jitter_stays_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    exc = _rate_limit()
+    monkeypatch.setattr(_llm, "_jitter", lambda: 0.0)
+    assert [_llm._retry_wait_s(exc, a, "gpt-4o") for a in range(4)] == [0.5, 1.0, 2.0, 4.0]
+    monkeypatch.setattr(_llm, "_jitter", lambda: 1.0)
+    assert _llm._retry_wait_s(exc, 1, "gpt-4o") == pytest.approx(1.25)
+    assert _llm._retry_wait_s(exc, 20, "gpt-4o") == 60.0
+
+
+def test_retry_after_is_ignored_for_non_rate_limit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_llm, "_jitter", lambda: 0.0)
+    exc = litellm.APIConnectionError(message="reset", llm_provider="openai", model="gpt-4o")
+    exc.response = SimpleNamespace(headers={"retry-after": "30"})  # type: ignore[attr-defined]
+    assert _llm._retry_wait_s(exc, 0, "gpt-4o") == 0.5
+
+
+def test_send_sleeps_for_what_the_provider_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    monkeypatch.setattr(_llm, "_jitter", lambda: 0.0)
+    waits: list[float] = []
+    monkeypatch.setattr(_llm, "_sleep", waits.append)
+    fn = _Recorder(fail_first=1, exc=lambda: _rate_limit_with({"retry-after": "7"}))
+    with llm_scope(policy=LLMPolicy(num_retries=2)):
+        _json_call(fn)
+    assert waits == [7.0]
+    assert len(fn.calls) == 2
+
+
+def test_mylonite_and_stub_errors_are_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Errors that are bugs or missing fixtures are never retried, so they
+    cannot spend the ceiling on sleeps that will not help."""
+    from mylonite._replay import MissingFixtureError
+
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    for exc in (lambda: MissingFixtureError("no fixture"), lambda: TypeError("bad stub")):
+        fn = _Recorder(fail_first=5, exc=exc)
+        with llm_scope(policy=LLMPolicy(num_retries=2)):
+            _json_call(fn)  # swallowed into a fallback, as before
+        assert len(fn.calls) == 1
+    server = _Recorder(
+        fail_first=1,
+        exc=lambda: litellm.InternalServerError(
+            message="500", llm_provider="openai", model="gpt-4o"
+        ),
+    )
+    with llm_scope(policy=LLMPolicy(num_retries=2)):
+        _json_call(server)
+    assert len(server.calls) == 2, "a provider 5xx is still retried"
+
+
+def test_a_global_litellm_retry_count_cannot_leak_into_ceiling_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LiteLLM's sync wrapper falls back to ``litellm.num_retries`` when the call
+    says 0. Under a ceiling that would be uncounted retries, so refuse."""
+    monkeypatch.setattr(litellm, "num_retries", 3)
+    fn = _Recorder()
+    # No ceiling: today's behaviour, untouched.
+    _json_call(fn)
+    assert len(fn.calls) == 1
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    with pytest.raises(InvalidRequestCeilingError, match=r"litellm.num_retries"):
+        _json_call(fn)
+    assert len(fn.calls) == 1, "nothing may be sent"
+    monkeypatch.setattr(litellm, "num_retries", None)
+    _json_call(fn)
+    assert len(fn.calls) == 2
+
+
+def test_the_env_value_is_parsed_once_per_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    real = _llm.parse_request_ceiling
+
+    def counting(raw: str) -> int:
+        calls.append(raw)
+        return real(raw)
+
+    monkeypatch.setattr(_llm, "parse_request_ceiling", counting)
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "50")
+    for _ in range(5):
+        _json_call(_Recorder())
+    assert calls == ["50"]
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "60")
+    assert request_ceiling() == 60
+    assert calls == ["50", "60"]
+
+
+def test_a_bad_env_value_fails_before_anything_is_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "lots")
+    fn = _Recorder()
+    with pytest.raises(InvalidRequestCeilingError):
+        _json_call(fn)  # not swallowed into a fallback
+    assert fn.calls == []

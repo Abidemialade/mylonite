@@ -73,6 +73,10 @@ def _assert_clean_ceiling_abort(res: Any, limit: int) -> None:
     assert "NOT TESTED" in res.output
     assert "Traceback" not in res.output
     assert not isinstance(res.exception, LLMRequestCeilingError)
+    # One line, naming the ceiling; no advice to raise a budget that cannot help.
+    assert res.output.count("MYL-ABT-001") == 1, res.output
+    assert "LLM call budget exhausted" not in res.output
+    assert "Raise --max-llm-calls" not in res.output
 
 
 def test_scan_stops_at_the_ceiling_and_exits_3(
@@ -152,3 +156,56 @@ def test_a_swallowed_trip_still_exits_3(monkeypatch: pytest.MonkeyPatch) -> None
 
     res = runner.invoke(guarded, ["run"])
     _assert_clean_ceiling_abort(res, 1)
+
+
+def _guarded_app(body: Any) -> typer.Typer:
+    guarded = typer.Typer(cls=CeilingGuardGroup)
+    guarded.command("run")(body)
+
+    @guarded.command()
+    def other() -> None:
+        pass
+
+    return guarded
+
+
+def _one_call() -> None:
+    litellm_json_call(
+        model="gpt-4o",
+        prompt="p",
+        expected_keys=("success",),
+        fallback={"success": False},
+        caller="judge",
+        completion_fn=lambda **_kw: _benign(),
+    )
+
+
+def test_any_exception_after_a_trip_still_exits_3(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stage that breaks on the partial results a refusal left behind must
+    not surface as a traceback and exit 1."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "1")
+
+    def run() -> None:
+        _one_call()
+        with contextlib.suppress(LLMRequestCeilingError):
+            _one_call()
+        raise ExceptionGroup("transport", [RuntimeError("partial tallies")])
+
+    res = runner.invoke(_guarded_app(run), ["run"])
+    _assert_clean_ceiling_abort(res, 1)
+
+
+def test_an_exception_with_no_trip_is_left_alone() -> None:
+    def run() -> None:
+        raise RuntimeError("an ordinary bug")
+
+    res = runner.invoke(_guarded_app(run), ["run"])
+    assert isinstance(res.exception, RuntimeError)
+
+
+def test_a_global_litellm_retry_count_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "5")
+    monkeypatch.setattr(litellm, "num_retries", 2)
+    res = runner.invoke(_guarded_app(_one_call), ["run"])
+    assert res.exit_code == EXIT_CONFIG, res.output
+    assert "litellm.num_retries" in res.output

@@ -756,3 +756,21 @@ def test_redrive_bounds_reach_the_scan_config(monkeypatch: pytest.MonkeyPatch) -
     src = Path(testkit.__file__).read_text(encoding="utf-8")
     assert "max_llm_calls=TESTKIT_REDRIVE_MAX_LLM_CALLS," in src
     assert "wall_clock_timeout_s=TESTKIT_REDRIVE_TIMEOUT_S," in src
+
+
+def test_aborted_redrive_names_the_hard_request_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the process-wide request ceiling stopped the re-drive, the message
+    names that ceiling, not the re-drive's own call budget."""
+    from mylonite.scan import _llm
+
+    monkeypatch.setattr(_llm, "request_ceiling_hit", lambda: 9)
+    exploit = _exploit()
+    result = ScanResult(
+        report=_report(aborted=AbortReason.BUDGET_EXCEEDED, attempts=[]), exploits=[]
+    )
+    with pytest.raises(testkit.TestkitRedriveAborted) as excinfo:
+        testkit._assert_from_result(result, exploit)
+    msg = str(excinfo.value)
+    assert "request ceiling of 9" in msg
+    assert _llm.REQUEST_CEILING_ENV in msg
+    assert f"{testkit.TESTKIT_REDRIVE_MAX_LLM_CALLS}-call LLM budget" not in msg

@@ -255,7 +255,9 @@ _ABORT: Final[tuple[ReasonCode, ...]] = (
     _rc(
         ABT_BUDGET_EXCEEDED,
         "The scan used up its LLM call budget and stopped early; coverage is incomplete.",
-        "Raise --max-llm-calls, or run fewer weakness classes — --weakness-class on a "
+        "Raise --max-llm-calls (the per-scan budget), or the hard request ceiling "
+        "(--max-llm-requests or MYLONITE_MAX_LLM_REQUESTS) when the run names it, or "
+        "run fewer weakness classes — --weakness-class on a "
         "reference/bundled target, weakness_classes in the target file for a custom one — "
         "then re-run.",
     ),

@@ -389,6 +389,13 @@ class _Decision:
     flakiness_metric: float
 
 
+def _raise_if_request_ceiling_hit() -> None:
+    """Stop validation once the hard request ceiling has refused a request."""
+    limit = request_ceiling_hit()
+    if limit is not None:
+        raise LLMRequestCeilingError(limit)
+
+
 class DifferentialValidator(ValidatorBase):
     """Differential-oracle validator — the validation-engine moat.
 
@@ -554,9 +561,7 @@ class DifferentialValidator(ValidatorBase):
         # twin scan the engine cut short returns a result rather than raising,
         # so the stages above may have tallied partial evidence. No verdict may
         # stand on it: the run is NOT TESTED.
-        limit = request_ceiling_hit()
-        if limit is not None:
-            raise LLMRequestCeilingError(limit)
+        _raise_if_request_ceiling_hit()
         return report
 
     def _validate_reference(self, test: GeneratedTest) -> ValidationReport:
@@ -1652,6 +1657,9 @@ class DifferentialValidator(ValidatorBase):
         """
         if not self._run_build:
             return self._build_skip_outcome()
+        # Write nothing that looks like a validated test for a run the ceiling
+        # already cut short.
+        _raise_if_request_ceiling_hit()
 
         if self._record_fixtures_dir is not None:
             canonical = self._canonical_run_index(tallies)
@@ -1758,6 +1766,9 @@ class DifferentialValidator(ValidatorBase):
             pattern_id_filter=exploit.pattern_id,
         )
         asyncio.run(engine.run())
+        # A recording the ceiling cut short is incomplete: stop before the
+        # sidecar, the test and the exploit that would make it look committed.
+        _raise_if_request_ceiling_hit()
 
         # 2. Stamp the _meta.json sidecar the offline gate reads. `format_version`
         #    is testkit's own field (per-exploit fixture-isolation SCOPE);

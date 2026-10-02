@@ -323,6 +323,17 @@ def _coverage_note(outcome: ScanOutcome) -> str:
     )
 
 
+def _request_ceiling_tripped() -> bool:
+    from mylonite.scan._llm import request_ceiling_hit
+
+    return request_ceiling_hit() is not None
+
+
+def _echo_nonempty(message: str) -> None:
+    if message:
+        echo(message)
+
+
 def _abort_message(outcome: ScanOutcome, budget_hint_text: str | None) -> str:
     """The operator-facing message for an aborted scan. ``scan``'s own budget
     message ends by suggesting ``--weakness-class``, which is `scan`-only —
@@ -336,6 +347,8 @@ def _abort_message(outcome: ScanOutcome, budget_hint_text: str | None) -> str:
     Every other abort reason's message doesn't mention a nonexistent flag,
     so it is printed unchanged.
     """
+    if outcome.abort is AbortReason.BUDGET_EXCEEDED and _request_ceiling_tripped():
+        return ""  # the CLI prints the one line that names the hard ceiling
     if outcome.abort is AbortReason.BUDGET_EXCEEDED and budget_hint_text:
         return reason_codes.tag(
             reason_codes.ABT_BUDGET_EXCEEDED,
@@ -376,7 +389,7 @@ def run_gate(
         # behaviour where a partial/aborted scan that still found something
         # before stopping is gated on that finding.
         if not bundle.outcome.trustworthy_clean:
-            echo(_abort_message(bundle.outcome, budget_hint_text))
+            _echo_nonempty(_abort_message(bundle.outcome, budget_hint_text))
             return GateResult(exit_code=bundle.outcome.exit_code, opened_pr=False, kept=None)
         echo("Mylonite gate: no exploit found — nothing to gate.")
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
@@ -428,7 +441,7 @@ def run_gate(
         # TESTED attempts) still prints: `scan` shows it, and a gate run over
         # the same scan must not hide it. The exit code is unchanged.
         if bundle.outcome.abort is not None:
-            echo(_abort_message(bundle.outcome, budget_hint_text))
+            _echo_nonempty(_abort_message(bundle.outcome, budget_hint_text))
             result.exit_code = bundle.outcome.exit_code
         elif bundle.outcome.operator_message:
             echo(bundle.outcome.operator_message)

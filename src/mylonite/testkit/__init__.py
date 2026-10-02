@@ -366,6 +366,17 @@ def _assert_from_result(
             ),
         }
         cause = _limits.get(result.report.aborted, f"the scan aborted ({result.report.aborted})")
+        from mylonite.scan._llm import REQUEST_CEILING_ENV, request_ceiling_hit
+
+        ceiling = request_ceiling_hit()
+        if result.report.aborted == AbortReason.BUDGET_EXCEEDED and ceiling is not None:
+            # The hard ceiling is process-wide: once it trips, every later
+            # re-drive in this pytest session stops here too.
+            cause = (
+                f"the hard LLM request ceiling of {ceiling} ({REQUEST_CEILING_ENV}) "
+                "was reached; it is shared by the whole pytest session, so later "
+                "re-drives stop too"
+            )
         raise TestkitRedriveAborted(
             f"inconclusive: the live re-drive of {pattern_id!r} was cut short because "
             f"{cause}. No verdict was reached, so resistance was NOT confirmed and the "
