@@ -257,17 +257,20 @@ def test_render_trends_sorts_versions_by_semver_not_string(tmp_path: Path) -> No
 
 
 def test_render_trends_not_run_layer_renders_literal_not_run(tmp_path: Path) -> None:
+    # A made-up version, not one of the real released versions: those collide
+    # with `_KNOWN_DEFECTIVE` (see the AgentDojo-label correction there), which
+    # would override the "not-run" status this test is actually exercising.
     results_root = tmp_path / "results"
     _write_meta(
         results_root,
-        "0.9.0",
+        "0.50.0",
         layers={"layer1": "ran", "layer2-agentdojo": "not-run", "layer3": "not-run"},
     )
-    _write_layer_summaries(results_root, "0.9.0")
+    _write_layer_summaries(results_root, "0.50.0")
 
     table = render_trends(results_root)
 
-    row = next(line for line in table.splitlines() if line.startswith("| 0.9.0"))
+    row = next(line for line in table.splitlines() if line.startswith("| 0.50.0"))
     cells = [c.strip() for c in row.split("|")]
     # | Version | Date | Model | Layer1 | Layer2 | Layer3 | -> indices 1..6
     assert cells[5] == "not run"  # layer2
@@ -277,13 +280,14 @@ def test_render_trends_not_run_layer_renders_literal_not_run(tmp_path: Path) -> 
 
 
 def test_render_trends_vacuous_f1_never_shown_as_a_number(tmp_path: Path) -> None:
+    # A made-up version: see the comment in the "not_run" test above.
     results_root = tmp_path / "results"
-    _write_meta(results_root, "0.9.0")
-    _write_layer_summaries(results_root, "0.9.0", judge_agreement_exercised=False, f1=0.99)
+    _write_meta(results_root, "0.50.0")
+    _write_layer_summaries(results_root, "0.50.0", judge_agreement_exercised=False, f1=0.99)
 
     table = render_trends(results_root)
 
-    row = next(line for line in table.splitlines() if line.startswith("| 0.9.0"))
+    row = next(line for line in table.splitlines() if line.startswith("| 0.50.0"))
     cells = [c.strip() for c in row.split("|")]
     assert cells[5] == "vacuous"
     assert "0.99" not in row
@@ -416,5 +420,9 @@ def test_the_trend_table_shows_both_injecagent_splits() -> None:
 
     committed = (ROOT / "verification" / "TRENDS.md").read_text(encoding="utf-8")
     # The 0.9.0 row must carry all three, so the good number and the bad one are
-    # published together.
-    assert "| 41.2% | 100.0% | 40.0% |" in committed
+    # published together. AgentDojo's cell is the known-defective annotation,
+    # not a bare number: the committed 41.2% was scored against an inverted
+    # label (see `_KNOWN_DEFECTIVE` in trends.py and FINDINGS.md).
+    assert (
+        "| 41.2% (label inverted; corrected 81.1%, see FINDINGS.md) | 100.0% | 40.0% |" in committed
+    )
