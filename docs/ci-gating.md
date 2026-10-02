@@ -157,12 +157,14 @@ up in [Reason codes](reason-codes.md).
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:
 
-1. `--out` containment: with `--open-pr` or `--workflows`, an output directory outside
-   the repository exits `8`.
+1. The repository checks, each exiting `8`: a `--base` that is empty, contains
+   whitespace or starts with `-`; with `--open-pr` or `--workflows`, an output
+   directory outside the repository; with `--open-pr`, a working tree with staged
+   files or uncommitted changes to tracked files.
 2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
    exiting `2`.
 
-So when both kinds of problem are present, the `--out` error is the one you see first.
+So when both kinds of problem are present, the exit-`8` error is the one you see first.
 
 For a custom (`--target-file`) target, `gate` then calibrates the declared
 `effect_probe` — real writes proving it can see a change — once, before its scan
@@ -303,10 +305,20 @@ satisfy automatically but a local or non-GitHub run must provide itself:
   the gate output and the scaffolded workflows land at the repo root either way,
   not wherever you happened to run it from. Outside a git repository entirely,
   it fails fast with a named error, before any scan/LLM spend.
-- **A `main` branch as the PR base.** The branch/commit/PR flow targets `main`
-  by default; if your default branch is named differently, open the PR
-  yourself with the printed `git push` + `gh pr create --base <branch>`
-  command instead of `--open-pr`.
+- **A clean working tree.** `--open-pr` switches branch and runs `git commit`,
+  which commits everything staged. So `gate` refuses, before any LLM call, when
+  files are staged or tracked files have uncommitted changes; commit, stash or
+  unstage them first. Untracked files are fine: `gate` stages only the files it
+  wrote.
+- **The right PR base.** The PR targets your repository's default branch:
+  `origin/HEAD`, else the branch your current branch tracks, else `main`. Pass
+  `--base <branch>` to target another branch. The printed `gh pr create`
+  command uses the same base.
+- **A fresh gate branch.** If the gate branch (`mylonite/gate-…`) already
+  exists from an earlier run, `git checkout -b` fails and `gate` stops on exit
+  code `8`. It leaves that branch and its commits alone; it deletes a branch
+  on rollback only when this run created it. Push or delete the old branch,
+  then re-run.
 - **`.mylonite/gate/` (or your configured `--out`) must actually be
   committed.** `gate` writes the test, the exploit, and your `target.yaml`
   there, then commits and pushes them as part of the PR — but if *your* repo's
