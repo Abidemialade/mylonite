@@ -209,7 +209,7 @@ def test_command_tree_matches_golden() -> None:
 
 
 def test_scan_reference_vulnerable_dry_run_matches_golden() -> None:
-    # No default provider or model (REG-1b) -- an explicit --model (the
+    # No default provider or model -- an explicit --model (the
     # exact value the removed hardcoded fallback used to supply) replaces
     # it, so the golden is otherwise unchanged.
     result = runner.invoke(

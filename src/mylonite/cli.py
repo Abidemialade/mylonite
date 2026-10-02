@@ -514,9 +514,9 @@ def plugins() -> None:
 
 
 def _require_model_chosen_or_exit(model: str | None) -> str:
-    """No default provider or model (CLAUDE.md, 2026-09-30): ``scan``/
-    ``validate``/``gate``/``ablate`` each resolve ``--model``/mylonite.yaml's
-    ``model:``/``MYLONITE_MODEL`` into ``model`` BEFORE calling this — with
+    """There is no default provider or model: ``scan``/``validate``/
+    ``gate``/``ablate`` each resolve ``--model``/mylonite.yaml's ``model:``/
+    ``MYLONITE_MODEL`` into ``model`` BEFORE calling this — with
     all three unset, there is nothing left to silently fall back to. Exits
     ``EXIT_PROVIDER`` (the same code a live command uses when the provider it
     WAS given turns out unreachable) with one line naming the approved
@@ -1140,7 +1140,7 @@ def scan(
     layout = _layout_for(ctx, config_root=config_root)
     effective_output_dir = output_dir if output_dir is not None else layout.scans
 
-    # No default provider or model (CLAUDE.md, 2026-09-30): with nothing
+    # No default provider or model: with nothing
     # resolved from --model/mylonite.yaml/MYLONITE_MODEL, stop here — before
     # any adapter/subprocess/engine work, dry-run included — with the
     # registry-built choose-a-model line, rather than silently picking one.
@@ -2198,8 +2198,8 @@ def validate(
     # validation at all. It now goes through the same `ModelRef.parse` path
     # as scan/gate/ablate/doctor, deliberately BEFORE `_locate_generated`
     # below so a bad --model fails fast without first requiring a real
-    # generated-test dir on disk. No default provider or model (CLAUDE.md,
-    # 2026-09-30): `_require_model_chosen_or_exit` stops with EXIT_PROVIDER
+    # generated-test dir on disk. There is no default provider or model:
+    # `_require_model_chosen_or_exit` stops with EXIT_PROVIDER
     # and the registry-built choose-a-model line when nothing resolved.
     base_model = _require_model_chosen_or_exit(model)
     _validate_model_string(base_model)
@@ -2995,7 +2995,7 @@ def gate(
         out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod, base=base
     )
 
-    # No default provider or model (CLAUDE.md, 2026-09-30): stop with
+    # No default provider or model: stop with
     # EXIT_PROVIDER and the registry-built choose-a-model line when nothing
     # resolved from --model/mylonite.yaml/MYLONITE_MODEL.
     base_model = _require_model_chosen_or_exit(model)
@@ -3494,7 +3494,7 @@ def ablate(
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
 
-    # No default provider or model (CLAUDE.md, 2026-09-30): stop with
+    # No default provider or model: stop with
     # EXIT_PROVIDER and the registry-built choose-a-model line when nothing
     # resolved from --model/mylonite.yaml/MYLONITE_MODEL.
     base_model = _require_model_chosen_or_exit(model)

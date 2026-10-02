@@ -41,7 +41,7 @@ def _no_request_ceiling(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _default_model_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No default provider or model (CLAUDE.md, 2026-09-30): ``scan``/
+    """There is no default provider or model: ``scan``/
     ``validate``/``gate``/``ablate`` now stop with ``EXIT_PROVIDER`` before
     any work starts when nothing resolves a model from ``--model``/
     ``mylonite.yaml``/``MYLONITE_MODEL`` -- there is no hardcoded fallback

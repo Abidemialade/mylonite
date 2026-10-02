@@ -112,8 +112,8 @@ def check(
     tf = None
     if target is not None and target.startswith("reference:"):
         # `check` makes no LLM call (`describe()` only) and no --authorize is
-        # needed either, so it needs no model -- CLAUDE.md's "no default
-        # provider" rule means there's nothing to spell out here any more.
+        # needed either, so it needs no model -- there is no default
+        # provider or model to spell out here any more.
         adapter = _build_adapter_for_reference(target, None)
     else:
         if target_file is None:
