@@ -26,7 +26,7 @@ from mylonite._cli_io import echo_err
 from mylonite.exit_codes import EXIT_CONFIG
 
 
-def _build_adapter_for_reference(target: str, model: str) -> Any:
+def _build_adapter_for_reference(target: str, model: str | None) -> Any:
     from mylonite.plugins._reference.reference_target_adapter import (
         InProcessGuardedReferenceAdapter,
         InProcessReferenceAdapter,

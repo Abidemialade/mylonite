@@ -272,9 +272,10 @@ def workload_message(iterations: int, *, fast: bool) -> str:
     """The pre-run statement of what a reference ``validate`` will drive."""
     perturbations = 1 if fast else len(_deterministic_strategies())
     return (
-        f"validate runs {iterations} iterations x 2 twins live (Haiku), each a full "
-        f"scan, plus {perturbations} metamorphic re-drive(s) x 2 twins; needs a "
-        "provider (ANTHROPIC_API_KEY). LLM calls and tokens are reported at the end."
+        f"validate runs {iterations} iterations x 2 twins live, each a full "
+        f"scan, plus {perturbations} metamorphic re-drive(s) x 2 twins, against "
+        "the model you configured; needs a configured provider -- see "
+        "docs/cli-reference.md. LLM calls and tokens are reported at the end."
     )
 
 
@@ -465,6 +466,17 @@ class DifferentialValidator(ValidatorBase):
     fixed (it cannot take extra params). ``completion_fn=None`` is the live
     path (real ``litellm.acompletion``); an injected callable is the
     deterministic offline seam the unit tests use.
+
+    ``model`` defaults to ``"stub"`` -- :mod:`mylonite.scan.providers`'s
+    test-only sentinel provider id, never a real model -- NOT a real
+    provider (CLAUDE.md, 2026-09-30: no default provider or model).
+    ``cli.py`` always threads its own resolved ``--model`` through here on
+    every real invocation; the default exists only so this class stays
+    zero-argument-constructible for the plugin registry's entry-point
+    discovery (``ValidatorBase`` subclasses must be, per its own contract --
+    config flows through the contract's methods, not ``__init__``), and so
+    an offline caller with a ``completion_fn`` seam (which never reaches a
+    real provider) doesn't have to repeat it.
     """
 
     contract_version: ClassVar[str] = CONTRACT_VERSION
@@ -479,7 +491,7 @@ class DifferentialValidator(ValidatorBase):
         max_guard_leak: float = 0.0,
         min_guard_resist_rate: float = 0.6,
         provider: str = "anthropic",
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = "stub",
         planner_model: str | None = None,
         customiser_model: str | None = None,
         judge_model: str | None = None,

@@ -71,7 +71,6 @@ from mylonite.scan.predicate_primitives import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_PLANNER_TIMEOUT_S = 60.0
 
 #: Bound on how long a single ``ClientSession`` read (including
@@ -389,7 +388,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         *,
         family: str,
         scope: str | None,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
         mcp_read_timeout_s: float | None = None,
@@ -670,9 +669,19 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     declared_deferrals=_declared_deferrals(self._spec),
                 )
 
+                # `describe()` never reaches here with `self._model` unset --
+                # only `invoke()` (a live attack) drives the planner, and
+                # every live command resolves a model before building this
+                # adapter (`cli._require_model_chosen_or_exit`), so `self._model`
+                # is never actually ``None`` here in real use. The coalesce is
+                # for type-correctness (``LLMPlanner.model`` is a plain
+                # ``str``) and for a caller that reaches here with no model at
+                # all (a bug upstream, not a user error) -- it fails inside
+                # the (fake or real) completion call with an unroutable-model
+                # error there, never a hardcoded real-provider default.
                 planner = LLMPlanner(
                     server=recording_shim,
-                    model=self._model,
+                    model=self._model or "stub",
                     system_prompt=self._spec.default_system_prompt,
                     completion_fn=self._completion_fn,
                 )
@@ -1784,9 +1793,13 @@ class _MCPAttackSession:
         baseline: str | None = ""
         if probe is not None and probe.verify_tool:
             baseline = await self._adapter._probe_verify_content(self._session, probe, probe_body)
+        # See the matching coalesce in `invoke()` above: `_model` is never
+        # actually unset in real use (the CLI always resolves one first);
+        # this is type-correctness plus a safe fallback for a direct caller
+        # that reaches here with none.
         planner = LLMPlanner(
             server=recording,
-            model=self._adapter._model,
+            model=self._adapter._model or "stub",
             system_prompt=self._adapter._spec.default_system_prompt,
             completion_fn=self._completion,
         )

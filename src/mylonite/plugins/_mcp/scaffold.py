@@ -455,9 +455,10 @@ def _scaffold_target_file(
 
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
-    adapter = build_mcp_adapter(
-        family=spec.family, scope=tf.scope, model=model or "claude-haiku-4-5-20251001"
-    )
+    # --scaffold makes no LLM call (introspection/describe() only), so `model`
+    # stays whatever the caller passed -- possibly None -- rather than
+    # defaulting to one.
+    adapter = build_mcp_adapter(family=spec.family, scope=tf.scope, model=model)
 
     echo_err(f"launching {command!r} to introspect its tools (no LLM call)…")
     try:

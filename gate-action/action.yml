@@ -8,9 +8,8 @@ inputs:
     description: "Authorization scope/family (you must own the target)."
     required: true
   model:
-    description: "LiteLLM model id."
-    required: false
-    default: "claude-haiku-4-5"
+    description: "LiteLLM model id (provider-prefixed, e.g. anthropic/claude-haiku-4-5). No default -- see docs/cli-reference.md for the approved providers."
+    required: true
   open-pr:
     description: "Open the gating PR (true) or just write artifacts (false)."
     required: false

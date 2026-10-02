@@ -26,14 +26,6 @@ _LLM_TO_WEAKNESS = {"LLM05": "W2", "LLM06": "W4"}
 
 _GUARDED_TWIN = "reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_guarded.py"
 
-#: The fallback enrichment model when a caller doesn't pass one explicitly —
-#: matches ``gate``'s own CLI default (``base_model = model or
-#: "claude-haiku-4-5-20251001"`` in cli.py), so a bare ``build_pr_body(...,
-#: llm_enrich=True)`` call (e.g. from a test or a library user) behaves the
-#: same as before T14, when this was hardcoded with no way to override it at
-#: all -- see ``_llm_suggestion``'s docstring for why that was a leak path.
-DEFAULT_MITIGATION_MODEL = "claude-haiku-4-5-20251001"
-
 #: Fallback for the "How this is gated" section's directory mention when a
 #: caller has no real one to pass (GT15) — matches `gate`'s own CLI default
 #: for `--out`, so a bare `build_pr_body(...)` call (a test, or a library
@@ -178,7 +170,7 @@ def build_pr_body(
     llm_enrich: bool = False,
     completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
-    model: str = DEFAULT_MITIGATION_MODEL,
+    model: str | None = None,
     guarded_is_server_layer: bool | None = None,
     target: Any | None = None,
     gate_dir: Path | str | None = None,
@@ -415,7 +407,7 @@ def build_gate_pr_body(
     llm_enrich: bool = False,
     completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
-    model: str = DEFAULT_MITIGATION_MODEL,
+    model: str | None = None,
     guarded_is_server_layer: bool | None = None,
     target: Any | None = None,
     gate_dir: Path | str | None = None,
@@ -488,20 +480,22 @@ def _llm_suggestion(
     exploit: ExploitRecord,
     *,
     completion_fn: CompletionFn | None = None,
-    model: str = DEFAULT_MITIGATION_MODEL,
+    model: str | None = None,
 ) -> str | None:
     """A short, app-specific remediation idea. Best-effort; labelled unverified.
 
-    T14: routed through ``_llm.litellm_text_call`` — the same chokepoint the
-    customiser/judge/planner use — instead of a bare, hardcoded
-    ``litellm.completion(model="claude-haiku-4-5-20251001", ...)`` call with
-    no budget counting, no policy kwargs, and (critically) no way to reach a
-    self-hosted/proxy ``api_base`` at all — the one call site the offline
-    demo/recorder infrastructure couldn't reach, since ``model`` was never a
-    parameter a caller could vary. ``completion_fn`` is still the offline test
-    seam (passed straight through); any failure (call exception, empty
-    response) returns ``None`` — enrichment must never break body assembly.
+    Routed through ``_llm.litellm_text_call`` — the same chokepoint the
+    customiser/judge/planner use — rather than a bare ``litellm.completion``
+    call, so it is a real, configurable, budget-counted/policy-kwarg'd call
+    with a model the CALLER supplies (``gate`` threads its own resolved
+    ``--model`` through ``build_pr_body``/``build_gate_pr_body``). No default
+    provider or model (CLAUDE.md, 2026-09-30): with no ``model``, enrichment
+    is skipped -- ``completion_fn`` is still the offline test seam (passed
+    straight through); any failure (call exception, empty response) also
+    returns ``None`` — enrichment must never break body assembly.
     """
+    if model is None:
+        return None
     prompt = (
         "You are a security engineer. In 2-3 sentences, suggest a concrete, "
         "human-applied mitigation for this AI-agent weakness. Do not include "

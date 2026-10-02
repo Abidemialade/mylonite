@@ -52,7 +52,6 @@ from mylonite.scan.llm_types import CompletionFn, ToolDescription, ToolResult
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
 Variant = Literal["vulnerable", "guarded"]
 
 
@@ -270,7 +269,7 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
         self,
         *,
         variant: Variant = "vulnerable",
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         completion_fn: CompletionFn | None = None,
         note_id_factory: Callable[[], str] | None = None,
     ) -> None:
@@ -321,9 +320,19 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
             )
             await server.call_tool("write_note", {"note_id": note_id, "body": payload.body})
 
+        # `describe()` never reaches here with `self._model` unset -- only
+        # `invoke()` (a live attack) drives the planner, and every live
+        # command resolves a model before building this adapter
+        # (`cli._require_model_chosen_or_exit`), so `self._model` is never
+        # actually ``None`` here in real use. The coalesce is for
+        # type-correctness (``LLMPlanner.model`` is a plain ``str``) and for
+        # a caller that reaches here with no model at all (a bug upstream,
+        # not a user error) -- it fails inside the (fake or real) completion
+        # call with an unroutable-model error there, never a hardcoded
+        # real-provider default.
         planner = LLMPlanner(
             server=server,
-            model=self._model,
+            model=self._model or "stub",
             completion_fn=self._completion_fn,
         )
 
@@ -376,9 +385,14 @@ class InProcessReferenceAdapter(AsyncTargetAdapterBase):
 
     async def open_session(self) -> _InProcessAttackSession:
         """Open a stateful :class:`AttackSession` over a fresh store/server."""
+        # See the matching coalesce in `invoke()`: `self._model` is never
+        # actually unset in real use (the CLI always resolves one first);
+        # this is type-correctness plus a safe fallback for a direct caller
+        # (e.g. `check`, which never opens a session) that reaches here with
+        # none.
         return _InProcessAttackSession(
             variant=self._variant,
-            model=self._model,
+            model=self._model or "stub",
             completion_fn=self._completion_fn,
         )
 

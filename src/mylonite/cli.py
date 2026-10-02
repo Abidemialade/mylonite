@@ -302,7 +302,7 @@ def _load_env_file(path: Path) -> None:
     credential pair, which matches neither pattern) — not a closed allowlist,
     which used to silently drop any provider's key it didn't already know
     about (Groq/Mistral/DeepSeek/OpenRouter) and Azure's non-key vars
-    (``AZURE_API_BASE``/``AZURE_API_VERSION``, only 1 of its 3 required vars).
+    (``AZURE_API_BASE``/``AZURE_API_VERSION``, only 1 of its 3 required vars).  # allow-literal: example
     Every unrecognised key is reported on stderr — dropped, never silent.
 
     An explicitly-passed flag OVERRIDES an ambient value (standard CLI
@@ -348,13 +348,18 @@ def _load_env_file(path: Path) -> None:
 
 
 def _infer_key_env_var(key: str) -> str | None:
-    """Best-effort provider env var for a bare API key, from its shape only."""
+    """Best-effort provider env var for a bare API key, from its shape only --
+    the var name itself always comes from the registry, never spelled out
+    here, so a provider's credential var has exactly one place it's named.
+    """
+    from mylonite.providers.registry import PROVIDERS
+
     if key.startswith("sk-ant-"):
-        return "ANTHROPIC_API_KEY"
+        return PROVIDERS["anthropic"].key_env[0]
     if key.startswith("sk-"):
-        return "OPENAI_API_KEY"
+        return PROVIDERS["openai"].key_env[0]
     if key.startswith("AKIA"):
-        return "AWS_ACCESS_KEY_ID"
+        return PROVIDERS["bedrock"].key_env[0]
     return None
 
 
@@ -369,7 +374,7 @@ def _load_api_key_file(path: Path) -> None:
     content = path.read_text(encoding="utf-8").strip()
     # DCR-0011: derive the dotenv-vs-bare-key SHAPE decision from the first
     # non-comment, non-blank line too, not the raw first line — a leading
-    # `#`-comment line (e.g. `# my key\nANTHROPIC_API_KEY=sk-ant-abc123`)
+    # `#`-comment line (e.g. `# my key\nANTHROPIC_API_KEY=sk-ant-abc123`)  # allow-literal: example
     # otherwise misrouted a valid dotenv file into the bare-key branch below
     # (the comment line has no `=`), which then went on to treat the WHOLE
     # `KEY=VALUE` line as a bare key and failed to infer a provider from it.
@@ -392,7 +397,7 @@ def _load_api_key_file(path: Path) -> None:
     if var is None:
         echo_err(
             "--api-key-file: couldn't infer the provider from the key shape. Use a "
-            "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "
+            "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "  # allow-literal: example
             "or pass --env-file."
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -508,12 +513,34 @@ def plugins() -> None:
         raise typer.Exit(code=EXIT_CONFIG)
 
 
+def _require_model_chosen_or_exit(model: str | None) -> str:
+    """No default provider or model (CLAUDE.md, 2026-09-30): ``scan``/
+    ``validate``/``gate``/``ablate`` each resolve ``--model``/mylonite.yaml's
+    ``model:``/``MYLONITE_MODEL`` into ``model`` BEFORE calling this — with
+    all three unset, there is nothing left to silently fall back to. Exits
+    ``EXIT_PROVIDER`` (the same code a live command uses when the provider it
+    WAS given turns out unreachable) with one line naming the approved
+    providers, built from the registry, and how to choose one — never a
+    hardcoded default, and never a traceback.
+
+    No-LLM paths (`scan --scaffold`, the `check`/`doctor`-style commands)
+    never call this — they pass a model straight through, possibly ``None``,
+    to an adapter whose ``describe()`` makes no LLM call.
+    """
+    if model is not None:
+        return model
+    from mylonite.scan.providers import no_model_configured_message
+
+    echo_err(no_model_configured_message())
+    raise typer.Exit(code=EXIT_PROVIDER)
+
+
 def _validate_model_string(model: str) -> None:
     """Reject obviously-malformed model ids before they reach LiteLLM."""
     if not model or not model.strip() or model != model.strip():
         echo_err(
             f"invalid --model {model!r}: must be a non-empty model id with no "
-            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5."
+            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5."  # allow-literal: example
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
@@ -553,7 +580,7 @@ def _warn_deprecated_provider_config() -> None:
     echo_err(
         "warning: setting a bare provider (mylonite.yaml's `provider:` key, or "
         "MYLONITE_PROVIDER) is deprecated -- prefix the model instead, e.g. "
-        "model: anthropic/claude-haiku-4-5 instead of model: claude-haiku-4-5 "
+        "model: anthropic/claude-haiku-4-5 instead of model: claude-haiku-4-5 "  # allow-literal: example
         "plus provider: anthropic."
     )
 
@@ -1076,50 +1103,11 @@ def scan(
     planner_model = planner_model or env_rc.planner_model
     customiser_model = customiser_model or env_rc.customiser_model
     judge_model = judge_model or env_rc.judge_model
-    effective_policy = _resolve_llm_policy(rc, env_rc)
-
-    # The resolved artefact Layout: an explicit --output-dir always wins outright
-    # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
-    # default decide where scan artefacts land — and, by construction, where
-    # `generate --latest` later looks for them (both read mylonite.layout.Layout).
-    layout = _layout_for(ctx, config_root=config_root)
-    effective_output_dir = output_dir if output_dir is not None else layout.scans
-
-    # Resolve provider + model with sensible defaults so dry-run doesn't require
-    # a live LLM provider configured.
-    #
-    # Haiku, matching `validate`/`gate`/`ablate`/`check` and the documented
-    # default. `scan` was the sole outlier on Sonnet, which is roughly 3x the
-    # token cost and -- because the default model is also the PLANNER, the agent
-    # under test -- resists injection harder, so the same target yielded fewer
-    # findings under `scan` than the published scorecard measured. A user
-    # budgeting from the quickstart under-budgeted, and a weakness the
-    # scorecard reports could go unreported on the very command meant to find it.
-    base_model = model or "claude-haiku-4-5-20251001"
-    _validate_model_string(base_model)
-    ref = _resolve_model_ref(base_model, provider)
-    effective_provider = ref.provider or "unknown"
-    effective_model = ref.raw
-
-    # Role-separated models: each defaults to the base model. See
-    # _resolve_role_model's docstring for what "resolve" means here.
-    effective_planner_model = _resolve_role_model(
-        planner_model, effective_model=effective_model, provider=provider
-    )
-    effective_customiser_model = _resolve_role_model(
-        customiser_model, effective_model=effective_model, provider=provider
-    )
-    # Effective app purpose: the --purpose flag, else the target file's declared
-    # purpose (resolved in the custom-target branch below). None for a reference
-    # target unless the flag is set.
-    effective_purpose = purpose
-    effective_judge_model = _resolve_role_model(
-        judge_model, effective_model=effective_model, provider=provider
-    )
 
     # Scaffold mode: introspect a custom MCP server and write a starter target.yaml
     # instead of scanning. No LLM call and no attack, so it does NOT require
-    # --authorize (this folds the former `init-target` command into `scan`).
+    # --authorize (this folds the former `init-target` command into `scan`), and —
+    # checked here, before any model is resolved/required below — no model either.
     if scaffold is not None:
         if rest_url is not None:
             _scaffold_rest_target_file(
@@ -1142,6 +1130,41 @@ def scan(
             force=force,
         )
         return
+
+    effective_policy = _resolve_llm_policy(rc, env_rc)
+
+    # The resolved artefact Layout: an explicit --output-dir always wins outright
+    # (below); absent that, mylonite.yaml's `root:` / MYLONITE_ROOT / the built-in
+    # default decide where scan artefacts land — and, by construction, where
+    # `generate --latest` later looks for them (both read mylonite.layout.Layout).
+    layout = _layout_for(ctx, config_root=config_root)
+    effective_output_dir = output_dir if output_dir is not None else layout.scans
+
+    # No default provider or model (CLAUDE.md, 2026-09-30): with nothing
+    # resolved from --model/mylonite.yaml/MYLONITE_MODEL, stop here — before
+    # any adapter/subprocess/engine work, dry-run included — with the
+    # registry-built choose-a-model line, rather than silently picking one.
+    base_model = _require_model_chosen_or_exit(model)
+    _validate_model_string(base_model)
+    ref = _resolve_model_ref(base_model, provider)
+    effective_provider = ref.provider or "unknown"
+    effective_model = ref.raw
+
+    # Role-separated models: each defaults to the base model. See
+    # _resolve_role_model's docstring for what "resolve" means here.
+    effective_planner_model = _resolve_role_model(
+        planner_model, effective_model=effective_model, provider=provider
+    )
+    effective_customiser_model = _resolve_role_model(
+        customiser_model, effective_model=effective_model, provider=provider
+    )
+    # Effective app purpose: the --purpose flag, else the target file's declared
+    # purpose (resolved in the custom-target branch below). None for a reference
+    # target unless the flag is set.
+    effective_purpose = purpose
+    effective_judge_model = _resolve_role_model(
+        judge_model, effective_model=effective_model, provider=provider
+    )
 
     from mylonite.scan.engine import ScanConfig
 
@@ -1992,9 +2015,10 @@ def validate(
             help=(
                 "The dir (or test file) emitted by `mylonite generate`. Runs the "
                 "differential-oracle validator LIVE by default — real LLM calls "
-                "(Haiku): ~5 iterations x 2 twins plus metamorphic re-drives; the "
-                "LLM calls and tokens used are printed when it finishes. Needs a "
-                "provider (ANTHROPIC_API_KEY)."
+                "against the model you chose: ~5 iterations x 2 twins plus "
+                "metamorphic re-drives; the LLM calls and tokens used are printed "
+                "when it finishes. Needs a configured provider -- see "
+                "docs/cli-reference.md."
             ),
         ),
     ],
@@ -2130,10 +2154,10 @@ def validate(
 ) -> None:
     """Run a generated test through the differential-oracle validator (LIVE).
 
-    Runs LIVE by default: ~``iterations`` iterations x 2 twins against a real LLM
-    (Haiku), plus the metamorphic re-drives, and needs a provider
-    (ANTHROPIC_API_KEY). The LLM calls and tokens it used are printed when it
-    finishes. Validates the ACTUAL committed test on disk (no
+    Runs LIVE by default: ~``iterations`` iterations x 2 twins against the model
+    you chose, plus the metamorphic re-drives, and needs a configured provider
+    (see ``docs/cli-reference.md``). The LLM calls and tokens it used are
+    printed when it finishes. Validates the ACTUAL committed test on disk (no
     re-emit), then — on a clean discriminating run — RECORDS the canonical guarded
     fixtures into the generated dir's ``fixtures/`` and runs that on-disk test
     offline as a full-pass build, so the command leaves a ready-to-commit,
@@ -2174,8 +2198,10 @@ def validate(
     # validation at all. It now goes through the same `ModelRef.parse` path
     # as scan/gate/ablate/doctor, deliberately BEFORE `_locate_generated`
     # below so a bad --model fails fast without first requiring a real
-    # generated-test dir on disk.
-    base_model = model or "claude-haiku-4-5-20251001"
+    # generated-test dir on disk. No default provider or model (CLAUDE.md,
+    # 2026-09-30): `_require_model_chosen_or_exit` stops with EXIT_PROVIDER
+    # and the registry-built choose-a-model line when nothing resolved.
+    base_model = _require_model_chosen_or_exit(model)
     _validate_model_string(base_model)
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
@@ -2969,7 +2995,10 @@ def gate(
         out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod, base=base
     )
 
-    base_model = model or "claude-haiku-4-5-20251001"
+    # No default provider or model (CLAUDE.md, 2026-09-30): stop with
+    # EXIT_PROVIDER and the registry-built choose-a-model line when nothing
+    # resolved from --model/mylonite.yaml/MYLONITE_MODEL.
+    base_model = _require_model_chosen_or_exit(model)
     _validate_model_string(base_model)
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
@@ -3464,7 +3493,10 @@ def ablate(
         echo_err("--iterations must be >= 1.")
         raise typer.Exit(code=EXIT_CONFIG)
 
-    base_model = model or "claude-haiku-4-5-20251001"
+    # No default provider or model (CLAUDE.md, 2026-09-30): stop with
+    # EXIT_PROVIDER and the registry-built choose-a-model line when nothing
+    # resolved from --model/mylonite.yaml/MYLONITE_MODEL.
+    base_model = _require_model_chosen_or_exit(model)
     _validate_model_string(base_model)
     ref = _resolve_model_ref(base_model, provider)
     effective_provider = ref.provider or "unknown"
