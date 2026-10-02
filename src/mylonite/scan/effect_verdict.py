@@ -43,11 +43,16 @@ def is_read_tool(
     recall_tool: str | None = None,
     consequential_tool_names: Collection[str] = (),
 ) -> bool:
-    """Whether a tool call is a read and therefore cannot establish dispatch."""
-    if name in {verify_tool, recall_tool} or name in read_tool_names:
-        return True
+    """Whether a tool call is a read and therefore cannot establish dispatch.
+
+    A consequential tool is never a read, even when it is also named as the
+    verify or recall tool: a call to it must always count as a dispatch, or a
+    misconfigured probe would hide the agent's own consequential calls.
+    """
     if name in consequential_tool_names:
         return False
+    if name in {verify_tool, recall_tool} or name in read_tool_names:
+        return True
     declared = annotations or {}
     has_consequential_hint = any(
         declared.get(key) is True for key in ("destructiveHint", "openWorldHint")

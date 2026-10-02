@@ -148,8 +148,7 @@ def test_missing_probe_warning_describes_what_the_scan_really_does() -> None:
     assert "may read as clean" not in warning
     assert "effect_probe" in warning
     assert "dispatched" in warning
-    assert "server-reported" in warning
-    assert "MYL-INC-012" in warning
+    assert "MYL-NT-017" in warning
 
 
 def test_rest_target_with_w3_w4_is_warned_they_read_not_tested() -> None:

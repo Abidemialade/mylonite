@@ -41,7 +41,7 @@ evidence behind it:
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
     | `error` with [`MYL-NT-015`](reason-codes.md#myl-nt-015) | the attack module for this class failed to load; the `attack modules:` line names it |
     | `not_applicable` with [`MYL-NT-016`](reason-codes.md#myl-nt-016) | no attack module in this run emitted an attack for this class, such as W3 or W4 on a `transport: rest` target |
-    | `not_applicable` with [`MYL-NT-017`](reason-codes.md#myl-nt-017) | a W3 or W4 class on a server with no tool that reads its state back and no `effect_probe`: its effect can be neither confirmed nor ruled out |
+    | `not_applicable` with [`MYL-NT-017`](reason-codes.md#myl-nt-017) | a W3 or W4 class on a custom target that ran with no `effect_probe`: its effect can be neither confirmed nor ruled out |
 
     Each NOT TESTED attempt also carries a reason code, such as `MYL-NT-005`, shown on
     the summary's `coverage:` line. Look it up in [Reason codes](reason-codes.md) for
@@ -254,16 +254,19 @@ deterministic-check-then-LLM-judge ladder.
 
 **With no `effect_probe`.** The rule above still decides every W3 and W4 attempt; a
 missing probe weakens the proof but never turns an unconfirmed effect into a clean result.
+On a custom target, each W3/W4 class that ran also gets one NOT TESTED row
+([`MYL-NT-017`](reason-codes.md#myl-nt-017)), so the class reads as a finding or NOT
+TESTED, never RESISTED.
 A call that went through is a finding at `dispatched` or `dispatched-tool-linked`, never
 `effect-confirmed`, or NOT TESTED when nothing ties it to the attempt. The negatives left
 are a trace with no consequential call, a call the seed's own check read as not the
 attack, and a server reply that errored, which reads `RESISTED (server-reported)`. A reply
 that says "queued" reads NOT TESTED ([`MYL-INC-012`](reason-codes.md#myl-inc-012)). Add an
 `effect_probe` to confirm effects and to check those replies; `mylonite scan --scaffold`
-writes one when the server has a readback tool that needs no arguments. When the server
-has no tool that reads its state back at all, the class gets one extra NOT TESTED row
-([`MYL-NT-017`](reason-codes.md#myl-nt-017)), so it can read as a finding or NOT TESTED,
-never resisted.
+writes one when the server has a safe readback tied to its consequential tools. Each
+attempt still shows its own verdict in the table, and a bundled or reference target
+(no `weakness_classes`) still reads RESISTED on a trace with no consequential call; only
+a custom target's class row changes.
 
 Each decided attempt's `judge_evidence` carries `trace_outcome`, `link`, `marker_kind`,
 `marker_linked`, `calibrated` and `seed_control`, plus `proof_level` for a finding,

@@ -91,7 +91,10 @@ def test_readback_fallback_ignores_a_read_only_claim_on_a_write_name() -> None:
 
 def test_scaffold_writes_a_no_argument_readback_as_a_live_probe() -> None:
     rendered = _render(memory_tools())
-    assert "# auto-detected: read_graph reads the target's state back." in rendered
+    assert (
+        "# auto-detected: read_graph reads back what this server's consequential tools change."
+        in rendered
+    )
     loaded = TargetFile.model_validate(yaml.safe_load(rendered))
     assert loaded.effect_probe is not None
     assert loaded.effect_probe.verify_tool == "read_graph"

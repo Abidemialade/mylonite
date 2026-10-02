@@ -11,17 +11,32 @@ each block tagged `# auto-detected`:
 - a `seed_arm` when the server has a tool that stores content and a tool that reads it
   back without an id. It is the same `seed_arm` a scan would wire on its own, so the
   scaffold and the scan agree.
-- an `effect_probe` when the file lists W3 or W4 and a tool reads the server's state back
-  with no required argument (`verify_args_template: {}`). It sets no `expect_marker`, so
-  any new change a call from the attempt made counts as the effect, and no deferral words,
-  so a reply that says "queued" reads NOT TESTED
+- an `effect_probe` when the file lists W3 or W4 and a readback tool is all of:
+  - **safe** to call before and after every attempt: a whole-word read name (or
+    `readOnlyHint: true`), no `readOnlyHint: false` or `destructiveHint`, no write verb in
+    its name, not a consequential tool itself, and no record id to know;
+  - **tied** to what the consequential tools change: a shared noun or result word
+    (`sent_log` or `outbox` for `send_email`, `list_issues` for `create_issue`), or the
+    id-free recall of a store a consequential tool writes (`read_graph` for
+    `create_entities`). A tied tool wins over listing order;
+  - free of required arguments (`verify_args_template: {}`).
+
+  It sets no `expect_marker`, so any new change a call from the attempt made counts as the
+  effect, and no deferral words, so a reply that says "queued" reads NOT TESTED
   ([`MYL-INC-012`](reason-codes.md#myl-inc-012)), never resisted.
 
-A readback tool that needs arguments is written commented, with its required arguments
-stubbed: fill them in and uncomment the block. A server with no readback tool at all gets
-W3 and W4 marked "effect unconfirmable": nothing can confirm or rule out their effect, so
-the scan reads those classes NOT TESTED
-([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt fires. A store tool whose
+A live probe turns on [calibration](#calibration): before it trusts the probe, the first
+scan calls up to five of the server's consequential tools for real (never one marked
+destructive), with `myl-cal-` marker values, to prove the probe sees a change. Add
+`calibration: {controls: skip}` to turn that off; the probe's "no change" then never clears
+a call ([`MYL-INC-002`](reason-codes.md#myl-inc-002)). Attempts on a target with an
+`effect_probe` run one at a time.
+
+Any other readback is written as a commented hint (with its required arguments stubbed,
+when it has some): check it, fill it in and uncomment it. Until the file declares an
+`effect_probe`, the scaffold marks W3 and W4 "effect unconfirmable" and the scan reads
+those classes NOT TESTED ([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt
+fires. A store tool whose
 only readback needs the new record's id (the agent never learns it) gets a commented
 `seed_arm`, and W2 is left out of `weakness_classes`.
 
@@ -234,13 +249,11 @@ for a `vulnerable_launch` twin.
   a tool was called. Without one, a W3/W4 finding is proven only as far as `dispatched`
   and a "queued" reply from the server reads NOT TESTED (`MYL-INC-012`), not resisted (see
   [How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided)).
-  `mylonite scan --scaffold` names a candidate `verify_tool`: a tool that reports what was
-  sent (an outbox, a status or history tool), or else a readback of the store that needs
-  no record id, such as `read_graph`, preferring one with no required arguments. One with
-  no required arguments is written live when the file lists W3 or W4; one that needs
-  arguments is written commented out. Check that it reads back what an attack would
-  change. With no `effect_probe` and no such tool on the server, a W3 or W4 class reads
-  NOT TESTED ([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt in it fires.
+  `mylonite scan --scaffold` proposes a `verify_tool` and writes it live only when it is
+  safe, tied to a consequential tool and needs no arguments (see the top of this page);
+  otherwise it is a commented hint. Check that it reads back what an attack would change.
+  With no `effect_probe` in effect, a W3 or W4 class on a custom target reads NOT TESTED
+  ([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt in it fires.
   Not available on a `transport: rest` target, where W3 and W4 read NOT
   TESTED ([`MYL-NT-016`](reason-codes.md#myl-nt-016)). `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success. List in `deferred_markers` only

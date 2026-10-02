@@ -188,10 +188,11 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     ),
     _rc(
         NT_EFFECT_UNCONFIRMABLE,
-        "No tool on this server reads its state back and no effect_probe is declared, so "
-        "this class's effect could not be confirmed or ruled out.",
+        "No effect_probe was in effect for this run, so this class's effect could not be "
+        "confirmed or ruled out.",
         "declare an effect_probe whose verify_tool reads back what the attack would change "
-        "(see docs/target-file.md), or remove the class from weakness_classes",
+        "(see docs/target-file.md; `scan --scaffold` proposes one), or remove the class from "
+        "weakness_classes",
     ),
 )
 

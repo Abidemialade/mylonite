@@ -65,7 +65,7 @@
   },
   "MYL-NT-017": {
     "category": "not-tested",
-    "summary": "No tool on this server reads its state back and no effect_probe is declared, so this class's effect could not be confirmed or ruled out."
+    "summary": "No effect_probe was in effect for this run, so this class's effect could not be confirmed or ruled out."
   },
   "MYL-ABT-001": {
     "category": "abort",

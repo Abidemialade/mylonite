@@ -27,7 +27,7 @@ from mylonite.plugins._mcp.target_file import (
 )
 from mylonite.reason_codes import NT_EFFECT_UNCONFIRMABLE
 from mylonite.scan.control_shim import coverable_weakness_classes
-from mylonite.scan.tool_roles import _classify_tools, readback_tool
+from mylonite.scan.tool_roles import _classify_tools, effect_readback
 
 
 def _spec(name: str, props: dict[str, Any], required: list[str], desc: str = "") -> ToolSpec:
@@ -80,7 +80,9 @@ def test_detected_seed_arm_and_readback_probe_are_written_live() -> None:
     assert validate_for_scan(loaded) == []
 
     assert loaded.effect_probe is not None
-    assert loaded.effect_probe.verify_tool == readback_tool(tools) == "read_graph"
+    assert loaded.effect_probe.verify_tool == "read_graph"
+    choice = effect_readback(tools)
+    assert choice is not None and choice.tool == "read_graph" and choice.tied
     assert loaded.effect_probe.verify_args_template == {}
     # No deferral words of its own: a "queued" reply stays inconclusive.
     assert loaded.effect_probe.deferred_markers == ()
@@ -93,7 +95,7 @@ def test_a_readback_that_needs_arguments_stays_commented_with_its_stub() -> None
     rendered = _render(tools, ["W4"])
     loaded = _load(rendered)
     assert loaded.effect_probe is None
-    assert "#   verify_tool: list_directory" in rendered
+    assert "#   verify_tool: read_file" in rendered
     assert "fill in" in rendered
 
 
@@ -134,3 +136,64 @@ def test_kitchen_sink_names_why_w2_is_left_out() -> None:
     assert "W2" not in _load(rendered).weakness_classes
     assert infer_seed_arm(tools)[0] is None
     assert "no id-free retrieval tool" in rendered
+
+
+def _t(name: str, required: tuple[str, ...] = (), **annotations: Any) -> ToolSpec:
+    props = {r: {"type": "string"} for r in required}
+    return ToolSpec(
+        name=name,
+        description="",
+        json_schema={"type": "object", "properties": props, "required": list(required)},
+        annotations=annotations,
+    )
+
+
+_SEND = _t("send_email", ("to", "body"))
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [_t("logout"), _t("clear_log", destructiveHint=True), _t("deploy_target")],
+    ids=["logout", "clear_log-destructive", "deploy_target"],
+)
+def test_an_unsafe_tool_is_never_written_as_a_live_probe(unsafe: ToolSpec) -> None:
+    """The scan calls verify_tool before and after every attempt, so a tool
+    that logs out, clears a log or deploys must never be written live. With
+    no probe written, the class reads NOT TESTED, never resisted."""
+    tools = [_SEND, unsafe]
+    assert effect_readback(tools) is None
+    rendered = _render(tools, ["W4"])
+    assert _load(rendered).effect_probe is None
+    assert f"verify_tool: {unsafe.name}" not in rendered
+    assert NT_EFFECT_UNCONFIRMABLE in rendered
+
+
+def test_a_write_annotated_or_destructive_reader_is_never_live() -> None:
+    tools = [_SEND, _t("list_jobs", readOnlyHint=False), _t("get_status", destructiveHint=True)]
+    assert effect_readback(tools) is None
+    assert _load(_render(tools, ["W4"])).effect_probe is None
+
+
+def test_a_tied_readback_beats_an_unrelated_one_listed_first() -> None:
+    tools = [_t("save_note", ("body",)), _t("list_notes"), _SEND, _t("sent_log")]
+    choice = effect_readback(tools)
+    assert choice is not None and choice.tool == "sent_log" and choice.tied
+    probe = _load(_render(tools, ["W4"])).effect_probe
+    assert probe is not None and probe.verify_tool == "sent_log"
+
+
+def test_an_untied_readback_stays_a_commented_hint() -> None:
+    tools = [_SEND, _t("list_notes")]
+    choice = effect_readback(tools)
+    assert choice is not None and choice.tool == "list_notes" and not choice.tied
+    rendered = _render(tools, ["W4"])
+    assert _load(rendered).effect_probe is None
+    assert "#   verify_tool: list_notes" in rendered
+    assert NT_EFFECT_UNCONFIRMABLE in rendered
+
+
+def test_the_live_probe_says_calibration_makes_real_calls() -> None:
+    rendered = _render(memory_tools(), ["W4"])
+    assert "calls up to five of this server's" in rendered
+    assert "calibration: {controls: skip}" in rendered
+    assert "docs/target-file.md" in rendered
