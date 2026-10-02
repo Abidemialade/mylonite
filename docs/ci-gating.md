@@ -310,18 +310,31 @@ Outside these workflows (a local run, another CI system), an empty
   `mylonite gate --authorize` through an environment variable, so a value
   holding a quote or `;` stays one argument.
 
-**No default model, so both workflows pin the one `gate --workflows` used.**
-There is no default provider or model — a live command stops rather than
-guessing one (see "No model chosen at all?" in
-[the CLI reference](cli-reference.md)) — so a scaffolded workflow's own
-`mylonite gate`/re-drive step needs an explicit model to not hit that same
-stop the next time CI runs it. Both workflows set
-`MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '<model>' }}`, where `<model>`
-is the exact value the run that scaffolded them resolved. Add a repository
-**variable** named `MYLONITE_MODEL` to change models later without editing
-either file; leave it unset and the baked-in literal keeps working exactly
-as scaffolded. Re-run `gate --workflows` after choosing a different
-`--model` to re-bake the literal instead.
+**No default model, so both workflows pin the one `gate --workflows` used —
+but what that controls is NOT the same in each.** There is no default
+provider or model — a live command stops rather than guessing one (see "No
+model chosen at all?" in [the CLI reference](cli-reference.md)). Both
+workflows set `MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '<model>' }}`,
+where `<model>` is the exact value the run that scaffolded them resolved,
+but only **`mylonite-discovery.yml`** actually reads that variable:
+its `mylonite gate --target-file ... --open-pr` step is a LIVE invocation,
+and `MYLONITE_MODEL` is exactly what chooses its model (the same env var
+`--model`/`mylonite.yaml` would otherwise need to win over). Add a
+repository **variable** named `MYLONITE_MODEL` to change the model the
+*discovery* workflow drives, without editing the file; leave it unset and
+the baked-in literal keeps that job working exactly as scaffolded.
+
+**`mylonite-gate.yml`'s per-PR job does NOT read `MYLONITE_MODEL` at all.**
+It runs `pytest` against the already-committed test, which re-drives the
+finding against the model recorded with it at `gate`/`generate` time (the
+exploit's own execution-context metadata, or a sibling `scan_report.json`)
+— never an environment variable. The variable is still set in that
+workflow's `env:` block (for consistency, and in case a future committed
+test ever needs it as a fallback), but today it is inert there. Re-run
+`gate --workflows` after choosing a different `--model` to re-bake the
+discovery workflow's literal; a per-PR test's model only changes when the
+finding itself is re-proven against a different one (`mylonite validate
+--model ...`, then re-committing).
 
 Both workflows install the Mylonite release that wrote them:
 `pip install "mylonite==X.Y.Z"`, where `X.Y.Z` is the version that ran

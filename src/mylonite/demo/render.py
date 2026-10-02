@@ -53,24 +53,27 @@ _GUARDED_FINDING_NOTE: Final[str] = (
 )
 #: Every command sits on its own indented line, under 80 columns, so a reader
 #: can copy it whole instead of stitching it back together across a wrap. The
-#: gate line is labelled "(needs an API key)" for the same reason the scan
-#: line below is: it is the second command a no-key user would otherwise hit
-#: a wall on.
+#: gate line is labelled "(choose a model)" for the same reason the scan line
+#: below is: it is the second command a reader with nothing configured would
+#: otherwise hit a wall on -- there is no default provider or model, so an
+#: API key alone is NOT enough; a model must be chosen too (--model,
+#: mylonite.yaml, or MYLONITE_MODEL).
 _TEASER: Final[str] = (
     "Each finding becomes a committed regression test, validated against this same "
-    "vulnerable/guarded oracle. Turn one into a gating test (needs an API key):\n"
+    "vulnerable/guarded oracle. Turn one into a gating test (choose a model and set "
+    "its key -- see docs/cli-reference.md):\n"
     "  mylonite gate reference:vulnerable"
 )
 #: Each command is one line with no shell continuation: a trailing backslash
 #: works in bash but not in PowerShell or cmd. A Windows console renders one
 #: column narrower than COLUMNS, so every line stays within 79 columns: the
 #: scaffold command is 78 on its own, so these two commands carry no indent,
-#: and the API-key notes sit on the lead-in lines rather than after them.
+#: and the choose-a-model notes sit on the lead-in lines rather than after them.
 _NEXT_STEP: Final[str] = (
     "Try it on your own app (docs/test-your-app.md).\n"
-    "Make a target file (no API key):\n"
+    "Make a target file (no model needed):\n"
     "mylonite scan --command python --arg app.py --scaffold app.yaml --scope my-app\n"
-    "Scan it (needs an API key):\n"
+    "Scan it (choose a model and set its key -- see docs/cli-reference.md):\n"
     "mylonite scan --target-file app.yaml --authorize my-app"
 )
 

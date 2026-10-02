@@ -204,17 +204,26 @@ deterministic predicates; `scan` itself runs each payload once by default, and t
 repeat-run consensus belongs to `validate` (five iterations by default), which `gate` runs
 for you. Treat the numbers as a demonstration of the machinery rather than a fresh
 measurement of today's model — `mylonite demo --live` is the fresh measurement, and it does
-call a model (by default one you host locally). Where a cell could not be
+call a model you choose (there is no default; see below). Where a cell could not be
 decided either way the table says so rather than showing it as a pass, and if a recording is
 ever missing or out of date the command fails and explains why instead of reporting a clean
 result it did not earn.
 
-Then, with a model configured, the real thing:
+Then, the real thing. There is no default provider or model — choose one with `--model`
+(or set `MYLONITE_MODEL`), plus that provider's own key env var:
 
 ```bash
+export MYLONITE_MODEL=anthropic/claude-haiku-4-5-20251001   # needs ANTHROPIC_API_KEY
+export ANTHROPIC_API_KEY=sk-ant-...
+
 mylonite scan reference:vulnerable   # finds the weaknesses built into it
 mylonite scan reference:guarded      # same attacks, comes up clean
 ```
+
+No key? `--model ollama_chat/llama3.2:3b` runs a local model instead (needs
+[Ollama running](docs/self-hosted-models.md)). With none of `--model`/`mylonite.yaml`'s
+`model:`/`MYLONITE_MODEL` set, the command stops before touching a target, naming every
+approved provider.
 
 See [the practice app](./docs/quarry.md) for what is built into it and why.
 
