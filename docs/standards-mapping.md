@@ -49,6 +49,54 @@ the four frameworks. The bundled mapper consults the taxonomy and derives relate
 tags (for example, a NIST AI RMF function from the OWASP class); a custom mapper can
 replace it via the plugin entry point.
 
+**This is Mylonite's own mapping, hand-assigned — not a mapping the standards
+bodies themselves publish.** Treat every tag as our judgment of where a finding
+sits, not as certification. Two different provenance paths, and neither is a
+published crosswalk:
+
+- **OWASP LLM / OWASP ASI / MITRE ATLAS IDs are hand-assigned per seed**, in
+  code (`src/mylonite/scan/seeds.py`) and in
+  [`reference_targets/mcp_kitchen_sink/seeds/seeds.yaml`](https://github.com/Abidemialade/mylonite/blob/main/reference_targets/mcp_kitchen_sink/seeds/seeds.yaml).
+  Each seed's author picked the closest-fitting ID at the time it was written.
+- **NIST AI RMF tags are derived, not assigned.** Each bundled NIST entry
+  lists the OWASP IDs it relates to, and a finding inherits every NIST entry
+  that references one of its own OWASP tags
+  (`src/mylonite/taxonomy/compliance.py`). The NIST text itself is NIST's own;
+  the link from a NIST subcategory to an OWASP ID is Mylonite's crosswalk, not
+  one NIST publishes.
+
+## Weakness class to standards IDs
+
+The four weakness classes Mylonite tests ([W1–W4](weakness-classes.md)) carry
+a fixed set of IDs, consistent across every bundled target family:
+
+| Class | OWASP LLM | OWASP ASI | MITRE ATLAS |
+|---|---|---|---|
+| W1 — tool-description instruction smuggling | LLM01 | ASI02 | AML.T0051 |
+| W2 — indirect prompt injection via ingested data | LLM01, LLM05 | ASI01, ASI06 | AML.T0051 |
+| W3 — excessive egress / SSRF | LLM06 | ASI02, ASI05 | AML.T0049 |
+| W4 — excessive agency / unconfirmed consequential action | LLM06 | ASI02 | **none** |
+
+**W4 has no ATLAS technique assigned.** No MITRE ATLAS technique in the
+bundled `v2026.05` catalogue cleanly matches "an agent dispatched a
+consequential action without confirmation" — rather than force a loose fit,
+the mapper leaves it untagged. A W4 finding's NIST tags are still derived from
+its OWASP IDs as usual.
+
+## Coverage is partial, by design
+
+Across every bundled seed, only **3 of the 10** OWASP LLM Top 10 entries
+(LLM01, LLM05, LLM06) and **4 of the 10** OWASP ASI Top 10 entries (ASI01,
+ASI02, ASI05, ASI06) are ever emitted, and only **2** MITRE ATLAS techniques
+(AML.T0049, AML.T0051) appear at all. That's not a gap in the taxonomy loaders
+— all ten entries of each framework, and the full ATLAS catalogue, are bundled
+and queryable (see [Auto-generated mapping tables](#auto-generated-mapping-tables)
+below) — it's a direct reflection of what the attack library currently tests:
+four weakness classes, not ten OWASP categories. A report or SARIF upload
+listing "LLM01, LLM05, LLM06" is not a claim that Mylonite checked LLM02–LLM04
+or LLM07–LLM10; it only has evidence for the classes it attacked. Don't market
+or report compliance coverage beyond what a specific run's tags actually say.
+
 ## Auto-generated mapping tables
 
 Auto-generated cross-reference tables (every OWASP LLM entry → matching OWASP ASI /
