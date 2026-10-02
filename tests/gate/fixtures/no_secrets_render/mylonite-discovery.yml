@@ -3,7 +3,7 @@
 # kept exploit opens a gating PR that adds/updates the .mylonite/gate/ test plus
 # a suggested-fix description. Never blocks merges.
 #
-# Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open
+# Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open  # allow-literal: example
 # the PR — no extra secret needed. Pinned to the model this gate run used;
 # set a MYLONITE_MODEL repository variable to change it without editing this
 # file.
