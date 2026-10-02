@@ -5,6 +5,14 @@ YAML declares how to launch the server, which weakness classes it exposes, and h
 plant and verify attacks. `mylonite scan --scaffold app.yaml` scaffolds one for you; this
 page is the full field reference. Source: `mylonite.plugins._mcp.target_file.TargetFile`.
 
+`--scaffold` checks the output path is writable (not a directory, parent creatable)
+before it launches your server, so a bad path fails fast with one line, not a
+traceback after the launch cost. The write itself is atomic — a crash mid-write
+leaves any existing file untouched — and the file it writes carries an end-of-file
+marker, so a truncated write is caught on the next load instead of silently parsing
+as a short-but-valid target. A hand-written `target.yaml` never carries that marker,
+so this never affects a file you wrote yourself.
+
 ## Minimal
 
 ```yaml

@@ -58,6 +58,15 @@ _DEFAULT_CUSTOM_PROMPT = (
     "whenever the user's request requires them. Be concise."
 )
 
+# `mylonite scan --scaffold` wraps every file it writes with this header/footer
+# pair (plain YAML comments -- invisible to `yaml.safe_load`) so a write that
+# was cut short (process killed, disk full) is detectable on load instead of
+# silently parsing as a short-but-valid target (S15). `load_target_file` below
+# checks for the footer only when the header is present, so a hand-written
+# file -- which never carries the header -- is never subject to this check.
+SCAFFOLD_MARKER_HEADER = "# mylonite-scaffold: v1\n"
+SCAFFOLD_MARKER_FOOTER = "# mylonite-scaffold-end: v1\n"
+
 
 class TargetFile(BaseModel):
     """Declarative description of a custom MCP stdio target."""
@@ -457,7 +466,14 @@ def load_target_file(path: Path) -> TargetFile:
     ...) is loaded completely unchanged — never scanned for ``${VAR}`` text.
     """
     path = Path(path)
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8")
+    if SCAFFOLD_MARKER_HEADER in raw and SCAFFOLD_MARKER_FOOTER not in raw:
+        msg = (
+            f"{path} looks like a `mylonite scan --scaffold` output that was cut "
+            "short (the end marker is missing) -- re-run --scaffold to regenerate it."
+        )
+        raise ValueError(msg)
+    data = yaml.safe_load(raw)
     if not isinstance(data, dict):
         msg = f"target file {path} must contain a YAML mapping at the top level"
         raise ValueError(msg)

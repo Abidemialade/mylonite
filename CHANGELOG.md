@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshots keep their original numbers with a correction note attached, since
   reproducing them exactly would need a fresh judge run against a live model.
 
+- **`scan --scaffold` checks the output path before launching your server, and
+  writes atomically.** A bad `--scaffold` path (a directory, or one Mylonite
+  can't write to) used to surface only after the target server had already been
+  launched, as an unhandled traceback — now it's one line, before anything
+  launches. The file itself is written atomically: a crash or interruption
+  mid-write leaves any existing file untouched instead of a truncated one, and
+  the written file carries an end marker so a truncated write is caught on the
+  next load rather than parsing as a short-but-valid target. A hand-written
+  `target.yaml` is unaffected — the check only applies to a file `--scaffold`
+  itself wrote.
 - **A committed gate's failure message now names your own app, not a "twin".**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` re-drive
   your declared target, so a regression no longer reads like it happened on
