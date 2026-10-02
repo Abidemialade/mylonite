@@ -89,13 +89,18 @@ from mylonite.scan.wiring import build_scan, note_id_counter
 #: fixtures (full-scan scope) are refused by :func:`_read_meta`.
 FIXTURE_FORMAT_VERSION = 2
 
-#: Re-record guidance surfaced in every fixture-trouble error. Names the
-#: consumer-facing regeneration command (``mylonite generate``), overriding
-#: ``_replay.GENERIC_RERECORD_HINT``'s generic default.
+#: Re-record guidance surfaced in every fixture-trouble error (G1). Names the
+#: consumer-facing recording command, overriding ``_replay.GENERIC_RERECORD_HINT``'s
+#: generic default. `mylonite generate` only EMITS the test file and leaves
+#: `fixtures/` empty — `mylonite validate` is the command that records fixtures
+#: into it (see ``cli.py``'s ``validate`` command, `record_fixtures_dir`). The
+#: old wording named `generate` as the fix, which sends a user with a
+#: missing/stale fixture straight back to the same error.
 TESTKIT_RERECORD_HINT = (
-    "Regenerate the fixtures with `mylonite generate` (or re-run "
-    "`mylonite scan` + `mylonite generate` against a live provider) so the "
-    "recorded attack replays against the current guarded twin."
+    "Run `mylonite validate <dir or test file>` (the one `mylonite generate` "
+    "emitted) against a live provider to record fresh fixtures next to the "
+    "test — `mylonite generate` alone only emits the test file and leaves "
+    "`fixtures/` empty, so re-running it will not fix this."
 )
 
 #: Bounds for the LIVE re-drive an emitted test performs against a custom target.
@@ -275,7 +280,17 @@ def _check_injected_double(double: Any) -> None:
     )
 
 
-def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
+def _assert_from_result(
+    result: ScanResult,
+    exploit: ExploitRecord,
+    *,
+    subject: str = "the guarded twin",
+    regression_detail: str = (
+        "The guarded reference agent followed the attacker's intent — this "
+        "is a regression in the guard."
+    ),
+    rerecord_hint: str = TESTKIT_RERECORD_HINT,
+) -> None:
     """Turn a guarded ``ScanResult`` into the gate verdict (A1).
 
     Reads the ``ScanResult`` structure — NOT a re-run of the predicate (the
@@ -288,6 +303,26 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
     * at least one ``no_finding`` → guard held → return;
     * otherwise (no matching attempt, or only ``skipped_*`` / ``error``) →
       INCONCLUSIVE → :class:`TestkitFixtureError` (never a silent pass).
+
+    This helper is shared by all three public assertions, but "a twin" is only
+    an accurate description of what :func:`assert_guard_holds` re-drives (the
+    bundled practice app). :func:`assert_target_resists` and
+    :func:`assert_control_holds` re-drive the OPERATOR's own real target — on a
+    custom target nothing was guarded as a twin, so TK1's fix is for each
+    caller to override these three keyword-only parameters with wording that
+    names what it actually re-drove, rather than reusing practice-app copy
+    ("the guarded twin" / "the guarded reference agent") on the user's own app
+    (the defaults below reproduce :func:`assert_guard_holds`'s original,
+    still-accurate wording unchanged):
+
+    * ``subject``: the noun phrase standing in for "the guarded twin" in every
+      message below (e.g. "your target ('acme')");
+    * ``regression_detail``: the sentence following "guard did not hold: …
+      fired against {subject}." on a FAILED guard;
+    * ``rerecord_hint``: the fixture-recording guidance in the generic
+      inconclusive fallback — only meaningful on the fixture-replay path
+      (:func:`assert_guard_holds`); the live paths override it to say there is
+      nothing to re-record.
     """
     pattern_id = exploit.pattern_id
     matching = [a for a in result.report.attempts if a.pattern_id == pattern_id]
@@ -297,9 +332,8 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
     )
     if exploit_fired:
         raise AssertionError(
-            f"guard did not hold: the exploit {pattern_id!r} fired against the "
-            "guarded twin. The guarded reference agent followed the attacker's "
-            "intent — this is a regression in the guard."
+            f"guard did not hold: the exploit {pattern_id!r} fired against "
+            f"{subject}. {regression_detail}"
         )
 
     # `no_finding` alone is not enough: the engine records it both for "a
@@ -346,8 +380,8 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
     if matching and all(attempt_reached_no_verdict(a) for a in matching):
         causes = sorted({c for a in matching for c in no_verdict_causes(a)})
         raise TestkitFixtureError(
-            f"inconclusive: no verdict was reached for {pattern_id!r} against the "
-            f"guarded twin (cause: {', '.join(causes) or 'unknown'}). The judge did "
+            f"inconclusive: no verdict was reached for {pattern_id!r} against "
+            f"{subject} (cause: {', '.join(causes) or 'unknown'}). The judge did "
             "not decide, so resistance was NOT confirmed and the gate refuses to "
             "pass. Check the LLM provider is healthy and the judge model returns "
             "parseable JSON, then re-run — this is not a fixture problem."
@@ -392,9 +426,9 @@ def _assert_from_result(result: ScanResult, exploit: ExploitRecord) -> None:
             "different name."
         )
     raise TestkitFixtureError(
-        f"inconclusive: no conclusive attempt for {pattern_id!r} against the "
-        f"guarded twin (outcomes seen: {outcomes}). The guard's resistance could "
-        f"not be confirmed — likely a replay/fixture problem. {TESTKIT_RERECORD_HINT}"
+        f"inconclusive: no conclusive attempt for {pattern_id!r} against "
+        f"{subject} (outcomes seen: {outcomes}). The guard's resistance could "
+        f"not be confirmed — likely a replay/fixture problem. {rerecord_hint}"
     )
 
 
@@ -820,7 +854,24 @@ def assert_target_resists(
         )
     finally:
         target_registry.clear_runtime_targets()
-    _assert_from_result(result, exploit)
+    # TK1: this re-drives the OPERATOR's own declared target, not the bundled
+    # practice app's guarded twin — name the real target instead of reusing
+    # assert_guard_holds's practice-app wording.
+    _assert_from_result(
+        result,
+        exploit,
+        subject=f"your target ({spec.family!r})",
+        regression_detail=(
+            "Your app followed the attacker's intent — this is a regression: "
+            "the exploit was kept because it was once resisted."
+        ),
+        rerecord_hint=(
+            "This is a LIVE re-drive of your own target, not a fixture replay "
+            "— there is nothing to re-record. Check the fix that made this "
+            "test pass is still in place, that the target and provider are "
+            "both reachable, then re-run."
+        ),
+    )
 
 
 def assert_control_holds(
@@ -987,8 +1038,25 @@ def assert_control_holds(
             "nothing for the control to stop (this test would be theater). Re-discover "
             "the exploit with `mylonite scan`."
         )
-    # Guarded must resist — reuse the canonical resist / inconclusive / regression logic.
-    _assert_from_result(guarded, exploit)
+    # Guarded must resist — reuse the canonical resist / inconclusive / regression
+    # logic. TK1: the guarded leg here is the operator's own target with
+    # `control` applied, not the bundled practice app's guarded twin — name the
+    # real target and the control instead of reusing practice-app wording.
+    _assert_from_result(
+        guarded,
+        exploit,
+        subject=f"your target ({spec.family!r}) with control {control!r} applied",
+        regression_detail=(
+            f"Control {control!r} did not stop it — this is a regression in "
+            "the control (or your server-side implementation of it), not in "
+            "a reference twin."
+        ),
+        rerecord_hint=(
+            "This is a LIVE re-drive of your own target, not a fixture replay "
+            "— there is nothing to re-record. Check the control is still "
+            "wired and enabled, then re-run."
+        ),
+    )
 
 
 __all__ = [

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A committed gate's failure message now names your own app, not a "twin".**
+  `testkit.assert_target_resists` and `testkit.assert_control_holds` re-drive
+  your declared target, so a regression no longer reads like it happened on
+  the bundled practice app's guarded reference agent — the message now names
+  your target (and, for `assert_control_holds`, the control that stopped
+  holding). A missing or stale fixture's error now points at
+  `mylonite validate`, the command that actually records fixtures; it used to
+  send you back to `mylonite generate`, which only emits the test file and
+  leaves `fixtures/` empty.
+
 ### Added
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,

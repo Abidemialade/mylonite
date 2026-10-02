@@ -119,6 +119,29 @@ def test_raises_when_control_not_load_bearing(
         )
 
 
+def test_control_not_load_bearing_names_the_real_target_and_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TK1: same failure, but on the message text.
+
+    The guarded leg here is the operator's own target with control ``"W2"``
+    applied -- not the bundled practice app's guarded reference agent. The
+    message must say so, naming the real target (``family``) and the control
+    that failed to hold, not "guarded twin" / "guarded reference agent".
+    """
+    target_file = _write_target_yaml(tmp_path)
+    _patch_scans(monkeypatch, raw=_fired(), guarded=_fired())
+    with pytest.raises(AssertionError) as excinfo:
+        testkit.assert_control_holds(
+            _exploit(), target_file=target_file, control="W2", model="stub-model", provider="stub"
+        )
+    msg = str(excinfo.value)
+    assert "myapp-notes" in msg
+    assert "W2" in msg
+    assert "guarded twin" not in msg
+    assert "guarded reference agent" not in msg
+
+
 def test_raises_when_attack_does_not_reproduce_on_raw(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

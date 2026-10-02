@@ -295,6 +295,14 @@ silent signature change breaks every downstream regression gate.
 Every one of these is honest-fail (R4): a stale or missing fixture, or a run that
 never reached a verdict, raises — it never reports a silent pass.
 
+Each assertion's failure message names what it actually re-drove. `assert_guard_holds`
+fails against "the guarded twin" (the bundled reference app is genuinely a twin), while
+`assert_target_resists` and `assert_control_holds` name your own declared target (and,
+for `assert_control_holds`, the control that stopped holding) — neither is a twin, so
+neither message calls your app one. A missing or stale fixture's error points at
+`mylonite validate <dir or test file>`, the command that records fixtures; running
+`mylonite generate` again does not fix it, since `generate` only emits the test file.
+
 ## The bundled reference app (the reference/demo differential)
 
 The bundled **reference agent** — [the reference app](quarry.md)'s `mcp_kitchen_sink`
