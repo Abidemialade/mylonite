@@ -68,7 +68,8 @@ def _exploit() -> ExploitRecord:
 
 def _result(outcome: str) -> Any:
     """A fabricated scan result. ``outcome`` is ``land``, ``resist``,
-    ``no_engagement`` (inconclusive) or ``aborted`` (inconclusive, hit its bound)."""
+    ``no_engagement`` (inconclusive), ``aborted`` (inconclusive, hit its time
+    bound) or ``budget`` (inconclusive, a call budget or the request ceiling)."""
     if outcome == "land":
         return SimpleNamespace(
             exploits=[SimpleNamespace(pattern_id=_PATTERN_ID)],
@@ -91,6 +92,11 @@ def _result(outcome: str) -> Any:
         return SimpleNamespace(
             exploits=[],
             report=SimpleNamespace(attempts=[], aborted=AbortReason.WALL_CLOCK_TIMEOUT),
+        )
+    if outcome == "budget":
+        return SimpleNamespace(
+            exploits=[],
+            report=SimpleNamespace(attempts=[], aborted=AbortReason.BUDGET_EXCEEDED),
         )
     raise AssertionError(f"unknown outcome {outcome!r}")
 
@@ -191,6 +197,26 @@ def test_an_aborted_attempt_keeps_its_own_error_type(
         )
     # A target that hit its time bound is not re-driven again.
     assert scripted.calls == 1
+
+
+def test_a_request_ceiling_stop_is_raised_and_never_counted_as_a_resist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The process-wide request ceiling trips on attempt 2: the check stops
+    there with the ceiling named, and the attempt is not a resist."""
+    from mylonite.scan import _llm
+
+    monkeypatch.setattr(_llm, "request_ceiling_hit", lambda: 9)
+    scripted = _Scripted(["resist", "budget", "resist"])
+    monkeypatch.setattr(testkit, "_run_target_scan", scripted)
+    with pytest.raises(testkit.TestkitRedriveAborted) as excinfo:
+        testkit.assert_target_resists(
+            _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
+        )
+    msg = str(excinfo.value)
+    assert "request ceiling of 9" in msg
+    assert "attempt 2 of 3 was inconclusive after 1 resisted" in msg
+    assert scripted.calls == 2
 
 
 def test_attempts_keyword_sets_n(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
