@@ -72,7 +72,7 @@ DOC_RULES: tuple[DocRule, ...] = (
     DocRule("src/mylonite/gate/", ("docs/ci-gating.md",), "the gate command and CI workflows"),
     DocRule("gate-action/", ("docs/ci-gating.md",), "the reusable gate action"),
     DocRule("src/mylonite/report/", ("docs/reading-results.md",), "report formats"),
-    DocRule("src/mylonite/testkit/", ("docs/validation.md",), "the pytest gate"),
+    DocRule("src/mylonite/testkit/", ("docs/testkit.md",), "the testkit API"),
     DocRule(
         "src/mylonite/contracts/",
         ("docs/plugin-authoring.md", "docs/architecture.md"),

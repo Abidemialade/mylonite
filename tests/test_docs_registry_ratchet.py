@@ -171,7 +171,7 @@ def _cli_backward_gaps() -> list[str]:
 # --- testkit API ----------------------------------------------------------
 #
 # Forward: every `testkit.__all__` name has a qualified `testkit.<name>`
-# mention somewhere in docs/validation.md. Backward: every qualified
+# mention somewhere in docs/testkit.md. Backward: every qualified
 # `testkit.<name>` mention in that page names a real `__all__` entry.
 #
 # Scoped to qualified mentions (not a bare name like `load_exploit`) because
@@ -180,8 +180,8 @@ def _cli_backward_gaps() -> list[str]:
 # unambiguously ABOUT the testkit API rather than just using an English word
 # that happens to match one of its names.
 
-_TESTKIT_DOC_PATH = _DOCS_DIR / "validation.md"
-_QUALIFIED_NAME_RE = re.compile(r"testkit\.([A-Za-z_][A-Za-z0-9_]*)")
+_TESTKIT_DOC_PATH = _DOCS_DIR / "testkit.md"
+_QUALIFIED_NAME_RE = re.compile(r"testkit\.(?!md\b)([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def _testkit_doc_names() -> set[str]:
