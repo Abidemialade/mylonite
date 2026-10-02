@@ -239,22 +239,22 @@ All four subclass from the same two roots: `TestkitFixtureError` covers "the
 check could not reach a trustworthy verdict"; `TestkitConfigError` covers "the
 inputs to the check don't resolve". None of them is a silent pass.
 
-- **`TestkitFixtureError`** — the offline gate's replay evidence can't be
+- **`testkit.TestkitFixtureError`** — the offline gate's replay evidence can't be
   trusted: a missing, corrupt, or version-mismatched fixture, or a run that
   produced no conclusive attempt. The message names the re-record command
   (`mylonite validate <dir or test file>`).
-- **`TestkitRedriveAborted`** (subclasses `TestkitFixtureError`) — a LIVE
+- **`testkit.TestkitRedriveAborted`** (subclasses `TestkitFixtureError`) — a LIVE
   re-drive was cut short by its own 12-call/180-second bound, or by
   `MYLONITE_MAX_LLM_REQUESTS`, before reaching a verdict. There is nothing to
   re-record on this path — the message points at the target or the provider
   instead.
-- **`TestkitAttackNotReproduced`** (subclasses `TestkitFixtureError`) — raised
+- **`testkit.TestkitAttackNotReproduced`** (subclasses `TestkitFixtureError`) — raised
   by `assert_control_holds` when the attack never landed on the raw target on
   any attempt, so there is nothing for the control to stop. Deliberately *not*
   an `AssertionError`: under `pending_fix` an `AssertionError` is the expected
   "not fixed yet" case and keeps the run green, so a control test that proves
   nothing would stay green forever instead of failing.
-- **`TestkitConfigError`** (a `ValueError`) — the model/provider a LIVE test
+- **`testkit.TestkitConfigError`** (a `ValueError`) — the model/provider a LIVE test
   needs cannot be resolved from any source (an explicit keyword, the exploit's
   own execution-context metadata, or a sibling `scan_report.json`), or
   `attempts`/`MYLONITE_REDRIVE_ATTEMPTS` is not a whole number from 1 to 20. A
