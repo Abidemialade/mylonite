@@ -350,7 +350,9 @@ def build_pr_body(
             f"See the guarded reference twin for a concrete fix: `{_GUARDED_TWIN}`.",
         ]
     if llm_enrich:
-        extra = _llm_suggestion(exploit, completion_fn=completion_fn, model=model)
+        # The model's reply is pasted into a committed PR body; it can echo
+        # anything it was shown, so it is redacted like the evidence lines.
+        extra = redact(_llm_suggestion(exploit, completion_fn=completion_fn, model=model) or "")
         if extra:
             sections += [
                 "",
@@ -480,7 +482,7 @@ def _llm_suggestion(
         "You are a security engineer. In 2-3 sentences, suggest a concrete, "
         "human-applied mitigation for this AI-agent weakness. Do not include "
         "code unless trivial. Weakness pattern: "
-        f"{exploit.pattern_id}; reason: {exploit.success_reason}."
+        f"{exploit.pattern_id}; reason: {redact(exploit.success_reason)}."
     )
     from mylonite.scan._llm import litellm_text_call
 

@@ -142,10 +142,11 @@ your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
 commands to commit and open the PR yourself. With neither flag below, your
 repository is not modified: no branch, no commit, no workflow files.
 
-Everything in that directory is written to be committed, so `gate` redacts
-secret-shaped values before it writes them. A key the target echoed into its
-reply, a tool result or a validator error shows up as `***REDACTED***` in the
-exploit JSON, the validation report and the evidence lines of `PR_BODY.md`.
+`gate` redacts secret-shaped values in the exploit JSON, the validation report
+and `PR_BODY.md` (its evidence lines and the optional LLM suggestion) before it
+writes them. A key the target echoed into its reply, a tool result or a
+validator error shows up there as `***REDACTED***`. The recorded replay files
+under `fixtures/` are not redacted; review them before you commit.
 
 Two flags opt in to the rest, independently:
 

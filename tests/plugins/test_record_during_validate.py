@@ -219,3 +219,39 @@ def test_record_fixtures_dir_none_is_collect_only(tmp_path: Path) -> None:
     assert "collect-only" in build.detail
     # Nothing was written anywhere under tmp_path.
     assert not list(tmp_path.rglob("_meta.json"))
+
+
+def test_record_writes_a_redacted_exploit_and_still_full_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#223: the exploit JSON written next to the recorded fixtures is committed
+    by gate and validate, so a key the target echoed must not reach it. The
+    on-disk test still full-passes against the redacted copy."""
+    fake_key = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    base = _build_exploit()
+    exploit = base.model_copy(
+        update={
+            "success_reason": f"agent leaked {fake_key}",
+            "response": base.response.model_copy(
+                update={"raw_response": f"env OPENAI_API_KEY={fake_key}"}
+            ),
+        }
+    )
+    test = _emit_test(exploit)
+    gen_dir = tmp_path / "gen"
+    _install_fake_acompletion(monkeypatch)
+
+    validator = DifferentialValidator(
+        iterations=2,
+        completion_fn=_ScriptedCompletion(),
+        record_fixtures_dir=gen_dir / "fixtures",
+    )
+    report = validator.validate(
+        test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+
+    text = (gen_dir / f"exploit_{exploit.pattern_id}.json").read_text(encoding="utf-8")
+    assert fake_key not in text
+    assert "***REDACTED***" in text
+    build = _outcome(report, "build")
+    assert build.passed is True, build.detail
