@@ -5,8 +5,8 @@ Two implementations ship here:
 * ``NullValidator`` — the no-op stub. Returns a "not implemented" report;
   useful as a default and as the ``null`` entry point.
 * ``DifferentialValidator`` — the validation-engine **moat**. It proves
-  a generated security test is *meaningful* by running the full attack scan
-  against BOTH reference twins across a multi-run flakiness filter, then
+  a generated security test is *meaningful* by running the test's own attack
+  seed against BOTH reference twins across a multi-run flakiness filter, then
   reporting a mutation score and one metamorphic-perturbation check.
 
 The pipeline (per ``mylonite.contracts.validator``):
@@ -32,9 +32,9 @@ The pipeline (per ``mylonite.contracts.validator``):
    record fixtures against, so its build leg is always collect-only — but it is
    the SAME real ``run_test_file``-backed check as above (T5), not a
    hardcoded pass: a syntactically broken emitted test genuinely fails it.
-2. **differential** — across ``iterations`` runs of the full attack scan, does
-   the exploit's ``pattern_id`` FIRE on the vulnerable twin and RESIST on the
-   guarded twin *at all*? (discrimination)
+2. **differential** — across ``iterations`` runs, each scoped to the exploit's
+   own seed (``pattern_id_filter``), does that ``pattern_id`` FIRE on the
+   vulnerable twin and RESIST on the guarded twin *at all*? (discrimination)
 3. **flakiness** — does it do both *reliably*? A STATISTICAL rate-gap decision
    (:meth:`DifferentialValidator._decide`), not a count threshold: the
    vulnerable-fire-rate minus the guarded-leak-rate must be ``>= min_rate_gap``,
@@ -47,7 +47,9 @@ The pipeline (per ``mylonite.contracts.validator``):
    (vulnerable FIRED that seed's pattern_id AND guarded RESISTED it)? The
    headline ``mutation_score`` is ``killed / total`` in [0,1]; the per-seed
    matrix (``W1:…✓ W2:…✓ W3:…✗ …``) is surfaced in the report notes. Computed
-   for free from the full scans already run.
+   for free from the scans already run; since those are scoped to the test's
+   own seed, only that seed can be killed, so the score reads which bundled
+   seeds this one test catches.
 5. **metamorphic** (GATING) — apply MULTIPLE deterministic, neutral perturbations
    (paraphrase / casing / whitespace / unicode confusables — pure string
    transforms, NO LLM, NO randomness) to the exploit body and GENUINELY run each
@@ -271,7 +273,7 @@ def workload_message(iterations: int, *, fast: bool) -> str:
 
 @dataclass(frozen=True)
 class _IterationTally:
-    """Per-iteration result of running the full scan against both twins."""
+    """Per-iteration result of running the finding's seed against both twins."""
 
     vuln_fired: bool
     guard_resisted: bool
@@ -1181,17 +1183,21 @@ class DifferentialValidator(ValidatorBase):
     # -- per-iteration "run attack xN, tally" (reused by metamorphic) ---------
 
     def _run_iteration(self, pattern_id: str) -> _IterationTally:
-        """Run the full attack scan against BOTH twins once and tally.
+        """Run the finding's own seed against BOTH twins once and tally.
 
-        Factored out so the metamorphic stage can reuse the exact same
-        per-iteration differential check. The two twins are independent — the
-        differential compares their results, neither feeds the other — so they
-        are driven CONCURRENTLY via ``run_twins`` inside one ``asyncio.run``,
-        each with its own adapter/customiser/judge/note-id-counter (built fresh
-        per call by ``build_scan``), so nothing is shared between them.
+        Each twin's scan is scoped to ``pattern_id``, so an iteration drives the
+        attack being validated and nothing else: the same attack on both sides,
+        at one seed's cost instead of the whole bank's. The two twins are
+        independent — the differential compares their results, neither feeds the
+        other — so they are driven CONCURRENTLY via ``run_twins`` inside one
+        ``asyncio.run``, each with its own adapter/customiser/judge/note-id-counter
+        (built fresh per call by ``build_scan``), so nothing is shared between them.
         """
         vuln_result, guard_result = asyncio.run(
-            run_twins(self._run_scan_async("vulnerable"), self._run_scan_async("guarded"))
+            run_twins(
+                self._run_scan_async("vulnerable", pattern_id),
+                self._run_scan_async("guarded", pattern_id),
+            )
         )
         return _IterationTally(
             vuln_fired=self._fired(vuln_result, pattern_id),
@@ -1201,11 +1207,15 @@ class DifferentialValidator(ValidatorBase):
             guard_fired=self._fired(guard_result, pattern_id),
         )
 
-    async def _run_scan_async(self, variant: Literal["vulnerable", "guarded"]) -> ScanResult:
-        """Build and await one full attack scan for ``variant``.
+    async def _run_scan_async(
+        self, variant: Literal["vulnerable", "guarded"], pattern_id: str
+    ) -> ScanResult:
+        """Build and await one attack scan for ``variant``, scoped to ``pattern_id``.
 
-        No internal ``asyncio.run`` — callers that want to run this concurrently
-        with its twin (``_run_iteration``) drive both from a single event loop.
+        Only the finding's seed runs (``pattern_id_filter``), as on the custom
+        path. No internal ``asyncio.run`` — callers that want to run this
+        concurrently with its twin (``_run_iteration``) drive both from a single
+        event loop.
         """
         engine = build_scan(
             variant,
@@ -1216,6 +1226,7 @@ class DifferentialValidator(ValidatorBase):
             planner_model=self._planner_model,
             customiser_model=self._customiser_model,
             judge_model=self._judge_model,
+            pattern_id_filter=pattern_id,
         )
         return await engine.run()
 
@@ -1276,10 +1287,10 @@ class DifferentialValidator(ValidatorBase):
         on the guarded side). This mirrors the per-exploit ``_fired`` / ``_resisted``
         helpers but applied to EVERY kitchen-sink seed, not just the exploit's.
 
-        Nearly free — the validator's differential loop runs the FULL attack bank
-        each iteration (``_run_iteration`` drives both twins via
-        ``_run_scan_async``, which calls ``build_scan`` with NO
-        ``pattern_id_filter``), so every kitchen-sink seed is observable.
+        Nearly free — it reads the scans the differential loop already ran.
+        Those scans are scoped to the exploit's own seed (``_run_iteration``
+        passes ``pattern_id_filter``), so every other kitchen-sink seed shows as
+        not killed: this one test does not catch them.
 
         ``mutation_score = killed_seeds / total_kitchen_sink_seeds``, bounded
         [0,1]. The matrix string (``W1✓ W2✓ W3✓ W4✗`` style) is surfaced in the

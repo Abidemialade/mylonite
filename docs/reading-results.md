@@ -87,7 +87,7 @@ flakiness    pass     1.00    gap +100% (vuln 100% - guarded 0%); guarded RESIST
 metamorphic  pass     0.86    robustness (6/7 perturbations held; gates kept)
 gate: kept = build ✓ AND differential ✓ AND flakiness ✓ AND metamorphic ✓  =>  KEPT
 reproducibility: vulnerable fired 5/5, guarded resisted 5/5
-mutation score: 7/9   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
+mutation score: 0.11   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
 ```
 
 The verdict at the end of the gate line is **KEPT**, **STABLE, NOT PROVEN** or

@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output schemas (not inside a `default`, `const` or `examples` value); a tool whose
   fields could not be read in full reads NOT TESTED, never stable; and a long or
   non-ASCII key name appears in a diff pointer as a short hash.
+### Changed
+
+- **`validate` on the reference app now attacks with the finding's own seed, and
+  nothing else.** Each differential run used to scan both builds with the whole
+  bank of nine seeds and then look for the finding's result. Now every run drives
+  only the seed being validated, on both builds, the same way the custom-target
+  path already did. The oracle's rules are unchanged: both builds, every
+  iteration, the same rate-gap and metamorphic checks. Measured on the offline
+  test double at 5 iterations, the differential makes 40 model calls instead of
+  310, and a whole `validate` makes 82 instead of 352. The mutation score now
+  says which bundled seeds this one test catches, so a single-seed test scores
+  1/9 where it used to borrow credit from the other eight seeds.
 
 ### Added
 

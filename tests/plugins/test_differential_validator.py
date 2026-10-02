@@ -2225,3 +2225,88 @@ def test_a_below_floor_judge_success_on_the_guarded_twin_is_not_resistance(
     )
     assert guard_resisted is False
     assert guard_fired is False
+
+
+# --- the reference differential is scoped to the finding's own seed -----------
+
+
+class _CallCountingCompletion(_ScriptedCompletion):
+    """``_ScriptedCompletion`` that counts every fake-LLM call it serves."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        self.calls += 1
+        return await super().__call__(**kwargs)
+
+
+def test_reference_iteration_drives_only_the_findings_seed() -> None:
+    """Each differential iteration attacks both twins with the finding's seed
+    and nothing else, so the verdict is about the attack being validated."""
+    validator = DifferentialValidator(iterations=1, completion_fn=_ScriptedCompletion())
+
+    tally = validator._run_iteration(_EXPLOIT_PATTERN_ID)
+
+    for result in (tally.vuln_result, tally.guard_result):
+        attempted = {a.pattern_id for a in result.report.attempts}
+        assert attempted == {_EXPLOIT_PATTERN_ID}
+        assert {e.pattern_id for e in result.exploits} <= {_EXPLOIT_PATTERN_ID}
+    assert tally.vuln_fired is True
+    assert tally.guard_resisted is True
+
+
+def test_every_differential_scan_is_scoped_to_the_findings_pattern(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every scan the reference differential builds, on both twins and in every
+    iteration, carries the finding's pattern filter."""
+    from mylonite.plugins._reference import reference_validator as rv
+
+    real_build_scan = rv.build_scan
+    seen: list[tuple[str, str | None]] = []
+
+    def _spy(variant: str, **kwargs: Any) -> Any:
+        seen.append((variant, kwargs.get("pattern_id_filter")))
+        return real_build_scan(variant, **kwargs)
+
+    monkeypatch.setattr(rv, "build_scan", _spy)
+    exploit = _build_exploit()
+    validator = DifferentialValidator(
+        iterations=3, completion_fn=_ScriptedCompletion(), run_build=False
+    )
+    report = validator.validate(
+        _emit_test(exploit), ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+
+    assert sorted(v for v, _ in seen) == ["guarded"] * 3 + ["vulnerable"] * 3
+    assert {f for _, f in seen} == {_EXPLOIT_PATTERN_ID}
+    assert report.reproducibility is not None
+    assert report.reproducibility.iterations == 3
+    assert report.reproducibility.vuln_fired == 3
+    assert report.reproducibility.guard_resisted == 3
+
+
+def test_scoped_iteration_makes_fewer_llm_calls_than_the_full_seed_bank() -> None:
+    """Scoping cuts the per-iteration cost: one seed per twin, not the whole bank."""
+    from mylonite._concurrency import run_twins
+    from mylonite.scan.wiring import build_scan, note_id_counter
+
+    scoped = _CallCountingCompletion()
+    DifferentialValidator(iterations=1, completion_fn=scoped)._run_iteration(_EXPLOIT_PATTERN_ID)
+
+    full = _CallCountingCompletion()
+
+    def _full_bank(variant: Any) -> Any:
+        return build_scan(
+            variant,
+            completion_fn=full,
+            note_id_factory=note_id_counter(),
+            provider="anthropic",
+            model="fake-model",
+        ).run()
+
+    asyncio.run(run_twins(_full_bank("vulnerable"), _full_bank("guarded")))
+
+    assert 0 < scoped.calls < full.calls
