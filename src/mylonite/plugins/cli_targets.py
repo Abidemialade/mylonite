@@ -330,10 +330,11 @@ def autowire_seed_arm(
 
     Moved out of ``cli.py``'s ``scan()`` verbatim (to keep cli.py under its size cap). The
     caller is responsible for: gating on ``transport != "rest"`` /
-    ``needs_seed_arm_autowire(tf)`` / ``not dry_run`` / ``not
-    allow_no_seed_arm``, running the model pre-flight FIRST
-    (``preflight_model_or_exit`` -- a bad ``--model`` must not reach this
-    probe and launch the real server), and computing ``budget_s`` itself
+    ``needs_seed_arm_autowire(tf)`` / ``not allow_no_seed_arm`` (a dry run
+    runs it too, so its preview matches the real scan), running the model
+    pre-flight FIRST on a real scan (``preflight_model_or_exit`` -- a bad
+    ``--model`` must not reach this probe and launch the real server), and
+    computing ``budget_s`` itself
     (``_autowire_budget_s(tf.timeout_s)``, so a test's monkeypatched
     constant still takes effect) -- this function assumes all of that
     already happened and just runs the probe.

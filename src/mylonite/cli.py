@@ -1234,20 +1234,19 @@ def scan(
 
         # seed_arm auto-wire: infer a seed_arm from the LIVE tool surface when a
         # W2 target omits one, so a real app needs near-zero config instead of
-        # the hard block below. Skipped on --dry-run/--allow-no-seed-arm, and
-        # for a rest (HTTP-agent) target (no tool surface to introspect or
-        # plant into -- W2 rides in as direct prompt injection instead). See
-        # cli_targets.autowire_seed_arm for the probe + inference logic itself.
+        # the hard block below. Skipped on --allow-no-seed-arm, and for a rest
+        # (HTTP-agent) target (no tool surface to introspect or plant into --
+        # W2 rides in as direct prompt injection instead). A --dry-run runs it
+        # too: detection is a describe() call with no LLM, and a dry run that
+        # skipped it reported W2 uncoverable where the real scan would wire it.
+        # See cli_targets.autowire_seed_arm for the probe + inference logic.
         synth_covers_indirect = False
-        if (
-            tf.transport != "rest"
-            and needs_seed_arm_autowire(tf)
-            and not dry_run
-            and not allow_no_seed_arm
-        ):
+        if tf.transport != "rest" and needs_seed_arm_autowire(tf) and not allow_no_seed_arm:
             # #207: validate the model BEFORE this probe can launch the real
-            # server -- a bad --model must not spawn a subprocess first.
-            preflight_model_or_exit(effective_planner_model, api_base=effective_policy.api_base)
+            # server -- a bad --model must not spawn a subprocess first. A dry
+            # run makes no model call, so it skips this check, as before.
+            if not dry_run:
+                preflight_model_or_exit(effective_planner_model, api_base=effective_policy.api_base)
             tf, tf_mutated, synth_covers_indirect = autowire_seed_arm(
                 tf,
                 authorize,

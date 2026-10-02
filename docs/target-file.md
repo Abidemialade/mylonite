@@ -349,7 +349,9 @@ suggests a class it already confirmed is coverable for the surface it just intro
 so a fresh scaffold's target.yaml never trips this refusal on first run.
 
 `--dry-run` downgrades the refusal to a warning — a dry run only enumerates seeds, so it
-stays informative instead of blocking. A W2 class you've explicitly accepted running
+stays informative instead of blocking. A dry run wires a missing `seed_arm` the same way a
+real scan does (detection reads the tool list; no LLM call), so its preview of W2 matches
+what the scan will run. A W2 class you've explicitly accepted running
 uncovered via `--allow-no-seed-arm` is not re-blocked here — the run proceeds, its
 kitchen-sink seeds are still scheduled, and each one hits the target and reports
 `skipped_no_seed_arm` (NOT TESTED), which forces the scan's overall coverage to PARTIAL

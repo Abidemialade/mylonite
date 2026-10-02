@@ -128,6 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A new offline test runs a two-finding gate and then `pytest` on its output,
   with no provider key.
 
+- **`scan --dry-run` previews W2 the way the real scan runs it.** A dry run
+  skipped the `seed_arm` auto-wire, so on a server with a store-and-recall
+  pair it warned that W2 could not be covered while the real scan wired and
+  ran it. The dry run now wires it too; detection reads the tool list and
+  makes no LLM call.
 - **`gate --open-pr` no longer deletes a branch it didn't create.** When a
   re-run hit a gate branch left over from an earlier run, `git checkout -b`
   failed and the rollback then ran `git branch -D` on that older branch,
