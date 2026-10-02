@@ -21,11 +21,15 @@ section for the two rates this campaign uses). The whole computation stays
 workflow-side; nothing in ``src/mylonite`` changes.
 
 If a log contains more than one ``llm:`` line (e.g. a run that scans and
-then validates), every line's calls and tokens are summed. **A log with no
-``llm:`` line at all is an error, not a $0 run** -- a crashed or
-incomplete scan must never silently cost nothing; the caller (the scorer)
-decides separately whether that crash is a product defect or an
-infrastructure failure.
+then validates), every line's calls and tokens are summed. **A log that
+EXISTS but has no ``llm:`` line at all is an error, not a $0 run** -- a
+crashed or incomplete scan must never silently cost nothing; the caller
+(the scorer) decides separately whether that crash is a product defect or
+an infrastructure failure. A log file that does not exist AT ALL is
+different: that means an earlier workflow step (checkout, the wheel build,
+a server launch) failed before any ``mylonite`` command was ever invoked,
+so genuinely no LLM money was spent -- this writes a ``cost.json`` with
+zero calls/cost and a ``reason`` field, and does not raise.
 
 Usage
 -----
@@ -160,6 +164,26 @@ def build_result(
     return result
 
 
+def build_result_for_missing_log(*, model: str, ref: str) -> dict[str, object]:
+    """``cost.json`` for the "no run.log at all" case -- see the module
+    docstring. Zero calls, zero cost, never raises: an earlier workflow
+    step failing before any ``mylonite`` command ran is a legitimate,
+    genuinely-free outcome, not a cost unknown-and-worth-investigating one
+    (that is :class:`NoSpendLineFoundError`'s job, for a log that EXISTS
+    but has no spend line)."""
+    return {
+        "model": model,
+        "ref": ref,
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "in_rate_per_million_usd": 0.0,
+        "out_rate_per_million_usd": 0.0,
+        "cost_usd": 0.0,
+        "reason": "no run.log found -- an earlier step failed before any mylonite command ran",
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -181,6 +205,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, required=True, help="Where to write cost.json.")
     args = parser.parse_args(argv)
+
+    if not args.log_file.is_file():
+        print(f"::notice::no run.log found at {args.log_file} -- writing a zero-cost cost.json.")
+        result = build_result_for_missing_log(model=args.model, ref=args.ref)
+        args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(result, indent=2))
+        return 0
 
     text = args.log_file.read_text(encoding="utf-8", errors="replace")
     try:
