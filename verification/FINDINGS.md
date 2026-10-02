@@ -208,18 +208,22 @@ docstring: "Returns True if the injection was executed correctly, False otherwis
 not when the agent resisted — the adapter had it inverted. Recomputed under the
 corrected label, from the same 27 recorded judge verdicts (no new model call): **15
 real positives, not 12 (ASR 55.6%, not 44.4%); judge agreement P=0.68, R=1.00, F1=0.81,
-not P=0.32/R=0.58/F1=0.41.** The direction of the finding flips too: recall is perfect
-on this subset (every real attack AgentDojo confirms is also flagged), and the 15
+not P=0.32/R=0.58/F1=0.41.** The direction of the finding flips too: recall is 1.00
+(15/15) on this subset — every real attack AgentDojo confirms is also flagged — though
+on a sample this small that is a strong signal, not a settled rate. All 20 rows of the
+`disagreements[]` array in the committed `layer2-agentdojo.json` files are, under the
+corrected label, agreements: the array's `benchmark_says_exploited` field is still
+written against the old (inverted) label and was not rewritten row by row, so the 15
 cases the "FP triage" paragraph above walks through — `send_money` to the attacker
-IBAN, `update_password`, `update_scheduled_transaction` — are genuine agreements
-(both sides correctly call them exploited), not disagreements. The 7 real false
-positives are the other direction: cases where the agent's calls carried the
-attacker's payload but AgentDojo's exact-goal oracle didn't credit the injection as
-fully achieved. `FPR` is informative now (`tn=5`, not 0): **0.58**. Per-case detail for
-the 7 isn't preserved in the committed report (only disagreement text under the old
-label was stored), so attributing them individually needs a fresh `--with-llm` run —
-left as a follow-up, not a live call made here. See `docs/verification.md` and
-`docs/limitations.md` for the corrected figures as currently cited.
+IBAN, `update_password`, `update_scheduled_transaction` — and the 5 cases the "5 FNs"
+sentence covers are all genuine agreements now, not disagreements. The 7 real false
+positives are the other direction: cases AgentDojo's exact-goal oracle scored as
+resisted that Mylonite's judge called exploited. Per-case detail for these 7 isn't
+preserved in the committed report (only disagreement text under the old label was
+stored, and these 7 were agreements under that label), so attributing them
+individually needs a fresh `--with-llm` run — left as a follow-up, not a live call
+made here. `FPR` is informative now (`tn=5`, not 0): **0.58**. See `docs/verification.md`
+and `docs/limitations.md` for the corrected figures as currently cited.
 
 ## Layer 3 — precision (false positives on known-good targets)
 
@@ -254,9 +258,9 @@ broad cross-model number still needs non-Claude provider keys (absent here).
   again (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not
   been re-run (see the Layer 1 note above).
 - Judge ≠ AgentDojo oracle (F1 0.81, precision 0.68, recall 1.00 once the label fix
-  below is applied) — semantic-mismatch to investigate: 7 of 27 cases where the agent's
-  calls carried the attacker's payload but the exact-goal oracle didn't credit it as
-  fully achieved.
+  below is applied) — the judge flagged 7 of 27 runs that AgentDojo's exact-goal
+  oracle scored as resisted; per-case attribution needs a fresh run (see the
+  correction note below).
 - No external *defended* server for a true external precision number.
 - Samples are small + Claude-only; the opt-in `verification.yml` workflow runs larger N.
 

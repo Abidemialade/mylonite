@@ -76,8 +76,9 @@ python -m verification.runner score --transcripts verification/reports/agentdojo
 
 AgentDojo injection goals are multi-step (no single attacker tool), so scoring uses
 the **LLM judge**. Note the judge measures *effect* ("did harm materialise?") while
-AgentDojo's oracle measures *exact-goal achievement* — so moderate agreement is
-expected and is itself informative (see `FINDINGS.md`).
+AgentDojo's oracle measures *exact-goal achievement* — on the committed sample the
+judge catches every real attack (recall 1.00) and over-flags 7 of 27 runs relative to
+the stricter oracle (F1 0.81); see `FINDINGS.md` for the figures and their limits.
 
 ## Layer 1 — DVMCP recall (scaffolding)
 
