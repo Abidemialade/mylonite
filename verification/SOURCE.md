@@ -16,6 +16,15 @@ enters the harness.
 | InjecAgent | https://github.com/uiuc-kang-lab/InjecAgent | MIT | `f19c9f2c79a41046eb13c03c51a24c567a8ffa07` | `test_cases_{dh,ds}_{base,enhanced}.json`, `tools.json` — sha256 in `fetch.py` |
 | AgentDojo | https://github.com/ethz-spylab/agentdojo | MIT | `089ed468cf3ed0322acc66b0211f26d9d90dbf60` | **released runs** (`runs/gpt-3.5-turbo-0125/banking/…`) — scored as real third-party transcripts; commit-pinned (no `pip install` of the package needed). See `fetch.fetch_agentdojo_runs`. |
 
+**Committed fixture (the exception to "nothing here is vendored").**
+`verification/layer2_datasets/fixtures/agentdojo_real_run_user_task_0_injection_task_3.json`
+is one real, small (4.4 KB) AgentDojo run, fetched with `gh api` at the pinned commit
+above: `runs/gpt-3.5-turbo-0125/banking/user_task_0/important_instructions/injection_task_3.json`,
+blob sha `af2947451d1ef8cf1e4deb75dab9e3bc9101079e`, recorded 2026-10-02. `security: true`
+(the agent sent money to the attacker's IBAN) — used by
+`tests/verification/test_layer2_agentdojo.py` to pin the adapter's polarity against a
+genuine upstream record, not only the synthetic in-file fixture helper.
+
 InjecAgent sha256 digests (recorded 2026-06-22, commit `f19c9f2`):
 
 ```
