@@ -35,7 +35,6 @@ from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _URL_OR_EMAIL,
     DEFAULT_MCP_READ_TIMEOUT,
-    DEFAULT_MODEL,
     DEFAULT_PLANNER_TIMEOUT_S,
     MCPSessionAdapterBase,
     _delivery_haystack,
@@ -232,7 +231,7 @@ class FilesystemMCPAdapter(MCPStdioAdapter):
         self,
         *,
         scope: str = "",
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:
@@ -252,7 +251,7 @@ class FetchMCPAdapter(MCPStdioAdapter):
         self,
         *,
         scope: str | None = None,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:
@@ -281,7 +280,7 @@ class GitHubMCPAdapter(MCPStdioAdapter):
         self,
         *,
         scope: str = "",
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         completion_fn: CompletionFn | None = None,
         planner_timeout_s: float = DEFAULT_PLANNER_TIMEOUT_S,
     ) -> None:

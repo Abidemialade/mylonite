@@ -23,11 +23,7 @@ from mylonite.exit_codes import (
     EXIT_SUCCESS,
     EXIT_VALIDATE_FAILED,
 )
-from mylonite.gate.mitigation import (
-    DEFAULT_MITIGATION_MODEL,
-    build_gate_pr_body,
-    commits_as_pending,
-)
+from mylonite.gate.mitigation import build_gate_pr_body, commits_as_pending
 from mylonite.generate.wiring import _slugify_pattern
 from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
 from mylonite.scan.llm_types import CompletionFn
@@ -395,7 +391,7 @@ def run_gate(
     open_pr_fn: Callable[..., Any],
     open_pr: bool,
     llm_enrich: bool = False,
-    mitigation_model: str = DEFAULT_MITIGATION_MODEL,
+    mitigation_model: str | None = None,
     mitigation_completion_fn: CompletionFn | None = None,
     system_prompt: str | None = None,
     target_context: Any | None = None,

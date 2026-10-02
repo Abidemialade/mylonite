@@ -111,7 +111,10 @@ def check(
     # `mylonite demo`, and the one a reader points at their own server next.
     tf = None
     if target is not None and target.startswith("reference:"):
-        adapter = _build_adapter_for_reference(target, "claude-haiku-4-5-20251001")
+        # `check` makes no LLM call (`describe()` only) and no --authorize is
+        # needed either, so it needs no model -- CLAUDE.md's "no default
+        # provider" rule means there's nothing to spell out here any more.
+        adapter = _build_adapter_for_reference(target, None)
     else:
         if target_file is None:
             echo_err(
@@ -128,9 +131,9 @@ def check(
             raise typer.Exit(code=EXIT_CONFIG) from exc
         target_registry.clear_runtime_targets()
         target_registry.register_target(spec)
-        adapter = build_mcp_adapter(
-            family=spec.family, scope=tf.scope, model="claude-haiku-4-5-20251001"
-        )
+        # `check` makes no LLM call (`describe()` only) -- no model to spell
+        # out here either.
+        adapter = build_mcp_adapter(family=spec.family, scope=tf.scope, model=None)
 
     echo_err(f"connecting to {target_file or target} to introspect its tools (no LLM call)…")
     try:
