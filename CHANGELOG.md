@@ -205,21 +205,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **No default model, anywhere — behaviour change.** `scan`, `validate`, `gate`
-  and `ablate` used to fall back to a hardcoded Haiku model (Sonnet, for
-  `scan`) when `--model`, `mylonite.yaml`'s `model:` and `MYLONITE_MODEL` were
-  all unset. They now stop before touching a target or making a call, with one
-  line naming every approved provider — an example `--model` value and the
-  environment variable it needs, built from the provider registry — and exit
-  `4`, the same code a live command already used for an unreachable provider.
+  and `ablate` each used to fall back to the same hardcoded Haiku model when
+  `--model`, `mylonite.yaml`'s `model:` and `MYLONITE_MODEL` were all unset
+  (a separate, lower-level default in the MCP/reference adapter classes
+  fell back to Sonnet instead, when a caller built one directly). They now
+  stop before touching a target or making a call, with one line naming
+  every approved provider — an example `--model` value and the environment
+  variable it needs, built from the provider registry — and exit `4`, the
+  same code a live command already used for an unreachable provider.
   `check`, `scan --scaffold` (introspection only; no LLM call either way) and
-  `mylonite demo`'s offline replay make no LLM call and still need no model.
-  `gate-action`'s `model` input is now required, with no default. Bedrock's
-  credential check now accepts a named `AWS_PROFILE`, an
-  `AWS_BEARER_TOKEN_BEDROCK` bearer token, or an OIDC role
-  (`AWS_ROLE_ARN`+`AWS_WEB_IDENTITY_TOKEN_FILE`), not only the static
-  access/secret keypair — AWS's own credential chain always accepted all
-  four; requiring the static pair specifically rejected the other three. See
-  "No model chosen at all?" in `docs/cli-reference.md`.
+  `mylonite demo`'s offline replay make no LLM call and still need no model;
+  `mylonite demo --live` now needs one explicitly too. `gate-action`'s
+  `model` input is now required, with no default, and is only passed through
+  to `mylonite gate` when it is actually set (an empty input used to become
+  `--model ""`). Bedrock's credential check now accepts a named
+  `AWS_PROFILE`, an `AWS_BEARER_TOKEN_BEDROCK` bearer token, an OIDC role
+  (`AWS_ROLE_ARN`+`AWS_WEB_IDENTITY_TOKEN_FILE`), or a container role
+  (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`/`_FULL_URI`), not only the
+  static access/secret keypair — and when NONE of these is set, it warns
+  and proceeds rather than blocking: AWS's own credential chain also
+  includes a default `~/.aws` profile, an active SSO session, and the EC2
+  instance-metadata role, none of which leaves an environment variable to
+  check at all. See "No model chosen at all?" in `docs/cli-reference.md`.
+
+  **Upgrading:** if you adopted the scaffolded `mylonite-discovery.yml`
+  workflow or `gate-action` before this release, add a `MYLONITE_MODEL`
+  repository variable (or the action's `model` input) naming the model you
+  want — the workflow's own baked-in default kept it running without one,
+  but a fresh `gate --workflows`/action run now needs it chosen explicitly.
 
 - **`validate` on the reference app now attacks with the finding's own seed, and
   nothing else.** Each differential run used to scan both builds with the whole

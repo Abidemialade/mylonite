@@ -22,12 +22,12 @@ coverage: of 18 attempts across both builds, 5 reached NO VERDICT (the agent eng
 declined to rule and this demo runs with no LLM judge, so nothing decided them) and 6 were NOT TESTED (the attack was
 delivered but the agent never engaged). A ⚠ cell is not a clean one — it establishes nothing in either direction.
 Each finding becomes a committed regression test, validated against this same vulnerable/guarded oracle. Turn one into a
-gating test (needs an API key):
+gating test (choose a model and set its key -- see docs/cli-reference.md):
   mylonite gate reference:vulnerable
 Try it on your own app (docs/test-your-app.md).
-Make a target file (no API key):
+Make a target file (no model needed):
 mylonite scan --command python --arg app.py --scaffold app.yaml --scope my-app
-Scan it (needs an API key):
+Scan it (choose a model and set its key -- see docs/cli-reference.md):
 mylonite scan --target-file app.yaml --authorize my-app
 mode: replay (offline) — <TIME>s
 recorded 2026-09-14 against ollama_chat/qwen3:4b-instruct-2507-q4_K_M

@@ -181,15 +181,15 @@ def test_render_clean_differential() -> None:
     # Teaser, next step, and footer.
     assert (
         "Each finding becomes a committed regression test, validated against this "
-        "same vulnerable/guarded oracle. Turn one into a gating test (needs an API key):"
+        "same vulnerable/guarded oracle. Turn one into a gating test (choose a model and set its key -- see docs/cli-reference.md):"
     ) in output
     assert "mylonite gate reference:vulnerable" in lines
     # `--command` takes the executable and `--arg` each argument; a single
     # "python app.py" string would be exec'd as one literal filename.
     assert _SCAFFOLD_CMD in lines
-    assert "Make a target file (no API key):" in lines
+    assert "Make a target file (no model needed):" in lines
     assert _SCAN_CMD in lines
-    assert "Scan it (needs an API key):" in lines
+    assert "Scan it (choose a model and set its key -- see docs/cli-reference.md):" in lines
     assert "Try it on your own app (docs/test-your-app.md)." in lines
     assert "mode: replay (offline)" in output
     assert "0.8s" in output
@@ -660,8 +660,8 @@ def test_demo_readable_at_80_columns(width: int) -> None:
     assert _SCAN_CMD in lines
     assert "mylonite gate reference:vulnerable" in lines
     assert not any(line.endswith("\\") for line in lines), text
-    assert "Make a target file (no API key):" in lines
-    assert "Scan it (needs an API key):" in lines
+    assert "Make a target file (no model needed):" in lines
+    assert "Scan it (choose a model and set its key -- see docs/cli-reference.md):" in lines
     assert all(len(line) <= width for line in text.splitlines()), text
 
 
