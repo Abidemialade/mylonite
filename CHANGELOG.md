@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
+  measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and
+  `docs/verification.md` point at them.
+
 - **The release verification campaign now runs in CI.** The new
   `verification-campaign` workflow (manual dispatch, `model` required) builds the
   wheel from `ref`, installs it into a clean venv, runs the three layer-2
