@@ -69,7 +69,7 @@ class CredentialedApiBaseError(ValueError):
             "'?api_key=...'). Refusing to proceed -- mylonite.yaml is a COMMITTED "
             "file and this would leak the secret into version control. Put the "
             "credential in an env var instead: your provider's own key var (e.g. "
-            "ANTHROPIC_API_KEY / OPENAI_API_KEY), or MYLONITE_API_BASE for a "
+            "ANTHROPIC_API_KEY / OPENAI_API_KEY), or MYLONITE_API_BASE for a "  # allow-literal: example
             "credential-free base URL plus a separate --api-key-file/--env-file "
             "for the key, or your proxy/gateway's own credential env var if it "
             "authenticates itself."

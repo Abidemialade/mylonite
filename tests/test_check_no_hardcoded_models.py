@@ -29,8 +29,13 @@ import check_no_hardcoded_models as gate  # noqa: E402
 #: add a real reason to the allowlist file instead and raise these in the
 #: same PR, so the ratchet is a deliberate, reviewable act rather than a
 #: silent widening.
-ALLOWLIST_ROW_COUNT_CEILING = 49
-ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 74
+#: REG-1b (2026-10-02): drained to 0 -- every row became either a fix or an
+#: inline `# allow-literal: example` marker on its own source line (see
+#: check_no_hardcoded_models.py's module docstring). A future PR may add a
+#: row back for a genuine case the marker/path exemptions don't cover; it
+#: should raise these ceilings explicitly, in the same PR, with a reason.
+ALLOWLIST_ROW_COUNT_CEILING = 0
+ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 0
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
@@ -82,6 +87,34 @@ def test_non_python_files_are_not_scanned(tmp_path: Path) -> None:
     _write(tmp_path, "a.txt", "claude-haiku-4-5\nANTHROPIC_API_KEY\n")  # pragma: allowlist secret
     hits = gate.scan(tmp_path)
     assert hits == []
+
+
+def test_a_line_carrying_the_allow_literal_marker_is_skipped(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "a.py",
+        'MODEL = "claude-haiku-4-5-20251001"  # allow-literal: example\n',
+    )
+    assert gate.scan(tmp_path) == []
+
+
+def test_the_marker_only_exempts_the_line_it_is_on(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "a.py",
+        'EXAMPLE = "claude-haiku-4-5"  # allow-literal: example\nDEFAULT = "claude-sonnet-4-6"\n',
+    )
+    hits = gate.scan(tmp_path)
+    assert len(hits) == 1
+    assert hits[0].text.startswith("DEFAULT")
+
+
+def test_redaction_module_is_exempt_by_path_like_the_registry() -> None:
+    """``mylonite._redaction`` quotes provider credential vars in its secret-
+    shape patterns and comments without ever choosing one for a user -- see
+    ``_REDACTION_PATH`` next to the existing ``_REGISTRY_PATH`` exemption."""
+    hits = gate.scan()
+    assert all(h.path != "src/mylonite/_redaction.py" for h in hits)
 
 
 # --- allowlist parsing ----------------------------------------------------

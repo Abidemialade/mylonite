@@ -198,7 +198,7 @@ class TestkitConfigError(ValueError):
 
     :func:`assert_target_resists` and :func:`assert_control_holds` used to
     default their ``model``/``provider`` parameters to a hardcoded value
-    (``"claude-haiku-4-5"`` / ``"anthropic"``) — meaning a committed regression
+    (``"claude-haiku-4-5"`` / ``"anthropic"``) — meaning a committed regression  # allow-literal: example
     test could silently gate CI using a DIFFERENT model than the one that
     actually discovered/validated the exploit. Both now resolve, per field,
     independently: an explicit keyword argument -> the exploit's own

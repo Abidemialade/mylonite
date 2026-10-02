@@ -86,7 +86,7 @@ DEMO_PROVIDER = "ollama"
 #: reference here would point at evidence that never ships and cannot be
 #: audited by a reader.
 #:
-#: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is
+#: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is  # allow-literal: example
 #: what Ollama's own tool-calling support targets — and the demo is entirely a
 #: tool-calling exercise. See docs/self-hosted-models.md.
 DEMO_MODEL = "ollama_chat/qwen3:4b-instruct-2507-q4_K_M"

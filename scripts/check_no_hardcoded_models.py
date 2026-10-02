@@ -28,9 +28,27 @@ example strings and fixtures there legitimately name a model), per occurrence:
    this check can never drift from what the CLI itself treats as a
    provider credential.
 
-Allowlist, keyed by content, not location
-------------------------------------------
-``scripts/hardcoded_models_allowlist.txt``, one entry per line::
+Two exemption mechanisms (2026-10, REG-1b: the allowlist file is now EMPTY
+for ``src/`` -- every hit is fixed outright or exempted one of these two ways)
+----------------------------------------------------------------------------
+1. **By path.** :mod:`mylonite.providers.registry` (the approved-provider
+   registry -- naming a provider's model prefix/credential env var(s) is its
+   whole job) and :mod:`mylonite._redaction` (whose secret-SHAPE patterns and
+   gate-runner-secret comments legitimately quote a provider credential var,
+   never choose one for the user) are skipped entirely, like this script
+   skips itself.
+2. **By inline marker, for a help/docstring/comment line that shows an
+   EXAMPLE model id or env var** (never a functional default/credential
+   read): append ``# allow-literal: example`` to that physical line. A line
+   carrying the marker is excluded from scanning altogether -- its hits never
+   reach the allowlist logic below. This is deliberately a PER-LINE marker,
+   not a file-wide or block one: it says "this exact line is an example",
+   nothing broader, so it can't accidentally excuse a real default added
+   later in the same function.
+
+``scripts/hardcoded_models_allowlist.txt`` still exists for anything that is
+neither of the above (a functional reason the marker/path exemptions don't
+fit) -- one entry per line::
 
     <path> | <matched text or a stable regex> | <count> | <reason>
 
@@ -83,18 +101,28 @@ _MODEL_LITERAL_RE = re.compile(r"claude-|gpt-|gemini-|ollama/|anthropic/|openai/
 #: reuse matters.
 _CAPS_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 
+#: A line carrying this marker is skipped entirely -- see the module
+#: docstring's "by inline marker" exemption. Checked as a plain substring
+#: (not a regex) against the RAW line, so it also works inside a triple-
+#: quoted docstring, where it isn't a real Python comment but is still an
+#: unambiguous, grep-able "this line is an example" marker.
+_ALLOW_LITERAL_MARKER = "# allow-literal: example"
+
 # This file's own docstring and comments quote the patterns above to explain
 # them, which would otherwise flag itself.
 _SELF = Path(__file__).resolve()
 
-# A second, narrow exemption: mylonite.providers.registry is the one module
-# allowed to name a provider's model prefix or credential env var(s) BY
-# DESIGN -- that's its whole job (see its own module docstring). Exempting
-# it by path keeps this allowlist from needing a growing block of rows that
-# would just restate the dataclass fields the registry already types and
-# tests cover; everywhere else, a hit still means "fix it or allowlist it
-# with a reason."
+# The two by-path exemptions -- see the module docstring's "by path" section.
+# mylonite.providers.registry is the one module allowed to name a provider's
+# model prefix or credential env var(s) BY DESIGN -- that's its whole job
+# (see its own module docstring). mylonite._redaction's secret-SHAPE pattern
+# definitions and gate-runner-secret comments legitimately quote a provider
+# credential var without ever choosing one for the user. Exempting both by
+# path keeps this check from needing a growing block of rows that would just
+# restate what those modules' own docstrings already explain; everywhere
+# else, a hit still means "fix it or mark it as an example."
 _REGISTRY_PATH = (ROOT / "src" / "mylonite" / "providers" / "registry.py").resolve()
+_REDACTION_PATH = (ROOT / "src" / "mylonite" / "_redaction.py").resolve()
 
 
 @dataclass(frozen=True)
@@ -133,7 +161,7 @@ def iter_py_files(root: Path = SRC_ROOT) -> list[Path]:
 def scan(root: Path = SRC_ROOT) -> list[Hit]:
     hits: list[Hit] = []
     for path in iter_py_files(root):
-        if path.resolve() in (_SELF, _REGISTRY_PATH):
+        if path.resolve() in (_SELF, _REGISTRY_PATH, _REDACTION_PATH):
             continue
         resolved = path.resolve()
         try:
@@ -149,6 +177,8 @@ def scan(root: Path = SRC_ROOT) -> list[Hit]:
         except UnicodeDecodeError:
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
+            if _ALLOW_LITERAL_MARKER in line:
+                continue
             for matched in _hits_in_line(line):
                 hits.append(Hit(rel, lineno, matched, line.strip()))
     return hits

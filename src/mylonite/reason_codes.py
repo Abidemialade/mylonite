@@ -265,7 +265,7 @@ _ABORT: Final[tuple[ReasonCode, ...]] = (
     _rc(
         ABT_PROVIDER_UNREACHABLE,
         "LLM provider calls failed several times in a row, so the scan stopped early.",
-        "Check the provider credentials (for example ANTHROPIC_API_KEY) and --model, and "
+        "Check the provider credentials (for example ANTHROPIC_API_KEY) and --model, and "  # allow-literal: example
         "that this machine can reach the provider (behind a proxy, see "
         "docs/enterprise-networking.md), then re-run.",
     ),

@@ -69,7 +69,7 @@ def _auth_remedy(provider: str | None, env_var_override: str | None) -> str:
         return f"Authentication failed — set/verify {', '.join(env_vars)}{suffix} is set and valid."
     return (
         "Authentication failed — set the API key env var for your provider "
-        "(e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or the AWS "
+        "(e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or the AWS "  # allow-literal: example
         "credentials for Bedrock)."
     )
 
