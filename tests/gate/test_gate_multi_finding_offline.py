@@ -148,22 +148,62 @@ def test_the_gate_dir_passes_pytest_on_its_first_run_offline(
 ) -> None:
     """What CI runs: ``pytest <gate dir>``, in a fresh process with no key."""
     _result, out_dir, _captured = two_finding_gate
+    run = _pytest(out_dir)
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "2 passed" in run.stdout, run.stdout
+
+
+def test_colliding_pattern_ids_still_collect_as_two_tests(tmp_path: Path) -> None:
+    """Two pattern_ids that slug the same get separate folders and, with the
+    real generator, distinct test file names, so pytest collects both."""
+    from mylonite.contracts import ValidationReport
+
+    out_dir = tmp_path / ".mylonite" / "gate"
+    patterns = ("indirect-injection-note-body-direct", "indirect.injection.note.body.direct")
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(
+            outcome=_two_found(), exploits=[_build_exploit(p) for p in patterns]
+        ),
+        generate_fn=ReferencePytestGenerator().emit,
+        validate_fn=lambda g, _d: ValidationReport(test_filename=g.filename, kept=True),
+        open_pr_fn=lambda **_k: None,
+        open_pr=False,
+    )
+
+    run = _pytest(out_dir, "--collect-only")
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "2 tests collected" in run.stdout, run.stdout
+
+
+def _ci_env() -> dict[str, str]:
+    """The environment of the emitted per-PR workflow, minus every credential:
+    no provider key, no token, no Mylonite setting from this machine."""
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.endswith("_API_KEY") and k != "MYLONITE_LIVE_TARGET"
+        if not (k.endswith(("_KEY", "_TOKEN")) or k.startswith("MYLONITE_"))
     }
-    env.update({"PYTHONPATH": _REPO_SRC, "PYTHONUTF8": "1"})
-    run = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(out_dir)],
-        cwd=str(out_dir.parent.parent),
+    env.update(
+        {
+            "MYLONITE_LIVE_TARGET": "1",
+            "MYLONITE_REQUIRE_GATE_RUN": "1",
+            "PYTHONPATH": _REPO_SRC,
+            "PYTHONUTF8": "1",
+        }
+    )
+    return env
+
+
+def _pytest(gate_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *args, str(gate_dir)],
+        cwd=str(gate_dir.parent.parent),
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env=env,
+        env=_ci_env(),
     )
-    assert run.returncode == 0, run.stdout + run.stderr
-    assert "2 passed" in run.stdout, run.stdout
 
 
 def test_the_commit_names_each_findings_fixtures(

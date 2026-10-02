@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared `fixtures/` at the gate root: each recording overwrote the last
   one's `_meta.json`, so every test but the last failed in CI, and a copy of
   each test written at the root stopped pytest from collecting the directory.
+  Two findings whose names reduce to the same folder name now also get
+  distinct test file names, so pytest collects both, and a rejected finding's
+  recordings move to `.mylonite/gate-rejected/` with the rest of its evidence.
   A new offline test runs a two-finding gate and then `pytest` on its output,
   with no provider key.
 

@@ -191,10 +191,17 @@ def _finish_unkept(
     replaces only the same-named file of this finding's own earlier
     evidence, so other findings' evidence is never touched. A per-finding
     subdirectory left empty by the move is removed.
+
+    The one directory that moves is a per-finding subdirectory's own
+    ``fixtures/``, which the validator recorded for this finding alone. In
+    a single-finding run ``out_dir/fixtures`` may belong to an earlier kept
+    run, so it stays.
     """
     echo(message)
     present = [p for p in written if p.exists()]
-    if not present:
+    fixtures = this_out / "fixtures"
+    own_fixtures = fixtures if this_out != out_dir and fixtures.is_dir() else None
+    if not present and own_fixtures is None:
         return
     rejected_dir = _rejected_evidence_dir(out_dir, slug)
     rejected_dir.mkdir(parents=True, exist_ok=True)
@@ -203,6 +210,11 @@ def _finish_unkept(
         if dest.exists():
             dest.unlink()
         shutil.move(str(path), str(dest))
+    if own_fixtures is not None:
+        dest = rejected_dir / "fixtures"
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.move(str(own_fixtures), str(dest))
     if this_out != out_dir and this_out.exists() and not any(this_out.iterdir()):
         this_out.rmdir()
     echo(
@@ -251,6 +263,16 @@ def _process_one_finding(
         reason = "the test generator returned nothing"
         echo(f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate.")
         return _FindingOutcome(exploit=exploit, stage="generate_failed", reason=reason)
+
+    # A slug the orchestrator de-duplicated (``a_b-2``) means another finding's
+    # pattern_id slugs the same, so the generator gave both tests one file
+    # name. pytest cannot collect two same-named test modules from folders
+    # without an ``__init__.py``, so carry the suffix into this file name.
+    base_slug = _slugify_pattern(exploit.pattern_id)
+    if slug != base_slug:
+        stem = Path(generated.filename).stem
+        suffix = slug[len(base_slug) :].lstrip("-")
+        generated = generated.model_copy(update={"filename": f"{stem}_{suffix}.py"})
 
     this_out.mkdir(parents=True, exist_ok=True)
     test_path = this_out / generated.filename
