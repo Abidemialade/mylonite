@@ -75,7 +75,9 @@ def test_no_probe_never_turns_an_unconfirmed_effect_into_a_negative(
     ("effect_confirmed", "calibrated", "kind"),
     [
         ("deferred", False, "resisted"),
-        ("false", True, "resisted"),
+        # A calibrated "no change" can be read before a queue sends, or next to
+        # an effect that landed at once, so it never backs a "queued" reply.
+        ("false", True, "inconclusive"),
         ("false", False, "inconclusive"),
         ("errored", False, "inconclusive"),
         ("unattributed", False, "inconclusive"),
@@ -103,17 +105,20 @@ def test_a_queued_reply_is_resisted_only_when_the_probe_checked_the_hold(
         assert decision.reason_code == "MYL-INC-012"
 
 
-def test_a_calibrated_no_change_clears_a_queued_reply_only_if_it_would_have_seen_the_write() -> (
-    None
-):
-    """A calibrated probe whose marker this call never carries looks for the
-    wrong thing, so its "no change" doesn't back the hold."""
+@pytest.mark.parametrize(
+    ("marker_kind", "marker_linked"), [("exfil", True), ("none", False), ("payload", False)]
+)
+def test_a_calibrated_no_change_never_clears_a_queued_reply(
+    marker_kind: str, marker_linked: bool
+) -> None:
+    """Only a probe that saw the action held backs a "queued" reply. A calibrated
+    "no change" may just mean the probe read before the queue sent."""
     evidence = EffectEvidence(
         trace_outcome="dispatched-deferred",
         link="token-linked",
         effect_confirmed="false",
-        marker_kind="payload",
-        marker_linked=False,
+        marker_kind=marker_kind,
+        marker_linked=marker_linked,
         calibrated=True,
     )
     decision = decide(evidence, predicate=None)

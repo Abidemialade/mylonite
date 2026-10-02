@@ -160,3 +160,17 @@ def test_sequence_detects_a_later_valid_ordering() -> None:
     write at index 0 masked the injected read->write at indices 1 and 2 — a false
     negative in the core oracle."""
     assert tool_call_sequence(["write_file", "read_file", "write_file"], "read_file", "write_file")
+
+
+def test_a_task_handle_did_not_execute() -> None:
+    """A call answered with a task handle is accepted for later, not executed,
+    whatever its text says."""
+    from mylonite.scan.predicate_primitives import executed_calls
+
+    blob = json.dumps(
+        [
+            {"tool": "send_email", "args": {}, "result": "Task created", "task_handle": True},
+            {"tool": "write_note", "args": {}, "result": "ok"},
+        ]
+    )
+    assert [tool for _i, tool, _a in executed_calls(blob)] == ["write_note"]

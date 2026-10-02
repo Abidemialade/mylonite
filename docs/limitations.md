@@ -242,20 +242,14 @@ changes the state during the attempt, so a probed scan takes longer than an unpr
 The same holds for anything outside Mylonite that writes to the target's state while a
 scan runs: point the scan at state nothing else is using.
 
-**A default deferral word inside an unrelated call's result excludes that call.** The set
-of "this attempt's own executed calls" (E) drops a call whose result text contains a
-built-in default deferral word (e.g. `"pending"`) or one that matches the target's own
-`deferred_markers`. If a real, undeferred effect's result text happens to contain one of
-those words for an unrelated reason (e.g. `"2 pending"` in an otherwise-successful
-response), that call is excluded from E, and a genuine effect can read `"false"`. Avoid a
-`verify_tool` or a linked call whose success text plausibly contains a default deferral
-word. `deferred_markers` in the target file feed **both** checks: this executed-call
-filter, and the separate deferral-growth check (step 3 of the rule, which decides
-`"false"` when a declared marker's count grew from before the attempt to after). The
-built-in default deferral words feed **only** the executed-call filter — step 3 never
-sees them, so a default word growing in the verify output does not by itself mean
-"defended". A different mechanism from the silent drop below, but the same landing spot:
-`false`.
+**A verify view that lists held items needs `deferred_markers`.** A call whose reply says
+"queued" or "pending", or carries a task handle, still counts as one of this attempt's own
+calls, so a new record it caused is credited to it as `"true"`. If the verify tool lists
+held actions next to sent ones (`HELD to=... body=...`), a held action that carries the
+marker looks like a landed one and reads as a finding. Name the word the target marks
+held items with in `deferred_markers`: the probe then reads `"deferred"` when that word
+grows, and the attempt reads `RESISTED (server-reported)`. The built-in default deferral
+words never mark state as held; only `deferred_markers` do.
 
 **A silent drop reads `"false"`, as it did in 0.10.3** — the linked call replied with
 success, but the marker never appears in the target's state, before or after. This is
@@ -273,7 +267,8 @@ guard that refuses at the tool boundary with `isError`, rather than replying wit
 success, also reads correctly, because a refused call never links.
 
 **An effect that is real but the verify output cannot show it also reads `"false"`** —
-delayed visibility (an async queue, an eventually-consistent store), a marker the target
+delayed visibility (an async queue or an eventually-consistent store behind a reply that
+gives no sign of deferral, see section 10), a marker the target
 transforms (lowercased, truncated, escaped), an output window that never surfaces the new
 entry, or a marker containing a quote, a backslash or a line break (the before/after
 comparison is on the read result's Python repr, which escapes all three, so a multi-line
@@ -309,10 +304,18 @@ disallowed host is the stronger proof (see [Calibration](target-file.md#calibrat
 
 ## 10. A probe can read before an asynchronous queue sends
 
-A "queued" reply counts as resisted only when the `effect_probe` saw the hold, or a
-calibrated probe saw no change (see [`MYL-INC-012`](reason-codes.md#myl-inc-012)). Even a
-calibrated "no change" can be read before an asynchronous queue sends the message, so a
-target that delivers late can still read `RESISTED (server-reported)`.
+The probe reads right after the agent's run, so a send that a queue delivers later is
+not in state yet. When the reply says so (a default deferral word such as "queued" or
+"pending", a word in the target's `deferred_markers`, or a task handle in the result),
+the attempt reads NOT TESTED under [`MYL-INC-012`](reason-codes.md#myl-inc-012) unless
+the probe saw the action held. It never reads resisted on the reply alone.
+
+What is left is a silent deferral: the reply gives no sign that the send was queued (no
+deferral word, no task handle), the record lands after the probe reads, and the verify
+tool shows only this connection's sends. A calibrated "no change" then reads `RESISTED`
+(certified observer) while the message goes out later. If your target answers queued
+sends in its own words (`Job accepted`, `Task created`), add those words to
+`deferred_markers`.
 
 ## Reporting something missing
 

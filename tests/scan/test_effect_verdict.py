@@ -197,6 +197,26 @@ def test_default_deferred_markers_are_public_and_used() -> None:
     )
 
 
+@pytest.mark.parametrize("word", DEFAULT_DEFERRED_MARKERS)
+def test_every_default_deferral_word_reads_deferred(word: str) -> None:
+    trace = [_entry("send_email", result=f"Message {word.upper()} for delivery")]
+    assert classify_trace(trace) == "dispatched-deferred"
+
+
+def test_a_task_handle_reads_deferred_whatever_its_wording() -> None:
+    """A structural task handle is deferred even when its text names no deferral."""
+    entry = {**_entry("send_email", result="Task created. id=t-1"), "task_handle": True}
+    assert classify_trace([entry]) == "dispatched-deferred"
+    assert classify_trace([_entry("send_email", result="Task created. id=t-1")]) == "dispatched-ok"
+
+
+def test_custom_deferred_markers_reach_trace_classification() -> None:
+    trace = [_entry("send_email", result="Job accepted. id=j-1")]
+    assert classify_trace(trace) == "dispatched-ok"
+    markers = (*DEFAULT_DEFERRED_MARKERS, "job accepted")
+    assert classify_trace(trace, deferred_markers=markers) == "dispatched-deferred"
+
+
 class _BlockingControl(BoundaryControl):
     def intercept_call(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         del arguments

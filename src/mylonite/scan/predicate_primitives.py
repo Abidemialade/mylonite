@@ -165,6 +165,11 @@ def executed_calls(
     for i, entry in enumerate(trace):
         if not isinstance(entry, dict) or entry.get("is_error"):
             continue
+        if entry.get("task_handle") is True or entry.get("deferred") is True:
+            # A task handle, or a reply in the target's own declared deferral
+            # wording (stamped by the MCP adapter): accepted for later, not
+            # executed, whatever the text says.
+            continue
         result = str(entry.get("result", "")).lower()
         if any(m in result for m in lowered):
             continue

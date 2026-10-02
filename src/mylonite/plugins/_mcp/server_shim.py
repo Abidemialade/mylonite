@@ -157,7 +157,20 @@ def _result_to_tool_result(name: str, r: CallToolResult) -> ToolResult:
         name=name,
         content="\n".join(text_parts),
         isError=bool(r.isError),
+        task_handle=_is_task_handle(r),
     )
+
+
+def _is_task_handle(r: CallToolResult) -> bool:
+    """Whether the server answered with a task handle instead of a final result.
+
+    A server with its own job queue can wrap the handle in an ordinary tool
+    result: ``resultType: "task"`` or a ``task`` object next to the content.
+    Either means the action was accepted for later, not carried out, whatever
+    the text says.
+    """
+    extra = r.model_extra or {}
+    return extra.get("resultType") == "task" or extra.get("task") is not None
 
 
 class MCPSessionAsServerLike:

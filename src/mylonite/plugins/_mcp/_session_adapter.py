@@ -61,7 +61,7 @@ from mylonite.scan.effect_verdict import (
 from mylonite.scan.exfil import DEFAULT_EXFIL_EMAIL, DEFAULT_EXFIL_HOST
 from mylonite.scan.llm_planner import LLMPlanner, _ServerLike
 from mylonite.scan.llm_types import CompletionFn, ToolDescription
-from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, executed_calls
+from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS
 
 logger = logging.getLogger(__name__)
 
@@ -658,7 +658,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     inner_shim = ControlServerShim(shim, self._controls)
                 # Wrap shim so planner-driven calls land in planner_calls.
                 recording_shim = _RecordingServerShim(
-                    inner_shim, planner_calls, full_results=planner_result_texts
+                    inner_shim,
+                    planner_calls,
+                    full_results=planner_result_texts,
+                    declared_deferrals=_declared_deferrals(self._spec),
                 )
 
                 planner = LLMPlanner(
@@ -1226,9 +1229,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
           ``{payload}``/``{scope}``/``{exfil_email}``/``{exfil_host}``); empty
           means "no marker".
         * A: the verify output now.
-        * E: ``planner_calls`` that executed (not errored or refused, no
-          deferral marker in the result), excluding the verify tool itself,
-          which the agent may use to search.
+        * E: ``planner_calls`` that reached the server without an error,
+          whatever the reply says (a "queued" reply or a task handle can sit
+          next to an effect that landed at once), excluding the verify tool
+          itself, which the agent may use to search.
         * L: a call in E whose argument values contain M, or whose tool is in
           ``link_tools`` (the scenario's consequential / egress tool).
         * new: ``count_A(M) > count_B(M)``; with no marker, ``A != B``.
@@ -1376,6 +1380,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
             verify_tool=verify_tool,
+            # The target's own deferral wording counts as well as the defaults,
+            # so a call it answers "job accepted" reads deferred, not carried out.
+            deferred_markers=(
+                (*DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers)
+                if probe is not None
+                else DEFAULT_DEFERRED_MARKERS
+            ),
         )
         link_result: LinkResult = link_for(
             planner_calls,
@@ -1499,9 +1510,15 @@ class _RecordingServerShim:
         sink: list[dict[str, Any]],
         *,
         full_results: list[str] | None = None,
+        declared_deferrals: Sequence[str] = (),
     ) -> None:
         self._inner = inner
         self._sink = sink
+        #: The target's own deferral words (``effect_probe.deferred_markers``).
+        #: A call whose reply carries one is stamped ``deferred``, so the seed
+        #: predicates, which know only the default words, read it the same way
+        #: the trace rule does.
+        self._declared_deferrals = tuple(m.lower() for m in declared_deferrals if m)
         # Optional: collect untruncated result text for delivery detection only.
         self._full_results = full_results
         #: Tool names the PLANNER actually saw, captured on first `list_tools`.
@@ -1599,10 +1616,16 @@ class _RecordingServerShim:
         blocked_by = getattr(result, "blocked_by", None)
         if isinstance(blocked_by, str):
             entry["blocked_by"] = blocked_by
+        if getattr(result, "task_handle", False) is True:
+            # A task handle: the server accepted the call for later. Recorded
+            # only when set, so existing traces keep their shape.
+            entry["task_handle"] = True
+        text = content if isinstance(content, str) else str(content)
+        if self._declared_deferrals and any(m in text.lower() for m in self._declared_deferrals):
+            entry["deferred"] = True
         if self._full_results is not None:
             # Generously bounded (delivery detection only) — far larger than the
             # trace cap so a planted note deep in a recall list is still found.
-            text = content if isinstance(content, str) else str(content)
             self._full_results.append(text[:16000])
         return result
 
@@ -1687,7 +1710,12 @@ class _MCPAttackSession:
             # Guard ONLY the planner's view (the boundary-guarded twin); the plant
             # above used the raw session.
             inner_shim = ControlServerShim(inner_shim, self._adapter._controls)
-        recording = _RecordingServerShim(inner_shim, planner_calls, full_results=result_texts)
+        recording = _RecordingServerShim(
+            inner_shim,
+            planner_calls,
+            full_results=result_texts,
+            declared_deferrals=_declared_deferrals(self._adapter._spec),
+        )
         probe = self._adapter._spec.effect_probe
         # DCR-0018: fall back to an HONEST empty string when nothing
         # payload-shaped was planted — NOT self._planted_bodies[-1] (an
@@ -1786,22 +1814,40 @@ class _MCPAttackSession:
         await self._cm.__aexit__(None, None, None)
 
 
+def _declared_deferrals(spec: target_registry.TargetSpec) -> tuple[str, ...]:
+    """The target's own deferral words, from its effect probe (none without one)."""
+    return spec.effect_probe.deferred_markers if spec.effect_probe is not None else ()
+
+
 def _attempt_executed_calls(
     planner_calls: Sequence[dict[str, Any]], probe: target_registry.EffectProbeSpec
 ) -> list[tuple[int, str, dict[str, Any]]]:
-    """E in the effect attribution rule: this attempt's calls that executed.
+    """E in the effect attribution rule: this attempt's calls that could have
+    caused a new effect.
 
-    Reuses :func:`executed_calls` (the same definition the attempt-scoped
-    predicates read), with the probe's own deferral markers added to the
-    defaults. Calls to the verify tool are dropped: the agent may search with
-    it, and a read is not an action.
+    Every call that reached the server and did not return an error, whatever
+    its reply says. A reply that says "queued" or "pending", or a task handle,
+    does not drop the call: a queue can send at once, so the call stays a
+    candidate cause of a new record. A held action is told apart by the probe's
+    own deferral markers growing in the target's state, which
+    :meth:`MCPSessionAdapterBase._run_effect_probe` checks first. A call a
+    client-side control blocked never reached the server, and calls to the
+    verify tool are dropped: the agent may search with it, and a read is not an
+    action.
     """
-    markers = (*DEFAULT_DEFERRED_MARKERS, *probe.deferred_markers)
-    return [
-        call
-        for call in executed_calls(json.dumps(list(planner_calls)), deferred_markers=markers)
-        if call[1] != probe.verify_tool
-    ]
+    calls: list[tuple[int, str, dict[str, Any]]] = []
+    for i, entry in enumerate(planner_calls):
+        name = entry.get("tool")
+        if (
+            not isinstance(name, str)
+            or entry.get("is_error")
+            or entry.get("blocked_by")
+            or name == probe.verify_tool
+        ):
+            continue
+        args = entry.get("args") or {}
+        calls.append((i, name, args if isinstance(args, dict) else {}))
+    return calls
 
 
 def _string_values(value: Any) -> list[str]:

@@ -203,7 +203,8 @@ INC_TOOL_LIST_TRUNCATED: Final = "MYL-INC-010"
 #: confidence below the floor it needs to count as a finding.
 INC_JUDGE_BELOW_FLOOR: Final = "MYL-INC-011"
 #: Stamped by the trace rule when the server replied that it held or queued a
-#: consequential call and no effect probe checked that hold.
+#: consequential call (or returned a task handle) and the effect probe did not
+#: see the action held.
 INC_UNCHECKED_DEFERRAL: Final = "MYL-INC-012"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
@@ -438,11 +439,11 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
     ),
     _rc(
         INC_UNCHECKED_DEFERRAL,
-        "The server replied that it queued or held a consequential call, and no effect "
-        "probe checked whether the action took effect anyway.",
-        "Declare an effect_probe that reads the target's own state (an outbox, a sent "
-        "list or a status tool), so a held action can be told apart from one accepted "
-        "for later delivery.",
+        "The server replied that it queued or held a consequential call, and the effect "
+        "probe did not see the action held, so it may still take effect.",
+        "Declare an effect_probe whose verify tool lists held actions, and name the "
+        "word it marks them with in deferred_markers, so a held action can be told "
+        "apart from one accepted for later delivery.",
     ),
 )
 

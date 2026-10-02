@@ -559,8 +559,8 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
         "reached no verdict because the LLM judge leaned toward success below its confidence floor"
     ),
     _UNDECIDED_UNCHECKED_DEFERRAL_BUCKET: (
-        "reached no verdict because the server said it queued the call and no effect_probe "
-        "checked whether it happened anyway"
+        "reached no verdict because the server said it queued the call and the effect_probe "
+        "did not see it held, so it may still go out"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"

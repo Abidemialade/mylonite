@@ -72,6 +72,31 @@ def test_result_to_tool_result_propagates_is_error_true() -> None:
     assert "allowlist" in tr.content
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"resultType": "task"},
+        {"task": {"taskId": "t-1", "status": "working"}},
+        {"resultType": "task", "task": {"taskId": "t-1", "status": "working"}},
+    ],
+)
+def test_result_to_tool_result_marks_a_task_handle(extra: dict[str, object]) -> None:
+    """A server that answers with a task handle accepted the call for later. The
+    flag is structural, so it holds whatever the text says."""
+    result = CallToolResult.model_validate(
+        {"content": [{"type": "text", "text": "Done. id=t-1"}], "isError": False, **extra}
+    )
+    assert _result_to_tool_result("send_email", result).task_handle is True
+
+
+@pytest.mark.parametrize("extra", [{}, {"resultType": "complete"}, {"task": None}])
+def test_result_to_tool_result_plain_result_has_no_task_handle(extra: dict[str, object]) -> None:
+    result = CallToolResult.model_validate(
+        {"content": [{"type": "text", "text": "sent"}], "isError": False, **extra}
+    )
+    assert _result_to_tool_result("send_email", result).task_handle is False
+
+
 def test_result_to_tool_result_ignores_non_text_content() -> None:
     """Embedded resources are skipped — Phase 1 predicates only inspect text."""
     result = CallToolResult(

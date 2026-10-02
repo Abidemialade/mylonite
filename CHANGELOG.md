@@ -64,6 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with one line naming the problem. Untracked files are fine: `gate` only
   ever stages the files it wrote.
 
+- **A queued or deferred send no longer reads as resisted unless the probe saw it
+  held.** A server that replied "queued" or "pending", or returned a task handle, could
+  read `RESISTED` and exit 0 while the email still went out, whether it landed at once or
+  after the effect probe read. Now a call whose reply carries a default deferral word, a
+  word from your `effect_probe.deferred_markers`, or a task handle (`resultType: "task"`
+  or a `task` field, whatever its text) reads NOT TESTED under `MYL-INC-012` and the scan
+  exits 2, unless the probe saw the action held. If the effect landed before the probe
+  read, the attempt is a finding at `effect-confirmed`. Proven end to end through the
+  real CLI against a stdio server that queues sends; the guarded reference agent still
+  reads resisted in the differential oracle. The `MYL-INC-012` summary text changed with
+  it (reason-code snapshot). If your verify tool lists held items next to sent ones, name
+  the word it marks them with in `deferred_markers`, or a held send reads as a finding;
+  see `docs/limitations.md` sections 8 and 10.
 - **The AgentDojo verification adapter read its own benchmark label backwards.**
   `verification/layer2_datasets/agentdojo.py` treated `security == False` as "the
   attack succeeded", but upstream's own `BaseInjectionTask.security` docstring says
