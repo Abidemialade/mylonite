@@ -15,6 +15,7 @@ from typing import Any
 
 from mylonite import reason_codes
 from mylonite._cli_io import echo
+from mylonite._redaction import redact_value
 from mylonite.contracts import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.exit_codes import (
     EXIT_GENERATE_FAILED,
@@ -217,8 +218,12 @@ def _process_one_finding(
     test_path.write_text(generated.source, encoding="utf-8")
     exploit_path = this_out / f"exploit_{exploit.pattern_id}.json"
     written = [test_path, exploit_path]
+    # The exploit record carries the payload, the customised prompt and the
+    # target's reply, any of which can hold a live credential, and this file is
+    # committed (#223). Redact it the way ``scan`` and ``generate`` redact their
+    # copy of the same record: secret-shaped string leaves only, never structure.
     exploit_path.write_text(
-        json.dumps(exploit.model_dump(mode="json"), indent=2, sort_keys=True),
+        json.dumps(redact_value(exploit.model_dump(mode="json")), indent=2, sort_keys=True),
         encoding="utf-8",
     )
 
