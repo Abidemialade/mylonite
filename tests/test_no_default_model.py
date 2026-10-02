@@ -91,6 +91,15 @@ def test_no_model_configured_names_every_approved_provider_and_key_var(argv):
     result = _invoke_with_adapters_spied(argv)
     for info in PROVIDERS.values():
         assert info.id in result.output, f"{info.id!r} missing from: {result.output}"
+        if info.credential_best_effort:
+            # Bedrock never blocks on one specific env var (several forms
+            # are accepted), so the line names the credential KIND, not
+            # `key_env[0]` -- asserting that literal here would reintroduce
+            # the "needs AWS_ACCESS_KEY_ID" over-claim the re-review flagged.
+            assert "AWS credentials" in result.output, (
+                f"{info.id!r}'s accepted-credential-forms text missing from: {result.output}"
+            )
+            continue
         if info.key_env:
             assert info.key_env[0] in result.output, (
                 f"{info.key_env[0]!r} (the {info.id!r} key var) missing from: {result.output}"

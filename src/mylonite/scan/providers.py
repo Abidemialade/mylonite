@@ -374,10 +374,17 @@ def approved_providers_help_text() -> str:
         example = info.example_model or f"{info.model_prefix}<model>"
         if info.local:
             need = "no key, local"
+        elif info.credential_best_effort:
+            # Bedrock: the static keypair is one of several accepted forms  # allow-literal: example
+            # (AWS_PROFILE, a bearer token, an OIDC or container role, or a  # allow-literal: example
+            # default ~/.aws profile/SSO session with no env var at all) --
+            # naming only `key_env[0]` here would wrongly suggest the
+            # keypair is required, which the never-block ruling forbids.
+            need = "AWS credentials (several forms accepted -- see docs/self-hosted-models.md)"
         elif info.key_env:
             need = info.key_env[0]
         else:
-            need = "see docs/self-hosted-models.md"
+            need = "no bare API key -- see docs/self-hosted-models.md"
         parts.append(f"{info.id} ({example}, needs {need})")
     return "; ".join(parts)
 
@@ -483,6 +490,17 @@ def looks_like_provider_env_var(key: str) -> bool:
     so an interactive operator sees it happen, but a non-interactive/CI
     invocation may not have anyone reading that line.
     """
+    if key.startswith("MYLONITE_"):
+        # Mylonite's OWN namespace -- MYLONITE_MODEL, MYLONITE_API_KEY (the
+        # scaffolded workflows' CI secret name, mapped to whichever
+        # provider's real key the gate run needs), MYLONITE_OFFLINE_E2E, ...
+        # -- is never a THIRD-PARTY provider's credential, even when a name
+        # in it happens to end in ``_API_KEY``. Recognising a SPECIFIC
+        # MYLONITE_* name as loadable is `_mylonite_env_var_names()`'s job
+        # (cli.py), by exact membership rather than this prefix (see its
+        # docstring on DCR-0002) -- this function only answers "is this a
+        # PROVIDER's var", never one of Mylonite's own.
+        return False
     if _RE_API_KEY_VAR.match(key) or _RE_AZURE_VAR.match(key):
         return True
     if any(key in variables for variables in PROVIDER_ENV_VARS.values()):
