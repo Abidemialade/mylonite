@@ -44,7 +44,7 @@ ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 0
 #: row lowers the count (or deletes it) and lowers this ceiling in the same
 #: change; never raise it to excuse a new, unreviewed hit.
 WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING = 2
-WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 4
+WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 2
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
@@ -340,3 +340,23 @@ def test_gate_action_s_own_example_line_is_marked_not_a_real_default(tmp_path: P
         'description: "e.g. anthropic/claude-haiku-4-5"  # allow-literal: example\n',
     )
     assert gate.scan(tmp_path) == []
+
+
+def test_yaml_files_under_src_are_also_scanned(tmp_path: Path) -> None:
+    """The other common spelling of the extension -- nothing under src/
+    uses it today, but a future template that does would otherwise be
+    invisible to this check (the re-review's "grep coverage" finding)."""
+    _write(tmp_path, "gate/templates/fake.yaml", "MODEL: claude-haiku-4-5\n")
+    hits = gate.scan(tmp_path)
+    assert any(h.matched == "claude-" for h in hits)
+
+
+@pytest.mark.parametrize("prefix", list(gate._UNREGISTERED_ROUTABLE_PREFIXES))
+def test_every_unregistered_routable_prefix_is_flagged(tmp_path: Path, prefix: str) -> None:
+    """LiteLLM-routable prefixes with no registry row (defence in depth,
+    per the re-review's non-blocking "grep coverage" finding): a hardcoded
+    Groq/OpenRouter/Mistral/DeepSeek model literal is still caught, even
+    though Mylonite doesn't back any of them with a credential check yet."""
+    _write(tmp_path, "a.py", f'MODEL = "{prefix}some-model"\n')
+    hits = gate.scan(tmp_path)
+    assert any(h.matched == prefix for h in hits), f"{prefix!r} was not flagged"

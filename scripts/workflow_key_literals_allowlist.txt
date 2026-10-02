@@ -17,5 +17,5 @@
 # lowering the ceiling in the same change. Never raise it to make room for a
 # new, unreviewed hit.
 
-src/mylonite/gate/templates/mylonite-gate.yml | ANTHROPIC_API_KEY|MYLONITE_API_KEY | 2 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose
-src/mylonite/gate/templates/mylonite-discovery.yml | ANTHROPIC_API_KEY|MYLONITE_API_KEY | 2 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose
+src/mylonite/gate/templates/mylonite-gate.yml | ANTHROPIC_API_KEY | 1 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose
+src/mylonite/gate/templates/mylonite-discovery.yml | ANTHROPIC_API_KEY | 1 | always maps the gate secret (MYLONITE_API_KEY) to Anthropic's key variable, regardless of the model the gate run chose

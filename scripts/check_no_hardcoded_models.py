@@ -16,9 +16,10 @@ mechanically.
 
 What it flags
 --------------
-Every ``*.py``/``*.yml`` file under ``src/mylonite`` and every ``*.yml`` file
-under ``gate-action/`` (never ``tests/`` or ``docs/`` -- example strings and
-fixtures there legitimately name a model), per occurrence:
+Every ``*.py``/``*.yml``/``*.yaml`` file under ``src/mylonite`` and every
+``*.yml``/``*.yaml`` file under ``gate-action/`` (never ``tests/`` or
+``docs/`` -- example strings and fixtures there legitimately name a model),
+per occurrence:
 
 1. A provider-prefixed model literal: a bare model-family prefix
    (``claude-``, ``gpt-``, ``gemini-``) or a provider ROUTING prefix --
@@ -28,13 +29,23 @@ fixtures there legitimately name a model), per occurrence:
    (``azure_ai/``, ``bedrock_converse/``, the legacy ``ollama/`` route) --
    built from the registry so this list can't drift out of sync with it the
    way the previous hand-maintained version did (missing ``ollama_chat/``,
-   ``hosted_vllm/``, ``gemini/``, ``azure/`` and ``vertex_ai/`` entirely).
+   ``hosted_vllm/``, ``gemini/``, ``azure/`` and ``vertex_ai/`` entirely) --
+   plus a small, hand-written list of LiteLLM-routable prefixes that have no
+   registry row yet (``groq/``, ``openrouter/``, ``mistral/``,
+   ``deepseek/`` -- :data:`_UNREGISTERED_ROUTABLE_PREFIXES`), as defence in
+   depth. This is NOT a complete list of everything LiteLLM can route (a
+   bare unprefixed id like ``o4-mini``, or a provider prefix not yet in
+   either list, slips past a static grep by construction) -- the CLI-level
+   no-default-model behaviour test is the real guard; this check only
+   catches the common, named-prefix case cheaply and early.
 2. A provider credential env var -- recognised the same way
    ``mylonite.scan.providers.looks_like_provider_env_var`` recognises one
    (the ``<PROVIDER>_API_KEY`` convention, the ``AZURE_*`` family, and the
    Bedrock credential pair), reused here rather than re-listing names so
    this check can never drift from what the CLI itself treats as a
-   provider credential.
+   provider credential. Mylonite's own ``MYLONITE_*`` vars are explicitly
+   exempt from this (see that function) -- they are Mylonite's, never a
+   third party's, even when one happens to end in ``_API_KEY``.
 
 Three exemption mechanisms (the main allowlist file is now EMPTY for
 ``src/`` -- every hit there is fixed outright or exempted one of these ways)
@@ -116,12 +127,35 @@ def _model_literal_pattern() -> str:
     return "|".join(re.escape(prefix) for prefix in ALL_MODEL_PREFIXES)
 
 
+#: LiteLLM-routable provider prefixes that `provider_from_model` can resolve
+#: but that have no :mod:`mylonite.providers.registry` row of their own (no
+#: dedicated verification evidence, no credential entry) -- checked here as
+#: defence in depth ONLY, per the re-review's parked/non-blocking finding.
+#: Deliberately NOT added to the registry: adding a row implies Mylonite
+#: backs that provider (a credential check, an approved-providers listing),
+#: which isn't true for these yet. Kept here, hand-written, rather than
+#: derived -- there is no live source for "every prefix LiteLLM routes but
+#: Mylonite doesn't back" the way :data:`ALL_MODEL_PREFIXES` is derived from
+#: the registry for the ones Mylonite DOES back.
+_UNREGISTERED_ROUTABLE_PREFIXES: tuple[str, ...] = (
+    "groq/",
+    "openrouter/",
+    "mistral/",
+    "deepseek/",
+)
+
 #: Model literals: a bare model-FAMILY prefix (deliberately this exact, short
 #: list -- a plain "anthropic" or "openai" with no following "/" is not
 #: flagged, since that matches ordinary prose far more often than a
 #: hardcoded model string) plus every provider-ROUTING prefix the registry
-#: knows about (see :func:`_model_literal_pattern`).
-_MODEL_LITERAL_RE = re.compile(r"claude-|gpt-|gemini-|" + _model_literal_pattern())
+#: knows about (see :func:`_model_literal_pattern`), plus the unregistered
+#: routable prefixes above.
+_MODEL_LITERAL_RE = re.compile(
+    r"claude-|gpt-|gemini-|"
+    + _model_literal_pattern()
+    + "|"
+    + "|".join(re.escape(prefix) for prefix in _UNREGISTERED_ROUTABLE_PREFIXES)
+)
 
 #: Candidate env-var-shaped identifiers: ALL_CAPS_WITH_UNDERSCORES, at least
 #: two words. Each candidate is then checked against
@@ -184,9 +218,12 @@ def _hits_in_line(line: str) -> list[str]:
 
 def iter_scanned_files(root: Path = SRC_ROOT) -> list[Path]:
     """Every file this check reads under ``root``: ``*.py`` (the product
-    code) and ``*.yml`` (the scaffolded workflow templates, and
-    ``gate-action/action.yml`` when ``root`` is :data:`GATE_ACTION_ROOT`)."""
-    return sorted(root.rglob("*.py")) + sorted(root.rglob("*.yml"))
+    code), ``*.yml`` (the scaffolded workflow templates, and
+    ``gate-action/action.yml`` when ``root`` is :data:`GATE_ACTION_ROOT`),
+    and ``*.yaml`` (same thing, the other common spelling -- nothing under
+    ``src/`` uses it today, but a future template that does would otherwise
+    be invisible to this check)."""
+    return sorted(root.rglob("*.py")) + sorted(root.rglob("*.yml")) + sorted(root.rglob("*.yaml"))
 
 
 def scan(root: Path = SRC_ROOT) -> list[Hit]:
