@@ -110,11 +110,6 @@ def test_severity_order_is_not_simply_sorted_numerically() -> None:
     )
 
 
-def test_most_severe_agrees_with_max_for_every_pair_of_documented_codes() -> None:
-    for a, b in itertools.product(_ALL_CODES, repeat=2):
-        assert exit_codes.most_severe([a, b]) == max(a, b)
-
-
 def test_most_severe_agrees_with_max_for_every_combination_of_documented_codes() -> None:
     for r in range(1, len(_ALL_CODES) + 1):
         for combo in itertools.combinations_with_replacement(_ALL_CODES, r):

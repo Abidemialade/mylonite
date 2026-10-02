@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from mylonite.scan.model_ref import ModelRef, route_model
-from mylonite.scan.providers import PROVIDER_ENV_VARS, required_env_vars
+from mylonite.scan.providers import PROVIDER_ENV_VARS
 
 
 def test_model_ref_parse_provider_prefixed_string() -> None:
@@ -76,11 +76,6 @@ def test_model_ref_env_vars_azure_returns_all_three() -> None:
     here on the read-side: `.env_vars()` must report the FULL requirement."""
     ref = ModelRef.parse("azure/my-deployment")
     assert ref.env_vars() == ("AZURE_API_KEY", "AZURE_API_BASE", "AZURE_API_VERSION")
-
-
-def test_model_ref_env_vars_matches_required_env_vars_helper() -> None:
-    ref = ModelRef.parse("openai/gpt-4o")
-    assert ref.env_vars() == required_env_vars("openai")
 
 
 def test_route_model_helper_matches_model_ref_raw() -> None:

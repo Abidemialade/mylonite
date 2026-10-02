@@ -16,13 +16,11 @@ surface, and the reason-code registry.
   past incidents (`--prove-control`, `--runs`, a stale `.mylonite/validated`
   path); this is the same idea applied uniformly to all three registries.
 
-Reason codes already had a one-way (registry -> docs) pin in
-`test_docs_consistency.py::test_reason_codes_documented`, which turned out to
-already check both directions (its `unknown` assertion is the backward half).
-This module reuses that same heading-parsing helper
-(`tests._doc_registry_sync`) rather than re-implementing it, and adds reason
-codes to the same parametrised sweep as the other two registries so all
-three live under one ratchet with one allowlist.
+Reason codes are checked here in both directions, using the shared
+heading-parsing helper (`tests._doc_registry_sync`), in the same parametrised
+sweep as the other two registries, so all three live under one ratchet with
+one allowlist. (An older standalone check in `test_docs_consistency.py` was
+retired as a duplicate of this row.)
 
 The allowlist
 -------------
@@ -204,8 +202,7 @@ def _testkit_backward_gaps() -> list[str]:
 # --- reason codes -----------------------------------------------------------
 #
 # Reuses `tests._doc_registry_sync.reason_code_headings` rather than
-# re-parsing `## ` sections a third time (test_docs_consistency.py's
-# `test_reason_codes_documented` is the second) -- see the module docstring.
+# re-parsing `## ` sections -- see the module docstring.
 
 _REASON_CODES_DOC_PATH = _DOCS_DIR / "reason-codes.md"
 
