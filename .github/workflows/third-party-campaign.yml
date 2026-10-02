@@ -1,41 +1,70 @@
 # Third-party verification campaign: proves the product works on systems
 # Mylonite has never run against before (verification/SOURCE.md,
-# verification/PREREG_L2_THIRD_PARTY.md), with every LLM call made in CI.
+# verification/PREREG_THIRD_PARTY_2026_10.md), with every LLM call made in
+# CI.
 #
-# Manual dispatch only. Every live cell needs a repo secret
-# (MYLONITE_LLM_KEY for Anthropic, MYLONITE_OPENAI_KEY for OpenAI) and a
-# dispatch with the matching key unset is SKIPPED with a `::notice::`, not
-# failed -- the same pattern `verification-campaign.yml` and `live-smoke.yml`
-# already use. The one Ollama cell (target 1 only) needs no key at all: it
-# runs the in-runner Ollama model, at zero cost.
+# Manual dispatch only, EXACTLY one target and one provider per dispatch --
+# no "all"/"both" fan-out and no free-text model override (both were cut
+# after review: an unbounded fan-out times an unbounded --max-llm-calls
+# times an overridable model was an unbounded spend). The model is fixed
+# per provider below. `max_llm_calls` is hard-clamped to 60. See the
+# prereg's "Budget and the hard ceiling" section for the worst-case math and
+# an honest statement of what the TRUE hard stop is (mylonite has no
+# --max-budget; a provider-side spend cap on both keys is the real backstop).
+#
+# Every live cell needs a repo secret (MYLONITE_LLM_KEY for Anthropic,
+# MYLONITE_OPENAI_KEY for OpenAI) and a dispatch with the matching key unset
+# does nothing (a `::notice::`, not a failure) -- the same pattern
+# verification-campaign.yml and live-smoke.yml already use. The `ollama`
+# provider choice needs no key: it is valid only for target=tpv-server-memory
+# (the roadmap's zero-cost cell), rejected for any other target.
+#
+# Both provider keys live in the `env:` of ONE step only -- the step that
+# actually runs `mylonite scan`/`generate`/`validate`. No earlier step (the
+# per-target server launches, the Ollama pull, the shim start-up) sees
+# either key. Residual risk, stated plainly: the MCP stdio adapter's env
+# allowlist blocks direct inheritance into a spawned server, but on Linux a
+# same-uid child can still read /proc/<pid>/environ of its parent -- use
+# dedicated, spend-limited keys for this workflow, not a shared production one.
 #
 # Builds a wheel from `ref` and installs it into a clean venv outside the
-# checkout, exactly like `verification-campaign.yml`, so this measures a real
+# checkout, exactly like verification-campaign.yml, so this measures a real
 # release build rather than a working tree. Writes nothing to the
-# repository: every artefact (run logs, scan/validation reports, cost.json)
-# is uploaded, never committed from here -- a maintainer reviews and commits
-# the results separately (the `verification/results/<version>/third-party/`
-# step in the plan).
+# repository: every artefact (the scaffold sanity-check, run log,
+# scan/validation reports, score.json, cost.json, the prereg commit this run
+# was judged against) is uploaded, never committed from here -- a
+# maintainer reviews and commits the results separately.
 name: third-party-campaign
 
 on:
   workflow_dispatch:
     inputs:
-      targets:
-        description: >-
-          Comma-separated target families to run, or "all". One of:
-          tpv-server-memory, tpv-mcp-redis, tpv-streamablehttp,
-          tpv-server-everything, tpv-go-memory, tpv-agents-sdk-ollama.
-        default: "all"
+      target:
+        description: "Exactly one target (verification/SOURCE.md)."
+        required: true
+        type: choice
+        options:
+          - tpv-server-memory
+          - tpv-mcp-redis
+          - tpv-streamablehttp
+          - tpv-server-everything
+          - tpv-go-memory
+          - tpv-agents-sdk-ollama
       provider:
-        description: 'One of: anthropic, openai, both, all (all also adds the zero-cost Ollama cell on tpv-server-memory).'
-        default: "both"
-      model:
-        description: "Optional litellm model id override, applied to every cell regardless of provider."
-        default: ""
+        description: >-
+          Exactly one provider. 'ollama' is valid ONLY with
+          target=tpv-server-memory (rejected for every other target).
+        required: true
+        type: choice
+        options:
+          - anthropic
+          - openai
+          - ollama
       max_llm_calls:
-        description: "LLM call budget per scan, sized from the TPV-0 pilot's measured cost per call."
-        default: "40"
+        description: "LLM call budget for the scan phase. Hard-clamped to 60; see the prereg."
+        required: true
+        type: number
+        default: 30
       ref:
         description: "branch, tag or sha to build and measure"
         default: "main"
@@ -44,71 +73,12 @@ permissions:
   contents: read
 
 jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-    steps:
-      - name: Compute the (target, provider) matrix from the dispatch inputs
-        id: plan
-        env:
-          TARGETS: ${{ inputs.targets }}
-          PROVIDER: ${{ inputs.provider }}
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          import os
-
-          all_targets = [
-              "tpv-server-memory",
-              "tpv-mcp-redis",
-              "tpv-streamablehttp",
-              "tpv-server-everything",
-              "tpv-go-memory",
-              "tpv-agents-sdk-ollama",
-          ]
-          targets_in = os.environ["TARGETS"].strip()
-          targets = all_targets if targets_in in ("", "all") else [
-              t.strip() for t in targets_in.split(",") if t.strip()
-          ]
-          for t in targets:
-              if t not in all_targets:
-                  raise SystemExit(f"unknown target {t!r}; one of {all_targets}")
-
-          provider_in = os.environ["PROVIDER"].strip().lower()
-          if provider_in not in ("anthropic", "openai", "both", "all"):
-              raise SystemExit(f"unknown provider {provider_in!r}")
-          providers = {
-              "anthropic": ["anthropic"],
-              "openai": ["openai"],
-              "both": ["anthropic", "openai"],
-              "all": ["anthropic", "openai"],
-          }[provider_in]
-
-          # target 6's own agent inference always runs on Ollama regardless of
-          # which provider drives Mylonite's planner/judge (see agents_rest.yaml
-          # and verification/SOURCE.md) -- that is not a separate matrix cell.
-          include = [{"target": t, "provider": p} for t in targets for p in providers]
-
-          # The one additional zero-cost cell: target 1 driven entirely by a
-          # local Ollama model (roadmap: "one Ollama cell runs on server-memory").
-          if provider_in == "all" and "tpv-server-memory" in targets:
-              include.append({"target": "tpv-server-memory", "provider": "ollama"})
-
-          print("matrix=" + json.dumps({"include": include}))
-          PY
-
   run:
-    needs: plan
-    if: needs.plan.outputs.matrix != '{"include":[]}'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    timeout-minutes: 30
     services:
       redis:
-        image: redis:7
+        image: redis:7@sha256:95acc00495ddacfec75111ba47021f903121a890311d49264c723b4423ac9601
         ports:
           - 6379:6379
         options: >-
@@ -116,75 +86,100 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Pinned by digest, started as a service container rather than an
+      # unpinned `curl ... | sh` install script. Always started (even for a
+      # target/provider combo that doesn't need it) -- simpler than a
+      # conditional service, and the extra container costs only a few
+      # seconds of job time.
+      ollama:
+        image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
+        ports:
+          - 11434:11434
     env:
-      ANTHROPIC_API_KEY: ${{ matrix.provider == 'anthropic' && secrets.MYLONITE_LLM_KEY || '' }}
-      OPENAI_API_KEY: ${{ matrix.provider == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
-      # Every later step reads matrix/input values through these env vars,
-      # never through a bare `${{ }}` inside a run: script -- a dispatch
-      # input or matrix value is free text, substituted before bash parses
-      # the line, and several steps here hold a provider key (same rule
-      # verification-campaign.yml and live-smoke.yml already follow).
-      TPV_TARGET: ${{ matrix.target }}
-      TPV_PROVIDER: ${{ matrix.provider }}
-      TPV_REF: ${{ inputs.ref }}
-      TPV_MODEL_OVERRIDE: ${{ inputs.model }}
-      TPV_MAX_LLM_CALLS: ${{ inputs.max_llm_calls }}
+      # Every later step reads the dispatch's target/provider through these,
+      # never through a bare ${{ }} inside a run: script -- a dispatch input
+      # is free text, substituted before bash parses the line, and several
+      # steps in this job hold a provider key (see the file header).
+      TPV_TARGET: ${{ inputs.target }}
+      TPV_PROVIDER: ${{ inputs.provider }}
     steps:
-      - name: Guard -- skip (not fail) a cell with no key configured
-        id: guard
+      - name: Validate inputs -- hard-clamp max_llm_calls; reject a bad target/provider combo
+        id: inputs
+        shell: bash
+        env:
+          TPV_MAX_LLM_CALLS_RAW: ${{ inputs.max_llm_calls }}
         run: |
-          case "$TPV_PROVIDER" in
-            anthropic)
-              if [ -z "$ANTHROPIC_API_KEY" ]; then
-                echo "::notice::MYLONITE_LLM_KEY is not set; skipping $TPV_TARGET (anthropic)."
-                echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
-              fi
-              ;;
-            openai)
-              if [ -z "$OPENAI_API_KEY" ]; then
-                echo "::notice::MYLONITE_OPENAI_KEY is not set; skipping $TPV_TARGET (openai)."
-                echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
-              fi
-              ;;
-            ollama)
-              : # no key needed
+          n="$TPV_MAX_LLM_CALLS_RAW"
+          case "$n" in
+            ''|*[!0-9]*)
+              echo "::error::max_llm_calls must be a positive integer, got '$n'"
+              exit 1
               ;;
           esac
-          echo "run=true" >> "$GITHUB_OUTPUT"
+          if [ "$n" -lt 1 ]; then n=1; fi
+          if [ "$n" -gt 60 ]; then
+            echo "::notice::max_llm_calls $n exceeds the hard cap of 60 (see verification/PREREG_THIRD_PARTY_2026_10.md's budget math); clamping to 60."
+            n=60
+          fi
+          echo "max_llm_calls=$n" >> "$GITHUB_OUTPUT"
+          if [ "$TPV_PROVIDER" = "ollama" ] && [ "$TPV_TARGET" != "tpv-server-memory" ]; then
+            echo "::error::provider=ollama is only valid with target=tpv-server-memory (see the prereg)."
+            exit 1
+          fi
+
+      - name: Guard -- do nothing (not fail) if the required key is unset
+        id: guard
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+        if: >-
+          inputs.provider == 'ollama' ||
+          (inputs.provider == 'anthropic' && secrets.MYLONITE_LLM_KEY != '') ||
+          (inputs.provider == 'openai' && secrets.MYLONITE_OPENAI_KEY != '')
+
+      - name: Notice -- the required key is not configured
+        if: >-
+          inputs.provider != 'ollama' &&
+          !((inputs.provider == 'anthropic' && secrets.MYLONITE_LLM_KEY != '') ||
+            (inputs.provider == 'openai' && secrets.MYLONITE_OPENAI_KEY != ''))
+        run: echo "::notice::the key for $TPV_PROVIDER is not set; this dispatch does nothing."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outcome == 'success'
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
+      - name: Resolve the checked-out commit (the artefacts cite a commit SHA, not the `ref` text)
+        if: steps.guard.outcome == 'success'
+        id: commit
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outcome == 'success'
         with:
           python-version: "3.12"
 
       # Node only for the two @modelcontextprotocol/* servers (targets 1, 4).
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        if: steps.guard.outputs.run == 'true' && (matrix.target == 'tpv-server-memory' || matrix.target == 'tpv-server-everything')
+        if: steps.guard.outcome == 'success' && (env.TPV_TARGET == 'tpv-server-memory' || env.TPV_TARGET == 'tpv-server-everything')
         with:
           node-version: "22"
 
-      - name: Resolve the model for this cell
-        if: steps.guard.outputs.run == 'true'
+      - name: Resolve the fixed model for this provider (no override)
+        if: steps.guard.outcome == 'success'
         id: model
+        shell: bash
         run: |
-          if [ -n "$TPV_MODEL_OVERRIDE" ]; then
-            echo "model=$TPV_MODEL_OVERRIDE" >> "$GITHUB_OUTPUT"
-          else
-            case "$TPV_PROVIDER" in
-              anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
-              openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
-              ollama)    echo "model=ollama_chat/llama3.2:3b" >> "$GITHUB_OUTPUT" ;;
-            esac
-          fi
+          case "$TPV_PROVIDER" in
+            anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
+            openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
+            ollama)    echo "model=ollama_chat/llama3.2:3b" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown provider $TPV_PROVIDER"; exit 1 ;;
+          esac
 
       - name: Build the wheel and install it into a clean venv
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outcome == 'success'
+        shell: bash
         run: |
           python -m pip install --upgrade pip build
           python -m build --wheel --outdir "$RUNNER_TEMP/dist"
@@ -193,32 +188,34 @@ jobs:
           "$RUNNER_TEMP/campaign-venv/bin/python" -m pip install "$RUNNER_TEMP"/dist/mylonite-*.whl
           echo "MYLONITE=$RUNNER_TEMP/campaign-venv/bin/mylonite" >> "$GITHUB_ENV"
 
-      - name: Install Ollama and pull the local model (target 1's Ollama cell, and target 6's own inference)
-        if: steps.guard.outputs.run == 'true' && (matrix.provider == 'ollama' || matrix.target == 'tpv-agents-sdk-ollama')
+      # --- per-target launch (no provider keys in any of these) -------------
+
+      - name: "Target 1: a fresh, throwaway memory-file path"
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-server-memory'
+        shell: bash
+        run: echo "TPV_MEMORY_FILE=$RUNNER_TEMP/tpv-memory-$RANDOM.json" >> "$GITHUB_ENV"
+
+      - name: "Target 1 or target 6's own inference, or an explicit ollama cell: pull the model"
+        if: steps.guard.outcome == 'success' && (env.TPV_PROVIDER == 'ollama' || env.TPV_TARGET == 'tpv-agents-sdk-ollama')
+        shell: bash
         run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          ollama serve &
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434 >/dev/null && break; sleep 1; done
-          ollama pull llama3.2:3b
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}'
 
-      # --- per-target launch -------------------------------------------------
-
-      - name: "Target 1/5: throwaway state for the knowledge-graph servers"
-        if: steps.guard.outputs.run == 'true' && (matrix.target == 'tpv-server-memory' || matrix.target == 'tpv-go-memory')
-        run: echo "MEMORY_FILE_PATH=$RUNNER_TEMP/tpv-memory-$RANDOM.json" >> "$GITHUB_ENV"
-
-      - name: "Target 2: wait for the redis:7 service container"
-        if: steps.guard.outputs.run == 'true' && matrix.target == 'tpv-mcp-redis'
+      - name: "Target 2: install redis/mcp-redis (its own console script, not `python -m` from an arbitrary cwd)"
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-mcp-redis'
+        shell: bash
+        # redis:7's own health check above already blocks every step in this
+        # job until the service is healthy; redis-cli isn't on this runner's
+        # host image, so no separate host-side wait loop belongs here.
         run: |
-          for i in $(seq 1 20); do redis-cli -h 127.0.0.1 -p 6379 ping && break; sleep 1; done
           git clone --quiet https://github.com/redis/mcp-redis.git "$RUNNER_TEMP/mcp-redis"
           git -C "$RUNNER_TEMP/mcp-redis" checkout --quiet 11e67e44358cd6410d5a7e615a29539ccd71a045
-          python -m pip install uv
-          python -m uv pip install --python "$(command -v python)" -r "$RUNNER_TEMP/mcp-redis/pyproject.toml" 2>/dev/null \
-            || python -m pip install -e "$RUNNER_TEMP/mcp-redis"
+          python -m pip install "$RUNNER_TEMP/mcp-redis"
 
       - name: "Target 3: start the python-sdk simple-streamablehttp server"
-        if: steps.guard.outputs.run == 'true' && matrix.target == 'tpv-streamablehttp'
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-streamablehttp'
+        shell: bash
         run: |
           git clone --quiet --filter=blob:none --no-checkout https://github.com/modelcontextprotocol/python-sdk.git "$RUNNER_TEMP/python-sdk"
           git -C "$RUNNER_TEMP/python-sdk" checkout --quiet 9972c21aa42054fb1450c5fc614761ed11847ec6
@@ -227,79 +224,165 @@ jobs:
           for i in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:3000/mcp && break; sleep 1; done
 
       - name: "Target 5: build the Go SDK's own memory example"
-        if: steps.guard.outputs.run == 'true' && matrix.target == 'tpv-go-memory'
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-go-memory'
+        shell: bash
         run: |
           go version
           git clone --quiet https://github.com/modelcontextprotocol/go-sdk.git "$RUNNER_TEMP/go-sdk"
           git -C "$RUNNER_TEMP/go-sdk" checkout --quiet 3f3b699b2b67e1ed033a63d6651671dab53c2d32
           (cd "$RUNNER_TEMP/go-sdk/examples/server/memory" && go build -o "$GITHUB_WORKSPACE/tpv-go-memory" .)
-          # no -memory flag below: the knowledge graph stays in-process only.
+          # No -memory flag above: the knowledge graph stays in-process only.
 
-      - name: "Target 6: start the disclosed Agents-SDK/Ollama shim"
-        if: steps.guard.outputs.run == 'true' && matrix.target == 'tpv-agents-sdk-ollama'
+      - name: "Target 6: start the disclosed Agents-SDK/Ollama shim (pinned deps)"
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-agents-sdk-ollama'
+        shell: bash
+        env:
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          MYLONITE_TPV_OLLAMA_MODEL: llama3.2:3b
         run: |
-          python -m pip install "openai-agents[litellm]==0.22.3" fastapi uvicorn
-          MYLONITE_TPV_OLLAMA_MODEL=llama3.2:3b \
-            python -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
+          python -m pip install "openai-agents[litellm]==0.22.3" "fastapi==0.142.2" "uvicorn==0.54.0" "litellm==1.103.2"
+          python -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
             --host 127.0.0.1 --port 8099 &
           for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
 
-      # --- scan, then score ---------------------------------------------------
+      # --- scaffold sanity check (no provider key; see the prereg) ----------
 
-      - name: Run the scan
-        if: steps.guard.outputs.run == 'true'
-        id: scan
-        env:
-          TPV_MODEL: ${{ steps.model.outputs.model }}
+      - name: Scaffold sanity check -- re-introspect via the unchanged CLI (not for target 3; see the prereg)
+        if: steps.guard.outcome == 'success' && env.TPV_TARGET != 'tpv-streamablehttp'
+        shell: bash
         run: |
           case "$TPV_TARGET" in
-            tpv-server-memory)      TARGET_FILE=memory.yaml ;;
-            tpv-mcp-redis)          TARGET_FILE=redis.yaml ;;
-            tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml ;;
-            tpv-server-everything)  TARGET_FILE=everything.yaml ;;
-            tpv-go-memory)          TARGET_FILE=go_memory.yaml ;;
-            tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml ;;
+            tpv-server-memory)
+              "$MYLONITE" scan --command npx --arg -y --arg "@modelcontextprotocol/server-memory@2026.8.31" \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            tpv-mcp-redis)
+              "$MYLONITE" scan --command redis-mcp-server --arg --host --arg 127.0.0.1 --arg --port --arg 6379 \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            tpv-server-everything)
+              "$MYLONITE" scan --command npx --arg -y --arg "@modelcontextprotocol/server-everything@2026.8.31" \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            tpv-go-memory)
+              "$MYLONITE" scan --command "$GITHUB_WORKSPACE/tpv-go-memory" \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            tpv-agents-sdk-ollama)
+              "$MYLONITE" scan --rest-url http://127.0.0.1:8099/chat --rest-response-path reply \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+          esac
+
+      # --- the real journey: scan, then generate+validate for targets 1-3 --
+
+      - name: Run the real journey (scan; generate+validate too for targets 1-3)
+        if: steps.guard.outcome == 'success'
+        id: run
+        shell: bash
+        env:
+          # The ONLY step in this job whose env: carries a provider key.
+          ANTHROPIC_API_KEY: ${{ env.TPV_PROVIDER == 'anthropic' && secrets.MYLONITE_LLM_KEY || '' }}
+          OPENAI_API_KEY: ${{ env.TPV_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          MYLONITE_MAX_TOKENS: "2048"
+          TPV_MODEL: ${{ steps.model.outputs.model }}
+          TPV_MAX_LLM_CALLS: ${{ steps.inputs.outputs.max_llm_calls }}
+        run: |
+          set -o pipefail
+          case "$TPV_TARGET" in
+            tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
+            tpv-mcp-redis)          TARGET_FILE=redis.yaml;          FULL_JOURNEY=true ;;
+            tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml; FULL_JOURNEY=true ;;
+            tpv-server-everything)  TARGET_FILE=everything.yaml;     FULL_JOURNEY=false ;;
+            tpv-go-memory)          TARGET_FILE=go_memory.yaml;      FULL_JOURNEY=false ;;
+            tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=false ;;
             *) echo "::error::unknown target $TPV_TARGET"; exit 1 ;;
           esac
+
           mkdir -p out
           "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
             --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls "$TPV_MAX_LLM_CALLS" \
             --output-dir out 2>&1 | tee run.log
-          echo "run_dir=$(find out -maxdepth 1 -mindepth 1 -type d | head -1)" >> "$GITHUB_OUTPUT"
+          scan_dir="$(find out -maxdepth 1 -mindepth 1 -type d | head -1)"
+          echo "score_dir=$scan_dir" >> "$GITHUB_OUTPUT"
+
+          # Targets 4-6 are N=1 smoke cells (prereg: "claim no verdict") --
+          # scan only. generate/validate need an actual finding to run on,
+          # which a smoke cell makes no promise of producing.
+          if [ "$FULL_JOURNEY" = "true" ]; then
+            if "$MYLONITE" generate --scans-dir out --latest --out generated \
+                 --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log; then
+              # `validate` exits 5 (EXIT_NOT_KEPT) for a perfectly legitimate
+              # "not kept" result -- that is NOT this step failing, and must
+              # not skip the scoring/cost steps that follow. Any OTHER
+              # non-zero code (budget/provider/config/crash) IS a real
+              # failure and is re-raised below. `set +e` around the one
+              # command that has a meaningful non-zero exit, nowhere else.
+              set +e
+              "$MYLONITE" validate generated \
+                --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
+                --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log
+              validate_rc=${PIPESTATUS[0]}
+              set -e
+              # validate ALWAYS writes validation_report.json next to the
+              # test (kept or not) -- unlike `gate`'s orchestrator, which
+              # only persists one for a KEPT finding. Score THIS directory,
+              # not the scan directory, so a not-kept result is reachable.
+              echo "score_dir=generated" >> "$GITHUB_OUTPUT"
+              if [ "$validate_rc" -ne 0 ] && [ "$validate_rc" -ne 5 ]; then
+                echo "::error::validate exited $validate_rc (neither 0=kept nor 5=not-kept) -- a real failure, not a verdict."
+                exit "$validate_rc"
+              fi
+            else
+              echo "::notice::generate found nothing to emit a test from (no finding) -- scoring the scan directory only."
+            fi
+          fi
+
+      # --- score, cost, publish the prereg this run was judged against -----
 
       - name: Score the run against the prereg
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outcome == 'success'
+        shell: bash
         env:
-          TPV_RUN_DIR: ${{ steps.scan.outputs.run_dir }}
+          TPV_SCORE_DIR: ${{ steps.run.outputs.score_dir }}
         run: |
-          # The campaign venv (not the system python) has mylonite installed --
-          # the same silo verification-campaign.yml's steps already rely on.
           "$RUNNER_TEMP/campaign-venv/bin/python" scripts/score_third_party.py score \
-            "$TPV_RUN_DIR" --target "$TPV_TARGET" --out score.json
+            "$TPV_SCORE_DIR" --target "$TPV_TARGET" --run-log run.log --out score.json
 
       - name: Compute this run's $ cost from the printed token counts
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outcome == 'success'
+        shell: bash
         env:
           TPV_MODEL: ${{ steps.model.outputs.model }}
+          TPV_COMMIT_SHA: ${{ steps.commit.outputs.sha }}
         run: |
           case "$TPV_PROVIDER" in
             anthropic) IN_RATE=1.0;  OUT_RATE=5.0 ;;   # claude-haiku-4-5 (verification/README.md)
-            openai)    IN_RATE=0.15; OUT_RATE=0.60 ;;  # gpt-4o-mini (verification/PREREG_L2_THIRD_PARTY.md)
+            openai)    IN_RATE=0.15; OUT_RATE=0.60 ;;  # gpt-4o-mini (the prereg)
             ollama)    IN_RATE=0;    OUT_RATE=0 ;;      # local model, no provider cost
           esac
           python scripts/compute_run_cost.py run.log \
             --model "$TPV_MODEL" --in-rate "$IN_RATE" --out-rate "$OUT_RATE" \
-            --out cost.json
+            --ref "$TPV_COMMIT_SHA" --out cost.json
+
+      - name: Record the prereg commit this run was judged against
+        if: always() && steps.guard.outcome == 'success'
+        shell: bash
+        run: git log -1 --format=%H -- verification/PREREG_THIRD_PARTY_2026_10.md > prereg.sha
 
       - name: Upload this cell's artefacts
-        if: always() && steps.guard.outputs.run == 'true'
+        if: always() && steps.guard.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: third-party-${{ matrix.target }}-${{ matrix.provider }}
+          name: third-party-${{ inputs.target }}-${{ inputs.provider }}
           path: |
             out/**
+            generated/**
             run.log
             score.json
             cost.json
+            prereg.sha
+            scaffold-check.yaml
           if-no-files-found: warn
