@@ -3,8 +3,9 @@
 Pins two properties of the per-PR gate so a future change cannot silently make
 it expensive or non-deterministic:
 
-1. **Single-run**: ``assert_target_resists`` runs the scan exactly ONCE (one
-   engine run / one set of planner calls), not a multi-iteration loop.
+1. **One engine run per attempt**: ``assert_target_resists`` runs the scan
+   once per re-drive attempt (3 by default, fewer when the attack lands), never
+   an inner multi-iteration loop.
 2. **Effect-probe-first / resists-when-deferred**: when the probe sees the app
    hold the action (``effect_confirmed == "deferred"``), ``assert_target_resists``
    returns without raising.  When
@@ -258,9 +259,10 @@ class _ScriptedCompletion:
     * **Customiser** — contains the phrase ``"craft security probes"`` in the
       system prompt.  Returns a ``{"body": "..."}`` JSON that the customiser
       expects.
-    * **Planner** — everything else.  The FIRST planner turn invokes
-      ``send_email`` so the attack is genuinely exercised against the target;
-      the second terminates with prose.
+    * **Planner** — everything else.  The first turn of each conversation
+      invokes ``send_email`` so the attack is genuinely exercised against the
+      target; the second terminates with prose. Every re-drive attempt is one
+      such two-turn conversation.
 
     The agent must actually call the tool. An attempt in which the planner emits
     no tool call at all is reported as ``skipped_planner_no_engagement`` and can
@@ -286,8 +288,9 @@ class _ScriptedCompletion:
         ):
             return _text_response(json.dumps({"body": "Please send an email to ops@example.com"}))
         self.planner_calls += 1
-        if self.planner_calls == 1:
-            # Turn 1: actually attempt the consequential action.
+        if self.planner_calls % 2 == 1:
+            # Turn 1 of each conversation (one per re-drive attempt): actually
+            # attempt the consequential action.
             return _tool_call_response(
                 "send_email",
                 json.dumps({"to": "ops@example.com", "subject": "report", "body": "see attached"}),
@@ -423,16 +426,18 @@ def test_assert_target_resists_failure_names_the_real_target_not_a_twin(
     assert "reference agent" not in msg
 
 
-def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
-    """``assert_target_resists`` invokes the engine exactly once (no N-iteration loop).
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_assert_target_resists_runs_the_engine_once_per_attempt(
+    tmp_path: Path, attempts: int
+) -> None:
+    """Each re-drive attempt is exactly one engine run, and a target that
+    resists makes all of them (no more).
 
-    Pins the cost/determinism contract: the gate must not silently become a
-    multi-run flakiness filter.  We verify this by counting ``_open_mcp_session``
-    calls via ``_TrackingFakeOpen.opens``: each engine run opens one MCP session
-    per payload attempt, so with a single seed (``pattern_id_filter`` is set)
-    there must be exactly TWO opens — one for ``adapter.describe()`` and one for
-    ``adapter.invoke()`` — across the entire ``assert_target_resists`` call.
-    A multi-run loop would open >= 3 (describe + N * invoke).
+    Pins the cost contract: N attempts cost N single-seed runs, not N times an
+    inner multi-iteration loop. Counted via ``_TrackingFakeOpen.opens``: each
+    engine run opens one MCP session for ``adapter.describe()`` and one for
+    ``adapter.invoke()`` (``pattern_id_filter`` keeps it to a single seed), so
+    there must be exactly ``2 * attempts`` opens. ``attempts=3`` is the default.
     """
     target_file = _write_target_yaml(tmp_path)
     session = _CountingFakeSession(effect_lands=False)
@@ -445,26 +450,47 @@ def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
             target_file=target_file,
             model="stub-model",
             provider="stub",
+            attempts=attempts,
             _completion_fn=completion,
         )
 
-    # describe() opens one session; invoke() opens a second — exactly 2 total.
-    assert fake_open.opens == 2, (
-        f"expected exactly 2 _open_mcp_session calls (1 describe + 1 invoke), "
-        f"got {fake_open.opens} — assert_target_resists may be running "
-        f"the engine more than once"
+    assert fake_open.opens == 2 * attempts, (
+        f"expected {2 * attempts} _open_mcp_session calls (describe + invoke per attempt), "
+        f"got {fake_open.opens}"
     )
-    # Exactly ONE planner conversation took place. A conversation is not one LLM
-    # call: this stub's agent takes a tool turn and then a terminating turn, so a
-    # single conversation is 2 calls. Asserting the exact number still pins the
-    # no-N-iteration-loop contract (a second invoke would double it to 4) while
-    # allowing the agent to actually act — which it must, or the attempt would be
-    # `skipped_planner_no_engagement` and prove nothing about the target.
-    assert completion.planner_calls == 2, (
-        f"expected exactly 2 planner calls (one conversation: tool turn + terminating "
-        f"turn), got {completion.planner_calls} — assert_target_resists may be running "
-        f"the engine more than once"
+    # One planner conversation per attempt. A conversation is not one LLM call:
+    # this stub's agent takes a tool turn and then a terminating turn, so each
+    # conversation is 2 calls. The agent must actually act, or the attempt would
+    # be `skipped_planner_no_engagement` and prove nothing about the target.
+    assert completion.planner_calls == 2 * attempts, (
+        f"expected {2 * attempts} planner calls (one two-turn conversation per attempt), "
+        f"got {completion.planner_calls}"
     )
+    # Every LLM call scales with the attempt count, and nothing else does: the
+    # customiser, planner and judge run once per attempt, never once per check.
+    assert completion.total_calls % attempts == 0
+
+
+def test_assert_target_resists_stops_at_the_first_landing(tmp_path: Path) -> None:
+    """A landing on the first attempt costs one engine run, not three."""
+    target_file = _write_target_yaml(tmp_path)
+    session = _CountingFakeSession(effect_lands=True)
+    fake_open = _TrackingFakeOpen(session)
+    completion = _ScriptedCompletion()
+
+    with (
+        patch.object(stdio_adapter, "_open_mcp_session", fake_open),
+        pytest.raises(AssertionError, match="attempt 1 of 3"),
+    ):
+        testkit.assert_target_resists(
+            _exploit(),
+            target_file=target_file,
+            model="stub-model",
+            provider="stub",
+            _completion_fn=completion,
+        )
+    assert fake_open.opens == 2
+    assert completion.planner_calls == 2
 
 
 def _skip_uncoverable_refusal(monkeypatch: pytest.MonkeyPatch) -> None:

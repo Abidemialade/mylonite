@@ -102,9 +102,11 @@ def test_passes_when_raw_fires_and_guarded_resists(
         )
         is None
     )
-    # Two scans: raw (no controls) then boundary-guarded (one control).
-    assert len(seen) == 2
-    assert seen[0] is None and seen[1] and seen[1][0].weakness == "W2"
+    # Raw (no controls) once, since it fired on the first attempt; then the
+    # boundary-guarded leg (one control) on each of the default 3 attempts.
+    assert len(seen) == 4
+    assert seen[0] is None
+    assert all(leg and leg[0].weakness == "W2" for leg in seen[1:])
 
 
 def test_raises_when_control_not_load_bearing(
@@ -204,8 +206,9 @@ def test_input_frame_control_on_rest_target_does_not_raise(
         )
         is None
     )
-    # Raw (plain call, input_frame=False) fires; guarded (input_frame=True) resists.
-    assert seen_input_frame == [False, True]
+    # Raw (plain call, input_frame=False) fires once; guarded (input_frame=True)
+    # resists on each of the default 3 attempts.
+    assert seen_input_frame == [False, True, True, True]
 
 
 def test_real_weakness_class_on_rest_target_raises_instead_of_spurious_fail(

@@ -119,11 +119,12 @@ states:
 1. **Not fixed yet.** The attack still lands, so the test is an expected
    failure (`xfail`) and the check stays green. `pytest -ra` lists it as
    `XFAIL ... pending fix: ...`.
-2. **Fixed.** The attack stops, the test passes, and the check fails on
-   purpose with: *The attack did not land on this run. If your fix has landed,
-   remove the `@testkit.pending_fix(...)` line above this test.* One passing
-   live run is not proof on its own, so if you haven't shipped a fix, re-run
-   the check first.
+2. **Fixed.** The attack stops on every re-drive attempt (3 by default), the
+   test passes, and the check fails on purpose with: *The attack did not land
+   on any re-drive attempt this run. If your fix has landed, remove the
+   `@testkit.pending_fix(...)` line above this test.* An attack that lands
+   rarely can still resist three attempts, so if you haven't shipped a fix,
+   re-run the check first.
 3. **Marker removed.** The test is a regular gate. It passes while the fix
    holds and fails the check if the attack works again.
 
@@ -379,6 +380,32 @@ where a keyless skip is the intended default. You also need:
 
 Only the bundled reference/replay test runs offline unconditionally; a gate against your
 own app always re-drives the real target.
+
+### What a live gate costs
+
+A live gate test re-drives your app up to 3 times. It fails on the first attempt the
+attack lands on and passes only when every attempt resisted, so a passing check is the
+expensive case:
+
+| Test | Attack lands on attempt 1 | Every attempt resists |
+|---|---|---|
+| `assert_target_resists` | 1 re-drive | 3 re-drives |
+| `assert_control_holds` | 1 raw + 1 guarded | 1 raw + 3 guarded |
+
+Each re-drive is one seed: about a customiser call, a few agent turns and a judge call,
+capped at 12 model calls and 180 seconds. To spend less on every pull request and keep the
+full check on a schedule, set the number of attempts per job:
+
+```bash
+# every pull request: one attempt
+MYLONITE_LIVE_TARGET=1 MYLONITE_REDRIVE_ATTEMPTS=1 pytest .mylonite/gate
+# nightly: the default 3
+MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate
+```
+
+One attempt proves less: an attack that lands 40% of the time resists a single re-drive
+60% of the time. A test that passes `attempts=` itself keeps that number whatever the
+variable says.
 
 What does *not* port: opening the gating PR, inline check-run annotations, and Security-tab
 SARIF upload all use the `gh` CLI and GitHub APIs. On other CI, run the test as the gate and

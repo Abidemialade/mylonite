@@ -277,16 +277,41 @@ silent signature change breaks every downstream regression gate.
 - **`testkit.assert_guard_holds(exploit, *, fixtures_dir=None, _completion_fn=None)`**
   — the offline gate for a bundled reference target. See
   ["Isn't this a tautology?"](#isnt-this-a-tautology) above.
-- **`testkit.assert_target_resists(exploit, *, target_file, model=None, provider=None, _completion_fn=None)`**
+- **`testkit.assert_target_resists(exploit, *, target_file, model=None, provider=None, attempts=None, _completion_fn=None)`**
   — the LIVE regression check for a custom target. See
   [Tier 2: the committed regression test](#two-tiers-live-discovery-offline-gate) above.
-- **`testkit.assert_control_holds(exploit, *, target_file, control, model=None, provider=None, _completion_fn=None)`**
+- **`testkit.assert_control_holds(exploit, *, target_file, control, model=None, provider=None, attempts=None, _completion_fn=None)`**
   — the LIVE control-efficacy check. See [the control-efficacy check](#the-control-efficacy-check)
   above.
+
+Both live checks re-drive your target up to 3 times, because discovery proved a
+rate and one clean run proves little against an attack that lands some of the
+time:
+
+| What happens | Result |
+|---|---|
+| The attack lands on attempt *k* | `AssertionError` at once, naming attempt *k*; no further attempt runs |
+| Every attempt resists | Pass |
+| No landing, but an attempt was inconclusive (no verdict, no tool call, a hit bound) | That attempt's `TestkitFixtureError` (or `TestkitRedriveAborted`) with a tally such as "2 of 3 resisted and 1 inconclusive"; never a pass |
+
+The remaining attempts still run after an inconclusive one, so a later landing
+fails as a regression rather than reading as "inconclusive". `assert_control_holds`
+runs its guarded leg on every attempt and its raw leg only until the attack has
+landed on it once, so a pass costs one raw re-drive plus one guarded re-drive per
+attempt. If the raw leg never lands, the check fails as before. The effect probe
+is calibrated once, before the first attempt, and each attempt has its own
+12-call and 180-second bound.
+
+`attempts=` sets the number for one test. Otherwise `MYLONITE_REDRIVE_ATTEMPTS`
+sets it for the whole run, and with neither it is 3. A value that is not a whole
+number of at least 1 raises `TestkitConfigError` before anything runs. See
+[the cost note in CI gating](ci-gating.md#what-a-live-gate-costs).
 - **`testkit.pending_fix(reason)`** — a decorator for a committed gate test whose
   finding isn't fixed yet. While the check raises `AssertionError` (the attack
-  still lands) the test is an expected failure and the run stays green. Once the
-  check passes, the test fails with a message telling you to remove the
+  still lands) the test is an expected failure and the run stays green; a live
+  check raises on the first attempt the attack lands on. Once the check passes,
+  which for a live check means every attempt resisted, the test fails with a
+  message telling you to remove the
   `@testkit.pending_fix(...)` line if your fix has landed; with the line removed
   it is a regular gate.
   Any other exception still fails the test, so an inconclusive run is never
