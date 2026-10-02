@@ -58,7 +58,9 @@ network boundary (VPN/private network) instead of a URL-embedded secret.
 `mylonite.providers.registry` holds one table row per provider Mylonite
 backs — Anthropic and Ollama with dedicated verification evidence, plus
 OpenAI, Gemini, Azure OpenAI, Vertex AI, Bedrock, vLLM/any OpenAI-compatible
-endpoint and a LiteLLM proxy. `PROVIDER_ENV_VARS` above, and the alias table
+endpoint and a LiteLLM proxy. See [Choose a model](choose-a-model.md) for
+that table rendered in full, with each row's key env var(s) and an example
+model string. `PROVIDER_ENV_VARS` above, and the alias table
 that maps a provider's own LiteLLM routing prefix (`hosted_vllm` for vLLM,
 `ollama_chat` for Ollama, and so on) back to its row, are both generated
 from it, so the three never drift apart.

@@ -48,6 +48,7 @@ nav:
   - Home: index.md
   - Get started:
       - Quickstart: quickstart.md
+      - Choose a model: choose-a-model.md
       - Installing on Windows: install-windows.md
       - Try it — the reference app: quarry.md
   - Guides:
