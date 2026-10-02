@@ -60,6 +60,18 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
             "Pass --live to use a different provider/model."
         )
 
+    # No default provider or model: --live makes a REAL call, so it needs a
+    # model chosen for it same as scan/validate/gate/ablate do -- DEMO_MODEL
+    # is the REPLAY fixtures' own recorded identity (see the module
+    # docstring above), never a live default to fall back to silently.
+    # Replay itself needs none: it never reaches this branch unless --live
+    # was passed.
+    if live and model is None:
+        from mylonite.scan.providers import no_model_configured_message
+
+        echo_err(no_model_configured_message())
+        raise typer.Exit(code=EXIT_PROVIDER)
+
     try:
         result = asyncio.run(run_demo(live=live, provider=provider, model=model))
     except (MissingFixtureError, DemoFixtureError) as exc:
