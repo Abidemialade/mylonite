@@ -194,10 +194,12 @@ Every validation reports three headline figures.
   test discriminates run-to-run; `1.0` means it fired and resisted on every
   iteration.
 - **Mutation score** (report-only) — the fraction of the bundled reference
-  **seeds** (nine of them, spanning W1–W4) that show the differential: the
+  **seeds** (nine of them, spanning W1–W4) that this test catches: the
   vulnerable build fired the seed **and** the guarded build resisted it. The
-  denominator is the seed count, not the four classes. It is computed for free from the scans already run and gives a coverage
-  read across the weakness bank, not just the single exploit under test.
+  denominator is the seed count, not the four classes. It is computed for free
+  from the scans already run. Each differential run attacks with the test's own
+  seed only, so a test that holds scores 1/9: it catches its own seed and makes
+  no claim about the other eight.
 
 A fourth stage, **metamorphic**, is **gating**. It applies several deterministic,
 semantically-neutral rewrites of the exploit body — paraphrase, casing, whitespace,
