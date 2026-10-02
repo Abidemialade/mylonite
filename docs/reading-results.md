@@ -250,6 +250,26 @@ the damage to them (an LLM-judge verdict, say), the remediation line says so and
 `{exfil_host}` marker and `mylonite scan --target-file <file> --authorize <family>` to
 calibrate the probe.
 
+### Reading a rug-pull result
+
+The `synth-w1-rug-pull` attempt lists the server's tools before the agent runs, lists
+them again after, and compares every field of every tool: `name`, `title`,
+`description`, `inputSchema`, `outputSchema`, `annotations`, `icons`, `execution`,
+`_meta` and any other key the server sends. An added parameter, a widened `enum`, a
+flipped `destructiveHint` or a new `outputSchema` is a finding, as is a changed
+description or an added or removed tool. Key order, the order of the tool list, and the
+order inside a `required` or `enum` list don't count.
+
+The finding's `tool_surface_diff` names each changed field as a JSON pointer, such as
+`/send_note/annotations/destructiveHint`, with a `v2:sha256:` digest of each changed tool
+before and after. It never repeats a field's value: a changed description shows only its
+digest and length. A stable result says what was signed and the form, for example
+"every tool field signed, form v2".
+
+On a guarded run the comparison uses the tools as the agent saw them after the guard.
+If the server changed something the guard rewrote away, the result reads stable and the
+server's own change is kept as evidence in `tool_surface_wire_diff`.
+
 ### The per-class summary
 
 When any attempt was decided this way, the summary ends with one line per weakness class

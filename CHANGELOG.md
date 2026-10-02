@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mylonite validate`, the command that actually records fixtures; it used to
   send you back to `mylonite generate`, which only emits the test file and
   leaves `fixtures/` empty.
+- **The rug-pull check now catches a change to any tool field, not just the
+  description.** Before, a server that added a parameter, widened an `enum`, flipped
+  `destructiveHint` or `readOnlyHint`, or changed `title`, `outputSchema`, `icons`,
+  `_meta` or a vendor key between two `tools/list` calls read "stable, no rug-pull". The
+  check now signs every field of every tool in a
+  canonical form (sorted keys, `required` and `enum` as sets, `$ref` never fetched), with
+  a versioned `v2:sha256:` digest. The finding's `tool_surface_diff` names each changed
+  field as a JSON pointer, such as `/send_note/annotations/destructiveHint`, and never
+  repeats field values. A stable result now says what it signed. The guarded run compares
+  the tools as the agent saw them after the guard, and the guard keeps a tool's
+  annotations when it rewrites its description. See "Reading a rug-pull result" in
+  `docs/reading-results.md`.
 
 ### Added
 

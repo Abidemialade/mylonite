@@ -116,8 +116,10 @@ surface as unknown rather than clean, falling through to the LLM judge.
   already-poisoned text and match it. So `make_control("W1")` sanitizes **and** pins.)
 - **Rug-pull (dynamic)** — the server serves benign descriptions, then mutates them (or
   adds a tool) after a few calls. The planner lists tools once, so Mylonite **re-lists
-  after the planner runs** and diffs the surface; `tool_surface_mutated_mid_session`
-  fires deterministically on any change. The mutation itself is the finding — a
+  after the planner runs** and diffs every field of every tool (schemas, annotations,
+  title, output schema and metadata, not just the description);
+  `tool_surface_mutated_mid_session` fires deterministically on any change and names the
+  changed fields (see [Reading a rug-pull result](reading-results.md#reading-a-rug-pull-result)). The mutation itself is the finding — a
   supply-chain attack on the agent — and the pin refuses the mutated tool. If that
   second listing fails or times out, the attempt reads NOT TESTED (`MYL-INC-009`),
   never as a stable surface.
