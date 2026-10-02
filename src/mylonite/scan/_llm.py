@@ -28,11 +28,14 @@ ad-hoc tests — but no budget enforcement happens.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
 import logging
+import os
 import threading
+import time
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -97,6 +100,190 @@ def fence(*parts: str) -> str:
 
 class BudgetExceededError(RuntimeError):
     """Raised when an LLM call would push the active counter over its cap."""
+
+
+# --- The hard request ceiling --------------------------------------------------
+#
+# ``--max-llm-calls`` is a per-scan planning budget: it counts one per logical
+# call, keeps a per-seed floor (so it can be overshot by design), and does not
+# reach validation at all. The ceiling below is the hard one. It is process-wide
+# (one counter for every scan, validation and gate step this process runs),
+# counts every request actually sent to a provider, retries included, and never
+# lets request N+1 out of the door.
+#
+# Why Mylonite owns the retries while a ceiling is set: LiteLLM turns
+# ``num_retries`` into the provider SDK's own ``max_retries`` (the OpenAI SDK
+# retries inside one LiteLLM call) as well as its wrapper-level retry loop. A
+# LiteLLM callback fires once per LiteLLM attempt and never sees the SDK's
+# internal retries, so counting there can under-count. Sending
+# ``num_retries=0, max_retries=0`` and looping here, charging the ceiling before
+# every send, cannot. With no ceiling set, call kwargs pass through untouched
+# and LiteLLM retries exactly as before.
+
+#: The env var that sets the ceiling. ``mylonite --max-llm-requests N`` sets the
+#: same ceiling for one invocation and wins over the variable.
+REQUEST_CEILING_ENV: Final = "MYLONITE_MAX_LLM_REQUESTS"
+
+#: Upper bound on one backoff sleep between retries, in seconds.
+_MAX_RETRY_BACKOFF_S: Final = 8.0
+
+
+class InvalidRequestCeilingError(ValueError):
+    """The ceiling value is not a whole number of at least 1."""
+
+
+class LLMRequestCeilingError(BudgetExceededError):
+    """Raised before a request that would go over the hard request ceiling.
+
+    A :class:`BudgetExceededError`, so every existing budget handler aborts the
+    run as ``budget_exceeded`` (exit ``3``) instead of reading it as a fault.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(request_ceiling_message(limit))
+
+
+def request_ceiling_message(limit: int) -> str:
+    """The one line that names the ceiling and what to do about it."""
+    return (
+        f"LLM request ceiling of {limit} reached ({REQUEST_CEILING_ENV} or "
+        "--max-llm-requests); no further LLM requests were sent and the run is "
+        "NOT TESTED. Raise the ceiling and re-run."
+    )
+
+
+def parse_request_ceiling(raw: str) -> int:
+    """Parse a ceiling value; raise :class:`InvalidRequestCeilingError` if bad."""
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        value = 0
+    if value < 1:
+        msg = f"{REQUEST_CEILING_ENV} must be a whole number of at least 1, got {raw!r}"
+        raise InvalidRequestCeilingError(msg)
+    return value
+
+
+@dataclass
+class _RequestCeiling:
+    explicit: int | None = None
+    sent: int = 0
+    hit: int | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+
+_CEILING = _RequestCeiling()
+
+
+def configure_request_ceiling(limit: int | None) -> None:
+    """Set the ceiling for this process; ``None`` falls back to the env var."""
+    if limit is not None and limit < 1:
+        raise InvalidRequestCeilingError(f"the request ceiling must be at least 1, got {limit}")
+    _CEILING.explicit = limit
+
+
+def request_ceiling() -> int | None:
+    """The ceiling in force, or ``None`` when there is none."""
+    if _CEILING.explicit is not None:
+        return _CEILING.explicit
+    raw = os.environ.get(REQUEST_CEILING_ENV, "").strip()
+    return parse_request_ceiling(raw) if raw else None
+
+
+def requests_sent() -> int:
+    """How many provider requests this process has sent, retries included."""
+    return _CEILING.sent
+
+
+def request_ceiling_hit() -> int | None:
+    """The ceiling that refused a request in this process, or ``None``."""
+    return _CEILING.hit
+
+
+def reset_request_ceiling() -> None:
+    """Forget the configured ceiling, the count and any trip. For tests."""
+    with _CEILING.lock:
+        _CEILING.explicit = None
+        _CEILING.sent = 0
+        _CEILING.hit = None
+
+
+def _charge_request() -> None:
+    """Count one provider request; refuse it if the ceiling is spent.
+
+    Sticky: once one request is refused, every later one is too, so a handler
+    that swallows the first refusal cannot let the run carry on spending.
+    """
+    limit = request_ceiling()
+    with _CEILING.lock:
+        if limit is not None and (_CEILING.hit is not None or _CEILING.sent >= limit):
+            _CEILING.hit = limit
+            raise LLMRequestCeilingError(limit)
+        _CEILING.sent += 1
+
+
+def _refuse_if_spent() -> None:
+    """Refuse a call outright, before it is counted as a call, once the ceiling
+    has nothing left. Keeps the spend line honest: a refused call never ran."""
+    limit = request_ceiling()
+    if limit is None:
+        return
+    with _CEILING.lock:
+        if _CEILING.hit is not None or _CEILING.sent >= limit:
+            _CEILING.hit = limit
+            raise LLMRequestCeilingError(limit)
+
+
+def _send_plan(call_kwargs: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """The kwargs to send and how many attempts Mylonite itself may make."""
+    if request_ceiling() is None:
+        return call_kwargs, 1
+    retries = call_kwargs.get("num_retries") or 0
+    attempts = 1 + max(0, int(retries))
+    return {**call_kwargs, "num_retries": 0, "max_retries": 0}, attempts
+
+
+def _retryable(exc: BaseException, model: str) -> bool:
+    """True when a failed send may succeed on another try (not auth/tls/...)."""
+    return _failure_category(exc, model) not in _NON_RECOVERABLE_CATEGORIES
+
+
+def _retry_backoff_s(attempt: int) -> float:
+    return float(min(_MAX_RETRY_BACKOFF_S, 0.5 * 2**attempt))
+
+
+#: Indirections so tests can skip the wait between retries.
+_sleep = time.sleep
+_async_sleep = asyncio.sleep
+
+
+def _send(fn: CompletionFn, call_kwargs: dict[str, Any], *, model: str) -> Any:
+    """Send one completion, charging the ceiling for every attempt."""
+    kwargs, attempts = _send_plan(call_kwargs)
+    for attempt in range(attempts):
+        _charge_request()
+        try:
+            return fn(**kwargs)
+        except Exception as exc:
+            if attempt + 1 >= attempts or not _retryable(exc, model):
+                raise
+            _sleep(_retry_backoff_s(attempt))
+    raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover
+
+
+async def _send_async(fn: AsyncCompletionFn, call_kwargs: dict[str, Any], *, model: str) -> Any:
+    """Async sibling of :func:`_send`."""
+    kwargs, attempts = _send_plan(call_kwargs)
+    for attempt in range(attempts):
+        _charge_request()
+        try:
+            return await fn(**kwargs)
+        except Exception as exc:
+            if attempt + 1 >= attempts or not _retryable(exc, model):
+                raise
+            await _async_sleep(_retry_backoff_s(attempt))
+    raise AssertionError("unreachable: the loop returns or raises")  # pragma: no cover
 
 
 #: Diagnosis categories (see ``diagnostics.classify_provider_error``) that will
@@ -775,6 +962,7 @@ def litellm_json_call(
     indefinitely; a caller under its own outer timeout can still override
     ``timeout_s`` tighter.
     """
+    _refuse_if_spent()
     _bump(caller)
     import litellm  # deferred: seconds to import; the keyless gate path never needs it
 
@@ -799,7 +987,9 @@ def litellm_json_call(
     if response_format is not None:
         call_kwargs["response_format"] = response_format
     try:
-        response = fn(**call_kwargs)
+        response = _send(fn, call_kwargs, model=model)
+    except BudgetExceededError:
+        raise  # the request ceiling: a decision, never a provider fault
     except Exception as exc:
         return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
@@ -824,6 +1014,7 @@ async def litellm_json_call_async(
     Passes an explicit ``timeout`` on every call (DCR-0018) — see
     ``litellm_json_call``'s docstring.
     """
+    _refuse_if_spent()
     _bump(caller)
     import litellm  # deferred: seconds to import; the keyless gate path never needs it
 
@@ -844,7 +1035,9 @@ async def litellm_json_call_async(
     if response_format is not None:
         call_kwargs["response_format"] = response_format
     try:
-        response = await fn(**call_kwargs)
+        response = await _send_async(fn, call_kwargs, model=model)
+    except BudgetExceededError:
+        raise  # the request ceiling: a decision, never a provider fault
     except Exception as exc:
         return _classify_or_swallow(exc, model=model, caller=caller, fallback=fallback)
     _mark_success()
@@ -901,6 +1094,7 @@ async def litellm_tool_call_async(
     ``TargetDescriptor`` (what attack modules reason over) is never touched —
     see ``_sanitised_tools``'s docstring.
     """
+    _refuse_if_spent()
     _bump(caller)
     import litellm  # deferred: seconds to import; the keyless gate path never needs it
 
@@ -913,7 +1107,9 @@ async def litellm_tool_call_async(
         call_kwargs["tools"] = _sanitised_tools(tools, model)
         call_kwargs["tool_choice"] = tool_choice or "auto"
     try:
-        response = await fn(**call_kwargs)
+        response = await _send_async(fn, call_kwargs, model=model)
+    except BudgetExceededError:
+        raise  # the request ceiling: a decision, never a provider fault
     except Exception as exc:
         _mark_failure(_failure_category(exc, model), model)
         raise
@@ -946,6 +1142,7 @@ def litellm_text_call(
     mitigation enrichment is opportunistic and, per its own docstring, must
     never break PR-body assembly.
     """
+    _refuse_if_spent()
     _bump(caller)
     import litellm  # deferred: seconds to import; the keyless gate path never needs it
 
@@ -959,7 +1156,9 @@ def litellm_text_call(
     if timeout_s is not None:
         call_kwargs["timeout"] = timeout_s
     try:
-        response = fn(**call_kwargs)
+        response = _send(fn, call_kwargs, model=model)
+    except BudgetExceededError:
+        raise  # the request ceiling: a decision, never a provider fault
     except Exception as exc:
         logger.info("%s: LiteLLM completion raised; enrichment skipped", caller)
         _mark_failure(_failure_category(exc, model), model)

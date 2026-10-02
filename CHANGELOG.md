@@ -104,6 +104,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a hand-added `@pytest.mark.xfail` still counts as a skip).
   The testkit signature snapshot gains `pending_fix`. See "A finding you
   haven't fixed yet" in `docs/ci-gating.md`.
+- **A hard spend limit: `MYLONITE_MAX_LLM_REQUESTS` (or `mylonite --max-llm-requests N`).**
+  One ceiling for the whole run counts every LLM request sent to a provider,
+  retries included, across scan, validation and gate, and never sends one past
+  the limit. Before, the only budget was `--max-llm-calls`, which bounds the scan
+  phase alone, keeps a per-seed floor, and skips provider retries, so one gate
+  run could make several hundred requests. Hitting the ceiling stops the run with
+  exit `3` and one `MYL-ABT-001` line naming the limit; the run reads NOT TESTED,
+  never clean, even if a step further in had swallowed the stop. While a ceiling is
+  set, Mylonite makes the provider retries itself so each one is counted. With
+  no ceiling set, nothing changes. The new root option changes the CLI
+  command-tree snapshot.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and
