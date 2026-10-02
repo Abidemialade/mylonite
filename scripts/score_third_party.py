@@ -19,18 +19,30 @@ one cell verdict.
 Classification, in order of precedence
 ---------------------------------------
 1. ``PRODUCT_DEFECT`` -- the run cannot be trusted as a clean result.
-   **Any Python traceback anywhere in the captured log wins this
-   classification outright**, before anything else is even considered:
-   Mylonite's own code is designed to catch and cleanly report provider and
-   config errors (``aborted``, ``classify_provider_error``), so a raw
-   traceback leaking to stdout means something Mylonite did not anticipate,
-   regardless of what the traceback's text happens to contain. The same
-   classification also covers: a missing/partial report with no positively-
-   evidenced infrastructure signature in the log; a scan whose attempts
-   include one that is neither ``finding`` nor ``no_finding`` and carries NO
-   reason code anywhere (report or log), alongside zero findings; and an
-   aborted or never-exercised scan with no reason code anywhere. Per the
-   prereg, PRODUCT_DEFECT is NEVER counted toward the N=3 bar and is NEVER
+   **A Python traceback with at least one ``mylonite`` stack frame anywhere
+   in the captured log wins this classification outright**, before anything
+   else is even considered: Mylonite's own code is designed to catch and
+   cleanly report provider and config errors (``aborted``,
+   ``classify_provider_error``), so a raw traceback FROM MYLONITE'S OWN CODE
+   leaking to stdout means something it did not anticipate, regardless of
+   what the traceback's text happens to contain. A traceback with NO
+   ``mylonite`` frame at all -- the target server's own crash -- is target
+   noise, not a Mylonite defect: the stdio adapter spawns each target server
+   without separating its stderr from Mylonite's own
+   (``_session_adapter.py``'s ``stdio_client`` call carries no ``errlog``),
+   so a third-party server's own traceback (e.g. on shutdown, or a tool
+   error) lands in the same captured log. Properly separating the two
+   streams needs a ``src/mylonite`` change (passing ``errlog=`` through to
+   ``stdio_client``) that this harness does not make; filtering by stack
+   frame here is the workaround that needs none. A target-only traceback is
+   recorded (``target_noise_traceback: true`` in the output) but never
+   blocks the cell. The PRODUCT_DEFECT classification also covers: a
+   missing/partial report with no positively-evidenced infrastructure
+   signature in the log; a scan whose attempts include one that is neither
+   ``finding`` nor ``no_finding`` and carries NO reason code anywhere
+   (report or log), alongside zero findings; and an aborted or
+   never-exercised scan with no reason code anywhere. Per the prereg,
+   PRODUCT_DEFECT is NEVER counted toward the N=3 bar and is NEVER
    auto-re-run -- it is logged as a product issue instead.
 2. ``INVALID`` -- the run directory is missing or unreadable AND the
    captured log carries a positively-evidenced infrastructure signature (an
@@ -107,9 +119,33 @@ _REASON_CODE_RE = re.compile(r"MYL-[A-Z]+-\d+")
 #: explained.
 _JUDGED_OUTCOMES = frozenset({"finding", "no_finding"})
 
-#: A raw Python traceback anywhere in the log overrides every other
-#: classification -- see the module docstring's point #1.
+#: A raw Python traceback with a mylonite stack frame anywhere in the log
+#: overrides every other classification -- see the module docstring's
+#: point #1. A traceback block runs from this header through every
+#: subsequent INDENTED line (the ``File "..."``/code-context pairs) up to
+#: and including the one final un-indented exception-type line.
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
+_TRACEBACK_BLOCK_RE = re.compile(re.escape(_TRACEBACK_MARKER) + r"\n(?:[ \t].*\n)*\S.*")
+
+#: Matched against each traceback BLOCK's own text (not the whole log) to
+#: tell "Mylonite's own code did not anticipate this" apart from "the
+#: target server crashed, and the stdio adapter does not separate its
+#: stderr from ours" -- see the module docstring's point #1. A simple
+#: substring check on a `File "..."` frame's path, not anchored further:
+#: Mylonite's own installed location always contains this component,
+#: whether run from a wheel's site-packages or an editable checkout.
+_MYLONITE_FRAME_MARKER = "mylonite"
+
+
+def _mylonite_traceback_present(log_text: str) -> bool:
+    """True when at least one traceback block carries a ``mylonite`` stack
+    frame -- as opposed to one raised entirely inside a spawned third-party
+    server, whose own stderr the stdio adapter does not currently separate
+    from Mylonite's own captured output."""
+    return any(
+        _MYLONITE_FRAME_MARKER in match.group(0) for match in _TRACEBACK_BLOCK_RE.finditer(log_text)
+    )
+
 
 #: Anchored provider/network exception CLASS NAMES (LiteLLM's own typed
 #: hierarchy, or the httpx/socket exceptions it wraps) -- matched as whole
@@ -213,17 +249,33 @@ def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object
     if run_log is not None and run_log.is_file():
         log_text = run_log.read_text(encoding="utf-8", errors="replace")
 
-    # Rule #1, checked before anything else: any traceback anywhere is a
-    # product defect, full stop -- see the module docstring.
-    if _TRACEBACK_MARKER in log_text:
-        return {
-            "classification": PRODUCT_DEFECT,
-            "reason": (
-                "a Python traceback is present in run.log -- investigate as a product "
-                "crash, never auto-re-run"
-            ),
-        }
+    # Rule #1, checked before anything else: a traceback with a mylonite
+    # stack frame anywhere is a product defect, full stop -- see the module
+    # docstring. A traceback with NO mylonite frame (the target server's own
+    # crash, inseparable from our log without a src/ change) is recorded,
+    # not blocked -- it falls through to ordinary classification below.
+    has_traceback = _TRACEBACK_MARKER in log_text
+    target_noise_traceback = False
+    if has_traceback:
+        if _mylonite_traceback_present(log_text):
+            return {
+                "classification": PRODUCT_DEFECT,
+                "reason": (
+                    "a Python traceback with a mylonite stack frame is present in "
+                    "run.log -- investigate as a product crash, never auto-re-run"
+                ),
+            }
+        target_noise_traceback = True
 
+    result = _score_run_normally(run_dir, log_text)
+    if target_noise_traceback:
+        result["target_noise_traceback"] = True
+    return result
+
+
+def _score_run_normally(run_dir: Path, log_text: str) -> dict[str, object]:
+    """Every classification branch except rule #1 (the traceback check,
+    handled by the caller, :func:`score_run`, before this is reached)."""
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
 

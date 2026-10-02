@@ -78,29 +78,91 @@ _DIFFERENTIAL_FAILED = {
     "report_only": False,
 }
 
-# --- rule #1: a traceback anywhere wins, before anything else -----------------
+# --- rule #1: a MYLONITE traceback wins; a target-only one is noise ----------
 
 
-def test_a_traceback_overrides_an_otherwise_kept_report(tmp_path: Path) -> None:
-    """Literal reading of the rule: ANY traceback anywhere is a product
-    defect, even alongside an otherwise-valid KEPT validation_report.json."""
+def _mylonite_traceback(exc_line: str) -> str:
+    """A realistic traceback block with a mylonite stack frame."""
+    return (
+        "Traceback (most recent call last):\n"
+        '  File "/opt/venv/lib/python3.12/site-packages/mylonite/scan/engine.py", '
+        "line 42, in run\n"
+        "    raise RuntimeError\n"
+        f"{exc_line}\n"
+    )
+
+
+def _target_only_traceback(exc_line: str) -> str:
+    """A realistic traceback block with no mylonite frame at all -- the
+    shape a spawned third-party server's own stderr takes, inherited into
+    the same log (see the module docstring's point #1)."""
+    return (
+        "Traceback (most recent call last):\n"
+        '  File "/opt/venv/lib/python3.12/site-packages/redis_mcp_server/main.py", '
+        "line 7, in <module>\n"
+        "    serve()\n"
+        f"{exc_line}\n"
+    )
+
+
+def test_a_mylonite_traceback_overrides_an_otherwise_kept_report(tmp_path: Path) -> None:
+    """A traceback WITH a mylonite stack frame is a product defect, even
+    alongside an otherwise-valid KEPT validation_report.json."""
     run_dir = tmp_path / "run1"
     _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
-    log = _write_log(tmp_path, "Traceback (most recent call last):\nValueError: boom\n")
+    log = _write_log(tmp_path, _mylonite_traceback("ValueError: boom"))
     result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+    assert "target_noise_traceback" not in result
+
+
+def test_a_mylonite_traceback_overrides_a_missing_report_even_with_an_infra_class_name(
+    tmp_path: Path,
+) -> None:
+    """A mylonite traceback wins over the narrower infra-signature check too
+    -- PRODUCT_DEFECT, not INVALID, when both are present."""
+    log = _write_log(tmp_path, _mylonite_traceback("litellm.exceptions.RateLimitError: boom"))
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
-def test_a_traceback_overrides_a_missing_report_even_with_an_infra_class_name(
+def test_a_target_only_traceback_is_noise_not_a_product_defect(tmp_path: Path) -> None:
+    """The exact bug this round's review caught: a third-party server's own
+    traceback (no mylonite frame anywhere) must not block the cell -- it is
+    recorded as target noise and scoring falls through normally."""
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    log = _write_log(tmp_path, _target_only_traceback("ConnectionResetError: peer closed"))
+    result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.KEPT
+    assert result["target_noise_traceback"] is True
+
+
+def test_a_target_only_traceback_with_no_report_still_checks_infra_signatures(
     tmp_path: Path,
 ) -> None:
-    """A traceback wins over the narrower infra-signature check too --
-    PRODUCT_DEFECT, not INVALID, when both are present."""
+    """With no report at all, a target-only traceback falls through to the
+    missing-report path, which can still read INVALID if an infra signature
+    is independently present."""
+    log = _write_log(tmp_path, _target_only_traceback("socket.gaierror: boom"))
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    assert result["classification"] == scorer.INVALID
+    assert result["target_noise_traceback"] is True
+
+
+def test_a_mylonite_traceback_wins_even_alongside_a_target_only_one(tmp_path: Path) -> None:
+    """A log with both a target-only traceback (e.g. from an earlier step)
+    and a genuine mylonite one -- the mylonite one still wins, even though
+    it isn't the first traceback block in the log."""
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
     log = _write_log(
         tmp_path,
-        "Traceback (most recent call last):\nlitellm.exceptions.RateLimitError: boom\n",
+        _target_only_traceback("ConnectionResetError: peer closed")
+        + "\n"
+        + _mylonite_traceback("RuntimeError: internal"),
     )
-    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    result = scorer.score_run(run_dir, run_log=log)
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
@@ -109,6 +171,7 @@ def test_no_log_at_all_means_no_traceback_check_blocks_normal_scoring(tmp_path: 
     _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
     result = scorer.score_run(run_dir)
     assert result["classification"] == scorer.KEPT
+    assert "target_noise_traceback" not in result
 
 
 # --- score_run: the real journey's validation_report.json ---------------------
@@ -202,7 +265,7 @@ def test_a_real_generate_crash_is_a_product_defect_not_found_unvalidated(tmp_pat
     (run_dir / "exploit_synth-w2-seed.json").write_text(
         json.dumps(_exploit_record()), encoding="utf-8"
     )
-    log = _write_log(tmp_path, "Traceback (most recent call last):\nKeyError: 'oops'\n")
+    log = _write_log(tmp_path, _mylonite_traceback("KeyError: 'oops'"))
     result = scorer.score_run(run_dir, run_log=log)
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
