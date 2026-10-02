@@ -96,3 +96,49 @@ def test_an_exploit_for_an_unknown_seed_fails_closed(monkeypatch: pytest.MonkeyP
 
     assert report.kept is False
     assert _outcome(report, "differential").passed is False
+
+
+def test_a_custom_target_that_never_comes_up_raises_target_launch_error() -> None:
+    """A run whose target cannot even be described is not evidence either way:
+    stop with a named error rather than report the attack "did not reproduce"."""
+    from tests.plugins.test_differential_validator import (
+        _cust_completion,
+        _custom_exploit,
+        _FakeCustomAdapter,
+    )
+
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+    from mylonite.plugins._reference.reference_validator import TargetLaunchError
+
+    class _DeadAdapter(_FakeCustomAdapter):
+        async def describe(self) -> Any:
+            raise OSError("server command not found")
+
+    validator = DifferentialValidator(
+        iterations=2, vuln_threshold=2, completion_fn=_cust_completion, run_build=False
+    )
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+
+    with pytest.raises(TargetLaunchError):
+        validator.validate(test, _DeadAdapter("true"), ReferenceVulnerableOracle())
+
+
+def test_a_custom_adapter_factory_that_raises_is_a_target_launch_error() -> None:
+    from tests.plugins.test_differential_validator import _cust_completion, _custom_exploit
+
+    from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
+    from mylonite.plugins._reference.reference_validator import TargetLaunchError
+
+    def _factory() -> Any:
+        raise FileNotFoundError("no such server binary")
+
+    validator = DifferentialValidator(
+        iterations=1,
+        completion_fn=_cust_completion,
+        run_build=False,
+        target_adapter_factory=_factory,
+    )
+    test = ReferencePytestGenerator().emit(_custom_exploit())
+
+    with pytest.raises(TargetLaunchError):
+        validator.validate(test, object(), ReferenceVulnerableOracle())  # type: ignore[arg-type]

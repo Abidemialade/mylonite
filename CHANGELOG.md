@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twin's run is now cut off at the limit and counts as no verdict, so a
   cut-off run can never help a test get kept. The option's help text changed,
   so the command-tree snapshot changed.
+- **`validate` stops with one line, not a traceback, when it cannot reach a
+  verdict.** A spent LLM call budget now exits `3` (`MYL-ABT-001`); it used to
+  print a traceback and exit `1`, the findings code. A custom target that never
+  comes up now exits `2` (`MYL-ABT-006`) after the first run, instead of
+  running every iteration and reporting that the attack did not reproduce. The
+  hard request ceiling still exits `3` with its own single line.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after

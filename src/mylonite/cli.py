@@ -2236,6 +2236,7 @@ def validate(
             target_file = candidate
             echo_err(f"Using target: {candidate} (co-located with the test)")
 
+    from mylonite.commands.validate_errors import validate_run_errors
     from mylonite.scan._llm import usage_tally
     from mylonite.scan.artefacts import spend_summary
 
@@ -2250,7 +2251,7 @@ def validate(
         # authorize check would still mean an unauthorized `validate` burns a
         # live LLM call before being rejected.
         spend_started = time.monotonic()
-        with usage_tally() as spend_tally:
+        with usage_tally() as spend_tally, validate_run_errors():
             report = _validate_custom(
                 generated,
                 target_file,
@@ -2331,7 +2332,11 @@ def validate(
         from mylonite.scan._llm import llm_scope
 
         spend_started = time.monotonic()
-        with llm_scope(policy=effective_policy), usage_tally() as spend_tally:
+        with (
+            llm_scope(policy=effective_policy),
+            usage_tally() as spend_tally,
+            validate_run_errors(),
+        ):
             report = validator.validate(
                 generated,
                 ReferenceVulnerableOracle().adapter(),
