@@ -536,11 +536,24 @@ def _require_model_chosen_or_exit(model: str | None) -> str:
 
 
 def _validate_model_string(model: str) -> None:
-    """Reject obviously-malformed model ids before they reach LiteLLM."""
+    """Reject obviously-malformed model ids before they reach LiteLLM.
+
+    The examples in the message are drawn from the provider registry at
+    call time, never a literal written here — the earlier version of this
+    message showed one provider's bare, unprefixed model id, which is
+    exactly the form :mod:`mylonite.scan.model_ref` warns may fail to
+    route, and a single-provider example reads as "this is the provider to
+    use."
+    """
     if not model or not model.strip() or model != model.strip():
+        from mylonite.providers.registry import PROVIDERS
+
+        examples = ", ".join(
+            info.example_model for info in PROVIDERS.values() if info.example_model
+        )
         echo_err(
             f"invalid --model {model!r}: must be a non-empty model id with no "
-            "surrounding whitespace, e.g. claude-sonnet-4-6 or claude-haiku-4-5."  # allow-literal: example
+            f"surrounding whitespace, prefixed with its provider (e.g. {examples})."
         )
         raise typer.Exit(code=EXIT_CONFIG)
 
