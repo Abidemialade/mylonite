@@ -38,6 +38,12 @@ def _write_validation_report(run_dir: Path, **over: object) -> None:
     (run_dir / "validation_report.json").write_text(json.dumps(base), encoding="utf-8")
 
 
+def _write_log(tmp_path: Path, text: str, name: str = "run.log") -> Path:
+    log = tmp_path / name
+    log.write_text(text, encoding="utf-8")
+    return log
+
+
 def _exploit_record(pattern_id: str = "synth-w2-seed") -> dict:
     return {
         "target_id": "tpv-server-memory",
@@ -71,6 +77,39 @@ _DIFFERENTIAL_FAILED = {
     "detail": "vulnerable fired 0/3",
     "report_only": False,
 }
+
+# --- rule #1: a traceback anywhere wins, before anything else -----------------
+
+
+def test_a_traceback_overrides_an_otherwise_kept_report(tmp_path: Path) -> None:
+    """Literal reading of the rule: ANY traceback anywhere is a product
+    defect, even alongside an otherwise-valid KEPT validation_report.json."""
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    log = _write_log(tmp_path, "Traceback (most recent call last):\nValueError: boom\n")
+    result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
+def test_a_traceback_overrides_a_missing_report_even_with_an_infra_class_name(
+    tmp_path: Path,
+) -> None:
+    """A traceback wins over the narrower infra-signature check too --
+    PRODUCT_DEFECT, not INVALID, when both are present."""
+    log = _write_log(
+        tmp_path,
+        "Traceback (most recent call last):\nlitellm.exceptions.RateLimitError: boom\n",
+    )
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
+def test_no_log_at_all_means_no_traceback_check_blocks_normal_scoring(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.KEPT
+
 
 # --- score_run: the real journey's validation_report.json ---------------------
 
@@ -110,14 +149,12 @@ def test_a_rejected_report_is_not_kept_with_a_detail(tmp_path: Path) -> None:
     assert "0/3" in result["detail"]
 
 
-def test_a_finding_outcome_with_no_exploit_file_and_no_infra_signature_is_a_product_defect(
+def test_a_finding_outcome_with_no_exploit_file_and_no_traceback_is_a_product_defect(
     tmp_path: Path,
 ) -> None:
     """Reuses `verification._scan_dir`'s existing guard: a partial copy (a
     scan_report.json claiming a finding, with no exploit_*.json beside it)
-    must never silently read as a clean result -- and, absent any infra
-    evidence in the log, it is a product defect (not re-runnable), never
-    the re-runnable INVALID case."""
+    must never silently read as a clean result."""
     run_dir = tmp_path / "run1"
     _write_scan_report(
         run_dir,
@@ -149,12 +186,49 @@ def test_a_finding_with_a_valid_exploit_file_and_no_validation_is_unvalidated(
     assert result["weakness_classes"] == ["W2"]
 
 
-def test_aborted_scan_is_not_tested_with_the_abort_reason(tmp_path: Path) -> None:
+def test_a_real_generate_crash_is_a_product_defect_not_found_unvalidated(tmp_path: Path) -> None:
+    """Hard check 4: a real generate crash (a traceback in the log) on a
+    scan that found something must not be scored as a candidate -- the
+    top-level traceback rule catches this before FOUND_UNVALIDATED is ever
+    considered."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        findings_count=1,
+        attempts=[
+            {"seed_id": "synth-w2-seed", "pattern_id": "synth-w2-seed", "outcome": "finding"}
+        ],
+    )
+    (run_dir / "exploit_synth-w2-seed.json").write_text(
+        json.dumps(_exploit_record()), encoding="utf-8"
+    )
+    log = _write_log(tmp_path, "Traceback (most recent call last):\nKeyError: 'oops'\n")
+    result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
+# --- NOT_TESTED requires a reason code somewhere (report OR log) --------------
+
+
+def test_aborted_scan_with_a_reason_code_only_in_the_log_is_not_tested(tmp_path: Path) -> None:
+    """The abort's MYL-ABT-* code is stamped into the printed console line
+    (reason_codes.tag), not into scan_report.json -- so it is findable only
+    in run.log, and the scorer must look there."""
     run_dir = tmp_path / "run1"
     _write_scan_report(run_dir, aborted="budget_exceeded")
-    result = scorer.score_run(run_dir)
+    log = _write_log(tmp_path, "scan aborted [MYL-ABT-001]: LLM call budget exceeded\n")
+    result = scorer.score_run(run_dir, run_log=log)
     assert result["classification"] == scorer.NOT_TESTED
-    assert "budget_exceeded" in result["reason"]
+    assert "MYL-ABT-001" in result["reason_codes"]
+
+
+def test_aborted_scan_with_no_reason_code_anywhere_is_a_product_defect(tmp_path: Path) -> None:
+    """NOT_TESTED requires a reason code; its absence is a product defect,
+    never a silent, code-free NOT_TESTED."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir, aborted="budget_exceeded")
+    result = scorer.score_run(run_dir)  # no run_log at all
+    assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
 def test_every_skip_explained_with_a_reason_code_is_not_tested(tmp_path: Path) -> None:
@@ -175,6 +249,16 @@ def test_every_skip_explained_with_a_reason_code_is_not_tested(tmp_path: Path) -
     assert "MYL-NT-016" in result["reason_codes"]
 
 
+def test_never_exercised_with_no_reason_code_anywhere_is_a_product_defect(tmp_path: Path) -> None:
+    """Zero attempts at all (never exercised), and nothing anywhere names a
+    reason code -- hard check 3's "one with zero attempts" case. Must not
+    silently read as NOT_TESTED."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir, attempts=[])
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
 def test_exercised_with_zero_findings_and_no_unexplained_gap_is_a_clean_not_kept(
     tmp_path: Path,
 ) -> None:
@@ -190,9 +274,9 @@ def test_exercised_with_zero_findings_and_no_unexplained_gap_is_a_clean_not_kept
 def test_zero_findings_with_an_unexplained_gap_is_a_product_defect_not_a_clean_pass(
     tmp_path: Path,
 ) -> None:
-    """The exact bug the review caught: one legitimately-judged no_finding
-    attempt must not mask an UNEXPLAINED skip/error elsewhere in the same
-    run -- the whole run is a product defect, not a silent NOT_KEPT."""
+    """One legitimately-judged no_finding attempt must not mask an
+    UNEXPLAINED skip/error elsewhere in the same run -- the whole run is a
+    product defect, not a silent NOT_KEPT."""
     run_dir = tmp_path / "run1"
     _write_scan_report(
         run_dir,
@@ -206,28 +290,47 @@ def test_zero_findings_with_an_unexplained_gap_is_a_product_defect_not_a_clean_p
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
+# --- anchored infra patterns (never a bare "503" or "timeout") ----------------
+
+
 def test_missing_report_with_no_log_defaults_to_product_defect(tmp_path: Path) -> None:
     result = scorer.score_run(tmp_path / "does-not-exist")
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
-def test_missing_report_with_an_infra_signature_in_the_log_is_invalid(tmp_path: Path) -> None:
-    run_log = tmp_path / "run.log"
-    run_log.write_text("httpx.ConnectTimeout: connection refused\n", encoding="utf-8")
-    result = scorer.score_run(tmp_path / "does-not-exist", run_log=run_log)
+def test_missing_report_with_an_anchored_exception_class_name_is_invalid(tmp_path: Path) -> None:
+    log = _write_log(tmp_path, "httpx.ConnectTimeout: connection to api failed\n")
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
     assert result["classification"] == scorer.INVALID
 
 
-def test_missing_report_with_a_bare_traceback_and_no_infra_signature_is_still_a_product_defect(
-    tmp_path: Path,
-) -> None:
-    """A crash with no provider/network signature is the product's own bug,
-    not a flaky runner -- it must not read as the re-runnable INVALID case
-    just because *something* traceback-shaped is in the log."""
-    run_log = tmp_path / "run.log"
-    run_log.write_text("Traceback (most recent call last):\nValueError: boom\n", encoding="utf-8")
-    result = scorer.score_run(tmp_path / "does-not-exist", run_log=run_log)
+def test_missing_report_with_a_bare_503_in_a_token_count_is_not_invalid(tmp_path: Path) -> None:
+    """The exact false positive the review named: "503" inside an ordinary
+    token count ("1,503 in / ... out tokens") must never be read as an
+    HTTP 503 infra failure."""
+    log = _write_log(tmp_path, "llm: 1 calls | 1,503 in / 200 out tokens | 1.0s\n")
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
     assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
+def test_missing_report_with_a_bare_timeout_word_is_not_invalid(tmp_path: Path) -> None:
+    """A bare "timeout" substring (e.g. from --iteration-timeout help text or
+    config echo) must not be read as a network timeout."""
+    log = _write_log(tmp_path, "note: --iteration-timeout defaults to 90s for this target\n")
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+
+def test_missing_report_with_a_dns_failure_line_is_invalid(tmp_path: Path) -> None:
+    log = _write_log(tmp_path, "socket.gaierror: Temporary failure in name resolution\n")
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    assert result["classification"] == scorer.INVALID
+
+
+def test_missing_report_with_runner_shutdown_line_is_invalid(tmp_path: Path) -> None:
+    log = _write_log(tmp_path, "Error: The runner has received a shutdown signal.\n")
+    result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)
+    assert result["classification"] == scorer.INVALID
 
 
 # --- rollup -------------------------------------------------------------------
@@ -273,9 +376,7 @@ def test_rollup_refuses_the_wrong_n() -> None:
 
 def test_rollup_requires_the_same_reason_code_for_not_tested_to_agree() -> None:
     """Two NOT_TESTED runs for DIFFERENT reasons do not agree with each
-    other, even though both are literally classified NOT_TESTED -- the
-    prereg's "same reason code" rule, which the bare-classification rollup
-    used to ignore."""
+    other, even though both are literally classified NOT_TESTED."""
     scores = [
         _score(scorer.NOT_TESTED, reason_codes=["MYL-NT-016"]),
         _score(scorer.NOT_TESTED, reason_codes=["MYL-NT-016"]),
@@ -296,6 +397,21 @@ def test_rollup_three_different_not_tested_reasons_is_no_consensus() -> None:
     result = scorer.rollup(scores, bar_numerator=2, bar_denominator=3)
     assert result["met_bar"] is False
     assert result["result"] == "NO_CONSENSUS"
+
+
+def test_rollup_dedupes_repeated_reason_codes_before_comparing() -> None:
+    """A run that saw the same code twice must still agree with one that
+    saw it once -- duplicates in the list must not create a spurious
+    disagreement."""
+    scores = [
+        _score(scorer.NOT_TESTED, reason_codes=["MYL-NT-016", "MYL-NT-016"]),
+        _score(scorer.NOT_TESTED, reason_codes=["MYL-NT-016"]),
+        _score(scorer.NOT_TESTED, reason_codes=["MYL-NT-016"]),
+    ]
+    result = scorer.rollup(scores, bar_numerator=2, bar_denominator=3)
+    assert result["met_bar"] is True
+    assert result["result"] == scorer.NOT_TESTED
+    assert result["reason_codes"] == ["MYL-NT-016"]
 
 
 def test_cli_round_trips_score_then_rollup(tmp_path: Path) -> None:

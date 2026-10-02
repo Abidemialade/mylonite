@@ -6,7 +6,7 @@ Why this exists
 ``.github/workflows/third-party-campaign.yml`` runs Mylonite's own CLI
 against six systems it has never run against before (see
 ``verification/SOURCE.md`` and ``verification/PREREG_THIRD_PARTY_2026_10.md``).
-Each cell runs the real journey -- ``scan`` then ``generate --latest`` then
+Each cell runs the real journey -- ``scan`` then ``generate`` then
 ``validate`` -- so a ``validation_report.json`` is written next to the
 generated test REGARDLESS of whether the finding was kept (the standalone
 ``validate`` command always persists one; only ``gate``'s orchestrator skips
@@ -16,20 +16,30 @@ directory into a single classification the prereg's pass rule defines, and
 then combines N classifications (the N=3, >=2/3 bar for targets 1-3) into
 one cell verdict.
 
-Classification, in order
--------------------------
-1. ``PRODUCT_DEFECT`` -- the run cannot be trusted as a clean result AND
-   there is no evidence of an infrastructure cause: a missing/partial report
-   with no recognisable infra signature in the captured log, or a scan whose
-   attempts include one that is neither ``finding`` nor ``no_finding`` and
-   carries NO reason code, alongside zero findings. Per the prereg, this is
-   NEVER counted toward the N=3 bar and is NEVER auto-re-run -- re-running a
-   product crash as if it were a flaky runner would hide the bug this
-   campaign exists to surface. It is logged as a product issue instead.
+Classification, in order of precedence
+---------------------------------------
+1. ``PRODUCT_DEFECT`` -- the run cannot be trusted as a clean result.
+   **Any Python traceback anywhere in the captured log wins this
+   classification outright**, before anything else is even considered:
+   Mylonite's own code is designed to catch and cleanly report provider and
+   config errors (``aborted``, ``classify_provider_error``), so a raw
+   traceback leaking to stdout means something Mylonite did not anticipate,
+   regardless of what the traceback's text happens to contain. The same
+   classification also covers: a missing/partial report with no positively-
+   evidenced infrastructure signature in the log; a scan whose attempts
+   include one that is neither ``finding`` nor ``no_finding`` and carries NO
+   reason code anywhere (report or log), alongside zero findings; and an
+   aborted or never-exercised scan with no reason code anywhere. Per the
+   prereg, PRODUCT_DEFECT is NEVER counted toward the N=3 bar and is NEVER
+   auto-re-run -- it is logged as a product issue instead.
 2. ``INVALID`` -- the run directory is missing or unreadable AND the
-   captured log carries a recognised infrastructure signature (a runner
-   crash, a provider 5xx, a timeout). This is the ONLY classification a
-   re-run is allowed for.
+   captured log carries a positively-evidenced infrastructure signature (an
+   anchored provider/network exception class name, or a specific,
+   unambiguous line such as a DNS-resolution failure or a GitHub Actions
+   runner shutdown notice -- never a bare word like "timeout" or a bare
+   number like "503", both of which can appear in ordinary, non-error log
+   text, e.g. a token count). This is the ONLY classification a re-run is
+   allowed for.
 3. ``KEPT`` -- a ``validation_report.json`` exists and
    ``mylonite._verdict.verdict_label(report) == "KEPT"``. Reading the label,
    not the bare ``ValidationReport.kept`` boolean, matters: ``kept=True``
@@ -41,11 +51,17 @@ Classification, in order
    (a judged ``no_finding``, with every other attempt explained) and found
    nothing.
 5. ``FOUND_UNVALIDATED`` -- ``scan_report.json`` recorded a finding but no
-   ``validation_report.json`` sits beside it. Under never-keep-unproven this
-   is a candidate, never a verdict -- deliberately NOT folded into KEPT.
+   ``validation_report.json`` sits beside it (and no traceback was found --
+   see #1). Under never-keep-unproven this is a candidate, never a verdict
+   -- deliberately NOT folded into KEPT.
 6. ``NOT_TESTED`` -- no attempt reached a verdict at all (every attempt
-   skipped, not-applicable, or undecided), and every such attempt carries a
-   named reason code.
+   skipped, not-applicable, or undecided) or the scan aborted, AND a reason
+   code for it was found somewhere -- in an attempt's own text fields, or
+   printed to the captured log (the abort-reason codes, e.g.
+   ``MYL-ABT-001``, are stamped into the console line, not into
+   ``scan_report.json`` itself). NOT_TESTED REQUIRES a reason code; the
+   identical situation with none found is PRODUCT_DEFECT (#1), never a
+   silent, code-free NOT_TESTED.
 
 Usage
 -----
@@ -91,32 +107,46 @@ _REASON_CODE_RE = re.compile(r"MYL-[A-Z]+-\d+")
 #: explained.
 _JUDGED_OUTCOMES = frozenset({"finding", "no_finding"})
 
-#: Case-insensitive substrings in a captured run.log that indicate an
-#: infrastructure failure rather than a product defect -- the ONLY signal
-#: that makes a missing/partial report re-runnable (INVALID) rather than a
-#: logged product issue (PRODUCT_DEFECT). Deliberately narrow: an absent or
-#: ambiguous log defaults to PRODUCT_DEFECT, never to the re-runnable case.
-_INFRA_SIGNATURES: tuple[str, ...] = (
-    "connection reset",
-    "connection refused",
-    "temporary failure in name resolution",
-    "timed out",
-    "timeout",
-    "502 bad gateway",
-    "503",
-    "service unavailable",
-    "overloaded_error",
-    "rate_limit_error",
-    "internal server error",
-    "the runner has received a shutdown signal",
-    "lost communication with the server",
-)
-
+#: A raw Python traceback anywhere in the log overrides every other
+#: classification -- see the module docstring's point #1.
 _TRACEBACK_MARKER = "Traceback (most recent call last):"
 
+#: Anchored provider/network exception CLASS NAMES (LiteLLM's own typed
+#: hierarchy, or the httpx/socket exceptions it wraps) -- matched as whole
+#: words, never a bare status-code or generic-word substring. "503" matches
+#: a token count like "1,503"; "timeout" matches ordinary config text
+#: (`--iteration-timeout`); these class names do not.
+_INFRA_CLASS_RE = re.compile(
+    r"\b("
+    r"RateLimitError|APIConnectionError|ServiceUnavailableError|InternalServerError|"
+    r"APITimeoutError|ConnectTimeout|ReadTimeout|ConnectError|RemoteProtocolError|"
+    r"ConnectionResetError|ConnectionRefusedError|gaierror"
+    r")\b"
+)
 
-def _reason_codes(raw_report: dict) -> list[str]:
-    """Every ``MYL-...`` reason code mentioned anywhere in the attempts list."""
+#: Specific, unambiguous LINES (not bare words) that only ever appear for a
+#: genuine infrastructure failure.
+_INFRA_LINE_SIGNATURES: tuple[str, ...] = (
+    "temporary failure in name resolution",
+    "name or service not known",
+    "the runner has received a shutdown signal",
+)
+
+
+def _infra_signature_in(log_text: str) -> str | None:
+    match = _INFRA_CLASS_RE.search(log_text)
+    if match:
+        return match.group(1)
+    lowered = log_text.lower()
+    for line in _INFRA_LINE_SIGNATURES:
+        if line in lowered:
+            return line
+    return None
+
+
+def _reason_codes_in_attempts(raw_report: dict) -> list[str]:
+    """Every ``MYL-...`` reason code mentioned in the attempts list's own
+    text fields."""
     codes: list[str] = []
     for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
         if not isinstance(attempt, dict):
@@ -126,6 +156,12 @@ def _reason_codes(raw_report: dict) -> list[str]:
             if isinstance(text, str):
                 codes.extend(_REASON_CODE_RE.findall(text))
     return codes
+
+
+def _dedupe(codes: list[str]) -> list[str]:
+    """Sorted, de-duplicated -- two runs that each saw the SAME code twice
+    must still agree with a run that saw it once."""
+    return sorted(set(codes))
 
 
 def _unexplained_attempts(raw_report: dict) -> list[dict]:
@@ -147,73 +183,68 @@ def _unexplained_attempts(raw_report: dict) -> list[dict]:
     return unexplained
 
 
-def _infra_signature_in(log_text: str) -> str | None:
-    lowered = log_text.lower()
-    for signature in _INFRA_SIGNATURES:
-        if signature in lowered:
-            return signature
-    return None
-
-
-def _classify_missing_report(run_dir: Path, run_log: Path | None) -> dict[str, object]:
+def _classify_missing_report(run_dir: Path, log_text: str) -> dict[str, object]:
     """Decide PRODUCT_DEFECT vs INVALID when no report exists at all.
 
-    Defaults to PRODUCT_DEFECT -- an infra failure must be POSITIVELY
-    evidenced in the log, never assumed, since PRODUCT_DEFECT is the only
-    classification that keeps a real crash from being quietly re-run away.
+    Called only after the caller has already ruled out a traceback in
+    ``log_text`` (see :func:`score_run`). Defaults to PRODUCT_DEFECT -- an
+    infra failure must be POSITIVELY evidenced, never assumed, since
+    PRODUCT_DEFECT is the only classification that keeps a real crash from
+    being quietly re-run away.
     """
-    log_text = (
-        run_log.read_text(encoding="utf-8", errors="replace")
-        if run_log and run_log.is_file()
-        else ""
-    )
     signature = _infra_signature_in(log_text)
     if signature is not None:
         return {
             "classification": INVALID,
             "reason": f"{run_dir}: no report found; infra signature in run.log: {signature!r}",
         }
-    has_traceback = _TRACEBACK_MARKER in log_text
-    reason = (
-        f"{run_dir}: no scan_report.json or validation_report.json found, and no "
-        "recognised infrastructure signature in run.log"
-    )
-    if has_traceback:
-        reason += " (a Python traceback IS present -- investigate as a product crash)"
-    return {"classification": PRODUCT_DEFECT, "reason": reason}
+    return {
+        "classification": PRODUCT_DEFECT,
+        "reason": (
+            f"{run_dir}: no scan_report.json or validation_report.json found, and no "
+            "recognised infrastructure signature in run.log"
+        ),
+    }
 
 
 def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object]:
     """Classify one run directory per the prereg's pass rule."""
+    log_text = ""
+    if run_log is not None and run_log.is_file():
+        log_text = run_log.read_text(encoding="utf-8", errors="replace")
+
+    # Rule #1, checked before anything else: any traceback anywhere is a
+    # product defect, full stop -- see the module docstring.
+    if _TRACEBACK_MARKER in log_text:
+        return {
+            "classification": PRODUCT_DEFECT,
+            "reason": (
+                "a Python traceback is present in run.log -- investigate as a product "
+                "crash, never auto-re-run"
+            ),
+        }
+
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
 
     if not report_path.is_file() and not validation_path.is_file():
-        return _classify_missing_report(run_dir, run_log)
+        return _classify_missing_report(run_dir, log_text)
 
     scan_result = None
     if report_path.is_file():
         try:
             scan_result = load_scan_dir(run_dir)
         except ScanDirIntegrityError as exc:
-            # A partial copy (a finding with no exploit file) is untrustworthy,
-            # same reasoning as a missing report: evidenced infra cause only.
-            signature = None
-            if run_log is not None and run_log.is_file():
-                signature = _infra_signature_in(
-                    run_log.read_text(encoding="utf-8", errors="replace")
-                )
-            if signature is not None:
-                return {
-                    "classification": INVALID,
-                    "reason": f"{exc} (infra signature: {signature!r})",
-                }
+            # A partial copy (a finding with no exploit file) is untrustworthy
+            # in the same way a missing report is -- no traceback was found
+            # above, so this is a product/harness defect, not an infra one.
             return {"classification": PRODUCT_DEFECT, "reason": str(exc)}
 
     raw_report: dict = {}
     if report_path.is_file():
         raw_report = json.loads(report_path.read_text(encoding="utf-8"))
-    reason_codes = _reason_codes(raw_report)
+    log_reason_codes = _REASON_CODE_RE.findall(log_text)
+    reason_codes = _dedupe(_reason_codes_in_attempts(raw_report) + log_reason_codes)
     weakness_classes = sorted(scan_result.weakness_classes) if scan_result is not None else []
 
     if validation_path.is_file():
@@ -244,10 +275,21 @@ def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object
 
     aborted = raw_report.get("aborted")
     if aborted:
+        # The abort's own MYL-ABT-* reason code is stamped into the printed
+        # console line (reason_codes.tag), NOT into scan_report.json itself
+        # -- so it can only be found in log_reason_codes, not the attempts
+        # list. NOT_TESTED requires one; its absence is a product defect.
+        if reason_codes:
+            return {
+                "classification": NOT_TESTED,
+                "reason": f"scan aborted: {aborted}",
+                "reason_codes": reason_codes,
+            }
         return {
-            "classification": NOT_TESTED,
-            "reason": f"scan aborted: {aborted}",
-            "reason_codes": reason_codes,
+            "classification": PRODUCT_DEFECT,
+            "reason": (
+                f"scan aborted ({aborted}) but no reason code found in scan_report.json or run.log"
+            ),
         }
 
     findings_count = raw_report.get("findings_count", 0) or 0
@@ -272,10 +314,18 @@ def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object
         }
 
     if scan_result is not None and not scan_result.exercised:
+        if reason_codes:
+            return {
+                "classification": NOT_TESTED,
+                "reason": "no attempt reached a verdict (all skipped/not_applicable/undecided)",
+                "reason_codes": reason_codes,
+            }
         return {
-            "classification": NOT_TESTED,
-            "reason": "no attempt reached a verdict (all skipped/not_applicable/undecided)",
-            "reason_codes": reason_codes,
+            "classification": PRODUCT_DEFECT,
+            "reason": (
+                "no attempt reached a verdict, and no reason code found in scan_report.json "
+                "or run.log"
+            ),
         }
 
     return {
@@ -289,11 +339,12 @@ def score_run(run_dir: Path, *, run_log: Path | None = None) -> dict[str, object
 def _rollup_key(score: dict[str, object]) -> tuple[object, ...]:
     """The value two runs must share to "agree", per the prereg: the bare
     classification for everything except NOT_TESTED, which also needs the
-    SAME reason code(s) -- two NOT_TESTED runs for different reasons do not
-    agree with each other."""
+    SAME reason code(s), de-duplicated -- two NOT_TESTED runs for different
+    reasons do not agree with each other, and a repeated code in one run's
+    list must not make it disagree with another run that saw it once."""
     classification = score.get("classification")
     if classification == NOT_TESTED:
-        return (classification, tuple(sorted(score.get("reason_codes", []) or [])))
+        return (classification, tuple(_dedupe(score.get("reason_codes", []) or [])))
     return (classification,)
 
 
@@ -329,7 +380,8 @@ def main(argv: list[str] | None = None) -> int:
         "--run-log",
         type=Path,
         default=None,
-        help="Captured stdout log for this run, used only to tell a product defect from an infra failure.",
+        help="Captured stdout log for this run -- required to distinguish a traceback-"
+        "driven product defect or an infra failure from a clean result.",
     )
     score_p.add_argument("--out", type=Path, required=True)
 
