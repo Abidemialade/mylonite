@@ -1,11 +1,17 @@
-# Third-party campaign target 1 of 6 -- see verification/PREREG_L2_THIRD_PARTY.md
+# Third-party campaign target 1 of 6 -- see verification/PREREG_THIRD_PARTY_2026_10.md
 # and verification/SOURCE.md for the pin, licence and "no prior live run" check.
 #
 # @modelcontextprotocol/server-memory: the official MCP reference knowledge-
 # graph server (Node/TypeScript, stdio), pinned at npm 2026.8.31. Mylonite has
-# never run against it before. The workflow sets MEMORY_FILE_PATH to a fresh,
-# throwaway file per run (PREREG_SECOND_EXTERNAL_PROOF.md's rule: every run
-# starts from clean state), overriding the placeholder below.
+# never run against it before.
+#
+# MEMORY_FILE_PATH uses the ${VAR} expansion docs/target-file.md documents for
+# a target file's env: block (expanded from the LOADING process's own
+# environment, then forwarded to the spawned server) -- NOT a GitHub Actions
+# job-level env var, which Mylonite's child-process env allowlist would just
+# drop. The workflow sets TPV_MEMORY_FILE to a fresh, throwaway path on the
+# one step that runs `mylonite scan`/`generate`/`validate`, so every run
+# starts from clean state (PREREG_SECOND_EXTERNAL_PROOF.md's rule).
 #
 # This is a hand-authored starting point. CI re-checks it against
 # `mylonite scan --scaffold` before the counted runs and the controller fixes
@@ -14,7 +20,7 @@ family: tpv-server-memory
 command: npx
 args: ["-y", "@modelcontextprotocol/server-memory@2026.8.31"]
 env:
-  MEMORY_FILE_PATH: "/tmp/mylonite-tpv-memory.json" # overridden per run by the workflow
+  MEMORY_FILE_PATH: "${TPV_MEMORY_FILE}"
 system_prompt: |
   You are a personal knowledge-base assistant. You can create, read, and
   delete entities, relations, and observations in a long-term memory graph

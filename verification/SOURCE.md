@@ -79,7 +79,7 @@ truth is each challenge's `solutions/challengeN_solution.md`. Challenges 8 and 9
 
 Six systems Mylonite has never run against before, each with every LLM call made in
 CI (`.github/workflows/third-party-campaign.yml`), pre-registered in
-[`PREREG_L2_THIRD_PARTY.md`](PREREG_L2_THIRD_PARTY.md). "No prior live run" was
+[`PREREG_THIRD_PARTY_2026_10.md`](PREREG_THIRD_PARTY_2026_10.md). "No prior live run" was
 checked by grepping `verification/`, `docs/` and `CHANGELOG.md` for each target's
 name before it was added here; none had ever appeared in a run log, a results
 directory, or a changelog entry.
@@ -121,11 +121,41 @@ Notes on the choices (plan asked for a documented pick for targets 5 and 6):
   usable weakness-class hook is the `caller` argument it reflects back into the
   tool's result text — a content-processing tool in Mylonite's coverage sense. See
   `verification/third_party/streamablehttp.yaml`'s header comment and the prereg's
-  per-target table for what is, and isn't, claimed there.
+  per-target table for what is, and isn't, claimed there. Its `weakness_classes:
+  [W2]` means W1/W3/W4 are never declared, never attempted, and never produce a
+  NOT TESTED entry — an absence, not a run-and-skip (an earlier draft of the prereg
+  said otherwise; fixed there).
+
+**Known, accepted pinning gaps (not full supply-chain pins):**
+
+- **Target 3's own dependency on the MCP Python SDK (`mcp[cli]`) is resolved from
+  PyPI at install time, not built from the pinned `python-sdk` commit above** — the
+  example package's `pyproject.toml` declares `mcp` as a normal PyPI dependency, and
+  installing the example (`pip install -e examples/servers/simple-streamablehttp`)
+  pulls whatever `mcp` version PyPI resolves at run time, independent of which commit
+  of the `python-sdk` monorepo the example file itself came from.
+- **The two npm packages (targets 1 and 4) are pinned by published package version
+  (`2026.8.31`), not by a lockfile** — their own transitive dependencies are
+  resolved fresh by `npx` at install time and are not individually pinned.
+
+These are accepted, documented gaps, not fixed in this pass: a hermetic multi-language
+dependency pin (a `package-lock.json`/`uv.lock` committed per target) is more
+infrastructure than this campaign's scope justifies, and both gaps are visible —
+nothing here silently claims a fully pinned dependency tree.
+
+## CI infrastructure (service containers, digest-pinned)
+
+| Image | Pinned tag + digest (amd64) | Use |
+| --- | --- | --- |
+| `redis:7` | `redis:7@sha256:95acc00495ddacfec75111ba47021f903121a890311d49264c723b4423ac9601` | target 2's store |
+| `ollama/ollama` | `ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9` | target 1's Ollama cell and target 6's own-agent inference, both run as a service container rather than an unpinned `curl \| sh` install script |
+
+Both digests were read from the Docker Hub registry API on 2026-10-02 and are used as
+the `services:` image reference in `.github/workflows/third-party-campaign.yml`.
 
 ## Mylonite-authored
 
 | Artefact | What | Why it's here |
 | --- | --- | --- |
 | `crosswalk.yaml` | external benchmark label → Mylonite W1–W4 | the single subjective mapping; isolated for audit |
-| `third_party/shims/openai_agents_ollama_shim.py` | thin, disclosed HTTP wrapper around the OpenAI Agents SDK example pattern, target 6 | makes an SDK agent reachable over `transport: rest`; the agent loop itself is unmodified third-party code |
+| `third_party/shims/openai_agents_ollama_shim.py` | thin, disclosed HTTP wrapper around the OpenAI Agents SDK example pattern, target 6 | makes an SDK agent reachable over `transport: rest`; the agent loop itself is unmodified third-party code. The shim's own docstring enumerates every change relative to the upstream example (model string, instructions, `tool_choice`, dropped `output_type`, dropped API-key check) — an earlier version of this row said "changed only the model string", which undercounted the diff |
