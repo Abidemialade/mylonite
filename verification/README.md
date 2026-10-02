@@ -209,7 +209,7 @@ licence recorded in [`SOURCE.md`](SOURCE.md):
 | 6 | an OpenAI Agents SDK agent, inference on Ollama | REST, thin disclosed shim | the black-box REST path, at zero model cost |
 
 The pass rule is pre-registered in
-[`PREREG_L2_THIRD_PARTY.md`](PREREG_L2_THIRD_PARTY.md) before any counted run:
+[`PREREG_THIRD_PARTY_2026_10.md`](PREREG_THIRD_PARTY_2026_10.md) before any counted run:
 expected weakness classes per target, what counts as a pass (KEPT, or
 not-kept/NOT TESTED with a named reason code — never a silent clean result or
 a traceback), a precision arm (a benign configuration must yield 0 findings),
@@ -219,18 +219,35 @@ prove the harness runs end-to-end on that system without claiming a verdict.
 A re-run is allowed only for a named infrastructure failure, and every
 outcome — kept or not — is published.
 
-Run it with `gh workflow run third-party-campaign.yml -f targets=all -f provider=both`.
-Every LLM call happens inside that CI run: the workflow maps the
-`MYLONITE_LLM_KEY`/`MYLONITE_OPENAI_KEY` repo secrets to the provider the
-dispatch asks for and skips (not fails) a cell whose key isn't set. One
-additional cell drives target 1 with a local Ollama model at zero cost. Each
-cell's run log, `scan_report.json`/`validation_report.json`, and a `cost.json`
-(tokens and $, computed from the token counts `scan`/`gate` already print — no
-change to `src/mylonite`) are uploaded as artifacts; nothing is written back
-to the repository from the workflow. `scripts/score_third_party.py` classifies
-each run against the prereg and rolls up the N=3 cells; a maintainer reviews
-the artifacts and commits the result under
-`verification/results/<version>/third-party/`.
+Each dispatch runs **exactly one target and one provider** — no "all"/"both"
+fan-out and no free-text model override (both were cut as spend-control fixes;
+see the prereg's "Budget and the hard ceiling"):
+
+```bash
+gh workflow run third-party-campaign.yml -f target=tpv-server-memory -f provider=anthropic
+```
+
+`provider: ollama` is accepted only with `target: tpv-server-memory` — the
+roadmap's one zero-cost cell. Every LLM call happens inside that CI run: the
+one step that drives `scan`/`generate`/`validate` reads
+`MYLONITE_LLM_KEY`/`MYLONITE_OPENAI_KEY` (mapped to the provider the dispatch
+asks for) in its own `env:` block only — no other step in the job sees either
+key — and a dispatch whose matching key isn't set does nothing (a notice, not
+a failure). Targets 1-3 run the real journey (`scan` then `generate --latest`
+then `validate`, so `validation_report.json` is written whether or not the
+finding is kept); targets 4-6 run `scan` only, since they claim no verdict.
+Each run's log, `scan_report.json`/`validation_report.json`, a `score.json`
+(classified by `scripts/score_third_party.py` — see its module docstring for
+the full classification list, including the never-keep-unproven rule that a
+`STABLE, NOT PROVEN` result is not kept), and a `cost.json` (tokens, calls and
+$, computed by `scripts/compute_run_cost.py` from the token counts
+`scan`/`validate` already print — no change to `src/mylonite`; it fails loudly
+rather than reporting $0 when no spend line is found) are uploaded as
+artifacts; nothing is written back to the repository from the workflow. The
+N=3 bar for targets 1-3 is met by dispatching the same target/provider three
+times and combining the three `score.json` files with `scripts/
+score_third_party.py rollup`; a maintainer reviews the artifacts and commits
+the result under `verification/results/<version>/third-party/`.
 
 ## CI, sampling, and the opt-in workflow
 

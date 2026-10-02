@@ -131,18 +131,20 @@ A further six systems Mylonite has never run against before — the official
 against a real Redis instance, the MCP Python SDK's streamable-HTTP example,
 the MCP Go SDK's own memory example, and an OpenAI Agents SDK agent whose own
 inference runs on a local Ollama model — have a committed pass rule
-([`verification/PREREG_L2_THIRD_PARTY.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_L2_THIRD_PARTY.md))
+([`verification/PREREG_THIRD_PARTY_2026_10.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_THIRD_PARTY_2026_10.md))
 and pinned target files
 ([`verification/third_party/`](https://github.com/Abidemialade/mylonite/tree/main/verification/third_party)),
 each with its licence and pin recorded in `verification/SOURCE.md` before any
-run. Every LLM call happens in CI, via the `third-party-campaign` workflow:
+run. Every LLM call happens in CI, via the `third-party-campaign` workflow,
+dispatched once per target/provider (no "all"/"both" fan-out):
 
 ```bash
-gh workflow run third-party-campaign.yml -f targets=all -f provider=both
+gh workflow run third-party-campaign.yml -f target=tpv-server-memory -f provider=anthropic
 ```
 
-The first three targets run at a fixed N=3 with a ≥2-of-3 bar; the last three
-are N=1 smoke cells that claim no verdict. This section will be updated with
+The first three targets run at a fixed N=3 with a ≥2-of-3 bar (three separate
+dispatches, combined with `scripts/score_third_party.py rollup`); the last
+three are N=1 smoke cells that claim no verdict. This section will be updated with
 the results once the campaign has run; until then, nothing on this page
 reflects it.
 
