@@ -209,12 +209,21 @@ def test_command_tree_matches_golden() -> None:
 
 
 def test_scan_reference_vulnerable_dry_run_matches_golden() -> None:
-    result = runner.invoke(app, ["scan", "reference:vulnerable", "--dry-run"])
+    # No default provider or model (REG-1b) -- an explicit --model (the
+    # exact value the removed hardcoded fallback used to supply) replaces
+    # it, so the golden is otherwise unchanged.
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--dry-run", "--model", "claude-haiku-4-5-20251001"],
+    )
     _assert_matches_golden("scan_reference_vulnerable_dry_run", result)
 
 
 def test_scan_reference_guarded_dry_run_matches_golden() -> None:
-    result = runner.invoke(app, ["scan", "reference:guarded", "--dry-run"])
+    result = runner.invoke(
+        app,
+        ["scan", "reference:guarded", "--dry-run", "--model", "claude-haiku-4-5-20251001"],
+    )
     _assert_matches_golden("scan_reference_guarded_dry_run", result)
 
 

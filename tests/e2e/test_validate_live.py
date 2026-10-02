@@ -87,7 +87,10 @@ def test_live_differential_validator_keeps_w2_seed() -> None:
     exploit = _build_exploit()
     test = ReferencePytestGenerator().emit(exploit)
     # Live path: completion_fn=None ⇒ real litellm.acompletion (Haiku default).
-    validator = DifferentialValidator(iterations=5)
+    # Pinned, like the sibling live MCP tests (tests/integration/test_scan_mcp_*_live.py):
+    # this test is gated behind MYLONITE_LIVE_E2E=1 and makes a REAL call, so it needs a
+    # real routable model, not the "stub" sentinel the offline tests use.
+    validator = DifferentialValidator(model="claude-haiku-4-5-20251001", iterations=5)
     report = validator.validate(
         test,
         ReferenceVulnerableOracle().adapter(),

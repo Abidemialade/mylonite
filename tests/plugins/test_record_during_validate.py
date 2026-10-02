@@ -124,6 +124,7 @@ def test_no_clean_run_skips_recording(tmp_path: Path) -> None:
     # vuln_fire_budget=0 → the vulnerable twin never fires, so no iteration has
     # (vuln_fired AND guard_resisted): canonical selection finds nothing.
     validator = DifferentialValidator(
+        model="stub",
         iterations=3,
         completion_fn=_ScriptedCompletion(vuln_fire_budget=0),
         record_fixtures_dir=fixtures_dir,
@@ -163,6 +164,7 @@ def test_record_then_full_pass_offline(tmp_path: Path, monkeypatch: pytest.Monke
     _install_fake_acompletion(monkeypatch)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
         record_fixtures_dir=fixtures_dir,
@@ -206,6 +208,7 @@ def test_record_fixtures_dir_none_is_collect_only(tmp_path: Path) -> None:
     test = _emit_test(exploit)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
         record_fixtures_dir=None,
@@ -242,6 +245,7 @@ def test_record_writes_a_redacted_exploit_and_still_full_passes(
     _install_fake_acompletion(monkeypatch)
 
     validator = DifferentialValidator(
+        model="stub",
         iterations=2,
         completion_fn=_ScriptedCompletion(),
         record_fixtures_dir=gen_dir / "fixtures",
