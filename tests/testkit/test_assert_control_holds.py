@@ -138,8 +138,11 @@ def test_control_not_load_bearing_names_the_real_target_and_control(
     msg = str(excinfo.value)
     assert "myapp-notes" in msg
     assert "W2" in msg
-    assert "guarded twin" not in msg
-    assert "guarded reference agent" not in msg
+    # Widened per review round 1: reject the substring, not just the two exact
+    # phrases -- "...not a reference twin" is a negation of the same banned
+    # wording, and the first version of this test missed it.
+    assert "twin" not in msg
+    assert "reference agent" not in msg
 
 
 def test_raises_when_attack_does_not_reproduce_on_raw(

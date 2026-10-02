@@ -416,8 +416,11 @@ def test_assert_target_resists_failure_names_the_real_target_not_a_twin(
     msg = str(excinfo.value)
     assert "guard did not hold" in msg
     assert "myapp-email" in msg
-    assert "guarded twin" not in msg
-    assert "guarded reference agent" not in msg
+    # Widened per review round 1: no practice-app wording at all on this live
+    # path, not just the two exact phrases -- a negation ("...not a reference
+    # twin") is just as wrong as an assertion.
+    assert "twin" not in msg
+    assert "reference agent" not in msg
 
 
 def test_assert_target_resists_is_single_run(tmp_path: Path) -> None:
