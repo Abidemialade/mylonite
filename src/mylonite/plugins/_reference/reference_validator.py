@@ -1339,6 +1339,15 @@ class DifferentialValidator(ValidatorBase):
 
     # -- metamorphic ----------------------------------------------------------
 
+    #: Probes run so far in this metamorphic stage. Each probe plants its note
+    #: under ``n_meta_<n>``, a name the differential's ``n_demo_<n>`` notes never
+    #: use, so a probe's opening planner request can never repeat a request the
+    #: differential already sent on the same twin. A recording stores one answer
+    #: per request, so a repeat would break the probe whenever the model answered
+    #: the two differently. Reset at the start of every stage, so the ids are the
+    #: same on every run and a recorded stage replays.
+    _metamorphic_probe_seq: int = 0
+
     def _metamorphic_outcome(self, exploit: ExploitRecord) -> ValidationOutcome:
         """Multiple deterministic perturbations, each GENUINELY run on both twins.
 
@@ -1396,6 +1405,7 @@ class DifferentialValidator(ValidatorBase):
         reject an otherwise-robust finding.
         """
         results: list[tuple[str, bool, str]] = []
+        self._metamorphic_probe_seq = 0
         counter = LiteLLMCallCounter(cap=self._metamorphic_max_llm_calls)
         budget_reached = False
         with llm_scope(counter=counter):
@@ -1510,10 +1520,14 @@ class DifferentialValidator(ValidatorBase):
             body=perturbed_body,
             metadata={**exploit.payload.metadata, "needs_customisation": "false"},
         )
+        # One fresh note id per probe, the same on both twins, so the pair stays
+        # a paired experiment (see `_metamorphic_probe_seq`).
+        self._metamorphic_probe_seq += 1
+        note_id = f"n_meta_{self._metamorphic_probe_seq:04d}"
         vuln_result, guard_result = asyncio.run(
             run_twins(
-                self._invoke_and_judge_async("vulnerable", payload),
-                self._invoke_and_judge_async("guarded", payload),
+                self._invoke_and_judge_async("vulnerable", payload, note_id=note_id),
+                self._invoke_and_judge_async("guarded", payload, note_id=note_id),
             )
         )
         # `is True`/`is False`, not plain truthiness: `None` (adapter error,
@@ -1524,7 +1538,11 @@ class DifferentialValidator(ValidatorBase):
         return vuln_fired, guard_resisted, guard_fired
 
     async def _invoke_and_judge_async(
-        self, variant: Literal["vulnerable", "guarded"], payload: Payload
+        self,
+        variant: Literal["vulnerable", "guarded"],
+        payload: Payload,
+        *,
+        note_id: str = "n_meta_0001",
     ) -> bool | None:
         """Invoke one twin with ``payload`` and judge the response.
 
@@ -1536,12 +1554,14 @@ class DifferentialValidator(ValidatorBase):
         success" by a caller computing e.g. ``guard_resisted`` (DCR-0022). No
         internal ``asyncio.run`` — callers that want to run this concurrently
         with its twin (``_run_perturbed``) drive both from a single event loop.
+        ``note_id`` names the planted note; ``_run_perturbed`` gives each probe
+        its own.
         """
         adapter = InProcessReferenceAdapter(
             variant=variant,
             model=self._planner_model,
             completion_fn=self._completion_fn,
-            note_id_factory=note_id_counter(),
+            note_id_factory=lambda: note_id,
         )
         judge = SuccessJudge(model=self._judge_model, completion_fn=self._completion_fn)
         try:

@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from collections import Counter
 from types import SimpleNamespace
 from typing import Any
 
@@ -2310,3 +2311,68 @@ def test_scoped_iteration_makes_fewer_llm_calls_than_the_full_seed_bank() -> Non
     asyncio.run(run_twins(_full_bank("vulnerable"), _full_bank("guarded")))
 
     assert 0 < scoped.calls < full.calls
+
+
+# --- metamorphic probes never repeat a differential request ---------------------
+
+
+class _KeySpy(_ScriptedCompletion):
+    """Records the replay cache key and the user turn of every request it serves."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keys: list[str] = []
+        self.planner_keys: list[str] = []
+        self.user_turns: list[str] = []
+
+    async def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        from mylonite._replay import _stable_key_v2
+
+        extra = {k: v for k, v in kwargs.items() if k not in ("model", "messages")}
+        key = _stable_key_v2(kwargs["model"], kwargs["messages"], **extra)
+        self.keys.append(key)
+        if "tools" in kwargs:
+            self.planner_keys.append(key)
+            self.user_turns.append(_last_user(kwargs["messages"]))
+        return await super().__call__(**kwargs)
+
+
+def test_no_metamorphic_request_repeats_a_differential_request() -> None:
+    """A recording stores one answer per request. If a metamorphic probe sent a
+    request the differential already sent on the same twin, a model that answered
+    the two differently could not be recorded, and the probe would break."""
+    exploit = _build_exploit()
+    differential, metamorphic = _KeySpy(), _KeySpy()
+
+    DifferentialValidator(iterations=1, completion_fn=differential)._run_iteration(
+        exploit.pattern_id
+    )
+    validator = DifferentialValidator(iterations=1, completion_fn=metamorphic)
+    validator._metamorphic_outcome(exploit)
+
+    assert differential.keys and metamorphic.keys
+    assert set(differential.keys).isdisjoint(metamorphic.keys)
+    assert len(set(metamorphic.planner_keys)) == len(metamorphic.planner_keys)
+
+
+def test_each_metamorphic_probe_gets_its_own_note_id_and_both_twins_share_it() -> None:
+    exploit = _build_exploit()
+    spy = _KeySpy()
+    validator = DifferentialValidator(iterations=1, completion_fn=spy)
+
+    validator._metamorphic_outcome(exploit)
+    first_run = [t for t in spy.user_turns if "n_meta_" in t]
+    spy.user_turns.clear()
+    validator._metamorphic_outcome(exploit)
+    second_run = [t for t in spy.user_turns if "n_meta_" in t]
+
+    ids = {t.split("note ")[1].split(" ")[0] for t in first_run}
+    assert len(ids) == len(validator._metamorphic_strategies)
+    assert all("n_demo_" not in t for t in first_run)
+    # Paired: both twins plant the same id, so every id turns up in the same
+    # number of planner turns, an even number (one share per twin).
+    per_id = Counter(t.split("note ")[1].split(" ")[0] for t in first_run)
+    assert len(set(per_id.values())) == 1
+    assert next(iter(per_id.values())) % 2 == 0
+    # Deterministic per run, so a recorded run replays.
+    assert sorted(second_run) == sorted(first_run)
