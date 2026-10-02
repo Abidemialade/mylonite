@@ -292,10 +292,10 @@ time:
 |---|---|
 | The attack lands on attempt *k* | `AssertionError` at once, naming attempt *k*; no further attempt runs |
 | Every attempt resists | Pass |
-| No landing, but an attempt was inconclusive (no verdict, no tool call, a hit bound) | That attempt's `TestkitFixtureError` (or `TestkitRedriveAborted`) with a tally such as "2 of 3 resisted and 1 inconclusive"; never a pass |
+| Attempt *k* is inconclusive (no verdict, no tool call, a hit bound) | That attempt's `TestkitFixtureError` (or `TestkitRedriveAborted`) at once, with the tally so far ("attempt 2 of 3 was inconclusive after 1 resisted"); no further attempt runs, and it is never a pass |
 
-The remaining attempts still run after an inconclusive one, so a later landing
-fails as a regression rather than reading as "inconclusive". `assert_control_holds`
+An inconclusive attempt stops the check because it can no longer pass, and
+another attempt on a hung target would only spend more time. `assert_control_holds`
 runs its guarded leg on every attempt and its raw leg only until the attack has
 landed on it once, so a pass costs one raw re-drive plus one guarded re-drive per
 attempt. If the raw leg never lands, the check fails as before. The effect probe

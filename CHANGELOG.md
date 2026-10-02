@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first attempt the attack lands on and stop there, and pass only after
   every attempt resisted. An attack that lands 40% of the time used to slip
   past a single clean run more often than not; it now has three chances to
-  show. An inconclusive attempt never counts as a resist, so a run with one
-  ends in an error, never a pass. Set the number with the new `attempts=`
+  show. An inconclusive attempt never counts as a resist: the check stops
+  there with an error, never a pass, and spends nothing more on a target
+  that may be hung. Set the number with the new `attempts=`
   keyword or the `MYLONITE_REDRIVE_ATTEMPTS` environment variable (for
   example `1` on every pull request and the default on a nightly job). A
   passing check now costs up to three re-drives (`assert_control_holds`: one

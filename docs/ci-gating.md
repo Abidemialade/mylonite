@@ -384,8 +384,8 @@ own app always re-drives the real target.
 ### What a live gate costs
 
 A live gate test re-drives your app up to 3 times. It fails on the first attempt the
-attack lands on and passes only when every attempt resisted, so a passing check is the
-expensive case:
+attack lands on, errors at the first inconclusive one, and passes only when every attempt
+resisted, so a passing check is the expensive case:
 
 | Test | Attack lands on attempt 1 | Every attempt resists |
 |---|---|---|
