@@ -188,19 +188,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (manual dispatch, exactly one target and one provider per dispatch, no model
   override) runs the real journey — `scan` then `generate` then `validate` for
   the three verdict-claimed targets — with its LLM call made in CI; both
-  provider keys live in the `env:` of that one step only, `max_llm_calls` is
-  hard-clamped, and the Ollama/redis service containers are digest-pinned
-  rather than an unpinned install script. It writes a `cost.json` per run —
-  computed from the token counts `scan`/`validate` already print, with no
-  change to `src/mylonite`, and it fails loudly rather than reporting $0 when
-  no spend line is found. The new `scripts/score_third_party.py` classifies a
-  run against `mylonite._verdict.verdict_label` (so a `STABLE, NOT PROVEN`
-  result reads not-kept, per never-keep-unproven), a never-keep-unproven
-  candidate, NOT TESTED with its reason code, or a product defect (an
-  unexplained gap or crash with no infrastructure signature — never silently
-  re-run), and rolls up the fixed-N, ≥2-of-3 bar across repeat dispatches for
-  the first three targets, requiring the SAME reason code to agree. The
-  campaign has not been run yet; this entry covers the harness only.
+  provider keys live in the `env:` of that one step only (no `secrets.*`
+  reference ever appears in a step `if:`, which GitHub rejects outright), a
+  non-zero exit from `scan`/`generate`/`validate` is captured and scored
+  rather than failing the step, and the Ollama/redis service containers are
+  digest-pinned rather than an unpinned install script. `max_llm_calls` is
+  hard-clamped and also sets a placeholder `MYLONITE_MAX_LLM_REQUESTS` env var
+  for the process-wide hard ceiling a separate, in-progress change
+  (BUDGET-1) is adding — a documented no-op until that lands, with the job's
+  30-minute timeout as today's real stop. The score and cost steps run with
+  `if: always()` so a crashed or aborted run still gets scored. It writes a
+  `cost.json` per run — computed from the token counts `scan`/`validate`
+  already print, with no change to `src/mylonite`, and it fails loudly rather
+  than reporting $0 when no spend line is found. The new
+  `scripts/score_third_party.py` treats any Python traceback anywhere in the
+  log as an unconditional product defect, checked before anything else;
+  otherwise it classifies a run against `mylonite._verdict.verdict_label` (so
+  a `STABLE, NOT PROVEN` result reads not-kept, per never-keep-unproven), a
+  never-keep-unproven candidate, NOT TESTED (which now REQUIRES a reason
+  code, found in the report or the log, or the result is a product defect
+  instead), or a product defect for an unexplained gap or a missing report
+  with no anchored infrastructure signature (narrowed to specific exception
+  class names and log lines, not bare words like "timeout" or numbers like
+  "503" that can appear in ordinary log text). Rollup requires the SAME,
+  de-duplicated reason code(s) across the fixed-N, ≥2-of-3 bar for the first
+  three targets. The campaign has not been run yet; this entry covers the
+  harness only.
 
 ## [0.11.0] - 2026-10-01
 
