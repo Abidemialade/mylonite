@@ -76,7 +76,7 @@ it is gated behind MYLONITE_LIVE_TARGET=1. It needs the target's `target.yaml`
 co-located next to this test: pass `mylonite generate --target-file <your-target>.yaml`
 (it writes target.yaml here for you), or copy your scan's target YAML in as target.yaml.
 
-Regenerate with `mylonite generate`. Do not edit by hand.
+{pending_note}Regenerate with `mylonite generate`. Do not edit by hand.
 """
 
 import os
@@ -87,7 +87,7 @@ import pytest
 from mylonite import testkit
 
 {decorators}
-@pytest.mark.skipif(
+{pending}@pytest.mark.skipif(
     os.environ.get("MYLONITE_LIVE_TARGET") != "1",
     reason="re-drives the real target live; set MYLONITE_LIVE_TARGET=1 to run",
 )
@@ -141,6 +141,24 @@ def test_security_{slug}() -> None:
     exploit = testkit.load_exploit(here / {exploit_filename})
     testkit.assert_control_holds(exploit, target_file=here / "target.yaml", control={control_literal}{model_kwarg}{provider_kwarg})
 '''
+
+
+#: ``Payload.metadata`` key that asks for the custom-target test to be emitted
+#: as a pending fix (``@testkit.pending_fix(...)``): the finding still works on
+#: the user's app, so a plain regression test would be red the moment it is
+#: committed. ``mylonite gate`` sets it on the copy of the exploit it hands the
+#: generator; the committed exploit JSON never carries it. Only the
+#: custom-target template honours it: a reference-twin or control-efficacy test
+#: already passes on the current build.
+PENDING_FIX_METADATA_KEY = "pending_fix"
+
+_PENDING_NOTE = """It is committed as a PENDING FIX: the attack still worked on your app when
+this test was written, so it is an expected failure and CI stays green. Once
+your fix lands the test passes and fails the run on purpose: then delete the
+`@testkit.pending_fix(...)` line (the one hand edit this file expects) so it
+becomes a regular gate.
+
+"""
 
 
 #: A pattern_id is a stable identifier that becomes BOTH a filename and a Python
@@ -363,6 +381,21 @@ class ReferencePytestGenerator(TestGeneratorBase):
             f", provider={_py_literal(exec_ctx.provider)}" if exec_ctx is not None else ""
         )
 
+        # A pending fix: the decorator line plus a module-docstring note. The
+        # reason is built only from the validated pattern_id and the slugified
+        # target display, and rendered as a Python literal anyway.
+        pending_reason = exploit.payload.metadata.get(PENDING_FIX_METADATA_KEY) or ""
+        if pending_reason and template is _TEMPLATE_CUSTOM:
+            reason = (
+                f"{exploit.pattern_id} still worked on {target_id_display} "
+                "when this test was committed"
+            )
+            pending = f"@testkit.pending_fix({_py_literal(reason)})\n"
+            pending_note = _PENDING_NOTE
+        else:
+            pending = ""
+            pending_note = ""
+
         source = template.format(
             pattern_id=exploit.pattern_id,  # validated above; docstring use only
             # Docstring-only site (no code site exists for target_id): slugified,
@@ -387,6 +420,9 @@ class ReferencePytestGenerator(TestGeneratorBase):
             control_literal=_py_literal(control),
             model_kwarg=model_kwarg,
             provider_kwarg=provider_kwarg,
+            # Only the custom template references these; harmless for the rest.
+            pending=pending,
+            pending_note=pending_note,
         )
 
         return GeneratedTest(

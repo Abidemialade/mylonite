@@ -130,5 +130,17 @@
       }
     ],
     "return": "ExploitRecord"
+  },
+  "pending_fix": {
+    "kind": "function",
+    "parameters": [
+      {
+        "annotation": "str",
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "reason"
+      }
+    ],
+    "return": "Callable[[TestFunction], TestFunction]"
   }
 }

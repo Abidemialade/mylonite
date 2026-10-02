@@ -71,6 +71,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VERTEXAI_PROJECT`/`VERTEXAI_LOCATION` instead (Vertex authenticates via
   Application Default Credentials, not a bearer key). See "The
   approved-provider registry" in `docs/self-hosted-models.md`.
+- **New public testkit API: `testkit.pending_fix(reason)`, so a gate for an
+  unfixed finding no longer turns CI red the day it merges.** `mylonite gate`
+  now commits the test for a finding that still works on your app with an
+  `@testkit.pending_fix(...)` line. Until you ship the fix, the test is an
+  expected failure and the check stays green. When the attack stops landing,
+  the test passes and fails the check on purpose, telling you to delete that
+  line once your fix has landed; from
+  then on it is a regular gate that fails if the attack works again. Only the
+  attack landing counts as "not fixed yet": a missing fixture or a target that
+  didn't start still fails. `pytest -m mylonite_pending_fix` lists open items,
+  and `MYLONITE_REQUIRE_GATE_RUN=1` counts a pending test as a run, not a skip
+  (a hand-added `@pytest.mark.xfail` still counts as a skip).
+  The testkit signature snapshot gains `pending_fix`. See "A finding you
+  haven't fixed yet" in `docs/ci-gating.md`.
 
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and

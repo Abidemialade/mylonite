@@ -595,3 +595,57 @@ def test_out_of_taxonomy_atlas_id_does_not_emit_unregistered_marker() -> None:
     assert "@pytest.mark.atlas_aml_t9999" not in source  # unregistered → no marker
     # The out-of-taxonomy ID still appears (provenance preserved) in the docstring.
     assert "AML.T9999" in source
+
+
+def _pending(exploit: ExploitRecord) -> ExploitRecord:
+    from mylonite.plugins._reference.reference_pytest_generator import PENDING_FIX_METADATA_KEY
+
+    meta = {**exploit.payload.metadata, PENDING_FIX_METADATA_KEY: "true"}
+    return exploit.model_copy(
+        update={"payload": exploit.payload.model_copy(update={"metadata": meta})}
+    )
+
+
+def test_pending_custom_target_emits_the_pending_fix_marker() -> None:
+    """A finding still open on the user's app is emitted as a pending fix."""
+    source = ReferencePytestGenerator().emit(_pending(_exploit(target_id="mcp:acme"))).source
+    ast.parse(source)
+    marker_lines = [ln for ln in source.splitlines() if ln.startswith("@testkit.pending_fix(")]
+    assert len(marker_lines) == 1
+    assert "PENDING FIX" in source  # the module docstring says what to do
+    # The marker sits directly above the live-target skip guard, so deleting
+    # that one line leaves a plain regression test.
+    assert (
+        "@testkit.pending_fix('safe-id still worked on mcp_acme when this test was committed')\n@pytest.mark.skipif("
+        in source
+    )
+
+
+def test_removing_the_pending_line_gives_the_plain_test_back() -> None:
+    plain = ReferencePytestGenerator().emit(_exploit(target_id="mcp:acme")).source
+    pending = ReferencePytestGenerator().emit(_pending(_exploit(target_id="mcp:acme"))).source
+    stripped = "".join(
+        line
+        for line in pending.splitlines(keepends=True)
+        if not line.startswith("@testkit.pending_fix(")
+    )
+
+    # Only the docstring note differs once the marker line is gone.
+    def _code(src: str) -> list[str]:
+        return [ast.dump(node) for node in ast.parse(src).body[1:]]
+
+    assert _code(stripped) == _code(plain)
+
+
+def test_pending_is_ignored_where_the_test_already_passes() -> None:
+    """A reference-twin or control-efficacy test passes on the current build, so
+    it is never emitted as pending."""
+    gen = ReferencePytestGenerator()
+    reference = _pending(_exploit(target_id="reference:vulnerable"))
+    control = _pending(_exploit(synthetic_control="W2"))
+    for exploit in (reference, control):
+        assert "pending_fix" not in gen.emit(exploit).source
+
+
+def test_no_pending_metadata_emits_no_marker() -> None:
+    assert "pending_fix" not in ReferencePytestGenerator().emit(_exploit()).source

@@ -23,7 +23,11 @@ from mylonite.exit_codes import (
     EXIT_SUCCESS,
     EXIT_VALIDATE_FAILED,
 )
-from mylonite.gate.mitigation import DEFAULT_MITIGATION_MODEL, build_gate_pr_body
+from mylonite.gate.mitigation import (
+    DEFAULT_MITIGATION_MODEL,
+    build_gate_pr_body,
+    commits_as_pending,
+)
 from mylonite.generate.wiring import _slugify_pattern
 from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
 from mylonite.scan.llm_types import CompletionFn
@@ -206,6 +210,27 @@ def _finish_unkept(
     )
 
 
+def _for_generation(exploit: ExploitRecord) -> ExploitRecord:
+    """The copy of ``exploit`` handed to ``generate_fn``.
+
+    A finding that still works on the user's app is tagged so its test is
+    emitted as a pending fix (see :func:`commits_as_pending`). Only this copy
+    carries the tag: the exploit JSON written next to the test is always the
+    untagged record, so a later ``mylonite generate`` run from it (after the
+    fix) emits a plain regression test.
+    """
+    if not commits_as_pending(exploit):
+        return exploit
+    from mylonite.plugins._reference.reference_pytest_generator import (
+        PENDING_FIX_METADATA_KEY,
+    )
+
+    meta = {**exploit.payload.metadata, PENDING_FIX_METADATA_KEY: "true"}
+    return exploit.model_copy(
+        update={"payload": exploit.payload.model_copy(update={"metadata": meta})}
+    )
+
+
 def _process_one_finding(
     exploit: ExploitRecord,
     out_dir: Path,
@@ -221,7 +246,7 @@ def _process_one_finding(
     this_out = out_dir / slug if multi else out_dir
     prefix = f"Mylonite gate: {exploit.pattern_id}: " if multi else "Mylonite gate: "
 
-    generated = generate_fn(exploit)
+    generated = generate_fn(_for_generation(exploit))
     if generated is None:
         reason = "the test generator returned nothing"
         echo(f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate.")
@@ -234,6 +259,9 @@ def _process_one_finding(
     written = [test_path, exploit_path]
     _write_redacted_exploit(exploit_path, exploit)
 
+    # The pending tag only shapes the emitted test. Hand the validator the
+    # untagged record so it never reaches the payloads it builds.
+    generated = generated.model_copy(update={"exploit": exploit})
     try:
         report = validate_fn(generated)
     finally:

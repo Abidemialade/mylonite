@@ -283,6 +283,17 @@ silent signature change breaks every downstream regression gate.
 - **`testkit.assert_control_holds(exploit, *, target_file, control, model=None, provider=None, _completion_fn=None)`**
   — the LIVE control-efficacy check. See [the control-efficacy check](#the-control-efficacy-check)
   above.
+- **`testkit.pending_fix(reason)`** — a decorator for a committed gate test whose
+  finding isn't fixed yet. While the check raises `AssertionError` (the attack
+  still lands) the test is an expected failure and the run stays green. Once the
+  check passes, the test fails with a message telling you to remove the
+  `@testkit.pending_fix(...)` line if your fix has landed; with the line removed
+  it is a regular gate.
+  Any other exception still fails the test, so an inconclusive run is never
+  green. The test also gets the `mylonite_pending_fix` marker, so
+  `pytest -m mylonite_pending_fix` lists what is still open. `mylonite gate`
+  adds it to the `assert_target_resists` test of every finding it commits on
+  your own target; see [A finding you haven't fixed yet](ci-gating.md#a-finding-you-havent-fixed-yet).
 - **`testkit.TestkitFixtureError`** — raised when `assert_guard_holds` cannot trust
   its replay evidence (a missing, corrupt or version-mismatched fixture, or an
   inconclusive run). Subclasses `mylonite._replay.FixtureError`.

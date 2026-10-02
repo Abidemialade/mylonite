@@ -26,6 +26,10 @@ predicate did NOT fire. A guard that genuinely holds → the test passes; a guar
 that lets the exploit through → ``AssertionError`` (the gate caught a
 regression).
 
+:func:`pending_fix` wraps a committed gate test whose finding is not fixed yet:
+an expected failure until the fix lands, then a failure that says to remove
+the marker, then (marker removed) a regular gate.
+
 The single most important property here is **honesty** (R4): a stale, missing,
 corrupt, or version-mismatched fixture, or an inconclusive run, must RAISE —
 never silently pass. The scan engine swallows ``completion_fn`` exceptions (a
@@ -62,7 +66,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
@@ -77,6 +81,7 @@ from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.providers import provider_from_model
 from mylonite.scan.wiring import build_scan, note_id_counter
+from mylonite.testkit._pytest_plugin import PENDING_FIX_MARKER, PENDING_FIX_XFAIL_PREFIX
 
 #: On-disk format version for a ``fixtures_dir`` sidecar (``_meta.json``). Bumped
 #: whenever the recorded-fixture layout or the (model, messages) keying changes.
@@ -1058,6 +1063,92 @@ def assert_control_holds(
     )
 
 
+#: The test function :func:`pending_fix` decorates (returned unchanged in type).
+#: Public so the frozen signature names it rather than a private TypeVar.
+TestFunction = TypeVar("TestFunction", bound=Callable[..., Any])
+
+
+def pending_fix(reason: str) -> Callable[[TestFunction], TestFunction]:
+    """Mark a committed gate test as waiting on a fix that has not landed yet.
+
+    ``mylonite gate`` commits a test for a finding that still works on your
+    app. Without this marker that test fails the moment it is committed and
+    blocks every later pull request. With it, the test moves through three
+    states:
+
+    1. **Not fixed yet.** The check raises ``AssertionError`` (the attack still
+       works). The test is reported as an expected failure (``xfail``) and the
+       run stays green.
+    2. **Fixed.** The check passes. Because the marker is strict, the test
+       FAILS and its message tells you to delete the ``@testkit.pending_fix``
+       line if your fix has landed (a single passing run of a live re-drive
+       does not prove it, so the message says so).
+    3. **Marker removed.** The test is a plain regression gate: it passes
+       while the fix holds and fails if the attack works again.
+
+    Only ``AssertionError`` counts as "not fixed yet". Any other exception
+    (a missing fixture, an unresolved model, a target that did not start)
+    propagates unchanged and fails the test, exactly as it would without the
+    marker, so a check that never reached a verdict is never green. A skip
+    (for example the ``MYLONITE_LIVE_TARGET`` guard) stays a skip.
+
+    Usage::
+
+        @testkit.pending_fix("the attack still worked when this test was committed")
+        def test_security_example() -> None:
+            ...
+
+    Parameters
+    ----------
+    reason:
+        One line saying why the test is pending. Shown in both the
+        expected-failure report and the "remove the marker" failure.
+
+    Raises
+    ------
+    ValueError:
+        ``reason`` is empty.
+    """
+    if not reason or not reason.strip():
+        raise ValueError("pending_fix() needs a reason, e.g. what was still open when committed.")
+    reason = reason.strip()
+
+    def decorate(fn: TestFunction) -> TestFunction:
+        import functools
+
+        import pytest
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                fn(*args, **kwargs)
+            except AssertionError as exc:
+                first_line = (str(exc).strip().splitlines() or ["the check failed"])[0]
+                # Raised, not called: under ``--runxfail`` pytest turns the
+                # ``pytest.xfail()`` function into a no-op, which would fall
+                # through to the "attack did not land" failure below while the
+                # attack still lands. The exception itself is reported as an
+                # expected failure normally, and as a failure carrying this
+                # text under ``--runxfail``.
+                raise pytest.xfail.Exception(
+                    f"{PENDING_FIX_XFAIL_PREFIX} {reason}. The check still fails ({first_line}). That "
+                    "is expected until your fix lands, so this does not fail the run."
+                ) from exc
+            pytest.fail(
+                "The attack did not land on this run. If your fix has landed, remove the "
+                "`@testkit.pending_fix(...)` line above this test so it becomes a regular "
+                f"gate that fails if the attack works again (marked pending: {reason}). "
+                "If you have not shipped a fix, the attack may land only some of the "
+                "time: re-run the check before removing the marker.",
+                pytrace=False,
+            )
+
+        marked: TestFunction = getattr(pytest.mark, PENDING_FIX_MARKER).with_args(reason)(wrapper)
+        return marked
+
+    return decorate
+
+
 __all__ = [
     "TestkitConfigError",
     "TestkitFixtureError",
@@ -1066,4 +1157,5 @@ __all__ = [
     "assert_guard_holds",
     "assert_target_resists",
     "load_exploit",
+    "pending_fix",
 ]

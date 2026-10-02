@@ -6,6 +6,9 @@ sole job is to register — warning-free — the bounded set of markers the
 reference pytest generator emits:
 
 * ``mylonite_security`` — flags a Mylonite-generated security regression test.
+* ``mylonite_pending_fix`` — put on a test by ``testkit.pending_fix``: a
+  committed gate still waiting on its fix (``pytest -m mylonite_pending_fix``
+  lists them).
 * ``owasp_llm01`` .. ``owasp_llm10`` — OWASP LLM Top 10 (2025) category.
 * ``owasp_asi01`` .. ``owasp_asi10`` — OWASP Agentic Security Initiative (2026).
 * ``atlas_<id>`` — one per MITRE ATLAS technique in the bundled taxonomy
@@ -32,6 +35,14 @@ if TYPE_CHECKING:
 
 #: The base marker every Mylonite-generated test carries.
 MYLONITE_SECURITY_MARKER = "mylonite_security"
+
+#: The marker ``testkit.pending_fix`` puts on the test it wraps (the testkit
+#: imports it from here, so the applied and the registered name cannot drift).
+PENDING_FIX_MARKER = "mylonite_pending_fix"
+
+#: Every expected-failure reason ``testkit.pending_fix`` raises starts with
+#: this, so the gate-run check can tell its xfail from any other.
+PENDING_FIX_XFAIL_PREFIX = "pending fix:"
 
 #: Set to ``"1"`` in the CI job that runs the committed gate to require that the
 #: gate actually ran. The scaffolded ``mylonite-gate.yml`` sets it. Unset (the
@@ -86,6 +97,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         f"{MYLONITE_SECURITY_MARKER}: a Mylonite-generated security regression test",
     )
+    config.addinivalue_line(
+        "markers",
+        f"{PENDING_FIX_MARKER}(reason): a committed Mylonite gate test waiting on its fix",
+    )
     for n in range(1, 11):
         config.addinivalue_line(
             "markers",
@@ -133,6 +148,16 @@ class _GateRunCheck:
         )
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
+        # pytest reports an expected failure as "skipped" with ``wasxfail``
+        # set. A ``testkit.pending_fix`` test that xfails did run its check
+        # (the attack landed), so it is not a gate that checked nothing. Only
+        # that exact case is exempt: any other xfail (a hand-added
+        # ``@pytest.mark.xfail``, a conftest hook) can hide a check that never
+        # reached a verdict, so it still counts as skipped.
+        if PENDING_FIX_MARKER in report.keywords and str(
+            getattr(report, "wasxfail", "")
+        ).startswith(PENDING_FIX_XFAIL_PREFIX):
+            return
         if report.skipped and MYLONITE_SECURITY_MARKER in report.keywords:
             self.skipped.append(report.nodeid)
 
