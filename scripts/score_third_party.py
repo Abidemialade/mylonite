@@ -19,24 +19,30 @@ one cell verdict.
 Classification, in order of precedence
 ---------------------------------------
 1. ``PRODUCT_DEFECT`` -- the run cannot be trusted as a clean result.
-   **A Python traceback with at least one ``mylonite`` stack frame anywhere
-   in the captured log wins this classification outright**, before anything
-   else is even considered: Mylonite's own code is designed to catch and
-   cleanly report provider and config errors (``aborted``,
+   **A Python traceback with at least one actual ``mylonite`` STACK FRAME
+   anywhere in the captured log wins this classification outright**, before
+   anything else is even considered: Mylonite's own code is designed to
+   catch and cleanly report provider and config errors (``aborted``,
    ``classify_provider_error``), so a raw traceback FROM MYLONITE'S OWN CODE
    leaking to stdout means something it did not anticipate, regardless of
-   what the traceback's text happens to contain. A traceback with NO
-   ``mylonite`` frame at all -- the target server's own crash -- is target
-   noise, not a Mylonite defect: the stdio adapter spawns each target server
-   without separating its stderr from Mylonite's own
-   (``_session_adapter.py``'s ``stdio_client`` call carries no ``errlog``),
-   so a third-party server's own traceback (e.g. on shutdown, or a tool
-   error) lands in the same captured log. Properly separating the two
-   streams needs a ``src/mylonite`` change (passing ``errlog=`` through to
-   ``stdio_client``) that this harness does not make; filtering by stack
-   frame here is the workaround that needs none. A target-only traceback is
-   recorded (``target_noise_traceback: true`` in the output) but never
-   blocks the cell. The PRODUCT_DEFECT classification also covers: a
+   what the traceback's text happens to contain. "An actual stack frame"
+   means a quoted ``File "...mylonite/....py"`` reference with "mylonite" as
+   a PATH SEGMENT -- never a bare substring match anywhere in the block,
+   which would also fire on a target's own planted/echoed content that
+   happens to contain the word "mylonite" (e.g. ``redis.yaml``'s seed key
+   literal ``mylonite-tpv-seed``, which a target server could echo back
+   verbatim in its own error message). A traceback with NO such frame at all
+   -- the target server's own crash -- is target noise, not a Mylonite
+   defect: the stdio adapter spawns each target server without separating
+   its stderr from Mylonite's own (``_session_adapter.py``'s
+   ``stdio_client`` call carries no ``errlog``), so a third-party server's
+   own traceback (e.g. on shutdown, or a tool error) lands in the same
+   captured log. Properly separating the two streams needs a
+   ``src/mylonite`` change (passing ``errlog=`` through to ``stdio_client``)
+   that this harness does not make; filtering by stack frame here is the
+   workaround that needs none. A target-only traceback is recorded
+   (``target_noise_traceback: true`` in the output) but never blocks the
+   cell. The PRODUCT_DEFECT classification also covers: a
    missing/partial report with no positively-evidenced infrastructure
    signature in the log; a scan whose attempts include one that is neither
    ``finding`` nor ``no_finding`` and carries NO reason code anywhere
@@ -130,11 +136,19 @@ _TRACEBACK_BLOCK_RE = re.compile(re.escape(_TRACEBACK_MARKER) + r"\n(?:[ \t].*\n
 #: Matched against each traceback BLOCK's own text (not the whole log) to
 #: tell "Mylonite's own code did not anticipate this" apart from "the
 #: target server crashed, and the stdio adapter does not separate its
-#: stderr from ours" -- see the module docstring's point #1. A simple
-#: substring check on a `File "..."` frame's path, not anchored further:
-#: Mylonite's own installed location always contains this component,
-#: whether run from a wheel's site-packages or an editable checkout.
-_MYLONITE_FRAME_MARKER = "mylonite"
+#: stderr from ours" -- see the module docstring's point #1. Anchored to an
+#: actual `File "...mylonite/....py"` STACK FRAME line -- "mylonite" as a
+#: path segment (between path separators), in a quoted `File "..."`
+#: reference, ending in `.py` -- never a bare substring match. A bare
+#: substring match on the whole block would also fire on a target's own
+#: planted/echoed content that happens to contain the word "mylonite" (e.g.
+#: `redis.yaml`'s seed key literal `mylonite-tpv-seed`, which a target
+#: server's own error message could echo back verbatim); this pattern
+#: cannot match that, since it requires both the quoted `File "..."` frame
+#: shape and a `.py` suffix. Mylonite's own installed location always
+#: contains this path segment, whether run from a wheel's site-packages or
+#: an editable checkout, on both POSIX (`/`) and Windows (`\`).
+_MYLONITE_FRAME_RE = re.compile(r'File "[^"]*[/\\]mylonite[/\\][^"]*\.py"')
 
 
 def _mylonite_traceback_present(log_text: str) -> bool:
@@ -143,7 +157,8 @@ def _mylonite_traceback_present(log_text: str) -> bool:
     server, whose own stderr the stdio adapter does not currently separate
     from Mylonite's own captured output."""
     return any(
-        _MYLONITE_FRAME_MARKER in match.group(0) for match in _TRACEBACK_BLOCK_RE.finditer(log_text)
+        _MYLONITE_FRAME_RE.search(match.group(0))
+        for match in _TRACEBACK_BLOCK_RE.finditer(log_text)
     )
 
 
