@@ -15,7 +15,9 @@ The recipe (form ``v2``) is documented so anyone can recompute a digest:
   ``default: null``, ``const: null`` and ``enum: [null]`` carry meaning;
 * object keys sorted; inside ``inputSchema`` and ``outputSchema`` (including
   ``$defs``) the ``required`` and ``enum`` arrays are compared as sets; every
-  other array keeps its order;
+  other array keeps its order, and so does any list inside a ``default``,
+  ``const`` or ``examples`` value or an ``enum`` member (those are data,
+  not schema);
 * ``$ref`` kept as literal text and never dereferenced;
 * tools keyed by name, so listing order does not matter;
 * ``sha256`` over compact JSON, prefixed ``v2:sha256:``.
@@ -62,6 +64,13 @@ RECOGNISED_TOOL_FIELDS: tuple[str, ...] = (
 #: sets inside the two schema fields only.
 _SET_KEYS = frozenset({"required", "enum"})
 _SCHEMA_FIELDS = frozenset({"inputSchema", "outputSchema"})
+
+#: Schema keywords whose value is data, not a schema: a ``required`` or
+#: ``enum`` key inside one is a literal key whose list keeps its order.
+_VALUE_KEYWORDS = frozenset({"default", "const", "examples"})
+#: Schema keywords whose value maps NAMES to schemas, so a child key such as
+#: ``default`` there is a property name, not a keyword.
+_NAME_MAPS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
 
 #: Longest pointer segment shown as text; longer ones are hashed.
 MAX_SEGMENT_CHARS = 64
@@ -148,9 +157,15 @@ def canonicalise(value: object, key: str | None = None, *, in_schema: bool = Fal
     """Sorted-key canonical form of a JSON value (``$ref`` is text). With
     ``in_schema``, ``required`` and ``enum`` arrays are compared as sets."""
     if isinstance(value, dict):
-        return {k: canonicalise(v, k, in_schema=in_schema) for k, v in sorted(value.items())}
+        names = key in _NAME_MAPS
+        return {
+            k: canonicalise(v, k, in_schema=in_schema and (names or k not in _VALUE_KEYWORDS))
+            for k, v in sorted(value.items())
+        }
     if isinstance(value, list):
-        items = [canonicalise(v, in_schema=in_schema) for v in value]
+        # Members of an enum (or required) list are values, never schemas.
+        member_schema = in_schema and key not in _SET_KEYS
+        items = [canonicalise(v, in_schema=member_schema) for v in value]
         if in_schema and key in _SET_KEYS:
             unique = {_dumps(v): v for v in items}
             return [unique[k] for k in sorted(unique)]
@@ -162,12 +177,18 @@ def _dumps(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def surface_views(tools: Iterable[ToolDescription], *, wire_only: bool = False) -> dict[str, Any]:
+def surface_views(
+    tools: Iterable[ToolDescription], *, wire_only: bool = False, converted_only: bool = False
+) -> dict[str, Any]:
     """``{tool name: canonical view}``. ``wire_only`` signs the raw server dump
-    (the below-shim view, kept as evidence) instead of the post-shim view."""
+    (the below-shim view, kept as evidence) instead of the post-shim view;
+    ``converted_only`` ignores the wire dump, so two listings where one tool's
+    dump failed can still be compared like for like."""
     out: dict[str, Any] = {}
     for t in tools:
-        if wire_only:
+        if converted_only:
+            out[t.name] = canonical_tool(tool_view(t.model_copy(update={"wire": None})))
+        elif wire_only:
             if t.wire is None:
                 continue
             out[t.name] = canonical_tool(t.wire)
@@ -177,9 +198,9 @@ def surface_views(tools: Iterable[ToolDescription], *, wire_only: bool = False) 
 
 
 def has_wire(tools: Iterable[ToolDescription]) -> bool:
-    """True when every listed tool carries its wire dump (all fields signed)."""
-    listed = list(tools)
-    return bool(listed) and all(t.wire is not None for t in listed)
+    """True when every listed tool carries its wire dump (all fields signed).
+    An empty listing has nothing left unsigned."""
+    return all(t.wire is not None for t in tools)
 
 
 def digest(view: object) -> str:

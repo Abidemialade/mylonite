@@ -179,6 +179,7 @@ MEANING_CHANGES: list[tuple[str, Mutator, str]] = [
         _set(["inputSchema", "properties", "region", "default"], None),
         "/send_note/inputSchema/properties/region/default",
     ),
+    ("null_title_on_titled_tool", _set(["title"], None), "/send_note/title"),
     ("add_tool", _add_tool, "/export_all"),
     ("remove_tool", _remove_tool, "/read_note"),
 ]
@@ -600,3 +601,96 @@ async def test_an_unguarded_run_does_not_repeat_the_diff_as_wire_evidence() -> N
     meta = await _invoke(_Session(_set(["title"], "Send a note now")))
     assert meta["tool_surface_mutated"] == "true"
     assert "tool_surface_wire_diff" not in meta
+
+
+# --- defensive paths -----------------------------------------------------------
+
+
+class _NotCallable:
+    model_dump = "not a function"
+
+
+class _Raises:
+    def model_dump(self, **kwargs: Any) -> Any:
+        raise RuntimeError("cannot dump")
+
+
+class _ReturnsList:
+    def model_dump(self, **kwargs: Any) -> Any:
+        return ["not", "a", "dict"]
+
+
+@pytest.mark.parametrize("tool", [_NotCallable(), _Raises(), _ReturnsList(), object()])
+def test_a_tool_that_cannot_be_dumped_has_no_wire_view(tool: Any) -> None:
+    assert tool_surface.wire_tool_dump(tool) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("which", ["first", "relist"])
+async def test_a_listing_whose_wire_fields_cannot_be_read_is_never_stable(which: str) -> None:
+    from mylonite import reason_codes
+    from mylonite.plugins._mcp import server_shim
+
+    real = server_shim.wire_tool_dump
+    calls = {"n": 0}
+
+    def flaky(tool: Any) -> Any:
+        calls["n"] += 1
+        # The first listing dumps tools 1-2, the re-list tools 3-4.
+        first = calls["n"] <= len(_BASE)
+        broken = first if which == "first" else not first
+        return None if broken else real(tool)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server_shim, "wire_tool_dump", flaky)
+        meta = await _invoke(_Session(lambda tools: None))
+    assert meta["tool_surface_mutated"] == "unsigned"
+    verdict = _verdict(meta)
+    assert verdict is not None and verdict.success is False
+    assert verdict.fallback_cause == reason_codes.INC_RELIST_FAILED
+    assert "could not be read in full" in verdict.reason
+
+
+@pytest.mark.asyncio
+async def test_a_change_still_reads_as_a_rug_pull_when_wire_fields_are_missing() -> None:
+    from mylonite.plugins._mcp import server_shim
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server_shim, "wire_tool_dump", lambda tool: None)
+        meta = await _invoke(_Session(_set(["annotations", "destructiveHint"], True)))
+    assert meta["tool_surface_mutated"] == "true"
+    assert meta["tool_surface_signed"] == tool_surface.SIGNED_CONVERTED_FIELDS
+
+
+def test_a_failed_relist_is_logged_with_its_cause(caplog: pytest.LogCaptureFixture) -> None:
+    import asyncio
+    import logging
+
+    class _Broken(_Session):
+        async def list_tools(self, *args: Any, **kwargs: Any) -> Any:
+            if self.list_calls >= 1:
+                self.list_calls += 1
+                raise ValueError("relist broke")
+            return await super().list_tools()
+
+    with caplog.at_level(logging.WARNING):
+        meta = asyncio.run(_invoke(_Broken(lambda tools: None)))
+    assert meta["tool_surface_mutated"] == "errored"
+    assert any("ValueError" in r.getMessage() for r in caplog.records)
+
+
+def test_value_lists_in_a_schema_keep_their_order() -> None:
+    def tool(prop: dict[str, Any]) -> dict[str, Any]:
+        schema = {"type": "object", "properties": {"x": prop}}
+        return tool_surface.canonical_tool({"name": "t", "inputSchema": schema})
+
+    for keyword in ("default", "const", "examples"):
+        a = tool({"type": "object", keyword: {"required": ["b", "a"], "enum": [2, 1]}})
+        b = tool({"type": "object", keyword: {"required": ["a", "b"], "enum": [1, 2]}})
+        assert a != b, keyword
+    # An enum member is a value too.
+    assert tool({"enum": [{"required": ["b", "a"]}]}) != tool({"enum": [{"required": ["a", "b"]}]})
+    # A property NAMED default is still a schema.
+    a = tool({"type": "object", "properties": {"default": {"enum": [2, 1]}}})
+    b = tool({"type": "object", "properties": {"default": {"enum": [1, 2]}}})
+    assert a == b
