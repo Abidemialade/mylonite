@@ -1338,3 +1338,31 @@ def test_gate_rewrites_a_redacted_exploit_after_the_validator_writes_its_own(tmp
         assert on_disk, f"no exploit file left for kept={kept}"
         for f in on_disk:
             assert _FAKE_KEY not in f.read_text(encoding="utf-8")
+
+
+def test_gate_rewrites_a_redacted_exploit_even_when_the_validator_raises(tmp_path):
+    """If validation raises after the validator wrote its own unredacted copy,
+    the file left on disk is still redacted and the error still surfaces."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+    path = out_dir / "exploit_indirect-injection-note-body-direct.json"
+
+    def raising_validate(test):
+        path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
+        raise RuntimeError("validator crashed")
+
+    with pytest.raises(RuntimeError, match="validator crashed"):
+        run_gate(
+            out_dir=out_dir,
+            scan_fn=lambda: ScanOutcomeBundle(
+                outcome=_found_outcome(), exploits=[_exploit_carrying_a_secret()]
+            ),
+            generate_fn=lambda e: GeneratedTest(
+                framework="pytest", filename="test_security_x.py", source="x", exploit=e
+            ),
+            validate_fn=raising_validate,
+            open_pr_fn=lambda **_: "printed",
+            open_pr=False,
+        )
+    text = path.read_text(encoding="utf-8")
+    assert _FAKE_KEY not in text
+    assert "***REDACTED***" in text
