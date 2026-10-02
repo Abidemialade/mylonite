@@ -593,7 +593,11 @@ def test_open_pr_commits_each_findings_own_fixtures_not_a_stale_root_dir(tmp_pat
         resolve_default_base=lambda _root: "main",
     )
     open_pr_fn = make_open_pr_fn(
-        runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=fake_pr
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=fake_pr,
+        model="anthropic/claude-haiku-4-5-20251001",
     )
     findings = [
         (

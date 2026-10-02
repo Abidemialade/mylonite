@@ -104,7 +104,11 @@ def two_finding_gate(
             generate_fn=ReferencePytestGenerator().emit,
             validate_fn=_reference_validate_fn(out_dir),
             open_pr_fn=make_open_pr_fn(
-                runs_on="ubuntu-latest", workflows=False, target_file=None, pr_mod=pr_mod
+                runs_on="ubuntu-latest",
+                workflows=False,
+                target_file=None,
+                pr_mod=pr_mod,
+                model="anthropic/claude-haiku-4-5-20251001",
             ),
             open_pr=False,
         )
