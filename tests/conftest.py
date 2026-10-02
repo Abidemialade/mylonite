@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 
@@ -22,3 +24,16 @@ def _check_and_ablate_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> Non
     and restores whatever was set before applying the override).
     """
     monkeypatch.setenv("MYLONITE_EXPERIMENTAL", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_request_ceiling(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The LLM request ceiling is process-wide state: one test's count or trip
+    must never leak into the next. Start every test with no ceiling and a zero
+    count, and clear whatever the test left behind."""
+    from mylonite.scan._llm import REQUEST_CEILING_ENV, reset_request_ceiling
+
+    monkeypatch.delenv(REQUEST_CEILING_ENV, raising=False)
+    reset_request_ceiling()
+    yield
+    reset_request_ceiling()
