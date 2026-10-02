@@ -8,6 +8,12 @@ stdio MCP server), this is the end-to-end path: scaffold a target file, scan, an
 > use the [`rest` transport](http-agent.md) — describe the request shape in the
 > target file and change nothing in your app.
 
+> **What gets tested.** Mylonite drives your server's tools with its own
+> planner — guardrails that live in your agent or host process, not the
+> server, are never exercised. See
+> [Coverage by app shape](index.md#coverage-by-app-shape) for exactly which
+> weakness classes are testable on your app's shape.
+
 > **Authorisation.** Mylonite finds and reproduces working exploits, so every
 > non-reference target requires an explicit `--authorize` flag asserting you
 > control the target. Its value is the target's `scope`, or its family when it
