@@ -1,0 +1,32 @@
+# Third-party campaign target 6 of 6 -- see verification/PREREG_L2_THIRD_PARTY.md
+# and verification/SOURCE.md for the pin, licence and "no prior live run" check.
+#
+# openai/openai-agents-python (MIT, pinned PyPI openai-agents[litellm]==0.22.3),
+# the examples/model_providers/litellm_auto.py pattern: an Agent/Runner loop
+# whose own inference runs on the in-runner Ollama model via LiteLLM's
+# ollama_chat route (model="litellm/ollama_chat/<model>"), so this target
+# costs nothing. Reached over `transport: rest` through a thin, disclosed
+# HTTP shim (verification/third_party/shims/openai_agents_ollama_shim.py)
+# that the workflow starts before scanning -- the shim is Mylonite-authored
+# glue; the agent loop, tool dispatch and model routing it wraps are
+# unmodified third-party code.
+#
+# A rest target has no tool surface Mylonite can see, so only W2
+# (prompt-injection / goal-hijack, judged on the reply) is testable here --
+# see docs/http-agent.md. A kept test on this target is capped at STABLE,
+# NOT PROVEN by design (the black-box-target rule): under never-keep-
+# unproven that is a candidate, not a gate test, which is the expected
+# outcome the prereg records for this target.
+#
+# This is a hand-authored starting point. CI re-checks it against
+# `mylonite scan --scaffold --rest-url ... --rest-response-path reply`
+# before the counted runs.
+family: tpv-agents-sdk-ollama
+transport: rest
+weakness_classes: [W2]
+request:
+  url: "http://127.0.0.1:8099/chat" # started by the workflow before the scan
+  method: POST
+  body: '{"prompt": "{prompt}"}'
+  response_path: reply
+  timeout_s: 120 # a local Ollama model is slower per turn than a hosted one

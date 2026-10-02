@@ -75,8 +75,57 @@ The DVMCP challenge → W-class mapping (the Mylonite-authored judgement) lives 
 truth is each challenge's `solutions/challengeN_solution.md`. Challenges 8 and 9
 (RCE / command injection) are recorded as **out of Mylonite's AI-layer scope**.
 
+## Third-party campaign targets (`verification/third_party/`)
+
+Six systems Mylonite has never run against before, each with every LLM call made in
+CI (`.github/workflows/third-party-campaign.yml`), pre-registered in
+[`PREREG_L2_THIRD_PARTY.md`](PREREG_L2_THIRD_PARTY.md). "No prior live run" was
+checked by grepping `verification/`, `docs/` and `CHANGELOG.md` for each target's
+name before it was added here; none had ever appeared in a run log, a results
+directory, or a changelog entry.
+
+| # | Target | Upstream | License | Pinned commit (or tag) | No prior live run |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `@modelcontextprotocol/server-memory` | github.com/modelcontextprotocol/servers | repo-wide MIT/Apache-2.0 relicensing split (MIT for unconsented contributions, Apache-2.0 for the rest) | npm `2026.8.31`; repo tag `typescript-servers-0.6.2` (commit `94a36286d2ea49d095704167846283f0c2c2d5d1`) | **confirmed** — named in `PREREG_SECOND_EXTERNAL_PROOF.md`/`EXTERNAL_DIFFERENTIAL.md` as a planned second-proof target, but no run log in `CAPABILITY_MATRIX.md`/`FINDINGS.md`/`TRENDS.md` ever executed it |
+| 2 | `redis/mcp-redis` | github.com/redis/mcp-redis | MIT | tag `v0.5.1` (commit `11e67e44358cd6410d5a7e615a29539ccd71a045`) | confirmed — no mention anywhere in `verification/`, `docs/`, `CHANGELOG.md` |
+| 3 | `modelcontextprotocol/python-sdk`, `examples/servers/simple-streamablehttp` | github.com/modelcontextprotocol/python-sdk | repo-wide MIT/Apache-2.0 relicensing split | tag `v2.2.0` (commit `9972c21aa42054fb1450c5fc614761ed11847ec6`) | confirmed — no mention anywhere |
+| 4 | `@modelcontextprotocol/server-everything` | github.com/modelcontextprotocol/servers | repo-wide MIT/Apache-2.0 relicensing split | npm `2026.8.31`; repo tag `typescript-servers-0.6.2` (commit `94a36286d2ea49d095704167846283f0c2c2d5d1`) | confirmed — no mention anywhere |
+| 5 | `modelcontextprotocol/go-sdk`, `examples/server/memory` | github.com/modelcontextprotocol/go-sdk | repo-wide MIT/Apache-2.0 relicensing split | tag `v1.8.0` (commit `3f3b699b2b67e1ed033a63d6651671dab53c2d32`) | confirmed — no mention anywhere |
+| 6 | `openai/openai-agents-python`, `examples/model_providers/litellm_auto.py` pattern | github.com/openai/openai-agents-python | MIT | tag `v0.22.3` (commit `fdf21db62c303a3db54b0dfbee82de2141fa2799`); PyPI `openai-agents[litellm]==0.22.3` | confirmed — no mention anywhere |
+
+Notes on the choices (plan asked for a documented pick for targets 5 and 6):
+
+- **Target 5 (runtime diversity, no external writes).** The Go SDK's own
+  `examples/server/memory` is a line-for-line port of target 1's knowledge-graph
+  server (same tool names: `create_entities`, `add_observations`, `delete_entities`,
+  `search_nodes`, …) onto the official MCP Go SDK, with an **in-memory-only** store
+  by default (the `-memory` flag, which would persist to a file, is left unset) — so
+  it writes nothing outside the process, satisfying "no external writes" without
+  needing a fallback target.
+- **Target 6 (an agent that runs its own inference on Ollama, at zero cost).** The
+  OpenAI Agents SDK accepts a `litellm/<model>` model string
+  (`examples/model_providers/litellm_auto.py` demonstrates this against OpenRouter).
+  LiteLLM's local-Ollama route is `ollama_chat/<model>` (the same route Mylonite
+  itself uses — see `scan/providers.py`), so `model="litellm/ollama_chat/llama3.2:3b"`
+  runs the example agent's own planning loop entirely against the in-runner Ollama
+  model, no provider key and no cost. The disclosed shim that exposes this agent over
+  the `rest` transport is `verification/third_party/shims/openai_agents_ollama_shim.py`
+  — it is Mylonite-authored glue (a thin FastAPI wrapper), not the system under test;
+  the agent loop itself (`Agent`/`Runner`, tool dispatch, the litellm model routing)
+  is the external code the campaign exercises. `openai-agents[litellm]==0.22.3` is
+  installed from PyPI rather than built from the GitHub tag, since the pinned PyPI
+  release is what a real adopter would install.
+- **Target 3's weakness surface.** `simple-streamablehttp` exists to prove the
+  `transport: http` path on code we didn't write, not to showcase a rich surface: its
+  one tool (`start-notification-stream`) has no store-and-recall pair, so its only
+  usable weakness-class hook is the `caller` argument it reflects back into the
+  tool's result text — a content-processing tool in Mylonite's coverage sense. See
+  `verification/third_party/streamablehttp.yaml`'s header comment and the prereg's
+  per-target table for what is, and isn't, claimed there.
+
 ## Mylonite-authored
 
 | Artefact | What | Why it's here |
 | --- | --- | --- |
 | `crosswalk.yaml` | external benchmark label → Mylonite W1–W4 | the single subjective mapping; isolated for audit |
+| `third_party/shims/openai_agents_ollama_shim.py` | thin, disclosed HTTP wrapper around the OpenAI Agents SDK example pattern, target 6 | makes an SDK agent reachable over `transport: rest`; the agent loop itself is unmodified third-party code |
