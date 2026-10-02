@@ -88,6 +88,20 @@ def _write_validation_report(out_dir: Path, report: ValidationReport) -> None:
     )
 
 
+def _write_redacted_exploit(path: Path, exploit: ExploitRecord) -> None:
+    """Write ``exploit`` to ``path`` with secret-shaped values redacted.
+
+    The exploit record carries the payload, the customised prompt and the
+    target's reply, any of which can hold a live credential, and this file is
+    committed (#223). Redacted the way ``scan`` and ``generate`` redact their
+    copy of the same record: secret-shaped string leaves only, never structure.
+    """
+    path.write_text(
+        json.dumps(redact_value(exploit.model_dump(mode="json")), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
 def _rejection_reason(report: ValidationReport) -> str:
     """The first validation stage that actually FAILED the verdict, its
     detail redacted and capped — more actionable in the PR body's
@@ -218,16 +232,13 @@ def _process_one_finding(
     test_path.write_text(generated.source, encoding="utf-8")
     exploit_path = this_out / f"exploit_{exploit.pattern_id}.json"
     written = [test_path, exploit_path]
-    # The exploit record carries the payload, the customised prompt and the
-    # target's reply, any of which can hold a live credential, and this file is
-    # committed (#223). Redact it the way ``scan`` and ``generate`` redact their
-    # copy of the same record: secret-shaped string leaves only, never structure.
-    exploit_path.write_text(
-        json.dumps(redact_value(exploit.model_dump(mode="json")), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    _write_redacted_exploit(exploit_path, exploit)
 
     report = validate_fn(generated)
+    # The validator may write its own copy of the exploit next to the test
+    # (the reference route records fixtures there). Write the redacted record
+    # again so whatever ends up committed, or kept for debugging, is redacted.
+    _write_redacted_exploit(exploit_path, exploit)
     if report is None:
         reason = "the validator returned nothing"
         message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."

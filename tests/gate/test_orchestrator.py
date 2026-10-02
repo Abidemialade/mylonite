@@ -1306,3 +1306,35 @@ def test_gate_pr_body_evidence_lines_are_redacted(tmp_path):
     seen = _run_gate_with_secret(tmp_path, report)
     assert _FAKE_KEY not in seen["body"]
     assert "***REDACTED***" in seen["body"]
+
+
+def test_gate_rewrites_a_redacted_exploit_after_the_validator_writes_its_own(tmp_path):
+    """A validator may write its own copy of the exploit next to the test (the
+    reference route does). The file left on disk must still be redacted, for a
+    kept finding and a rejected one."""
+    for kept in (True, False):
+        out = tmp_path / f"kept-{kept}"
+        path = out / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
+
+        def overwriting_validate(test, _path=path, _kept=kept):
+            _path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
+            assert _FAKE_KEY in _path.read_text(encoding="utf-8")
+            report = _kept_report(test.filename)
+            return report if _kept else report.model_copy(update={"kept": False})
+
+        run_gate(
+            out_dir=out / ".mylonite" / "gate",
+            scan_fn=lambda: ScanOutcomeBundle(
+                outcome=_found_outcome(), exploits=[_exploit_carrying_a_secret()]
+            ),
+            generate_fn=lambda e: GeneratedTest(
+                framework="pytest", filename="test_security_x.py", source="x", exploit=e
+            ),
+            validate_fn=overwriting_validate,
+            open_pr_fn=lambda **_: "printed",
+            open_pr=False,
+        )
+        on_disk = list(out.rglob("exploit_*.json"))
+        assert on_disk, f"no exploit file left for kept={kept}"
+        for f in on_disk:
+            assert _FAKE_KEY not in f.read_text(encoding="utf-8")

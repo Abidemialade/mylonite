@@ -441,3 +441,33 @@ def test_pr_body_evidence_lines_redact_validator_detail():
     body = build_pr_body(ex, report)
     assert fake_key not in body
     assert "- **effect**: pass — probe saw token=***REDACTED***" in body
+
+
+def test_llm_suggestion_and_its_prompt_are_redacted():
+    """#223: the opt-in LLM suggestion is pasted into the committed PR body,
+    and its prompt quotes success_reason; neither may carry a key."""
+    fake_key = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    ex = ex.model_copy(update={"success_reason": f"agent leaked {fake_key}"})
+    prompts: list[str] = []
+
+    def fake_completion(*, model, messages, **kwargs):
+        prompts.append(str(messages))
+
+        class _Msg:
+            content = f"Rotate the key {fake_key} and wrap notes."
+
+        class _Choice:
+            message: _Msg = _Msg()  # type: ignore[misc]
+
+        class _Resp:
+            def __init__(self) -> None:
+                self.choices = [_Choice()]
+
+        return _Resp()
+
+    body = build_pr_body(ex, _report(), llm_enrich=True, completion_fn=fake_completion)
+    assert prompts and fake_key not in prompts[0]
+    assert "Unverified LLM suggestion" in body
+    assert fake_key not in body
+    assert "Rotate the key ***REDACTED***" in body

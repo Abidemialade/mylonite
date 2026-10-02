@@ -79,7 +79,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal, get_args
 
 from mylonite._concurrency import gather_bounded, run_twins
-from mylonite._redaction import redact_exception
+from mylonite._redaction import redact_exception, redact_value
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
 from mylonite._verdict import (
@@ -1746,7 +1746,14 @@ class DifferentialValidator(ValidatorBase):
         test_path = artefact_dir / test.filename
         test_path.write_text(test.source, encoding="utf-8")
         exploit_path = artefact_dir / f"exploit_{exploit.pattern_id}.json"
-        exploit_path.write_text(exploit.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        # Redacted like every other copy of the exploit record: this file is
+        # committed by `gate` and `validate` (#223). The emitted test reads only
+        # `pattern_id` and the exec-context keys, which redaction never touches.
+        exploit_path.write_text(
+            json.dumps(redact_value(exploit.model_dump(mode="json")), indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
 
         # 4. Run the ON-DISK committed test offline — FULL pass required (exit 0).
         result = run_test_file(test_path)
