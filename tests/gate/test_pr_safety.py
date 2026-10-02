@@ -231,3 +231,158 @@ def test_base_reaches_gh_pr_create(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     )
     gh = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
     assert gh[gh.index("--base") + 1] == "trunk"
+
+
+# ---------------------------------------------------------------------------
+# After the gate commit exists, the run returns to where it started and keeps
+# the gate branch: on success, and when push or `gh pr create` fails.
+# ---------------------------------------------------------------------------
+
+
+def _real_git_fake_gh(*, gh_rc: int = 0):
+    """Runs git for real; answers `gh` (auth status, pr create) without a network."""
+
+    def run(cmd, **kwargs):
+        if cmd[0] == "gh":
+            create = cmd[:3] == ["gh", "pr", "create"]
+
+            class _CP:
+                returncode = gh_rc if create else 0
+                stdout = "https://github.com/o/r/pull/1\n" if create and gh_rc == 0 else ""
+                stderr = "gh: could not create the pull request" if create and gh_rc else ""
+
+            return _CP()
+        return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)
+
+    return run
+
+
+def _with_local_origin(tmp_path: Path, repo: Path) -> None:
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True, capture_output=True)
+    _git(repo, "remote", "add", "origin", str(bare))
+
+
+def _open(repo: Path, run) -> object:
+    return open_or_print_pr(
+        _gate_paths(repo),
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+
+def test_success_returns_to_the_original_branch_and_keeps_the_gate_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    repo = _init_repo(tmp_path / "repo")
+    _with_local_origin(tmp_path, repo)
+
+    result = _open(repo, _real_git_fake_gh())
+
+    assert getattr(result, "opened", False) is True
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    gate_sha = _git(repo, "rev-parse", "mylonite/gate-x")
+    assert getattr(result, "commit_sha", None) == gate_sha
+    out = capsys.readouterr().out
+    assert "'mylonite/gate-x' is kept" in out
+    assert "back on 'main'" in out
+
+
+def test_push_failure_returns_to_the_original_branch_and_keeps_the_gate_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    repo = _init_repo(tmp_path / "repo")  # no `origin` remote: the push fails
+
+    with pytest.raises(GatePrError, match="git push") as excinfo:
+        _open(repo, _real_git_fake_gh())
+
+    assert "'mylonite/gate-x' is kept" in str(excinfo.value)
+    assert "back on 'main'" in str(excinfo.value)
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"
+
+
+def test_gh_failure_returns_to_the_original_branch_and_keeps_the_gate_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    repo = _init_repo(tmp_path / "repo")
+    _with_local_origin(tmp_path, repo)
+
+    with pytest.raises(GatePrError, match="gh pr create failed") as excinfo:
+        _open(repo, _real_git_fake_gh(gh_rc=1))
+
+    assert "'mylonite/gate-x' is kept" in str(excinfo.value)
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"
+
+
+def test_gh_missing_returns_to_the_original_branch_and_keeps_the_gate_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: None)
+    repo = _init_repo(tmp_path / "repo")
+
+    result = _open(repo, _real_git_fake_gh())
+
+    assert getattr(result, "opened", True) is False
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"
+
+
+# ---------------------------------------------------------------------------
+# A detached HEAD (common in CI) is restored to the same commit.
+# ---------------------------------------------------------------------------
+
+
+def test_detached_head_is_restored_after_a_failed_commit(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    start = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "--detach")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+    with pytest.raises(GatePrError):
+        _open(repo, _real_git_fake_gh())
+
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"  # still detached
+    assert _git(repo, "rev-parse", "HEAD") == start
+    assert _git(repo, "branch", "--list", "mylonite/gate-x") == ""
+
+
+def test_detached_head_is_restored_after_a_successful_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    repo = _init_repo(tmp_path / "repo")
+    _with_local_origin(tmp_path, repo)
+    start = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "--detach")
+
+    _open(repo, _real_git_fake_gh())
+
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
+    assert _git(repo, "rev-parse", "HEAD") == start
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"
+    assert f"detached commit {start[:12]}" in capsys.readouterr().out
+
+
+def test_a_git_error_checking_the_index_is_not_reported_as_staged_files(tmp_path: Path) -> None:
+    def run(cmd, **kwargs):
+        class _CP:
+            returncode = 128 if cmd[:3] == ["git", "diff", "--cached"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = "fatal: index file corrupt" if cmd[:3] == ["git", "diff", "--cached"] else ""
+
+        return _CP()
+
+    with pytest.raises(GatePrError, match="rc=128") as excinfo:
+        _open(_init_repo(tmp_path / "repo"), run)
+    assert "staged" not in str(excinfo.value)

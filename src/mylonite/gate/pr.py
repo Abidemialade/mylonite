@@ -68,6 +68,9 @@ class PrResult:
     opened: bool
     pr_url: str | None = None
     printed_command: str | None = None
+    #: The gate commit, when one was made. The run returns to the original
+    #: branch afterwards, so HEAD is no longer this commit.
+    commit_sha: str | None = None
 
 
 def resolve_repo_root(*, cwd: Path | None = None, _run: Runner = _default_run) -> Path:
@@ -247,10 +250,16 @@ def open_or_print_pr(
     pr_title: str,
     pr_body: str,
     open_pr: bool,
-    base: str = "main",
+    base: str,
     _run: Runner = _default_run,
 ) -> PrResult:
-    """Commit the gate artifacts to ``branch``; open the PR iff ``open_pr`` and gh works."""
+    """Commit the gate artifacts to ``branch``; open the PR iff ``open_pr`` and gh works.
+
+    ``base`` has no default on purpose: the caller resolves it (``--base`` or
+    :func:`resolve_default_base`), so no caller silently targets ``main``.
+    With ``open_pr``, once the gate commit exists the run always returns to
+    the branch (or detached commit) it started on and keeps the gate branch.
+    """
     cwd = paths.repo_root
     body_path = paths.gate_dir / "PR_BODY.md"
 
@@ -320,18 +329,30 @@ def open_or_print_pr(
         )
         return PrResult(branch=branch, opened=False, printed_command=manual)
 
-    # Capture whatever branch was actually checked out BEFORE doing anything
-    # destructive, so a mid-sequence failure can restore exactly that — not a
-    # hardcoded assumption (``base`` is the PR's merge target, which may differ
-    # from the branch the operator actually had checked out).
+    # Capture whatever was actually checked out BEFORE doing anything
+    # destructive, so a failure (or the end of a successful run) can restore
+    # exactly that — not a hardcoded assumption (``base`` is the PR's merge
+    # target, which may differ from the branch the operator had checked out).
+    # On a detached HEAD (common in CI) `--abbrev-ref` prints the literal
+    # "HEAD", and `git checkout HEAD` would restore nothing, so record the
+    # commit itself instead.
     original_branch = _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, _run=_run).stdout.strip()
+    original_label = f"'{original_branch}'"
+    if original_branch == "HEAD":
+        original_branch = _git(["rev-parse", "HEAD"], cwd=cwd, _run=_run).stdout.strip()
+        original_label = f"the detached commit {original_branch[:12]}"
 
     # The pre-flight already refused a staged tree, but `git commit` below
     # commits EVERYTHING staged, so check again right before branching: the
     # run itself never stages anything, so a staged file here is not ours.
+    # `git diff --quiet` exits 1 for "differences", anything else for an error.
     staged_cp = _run(["git", "diff", "--cached", "--quiet"], cwd=str(cwd))
-    if getattr(staged_cp, "returncode", 1) != 0:
+    staged_rc = getattr(staged_cp, "returncode", 1)
+    if staged_rc == 1:
         raise GatePrError(_STAGED_MESSAGE.format(what="Files are"))
+    if staged_rc != 0:
+        stderr = redact((getattr(staged_cp, "stderr", "") or "").strip())
+        raise GatePrError(f"git diff --cached --quiet failed (rc={staged_rc}): {stderr}")
 
     # Only a branch THIS run created may be deleted on rollback: when
     # `checkout -b` fails because the branch already exists (a re-run), that
@@ -357,17 +378,85 @@ def open_or_print_pr(
         )
         raise
 
+    # The gate commit exists from here on. Whatever happens next (push, gh,
+    # or success), the gate branch is KEPT and the operator is put back where
+    # they started, so their next commit doesn't land on the gate branch.
+    commit_sha = (
+        str(getattr(_git(["rev-parse", "HEAD"], cwd=cwd, _run=_run), "stdout", "") or "").strip()
+        or None
+    )
+    try:
+        result = _publish(
+            cwd=cwd,
+            branch=branch,
+            base=base,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            gh_cmd=gh_cmd,
+            commit_sha=commit_sha,
+            _run=_run,
+        )
+    except GatePrError as exc:
+        note = _return_after_commit(
+            cwd=cwd,
+            original_branch=original_branch,
+            original_label=original_label,
+            branch=branch,
+            _run=_run,
+        )
+        raise GatePrError(f"{exc} {note}") from exc
+    echo(
+        _return_after_commit(
+            cwd=cwd,
+            original_branch=original_branch,
+            original_label=original_label,
+            branch=branch,
+            _run=_run,
+        )
+    )
+    return result
+
+
+def _return_after_commit(
+    *, cwd: Path, original_branch: str, original_label: str, branch: str, _run: Runner
+) -> str:
+    """Check ``original_branch`` back out, keeping ``branch``; return one line
+    saying which branch was kept and where the operator now is. Never raises."""
+    cp = _run(["git", "checkout", original_branch], cwd=str(cwd))
+    if getattr(cp, "returncode", 1) == 0:
+        return (
+            f"The gate branch '{branch}' is kept with the committed gate output; "
+            f"you are back on {original_label}."
+        )
+    stderr = redact((getattr(cp, "stderr", "") or "").strip())
+    return (
+        f"The gate branch '{branch}' is kept with the committed gate output, and you are "
+        f"still on it: checking out {original_label} failed: {stderr}"
+    )
+
+
+def _publish(
+    *,
+    cwd: Path,
+    branch: str,
+    base: str,
+    pr_title: str,
+    pr_body: str,
+    gh_cmd: str,
+    commit_sha: str | None,
+    _run: Runner,
+) -> PrResult:
+    """Push the committed gate branch and open the PR (or print how to)."""
     if not gh_available(_run=_run):
         # The operator asked for the PR flow, so the commit above is what they
         # wanted; only the gh half is unavailable. Degrade to printing the
-        # remaining two steps. body_path was already written (and committed,
-        # since it's in `rels`) above.
+        # remaining two steps (both work from any checked-out branch).
         echo(
             f"\nGate artifacts committed to branch '{branch}'.\n"
             f"To open the gating PR, run:\n"
             f"  git push -u origin {shlex.quote(branch)}\n  {gh_cmd}\n"
         )
-        return PrResult(branch=branch, opened=False, printed_command=gh_cmd)
+        return PrResult(branch=branch, opened=False, printed_command=gh_cmd, commit_sha=commit_sha)
 
     _git(["push", "-u", "origin", branch], cwd=cwd, _run=_run)
     cp = _run(
@@ -390,4 +479,4 @@ def open_or_print_pr(
         stderr = redact((getattr(cp, "stderr", "") or "").strip())
         raise GatePrError(f"gh pr create failed (rc={cp.returncode}): {stderr}")
     url = (getattr(cp, "stdout", "") or "").strip() or None
-    return PrResult(branch=branch, opened=True, pr_url=url)
+    return PrResult(branch=branch, opened=True, pr_url=url, commit_sha=commit_sha)

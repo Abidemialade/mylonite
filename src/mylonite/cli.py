@@ -3292,7 +3292,8 @@ def gate(
         echo_err(f"\nerror: the gate's git/gh step failed: {exc}")
         echo_err(
             f"The findings, the generated test and the validation report are "
-            f"still in '{out}'. Nothing was lost; only the PR step failed."
+            f"still in '{out}', or committed on the gate branch named above. "
+            f"Nothing was lost; only the PR step failed."
         )
         raise typer.Exit(code=EXIT_PR_FAILED) from exc
     echo(f"gate {spend_summary(spend_tally.spend(), time.monotonic() - spend_started)}")

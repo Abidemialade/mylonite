@@ -49,6 +49,7 @@ def test_print_path_when_open_pr_false(tmp_path, capsys):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=runner,
     )
     assert isinstance(result, PrResult)
@@ -78,6 +79,7 @@ def test_no_git_mutation_at_all_without_open_pr(tmp_path, capsys):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=runner,
     )
 
@@ -105,6 +107,7 @@ def test_print_path_warns_against_git_add_on_the_bare_gate_dir(tmp_path, capsys)
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=_fake_runner_recording(),
     )
     out = capsys.readouterr().out
@@ -128,6 +131,7 @@ def test_print_path_lists_workflow_files_already_written(tmp_path, capsys):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=_fake_runner_recording(),
     )
     out = capsys.readouterr().out
@@ -151,6 +155,7 @@ def test_print_path_says_not_modified_when_no_workflows_were_written(tmp_path, c
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=_fake_runner_recording(),
     )
     out = capsys.readouterr().out
@@ -182,6 +187,7 @@ def test_open_pr_still_commits(tmp_path, monkeypatch):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=True,
+        base="main",
         _run=runner,
     )
 
@@ -214,6 +220,7 @@ def test_open_path_calls_gh_when_available(tmp_path, monkeypatch):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=True,
+        base="main",
         _run=run,
     )
     assert result.opened is True
@@ -233,6 +240,7 @@ def test_open_requested_but_gh_missing_degrades_to_print(tmp_path, capsys, monke
         pr_title="Gate: x",
         pr_body="body",
         open_pr=True,
+        base="main",
         _run=_fake_runner_recording(),
     )
     assert result.opened is False
@@ -267,6 +275,7 @@ def test_relative_gate_dir_does_not_crash(tmp_path, monkeypatch):
         pr_title="t",
         pr_body="x",
         open_pr=True,  # the commit sequence only runs under the PR flow
+        base="main",
         _run=runner,
     )
     assert result.opened is False
@@ -289,7 +298,9 @@ def test_failing_git_commit_raises(tmp_path):
         return _CP()
 
     with pytest.raises(GatePrError):
-        open_or_print_pr(paths, branch="b", pr_title="t", pr_body="x", open_pr=True, _run=run)
+        open_or_print_pr(
+            paths, branch="b", pr_title="t", pr_body="x", open_pr=True, base="main", _run=run
+        )
 
 
 def test_printed_command_quotes_every_interpolated_value(tmp_path):
@@ -307,6 +318,7 @@ def test_printed_command_quotes_every_interpolated_value(tmp_path):
         pr_title="Gate: x",
         pr_body="body",
         open_pr=False,
+        base="main",
         _run=runner,
     )
 
@@ -343,6 +355,7 @@ def test_failed_commit_restores_the_original_branch(tmp_path):
             pr_title="t",
             pr_body="x",
             open_pr=True,
+            base="main",
             _run=run,
         )
 
@@ -376,6 +389,7 @@ def test_out_of_tree_gate_dir_raises_GatePrError_before_any_checkout(tmp_path):
             pr_title="t",
             pr_body="x",
             open_pr=False,
+            base="main",
             _run=runner,
         )
 
@@ -413,6 +427,7 @@ def test_git_stderr_credentials_are_scrubbed(tmp_path, monkeypatch):
             pr_title="t",
             pr_body="x",
             open_pr=True,
+            base="main",
             _run=run,
         )
 
@@ -453,6 +468,7 @@ def test_rollback_step_failure_warns_but_does_not_replace_the_original_error(tmp
             pr_title="t",
             pr_body="x",
             open_pr=True,
+            base="main",
             _run=run,
         )
 
@@ -529,7 +545,7 @@ def test_add_paths_used_exactly_excludes_anything_not_listed(tmp_path, capsys):
     )
     runner = _fake_runner_recording()
     result = open_or_print_pr(
-        paths, branch="b", pr_title="t", pr_body="x", open_pr=False, _run=runner
+        paths, branch="b", pr_title="t", pr_body="x", open_pr=False, base="main", _run=runner
     )
     printed = result.printed_command or ""
     assert "b_pattern" in printed
@@ -561,7 +577,9 @@ def test_pr_body_written_before_any_git_command(tmp_path, monkeypatch):
         return _CP()
 
     paths = GatePaths(repo_root=tmp_path, gate_dir=gate_dir, add_paths=[gate_dir / "PR_BODY.md"])
-    open_or_print_pr(paths, branch="b", pr_title="t", pr_body="hello", open_pr=True, _run=run)
+    open_or_print_pr(
+        paths, branch="b", pr_title="t", pr_body="hello", open_pr=True, base="main", _run=run
+    )
 
     assert (gate_dir / "PR_BODY.md").read_text(encoding="utf-8") == "hello"
     assert calls_before_write == [True]

@@ -299,9 +299,11 @@ Options: `target` or `--target-file` (a custom target comes only through
 `--target-file`; `gate` does not take inline `mcp:custom` flags); `--authorize` (the
 target's `scope`, or its family when it declares no scope); `--open-pr` (create the branch,
 commit, push, and open the PR via `gh`; refused on a tree with staged or uncommitted
-changes, and a rollback never deletes a branch the run didn't create); `--base BRANCH`
-(the branch the PR targets; defaults to the repository's default branch: `origin/HEAD`,
-else the current branch's upstream, else `main`); `--config`; `--model` (any LiteLLM provider via
+changes, and a rollback never deletes a branch the run didn't create; after the commit it
+returns you to the branch or detached commit you started on and keeps the gate branch,
+naming it in the output); `--base BRANCH` (the branch the PR targets; defaults to the
+repository's default branch: `origin/HEAD`, else the current branch's upstream, else
+`main`; running from a feature branch, pass `--base`); `--config`; `--model` (any LiteLLM provider via
 a `provider/model` prefix); `--planner-model`, `--customiser-model`, `--judge-model`
 (the three [model roles](attack-modes.md#composing-the-model-roles), each defaulting
 to `--model`, same split as `scan`); `--purpose "…"` (a one-line description of what

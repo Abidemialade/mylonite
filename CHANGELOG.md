@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throwing away any commits you had not pushed. Rollback now deletes a branch
   only when this run created it; the older branch and its commits are kept.
 
+- **`gate --open-pr` puts you back on the branch you started from.** After
+  the gate commit, a successful run, a failed push and a failed
+  `gh pr create` all used to leave you on `mylonite/gate-…`, so your next
+  commit landed on the gate branch. `gate` now checks out your original
+  branch (or, on a detached HEAD, the same commit), keeps the gate branch,
+  and names it in the output or the error. A detached HEAD used to be lost on
+  rollback; it is now restored.
+
 - **`gate --open-pr` refuses a tree with staged or uncommitted changes, before
   any LLM call.** `git commit` commits everything staged, so a file you had
   staged for your own work went into the gating PR, and uncommitted edits
