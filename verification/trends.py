@@ -83,6 +83,15 @@ _LAYER_FILES = {
 #: historical number, not a permanent asterisk.
 _KNOWN_DEFECTIVE: dict[tuple[str, str], str] = {
     ("0.9.0", "layer1"): "unmeasured (harness defect, see FINDINGS.md)",
+    # The AgentDojo adapter read the upstream `security` label backwards (it
+    # mapped security==False to "attack succeeded"; upstream's own docstring
+    # says the opposite). Every committed result through 0.11.0 was scored
+    # against that inverted label. 41.2% is what was published; 81.1% is the
+    # same 27 recorded judge verdicts recomputed under the corrected label
+    # (no new model call) -- see FINDINGS.md.
+    ("0.9.0", "layer2-agentdojo"): "41.2% (label inverted; corrected 81.1%, see FINDINGS.md)",
+    ("0.10.0", "layer2-agentdojo"): "41.2% (label inverted; corrected 81.1%, see FINDINGS.md)",
+    ("0.11.0", "layer2-agentdojo"): "41.2% (label inverted; corrected 81.1%, see FINDINGS.md)",
 }
 
 _SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
@@ -144,7 +153,7 @@ def _render_layer1(version_dir: Path, meta: dict[str, Any], version: str) -> str
         return "error"
 
 
-def _render_judge_f1(version_dir: Path, meta: dict[str, Any], layer_key: str) -> str:
+def _render_judge_f1(version_dir: Path, meta: dict[str, Any], layer_key: str, version: str) -> str:
     """Judge-agreement F1 from one layer-2 report.
 
     Parameterised over the layer so the table can show all three columns. It
@@ -160,7 +169,14 @@ def _render_judge_f1(version_dir: Path, meta: dict[str, Any], layer_key: str) ->
     only human-readable view of it. Both now have columns, so a reader sees the
     good number and the bad one together -- which is the standard the README
     sets for itself ("published for the same reason the wins are").
+
+    Checked against ``_KNOWN_DEFECTIVE`` first, same as ``_render_layer1``: a
+    harness/labelling defect discovered after the fact must never render as a
+    clean number just because the field is technically present.
     """
+    known_defective = _KNOWN_DEFECTIVE.get((version, layer_key))
+    if known_defective is not None:
+        return known_defective
     if _layer_status(meta, layer_key) != "ran":
         return "not run"
     try:
@@ -231,9 +247,9 @@ def render_trends(results_root: Path) -> str:
         row = (
             f"| {version} | {_render_date(meta)} | {model} "
             f"| {_render_layer1(entry, meta, version)} "
-            f"| {_render_judge_f1(entry, meta, 'layer2-agentdojo')} "
-            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-dh')} "
-            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-ds')} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-agentdojo', version)} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-dh', version)} "
+            f"| {_render_judge_f1(entry, meta, 'layer2-injecagent-ds', version)} "
             f"| {_render_layer3(entry, meta)} |"
         )
         rows.append((key, row))
