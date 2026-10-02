@@ -202,13 +202,18 @@ exists.
 calls or spend today: there is no `--max-budget`/spend-cap option anywhere in the
 CLI, config, or `LLMPolicy` (which forwards only a fixed allowlist of LiteLLM kwargs
 -- `api_base`, `max_tokens`, `temperature`, `timeout`, `num_retries` -- not LiteLLM's
-own `max_budget`). **BUDGET-1, a separate PR, is adding a hard, process-wide LLM
-request ceiling** counted across `scan` + `generate` + `validate` + retries, read
-from an environment variable. This workflow already wires a placeholder for it:
-`MYLONITE_MAX_LLM_REQUESTS`, set on the run step from the same clamped
-`max_llm_calls` dispatch input that already drives `scan --max-llm-calls`, in exactly
-one place in the workflow file (a single line), so the controller can correct the
-name to whatever BUDGET-1 actually lands with. Until that PR lands, the env var is a
+own `max_budget`). **BUDGET-1, a separate PR, is adding a hard LLM-call ceiling,
+applied per process** (including retries). `generate` makes no LLM call at all
+(`cli.py:1566` -- it is offline and deterministic), so the two processes that matter
+are `scan` and `validate`, run one after the other, each its own process with its
+own ceiling -- a per-cell bound is therefore **ceiling x 2**, not a single shared
+counter across all three commands (an earlier draft of this section wrongly said
+"counted across scan + generate + validate"; fixed here). This workflow already
+wires a placeholder for the env var name: `MYLONITE_MAX_LLM_REQUESTS`, set
+identically on both processes (they share the run step's `env:`) from a single
+hardcoded value (not the dispatch's own `max_llm_calls` input -- see why below), in
+exactly one place in the workflow file, so the controller can correct the name to
+whatever BUDGET-1 actually lands with. Until that PR lands, the env var is a
 harmless no-op -- nothing in `src/` reads it yet -- and today's only two REAL stops
 are:
 
@@ -221,16 +226,37 @@ are:
    something this workflow can enforce itself, and it is the only stop that is
    genuinely independent of a bug anywhere in this chain.
 
-**Once BUDGET-1 lands and the env var name is aligned, the per-cell worst case
-restates cleanly as ceiling x max tokens x price** (the simplest conservative bound:
-treating `max_tokens` as capping both legs, which overstates input but never
-understates the total): at the already-wired ceiling of 60 and
-`MYLONITE_MAX_TOKENS=2048`, Haiku 4.5 (`$1`/`$5` per M, summed `$6`/M) is
-`60 * 2048 * 6 / 1e6` ~= **$0.74**; gpt-4o-mini (`$0.15`/`$0.60` per M, summed
-`$0.75`/M) is `60 * 2048 * 0.75 / 1e6` ~= **$0.09**. Both are well inside a single
-cell's share of the campaign budget below -- but this number is **not yet real**
-until BUDGET-1 actually enforces the ceiling; until then, see the worst case stated
-above and rely on the job timeout.
+**The per-cell worst case, once BUDGET-1 lands, restates as**
+
+```
+ceiling x processes x (max_input_tokens x input_price + max_output_tokens x output_price)
+```
+
+with **processes = 2** (`scan`, `validate` -- `generate` makes none), **max_input_tokens
+= 8,000** (the top of this section's own 3k-8k/call estimate; `max_tokens` bounds only
+the OUTPUT leg, so input is NOT capped by it -- an earlier draft of this section
+wrongly claimed `max_tokens` "overstates input but never understates the total",
+which is false whenever actual input exceeds `max_tokens`, as it does here) and
+**max_output_tokens = 2,048** (`MYLONITE_MAX_TOKENS`).
+
+**`MYLONITE_MAX_LLM_REQUESTS` is set to a hardcoded `30` (half the dispatch's own
+clamped `max_llm_calls`, and NOT driven by that input)** specifically so the
+2-process total lands back near the single-process ballpark an earlier draft of
+this section assumed, keeping the whole cell inside a sensible share of the totals
+below -- no single cell's hard-ceiling exposure should be able to consume more than
+roughly a quarter of the whole campaign's allocation for one provider, even in the
+genuine worst case (every call maxed out on every retry, which the typical ~$0.005/
+call figure elsewhere in this repo says is far from the expected case):
+
+| Model | `30 x 2 x (8000 x in + 2048 x out) / 1e6` | Worst case per cell |
+|---|---|---|
+| Haiku 4.5 (`$1`/`$5` per M) | `30 * 2 * (8000*1 + 2048*5) / 1e6` | **~$1.09** |
+| gpt-4o-mini (`$0.15`/`$0.60` per M) | `30 * 2 * (8000*0.15 + 2048*0.60) / 1e6` | **~$0.15** |
+
+Both are well inside a single cell's share of the campaign budget below -- but
+neither number is **real** until BUDGET-1 actually lands and enforces the ceiling;
+until then, see the worst case stated above (570 calls, no per-process ceiling) and
+rely on the job timeout.
 
 **Other spend controls already in place, independent of BUDGET-1:**
 
@@ -241,7 +267,13 @@ above and rely on the job timeout.
   by a dispatch picking an expensive model.
 - **`MYLONITE_MAX_TOKENS=2048`** is set on the one step that calls the CLI, bounding
   each call's OUTPUT tokens (there is no `--max-tokens` CLI flag; this is the
-  documented env-var equivalent -- see `config.py`'s `MYLONITE_MAX_TOKENS`).
+  documented env-var equivalent -- see `config.py`'s `MYLONITE_MAX_TOKENS`). It does
+  NOT bound input tokens, which is why the restated formula above prices the input
+  leg separately at 8k rather than reusing this same figure.
+- **`scan --max-llm-calls` stays driven by the (separately clamped-to-60) dispatch
+  input**, representing the user's intended scan budget; `MYLONITE_MAX_LLM_REQUESTS`
+  is a stricter, independently-sized hard backstop underneath it, not the same
+  number re-used for two different purposes.
 
 Total campaign budget: $4.50 Anthropic + $5.00 OpenAI across targets 1-6. Target 6's
 own-agent inference runs on Ollama at zero cost regardless of which provider drives
