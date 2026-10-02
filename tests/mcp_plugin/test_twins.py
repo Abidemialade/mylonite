@@ -324,3 +324,45 @@ def test_twin_plan_is_frozen_and_comparable() -> None:
     ]
     with pytest.raises(AttributeError):
         plan_a.control_weakness = "W3"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("control_config", "weakness", "expected"),
+    [
+        ({}, "W4", "block"),
+        ({}, "W2", "block"),
+        ({}, "W3", "allowlist"),
+        ({}, "W1", "pin"),
+        ({"enforcement_mode": "approve"}, "W4", "approve-deny"),
+        (
+            {"enforcement_mode": "approve", "approval_policy": "approve_when_trusted"},
+            "W4",
+            "approve-policy",
+        ),
+        ({"enforcement_mode": "observe"}, "W2", "observe"),
+    ],
+)
+def test_a_boundary_plan_names_how_its_stand_in_guard_decides(
+    control_config: dict[str, Any], weakness: str, expected: str
+) -> None:
+    """The report says "resists by construction" only for a guard that refuses
+    whatever the model does, so the plan must carry the mode it was built with."""
+    tf = TargetFile(
+        family="mode-app",
+        command="python",
+        args=["-m", "srv"],
+        weakness_classes=[weakness],
+        control_config={"consequential_tools": ["send_email"], **control_config},
+    )
+    plan = plan_twins(build_target_spec(tf), weakness=weakness, fast=False)
+
+    assert plan.guard_mode == expected
+
+
+def test_the_input_framing_and_server_layer_plans_carry_their_guard_mode() -> None:
+    rest = _spec(transport="rest", url=None, request=_REST_REQUEST)
+    assert plan_twins(rest, weakness="W2", fast=False, prove_input_control=True).guard_mode == (
+        "input-frame"
+    )
+    server = _spec(control_env={"W2": {"GUARD": "off"}})
+    assert plan_twins(server, weakness="W2", fast=False).guard_mode is None

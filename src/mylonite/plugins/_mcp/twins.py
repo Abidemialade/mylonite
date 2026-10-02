@@ -47,11 +47,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mylonite._twin_fidelity import proof_claim
+from mylonite._twin_fidelity import GuardMode, proof_claim
 from mylonite.mitigations import snippet
 from mylonite.plugins._mcp.factory import LaunchIntent
 from mylonite.plugins._mcp.target_registry import TargetSpec
-from mylonite.scan.control_shim import BoundaryControl, make_control
+from mylonite.scan.control_shim import (
+    BoundaryControl,
+    ConfirmGateControl,
+    DescriptionIntegrityControl,
+    EgressAllowlistControl,
+    InformationFlowControl,
+    make_control,
+)
 from mylonite.scan.labels import ApprovalPolicy, ApproveWhenTrusted, DenyAll, EnforcementMode
 
 #: The sentinel ``weakness``/``control`` value meaning "test the rest
@@ -171,6 +178,9 @@ class TwinPlan:
     guarded_is_server_layer: bool
     control_context: str | None
     banner: str | None
+    #: How a synthetic guarded side decides (see ``_twin_fidelity.GuardMode``);
+    #: ``None`` for a server-layer twin or no differential.
+    guard_mode: GuardMode | None = None
 
 
 def _no_diff_plan(*, banner: str | None) -> TwinPlan:
@@ -268,7 +278,33 @@ def _input_frame_plan() -> TwinPlan:
         guarded_is_server_layer=False,
         control_context="Control: input data-framing (spotlighting)",
         banner=_INPUT_FRAME_BANNER,
+        guard_mode="input-frame",
     )
+
+
+def stand_in_guard_mode(control: BoundaryControl) -> GuardMode:
+    """How ``control`` decides on the guarded side: by construction, or not.
+
+    Reads the enforcement mode and approval policy the control was built with
+    (``boundary_control_for`` threads the target file's ``enforcement_mode`` and
+    ``approval_policy``), so the report never claims "refuses by design" for a
+    guard that was configured to decide.
+    """
+    if isinstance(control, (ConfirmGateControl, InformationFlowControl)):
+        mode = control._mode
+        if mode == "observe":
+            return "observe"
+        if mode == "approve":
+            policy = getattr(control, "_approval_policy", None)
+            if policy is None or isinstance(policy, DenyAll):
+                return "approve-deny"
+            return "approve-policy"
+        return "block"
+    if isinstance(control, EgressAllowlistControl):
+        return "allowlist"
+    if isinstance(control, DescriptionIntegrityControl):
+        return "pin"
+    return "approve-policy"
 
 
 def plan_twins(
@@ -343,7 +379,14 @@ def plan_twins(
         guarded_is_server_layer=False,
         control_context=f"Control {weakness}: {snippet(weakness)}",
         banner=banner,
+        guard_mode=stand_in_guard_mode(boundary),
     )
 
 
-__all__ = ["INPUT_FRAME_CONTROL", "TwinPlan", "boundary_control_for", "plan_twins"]
+__all__ = [
+    "INPUT_FRAME_CONTROL",
+    "TwinPlan",
+    "boundary_control_for",
+    "plan_twins",
+    "stand_in_guard_mode",
+]

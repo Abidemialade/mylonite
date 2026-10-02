@@ -83,7 +83,7 @@ from typing import Any, ClassVar, Final, Literal, get_args
 from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact_exception, redact_value
 from mylonite._replay import LiteLLMRecorder
-from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_marker
+from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_guard_mode, format_marker
 from mylonite._verdict import (
     JUDGE_ONLY_CLAUSE,
     black_box_marker,
@@ -290,6 +290,10 @@ class _IterationTally:
     # ``not guard_resisted``: a guarded run can skip/error (neither resist nor
     # fire). The statistical oracle needs the actual leak rate, not its inverse.
     guard_fired: bool = False
+    # The vulnerable twin's scan reached no verdict for the seed: cut off by the
+    # time limit or the budget, or nothing judged. Tallied as "did not fire",
+    # so the report counts it separately from an attack that never landed.
+    vuln_no_verdict: bool = False
 
 
 @dataclass(frozen=True)
@@ -391,13 +395,60 @@ class _Decision:
 
 
 class TargetLaunchError(RuntimeError):
-    """The custom target never came up, so no run could reach a verdict.
+    """The custom target did not come up, so the run could not reach a verdict.
 
     Raised when the adapter factory fails or a run's scan aborts because the
     target could not be described. Every later run would fail the same way and
     read as "the attack did not reproduce", which blames the attack for a
     launch problem. The CLI maps it to exit ``2`` with one line.
+
+    ``completed_runs`` is how many runs finished before the failure. Zero means
+    the target never came up at all (a configuration problem, most likely);
+    more means it went down part-way and those runs' results were discarded.
     """
+
+    def __init__(self, message: str, *, completed_runs: int = 0) -> None:
+        super().__init__(message)
+        self.completed_runs = completed_runs
+
+
+def build_target_or_raise(factory: Callable[[], Any]) -> Any:
+    """Call an adapter ``factory``; a failure becomes :class:`TargetLaunchError`."""
+    try:
+        return factory()
+    except Exception as exc:
+        raise TargetLaunchError(f"the target could not be built: {redact_exception(exc)}") from exc
+
+
+#: Marks, in ``ValidationReport.notes``, how many unguarded runs reached no
+#: verdict: cut off by ``--iteration-timeout`` or stopped by the call budget.
+#: Such a run is tallied as "did not fire", so without this a report where
+#: every run was cut off reads exactly like one where the attack never landed.
+_UNGUARDED_NO_VERDICT_RE = re.compile(r"\[unguarded-no-verdict=(\d+)/(\d+)\]")
+
+
+def unguarded_no_verdict_marker(count: int, total: int) -> str:
+    """The notes marker for ``count`` of ``total`` unguarded runs with no verdict."""
+    return f" [unguarded-no-verdict={count}/{total}]" if count else ""
+
+
+def unguarded_no_verdict(notes: str | None) -> int:
+    """How many unguarded runs reached no verdict, per the notes marker (else 0)."""
+    match = _UNGUARDED_NO_VERDICT_RE.search(notes or "")
+    return int(match.group(1)) if match else 0
+
+
+def _with_run_count(
+    exc: TargetLaunchError, *, side: str, completed: int, total: int, fired: int
+) -> TargetLaunchError:
+    """Re-state a launch failure with how far the loop got before it."""
+    if completed == 0 and side == "unguarded":
+        return exc
+    return TargetLaunchError(
+        f"{exc} (on the {side} side, after {completed} of {total} runs finished, "
+        f"{fired} of them fired; those results were discarded)",
+        completed_runs=completed + (total if side == "guarded" else 0),
+    )
 
 
 def _raise_if_request_ceiling_hit() -> None:
@@ -446,6 +497,7 @@ class DifferentialValidator(ValidatorBase):
         control_context: str | None = None,
         consensus_judges: int = 3,
         iteration_timeout_s: float | None = None,
+        guard_mode: str | None = None,
         progress_cb: Callable[[str], None] | None = None,
     ) -> None:
         if iterations < 1:
@@ -478,6 +530,9 @@ class DifferentialValidator(ValidatorBase):
         # (server-layer) control is theater.
         self._guarded_is_server_layer = guarded_is_server_layer
         self._control_context = control_context
+        # How the synthetic guarded side decides (``TwinPlan.guard_mode``),
+        # stamped into the notes so the report can say what a pass shows.
+        self._guard_mode = guard_mode
         self._consensus_judges = max(1, consensus_judges)
         # Default: vulnerable should fire almost-always (N-1) — but at
         # iterations=1, N-1 is 0, which makes the custom-target stability/effect
@@ -588,6 +643,7 @@ class DifferentialValidator(ValidatorBase):
         vuln_fires = sum(1 for t in tallies if t.vuln_fired)
         guard_resists = sum(1 for t in tallies if t.guard_resisted)
         guard_fires = sum(1 for t in tallies if t.guard_fired)
+        vuln_no_verdict = sum(1 for t in tallies if t.vuln_no_verdict)
         decision = self._decide(
             vuln_fires=vuln_fires,
             guard_resists=guard_resists,
@@ -637,8 +693,9 @@ class DifferentialValidator(ValidatorBase):
             stage="differential",
             passed=differential_passed,
             detail=(
-                f"vulnerable fired the exploit {vuln_fires}/{n} ({vuln_rate:.0%}); "
-                f"{guard_evidence}; {clean_runs}/{n} runs both fired and resisted; the test "
+                f"vulnerable fired the exploit {vuln_fires}/{n} ({vuln_rate:.0%})"
+                + (f", reached no verdict {vuln_no_verdict}/{n}" if vuln_no_verdict else "")
+                + f"; {guard_evidence}; {clean_runs}/{n} runs both fired and resisted; the test "
                 f"{'discriminates' if differential_passed else 'does NOT discriminate'} "
                 f"between the twins (strength={decision.differential_metric:.2f})"
                 + _tier_clause(fire_tiers)
@@ -661,7 +718,7 @@ class DifferentialValidator(ValidatorBase):
 
         # 3. mutation-score (report-only) — per-seed kill matrix from the scans
         #    already run.
-        mutation = self._mutation_score(tallies)
+        mutation = self._mutation_score(tallies, own_pattern_id=pattern_id)
 
         # 4. metamorphic — multiple deterministic perturbations, each genuinely
         #    driven through both twins. GATES kept (M2), unlike mutation-score above.
@@ -681,21 +738,26 @@ class DifferentialValidator(ValidatorBase):
             ValidationReport(test_filename=test.filename, outcomes=outcomes, kept=kept)
         )
         notes = (
-            f"statistical differential: vulnerable fired {vuln_fires}/{self._iterations} "
-            f"({vuln_rate:.0%}), guarded leaked {guard_fires}/{self._iterations} "
-            f"({guard_leak_rate:.0%}), success-rate gap {rate_gap:+.0%} "
-            f"(significant={decision.flakiness_passed}); "
-            f"mutation: killed {mutation.killed}/{mutation.total} kitchen-sink seeds "
-            f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
-            f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
-            f"(need >= {self._metamorphic_threshold:.0%}, gates kept); "
-            f"{label} (kept = {' ∧ '.join(legs)}). " + format_marker(server_layer=True)
-            # The reference twins ARE a server-layer pair: the guarded side is the
-            # real `server_guarded.py`, not a boundary shim, so this differential
-            # earns the strong claim. Stamping it is not cosmetic -- every reader
-            # defaults to "boundary" when the marker is absent, so without this the
-            # reference app (the demo everyone runs first) would UNDER-claim.
-        ) + judge_only_marker(judge_only)
+            (
+                f"statistical differential: vulnerable fired {vuln_fires}/{self._iterations} "
+                f"({vuln_rate:.0%}), guarded leaked {guard_fires}/{self._iterations} "
+                f"({guard_leak_rate:.0%}), success-rate gap {rate_gap:+.0%} "
+                f"(significant={decision.flakiness_passed}); "
+                f"mutation: (own seed only, '-' = not run) killed "
+                f"{mutation.killed}/{mutation.total} kitchen-sink seeds "
+                f"(mutation_score={mutation.score:.2f}): {mutation.matrix}; "
+                f"metamorphic robustness={(metamorphic.metric or 0.0):.2f} "
+                f"(need >= {self._metamorphic_threshold:.0%}, gates kept); "
+                f"{label} (kept = {' ∧ '.join(legs)}). " + format_marker(server_layer=True)
+                # The reference twins ARE a server-layer pair: the guarded side is the
+                # real `server_guarded.py`, not a boundary shim, so this differential
+                # earns the strong claim. Stamping it is not cosmetic -- every reader
+                # defaults to "boundary" when the marker is absent, so without this the
+                # reference app (the demo everyone runs first) would UNDER-claim.
+            )
+            + judge_only_marker(judge_only)
+            + unguarded_no_verdict_marker(vuln_no_verdict, n)
+        )
 
         return ValidationReport(
             test_filename=test.filename,
@@ -733,11 +795,23 @@ class DifferentialValidator(ValidatorBase):
         """
         pattern_id = test.exploit.pattern_id
         n = self._iterations
-        runs = []
+        runs: list[_CustomRun] = []
         for i in range(n):
             self._progress(f"re-driving real target: stability run {i + 1}/{n}")
-            runs.append(self._run_custom_iteration(target, pattern_id))
+            try:
+                runs.append(self._run_custom_iteration(target, pattern_id))
+            except TargetLaunchError as exc:
+                raise _with_run_count(
+                    exc,
+                    side="unguarded",
+                    completed=len(runs),
+                    total=n,
+                    fired=sum(1 for r in runs if r.finding),
+                ) from exc
         fired = sum(1 for r in runs if r.finding)
+        # A run that neither fired nor was decided resisted reached no verdict
+        # (cut off by the time limit or the budget, or nothing was judged).
+        raw_no_verdict = sum(1 for r in runs if not r.finding and not r.resisted)
         # A finding only the LLM judge made, on every run, keeps nothing: no run
         # was confirmed by the target's state or the recorded trace. Judge-only
         # runs still count toward the threshold when one run is confirmed.
@@ -778,6 +852,8 @@ class DifferentialValidator(ValidatorBase):
             f"the attack reproduced against the real target {fired}/{n} runs "
             f"(need >= {self._vuln_threshold})" + _tier_clause(fire_tiers)
         )
+        if raw_no_verdict:
+            stability_detail += f"; {raw_no_verdict}/{n} runs reached no verdict"
         if judge_only:
             stability_detail += f"; {JUDGE_ONLY_CLAUSE}"
         stability = ValidationOutcome(
@@ -868,16 +944,25 @@ class DifferentialValidator(ValidatorBase):
             # "vulnerable" side; only the guarded runs are new. The success-RATE
             # gap is the control's marginal contribution — proof the safeguard,
             # not the model, carries the security.
-            guard_runs = []
+            guard_runs: list[_CustomRun] = []
             for i in range(n):
                 self._progress(f"boundary-guarded twin: differential run {i + 1}/{n}")
-                guard_runs.append(
-                    self._run_custom_iteration(
-                        target,
-                        pattern_id,
-                        factory=self._guarded_adapter_factory,
+                try:
+                    guard_runs.append(
+                        self._run_custom_iteration(
+                            target,
+                            pattern_id,
+                            factory=self._guarded_adapter_factory,
+                        )
                     )
-                )
+                except TargetLaunchError as exc:
+                    raise _with_run_count(
+                        exc,
+                        side="guarded",
+                        completed=len(guard_runs),
+                        total=n,
+                        fired=sum(1 for r in guard_runs if r.finding),
+                    ) from exc
             guard_fired = sum(1 for r in guard_runs if r.finding)
             guard_resisted_count = sum(1 for r in guard_runs if r.resisted)
             decision = self._decide(
@@ -961,6 +1046,11 @@ class DifferentialValidator(ValidatorBase):
                 f" {twin_label} (control {control!r}): leaked "
                 f"{guard_fired}/{n}, contribution {rate_gap:+.0%}. "
                 + format_marker(server_layer=self._guarded_is_server_layer)
+                + (
+                    " " + format_guard_mode(self._guard_mode)
+                    if self._guard_mode and not self._guarded_is_server_layer
+                    else ""
+                )
             )
 
         twin_note = (
@@ -987,6 +1077,7 @@ class DifferentialValidator(ValidatorBase):
             + notes_tail
             + judge_only_marker(judge_only)
             + black_box_marker(black_box_cap)
+            + unguarded_no_verdict_marker(raw_no_verdict, n)
         )
         return ValidationReport(
             test_filename=test.filename,
@@ -1016,12 +1107,7 @@ class DifferentialValidator(ValidatorBase):
         from mylonite.scan.engine import ScanConfig
 
         chosen_factory = factory or self._target_adapter_factory
-        try:
-            adapter = chosen_factory() if chosen_factory else target
-        except Exception as exc:
-            raise TargetLaunchError(
-                f"the target could not be built: {redact_exception(exc)}"
-            ) from exc
+        adapter = build_target_or_raise(chosen_factory) if chosen_factory else target
         config = ScanConfig(
             target_id="mcp:custom",  # report id; seed selection uses the descriptor
             provider=self._provider,
@@ -1246,6 +1332,10 @@ class DifferentialValidator(ValidatorBase):
             vuln_result=vuln_result,
             guard_result=guard_result,
             guard_fired=self._fired(guard_result, pattern_id),
+            vuln_no_verdict=(
+                not self._fired(vuln_result, pattern_id)
+                and not self._resisted(vuln_result, pattern_id)
+            ),
         )
 
     async def _run_scan_async(
@@ -1323,7 +1413,9 @@ class DifferentialValidator(ValidatorBase):
 
     # -- mutation score -------------------------------------------------------
 
-    def _mutation_score(self, tallies: list[_IterationTally]) -> _MutationResult:
+    def _mutation_score(
+        self, tallies: list[_IterationTally], *, own_pattern_id: str | None = None
+    ) -> _MutationResult:
         """Per-seed kill matrix over every kitchen-sink seed.
 
         A seed is "killed" iff, across all the scans already run, the vulnerable
@@ -1370,8 +1462,17 @@ class DifferentialValidator(ValidatorBase):
         killed_count = sum(1 for *_, k in killed_flags if k)
         total = len(killed_flags)
         score = killed_count / total
+        # A seed other than ``own_pattern_id`` that was not killed was never
+        # run (the scans are scoped to the own seed): mark it "-", not a miss.
         matrix = " ".join(
-            f"{weakness}:{pattern_id}{'✓' if killed else '✗'}"
+            f"{weakness}:{pattern_id}"
+            + (
+                "✓"
+                if killed
+                else "✗"
+                if own_pattern_id is None or pattern_id == own_pattern_id
+                else "-"
+            )
             for pattern_id, weakness, killed in killed_flags
         )
         return _MutationResult(

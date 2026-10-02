@@ -87,7 +87,12 @@ flakiness    pass     1.00    gap +100% (vuln 100% - guarded 0%); guarded RESIST
 metamorphic  pass     0.86    robustness (6/7 perturbations held; gates kept)
 gate: kept = build ✓ AND differential ✓ AND flakiness ✓ AND metamorphic ✓  =>  KEPT
 reproducibility: vulnerable fired 5/5, guarded resisted 5/5
-mutation score: 0.11   |   compliance: OWASP-LLM LLM01 · OWASP-ASI ASI01 · NIST MEASURE-2.7
+mutation score: 0.11 (seeds killed out of all 9 in the bank; this test runs only its own seed, so 1/9 is the most it can score)
+kill matrix (this test's own seed; 8 not run; killed = fired on the vulnerable side and resisted on the guarded side):
+  - W1:tool-description-summary-smuggle  not run
+  ✓ W2:indirect-injection-note-body-tool-chain  killed
+  - W3:excessive-agency-fetch-attacker-url-direct  not run
+  ...
 ```
 
 The kill matrix below the panel lists every seed in the bundled bank. The differential
@@ -100,6 +105,9 @@ When a test is **REJECTED** because the attack never landed on the unguarded sid
 (fired 0 of N runs), you get one remediation line saying so, not one per failed leg.
 That run says nothing about the guard. Whether an attack lands depends on the model
 and its prompt, so try a different `--planner-model` or system prompt and re-run.
+An unguarded run that was cut off by `--iteration-timeout` or stopped by the call
+budget reached no verdict, which is not the same as the attack failing to land.
+When any were, the line counts them and points at the time limit instead.
 
 The verdict at the end of the gate line is **KEPT**, **STABLE, NOT PROVEN** or
 **REJECTED**. STABLE, NOT PROVEN is a kept test with no proof behind it: the attack
@@ -482,11 +490,22 @@ worth gating on either way. To upgrade a synthetic result to the strong claim, d
 `control_env` in your `target.yaml` so Mylonite can toggle your real control — see
 [target.yaml](target-file.md).
 
-When the guarded side was the synthetic twin, `validate` adds a `guarded side: a
-stand-in` line under a passing verdict. In its default mode Mylonite's boundary guard
-refuses the attack's tool call by design, so that side resists by construction. The pass
-shows the attack is real and that this kind of guard stops it. It does not show that
-your own guard holds.
+When the guarded side was a Mylonite guard rather than yours, `validate` adds a
+`guarded side: a stand-in` line under any verdict that is not REJECTED, naming how
+that guard decided:
+
+| Guard | What the line says |
+|---|---|
+| Block mode (the default), or approve mode with the default deny-all policy | It refuses every consequential tool call by design, so that side resists by construction. |
+| The W3 egress allowlist | It refuses any host outside its fixed allowlist, so that side resists by construction. |
+| The W1 description pin | It refused calls to tools whose description changed. |
+| Approve mode with an approval policy | The policy decided each call; not by construction. |
+| Observe mode | It records but never refuses, so a resisted run means the model declined. |
+| Input data-framing (`--prove-input-control`) | The input was wrapped as data and the agent still decided; not by construction. |
+
+Only a KEPT verdict adds `what this pass shows`: the attack is real and this kind of
+guard stops it. A STABLE, NOT PROVEN verdict has already said nothing proved a
+safeguard, so it gets no such line. Neither says your own guard holds.
 
 A **rejection** on a synthetic twin is likewise not evidence your control is ineffective:
 the boundary shim cannot see a guard enforced inside your server. The reject message says

@@ -153,6 +153,10 @@ The error line carries reason code `[MYL-ABT-001]`. The other abort and
 incomplete-coverage errors `gate` prints carry codes the same way; look each one
 up in [Reason codes](reason-codes.md).
 
+If a custom target does not come up while `gate` is validating a finding, `gate`
+stops with one `[MYL-ABT-006]` line and exit `2`. The line says how many runs had
+finished, that later findings were not validated, and where the scan results are.
+
 ### Pre-flight order
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:

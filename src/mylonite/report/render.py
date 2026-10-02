@@ -19,6 +19,7 @@ from mylonite._twin_fidelity import (
     MARKER_SERVER_LAYER,
     MARKER_SYNTHETIC,
     TwinLayer,
+    guard_mode_in,
     proof_claim,
 )
 from mylonite._verdict import (
@@ -30,6 +31,51 @@ from mylonite._verdict import (
     verdict_label,
     verdict_reason,
 )
+
+#: What the guarded side was, per the guard mode the validator stamps. Only
+#: the modes that refuse whatever the model does say "by construction".
+_STAND_IN_LINES: dict[str, str] = {
+    "block": (
+        "guarded side: a stand-in. Mylonite's boundary guard ran in block mode: it "
+        "refuses every consequential tool call by design, so that side resists by "
+        "construction."
+    ),
+    "approve-deny": (
+        "guarded side: a stand-in. Mylonite's boundary guard ran in approve mode with "
+        "the default deny-all policy: it refuses every consequential tool call by "
+        "design, so that side resists by construction."
+    ),
+    "allowlist": (
+        "guarded side: a stand-in. Mylonite's boundary guard refuses egress to any "
+        "host outside its fixed allowlist by design, so that side resists by "
+        "construction."
+    ),
+    "pin": (
+        "guarded side: a stand-in. Mylonite's boundary guard refused calls to any tool "
+        "whose description changed from its pinned version; your own guard was not "
+        "tested."
+    ),
+    "approve-policy": (
+        "guarded side: a stand-in. Mylonite's boundary guard ran in approve mode and "
+        "its approval policy decided each call, so that side did not resist by "
+        "construction; your own guard was not tested."
+    ),
+    "observe": (
+        "guarded side: a stand-in. Mylonite's boundary guard ran in observe mode: it "
+        "records but never refuses, so a resisted run means the model declined, not "
+        "that a guard stopped it."
+    ),
+    "input-frame": (
+        "guarded side: a stand-in. Mylonite wrapped the input as data (input "
+        "data-framing) and the agent still had to decide, so that side did not "
+        "resist by construction; your own guard was not tested."
+    ),
+}
+_STAND_IN_UNKNOWN = (
+    "guarded side: a stand-in. Mylonite's boundary guard played the guarded build, "
+    "not your own guard."
+)
+
 
 #: The legs whose remediation assumes the attack landed at least once. When the
 #: unguarded side fired 0 times, each of them fails for that one reason, and
@@ -182,7 +228,9 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     # whole-bank run), so it keeps its mark.
     matrix = getattr(report, "mutation_matrix", None) or []
     own = _own_seed_id(report, matrix)
-    if report.mutation_score is not None:
+    # A custom-target report has no kill matrix and a placeholder score of 0;
+    # a bare "mutation score: 0.00" would read as zero coverage, so skip it.
+    if report.mutation_score is not None and matrix:
         if own is not None:
             console_print(
                 console,
@@ -271,7 +319,10 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             diff_remediation = "differential fail: no discriminating power between the twins."
         # Deferred: the validator module pulls in the scan engine, which a
         # report render does not otherwise need.
-        from mylonite.plugins._reference.reference_validator import EFFECT_UNPROVEN_CLAUSE
+        from mylonite.plugins._reference.reference_validator import (
+            EFFECT_UNPROVEN_CLAUSE,
+            unguarded_no_verdict,
+        )
 
         effect_remediation = (
             "effect fail: the target's effect probe did not confirm the damage materialised."
@@ -326,32 +377,50 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
                 console_print(console, f"[red]  remediation: {_remediation[outcome.stage]}[/red]")
         if never_landed is not None:
             # The attack never fired on the unguarded side, so every leg that
-            # compares sides failed for that one reason. Say it once, and point at
-            # what decides whether an attack lands: the model and its prompt.
-            console_print(
-                console,
-                f"[red]  remediation: the attack never landed on the unguarded side "
-                f"(fired 0/{never_landed}), so this run says nothing about the guard. "
-                "Try a different planner model (--planner-model) or system prompt, "
-                "then re-run `mylonite validate`.[/red]",
-            )
+            # compares sides failed for that one reason. Say it once. A run cut
+            # off by the time limit or the budget is tallied as "did not fire"
+            # too, so name that cause when it applies; otherwise point at what
+            # decides whether an attack lands: the model and its prompt.
+            no_verdict = unguarded_no_verdict(notes)
+            if no_verdict:
+                rest = never_landed - no_verdict
+                tail = f", and the other {rest} did not fire" if rest else ""
+                line = (
+                    f"{no_verdict}/{never_landed} unguarded runs reached no verdict "
+                    f"(cut off by --iteration-timeout or the call budget){tail}, so this "
+                    "run says nothing about the attack or the guard. Raise "
+                    "--iteration-timeout (or lower --iterations) and re-run."
+                )
+            else:
+                line = (
+                    f"the attack never landed on the unguarded side (fired "
+                    f"0/{never_landed}), so this run says nothing about the guard. Try a "
+                    "different planner model (--planner-model) or system prompt, then "
+                    "re-run `mylonite validate`."
+                )
+            console_print(console, f"[red]  remediation: {line}[/red]")
 
     if label != REJECTED and MARKER_SYNTHETIC in notes:
-        # The guarded side was Mylonite's own boundary guard, not the user's. In
-        # its default mode it refuses the attack's tool call outright, so the
-        # guarded side resists by design: the pass proves the attack is real and
-        # that this kind of guard stops it, never that the user's guard does.
-        console_print(
-            console,
-            "guarded side: a stand-in. Mylonite's boundary guard played the guarded "
-            "build; in its default mode it refuses the attack's tool call by design, "
-            "so that side resists by construction.",
-        )
-        console_print(
-            console,
-            f"  what this pass shows: {proof_claim('boundary')}. Declare control_env "
-            "in the target file to test your own guard.",
-        )
+        # The guarded side was a Mylonite stand-in, not the user's guard. Say how
+        # it decided (the validator stamps the mode), and only call it "by
+        # construction" when it refuses whatever the model does. The proof
+        # sentence goes under KEPT only: a STABLE, NOT PROVEN verdict has
+        # already said nothing proved a safeguard.
+        mode = guard_mode_in(notes)
+        console_print(console, _STAND_IN_LINES.get(mode or "", _STAND_IN_UNKNOWN))
+        if label == KEPT:
+            if mode == "observe":
+                shows = (
+                    "the attack is real and the model declined it on the guarded side; "
+                    "no guard refused anything"
+                )
+            else:
+                shows = proof_claim("boundary")
+            console_print(
+                console,
+                f"  what this pass shows: {shows}. Declare control_env in the target "
+                "file to test your own guard.",
+            )
 
 
 #: How each guarded side is described on the ablation matrix. Ablation's own

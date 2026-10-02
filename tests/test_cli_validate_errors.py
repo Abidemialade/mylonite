@@ -76,3 +76,81 @@ def test_a_target_that_never_came_up_exits_2_with_one_line(
     lines = [line for line in result.output.splitlines() if "MYL-ABT-006" in line]
     assert len(lines) == 1, result.output
     assert "could not be described" in lines[0]
+
+
+def test_a_target_that_went_down_part_way_does_not_blame_the_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exc = TargetLaunchError("server exited (after 2 of 3 runs finished)", completed_runs=2)
+    result = _invoke(tmp_path, monkeypatch, exc)
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    line = next(line for line in result.output.splitlines() if "MYL-ABT-006" in line)
+    assert "went down part-way" in line
+    assert "check the target file" not in line
+
+
+def test_the_budget_line_names_no_flag_validate_lacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = _invoke(tmp_path, monkeypatch, BudgetExceededError("cap of 50 reached"))
+
+    line = next(line for line in result.output.splitlines() if "MYL-ABT-001" in line)
+    assert "--iterations" in line
+    assert "Raise the budget" not in line
+
+
+def test_gate_reports_a_target_that_did_not_come_up_in_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The validator's launch failure escapes the gate orchestrator; the gate
+    handler maps it to exit 2 with one line, never a traceback."""
+    from tests.test_cli import (
+        _SERVER_LAYER_TARGET_YAML,
+        _canned_finding_result,
+        _sample_exploit,
+        _skip_uncoverable_refusal,
+    )
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    _skip_uncoverable_refusal(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _raising_validator(monkeypatch, TargetLaunchError("the target could not be described"))
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(tmp_path / "gate_out"),
+                "--no-workflows",
+            ],
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "Traceback" not in result.output
+    assert not isinstance(result.exception, TargetLaunchError)
+    lines = [line for line in result.output.splitlines() if "MYL-ABT-006" in line]
+    assert len(lines) == 1, result.output
+    assert "later findings were not validated" in lines[0]
+    assert "gate_out" in lines[0]

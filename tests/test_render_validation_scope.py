@@ -14,13 +14,15 @@ import io
 
 from rich.console import Console
 
-from mylonite._twin_fidelity import format_marker
+from mylonite._twin_fidelity import format_guard_mode, format_marker
+from mylonite._verdict import black_box_marker
 from mylonite.contracts import (
     ReproducibilityEvidence,
     SeedKill,
     ValidationOutcome,
     ValidationReport,
 )
+from mylonite.plugins._reference.reference_validator import unguarded_no_verdict_marker
 from mylonite.report.render import _render_validation_report
 
 _OWN = "indirect-injection-note-body-direct"
@@ -123,6 +125,26 @@ def test_a_rejection_where_the_attack_never_landed_says_so() -> None:
     assert "too flaky" not in out
 
 
+def test_cut_off_unguarded_runs_are_not_reported_as_an_attack_that_never_landed() -> None:
+    notes = format_marker(server_layer=True) + unguarded_no_verdict_marker(2, 3)
+    out = _render(_reference_report(kept=False, vuln_fired=0, notes=notes))
+
+    remediation = [line for line in out.splitlines() if "remediation" in line]
+    assert len(remediation) == 1, out
+    assert "never landed" not in out
+    assert "2/3 unguarded runs reached no verdict" in remediation[0]
+    assert "the other 1 did not fire" in remediation[0]
+    assert "--iteration-timeout" in remediation[0]
+    assert "planner" not in remediation[0]
+
+
+def test_the_bare_mutation_score_is_skipped_without_a_kill_matrix() -> None:
+    report = _reference_report().model_copy(update={"mutation_matrix": [], "mutation_score": 0.0})
+    out = _render(report)
+
+    assert "mutation score" not in out
+
+
 def test_a_rejection_where_the_attack_landed_keeps_the_leg_remediation() -> None:
     out = _render(_reference_report(kept=False, vuln_fired=2))
 
@@ -143,14 +165,76 @@ def test_a_build_failure_is_still_reported_when_the_attack_never_landed() -> Non
 # --- the stand-in guard ------------------------------------------------------
 
 
-def test_a_pass_against_the_stand_in_guard_says_your_guard_was_not_tested() -> None:
-    out = _render(_reference_report(notes=format_marker(server_layer=False)))
+def _synthetic(mode: str | None) -> str:
+    notes = format_marker(server_layer=False)
+    return notes + (" " + format_guard_mode(mode) if mode else "")
+
+
+def test_a_pass_against_a_block_mode_stand_in_says_it_resists_by_construction() -> None:
+    out = _render(_reference_report(notes=_synthetic("block")))
 
     line = next(line for line in out.splitlines() if line.startswith("guarded side"))
     assert "stand-in" in line
-    assert "by design" in out
-    assert "control_env" in out
+    assert "block mode" in line
+    assert "by construction" in line
+    assert "what this pass shows" in out
     assert "not your implementation" in out
+    assert "control_env" in out
+
+
+def test_a_deny_all_approve_stand_in_also_resists_by_construction() -> None:
+    out = _render(_reference_report(notes=_synthetic("approve-deny")))
+
+    assert "by construction" in out
+    assert "deny-all" in out
+
+
+def test_an_approval_policy_stand_in_is_not_called_by_construction() -> None:
+    out = _render(_reference_report(notes=_synthetic("approve-policy")))
+
+    line = next(line for line in out.splitlines() if line.startswith("guarded side"))
+    assert "did not resist by construction" in line
+    assert "resists by construction" not in out
+
+
+def test_an_observe_mode_stand_in_says_the_model_declined() -> None:
+    out = _render(_reference_report(notes=_synthetic("observe")))
+
+    line = next(line for line in out.splitlines() if line.startswith("guarded side"))
+    assert "observe mode" in line
+    assert "never refuses" in line
+    assert "by construction" not in out
+    # The proof sentence would claim a control closed the attack; none refused.
+    assert "closes this attack" not in out
+    assert "no guard refused anything" in out
+
+
+def test_an_input_framing_black_box_keep_gets_no_proof_sentence() -> None:
+    """A REST input-framing keep is STABLE, NOT PROVEN: the judge is the only
+    evidence, so the stand-in line must not add a proof the verdict denies."""
+    notes = _synthetic("input-frame") + black_box_marker(True)
+    out = _render(_reference_report(notes=notes))
+
+    assert "STABLE, NOT PROVEN" in out
+    line = next(line for line in out.splitlines() if line.startswith("guarded side"))
+    assert "input" in line
+    assert "did not resist by construction" in line
+    assert "what this pass shows" not in out
+    assert "closes this attack" not in out
+
+
+def test_an_older_report_without_a_mode_gets_the_plain_stand_in_line() -> None:
+    out = _render(_reference_report(notes=_synthetic(None)))
+
+    line = next(line for line in out.splitlines() if line.startswith("guarded side"))
+    assert "stand-in" in line
+    assert "by construction" not in out
+
+
+def test_a_rejected_stand_in_run_prints_no_stand_in_line() -> None:
+    out = _render(_reference_report(kept=False, vuln_fired=2, notes=_synthetic("block")))
+
+    assert not any(line.startswith("guarded side") for line in out.splitlines())
 
 
 def test_a_server_layer_pass_has_no_stand_in_line() -> None:
