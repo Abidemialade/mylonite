@@ -196,14 +196,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing no longer fails the step under `bash`'s `-eo pipefail` (the no-match
   glob now goes through `compgen -G ... || true`, not a bare `ls`). `scan` and
   `validate` (two separate processes; `generate` makes no LLM call) each get
-  their own placeholder `MYLONITE_MAX_LLM_REQUESTS` for the per-process hard
-  ceiling a separate, in-progress change (BUDGET-1) is adding — sized from a
-  `src/`-derived call estimate (scan 120 with `--max-llm-calls` fixed at 60,
-  validate 80 at `--iterations` fixed at 3, exposed as two clamped dispatch
-  inputs, `scan_ceiling`/`validate_ceiling`) and refined by one uncounted pilot
-  dispatch before the first counted run (see the prereg's "Pilot procedure").
-  It is a documented no-op until BUDGET-1 lands, with the job's 30-minute
-  timeout and a provider-side spend cap as today's real stops; the prereg
+  their own `MYLONITE_MAX_LLM_REQUESTS`, Mylonite's hard request ceiling
+  (#282) — sized from a `src/`-derived call estimate (scan 120 with
+  `--max-llm-calls` fixed at 60, validate 80 at `--iterations` fixed at 3,
+  exposed as two clamped dispatch inputs, `scan_ceiling`/`validate_ceiling`)
+  and refined by one uncounted pilot dispatch before the first counted run
+  (see the prereg's "Pilot procedure"). A stage that reaches its ceiling exits
+  3 with `MYL-ABT-001` and scores NOT TESTED; the job's 30-minute timeout and a
+  provider-side spend cap stay as the outer stops. Each stage writes its own
+  log (`scan.log`, `generate.log`, `validate.log`) beside `run.log`, and the
+  scorer reads reason codes only from the scored stage's log: a `validate`
+  that stops at its ceiling reads NOT TESTED keyed on `MYL-ABT-001` alone, so
+  three re-drives agree whatever their scans skipped. The prereg
   states the realistic and worst-case cost per cell and the campaign-wide fit
   (~$3.6 realistic against the $4.50 Anthropic allocation), for both Haiku 4.5
   and gpt-4o-mini. The score and cost steps run with `if: always()` so a
