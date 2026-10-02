@@ -53,6 +53,18 @@ to construct with one (see
 LiteLLM proxy in front of it and authenticate to *that*, or route through a
 network boundary (VPN/private network) instead of a URL-embedded secret.
 
+## The approved-provider registry
+
+`mylonite.providers.registry` holds one table row per provider Mylonite
+backs — Anthropic and Ollama with dedicated verification evidence, plus
+OpenAI, Gemini, Azure OpenAI, Bedrock, vLLM/any OpenAI-compatible endpoint
+and a LiteLLM proxy. `PROVIDER_ENV_VARS` above is generated from that table,
+so the two never drift. A provider id LiteLLM itself can route but that
+isn't in the table yet (a newer OpenAI-compatible host, for example) falls
+back to LiteLLM's own `<PROVIDER>_API_KEY` naming convention and prints one
+warning line, so the credential check still runs instead of skipping
+silently and failing later, mid-scan, with a traceback.
+
 ## Model-size guidance if you're running this in CI
 
 If you *are* self-hosting inside CI (e.g. spinning up Ollama in a GitHub

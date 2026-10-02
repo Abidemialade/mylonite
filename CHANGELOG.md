@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An approved-provider registry.** `mylonite.providers.registry` is now the
+  one table of providers Mylonite backs — Anthropic and Ollama with
+  dedicated verification evidence, plus OpenAI, Gemini, Azure OpenAI,
+  Bedrock, vLLM/any OpenAI-compatible endpoint and a LiteLLM proxy.
+  `mylonite.scan.providers.PROVIDER_ENV_VARS` is generated from it, so the
+  two can't drift. A provider LiteLLM itself can route but that isn't in the
+  table yet now falls back to LiteLLM's own `<PROVIDER>_API_KEY` naming
+  convention and prints one warning line, instead of silently skipping the
+  credential check and failing later, mid-scan, with a traceback. See
+  "The approved-provider registry" in `docs/self-hosted-models.md`.
+
 - **The 0.11.0 verification results are committed** under `verification/results/0.11.0/`,
   measured in CI against the built 0.11.0 wheel; `verification/TRENDS.md` and
   `docs/verification.md` point at them.
