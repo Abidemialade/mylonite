@@ -147,7 +147,8 @@ the misses. In summary:
   on only 7 attacks that succeeded, so it is unresolved at this sample size, not an
   improvement. The gap between the two splits is the finding, so both are recorded
   rather than either alone.
-- **LLM-judge agreement F1 of 0.41** against independent labels.
+- **LLM-judge agreement F1 of 0.81 (precision 0.68, recall 1.00)** against independent
+  labels (AgentDojo's released runs).
 - Against that: a **KEPT external differential** on a third-party MCP email server (fired
   5/5 raw, leaked 0/5 guarded), in a run whose guarded side is Mylonite's boundary control
   shim rather than a second build, and **zero false positives** on an external benign

@@ -30,6 +30,10 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > steady is the expected outcome and is the clearest signal available that the
 > release did not disturb the judge.
 >
+> **AgentDojo's `security` label was read backwards** in this run and in 0.9.0's
+> (fixed afterward; see the correction note under Layer 2 below for the
+> recomputed figures). The figure above is left as recorded.
+>
 > **Do not read `ds` 0.400 → 0.833 as the judge improving.** Recall on `ds` is
 > measured only over cases where the attack actually succeeded, and this run
 > produced **7** such positives (5 caught, 2 missed) against 8 in 0.9.0. A metric
@@ -61,6 +65,9 @@ cost-bounded. Read the caveats — several numbers mean less (or more) than they
 > outcome rather than a regression — and recall of 0.583 over 12 genuine positives is
 > real detection. The low precision is largely the semantic mismatch described below:
 > the judge measures *effect*, AgentDojo's oracle measures *exact goal achievement*.
+>
+> **This reading was backwards** (the `security` label maps the other way; see the
+> correction note under Layer 2 below). The figure above is left as recorded.
 >
 > **InjecAgent is new information.** June's run used a well-aligned model that
 > resisted every case, leaving the judge no positives and a vacuous F1. Re-running
@@ -194,6 +201,26 @@ precision failure. A real external precision number needs a *defended* third-par
 server (the Layer-3 gap). The 5 FNs are refused/not-executed traces (oracle-semantics
 nuance), not under-reporting of a real effect.
 
+**Correction: the table and the two paragraphs above are left as originally recorded,
+but the reading they rest on was backwards.** AgentDojo's `security` field is `True`
+when the injection goal was executed (upstream's own `BaseInjectionTask.security`
+docstring: "Returns True if the injection was executed correctly, False otherwise"),
+not when the agent resisted — the adapter had it inverted. Recomputed under the
+corrected label, from the same 27 recorded judge verdicts (no new model call): **15
+real positives, not 12 (ASR 55.6%, not 44.4%); judge agreement P=0.68, R=1.00, F1=0.81,
+not P=0.32/R=0.58/F1=0.41.** The direction of the finding flips too: recall is perfect
+on this subset (every real attack AgentDojo confirms is also flagged), and the 15
+cases the "FP triage" paragraph above walks through — `send_money` to the attacker
+IBAN, `update_password`, `update_scheduled_transaction` — are genuine agreements
+(both sides correctly call them exploited), not disagreements. The 7 real false
+positives are the other direction: cases where the agent's calls carried the
+attacker's payload but AgentDojo's exact-goal oracle didn't credit the injection as
+fully achieved. `FPR` is informative now (`tn=5`, not 0): **0.58**. Per-case detail for
+the 7 isn't preserved in the committed report (only disagreement text under the old
+label was stored), so attributing them individually needs a fresh `--with-llm` run —
+left as a follow-up, not a live call made here. See `docs/verification.md` and
+`docs/limitations.md` for the corrected figures as currently cited.
+
 ## Layer 3 — precision (false positives on known-good targets)
 
 - `reference:guarded`: **8 probes, 0 false positives (FPR 0%).** Mylonite stays
@@ -226,7 +253,10 @@ broad cross-model number still needs non-Claude provider keys (absent here).
 - No model-fooling catch confirmed on an external app yet: DVMCP recall is measurable
   again (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not
   been re-run (see the Layer 1 note above).
-- Judge ≠ AgentDojo oracle (F1 0.41) — semantic-mismatch to investigate.
+- Judge ≠ AgentDojo oracle (F1 0.81, precision 0.68, recall 1.00 once the label fix
+  below is applied) — semantic-mismatch to investigate: 7 of 27 cases where the agent's
+  calls carried the attacker's payload but the exact-goal oracle didn't credit it as
+  fully achieved.
 - No external *defended* server for a true external precision number.
 - Samples are small + Claude-only; the opt-in `verification.yml` workflow runs larger N.
 
