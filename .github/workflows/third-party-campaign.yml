@@ -13,11 +13,13 @@
 # process's own MYLONITE_MAX_LLM_REQUESTS ceiling (scan_ceiling <= 150,
 # validate_ceiling <= 100; see the prereg's "Pilot procedure" for how the
 # real values get set from one uncounted dispatch before any counted run).
+# MYLONITE_MAX_LLM_REQUESTS is Mylonite's own hard ceiling on LLM requests
+# for one process, retries included (#282; also the global
+# --max-llm-requests flag). When a process reaches it, Mylonite stops,
+# prints one [MYL-ABT-001] line and exits 3, and the result is NOT TESTED.
 # See the prereg's "Budget and the hard ceiling" section for the worst-case
-# math, the pending BUDGET-1 hard ceiling this workflow already wires a
-# placeholder env var for, and an honest statement of today's actual hard
-# stop (the 30-minute job timeout, and a provider-side spend cap; mylonite
-# has no --max-budget yet).
+# math. The job's 30-minute timeout and a provider-side spend cap stay as
+# the outer stops (the ceiling counts requests, not dollars).
 #
 # Every live cell needs a repo secret (MYLONITE_LLM_KEY for Anthropic,
 # MYLONITE_OPENAI_KEY for OpenAI) and a dispatch with the matching key unset
@@ -374,9 +376,12 @@ jobs:
           # since a step's `env:` can only hold one value per name and the
           # two processes need different ones (scan has more seeds to
           # drive than validate has re-drives). MYLONITE_MAX_LLM_REQUESTS
-          # is this workflow's one guess at the real BUDGET-1 env var name
-          # (a separate, in-progress PR adding a hard, per-process LLM-call
-          # ceiling); it is a no-op today (nothing in src/ reads it yet).
+          # is Mylonite's hard request ceiling (#282): it counts every LLM
+          # request the process sends, retries included, and refuses the
+          # next one. A process that reaches it prints one [MYL-ABT-001]
+          # line and exits 3 (NOT TESTED). This step captures that exit
+          # code like any other, so a trip never fails the step; the scorer
+          # reads the code from that stage's own log.
           # The pre-pilot defaults (120/80) are sized from a from-`src/`
           # estimate of realistic/worst-case calls per process -- see the
           # prereg's "Pilot procedure", which sets the REAL values from one
@@ -406,12 +411,18 @@ jobs:
           # the scoring and cost steps that follow and silently lose the
           # result -- including the expected, honest "the target resisted"
           # outcome, which must read green, not red.
+          # Each stage also gets its own log (scan.log, generate.log,
+          # validate.log) beside the combined run.log. The scorer reads a
+          # stage's reason codes only from that stage's log, so a validate
+          # abort is never scored with scan's codes and N=3 agreement keys
+          # are not split by what scan happened to skip. validate.log
+          # existing is also how the scorer knows validate ran.
           mkdir -p out
           set +e
           MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
             --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
-            --output-dir out 2>&1 | tee run.log
+            --output-dir out 2>&1 | tee run.log scan.log
           scan_rc=${PIPESTATUS[0]}
           set -e
           echo "scan exited $scan_rc" >> run.log
@@ -442,7 +453,7 @@ jobs:
             if [ -n "$exploit_path" ]; then
               set +e
               "$MYLONITE" generate "$exploit_path" --out generated \
-                --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log
+                --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log generate.log
               generate_rc=${PIPESTATUS[0]}
               set -e
               echo "generate exited $generate_rc" >> run.log
@@ -450,7 +461,7 @@ jobs:
                 set +e
                 MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate generated \
                   --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
-                  --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log
+                  --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
                 validate_rc=${PIPESTATUS[0]}
                 set -e
                 echo "validate exited $validate_rc" >> run.log
@@ -460,7 +471,7 @@ jobs:
                 # directory, not the scan directory, so a not-kept result
                 # is reachable.
                 echo "score_dir=generated" >> "$GITHUB_OUTPUT"
-              elif grep -q "found no exploits" run.log; then
+              elif grep -q "found no exploits" generate.log; then
                 echo "::notice::generate found no exploits to emit a test from -- a clean no-finding scan; scoring the scan directory."
               else
                 echo "::warning::generate exited $generate_rc without the expected 'found no exploits' message -- a real failure, not a clean no-finding result; scoring the scan directory, which the scorer may read as a product defect given the traceback rule."
@@ -489,7 +500,8 @@ jobs:
           TPV_SCORE_DIR: ${{ steps.run.outputs.score_dir }}
         run: |
           "$RUNNER_TEMP/campaign-venv/bin/python" scripts/score_third_party.py score \
-            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --run-log run.log --out score.json
+            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --run-log run.log \
+            --scan-log scan.log --validate-log validate.log --out score.json
 
       - name: Compute this run's $ cost from the printed token counts
         if: always() && steps.guard.outputs.run == 'true'
@@ -521,6 +533,9 @@ jobs:
             out/**
             generated/**
             run.log
+            scan.log
+            generate.log
+            validate.log
             score.json
             cost.json
             prereg.sha
