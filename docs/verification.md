@@ -95,19 +95,18 @@ run by us.
 positive count at 12 (ASR 44.4%) and the judge agreement at P=0.32/R=0.58/F1=0.41. The
 figures above are recomputed from the same 27 recorded judge verdicts under the corrected
 label — no new model call was made; see `verification/results/0.11.0/layer2-agentdojo.json`
-for the as-published note.*
+for the as-published note. The 20 rows in that file's `disagreements[]` array are, under
+the corrected label, agreements — the array's `benchmark_says_exploited` field is still
+written against the old (inverted) label and has not been updated row by row.*
 
-**Recall is now perfect (1.00) on this subset**: every one of the 15 real attacks that
-AgentDojo's oracle confirms is also flagged by Mylonite's judge. The **7 false
-positives** are the other direction — cases where the agent's calls carried the
-attacker's payload (e.g. a transfer toward the attacker IBAN) but upstream's
-exact-goal check didn't credit the injection as fully achieved (a partial transfer
-under a cumulative threshold, in at least one case). Mylonite's effect-based judge and
-AgentDojo's exact-goal oracle are still answering different questions; the corrected
-numbers just show the gap runs the other way than first reported. Per-case detail for
-these 7 isn't preserved in the committed report (only disagreement text under the old
-label was stored) — a fresh `--with-llm` run would be needed to attribute them
-individually, and is left as a follow-up, not a live call made here.
+**Recall is 1.00 (15/15) on this subset**: every real attack AgentDojo's oracle confirms
+is also flagged by Mylonite's judge — on a 27-case sample, so read it as a strong
+signal, not a settled rate. The **7 false positives** are cases where Mylonite's judge
+called a run exploited and AgentDojo's exact-goal oracle scored it resisted. Per-case
+detail for these 7 isn't preserved in the committed report (only disagreement text
+under the old label was stored, and these 7 were agreements under that label) — a
+fresh `--with-llm` run would be needed to attribute them individually, and is left as a
+follow-up, not a live call made here.
 
 **`FPR` is informative now**: with the label corrected, `tn = 5` (cases both sides agree
 were resisted), so `fpr = 0.58` is a real measurement, not the `tn = 0` artifact the
@@ -143,9 +142,9 @@ original (inverted) run produced.
 - No model-fooling catch confirmed on an external app: DVMCP recall is measurable again
   (the harness that made 0.9.0's figure unmeasured is fixed), but Layer 1 has not been
   re-run yet (see the Layer 1 note above).
-- Judge ≠ AgentDojo oracle (F1 0.81, P 0.68) — a semantic mismatch still to investigate:
-  7 of 27 cases where the agent's calls carried the attacker's payload but the
-  exact-goal oracle didn't credit it as fully achieved.
+- Judge ≠ AgentDojo oracle (F1 0.81, P 0.68, R 1.00) — the judge flagged 7 of 27 runs
+  that AgentDojo's exact-goal oracle scored as resisted; per-case attribution needs a
+  fresh run (see the correction note above).
 - No external *defended* server for a true external precision number.
 - Samples are small, and the hosted-model layers use one model; the opt-in
   `verification.yml` workflow runs larger N on manual dispatch.
