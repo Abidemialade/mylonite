@@ -1452,3 +1452,89 @@ def test_run_gate_hands_validate_fn_the_directory_each_test_was_written_to(tmp_p
         assert seen == {"solo-pattern": out_dir}
     else:
         assert seen == {"a-pattern": out_dir / "a_pattern", "b-pattern": out_dir / "b_pattern"}
+
+
+def _record_then_reject(generated, finding_dir):
+    """A validator that recorded replay fixtures for this finding, then rejected it."""
+    (finding_dir / "fixtures").mkdir(parents=True, exist_ok=True)
+    (finding_dir / "fixtures" / "rec.json").write_text("{}", encoding="utf-8")
+    return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
+
+
+def _emit_named(e):
+    return GeneratedTest(
+        framework="pytest", filename=f"test_{e.pattern_id}.py", source="# t\n", exploit=e
+    )
+
+
+def test_a_rejected_findings_own_fixtures_move_to_the_rejected_evidence(tmp_path):
+    """In a multi-finding run the finding's folder holds only its own
+    recordings, so they leave with the rest of its rejected evidence."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(
+            outcome=_found_outcome(2), exploits=[_exploit("a-pattern"), _exploit("b-pattern")]
+        ),
+        generate_fn=_emit_named,
+        validate_fn=lambda g, d: (
+            _record_then_reject(g, d)
+            if g.exploit.pattern_id == "a-pattern"
+            else _kept_report(g.filename)
+        ),
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+
+    assert not (out_dir / "a_pattern").exists()
+    rejected = tmp_path / ".mylonite" / "gate-rejected" / "a_pattern"
+    assert (rejected / "fixtures" / "rec.json").is_file()
+    assert (rejected / "test_a-pattern.py").is_file()
+
+
+def test_a_rejected_single_finding_leaves_the_gate_root_fixtures_alone(tmp_path):
+    """One finding writes into the gate root, whose fixtures/ may belong to an
+    earlier kept run, so it is never moved."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(1), exploits=[_exploit("solo")]),
+        generate_fn=_emit_named,
+        validate_fn=_record_then_reject,
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+
+    assert (out_dir / "fixtures" / "rec.json").is_file()
+    assert not (tmp_path / ".mylonite" / "gate-rejected" / "solo" / "fixtures").exists()
+
+
+def test_colliding_slugs_get_distinct_test_file_names(tmp_path):
+    """Two pattern_ids that slug the same land in `a_b/` and `a_b-2/`; their
+    test files must not share a name, or pytest cannot collect both."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+    seen: list[str] = []
+
+    def fake_validate(generated, finding_dir):
+        assert (finding_dir / generated.filename).is_file()
+        seen.append(generated.filename)
+        return _kept_report(generated.filename)
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(
+            outcome=_found_outcome(2), exploits=[_exploit("a.b"), _exploit("a_b")]
+        ),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_a_b.py", source="# t\n", exploit=e
+        ),
+        validate_fn=fake_validate,
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+
+    assert seen == ["test_security_a_b.py", "test_security_a_b_2.py"]
+    assert (out_dir / "a_b" / "test_security_a_b.py").is_file()
+    assert (out_dir / "a_b-2" / "test_security_a_b_2.py").is_file()

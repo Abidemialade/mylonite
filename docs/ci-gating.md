@@ -181,11 +181,16 @@ your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
 commands to commit and open the PR yourself. With neither flag below, your
 repository is not modified: no branch, no commit, no workflow files.
 
-One finding is written straight into `.mylonite/gate/`. With two or more, each
-kept finding gets its own folder, `.mylonite/gate/<finding>/`, holding its test,
-exploit JSON and validation report. On the reference target it also holds the
-`fixtures/` its test replays, so `pytest .mylonite/gate/` runs every kept test
-offline, with no provider key.
+One finding is written straight into `.mylonite/gate/`, and on the reference
+target its replay recordings sit beside it in `.mylonite/gate/fixtures/`. With
+two or more, each kept finding gets its own folder, `.mylonite/gate/<finding>/`,
+holding its test, exploit JSON, validation report and, on the reference target,
+the `fixtures/` its test replays. With `--target-file`, each finding folder also
+gets its own redacted `target.yaml`, because the test loads the file from its
+own folder. `pytest .mylonite/gate/` runs every kept test; on the reference
+target it runs offline, with no provider key. A rejected finding's files,
+recordings included, move to `.mylonite/gate-rejected/<finding>/` and are never
+committed.
 
 `gate` redacts secret-shaped values in the exploit JSON, the validation report
 and `PR_BODY.md` (its evidence lines and the optional LLM suggestion) before it
