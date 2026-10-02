@@ -57,14 +57,22 @@ network boundary (VPN/private network) instead of a URL-embedded secret.
 
 `mylonite.providers.registry` holds one table row per provider Mylonite
 backs — Anthropic and Ollama with dedicated verification evidence, plus
-OpenAI, Gemini, Azure OpenAI, Bedrock, vLLM/any OpenAI-compatible endpoint
-and a LiteLLM proxy. `PROVIDER_ENV_VARS` above is generated from that table,
-so the two never drift. A provider id LiteLLM itself can route but that
-isn't in the table yet (a newer OpenAI-compatible host, for example) falls
-back to LiteLLM's own `<PROVIDER>_API_KEY` naming convention and prints one
-warning line (through the same redacting output boundary every other
-Mylonite message uses), so the credential check still runs instead of
-skipping silently and failing later, mid-scan, with a traceback.
+OpenAI, Gemini, Azure OpenAI, Vertex AI, Bedrock, vLLM/any OpenAI-compatible
+endpoint and a LiteLLM proxy. `PROVIDER_ENV_VARS` above, and the alias table
+that maps a provider's own LiteLLM routing prefix (`hosted_vllm` for vLLM,
+`ollama_chat` for Ollama, and so on) back to its row, are both generated
+from it, so the three never drift apart.
+
+A provider id outside this table isn't necessarily unchecked: if LiteLLM
+itself still routes it (xAI, Groq, Mistral, DeepSeek, OpenRouter, Cohere's
+chat route, ...), Mylonite asks LiteLLM's own local key-presence check for
+the right variable instead of guessing. Only when LiteLLM knows nothing
+about the provider either does it fall back to LiteLLM's own
+`<PROVIDER>_API_KEY` naming convention and print one warning line (through
+the same redacting output boundary every other Mylonite message uses, and
+only once per provider id, not once per check), so the credential check
+still runs instead of skipping silently and failing later, mid-scan, with a
+traceback.
 
 ## Model-size guidance if you're running this in CI
 

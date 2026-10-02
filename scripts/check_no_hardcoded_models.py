@@ -87,6 +87,15 @@ _CAPS_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
 # them, which would otherwise flag itself.
 _SELF = Path(__file__).resolve()
 
+# A second, narrow exemption: mylonite.providers.registry is the one module
+# allowed to name a provider's model prefix or credential env var(s) BY
+# DESIGN -- that's its whole job (see its own module docstring). Exempting
+# it by path keeps this allowlist from needing a growing block of rows that
+# would just restate the dataclass fields the registry already types and
+# tests cover; everywhere else, a hit still means "fix it or allowlist it
+# with a reason."
+_REGISTRY_PATH = (ROOT / "src" / "mylonite" / "providers" / "registry.py").resolve()
+
 
 @dataclass(frozen=True)
 class Hit:
@@ -124,7 +133,7 @@ def iter_py_files(root: Path = SRC_ROOT) -> list[Path]:
 def scan(root: Path = SRC_ROOT) -> list[Hit]:
     hits: list[Hit] = []
     for path in iter_py_files(root):
-        if path.resolve() == _SELF:
+        if path.resolve() in (_SELF, _REGISTRY_PATH):
             continue
         resolved = path.resolve()
         try:

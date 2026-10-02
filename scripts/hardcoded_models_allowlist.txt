@@ -38,23 +38,11 @@ src/mylonite/scan/providers.py | bedrock/ | 1 | the approved-provider registry's
 src/mylonite/scan/providers.py | ollama/ | 2 | the approved-provider registry's own docstring and comment, listing providers it covers
 src/mylonite/scan/providers.py | STRIPE_API_KEY | 1 | docstring example of an unrelated credential that happens to match the *_API_KEY shape, not a provider
 
-# --- providers/registry.py: the typed provider table itself ---------------
-# The new approved-provider data table (mylonite.providers.registry) --
-# scan/providers.py derives PROVIDER_ENV_VARS from it now instead of
-# hand-listing these literals itself.
-src/mylonite/providers/registry.py | anthropic/ | 2 | the provider registry's own rows (model_prefix and the Haiku example model)
-src/mylonite/providers/registry.py | ANTHROPIC_API_KEY | 1 | the provider registry
-src/mylonite/providers/registry.py | claude- | 1 | the provider registry's small-tier example model
-src/mylonite/providers/registry.py | openai/ | 1 | the provider registry
-src/mylonite/providers/registry.py | OPENAI_API_KEY | 1 | the provider registry
-src/mylonite/providers/registry.py | GEMINI_API_KEY | 1 | the provider registry
-src/mylonite/providers/registry.py | GOOGLE_API_KEY | 1 | the provider registry's comment noting LiteLLM also accepts this name
-src/mylonite/providers/registry.py | AZURE_API_KEY | 1 | the provider registry
-src/mylonite/providers/registry.py | AZURE_API_BASE | 1 | the provider registry
-src/mylonite/providers/registry.py | AZURE_API_VERSION | 1 | the provider registry
-src/mylonite/providers/registry.py | bedrock/ | 1 | the provider registry
-src/mylonite/providers/registry.py | AWS_ACCESS_KEY_ID | 1 | the provider registry (Bedrock's credential pair)
-src/mylonite/providers/registry.py | AWS_SECRET_ACCESS_KEY | 1 | the provider registry (Bedrock's credential pair)
+# mylonite/providers/registry.py is exempt BY PATH (see _REGISTRY_PATH in
+# scripts/check_no_hardcoded_models.py) -- it's the one module allowed to
+# name a provider's model prefix or credential env var(s) by design, and
+# allowlisting its rows one by one here would just restate its own typed
+# fields.
 
 # --- user-facing text naming an env var so a human knows what to set ------
 # Error remedies and --help text that tell the USER which credential to
