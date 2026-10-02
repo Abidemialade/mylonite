@@ -633,13 +633,15 @@ class DifferentialValidator(ValidatorBase):
     def _validate_reference(self, test: GeneratedTest) -> ValidationReport:
         pattern_id = test.exploit.pattern_id
 
-        # 1+2. differential + flakiness — the one live loop (the moat).
+        # 1+2. differential + flakiness — the one live loop (the moat). Every
+        # iteration replays the committed exploit body on both twins, so the
+        # loop measures the attack the test was written for.
         tallies = []
         for i in range(self._iterations):
             self._progress(
                 f"differential iteration {i + 1}/{self._iterations} (vulnerable + guarded)"
             )
-            tallies.append(self._run_iteration(pattern_id))
+            tallies.append(self._run_iteration(pattern_id, replay=test.exploit.payload))
         vuln_fires = sum(1 for t in tallies if t.vuln_fired)
         guard_resists = sum(1 for t in tallies if t.guard_resisted)
         guard_fires = sum(1 for t in tallies if t.guard_fired)
@@ -1309,12 +1311,15 @@ class DifferentialValidator(ValidatorBase):
 
     # -- per-iteration "run attack xN, tally" (reused by metamorphic) ---------
 
-    def _run_iteration(self, pattern_id: str) -> _IterationTally:
+    def _run_iteration(self, pattern_id: str, replay: Payload | None = None) -> _IterationTally:
         """Run the finding's own seed against BOTH twins once and tally.
 
         Each twin's scan is scoped to ``pattern_id``, so an iteration drives the
         attack being validated and nothing else: the same attack on both sides,
-        at one seed's cost instead of the whole bank's. The two twins are
+        at one seed's cost instead of the whole bank's. With ``replay`` (the
+        committed exploit's payload), both twins get that exact body with the
+        customiser off, so the pair sees identical text on every iteration and
+        no LLM rewording sits between the finding and its proof. The two twins are
         independent — the differential compares their results, neither feeds the
         other — so they are driven CONCURRENTLY via ``run_twins`` inside one
         ``asyncio.run``, each with its own adapter/customiser/judge/note-id-counter
@@ -1322,8 +1327,8 @@ class DifferentialValidator(ValidatorBase):
         """
         vuln_result, guard_result = asyncio.run(
             run_twins(
-                self._run_scan_async("vulnerable", pattern_id),
-                self._run_scan_async("guarded", pattern_id),
+                self._run_scan_async("vulnerable", pattern_id, replay=replay),
+                self._run_scan_async("guarded", pattern_id, replay=replay),
             )
         )
         return _IterationTally(
@@ -1339,12 +1344,17 @@ class DifferentialValidator(ValidatorBase):
         )
 
     async def _run_scan_async(
-        self, variant: Literal["vulnerable", "guarded"], pattern_id: str
+        self,
+        variant: Literal["vulnerable", "guarded"],
+        pattern_id: str,
+        *,
+        replay: Payload | None = None,
     ) -> ScanResult:
         """Build and await one attack scan for ``variant``, scoped to ``pattern_id``.
 
         Only the finding's seed runs (``pattern_id_filter``), as on the custom
-        path. The scan is bounded by ``iteration_timeout_s``
+        path, driven with ``replay``'s body when given. The scan is bounded by
+        ``iteration_timeout_s``
         (``--iteration-timeout``), as on the custom path; a cut-off scan records
         no verdict, so the iteration fails closed.
         No internal ``asyncio.run`` — callers that want to run this
@@ -1362,6 +1372,7 @@ class DifferentialValidator(ValidatorBase):
             judge_model=self._judge_model,
             pattern_id_filter=pattern_id,
             wall_clock_timeout_s=self._iteration_timeout_s,
+            replay_payload=replay,
         )
         return await engine.run()
 
