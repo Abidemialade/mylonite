@@ -138,6 +138,30 @@ def test_a_target_only_traceback_is_noise_not_a_product_defect(tmp_path: Path) -
     assert result["target_noise_traceback"] is True
 
 
+def test_a_target_traceback_that_merely_mentions_the_word_mylonite_is_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """The specific false positive this round's review caught: redis.yaml's
+    seed key literal is `mylonite-tpv-seed`, and a target server echoing it
+    back in an error message must not make a bare substring check misread
+    the target's OWN crash as Mylonite's. The frame check requires an actual
+    `File "...mylonite/....py"` stack frame, not just the word anywhere in
+    the block."""
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    log = _write_log(
+        tmp_path,
+        "Traceback (most recent call last):\n"
+        '  File "/opt/venv/lib/python3.12/site-packages/redis_mcp_server/main.py", '
+        "line 7, in <module>\n"
+        "    serve()\n"
+        "KeyError: 'mylonite-tpv-seed'\n",
+    )
+    result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.KEPT
+    assert result["target_noise_traceback"] is True
+
+
 def test_a_target_only_traceback_with_no_report_still_checks_infra_signatures(
     tmp_path: Path,
 ) -> None:
