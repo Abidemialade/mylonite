@@ -8,24 +8,40 @@
 # after review: an unbounded fan-out times an unbounded --max-llm-calls
 # times an overridable model was an unbounded spend). The model is fixed
 # per provider below. `max_llm_calls` is hard-clamped to 60. See the
-# prereg's "Budget and the hard ceiling" section for the worst-case math and
-# an honest statement of what the TRUE hard stop is (mylonite has no
-# --max-budget; a provider-side spend cap on both keys is the real backstop).
+# prereg's "Budget and the hard ceiling" section for the worst-case math,
+# the pending BUDGET-1 hard ceiling this workflow already wires a
+# placeholder env var for, and an honest statement of today's actual hard
+# stop (the 30-minute job timeout; mylonite has no --max-budget yet).
 #
 # Every live cell needs a repo secret (MYLONITE_LLM_KEY for Anthropic,
 # MYLONITE_OPENAI_KEY for OpenAI) and a dispatch with the matching key unset
-# does nothing (a `::notice::`, not a failure) -- the same pattern
-# verification-campaign.yml and live-smoke.yml already use. The `ollama`
-# provider choice needs no key: it is valid only for target=tpv-server-memory
-# (the roadmap's zero-cost cell), rejected for any other target.
+# does nothing (a `::notice::`, not a failure) -- the same env-plus-shell
+# guard pattern verification-campaign.yml and live-smoke.yml use. GitHub
+# does not allow a `secrets` reference inside a step `if:` at all ("Unrecognized
+# named-value: 'secrets'") -- the guard step below reads both keys into its
+# OWN `env:` (scoped to that one step, purely to test non-emptiness) and
+# tests them in its shell script, never in an `if:`. The `ollama` provider
+# choice needs no key: it is valid only for target=tpv-server-memory (the
+# roadmap's zero-cost cell), rejected for any other target.
 #
-# Both provider keys live in the `env:` of ONE step only -- the step that
-# actually runs `mylonite scan`/`generate`/`validate`. No earlier step (the
-# per-target server launches, the Ollama pull, the shim start-up) sees
-# either key. Residual risk, stated plainly: the MCP stdio adapter's env
-# allowlist blocks direct inheritance into a spawned server, but on Linux a
-# same-uid child can still read /proc/<pid>/environ of its parent -- use
-# dedicated, spend-limited keys for this workflow, not a shared production one.
+# The real provider key used to drive Mylonite lives in the `env:` of ONE
+# step only -- the step that actually runs `mylonite scan`/`generate`/
+# `validate`. Every per-target server-launch step, the Ollama pull, the
+# shim start-up and the scaffold check carry neither key. (The guard step
+# above also briefly holds both keys, in its own env, solely to check
+# whether each is empty -- an unavoidable, minimal second exposure: GitHub
+# gives no other way to test a secret's presence outside an `if:`.)
+# Residual risk, stated plainly: the MCP stdio adapter's env allowlist
+# blocks direct inheritance into a spawned server, but on Linux a same-uid
+# child can still read /proc/<pid>/environ of its parent -- use dedicated,
+# spend-limited keys for this workflow, not a shared production one.
+#
+# None of scan/generate/validate's own non-zero exit codes are allowed to
+# fail the "Run the real journey" step -- they are captured and handed to
+# the scorer instead (an aborted scan, a rejected/not-kept validate, or an
+# actual crash are all legitimate, scoreable outcomes, not step failures).
+# The scoring and cost steps run with `if: always()` so they still produce
+# score.json/cost.json for exactly those outcomes.
 #
 # Builds a wheel from `ref` and installs it into a clean venv outside the
 # checkout, exactly like verification-campaign.yml, so this measures a real
@@ -61,7 +77,10 @@ on:
           - openai
           - ollama
       max_llm_calls:
-        description: "LLM call budget for the scan phase. Hard-clamped to 60; see the prereg."
+        description: >-
+          LLM call budget, hard-clamped to 60. Drives both scan's own
+          --max-llm-calls and the placeholder process-wide ceiling env var
+          (see the prereg's "Budget and the hard ceiling").
         required: true
         type: number
         default: 30
@@ -127,46 +146,65 @@ jobs:
             exit 1
           fi
 
+      # No `secrets.*` in this (or any) step's `if:` -- GitHub rejects that
+      # outright ("Unrecognized named-value: 'secrets'"), which would stop
+      # the whole workflow from loading. Both keys are read into THIS
+      # step's own env, purely to test non-emptiness in the shell script,
+      # following the exact env-plus-shell pattern verification-campaign.yml
+      # and live-smoke.yml already use.
       - name: Guard -- do nothing (not fail) if the required key is unset
         id: guard
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
-        if: >-
-          inputs.provider == 'ollama' ||
-          (inputs.provider == 'anthropic' && secrets.MYLONITE_LLM_KEY != '') ||
-          (inputs.provider == 'openai' && secrets.MYLONITE_OPENAI_KEY != '')
-
-      - name: Notice -- the required key is not configured
-        if: >-
-          inputs.provider != 'ollama' &&
-          !((inputs.provider == 'anthropic' && secrets.MYLONITE_LLM_KEY != '') ||
-            (inputs.provider == 'openai' && secrets.MYLONITE_OPENAI_KEY != ''))
-        run: echo "::notice::the key for $TPV_PROVIDER is not set; this dispatch does nothing."
+        shell: bash
+        env:
+          TPV_ANTHROPIC_KEY_PRESENT: ${{ secrets.MYLONITE_LLM_KEY }}
+          TPV_OPENAI_KEY_PRESENT: ${{ secrets.MYLONITE_OPENAI_KEY }}
+        run: |
+          case "$TPV_PROVIDER" in
+            anthropic)
+              if [ -z "$TPV_ANTHROPIC_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_LLM_KEY is not set; skipping $TPV_TARGET (anthropic)."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            openai)
+              if [ -z "$TPV_OPENAI_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_OPENAI_KEY is not set; skipping $TPV_TARGET (openai)."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            ollama)
+              : # no key needed
+              ;;
+          esac
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Resolve the checked-out commit (the artefacts cite a commit SHA, not the `ref` text)
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         id: commit
         shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         with:
           python-version: "3.12"
 
       # Node only for the two @modelcontextprotocol/* servers (targets 1, 4).
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        if: steps.guard.outcome == 'success' && (env.TPV_TARGET == 'tpv-server-memory' || env.TPV_TARGET == 'tpv-server-everything')
+        if: steps.guard.outputs.run == 'true' && (env.TPV_TARGET == 'tpv-server-memory' || env.TPV_TARGET == 'tpv-server-everything')
         with:
           node-version: "22"
 
       - name: Resolve the fixed model for this provider (no override)
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         id: model
         shell: bash
         run: |
@@ -178,7 +216,7 @@ jobs:
           esac
 
       - name: Build the wheel and install it into a clean venv
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         shell: bash
         run: |
           python -m pip install --upgrade pip build
@@ -191,19 +229,19 @@ jobs:
       # --- per-target launch (no provider keys in any of these) -------------
 
       - name: "Target 1: a fresh, throwaway memory-file path"
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-server-memory'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-server-memory'
         shell: bash
         run: echo "TPV_MEMORY_FILE=$RUNNER_TEMP/tpv-memory-$RANDOM.json" >> "$GITHUB_ENV"
 
       - name: "Target 1 or target 6's own inference, or an explicit ollama cell: pull the model"
-        if: steps.guard.outcome == 'success' && (env.TPV_PROVIDER == 'ollama' || env.TPV_TARGET == 'tpv-agents-sdk-ollama')
+        if: steps.guard.outputs.run == 'true' && (env.TPV_PROVIDER == 'ollama' || env.TPV_TARGET == 'tpv-agents-sdk-ollama')
         shell: bash
         run: |
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
           curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}'
 
       - name: "Target 2: install redis/mcp-redis (its own console script, not `python -m` from an arbitrary cwd)"
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-mcp-redis'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-mcp-redis'
         shell: bash
         # redis:7's own health check above already blocks every step in this
         # job until the service is healthy; redis-cli isn't on this runner's
@@ -214,7 +252,7 @@ jobs:
           python -m pip install "$RUNNER_TEMP/mcp-redis"
 
       - name: "Target 3: start the python-sdk simple-streamablehttp server"
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-streamablehttp'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-streamablehttp'
         shell: bash
         run: |
           git clone --quiet --filter=blob:none --no-checkout https://github.com/modelcontextprotocol/python-sdk.git "$RUNNER_TEMP/python-sdk"
@@ -224,7 +262,7 @@ jobs:
           for i in $(seq 1 20); do curl -sf -o /dev/null http://127.0.0.1:3000/mcp && break; sleep 1; done
 
       - name: "Target 5: build the Go SDK's own memory example"
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-go-memory'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-go-memory'
         shell: bash
         run: |
           go version
@@ -234,7 +272,7 @@ jobs:
           # No -memory flag above: the knowledge graph stays in-process only.
 
       - name: "Target 6: start the disclosed Agents-SDK/Ollama shim (pinned deps)"
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET == 'tpv-agents-sdk-ollama'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-agents-sdk-ollama'
         shell: bash
         env:
           OLLAMA_API_BASE: http://127.0.0.1:11434
@@ -248,7 +286,7 @@ jobs:
       # --- scaffold sanity check (no provider key; see the prereg) ----------
 
       - name: Scaffold sanity check -- re-introspect via the unchanged CLI (not for target 3; see the prereg)
-        if: steps.guard.outcome == 'success' && env.TPV_TARGET != 'tpv-streamablehttp'
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET != 'tpv-streamablehttp'
         shell: bash
         run: |
           case "$TPV_TARGET" in
@@ -277,19 +315,27 @@ jobs:
       # --- the real journey: scan, then generate+validate for targets 1-3 --
 
       - name: Run the real journey (scan; generate+validate too for targets 1-3)
-        if: steps.guard.outcome == 'success'
+        if: steps.guard.outputs.run == 'true'
         id: run
         shell: bash
         env:
-          # The ONLY step in this job whose env: carries a provider key.
+          # The ONLY step in this job whose env: carries a REAL provider key
+          # used to drive a live call (the guard step above only checks
+          # presence, never uses the value).
           ANTHROPIC_API_KEY: ${{ env.TPV_PROVIDER == 'anthropic' && secrets.MYLONITE_LLM_KEY || '' }}
           OPENAI_API_KEY: ${{ env.TPV_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
           OLLAMA_API_BASE: http://127.0.0.1:11434
           MYLONITE_MAX_TOKENS: "2048"
+          # Placeholder for BUDGET-1 (a separate, in-progress PR adding a
+          # hard, process-wide LLM-call ceiling counted across
+          # scan+generate+validate+retries). MYLONITE_MAX_LLM_REQUESTS is
+          # this workflow's one guess at the real name; it is a no-op today
+          # (nothing in src/ reads it yet) and appears in exactly this one
+          # place so the controller can align the name once BUDGET-1 lands.
+          MYLONITE_MAX_LLM_REQUESTS: ${{ steps.inputs.outputs.max_llm_calls }}
           TPV_MODEL: ${{ steps.model.outputs.model }}
           TPV_MAX_LLM_CALLS: ${{ steps.inputs.outputs.max_llm_calls }}
         run: |
-          set -o pipefail
           case "$TPV_TARGET" in
             tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
             tpv-mcp-redis)          TARGET_FILE=redis.yaml;          FULL_JOURNEY=true ;;
@@ -300,59 +346,90 @@ jobs:
             *) echo "::error::unknown target $TPV_TARGET"; exit 1 ;;
           esac
 
+          # Nothing below lets scan/generate/validate's own exit code fail
+          # THIS STEP -- each is captured with `set +e` / PIPESTATUS and
+          # logged, never re-raised. A budget/provider abort, a rejected
+          # validate, or an actual crash are all legitimate, scoreable
+          # outcomes (see scripts/score_third_party.py), not step failures;
+          # letting any of them fail this step would skip the scoring and
+          # cost steps that follow and silently lose the result.
           mkdir -p out
+          set +e
           "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
             --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls "$TPV_MAX_LLM_CALLS" \
             --output-dir out 2>&1 | tee run.log
+          scan_rc=${PIPESTATUS[0]}
+          set -e
+          echo "scan exited $scan_rc" >> run.log
           scan_dir="$(find out -maxdepth 1 -mindepth 1 -type d | head -1)"
-          echo "score_dir=$scan_dir" >> "$GITHUB_OUTPUT"
+          echo "score_dir=${scan_dir:-out}" >> "$GITHUB_OUTPUT"
 
           # Targets 4-6 are N=1 smoke cells (prereg: "claim no verdict") --
           # scan only. generate/validate need an actual finding to run on,
           # which a smoke cell makes no promise of producing.
-          if [ "$FULL_JOURNEY" = "true" ]; then
-            if "$MYLONITE" generate --scans-dir out --latest --out generated \
-                 --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log; then
-              # `validate` exits 5 (EXIT_NOT_KEPT) for a perfectly legitimate
-              # "not kept" result -- that is NOT this step failing, and must
-              # not skip the scoring/cost steps that follow. Any OTHER
-              # non-zero code (budget/provider/config/crash) IS a real
-              # failure and is re-raised below. `set +e` around the one
-              # command that has a meaningful non-zero exit, nowhere else.
+          if [ "$FULL_JOURNEY" = "true" ] && [ -n "$scan_dir" ]; then
+            # Pass ONE exploit file explicitly (sorted first by pattern_id),
+            # never `--latest`/a bare scan dir: with 2+ findings, `generate`
+            # writes each into its own generated/<slug>/ subdirectory, and
+            # `validate generated` (the parent) then finds no exploit_*.json
+            # there and fails -- a real bug a prior round of this workflow
+            # had. Passing one exploit path keeps generate in its
+            # single-finding mode, which writes flat into --out. Known,
+            # documented scope limit: with multiple findings in one scan,
+            # only the first is validated and scored this round.
+            exploit_path="$(ls "$scan_dir"/exploit_*.json 2>/dev/null | sort | head -1)"
+            if [ -n "$exploit_path" ]; then
               set +e
-              "$MYLONITE" validate generated \
-                --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
-                --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log
-              validate_rc=${PIPESTATUS[0]}
+              "$MYLONITE" generate "$exploit_path" --out generated \
+                --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log
+              generate_rc=${PIPESTATUS[0]}
               set -e
-              # validate ALWAYS writes validation_report.json next to the
-              # test (kept or not) -- unlike `gate`'s orchestrator, which
-              # only persists one for a KEPT finding. Score THIS directory,
-              # not the scan directory, so a not-kept result is reachable.
-              echo "score_dir=generated" >> "$GITHUB_OUTPUT"
-              if [ "$validate_rc" -ne 0 ] && [ "$validate_rc" -ne 5 ]; then
-                echo "::error::validate exited $validate_rc (neither 0=kept nor 5=not-kept) -- a real failure, not a verdict."
-                exit "$validate_rc"
+              echo "generate exited $generate_rc" >> run.log
+              if [ "$generate_rc" -eq 0 ]; then
+                set +e
+                "$MYLONITE" validate generated \
+                  --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
+                  --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log
+                validate_rc=${PIPESTATUS[0]}
+                set -e
+                echo "validate exited $validate_rc" >> run.log
+                # validate ALWAYS writes validation_report.json next to the
+                # test (kept or not) -- unlike `gate`'s orchestrator, which
+                # only persists one for a KEPT finding. Score THIS
+                # directory, not the scan directory, so a not-kept result
+                # is reachable.
+                echo "score_dir=generated" >> "$GITHUB_OUTPUT"
+              elif grep -q "found no exploits" run.log; then
+                echo "::notice::generate found no exploits to emit a test from -- a clean no-finding scan; scoring the scan directory."
+              else
+                echo "::warning::generate exited $generate_rc without the expected 'found no exploits' message -- a real failure, not a clean no-finding result; scoring the scan directory, which the scorer may read as a product defect given the traceback rule."
               fi
             else
-              echo "::notice::generate found nothing to emit a test from (no finding) -- scoring the scan directory only."
+              echo "::notice::scan_report.json claims a finding but no exploit_*.json file was found under $scan_dir -- scoring the scan directory."
             fi
           fi
 
       # --- score, cost, publish the prereg this run was judged against -----
+      # Both steps run with `if: always()` (plus the guard's own output
+      # check): scan/generate/validate's exit codes never fail the run step
+      # above, but `always()` means score.json/cost.json are still written
+      # even if some EARLIER, unrelated step (checkout, the wheel build, a
+      # server launch) failed -- the scorer's own missing-report path
+      # handles that case (PRODUCT_DEFECT or INVALID, never silently
+      # nothing).
 
       - name: Score the run against the prereg
-        if: steps.guard.outcome == 'success'
+        if: always() && steps.guard.outputs.run == 'true'
         shell: bash
         env:
           TPV_SCORE_DIR: ${{ steps.run.outputs.score_dir }}
         run: |
           "$RUNNER_TEMP/campaign-venv/bin/python" scripts/score_third_party.py score \
-            "$TPV_SCORE_DIR" --target "$TPV_TARGET" --run-log run.log --out score.json
+            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --run-log run.log --out score.json
 
       - name: Compute this run's $ cost from the printed token counts
-        if: steps.guard.outcome == 'success'
+        if: always() && steps.guard.outputs.run == 'true'
         shell: bash
         env:
           TPV_MODEL: ${{ steps.model.outputs.model }}
@@ -365,15 +442,15 @@ jobs:
           esac
           python scripts/compute_run_cost.py run.log \
             --model "$TPV_MODEL" --in-rate "$IN_RATE" --out-rate "$OUT_RATE" \
-            --ref "$TPV_COMMIT_SHA" --out cost.json
+            --ref "${TPV_COMMIT_SHA:-unknown}" --out cost.json
 
       - name: Record the prereg commit this run was judged against
-        if: always() && steps.guard.outcome == 'success'
+        if: always() && steps.guard.outputs.run == 'true'
         shell: bash
         run: git log -1 --format=%H -- verification/PREREG_THIRD_PARTY_2026_10.md > prereg.sha
 
       - name: Upload this cell's artefacts
-        if: always() && steps.guard.outcome == 'success'
+        if: always() && steps.guard.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: third-party-${{ inputs.target }}-${{ inputs.provider }}
