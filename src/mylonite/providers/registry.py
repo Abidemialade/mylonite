@@ -57,9 +57,29 @@ class ProviderInfo:
     case: AWS's credential chain accepts a static access/secret keypair, OR
     a named ``AWS_PROFILE``, OR an AWS Bedrock API key/bearer token, OR an
     OIDC role (the env-detectable form: ``AWS_ROLE_ARN`` +
-    ``AWS_WEB_IDENTITY_TOKEN_FILE``) -- requiring the static pair alone
-    rejected every other legitimate form. Empty for every other row here
-    (their one ``key_env`` set is the only form).
+    ``AWS_WEB_IDENTITY_TOKEN_FILE``), OR a container role (ECS/CodeBuild:
+    ``AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`` or ``_FULL_URI``) --
+    requiring the static pair alone rejected every other legitimate form.
+    Empty for every other row here (their one ``key_env`` set is the only
+    form).
+
+    ``optional_env`` names vars this provider's SDK/LiteLLM route reads but
+    doesn't strictly require (Bedrock's region, an OpenAI-compatible base
+    URL) -- recognised so ``--env-file``/``looks_like_provider_env_var``
+    load them, but never a hard precondition the way ``key_env``/
+    ``extra_env`` are.
+
+    ``credential_best_effort`` marks a provider whose REAL credential chain
+    has forms with NO environment-variable footprint at all -- Bedrock's
+    default ``~/.aws`` profile (no ``AWS_PROFILE`` set), an active SSO
+    session, and the EC2 instance-metadata role are all genuine, working
+    credentials that no env-var check can ever see. For such a provider,
+    none of ``key_env``/``key_env_alternatives`` matching is advisory, never
+    a hard failure: the caller prints one line naming what WAS checked and
+    proceeds, leaving the real failure (if there is one) to the provider's
+    own auth preflight or first call. ``False`` for every other row, where
+    the checked forms genuinely are the complete set of ways to configure
+    the provider.
     """
 
     id: str
@@ -71,6 +91,8 @@ class ProviderInfo:
     example_model: str | None = None
     local: bool = False
     key_env_alternatives: tuple[tuple[str, ...], ...] = ()
+    optional_env: tuple[str, ...] = ()
+    credential_best_effort: bool = False
 
 
 PROVIDERS: dict[str, ProviderInfo] = {
@@ -87,6 +109,11 @@ PROVIDERS: dict[str, ProviderInfo] = {
         model_prefix="ollama_chat/",
         key_env=(),
         local=True,
+        # The no-key workaround every other provider's missing-credential
+        # message points at (``LOCAL_MODEL_HINT`` in scan/providers.py) --
+        # kept here, not hardcoded at the call site, so it can't drift from
+        # this row's own `model_prefix`.
+        example_model="ollama_chat/llama3.2:3b",
     ),
     "openai": ProviderInfo(
         id="openai",
@@ -96,6 +123,9 @@ PROVIDERS: dict[str, ProviderInfo] = {
         # Left unset pending a pricing check on the small tier -- see the
         # provider registry PR series.
         example_model=None,
+        # An OpenAI-compatible endpoint (a local vLLM/Ollama shim, a
+        # gateway) -- recognised so --env-file loads it, never required.
+        optional_env=("OPENAI_API_BASE",),
     ),
     "google": ProviderInfo(
         id="google",
@@ -117,13 +147,24 @@ PROVIDERS: dict[str, ProviderInfo] = {
         # The static keypair is kept as the CANONICAL set (what an error
         # message/the docs show as "the" credential) -- but see
         # `key_env_alternatives` below: any ONE of several AWS credential
-        # forms satisfies this provider, not just the static pair.
+        # forms satisfies this provider, not just the static pair. AND see
+        # `credential_best_effort=True`: AWS's credential chain also has
+        # forms (a default ~/.aws profile with no AWS_PROFILE set, SSO, the
+        # EC2/ECS/CodeBuild instance role) that leave NO env var at all to
+        # check -- so even when none of these match, Mylonite warns and
+        # proceeds rather than blocking a configuration it cannot see.
         key_env=("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
         key_env_alternatives=(
             ("AWS_PROFILE",),
             ("AWS_BEARER_TOKEN_BEDROCK",),
             ("AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"),
+            ("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",),
+            ("AWS_CONTAINER_CREDENTIALS_FULL_URI",),
         ),
+        # LiteLLM defaults the region, so it's optional -- but it ships in
+        # .env.example and --env-file used to reject it.
+        optional_env=("AWS_REGION_NAME",),
+        credential_best_effort=True,
     ),
     "vllm": ProviderInfo(
         id="vllm",
@@ -152,3 +193,28 @@ PROVIDERS: dict[str, ProviderInfo] = {
         extra_env=("VERTEXAI_PROJECT", "VERTEXAI_LOCATION"),
     ),
 }
+
+#: LiteLLM provider-id spellings that route to an approved row here but
+#: aren't that row's own ``model_prefix`` (confirmed against the installed
+#: litellm package: ``azure_ai``/``bedrock_converse`` are documented
+#: alternates, and ``ollama`` -- the legacy ``/api/generate`` route -- is
+#: accepted alongside this registry's own ``ollama_chat/`` prefix). Exposed
+#: here, as DATA, rather than re-derived or hand-copied, so both
+#: :mod:`mylonite.scan.providers`'s alias table and
+#: ``scripts/check_no_hardcoded_models.py``'s model-literal regex read the
+#: SAME list instead of each keeping its own, independently incomplete one
+#: -- the hand-maintained regex was missing ``ollama_chat/``, ``hosted_vllm/``,
+#: ``gemini/``, ``azure/`` and ``vertex_ai/`` entirely before this existed.
+EXTRA_ROUTING_ALIASES: dict[str, str] = {
+    "azure_ai": "azure",
+    "bedrock_converse": "bedrock",
+    "ollama": "ollama",
+}
+
+#: Every provider-routing prefix a hardcoded model literal could use to
+#: reach an approved provider: each row's own ``model_prefix`` plus the
+#: aliases above, every one written with the trailing ``/`` it's prefixed
+#: with (``"anthropic/"``, ``"ollama_chat/"``, ``"bedrock_converse/"``, ...).
+ALL_MODEL_PREFIXES: tuple[str, ...] = tuple(
+    info.model_prefix for info in PROVIDERS.values()
+) + tuple(f"{alias}/" for alias in EXTRA_ROUTING_ALIASES)

@@ -252,30 +252,33 @@ class LLMNotConfiguredError(RuntimeError):
     """Raised by :func:`require_llm_configured` when no credential is
     resolvable for the effective provider.
 
-    Mirrors the deleted ``MyloniteSettings.require_llm()``'s intent (CLAUDE.md:
-    "There is no default provider ... `require_llm()` raises if one isn't
-    set") as a REAL runtime check in the config-resolution path every live
-    command actually goes through, rather than a class nothing called.
+    Mirrors the deleted ``MyloniteSettings.require_llm()``'s intent (there is
+    no default provider, and ``require_llm()`` raises if one isn't set) as a
+    REAL runtime check in the config-resolution path every live command
+    actually goes through, rather than a class nothing called.
     """
 
 
-def require_llm_configured(*, model: str, provider: str | None = None) -> None:
+def require_llm_configured(*, model: str, provider: str | None = None) -> str | None:
     """Raise :class:`LLMNotConfiguredError` when no credential is resolvable
-    for ``model``'s effective provider.
+    for ``model``'s effective provider -- except for a
+    :attr:`~mylonite.providers.registry.ProviderInfo.credential_best_effort`
+    provider (Bedrock), for which this instead RETURNS a one-line,
+    non-fatal warning the caller should print before proceeding (see below).
 
     A local/self-hosted/proxy provider (ollama, vllm, a litellm-proxy — see
-    ``scan.providers.PROVIDER_ENV_VARS``) needs no key and always passes. A
-    model with NO derivable provider at all (``provider_from_model`` returns
-    ``None`` — nothing to resolve a credential var against) also passes,
-    nothing to check — deliberately permissive there, since ``ModelRef``/
-    LiteLLM itself is the source of truth for "is this a valid model", not
-    this function; this only checks "is there evidently a credential for
-    it", the narrower question the deleted ``require_llm()`` asked. A
-    provider id that DOES resolve but isn't in the approved registry is
-    still checked: against LiteLLM's own key-presence map when LiteLLM
-    itself recognises the provider, or a guessed ``<PROVIDER>_API_KEY``-
-    shaped var as a last resort when it doesn't -- see
-    :func:`~mylonite.scan.providers.required_env_vars`.
+    ``scan.providers.PROVIDER_ENV_VARS``) needs no key and always passes
+    (returns ``None``). A model with NO derivable provider at all
+    (``provider_from_model`` returns ``None`` — nothing to resolve a
+    credential var against) also passes, nothing to check — deliberately
+    permissive there, since ``ModelRef``/LiteLLM itself is the source of
+    truth for "is this a valid model", not this function; this only checks
+    "is there evidently a credential for it", the narrower question the
+    deleted ``require_llm()`` asked. A provider id that DOES resolve but
+    isn't in the approved registry is still checked: against LiteLLM's own
+    key-presence map when LiteLLM itself recognises the provider, or a
+    guessed ``<PROVIDER>_API_KEY``-shaped var as a last resort when it
+    doesn't -- see :func:`~mylonite.scan.providers.required_env_vars`.
 
     Splits :func:`~mylonite.scan.providers.required_env_vars`'s result (the
     key PLUS anything else LiteLLM needs to route a call, e.g. Azure's
@@ -287,27 +290,39 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
        must be FULLY present. Most providers have exactly one set (so this
        is "all of key_env, together" exactly like before); Bedrock has
        several (the static keypair, OR ``AWS_PROFILE`` alone, OR a bearer  # allow-literal: example
-       token alone, OR an OIDC role pair) -- requiring the static pair
-       specifically used to reject every other legitimate AWS credential
-       form.
+       token alone, OR an OIDC role pair, OR a container-role URI) --
+       requiring the static pair specifically used to reject every other
+       legitimate AWS credential form. Even when NONE of Bedrock's forms
+       match, this does NOT raise: AWS's real credential chain also
+       includes a default ``~/.aws`` profile with no ``AWS_PROFILE`` set,  # allow-literal: example
+       an active SSO session, and the EC2 instance-metadata role, none of
+       which leaves an environment variable to check at all -- blocking on
+       their absence would reject a genuinely working configuration this
+       function simply cannot see. Instead it returns a one-line warning
+       naming what WAS checked, and the real failure (if there is one)
+       surfaces from the provider's own auth preflight or first call.
     2. Anything ELSE the provider always needs regardless of which
        credential form is used (Azure's endpoint/API-version pair, Vertex's
        project/location) -- these are not part of any credential
        alternative, so ALL of them are still required together, same as
-       before. An Azure setup with only ``AZURE_API_KEY`` set still fails  # allow-literal: example
-       here because ``AZURE_API_BASE``/``AZURE_API_VERSION`` are also unset.  # allow-literal: example
+       before, and this part DOES still raise -- Bedrock's leniency is
+       about which CREDENTIAL form was used, not about a hard
+       precondition every form shares. An Azure setup with only
+       ``AZURE_API_KEY`` set still fails here because  # allow-literal: example
+       ``AZURE_API_BASE``/``AZURE_API_VERSION`` are also unset.  # allow-literal: example
     """
     from mylonite.scan.providers import (
         credential_configured,
         credential_sets_for,
         provider_from_model,
+        provider_info_for,
         required_env_vars,
     )
 
     resolved = provider_from_model(model, declared=provider)
     needed = required_env_vars(resolved)
     if not needed:
-        return
+        return None
     sets = credential_sets_for(resolved)
     canonical = sets[0] if sets else ()
     extra = tuple(v for v in needed if v not in canonical)
@@ -318,7 +333,26 @@ def require_llm_configured(*, model: str, provider: str | None = None) -> None:
     credential_ok = credential_configured(resolved) if sets else True
     missing_extra = [var for var in extra if not os.environ.get(var)]
     if credential_ok and not missing_extra:
-        return
+        return None
+
+    info = provider_info_for(resolved)
+    if (
+        not credential_ok
+        and missing_extra == []
+        and info is not None
+        and info.credential_best_effort
+    ):
+        checked = " / ".join("+".join(s) for s in sets)
+        return (
+            f"no explicit credential for provider {resolved!r} was found in the "
+            f"environment (checked: {checked}) -- proceeding anyway: a default "
+            "~/.aws profile, an active SSO session, or a container/instance role "
+            "(ECS, CodeBuild, EC2) all authenticate with no environment variable "
+            "at all, so this is advisory, not a block. If the call that follows "
+            "fails, set one of the forms above (AWS_PROFILE=default covers the "  # allow-literal: example
+            "common case)."
+        )
+
     missing_primary = [] if credential_ok else [v for v in canonical if not os.environ.get(v)]
     missing = missing_primary + missing_extra
     alt_hint = ""

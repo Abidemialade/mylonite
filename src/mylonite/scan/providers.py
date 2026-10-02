@@ -12,7 +12,7 @@ import os
 import re
 from collections.abc import Mapping
 
-from mylonite.providers.registry import PROVIDERS
+from mylonite.providers.registry import EXTRA_ROUTING_ALIASES, PROVIDERS, ProviderInfo
 
 # Bare API-key env var(s) per provider, read from the approved-provider
 # registry (:mod:`mylonite.providers.registry`) -- that module is now the
@@ -41,21 +41,19 @@ _EXTRA_ENV_VARS: dict[str, tuple[str, ...]] = {
 }
 
 #: OPTIONAL provider vars: recognised by :func:`looks_like_provider_env_var` so
-#: ``--env-file`` will load them, but NOT required to route a call.
+#: ``--env-file`` will load them, but NOT required to route a call. Read from
+#: the registry's `optional_env` column (Bedrock's region; an OpenAI-compatible
+#: base URL) -- this is a working allow-list, not an example, so it is DATA
+#: derived from the registry, same as :data:`_EXTRA_ENV_VARS`, rather than a
+#: hand-maintained tuple.
 #:
 #: Kept separate from :data:`_EXTRA_ENV_VARS` because that map feeds
 #: :func:`required_env_vars`, and anything listed there becomes a HARD
 #: precondition -- putting an optional var in it makes a working configuration
 #: report as missing credentials. "Loadable" and "required" are different
 #: questions and need different lists.
-_OPTIONAL_ENV_VARS: tuple[str, ...] = (
-    # Bedrock's region. LiteLLM defaults it, so it is optional -- but it ships
-    # in .env.example and `--env-file` used to reject it.
-    "AWS_REGION_NAME",  # allow-literal: example
-    # An OpenAI-compatible endpoint (a local vLLM/Ollama shim, a gateway). The
-    # AZURE_* family got recognition for free from its own regex; OpenAI's
-    # equivalent matched nothing.
-    "OPENAI_API_BASE",  # allow-literal: example
+_OPTIONAL_ENV_VARS: tuple[str, ...] = tuple(
+    var for info in PROVIDERS.values() for var in info.optional_env
 )
 
 #: Every var named in some provider's `key_env_alternatives` (e.g. Bedrock's
@@ -90,7 +88,7 @@ _RE_AZURE_VAR: re.Pattern[str] = re.compile(r"^AZURE_[A-Z0-9_]+$")
 # stopped covering `hosted_vllm` (its OWN model_prefix) when this dict was
 # still hand-maintained: LiteLLM routes the self-hosted/OpenAI-compatible
 # prefix `docs/self-hosted-models.md` tells users to set
-# (`hosted_vllm/<model>`), but the hand-written alias only had the SHORTER,
+# (`hosted_vllm/<model>`), but the hand-written alias only had the SHORTER,  # allow-literal: example
 # undocumented spelling `vllm`, so `required_env_vars("hosted_vllm")`
 # silently fell through to demanding a nonexistent, guessed credential var
 # -- see the test that pins every row's own prefix as an accepted alias.
@@ -100,18 +98,13 @@ _RE_AZURE_VAR: re.Pattern[str] = re.compile(r"^AZURE_[A-Z0-9_]+$")
 # /api/chat one we use, and the registry's own `model_prefix`). Only the
 # bare "ollama" matches our registry id directly (via the identity
 # fallback in `_normalise_provider` below) -- deriving a provider from an
-# `ollama_chat/...` model used to report the ROUTE as if it were the
+# `ollama_chat/...` model used to report the ROUTE as if it were the  # allow-literal: example
 # provider before this dict covered it, visible in `demo --live`, which
-# printed `live (ollama_chat/...)` for a run whose provider is `ollama`,
+# printed `live (ollama_chat/...)` for a run whose provider is `ollama`,  # allow-literal: example
 # and stamped that into ScanReport.provider.
 _ALIASES: dict[str, str] = {
     info.model_prefix.rstrip("/"): provider_id for provider_id, info in PROVIDERS.items()
-} | {
-    # Manual extras LiteLLM also accepts for a registry provider that
-    # AREN'T that row's own `model_prefix`, so they can't be derived above.
-    "azure_ai": "azure",
-    "bedrock_converse": "bedrock",
-}
+} | EXTRA_ROUTING_ALIASES  # the manual extras LiteLLM also accepts; see that constant's docstring
 
 # Self-hosted/OpenAI-compatible LiteLLM routes that need no key, but that
 # (unlike vllm/ollama) don't get their own approved-registry row: LM
@@ -248,6 +241,20 @@ def required_env_vars(provider: str | None, override: str | None = None) -> tupl
     return _unlisted_provider_fallback(p)
 
 
+def provider_info_for(provider: str | None) -> ProviderInfo | None:
+    """The approved-registry row for ``provider`` (after alias/case
+    normalisation), or ``None`` for an unlisted/unrecognised id.
+
+    Lets a caller read a registry FIELD (e.g. ``credential_best_effort``)
+    for the provider a model resolved to, without re-deriving the
+    normalisation :func:`credential_sets_for` and friends already do.
+    """
+    p = _normalise_provider(provider)
+    if p is None:
+        return None
+    return PROVIDERS.get(p)
+
+
 def credential_sets_for(provider: str | None) -> tuple[tuple[str, ...], ...]:
     """Every independently-sufficient set of env vars for ``provider``'s
     credential: the canonical :attr:`ProviderInfo.key_env` set (first, if
@@ -378,7 +385,7 @@ def approved_providers_help_text() -> str:
 def no_model_configured_message() -> str:
     """The one line printed, then ``EXIT_PROVIDER``, when a live command
     resolves no model at all from ``--model``/``mylonite.yaml``'s ``model:``/
-    ``MYLONITE_MODEL`` -- CLAUDE.md's "no default provider" rule means there
+    ``MYLONITE_MODEL`` -- there is no default provider or model, so there
     is nothing left to silently fall back to.
     """
     return (
@@ -388,8 +395,12 @@ def no_model_configured_message() -> str:
     )
 
 
-LOCAL_MODEL_HINT = (  # keep in sync with docs/self-hosted-models.md
-    "No key? Run a local model instead: --model ollama_chat/llama3.2:3b "
+#: The no-key workaround, built from the registry's ollama row rather than
+#: a hardcoded literal here, so it can't drift from the model that row
+#: actually names (:attr:`~mylonite.providers.registry.ProviderInfo.
+#: example_model`).
+LOCAL_MODEL_HINT = (
+    f"No key? Run a local model instead: --model {PROVIDERS['ollama'].example_model} "
     "(needs Ollama running; see docs/self-hosted-models.md)."
 )
 _DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
@@ -412,6 +423,14 @@ def require_llm_configured_or_exit(
     it back under its original name (``_require_llm_configured_or_exit``)
     so every existing call site and the one test that imports it directly
     keep working unchanged.
+
+    ``require_llm_configured`` returns a non-fatal warning line (rather
+    than raising) for a ``credential_best_effort`` provider (Bedrock) whose
+    explicit forms don't match -- printed here, same as the exception case,
+    but WITHOUT exiting: the real credential may still be a default AWS
+    profile, SSO, or an instance role this process can't see from env vars
+    alone, so the run proceeds and the provider's own auth preflight/first
+    call surfaces a real failure if there is one.
     """
     import typer
 
@@ -425,10 +444,12 @@ def require_llm_configured_or_exit(
             continue
         seen.add(m)
         try:
-            require_llm_configured(model=m, provider=provider)
+            warning = require_llm_configured(model=m, provider=provider)
         except LLMNotConfiguredError as exc:
             echo_err(f"{exc}\n{LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
             raise typer.Exit(code=EXIT_CONFIG) from exc
+        if warning:
+            echo_err(warning)
     preflight_model_or_exit(*models, api_base=api_base)
 
 
