@@ -89,22 +89,21 @@ on:
           Per-process hard LLM-request ceiling for the scan phase
           (MYLONITE_MAX_LLM_REQUESTS), clamped to <=150. scan's own soft
           --max-llm-calls stays fixed at 60 regardless of this value. The
-          default (120) is a pre-pilot estimate -- see the prereg's "Pilot
-          procedure" section for how the real value gets set before any
-          counted run.
+          default (60) is set from the pilot; see the prereg's "Pilot
+          result" subsection for the measured spend and the reasoning.
         required: true
         type: number
-        default: 120
+        default: 60
       validate_ceiling:
         description: >-
           Per-process hard LLM-request ceiling for the validate phase
           (MYLONITE_MAX_LLM_REQUESTS), clamped to <=100. validate's own
           --iterations stays fixed at 3 regardless of this value. The
-          default (80) is a pre-pilot estimate -- see the prereg's "Pilot
-          procedure" section.
+          default (40) is set from the pilot; see the prereg's "Pilot
+          result" subsection.
         required: true
         type: number
-        default: 80
+        default: 40
       ref:
         description: "branch, tag or sha to build and measure"
         default: "main"
