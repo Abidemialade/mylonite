@@ -93,7 +93,7 @@ def injecagent_cache_dir() -> Path:
 
 # --- AgentDojo (ETH SPY Lab, MIT) — Layer 2 via released runs ----------------
 # We score Mylonite's judge against AgentDojo's RECORDED runs (no model run): the
-# released trajectories include real positives (security=False) from weaker models.
+# released trajectories include real positives (security=True) from weaker models.
 # Pinned commit fixes the content; a bounded subset of one vulnerable model + suite
 # is enough for a confusion matrix with positives. See verification/SOURCE.md.
 AGENTDOJO_COMMIT = "089ed468cf3ed0322acc66b0211f26d9d90dbf60"

@@ -60,7 +60,7 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         n = write_transcripts(out, transcripts)
         positives = sum(1 for t in transcripts if t.benchmark_success)
         print(f"fetched {len(run_paths)} AgentDojo runs -> {n} transcripts -> {out}")
-        print(f"  {positives} real positives (security=False); {n - positives} negatives")
+        print(f"  {positives} real positives (security=True); {n - positives} negatives")
         print("next: `score --transcripts <out> --with-llm` to verify the judge on real positives")
         return 0
     print(f"fetch: dataset {args.dataset!r} not wired yet", file=sys.stderr)

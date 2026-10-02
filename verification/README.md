@@ -65,7 +65,7 @@ LLM-judge leg.
 ### AgentDojo — score the judge on *released* runs (no model run)
 
 AgentDojo ships recorded trajectories for dozens of models under `runs/`, each with
-a ground-truth `security` label (`security=False` = attack succeeded). We score
+a ground-truth `security` label (`security=True` = attack succeeded). We score
 Mylonite's judge directly against those — **real third-party positives from a model
 that actually fell for attacks**, no synthesis and no model run by us:
 
