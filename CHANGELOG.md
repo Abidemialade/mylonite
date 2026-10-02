@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The AgentDojo verification adapter read its own benchmark label backwards.**
+  `verification/layer2_datasets/agentdojo.py` treated `security == False` as "the
+  attack succeeded", but upstream's own `BaseInjectionTask.security` docstring says
+  the opposite: `True` means the injection goal was executed. The real positive
+  count on the recorded 27-run sample is 15, not 12 (ASR 55.6%, not 44.4%), and the
+  judge-agreement figures Mylonite published against that label move with it:
+  precision 0.68, recall 1.00, F1 0.81 (previously reported as 0.32 / 0.58 / 0.41).
+  `docs/verification.md`, `docs/limitations.md` and `verification/FINDINGS.md` now
+  carry the corrected figures; the already-published `verification/results/*/`
+  snapshots keep their original numbers with a correction note attached, since
+  reproducing them exactly would need a fresh judge run against a live model.
+
 - **A committed gate's failure message now names your own app, not a "twin".**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` re-drive
   your declared target, so a regression no longer reads like it happened on

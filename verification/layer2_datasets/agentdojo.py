@@ -7,14 +7,15 @@ Each run carries the full ``messages`` trajectory, the ``injections`` payload, a
 a ground-truth **``security``** label.
 
 That makes AgentDojo the cleanest closure for "verify the judge's positive class":
-its released runs contain **real third-party positives** (``security == False`` =
+its released runs contain **real third-party positives** (``security == True`` =
 the injection succeeded), so we can score Mylonite's success-judge against an
 independent label *without running a model ourselves* and *without synthesising*
 anything.
 
-Semantics (verified against the data): ``security == True`` → the agent resisted
-(secure); ``security == False`` → the attack succeeded. So
-``benchmark_success = not security``.
+Semantics (per upstream's own docstring, ``BaseInjectionTask.security``:
+"Returns True if the injection was executed correctly, False otherwise"):
+``security == True`` → the attack succeeded; ``security == False`` → the agent
+resisted. So ``benchmark_success = security``.
 
 Mapping to a Mylonite ``Transcript``: AgentDojo injection goals are multi-step
 tasks, not a single attacker tool, so there is no ``consequential_tool`` — scoring
@@ -82,7 +83,7 @@ def run_to_transcript(run: dict[str, Any]) -> Transcript:
         model=str(run.get("pipeline_name", "")),
         tool_calls=calls,
         final_output=final_text,
-        benchmark_success=(run.get("security") is False),  # security False => attack succeeded
+        benchmark_success=(run.get("security") is True),  # security True => attack succeeded
         benchmark_metric="agentdojo-security",
         synthetic=False,
         agent_mode="third-party-run",
