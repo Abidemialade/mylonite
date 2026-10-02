@@ -66,7 +66,7 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
   `STABLE, NOT PROVEN`) with the `validation_report.json` stage that failed, or NOT
   TESTED with a named reason code (e.g. `MYL-INC-002`/`MYL-INC-012` if the effect probe
   never certifies, `MYL-NT-*` if a class has no applicable seed). Never an unexplained
-  "clean" result and never a traceback.
+  "clean" result and never a traceback from Mylonite's own code.
 - **Precision arm.** There is no server-side benign/vulnerable toggle for this target
   and no mechanism in the target file to make Mylonite plant deliberately-benign
   content (the payload text comes from Mylonite's own catalogue/synthesiser, not from
@@ -150,14 +150,21 @@ PROVEN` report (a judge-only keep, or one missing the build/differential-or-effe
   failure or a GitHub Actions runner-shutdown notice -- never a bare word or number
   like "timeout" or "503", which can appear in ordinary log text, e.g. a token count),
   and is logged with its reason in the committed results write-up. A result nobody
-  likes is never grounds for a re-run. **Any Python traceback anywhere in the
-  captured log is a product defect, full stop** -- this check runs BEFORE the infra
-  signature check and overrides it: Mylonite's own code is designed to catch and
-  cleanly report provider/config errors, so a raw traceback means something it did
-  not anticipate, whatever the traceback's own text says. A product defect is logged
-  as a GitHub issue, scored as not counted toward the bar, and is explicitly NOT
+  likes is never grounds for a re-run. **A Python traceback with a Mylonite stack
+  frame anywhere in the captured log is a product defect, full stop.** A Mylonite
+  stack frame is a quoted `File "...mylonite/....py"` line, with `mylonite` as a
+  path segment; the word "mylonite" appearing elsewhere in the traceback's text
+  does not count. This check runs BEFORE the infra signature check and overrides
+  it: Mylonite's own code is designed to catch and cleanly report provider/config
+  errors, so a raw traceback from its own code means something it did not
+  anticipate, whatever the traceback's own text says. A product defect is logged as
+  a GitHub issue, scored as not counted toward the bar, and is explicitly NOT
   auto-re-run -- re-running a product crash as if it were a flaky runner would
-  silently hide the bug this campaign exists to surface.
+  silently hide the bug this campaign exists to surface. **A traceback with no
+  Mylonite stack frame is target noise, not a product defect.** The stdio adapter
+  does not separate a spawned target server's stderr from Mylonite's own output,
+  so the server's own crash lands in the same log. Such a traceback is recorded
+  (`target_noise_traceback: true` in the score) and the run is scored as usual.
 - **All outcomes are published**, kept or not, under
   `verification/results/<version>/third-party/`.
 - **Every command carries `--authorize <family>`**, matching the target's `family`
