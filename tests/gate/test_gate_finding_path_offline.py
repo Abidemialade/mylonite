@@ -137,7 +137,7 @@ def gate_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[Any, Path, _Reco
         out_dir=out_dir,
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[exploit]),
         generate_fn=ReferencePytestGenerator().emit,
-        validate_fn=lambda generated: validator.validate(
+        validate_fn=lambda generated, _finding_dir: validator.validate(
             generated,
             ReferenceVulnerableOracle().adapter(),
             ReferenceVulnerableOracle(),

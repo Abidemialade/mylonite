@@ -296,8 +296,13 @@ def make_validate_fn(
     tf: Any,
     fast: bool,
     randomize_exfil: bool,
-) -> Callable[[Any], Any]:
-    def validate_fn(generated: Any) -> Any:
+) -> Callable[[Any, Path], Any]:
+    # `out` is the gate root. It is no longer read here: run_gate hands
+    # validate_fn each finding's own directory instead. The keyword stays so
+    # the CLI call site does not change.
+    del out
+
+    def validate_fn(generated: Any, finding_dir: Path) -> Any:
         from mylonite.plugins._reference.reference_validator import (
             DifferentialValidator,
             ReferenceVulnerableOracle,
@@ -318,7 +323,11 @@ def make_validate_fn(
                 planner_model=effective_planner_model if planner_model else None,
                 customiser_model=effective_customiser_model if customiser_model else None,
                 judge_model=effective_judge_model if judge_model else None,
-                record_fixtures_dir=out / "fixtures",
+                # This finding's own directory, where its test reads them. A
+                # directory shared by every finding left all but the last test
+                # without matching recordings, and the validator's copy of the
+                # test landed at the gate root, where pytest could not collect it.
+                record_fixtures_dir=finding_dir / "fixtures",
                 progress_cb=lambda msg: echo_err(f"  … {msg}"),
             )
             with llm_scope(policy=effective_policy):
@@ -641,12 +650,14 @@ def make_open_pr_fn(
                 add_paths.append(finding_dir / "target.yaml")
         if target_file is not None and out_dir not in dirs:
             add_paths.append(out_dir / "target.yaml")
-        # The reference-target differential leg records replay fixtures for
-        # the whole run (not per finding) when it recorded any -- committed
-        # so the emitted test(s) can run offline in CI.
-        fixtures_dir = out_dir / "fixtures"
-        if fixtures_dir.is_dir():
-            add_paths.append(fixtures_dir)
+        # The reference-target differential leg records each finding's replay
+        # fixtures in that finding's own directory -- committed so the emitted
+        # test can run offline in CI. A `fixtures/` at the gate root that no
+        # kept finding owns is left out.
+        for finding_dir in dirs:
+            fixtures_dir = finding_dir / "fixtures"
+            if fixtures_dir.is_dir() and fixtures_dir not in add_paths:
+                add_paths.append(fixtures_dir)
         add_paths.append(out_dir / "PR_BODY.md")
         paths = pr_mod.GatePaths(
             repo_root=repo_root, gate_dir=out_dir, workflow_files=wf_files, add_paths=add_paths

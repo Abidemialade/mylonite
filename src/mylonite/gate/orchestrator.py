@@ -237,7 +237,7 @@ def _process_one_finding(
     slug: str,
     *,
     generate_fn: Callable[[ExploitRecord], GeneratedTest | None],
-    validate_fn: Callable[[GeneratedTest], ValidationReport | None],
+    validate_fn: Callable[[GeneratedTest, Path], ValidationReport | None],
     multi: bool,
 ) -> _FindingOutcome:
     """Generate, write, and validate ONE finding. Never raises for a per-finding
@@ -263,7 +263,10 @@ def _process_one_finding(
     # untagged record so it never reaches the payloads it builds.
     generated = generated.model_copy(update={"exploit": exploit})
     try:
-        report = validate_fn(generated)
+        # The validator gets this finding's own directory: a route that records
+        # replay fixtures writes them to `this_out/fixtures`, where this
+        # finding's test reads them, never to a directory shared by findings.
+        report = validate_fn(generated, this_out)
     finally:
         # The validator may write its own copy of the exploit next to the test
         # (the reference route records fixtures there). Write the redacted
@@ -366,7 +369,7 @@ def run_gate(
     out_dir: Path,
     scan_fn: Callable[[], ScanOutcomeBundle],
     generate_fn: Callable[[ExploitRecord], GeneratedTest | None],
-    validate_fn: Callable[[GeneratedTest], ValidationReport | None],
+    validate_fn: Callable[[GeneratedTest, Path], ValidationReport | None],
     open_pr_fn: Callable[..., Any],
     open_pr: bool,
     llm_enrich: bool = False,

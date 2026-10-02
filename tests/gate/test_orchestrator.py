@@ -140,7 +140,7 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
             exploit=exploit,
         )
 
-    def fake_validate(test):
+    def fake_validate(test, _finding_dir):
         return report
 
     # #202: open_pr_fn now takes the whole kept-findings list, not a single
@@ -201,7 +201,7 @@ def test_validation_report_is_on_disk_before_the_pr_step_runs(tmp_path):
                 source="# test\n",
                 exploit=exploit,
             ),
-            validate_fn=lambda test: report,
+            validate_fn=lambda test, _finding_dir: report,
             open_pr_fn=fake_open_pr,
             open_pr=True,
         )
@@ -261,7 +261,7 @@ def test_run_gate_threads_system_prompt_so_localize_resolves_a_line(tmp_path):
             exploit=exploit,
         )
 
-    def fake_validate(test):
+    def fake_validate(test, _finding_dir):
         return report
 
     def fake_open_pr(*, out_dir, findings, body, open_pr, **_):
@@ -328,7 +328,7 @@ def test_run_gate_threads_target_context_into_the_structural_recommendation(tmp_
             framework="pytest", filename="test_security_x.py", source="# test\n", exploit=exploit
         )
 
-    def fake_validate(test):
+    def fake_validate(test, _finding_dir):
         return report
 
     def fake_open_pr(*, out_dir, findings, body, open_pr, **_):
@@ -391,7 +391,7 @@ def test_run_gate_threads_a_real_configurable_mitigation_model(tmp_path):
             source="# test\n",
             exploit=exploit,
         ),
-        validate_fn=lambda test: report,
+        validate_fn=lambda test, _finding_dir: report,
         open_pr_fn=lambda **k: pr_calls.update(k) or "printed",
         open_pr=False,
         llm_enrich=True,
@@ -409,7 +409,7 @@ def test_run_gate_no_exploit_exits_zero_no_pr(tmp_path):
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=_trustworthy_clean_outcome(), exploits=[]),
         generate_fn=lambda e: None,
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -436,7 +436,7 @@ def test_gate_exits_nonzero_when_scan_aborted(tmp_path):
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=outcome, exploits=[]),
         generate_fn=lambda e: generate_called.__setitem__("called", True),
-        validate_fn=lambda t: validate_called.__setitem__("called", True),
+        validate_fn=lambda t, _finding_dir: validate_called.__setitem__("called", True),
         open_pr_fn=lambda **k: pr_called.__setitem__("called", True),
         open_pr=False,
     )
@@ -470,7 +470,7 @@ def test_gate_exits_nonzero_when_every_attempt_errored_without_formal_abort(tmp_
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=outcome, exploits=[]),
         generate_fn=lambda e: generate_called.__setitem__("called", True),
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -491,7 +491,7 @@ def test_run_gate_returns_a_typed_result_when_generate_returns_none(tmp_path):
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[ex]),
         generate_fn=lambda e: None,
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -513,7 +513,7 @@ def test_run_gate_returns_a_typed_result_when_validate_returns_none(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -542,7 +542,7 @@ def test_run_gate_opened_pr_flows_from_prresult(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: report,
+        validate_fn=lambda t, _finding_dir: report,
         open_pr_fn=fake_open_pr,
         open_pr=True,
     )
@@ -560,7 +560,7 @@ def test_run_gate_rejected_test_exits_5_no_pr(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: rejected,
+        validate_fn=lambda t, _finding_dir: rejected,
         open_pr_fn=lambda **k: called.__setitem__("pr", True),
         open_pr=False,
     )
@@ -604,7 +604,7 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
             exploit=exploit,
         )
 
-    def fake_validate(generated):
+    def fake_validate(generated, _finding_dir):
         validated_order.append(generated.exploit.pattern_id)
         if generated.exploit.pattern_id == "a-pattern":
             return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
@@ -666,7 +666,7 @@ def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="test_security_solo.py", source="# t\n", exploit=e
         ),
-        validate_fn=lambda t: _kept_report("test_security_solo.py"),
+        validate_fn=lambda t, _finding_dir: _kept_report("test_security_solo.py"),
         open_pr_fn=lambda **k: "printed",
         open_pr=False,
     )
@@ -686,7 +686,7 @@ def test_run_gate_prints_validating_each_and_kept_rejected_summary(tmp_path, cap
             exploit=exploit,
         )
 
-    def fake_validate(generated):
+    def fake_validate(generated, _finding_dir):
         if generated.exploit.pattern_id == "a-pattern":
             return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
         return _kept_report(generated.filename)
@@ -728,7 +728,7 @@ def test_run_gate_one_findings_generate_failure_does_not_hide_the_other(tmp_path
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex_bad, ex_ok]),
         generate_fn=fake_generate,
-        validate_fn=lambda t: _kept_report("test_ok.py"),
+        validate_fn=lambda t, _finding_dir: _kept_report("test_ok.py"),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -749,7 +749,7 @@ def test_run_gate_every_finding_fails_to_generate_exits_generate_failed(tmp_path
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
         generate_fn=lambda e: None,
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -776,7 +776,7 @@ def test_run_gate_every_finding_fails_generate_or_validate_exits_validate_failed
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex1, ex2]),
         generate_fn=fake_generate,
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -801,7 +801,7 @@ def test_run_gate_several_kept_findings_use_a_hashed_branch_name(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename=f"t_{e.pattern_id}.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report(t.filename),
+        validate_fn=lambda t, _finding_dir: _kept_report(t.filename),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -838,7 +838,7 @@ def test_run_gate_budget_abort_with_findings_still_gates_and_exits_scan_code(tmp
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report("t.py"),
+        validate_fn=lambda t, _finding_dir: _kept_report("t.py"),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -871,7 +871,7 @@ def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monke
             exploit=exploit,
         )
 
-    def fake_validate(generated):
+    def fake_validate(generated, _finding_dir):
         if generated.exploit.pattern_id == "a-pattern":
             return ValidationReport(test_filename=generated.filename, kept=False, outcomes=[])
         return _kept_report(generated.filename)
@@ -920,7 +920,7 @@ def test_run_gate_single_rejected_finding_prints_the_line_once(tmp_path, capsys)
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: rejected,
+        validate_fn=lambda t, _finding_dir: rejected,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -964,7 +964,7 @@ def test_run_gate_budget_abort_uses_gate_specific_hint_not_scan_wording(tmp_path
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="t.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report("t.py"),
+        validate_fn=lambda t, _finding_dir: _kept_report("t.py"),
         open_pr_fn=lambda **k: "printed",
         open_pr=False,
         budget_hint_text="Raise --max-llm-calls, or narrow the scan by editing weakness_classes:.",
@@ -991,7 +991,7 @@ def test_run_gate_budget_abort_no_findings_uses_gate_specific_hint(tmp_path, cap
         out_dir=tmp_path / ".mylonite" / "gate",
         scan_fn=lambda: ScanOutcomeBundle(outcome=aborted_no_findings, exploits=[]),
         generate_fn=lambda e: None,
-        validate_fn=lambda t: None,
+        validate_fn=lambda t, _finding_dir: None,
         open_pr_fn=lambda **k: None,
         open_pr=False,
         budget_hint_text="Raise --max-llm-calls — gate has no per-class filter for this target.",
@@ -1027,7 +1027,7 @@ def test_rejected_finding_reason_carries_the_failed_stage_detail(tmp_path):
             exploit=exploit,
         )
 
-    def fake_validate(generated):
+    def fake_validate(generated, _finding_dir):
         if generated.exploit.pattern_id == ex.pattern_id:
             return rejected
         return _kept_report(generated.filename)
@@ -1091,7 +1091,7 @@ def _run_single_rejected(out_dir, pattern_id: str, filename: str) -> GateResult:
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename=filename, source="# rejected\n", exploit=e
         ),
-        validate_fn=lambda t: rejected,
+        validate_fn=lambda t, _finding_dir: rejected,
         open_pr_fn=lambda **k: None,
         open_pr=False,
     )
@@ -1163,7 +1163,7 @@ def test_gate_echoes_the_coverage_caveat_and_notes_it_in_the_pr_body(tmp_path, c
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="test_security_x.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report(t.filename),
+        validate_fn=lambda t, _finding_dir: _kept_report(t.filename),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -1201,7 +1201,7 @@ def test_gate_pr_body_coverage_note_on_an_abort_names_the_abort_not_a_zero_count
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="test_security_x.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report(t.filename),
+        validate_fn=lambda t, _finding_dir: _kept_report(t.filename),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -1222,7 +1222,7 @@ def test_gate_pr_body_has_no_coverage_note_on_a_complete_scan(tmp_path):
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="test_security_x.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: _kept_report(t.filename),
+        validate_fn=lambda t, _finding_dir: _kept_report(t.filename),
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -1271,7 +1271,7 @@ def _run_gate_with_secret(tmp_path, report: ValidationReport) -> dict:
         generate_fn=lambda e: GeneratedTest(
             framework="pytest", filename="test_security_x.py", source="x", exploit=e
         ),
-        validate_fn=lambda t: report,
+        validate_fn=lambda t, _finding_dir: report,
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
@@ -1316,7 +1316,7 @@ def test_gate_rewrites_a_redacted_exploit_after_the_validator_writes_its_own(tmp
         out = tmp_path / f"kept-{kept}"
         path = out / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
 
-        def overwriting_validate(test, _path=path, _kept=kept):
+        def overwriting_validate(test, _finding_dir, _path=path, _kept=kept):
             _path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
             assert _FAKE_KEY in _path.read_text(encoding="utf-8")
             report = _kept_report(test.filename)
@@ -1346,7 +1346,7 @@ def test_gate_rewrites_a_redacted_exploit_even_when_the_validator_raises(tmp_pat
     out_dir = tmp_path / ".mylonite" / "gate"
     path = out_dir / "exploit_indirect-injection-note-body-direct.json"
 
-    def raising_validate(test):
+    def raising_validate(test, _finding_dir):
         path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
         raise RuntimeError("validator crashed")
 
@@ -1384,7 +1384,10 @@ def _gate_once(tmp_path, exploit):
         out_dir=out,
         scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[exploit]),
         generate_fn=fake_generate,
-        validate_fn=lambda t: (seen.__setitem__("validated", t.exploit), _kept_report())[1],
+        validate_fn=lambda t, _finding_dir: (
+            seen.__setitem__("validated", t.exploit),
+            _kept_report(),
+        )[1],
         open_pr_fn=lambda **_: "printed",
         open_pr=False,
     )
@@ -1417,3 +1420,35 @@ def test_gate_never_marks_a_test_that_already_passes_as_pending(tmp_path, kind):
         ex = ex.model_copy(update={"payload": ex.payload.model_copy(update={"metadata": meta})})
     generated_from, _ = _gate_once(tmp_path, ex)
     assert PENDING_FIX_METADATA_KEY not in generated_from.payload.metadata
+
+
+@pytest.mark.parametrize("patterns", [["solo-pattern"], ["a-pattern", "b-pattern"]])
+def test_run_gate_hands_validate_fn_the_directory_each_test_was_written_to(tmp_path, patterns):
+    """The validator records replay fixtures beside the test it proves, so it
+    must get the directory the orchestrator wrote that test to: the gate root
+    for one finding, the finding's own subdirectory for several."""
+    out_dir = tmp_path / ".mylonite" / "gate"
+    seen: dict[str, object] = {}
+
+    def fake_validate(generated, finding_dir):
+        assert (finding_dir / generated.filename).is_file()
+        seen[generated.exploit.pattern_id] = finding_dir
+        return _kept_report(generated.filename)
+
+    run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(
+            outcome=_found_outcome(len(patterns)), exploits=[_exploit(p) for p in patterns]
+        ),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename=f"test_{e.pattern_id}.py", source="# t\n", exploit=e
+        ),
+        validate_fn=fake_validate,
+        open_pr_fn=lambda **k: "printed",
+        open_pr=False,
+    )
+
+    if len(patterns) == 1:
+        assert seen == {"solo-pattern": out_dir}
+    else:
+        assert seen == {"a-pattern": out_dir / "a_pattern", "b-pattern": out_dir / "b_pattern"}
