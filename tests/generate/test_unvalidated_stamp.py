@@ -327,9 +327,108 @@ def test_sync_stamp_says_nothing_when_nothing_changed(
     assert "UNVALIDATED" not in capsys.readouterr().out
 
 
-def test_strip_removes_an_edited_header_whole() -> None:
-    edited = f"{UNVALIDATED_MARKER}\n# reworded by hand\n'''doc'''\n# trailing comment\n"
-    assert strip_unvalidated(edited) == "'''doc'''\n# trailing comment\n"
+def test_strip_of_an_edited_header_removes_only_the_marker_and_known_lines() -> None:
+    known = stamp_unvalidated("").splitlines()[1]
+    edited = f"{UNVALIDATED_MARKER}\n{known}\n# reworded by hand\n'''doc'''\n"
+    assert strip_unvalidated(edited) == "# reworded by hand\n'''doc'''\n"
+
+
+def test_sync_stamp_flags_an_edited_header(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_text(f"{UNVALIDATED_MARKER}\n# reworded\n'''doc'''\n", encoding="utf-8")
+
+    sync_stamp(test_path, _report(kept=True))
+
+    assert test_path.read_text(encoding="utf-8") == "# reworded\n'''doc'''\n"
+    assert "header had been edited" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_user_comments_round_trip_byte_identical_through_reject_then_keep(
+    tmp_path: Path, newline: str
+) -> None:
+    """A licence header right at the top survives being stamped and unstamped."""
+    original = newline.join(
+        ["# Copyright ACME", "# SPDX-License-Identifier: Apache-2.0", '"""doc"""', ""]
+    ).encode("utf-8")
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_bytes(original)
+
+    sync_stamp(test_path, _report(kept=False))
+    stamped = test_path.read_bytes()
+    assert stamped.startswith(UNVALIDATED_MARKER.encode())
+    sync_stamp(test_path, _report(kept=True))
+
+    assert test_path.read_bytes() == original
+
+
+def test_sync_stamp_keeps_an_lf_file_lf(tmp_path: Path) -> None:
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_bytes(b'"""doc"""\nX = 1\n')
+
+    sync_stamp(test_path, _report(kept=False))
+
+    assert b"\r" not in test_path.read_bytes()
+
+
+# --- the target the KEPT report was proved against ------------------------------
+
+_TARGET_YAML = "family: myapp\ncommand: python\nargs: [-m, my_server]\nweakness_classes: [W2]\n"
+
+
+def _kept_custom_dir(tmp_path: Path) -> Path:
+    """A custom-target folder as `generate` and then a KEPT `validate` leave it."""
+    scan = tmp_path / "scans" / "s1"
+    scan.mkdir(parents=True)
+    exploit = _exploit().model_copy(update={"target_id": "mcp:myapp"})
+    (scan / "exploit_a.json").write_text(exploit.model_dump_json(), encoding="utf-8")
+    (scan / "target.yaml").write_text(_TARGET_YAML, encoding="utf-8")
+    src = tmp_path / "validated"
+    result = runner.invoke(app, ["generate", str(scan), "--out", str(src)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert (src / "target.yaml").is_file()
+    (test_file,) = src.glob("test_security_*.py")
+    _write_report(src, _report(kept=True, test_filename=test_file.name))
+    return src
+
+
+def _generate(src: Path, out_dir: Path, *extra: str) -> str:
+    result = runner.invoke(app, ["generate", str(src), "--out", str(out_dir), *extra])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    return _emitted_source(out_dir)
+
+
+def test_kept_custom_target_regenerates_unstamped(tmp_path: Path) -> None:
+    src = _kept_custom_dir(tmp_path)
+    assert not is_unvalidated(_generate(src, tmp_path / "gen"))
+
+
+def test_kept_custom_target_with_the_same_target_file_regenerates_unstamped(
+    tmp_path: Path,
+) -> None:
+    src = _kept_custom_dir(tmp_path)
+    same = tmp_path / "same.yaml"
+    same.write_text(_TARGET_YAML, encoding="utf-8")
+    assert not is_unvalidated(_generate(src, tmp_path / "gen", "--target-file", str(same)))
+
+
+def test_kept_custom_target_with_another_target_file_stamps(tmp_path: Path) -> None:
+    """The source renders identically, but the test would run against an unproven app."""
+    src = _kept_custom_dir(tmp_path)
+    other = tmp_path / "other.yaml"
+    other.write_text(_TARGET_YAML.replace("myapp", "otherapp"), encoding="utf-8")
+    assert is_unvalidated(_generate(src, tmp_path / "gen", "--target-file", str(other)))
+
+
+def test_kept_custom_target_whose_target_yaml_was_swapped_stamps(tmp_path: Path) -> None:
+    src = _kept_custom_dir(tmp_path)
+    target = src / "target.yaml"
+    target.write_text(_TARGET_YAML.replace("myapp", "otherapp"), encoding="utf-8")
+    report_mtime = (src / "validation_report.json").stat().st_mtime
+    os.utime(target, (report_mtime + 60, report_mtime + 60))
+    assert is_unvalidated(_generate(src, tmp_path / "gen"))
 
 
 # --- gate builds its tests through its own path --------------------------------

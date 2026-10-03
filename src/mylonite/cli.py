@@ -1615,7 +1615,10 @@ def generate(
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
     # Refuses up front; else the KEPT test (if any) each new test must match to go unstamped.
     proven_by = stamps_for(
-        exploit_paths, allow_unvalidated=unvalidated, prove_control=prove_control
+        exploit_paths,
+        allow_unvalidated=unvalidated,
+        prove_control=prove_control,
+        target_file=target_file,
     )
     multi = len(exploit_paths) > 1
 

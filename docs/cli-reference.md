@@ -245,8 +245,9 @@ is one (`validate` and `gate` write it). If it is REJECTED, STABLE, NOT PROVEN o
 unreadable, `generate` writes nothing and exits `5`. Pass `--unvalidated` to write
 the test anyway, with the header. If it is KEPT, the test goes without the header
 only when that report proved this exact test: the folder holds one exploit, the
-exploit is no newer than the report, `--prove-control` is off, and the test the
-report names matches the one about to be written. Otherwise the test is stamped.
+exploit and the folder's `target.yaml` are no newer than the report, any
+`--target-file` matches that `target.yaml`, `--prove-control` is off, and the test
+the report names matches the one about to be written. Otherwise the test is stamped.
 
 ## `validate` — prove the test
 

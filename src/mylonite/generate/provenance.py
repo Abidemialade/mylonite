@@ -7,9 +7,10 @@ to the test and its exploit. ``gate`` writes the same file into each finding's
 directory.
 
 A test is written without the header only when a KEPT report beside its input
-proved this very test: the folder holds one exploit, no newer than the report,
-the test the report names is still there, and it matches what ``generate`` is
-about to write. Anything else carries :data:`UNVALIDATED_MARKER` as its first
+proved this very test against the same target: the folder holds one exploit,
+it and the folder's ``target.yaml`` are no newer than the report, any
+``--target-file`` matches that ``target.yaml``, and the test the report names
+is still there and matches what ``generate`` is about to write. Anything else carries :data:`UNVALIDATED_MARKER` as its first
 line. ``validate`` keeps the header in step with its latest verdict: it removes
 it on KEPT and adds it on STABLE, NOT PROVEN or REJECTED, so a candidate never
 reads as a gate test.
@@ -47,6 +48,15 @@ UNVALIDATED_HELP: Final = (
 )
 
 
+#: The header's own lines, newline-free, for stripping a header that lost some.
+_STAMP_LINES: Final = frozenset(_STAMP.splitlines())
+
+
+def _stamp_for(source: str) -> str:
+    """The header in ``source``'s own line endings, so a CRLF file stays CRLF."""
+    return _STAMP.replace("\n", "\r\n") if "\r\n" in source else _STAMP
+
+
 def is_unvalidated(source: str) -> bool:
     """True when ``source`` starts with the unvalidated header."""
     return source.startswith(UNVALIDATED_MARKER)
@@ -54,21 +64,30 @@ def is_unvalidated(source: str) -> bool:
 
 def stamp_unvalidated(source: str) -> str:
     """``source`` with the unvalidated header in front (once)."""
-    return source if is_unvalidated(source) else _STAMP + source
+    return source if is_unvalidated(source) else _stamp_for(source) + source
+
+
+def has_exact_stamp(source: str) -> bool:
+    """True when ``source`` starts with the header exactly as Mylonite wrote it."""
+    return source.startswith(_stamp_for(source))
 
 
 def strip_unvalidated(source: str) -> str:
     """``source`` without the unvalidated header, if it has one.
 
-    Removes the marker line and the ``#`` comment lines right after it, so a
-    header whose wording was edited (by hand, or by another release) still
-    comes off whole.
+    Removes the header exactly as written. When the header was edited, removes
+    the marker line and any of the header's own lines that directly follow it,
+    and nothing else: a comment of the user's own (a licence line, a ``noqa``)
+    is never touched.
     """
     if not is_unvalidated(source):
         return source
+    stamp = _stamp_for(source)
+    if source.startswith(stamp):
+        return source[len(stamp) :]
     lines = source.splitlines(keepends=True)
     end = 1
-    while end < len(lines) and lines[end].startswith("#"):
+    while end < len(lines) and lines[end].rstrip("\r\n") in _STAMP_LINES:
         end += 1
     return "".join(lines[end:])
 
@@ -93,27 +112,60 @@ def input_verdict(exploit_path: Path) -> str | None:
     return UNREADABLE if report is None else verdict_label(report)
 
 
-def _proving_test(exploit_path: Path, *, prove_control: bool) -> Path | None:
+def _same_target(folder_target: Path, target_file: Path | None, report_mtime: int) -> bool:
+    """True when the run targets the app the KEPT report was proved against.
+
+    That is the ``target.yaml`` beside the report, unchanged since the report
+    was written. An explicit ``--target-file`` must match it once redacted (the
+    form ``generate`` writes); with no ``target.yaml`` beside the report, any
+    ``--target-file`` is a different target.
+    """
+    if folder_target.is_file() and folder_target.stat().st_mtime_ns > report_mtime:
+        return False
+    if target_file is None:
+        return True
+    if not folder_target.is_file():
+        return False
+    from mylonite._redaction import redact_target_yaml
+
+    try:
+        wanted = redact_target_yaml(target_file.read_text(encoding="utf-8"))
+        return wanted == folder_target.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _proving_test(
+    exploit_path: Path, *, prove_control: bool, target_file: Path | None
+) -> Path | None:
     """The test a KEPT report beside ``exploit_path`` proved, if it can only be this one.
 
     ``None`` (so the new test is stamped) when the folder holds more than one
     exploit, ``--prove-control`` asks for a different test than the one proved,
-    the exploit is newer than the report (replaced after the keep), or the
-    test the report names is gone.
+    the exploit or the folder's ``target.yaml`` is newer than the report
+    (replaced after the keep), ``--target-file`` names a different target, or
+    the test the report names is gone.
     """
     folder = exploit_path.parent
     report_path = folder / "validation_report.json"
     report = _read_report(report_path)
     if report is None or prove_control or len(list(folder.glob("exploit_*.json"))) != 1:
         return None
-    if exploit_path.stat().st_mtime_ns > report_path.stat().st_mtime_ns:
+    report_mtime = report_path.stat().st_mtime_ns
+    if exploit_path.stat().st_mtime_ns > report_mtime:
+        return None
+    if not _same_target(folder / "target.yaml", target_file, report_mtime):
         return None
     test_path = folder / Path(report.test_filename).name
     return test_path if test_path.is_file() else None
 
 
 def stamps_for(
-    exploit_paths: Sequence[Path], *, allow_unvalidated: bool, prove_control: bool = False
+    exploit_paths: Sequence[Path],
+    *,
+    allow_unvalidated: bool,
+    prove_control: bool = False,
+    target_file: Path | None = None,
 ) -> list[Path | None]:
     """Per input exploit, the KEPT test that may vouch for its new test, or ``None``.
 
@@ -135,7 +187,9 @@ def stamps_for(
             )
             raise typer.Exit(code=EXIT_NOT_KEPT)
         proving.append(
-            _proving_test(path, prove_control=prove_control) if verdict == KEPT else None
+            _proving_test(path, prove_control=prove_control, target_file=target_file)
+            if verdict == KEPT
+            else None
         )
     return proving
 
@@ -164,15 +218,22 @@ def sync_stamp(test_path: Path, report: ValidationReport) -> None:
 
     KEPT removes the header; any other verdict adds it, also to a test that was
     written without one (an older test, or one kept earlier that now fails).
-    Prints a line only when the file changed.
+    Prints a line only when the file changed. Keeps the file's own line endings.
     """
     label = verdict_label(report)
-    source = test_path.read_text(encoding="utf-8")
+    with test_path.open(encoding="utf-8", newline="") as fh:
+        source = fh.read()
     updated = strip_unvalidated(source) if label == KEPT else stamp_unvalidated(source)
     if updated == source:
         return
-    test_path.write_text(updated, encoding="utf-8")
+    with test_path.open("w", encoding="utf-8", newline="") as fh:
+        fh.write(updated)
     if label == KEPT:
         echo(f"Removed the UNVALIDATED header from {test_path}: the test is KEPT.")
+        if not has_exact_stamp(source):
+            echo(
+                "The header had been edited: only its marker and unchanged lines were "
+                f"removed. Check the comment lines at the top of {test_path}."
+            )
     else:
         echo(f"Added the UNVALIDATED header to {test_path}: the verdict is {label}.")
