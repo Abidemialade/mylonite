@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **The seven-step journey (`docs/journey/`) now stands on its own.** A
+  reader who follows only those eight pages, start to finish, can run the
+  whole thing without opening any other doc: two worked, copy-pasteable
+  launch commands (the official MCP memory server over `npx`, and
+  Mylonite's own `mcp-kitchen-sink` reference app installed from PyPI, both
+  for Linux/macOS and Windows), the real spend caps (`--max-llm-calls`,
+  `--max-llm-requests` / `MYLONITE_MAX_LLM_REQUESTS`) named on every step
+  that spends, how to commit the gate locally without opening a pull
+  request, every command's exit codes (including `gate`'s never-keep-
+  unproven `9`/`10`), each provider's key variable, and the literal next
+  command `generate --latest` prints. A second pass adds `demo`'s and
+  `scan --scaffold`'s exit codes, `generate`'s own exit codes, which of the
+  two server-memory code blocks to use and when, the exact `git`
+  checkout/add/commit lines a real `gate` run prints (no `...`
+  placeholders), and the numbered `pytest` exit code at each of the three
+  re-prove stages.
+
 ### Added
 
 - **`scan`, `validate` and `gate` show what a live run will touch before

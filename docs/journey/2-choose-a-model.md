@@ -12,9 +12,10 @@ checks against and would drift from it if copied here by hand.
 Pick one of two paths:
 
 - **A hosted provider.** Anthropic is the one this journey is measured
-  against (`claude-haiku-4-5-20251001`); OpenAI, Gemini, Azure, Bedrock,
-  Vertex AI and a LiteLLM proxy are also supported — see the table for each
-  one's key variable.
+  against (`claude-haiku-4-5-20251001`). Also supported: OpenAI
+  (`OPENAI_API_KEY`), Gemini (`GEMINI_API_KEY`), Azure (`AZURE_API_KEY`),
+  Bedrock (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), and Vertex AI or a
+  LiteLLM proxy (no bare key — see the table for how each authenticates).
 
   ```bash
   export MYLONITE_MODEL=anthropic/claude-haiku-4-5-20251001

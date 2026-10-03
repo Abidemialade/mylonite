@@ -22,7 +22,8 @@ order to read them in, start to finish, on your own machine.
 - **An MCP server you can run locally** (stdio), for steps 3 onward. No
   server yet? [Try it](1-try.md) uses the bundled one instead, so you can
   do steps 1-2 and see the shape of steps 3-7 before you have your own app
-  wired up.
+  wired up — or follow [Point at your app](3-point-at-your-app.md)'s two
+  worked examples, launching a real server by name.
 
 ## The bar this is measured against
 

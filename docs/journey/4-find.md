@@ -18,6 +18,19 @@ prompt and tool descriptions, not your app's own agent or model — and runs
 the [single-shot attack engine](../attack-modes.md). Findings land under
 `.mylonite/scans/<timestamp>/`.
 
+**Capping the spend.** `--max-llm-calls N` (default 50) is a per-scan
+budget — a soft one, since each seed keeps a small floor. The global
+`--max-llm-requests N` (before the command) or `MYLONITE_MAX_LLM_REQUESTS=N`
+is the hard ceiling across this whole run: request N+1 is never sent, the
+run stops and exits `3`. Both are described in full in the [CLI
+reference](../cli-reference.md).
+
+**Exit codes.** `scan` exits `0` whether or not it finds anything —
+reporting a weakness is not a failure. `2` is a config or usage error
+(including an empty scan), `3` is the budget or request ceiling above, and
+`4` is a missing model choice or a provider/credential that refused the run
+before the target was ever touched.
+
 ## Reading the output
 
 A finding earns one of three **evidence tiers**, shown in the scan table and
