@@ -99,6 +99,8 @@ NT_UNKNOWN_SEED: Final = "MYL-NT-014"
 NT_MODULE_LOAD_FAILED: Final = "MYL-NT-015"
 NT_NO_ATTACK_EMITTED: Final = "MYL-NT-016"
 NT_EFFECT_UNCONFIRMABLE: Final = "MYL-NT-017"
+NT_SYNTHESIS_CAPPED: Final = "MYL-NT-018"
+NT_SEED_CUT_OFF: Final = "MYL-NT-019"
 
 _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     _rc(
@@ -194,6 +196,19 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
         "(see docs/target-file.md; `scan --scaffold` proposes one), or remove the class from "
         "weakness_classes",
     ),
+    _rc(
+        NT_SYNTHESIS_CAPPED,
+        "The per-class probe ceiling left this tool without a probe, so it was never attacked.",
+        "name the tools that matter in the target file's control_config (egress_tools for W3, "
+        "consequential_tools for W4), which are probed first, or remove the class from "
+        "weakness_classes; a larger --max-llm-calls does not lift the ceiling",
+    ),
+    _rc(
+        NT_SEED_CUT_OFF,
+        "The scan stopped early before this seed finished, so it proved nothing.",
+        "fix the cause the scan's abort line names (its MYL-ABT code), such as the call "
+        "budget or the wall-clock limit",
+    ),
 )
 
 #: The inconclusive codes the trace rule (``scan/effect_verdict.py``) stamps on
@@ -244,6 +259,8 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "module_load_failed": NT_MODULE_LOAD_FAILED,
     "no_attack_emitted": NT_NO_ATTACK_EMITTED,
     "effect_unconfirmable": NT_EFFECT_UNCONFIRMABLE,
+    "synthesis_capped": NT_SYNTHESIS_CAPPED,
+    "seed_cut_off": NT_SEED_CUT_OFF,
 }
 
 

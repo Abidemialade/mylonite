@@ -486,6 +486,26 @@ NO_ATTACK_EMITTED_KEY: Final = "no_attack_emitted"
 #: it must never read as resisted. Told apart by this ``judge_evidence`` key.
 _EFFECT_UNCONFIRMABLE_BUCKET: Final = "effect_unconfirmable"
 EFFECT_UNCONFIRMABLE_KEY: Final = "effect_unconfirmable"
+#: The engine records one ``outcome == "not_applicable"`` attempt per tool the
+#: per-class synthesis ceiling left without a probe. The key's value is the
+#: tool name.
+_SYNTHESIS_CAPPED_BUCKET: Final = "synthesis_capped"
+SYNTHESIS_CAPPED_KEY: Final = "synthesis_capped"
+#: The engine records one ``outcome == "not_applicable"`` attempt per emitted
+#: seed that had no attempt when the scan stopped early. The key's value is the
+#: abort reason.
+_SEED_CUT_OFF_BUCKET: Final = "seed_cut_off"
+SEED_CUT_OFF_KEY: Final = "seed_cut_off"
+#: Every ``judge_evidence`` key that marks an engine-made row standing for a
+#: seed or class that never ran. Such a row names its class in
+#: ``judge_evidence["weakness"]``.
+NEVER_RAN_KEYS: Final[tuple[str, ...]] = (
+    MODULE_LOAD_FAILURE_KEY,
+    NO_ATTACK_EMITTED_KEY,
+    EFFECT_UNCONFIRMABLE_KEY,
+    SYNTHESIS_CAPPED_KEY,
+    SEED_CUT_OFF_KEY,
+)
 
 #: The trace rule's per-attempt inconclusive codes (``scan/effect_verdict.py``
 #: stamps them as ``fallback_cause``) -> their cause bucket. Matched by value,
@@ -579,6 +599,8 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     _EFFECT_UNCONFIRMABLE_BUCKET: (
         "stand for a class whose effect no tool on this server can read back"
     ),
+    _SYNTHESIS_CAPPED_BUCKET: "stand for tools the per-class probe ceiling left without a probe",
+    _SEED_CUT_OFF_BUCKET: "never finished because the scan stopped early",
 }
 
 _BUCKET_REMEDY: Final[dict[str, str]] = {
@@ -633,6 +655,10 @@ def _not_tested_cause_bucket(attempt: object) -> str | None:
             return _NO_ATTACK_EMITTED_BUCKET
         if evidence.get(EFFECT_UNCONFIRMABLE_KEY):
             return _EFFECT_UNCONFIRMABLE_BUCKET
+        if evidence.get(SYNTHESIS_CAPPED_KEY):
+            return _SYNTHESIS_CAPPED_BUCKET
+        if evidence.get(SEED_CUT_OFF_KEY):
+            return _SEED_CUT_OFF_BUCKET
     return str(outcome)
 
 

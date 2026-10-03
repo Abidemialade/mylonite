@@ -24,6 +24,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mylonite import reason_codes
+from mylonite._paths import safe_slug
 from mylonite._redaction import redact
 from mylonite.contracts import (
     ExploitRecord,
@@ -48,6 +49,8 @@ from mylonite.scan.coverage import (
     MODULE_LOAD_FAILURE_KEY,
     NO_ATTACK_EMITTED_KEY,
     NO_VERDICT_EVIDENCE_KEYS,
+    SEED_CUT_OFF_KEY,
+    SYNTHESIS_CAPPED_KEY,
     AbortReason,
     provider_abort_message,
 )
@@ -542,6 +545,76 @@ def _effect_unconfirmable_attempts(
     return attempts
 
 
+def _synthesis_capped_attempts(descriptor: TargetDescriptor) -> list[ScanAttempt]:
+    """One NOT TESTED attempt per tool the per-class synthesis ceiling dropped.
+
+    Without it a dropped tool was only a log warning, and the class read
+    resisted when every probe that did run resisted. ``not_applicable`` with a
+    ``judge_evidence`` key, like the other engine-made rows; no contract change.
+    """
+    attempts: list[ScanAttempt] = []
+    for weakness, tool in seed_coverage(descriptor).dropped:
+        seed_id = f"synthesis-capped:{weakness}:{safe_slug(tool)}"
+        reason = reason_codes.tag(
+            reason_codes.NT_SYNTHESIS_CAPPED,
+            f"the per-class probe ceiling left {tool!r} without a {weakness} probe, so it "
+            "was never attacked.",
+        )
+        attempts.append(
+            ScanAttempt(
+                seed_id=seed_id,
+                pattern_id=seed_id,
+                outcome="not_applicable",
+                verdict_reason=reason,
+                not_applicable_reason=reason,
+                judge_evidence={SYNTHESIS_CAPPED_KEY: tool, "weakness": weakness},
+            )
+        )
+    return attempts
+
+
+def _cut_off_attempts(
+    payloads: Iterable[Payload],
+    attempts: Sequence[ScanAttempt],
+    aborted: AbortReason,
+    seeds_by_id: Mapping[str, Any],
+) -> list[ScanAttempt]:
+    """One NOT TESTED attempt per emitted seed with no attempt when the scan stopped.
+
+    A seed cancelled by an abort (call budget, provider, wall clock) used to
+    leave no attempt at all, so a class whose only seeds were cut off vanished
+    from the summary, and a class with one resisted seed and the rest cut off
+    read resisted.
+    """
+    recorded = {a.pattern_id for a in attempts}
+    by_id = {s.pattern_id: s for s in SEED_CATALOGUE} | dict(seeds_by_id)
+    out: list[ScanAttempt] = []
+    for payload in payloads:
+        if payload.pattern_id in recorded:
+            continue
+        recorded.add(payload.pattern_id)
+        evidence = {SEED_CUT_OFF_KEY: aborted.value}
+        weakness = _payload_weakness(payload, by_id)
+        if weakness:
+            evidence["weakness"] = weakness
+        reason = reason_codes.tag(
+            reason_codes.NT_SEED_CUT_OFF,
+            f"the scan stopped early ({aborted.value}) before this seed finished, so it "
+            "proved nothing about the target.",
+        )
+        out.append(
+            ScanAttempt(
+                seed_id=str((payload.metadata or {}).get("seed_id") or payload.pattern_id),
+                pattern_id=payload.pattern_id,
+                outcome="not_applicable",
+                verdict_reason=reason,
+                not_applicable_reason=reason,
+                judge_evidence=evidence,
+            )
+        )
+    return out
+
+
 class ScanEngine:
     """Drives the full scan in one async run."""
 
@@ -671,6 +744,7 @@ class ScanEngine:
             # dry run (no verdict by design) are exempt, as above.
             if self._config.pattern_id_filter is None and not self._config.dry_run:
                 attempts.extend(_load_failure_attempts(self._module_load_failures, descriptor))
+                attempts.extend(_synthesis_capped_attempts(descriptor))
 
             tasks: list[asyncio.Task[_PerPayloadOutcome]] = []
             semaphore = asyncio.Semaphore(_effective_max_concurrent(self._config, self._adapter))
@@ -921,6 +995,15 @@ class ScanEngine:
         # run is incomplete and must not read as a finished scan.
         if aborted is None and request_ceiling_hit() is not None:
             aborted = AbortReason.BUDGET_EXCEEDED
+
+        # A seed the abort cut off has no attempt; give it a NOT TESTED one so
+        # its class can never read resisted. Exempt as the rows above are.
+        if (
+            aborted is not None
+            and self._config.pattern_id_filter is None
+            and not self._config.dry_run
+        ):
+            attempts.extend(_cut_off_attempts(all_payloads, attempts, aborted, self._seeds_by_id))
 
         return self._finalize(
             attempts,

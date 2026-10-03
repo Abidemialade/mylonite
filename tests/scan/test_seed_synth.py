@@ -610,3 +610,48 @@ def test_capped_candidates_are_reported_not_silently_dropped(
     assert "not probed" in joined
     # The specific tools that went unprobed must be named, not just counted.
     assert "delete_record_59" in joined
+
+
+def test_synthesis_returns_every_tool_the_ceiling_dropped() -> None:
+    """The dropped tools are data, not only a log line, so the scan can report
+    each one as NOT TESTED instead of letting the class read resisted."""
+    result = seed_synth.synthesize(_descriptor(["W4"], _many_tools(60)))
+    kept = [s for s in result.seeds if s.weakness == "W4"]
+    assert len(kept) == seed_synth._SYNTH_CAP_CEILING
+    assert len(result.dropped) == 60 - seed_synth._SYNTH_CAP_CEILING
+    assert all(weakness == "W4" for weakness, _tool_name in result.dropped)
+    assert ("W4", "delete_record_59") in result.dropped
+    # synthesize_seeds is the same selection, seeds only.
+    assert [
+        s.pattern_id for s in seed_synth.synthesize_seeds(_descriptor(["W4"], _many_tools(60)))
+    ] == [s.pattern_id for s in result.seeds]
+
+
+def test_nothing_is_dropped_under_the_ceiling() -> None:
+    assert seed_synth.synthesize(_descriptor(["W1", "W4"], _many_tools(5))).dropped == ()
+
+
+def test_the_cap_warning_no_longer_points_at_the_call_budget(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A larger --max-llm-calls cannot lift a per-class ceiling, so the warning
+    must not offer it as the fix."""
+    with caplog.at_level(logging.WARNING, logger="mylonite.scan.seed_synth"):
+        seed_synth.synthesize_seeds(_descriptor(["W4"], _many_tools(60)))
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "Raise --max-llm-calls" not in joined
+    assert "NOT TESTED" in joined
+
+
+def test_seed_coverage_carries_the_dropped_tools() -> None:
+    from mylonite.contracts._types import TargetDescriptor
+
+    descriptor = TargetDescriptor(
+        target_id="mcp:custom-app",
+        kind="mcp",
+        system_prompt="x",
+        tools=_many_tools(12),
+        weakness_classes=["W4"],
+    )
+    cov = seeds.seed_coverage(descriptor)
+    assert len(cov.dropped) == 12 - seed_synth._SYNTH_CAP_CEILING
