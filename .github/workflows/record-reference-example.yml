@@ -44,12 +44,14 @@ jobs:
   record:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
+    # The key is mapped only into the steps that need it, never job-wide:
+    # the install steps run third-party build hooks.
     steps:
       # Refuse rather than skip: this workflow exists only to spend the key,
       # so a dispatch without one is a mistake to surface, not a quiet no-op.
       - name: Refuse without a key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::error::MYLONITE_LLM_KEY is not set; nothing can be recorded."
@@ -99,6 +101,7 @@ jobs:
 
       - name: Record the kept example
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
           MODEL: ${{ inputs.model }}
           PATTERN_ID: ${{ inputs.pattern_id }}
           STRATEGIES: ${{ inputs.metamorphic_strategies }}
@@ -113,6 +116,7 @@ jobs:
       - name: Record the demo fixtures
         if: inputs.record_demo_fixtures
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
           MODEL: ${{ inputs.model }}
           MYLONITE_MAX_LLM_REQUESTS: ${{ inputs.max_llm_calls }}
         run: |
