@@ -571,6 +571,39 @@ def _relative_sqlite_arg_indices(args: list[str]) -> list[int]:
     return [i for i, val in enumerate(args) if _looks_like_relative_sqlite_path(val)]
 
 
+def _credential_arg_indices(args: list[str]) -> list[int]:
+    """Indices of positional ``args`` entries that look like they carry a
+    credential (:func:`~mylonite._redaction.looks_like_credential_arg`) --
+    ``--api-key=sk-...``, a bare opaque token, or a URL with
+    ``?access_token=...`` (#210/#183). ``args`` has no key name to mask a
+    value by the way ``env``/``headers`` do, so this never fixes the value --
+    only the warning (by position, value withheld) can fire."""
+    from mylonite._redaction import looks_like_credential_arg
+
+    return [i for i, val in enumerate(args) if looks_like_credential_arg(val)]
+
+
+def credential_arg_warnings(tf: TargetFile) -> list[str]:
+    """Warn (never block) about a credential-shaped value in ``args`` (#210/#183).
+
+    ``headers``, ``request.headers`` and ``env`` are the only fields Mylonite
+    masks before writing a target file to disk; a value in ``args`` survives
+    byte-for-byte into every copy it writes (the scan directory, ``generate``'s
+    co-located copy, the ``gate`` PR) -- see
+    ``docs/target-file.md#a-credential-in-args-is-written-in-plain-text``. This
+    names the position and withholds the value -- never prints it, even
+    redacted, matching :func:`relative_sqlite_path_warnings`'s own precedent --
+    and points at the fix: move the credential to ``env:`` (most subprocess
+    CLIs also accept a value from an environment variable) or set it via
+    ``--env-file``, instead of a literal launch argument."""
+    return [
+        f"args[{i}] looks like it carries a credential (value withheld). Move it to "
+        "env: in the target file, or set it via --env-file, instead of a launch "
+        "argument -- see docs/target-file.md#a-credential-in-args-is-written-in-plain-text."
+        for i in _credential_arg_indices(tf.args)
+    ]
+
+
 def relative_sqlite_path_warnings(tf: TargetFile) -> list[str]:
     """Human-readable warnings for every relative-SQLite-path footgun (#18) in
     ``tf``'s ``env`` or ``args`` — shared by ``scan --scaffold`` (a brand-new
@@ -640,6 +673,8 @@ def load_target_file(path: Path) -> TargetFile:
     # `typer` via `_cli_io`, which the gate-action runtime-detection step's
     # bare `python` does not have.
     for warning in relative_sqlite_path_warnings(tf):
+        warn_stderr(f"warning: {warning}")
+    for warning in credential_arg_warnings(tf):
         warn_stderr(f"warning: {warning}")
     return tf
 
