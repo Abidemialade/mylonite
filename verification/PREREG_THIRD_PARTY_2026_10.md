@@ -455,3 +455,8 @@ Recorded before the affected cells were re-run; neither changes a pass rule.
   counted dispatch stopped before any request, with no outcome. The workflow now passes
   `--allow-no-seed-arm` for target 3 only, which makes W2 read NOT TESTED as this prereg
   already expects. The cell was re-run after this change.
+- **2026-10-03, target 6 shim install (infrastructure).** Both smoke dispatches for
+  target 6 stopped while installing the agent shim, before Mylonite ran: the shim's
+  `openai-agents` pin needs `openai>=3`, and the LiteLLM pin needed `openai<3`, so pip
+  refused both. No request was billed. The shim now installs in its own virtualenv,
+  since it is the target and not Mylonite, and both cells were re-run.
