@@ -74,7 +74,7 @@ _MISSING_KEY_TOKENS = ("no api key", "api key is required", "header is required"
 _LABELLED_STATUS_RE = re.compile(r"\b(?:error code|status(?: code)?|http)\W{0,3}(\d{3})\b")
 #: Last resort: a bare 400 or 401 standing alone as a word, so a request id or
 #: a token count that merely contains the digits doesn't count.
-_BARE_STATUS_RE = re.compile(r"(?<![\w.-])(40[01])(?![\w.-])")
+_BARE_STATUS_RE = re.compile(r"(?<![\w.-])(40[01])(?![\w-]|\.\d)")
 
 
 def _status_code(exc: BaseException, low: str) -> int | None:
@@ -183,7 +183,8 @@ def _header_remedy(low: str) -> str:
 
     name = _named_header(low)
     what = f"the {name} header" if name else "a required request header"
-    return (
+    # The header name comes from the provider's text, so mask it at source.
+    return mask_secret_values(
         f"The provider needs {what} with this key (HTTP 400) -- pass "
         f"--llm-header {name or 'NAME'}=<value> or set {LLM_HEADERS_ENV}."
     )

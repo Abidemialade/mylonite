@@ -27,7 +27,9 @@ mylonite --llm-header anthropic-workspace-id=<your-workspace-id> scan reference:
 ```
 
 Header values are treated as secrets. They go to the provider and nowhere else: the
-console, Mylonite's logs, artefacts, fixtures and replay cache keys never carry them.
+console, artefacts, fixtures and replay cache keys never carry them, and Mylonite's
+log filters mask them in log messages, tracebacks and extra fields (including LiteLLM's
+own loggers).
 Values shorter than 4 characters are not masked. A malformed entry exits `2`, and the
 error names only the entry's position, never any part of it. LiteLLM's own debug
 logging (`LITELLM_LOG=DEBUG`) prints request headers; leave it off when a header carries

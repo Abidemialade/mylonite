@@ -8,10 +8,16 @@ for the same name, compared case-insensitively.
 
 Header values are treated as secrets. They go into the provider call
 (``LLMPolicy.extra_headers``) and nowhere else: each one is registered with
-:mod:`mylonite._redaction`, so ``redact()`` masks it in console messages,
-in log records from any logger, and in persisted error details, and no
-parse error here ever echoes any part of an entry. Values shorter than four
-characters are not registered (masking them would shred ordinary text).
+:mod:`mylonite._redaction`, so ``redact()`` masks it in console messages and
+in persisted error details, and no parse error here ever echoes any part of
+an entry. In logs, the filters ``install_log_redaction`` adds mask it in the
+message, exception traceback, stack info and string ``extra=`` fields of
+records on the ``mylonite`` logger tree, on LiteLLM's ``LiteLLM`` and
+``litellm`` loggers, and on records reaching the root logger's handlers and
+Python's fallback stderr handler. Not covered: a handler the host
+application adds after installation, for a record from a module logger
+created after installation. Values shorter than four characters are not
+registered (masking them would shred ordinary text).
 
 The configured set is process-wide, like the request ceiling: the root CLI
 callback configures it once per invocation.
