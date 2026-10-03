@@ -192,6 +192,26 @@ target is rejected — set `request.timeout_s` there instead.
 timeout_s: 90
 ```
 
+## Probes per class
+
+`seed_tool_ceiling` (optional; `stdio`/`sse`/`http` only) sets how many tools in one
+weakness class get their own probe. The default is 8, and the value must be a whole
+number from 3 to 50. A tool past the ceiling is never attacked, and the scan reports
+it as NOT TESTED ([`MYL-NT-018`](reason-codes.md#myl-nt-018)), so on a server with more
+candidate tools than that in one class the class can't read resisted.
+
+```yaml
+seed_tool_ceiling: 20
+```
+
+Each extra probe costs LLM calls: a customiser call, several planner turns and a judge
+call. Raise `--max-llm-calls` with the ceiling, or the scan stops on its budget
+([`MYL-ABT-001`](reason-codes.md#myl-abt-001)) and the seeds it cut off read NOT TESTED
+too. For W4 there is a second way: a `control_config.consequential_tools` list replaces
+the classifier, so listing only the tools that matter keeps the class under the
+ceiling. Declaring `egress_tools` only moves those tools to the front of the W3 list;
+the classifier's other matches still count toward the ceiling.
+
 ## Calibration
 
 `calibration.controls` (optional; `stdio`/`sse`/`http` only — a `rest` target is

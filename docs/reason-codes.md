@@ -194,8 +194,8 @@ change (see [Target file](target-file.md)), or remove the class from `weakness_c
 ## MYL-NT-018
 
 The per-class probe ceiling left this tool without a probe, so it was never attacked.
-Mylonite builds at most 8 probes per weakness class on a custom target. A server with more
-candidate tools than that in one class gets one NOT TESTED row per tool left over, shown as
+Mylonite builds at most 8 probes per weakness class on a custom target, or the number
+set by `seed_tool_ceiling` in the target file. A server with more candidate tools than that in one class gets one NOT TESTED row per tool left over, shown as
 `⚠ NOT TESTED`, so the class can no longer read resisted with tools nobody probed. A scan
 whose only gap is this code exits `2`.
 
@@ -204,9 +204,11 @@ classes:
   W4  NOT TESTED [MYL-NT-018 x4] (8 resisted, 4 not tested)
 ```
 
-**Fix:** Name the tools that matter in the target file's `control_config` (`egress_tools`
-for W3, `consequential_tools` for W4); declared tools are probed first. Or remove the class
-from `weakness_classes`. A larger `--max-llm-calls` does not lift the ceiling.
+**Fix:** Raise `seed_tool_ceiling` in the target file (see
+[Probes per class](target-file.md#probes-per-class)). Each extra probe costs LLM calls,
+so raise `--max-llm-calls` with it; a larger budget alone does not lift the ceiling. For
+W4 only, a `control_config.consequential_tools` list replaces the classifier, so listing
+just the tools that matter also clears it. Or remove the class from `weakness_classes`.
 
 ## MYL-NT-019
 

@@ -45,6 +45,7 @@ from mylonite.plugins._mcp.target_registry import (
     RequestSpec,
     SeedArmSpec,
     TargetSpec,
+    validate_seed_tool_ceiling,
 )
 from mylonite.scan.weakness import EFFECTFUL_WEAKNESS_CLASSES, WEAKNESS_CLASSES
 
@@ -139,9 +140,14 @@ class TargetFile(BaseModel):
     # to calibrate. See target_registry.CalibrationSettings /
     # TargetSpec.calibration_controls.
     calibration: CalibrationSettings | None = None
+    # How many tools per weakness class get their own synthesised probe. None
+    # (default) keeps the built-in ceiling of 8. Bounds and the check live in
+    # target_registry.validate_seed_tool_ceiling. MCP transports only.
+    seed_tool_ceiling: int | None = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def _check(self) -> TargetFile:
+        validate_seed_tool_ceiling(self.seed_tool_ceiling)
         if self.system_prompt is not None and self.system_prompt_file is not None:
             msg = "set at most one of system_prompt / system_prompt_file"
             raise ValueError(msg)
@@ -165,6 +171,11 @@ class TargetFile(BaseModel):
                 raise ValueError(
                     "timeout_s is for MCP transports (stdio/sse/http); a rest target's "
                     "HTTP client timeout is request.timeout_s — set that instead"
+                )
+            if self.seed_tool_ceiling is not None:
+                raise ValueError(
+                    "seed_tool_ceiling is for MCP transports (stdio/sse/http); a rest "
+                    "target gets one direct-injection probe, with no tools to cap"
                 )
             if self.calibration is not None:
                 raise ValueError(
@@ -315,6 +326,7 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         request=tf.request,
         timeout_s=tf.timeout_s,
         calibration_controls=tf.calibration.controls if tf.calibration is not None else "auto",
+        seed_tool_ceiling=tf.seed_tool_ceiling,
     )
 
 

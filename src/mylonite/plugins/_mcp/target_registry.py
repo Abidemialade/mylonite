@@ -19,7 +19,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -345,6 +345,28 @@ def _validate_github_scope(scope: str | None) -> None:
         raise InvalidTargetScope(f"github scope must be exactly owner/repo; got {scope!r}")
 
 
+#: Bounds for a target file's ``seed_tool_ceiling``: how many tools in one
+#: weakness class get their own synthesised probe. Below the minimum the scan
+#: probes that many anyway (the synthesis floor); above the maximum one class
+#: alone could spend most of a scan's call budget.
+SEED_TOOL_CEILING_MIN: Final = 3
+SEED_TOOL_CEILING_MAX: Final = 50
+
+
+def validate_seed_tool_ceiling(value: int | None) -> int | None:
+    """Check a target file's ``seed_tool_ceiling``; ``None`` keeps the default."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"seed_tool_ceiling must be a whole number; got {value!r}")
+    if not SEED_TOOL_CEILING_MIN <= value <= SEED_TOOL_CEILING_MAX:
+        raise ValueError(
+            f"seed_tool_ceiling must be between {SEED_TOOL_CEILING_MIN} and "
+            f"{SEED_TOOL_CEILING_MAX}; got {value}"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class TargetSpec:
     """Launch + authorize metadata for one bundled MCP target family."""
@@ -392,6 +414,12 @@ class TargetSpec:
     # unchanged on a stdio target and withholds consent on a remote one.
     # Ignored for transport: rest (no MCP session to calibrate there).
     calibration_controls: Literal["auto", "allow", "skip"] = "auto"
+    # How many tools per weakness class get their own synthesised probe. None
+    # keeps the default ceiling (8). See validate_seed_tool_ceiling.
+    seed_tool_ceiling: int | None = None
+
+    def __post_init__(self) -> None:
+        validate_seed_tool_ceiling(self.seed_tool_ceiling)
 
     def render_args(self, scope: str | None) -> list[str]:
         """Return the concrete args list, substituting scope where the template asks."""

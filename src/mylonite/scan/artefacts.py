@@ -45,6 +45,7 @@ from mylonite.scan.coverage import (
     ATTEMPT_CLASS,
     EFFECT_UNCONFIRMABLE_KEY,
     MODULE_LOAD_FAILURE_KEY,
+    NEVER_RAN_KEYS,
     NO_ATTACK_EMITTED_KEY,
     SEED_CUT_OFF_KEY,
     SYNTHESIS_CAPPED_KEY,
@@ -119,15 +120,21 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
 }
 
 
+#: Engine-made ``not_applicable`` rows that stand for an attack that never ran.
+#: A module-load row is ``error`` and keeps its own mark.
+_NEVER_RAN_ROW_KEYS: Final = tuple(k for k in NEVER_RAN_KEYS if k != MODULE_LOAD_FAILURE_KEY)
+
+
 def row_mark(attempt: ScanAttempt, marks: Mapping[str, str]) -> str:
     """The status cell for one attempt row.
 
-    A row the engine made for a tool the synthesis ceiling skipped, or for a
-    seed the scan stopped before it finished, is ``not_applicable`` on the wire
-    but reads NOT TESTED: the capability exists, the seed simply never ran.
+    A ``not_applicable`` row the engine made for a class or seed that never ran
+    (no attack emitted, effect unconfirmable, a tool past the synthesis ceiling,
+    a seed the scan stopped before it finished) reads NOT TESTED, not "no such
+    capability": the capability exists, the attack simply never ran.
     """
     evidence = attempt.judge_evidence
-    if evidence.get(SYNTHESIS_CAPPED_KEY) or evidence.get(SEED_CUT_OFF_KEY):
+    if attempt.outcome == "not_applicable" and any(evidence.get(k) for k in _NEVER_RAN_ROW_KEYS):
         return marks["skipped_planner_no_engagement"]
     return marks.get(attempt.outcome, attempt.outcome)
 

@@ -22,7 +22,10 @@ channel); synthesis only fills the gap.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -305,9 +308,34 @@ _SYNTH_CAP_FLOOR = 3
 _SYNTH_CAP_CEILING = 8
 
 
+#: The target file's ``seed_tool_ceiling`` for the scan in progress (``None``:
+#: the default above), and the cap warnings already logged in that scan.
+_ceiling_var: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "mylonite_seed_tool_ceiling", default=None
+)
+_warned_var: contextvars.ContextVar[set[tuple[str, ...]] | None] = contextvars.ContextVar(
+    "mylonite_seed_tool_ceiling_warned", default=None
+)
+
+
+@contextlib.contextmanager
+def tool_ceiling_scope(ceiling: int | None) -> Iterator[None]:
+    """Scope one scan: apply the target's ``seed_tool_ceiling`` (``None`` keeps
+    the default) and log each class's cap warning once, however many times the
+    scan resolves its seeds."""
+    ceiling_token = _ceiling_var.set(ceiling)
+    warned_token = _warned_var.set(set())
+    try:
+        yield
+    finally:
+        _warned_var.reset(warned_token)
+        _ceiling_var.reset(ceiling_token)
+
+
 def _cap_for(n_tools: int) -> int:
     """Per-class probe ceiling for a target exposing ``n_tools`` tools."""
-    return max(_SYNTH_CAP_FLOOR, min(_SYNTH_CAP_CEILING, n_tools))
+    ceiling = _ceiling_var.get() or _SYNTH_CAP_CEILING
+    return max(_SYNTH_CAP_FLOOR, min(ceiling, n_tools))
 
 
 def _capped(
@@ -324,7 +352,7 @@ def _capped(
     probed". Each dropped ``(weakness, tool)`` goes into ``dropped``, and the
     scan reports it as a NOT TESTED attempt, so the class cannot read resisted
     with tools left unprobed. A larger call budget does not lift the ceiling, so
-    the warning does not offer it as the fix.
+    the warning names ``seed_tool_ceiling`` instead.
     """
     if len(candidates) <= cap:
         return candidates
@@ -332,15 +360,27 @@ def _capped(
         str(getattr(c, "name", c) if not isinstance(c, tuple) else c[0]) for c in candidates[cap:]
     ]
     dropped.extend((weakness, name) for name in names)
+    warned = _warned_var.get()
+    key = (target_id, weakness, str(cap), *names)
+    if warned is not None and key in warned:
+        return candidates[:cap]
+    if warned is not None:
+        warned.add(key)
     logger.warning(
         "%s: %s synthesis capped at %d of %d candidate tool(s); not probed, reported as "
-        "NOT TESTED: %s. Name the tools that matter in the target file's control_config "
-        "(they are probed first), or remove the class from weakness_classes.",
+        "NOT TESTED: %s. Raise seed_tool_ceiling in the target file to probe more (each "
+        "probe costs LLM calls), or remove the class from weakness_classes.%s",
         target_id,
         weakness,
         cap,
         len(candidates),
         ", ".join(names),
+        (
+            " For W4, a control_config.consequential_tools list replaces the classifier, "
+            "so listing only the tools that matter also clears this."
+            if weakness == "W4"
+            else ""
+        ),
     )
     return candidates[:cap]
 

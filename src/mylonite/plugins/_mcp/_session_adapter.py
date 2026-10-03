@@ -484,6 +484,15 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         """
         return self._spec.effect_probe is not None
 
+    @property
+    def seed_tool_ceiling(self) -> int | None:
+        """The target file's ``seed_tool_ceiling`` (``None``: the default).
+
+        The scan engine applies it to seed synthesis for the whole run, so a
+        scan and a later re-drive of one of its seeds build the same seeds.
+        """
+        return self._spec.seed_tool_ceiling
+
     def calibration_summary(self) -> CalibrationSummary | None:
         """This target's calibration, for the scan result and ``verdicts.json``.
 
