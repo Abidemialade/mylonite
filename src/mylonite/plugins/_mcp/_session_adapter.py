@@ -1312,7 +1312,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             return None
         if getattr(result, "isError", False):
             return ""
-        return str(getattr(result, "content", "") or "")
+        return _result_readback_text(result)
 
     async def _run_effect_probe(
         self,
@@ -1387,7 +1387,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 probe.verify_tool,
             )
             return "errored"
-        content = str(getattr(result, "content", "") or "")
+        content = _result_readback_text(result)
         is_error = bool(getattr(result, "isError", False))
         probe_calls.append({"tool": f"effect_probe:{probe.verify_tool}", "is_error": is_error})
         if baseline_content is None:
@@ -2083,6 +2083,47 @@ def _truncate_result(content: Any, limit: int = 800) -> str:
     """Coerce a tool result to a short string for the effect trace (bounded)."""
     text = content if isinstance(content, str) else str(content)
     return text[:limit]
+
+
+def _result_readback_text(result: Any) -> str:
+    """The text a recall/verify check should search: ``content`` PLUS
+    ``structuredContent``.
+
+    An MCP server may echo a write back only through ``structuredContent``
+    (a typed field some SDKs — notably the Go SDK — populate on every call)
+    while ``content`` carries a fixed, unrelated human-readable string (e.g.
+    "Nodes searched successfully") that never contains the data. A go-memory
+    recall that genuinely returned the planted record then read as
+    "not recalled", because the only field this check looked at never carried
+    it (#324). Concatenating both lets a token/marker search see either place
+    a server puts its answer, without changing how any caller counts or
+    compares the text — a server that only ever used ``content`` gets the
+    exact same string as before (``structuredContent`` is empty, so there is
+    nothing to add).
+
+    ``structuredContent`` is appended only when it is NOT already present in
+    ``content``: the MCP spec asks a server that returns structured output to
+    ALSO put the same JSON in a ``TextContent`` block, and the Python SDK's
+    own FastMCP does exactly that. Appending it unconditionally then counted
+    every marker or token TWICE on those servers (#324 review I1) — most
+    comparisons are a B-vs-A ratio on the same doubled text, so they stayed
+    consistent, but the held-call guard in ``_run_effect_probe`` counts a
+    marker's occurrences in a SINGLE call's arguments (never doubled), so a
+    held call next to a landed one could explain only half the (doubled)
+    growth and wrongly read as a new, attributable effect.
+    """
+    content = getattr(result, "content", "") or ""
+    text = content if isinstance(content, str) else str(content)
+    structured = getattr(result, "structuredContent", None)
+    if not structured:
+        return text
+    try:
+        structured_text = json.dumps(structured, default=str)
+    except TypeError:
+        structured_text = str(structured)
+    if structured_text and structured_text in text:
+        return text
+    return f"{text} {structured_text}" if text else structured_text
 
 
 _URL_OR_EMAIL = re.compile(r"https?://[^\s\"'<>)]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")

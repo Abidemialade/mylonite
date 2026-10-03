@@ -14,7 +14,7 @@ Every assignment is a HINT — never authoritative for any verdict.
 from __future__ import annotations
 
 import re
-from typing import Any, NamedTuple
+from typing import Any, Final, NamedTuple
 
 from mylonite.scan._control_primitives import sanitize_tool_description
 
@@ -170,8 +170,132 @@ def _schema_required(tool: Any) -> list[str]:
     return [str(r) for r in req] if isinstance(req, list) else []
 
 
+def _schema_type_kinds(spec: Any) -> frozenset[str]:
+    """``spec``'s ``"type"`` keyword, normalised to a set of kind names.
+
+    A nullable field (``"type": ["null", "array"]`` -- the Go JSON-Schema
+    generator's idiom for an optional field, seen on go-memory's
+    ``add_observations``/``create_relations``) declares ``"type"`` as a LIST,
+    not the bare string every type check in this module compared against with
+    plain equality. That made the whole class of nullable-typed fields
+    invisible to the content-slot walker (#324): every ``spec.get("type") ==
+    "array"`` check saw a list, never ``True``.
+    """
+    if not isinstance(spec, dict):
+        return frozenset()
+    kind = spec.get("type")
+    if isinstance(kind, str):
+        return frozenset({kind})
+    if isinstance(kind, list):
+        return frozenset(k for k in kind if isinstance(k, str))
+    return frozenset()
+
+
+def _is_concrete_branch(branch: Any) -> bool:
+    """Whether a union branch names a usable (non-null) shape."""
+    if not isinstance(branch, dict):
+        return False
+    kinds = _schema_type_kinds(branch)
+    if kinds:
+        return kinds != {"null"}
+    # No inline "type" at all but still clearly a concrete object/array shape
+    # (e.g. a $ref-free nested schema) — accepted so an object/array branch
+    # missing the (optional) "type" keyword is not dropped.
+    return "properties" in branch or "items" in branch
+
+
+def _concrete_spec(spec: Any) -> Any:
+    """``spec``, resolved to the sub-schema the type dispatch below should see.
+
+    Two JSON-Schema idioms hide a field's real shape behind no inline
+    ``"type"`` a plain ``spec.get("type") == "..."`` check can read:
+
+    * a Pydantic/OpenAPI ``Union`` field compiles to ``"anyOf"``/``"oneOf"``
+      with NO ``"type"`` key on the wrapper at all (mcp-redis's ``set``'s
+      ``value: Union[str, bytes, int, float, dict]``) — the first concrete
+      (non-null) branch is picked, preferring one the content-slot walker can
+      actually use (a string, then an array, then an object) so a content
+      field is not resolved to, say, an unusable ``integer`` branch;
+    * a nullable type list (``"type": ["null", "array"]``) is narrowed to its
+      one non-null kind.
+
+    Returns ``spec`` itself (unmodified) when there is nothing to unwrap, so
+    every existing caller that inspects ``spec.get("type")`` downstream keeps
+    working unchanged.
+    """
+    if not isinstance(spec, dict):
+        return spec
+    for key in ("anyOf", "oneOf"):
+        branches = spec.get(key)
+        if isinstance(branches, list):
+            concrete = [b for b in branches if _is_concrete_branch(b)]
+            if not concrete:
+                continue
+            # Prefer a branch shaped like genuine content over a scalar number
+            # or boolean sibling branch, so a union's content-capable shape
+            # wins over, say, an "integer" branch listed first.
+            for preferred in ("string", "array", "object"):
+                for branch in concrete:
+                    if preferred in _schema_type_kinds(branch) or (
+                        preferred == "object" and "properties" in branch
+                    ):
+                        return _concrete_spec(branch)
+            return _concrete_spec(concrete[0])
+    kind = spec.get("type")
+    if isinstance(kind, list):
+        non_null = [k for k in kind if k != "null"]
+        if non_null:
+            return {**spec, "type": non_null[0]}
+    return spec
+
+
 def _is_string_param(spec: Any) -> bool:
-    return isinstance(spec, dict) and spec.get("type") == "string"
+    return _schema_type_kinds(_concrete_spec(spec)) == {"string"}
+
+
+#: Sentinel returned by :func:`_safe_required_literal` when no generic,
+#: schema-valid literal is safe for a required param — the caller must then
+#: skip the whole call rather than send one with that param missing (#324:
+#: never send an invalid call).
+_UNFILLABLE: Final = object()
+
+
+def _safe_required_literal(name: str, spec: Any) -> Any:
+    """A neutral, schema-valid literal for a REQUIRED param that is not the
+    content slot itself, or :data:`_UNFILLABLE` when none is safe.
+
+    Covers the primitive types a required sibling realistically has: a
+    string gets a neutral placeholder, integer/number get ``0``, boolean gets
+    ``False``. ``anyOf``/``oneOf`` and a nullable ``"type"`` list are resolved
+    first (:func:`_concrete_spec`), so a required param typed as a union
+    (mcp-redis's own ``value`` field, were it required elsewhere) still
+    resolves to a fillable primitive when one of its branches is one. A
+    required array/object (no generic literal is obviously valid against an
+    unknown nested schema) is deliberately left :data:`_UNFILLABLE`: the
+    walker would otherwise guess a shape and risk an invalid call.
+
+    An id-shaped NON-STRING param (its name is a whole ``_ID_PARAM_HINTS``
+    token — ``chat_id``, ``parentId``, a bare ``key``/``ref``/``handle``) is
+    also left :data:`_UNFILLABLE`, whatever its type: a string fill uses the
+    control's own per-run token, which can never collide with a real record,
+    but a bare ``0``/``False`` filled into an integer or boolean id CAN BE a
+    real (often root/default) resource — ``parent_id: 0``, ``chat_id: 0`` —
+    so calibration would call a consequential tool against a resource the
+    operator never scoped (#324 review I3). Skip the whole call instead.
+    """
+    resolved = _concrete_spec(spec)
+    if not isinstance(resolved, dict):
+        return _UNFILLABLE
+    kinds = _schema_type_kinds(resolved)
+    if "string" in kinds:
+        return "mylonite-probe"
+    if _hints_match(name, _ID_PARAM_HINTS):
+        return _UNFILLABLE
+    if "integer" in kinds or "number" in kinds:
+        return 0
+    if "boolean" in kinds:
+        return False
+    return _UNFILLABLE
 
 
 def _content_param(tool: Any) -> str | None:
@@ -230,10 +354,11 @@ def _rank_content_fields(sub: dict[str, Any]) -> list[str]:
     """
 
     def is_string_array(spec: Any) -> bool:
+        resolved = _concrete_spec(spec)
         return (
-            isinstance(spec, dict)
-            and spec.get("type") == "array"
-            and _is_string_param(spec.get("items"))
+            isinstance(resolved, dict)
+            and "array" in _schema_type_kinds(resolved)
+            and _is_string_param(resolved.get("items"))
         )
 
     candidates = [n for n in sub if not _hints_match(n, _ID_PARAM_HINTS)]
@@ -298,14 +423,17 @@ def _build_payload_value(spec: Any, *, depth: int) -> Any | None:
     """
     if depth > _MAX_CONTENT_DEPTH or not isinstance(spec, dict):
         return None
-    kind = spec.get("type")
-    if kind == "string":
+    spec = _concrete_spec(spec)
+    if not isinstance(spec, dict):
+        return None
+    kinds = _schema_type_kinds(spec)
+    if "string" in kinds:
         # An id-shaped leaf is a handle, not a free-text slot (DCR-0015).
         return "{payload}"
-    if kind == "array":
+    if "array" in kinds:
         inner = _build_payload_value(spec.get("items"), depth=depth + 1)
         return None if inner is None else [inner]
-    if kind == "object" or "properties" in spec:
+    if "object" in kinds or "properties" in spec:
         sub = spec.get("properties")
         if not isinstance(sub, dict) or not sub:
             return None
@@ -316,10 +444,20 @@ def _build_payload_value(spec: Any, *, depth: int) -> Any | None:
             if built is None:
                 continue
             obj: dict[str, Any] = {field: built}
-            # Fill sibling REQUIRED strings so the synthesised call validates.
+            # Fill sibling REQUIRED params so the synthesised call validates.
+            # A sibling with no safe generic literal (an array/object this
+            # walker has no shape for) means this field can't be used as the
+            # content slot without sending an invalid call — skip it and try
+            # the next-ranked field instead (#324).
+            unfillable = False
             for other in required_names - {field}:
-                if _is_string_param(sub.get(other)):
-                    obj[other] = "mylonite-probe"
+                literal = _safe_required_literal(other, sub.get(other))
+                if literal is _UNFILLABLE:
+                    unfillable = True
+                    break
+                obj[other] = literal
+            if unfillable:
+                continue
             return obj
     return None
 

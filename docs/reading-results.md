@@ -346,6 +346,18 @@ per tool, with its role, where the role came from (`declared`, `annotation`, `sc
 `name` or `unknown`), and whether the gate treats it as consequential. When the trace
 would count the tool's calls as reads, the line says so.
 
+A `schema`-sourced role also resolves a content argument typed as a JSON Schema union
+(`anyOf`/`oneOf`, the shape Pydantic and many OpenAPI generators emit for a field that
+accepts more than one type) or as a nullable type list (`"type": ["null", "array"]`, the
+Go JSON-Schema generator's own idiom for an optional field) to its first concrete branch,
+so a tool whose content argument is typed either way is still offered as a seed arm or a
+calibration write — it used to read as having no content argument at all. When a
+tool's OTHER required arguments can't be filled with a schema-valid value (a required
+array or object with no further shape to go on, or a required argument whose name is
+id-shaped — it ends in `id`, or is a bare `key`/`ref`/`handle`, where even a fillable
+integer or boolean type is left alone because a guessed `0` or `False` can address a
+real resource), that tool is skipped rather than called with the argument missing or guessed.
+
 `validate` counts a custom target's firing runs by these proof levels on its effect leg
 (see [Validation](validation.md)). When the leg fails because runs fired with nothing tying
 the damage to them (an LLM-judge verdict, say), the remediation line says so and points at an `{exfil_email}` or

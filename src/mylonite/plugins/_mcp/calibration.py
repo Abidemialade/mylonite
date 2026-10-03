@@ -49,6 +49,7 @@ from mylonite.contracts import ToolSpec
 from mylonite.plugins._mcp import target_registry
 from mylonite.plugins._mcp._session_adapter import (
     _render_seed_args,
+    _result_readback_text,
     _serialise_tools,
     _truncate_result,
 )
@@ -59,7 +60,13 @@ from mylonite.scan.class_verdict import CalibrationSummary
 from mylonite.scan.control_shim import _DESTRUCTIVE_HINTS, consequential_tool_names
 from mylonite.scan.predicate_primitives import count_deferral_word
 from mylonite.scan.tool_classifier import hint_matches
-from mylonite.scan.tool_roles import _classify_tools, _content_slot_template
+from mylonite.scan.tool_roles import (
+    _ID_PARAM_HINTS,
+    _classify_tools,
+    _concrete_spec,
+    _content_slot_template,
+    _schema_type_kinds,
+)
 
 if TYPE_CHECKING:
     from mcp import ClientSession
@@ -457,8 +464,36 @@ def _changed(before: str, after: str, marker: str) -> bool:
     return after != before
 
 
-def _fill_required_strings(tool: ToolSpec, args: dict[str, Any], value: str) -> dict[str, Any]:
-    """``args`` with each missing required top-level string param set to ``value``."""
+def _fill_required_args(tool: ToolSpec, args: dict[str, Any], value: str) -> dict[str, Any] | None:
+    """``args`` with each missing required top-level param filled in, or
+    ``None`` when a required param has no schema-valid value to fill.
+
+    A missing required STRING param gets ``value`` (the control's own
+    token), so the call still carries what the probe looks for. A missing
+    required integer/number param gets ``0``, boolean gets ``False`` —
+    ``"type"`` is resolved through a nullable-type list and ``anyOf``/
+    ``oneOf`` first (:func:`mylonite.scan.tool_roles._concrete_spec`), so a
+    union- or nullable-typed required param (the same Go/Pydantic schema
+    idioms the content-slot walker now unwraps, #324) still resolves to a
+    fillable primitive when one of its branches is one — this is what makes
+    mcp-redis's two-required-argument ``expire(name, expire_seconds)`` a
+    usable control candidate instead of a guaranteed schema failure.
+
+    A required param of any other shape (array, object, or one with no
+    concrete primitive branch at all) returns ``None`` for the WHOLE call:
+    the caller must then skip this tool rather than send a call with that
+    param missing or guessed — never an invalid call.
+
+    An id-shaped NON-STRING required param (its name is a whole
+    ``_ID_PARAM_HINTS`` token — ``chat_id``, ``parentId``, a bare
+    ``key``/``ref``/``handle``) also returns ``None`` for the whole call,
+    whatever its type: a string fill uses ``value`` (the control's own
+    per-run token), which can never collide with a real record, but a bare
+    ``0``/``False`` filled into an integer or boolean id CAN BE a real,
+    often root or default, resource (``parent_id: 0``, ``chat_id: 0``) —
+    calibration would then call a consequential tool against a resource the
+    operator never scoped (#324 review I3).
+    """
     schema: dict[str, Any] = tool.json_schema if isinstance(tool.json_schema, dict) else {}
     raw_props = schema.get("properties")
     props: dict[str, Any] = raw_props if isinstance(raw_props, dict) else {}
@@ -466,9 +501,19 @@ def _fill_required_strings(tool: ToolSpec, args: dict[str, Any], value: str) -> 
     required: list[Any] = raw_required if isinstance(raw_required, list) else []
     out = dict(args)
     for name in required:
-        prop = props.get(name)
-        if name not in out and isinstance(prop, dict) and prop.get("type") == "string":
+        if name in out:
+            continue
+        kinds = _schema_type_kinds(_concrete_spec(props.get(name)))
+        if "string" in kinds:
             out[name] = value
+        elif hint_matches(name, _ID_PARAM_HINTS):
+            return None
+        elif "integer" in kinds or "number" in kinds:
+            out[name] = 0
+        elif "boolean" in kinds:
+            out[name] = False
+        else:
+            return None
     return out
 
 
@@ -618,7 +663,14 @@ async def _control_one_tool(
     scope = adapter._scope
     marker = _render_seed_args(probe.expect_marker or "", token, scope)
     value = token if not marker or token in marker else f"{token} {marker}"
-    write_args = _fill_required_strings(tool, _render_seed_args(template, value, scope), token)
+    write_args = _fill_required_args(tool, _render_seed_args(template, value, scope), token)
+    if write_args is None:
+        return ToolControl(
+            tool.name,
+            TOOL_FAILED,
+            INC_SCHEMA,
+            f"{tool.name!r} has a required argument with no schema-valid value to fill",
+        )
     errors = validate_args(tool.json_schema, write_args)
     if errors:
         return ToolControl(
@@ -749,7 +801,12 @@ async def _plant_and_recall(
     calls: list[tuple[ToolSpec, dict[str, Any]]] = []
     schema_errors: list[str] = []
     for recall in recalls:
-        args = _fill_required_strings(recall, {}, token)
+        args = _fill_required_args(recall, {}, token)
+        if args is None:
+            schema_errors.append(
+                f"{recall.name!r} has a required argument with no schema-valid value to fill"
+            )
+            continue
         errors = validate_args(recall.json_schema, args)
         if errors:
             schema_errors.append(
@@ -760,6 +817,37 @@ async def _plant_and_recall(
     if not calls:
         return SeedControl(SEED_FAILED, INC_SCHEMA, schema_errors[0])
 
+    # Baseline: read each recall candidate with the SAME args BEFORE anything
+    # is planted. Every required argument was just filled with the token
+    # itself, so a recall tool whose reply echoes its own query (a common
+    # shape for a typed `structuredContent` result) would otherwise read
+    # "recalled" with nothing actually stored (#324 review I2). Requiring the
+    # token's count to GROW after the plant -- mirroring the positive
+    # control's own before/after/written reads -- catches that: an echo's
+    # count is identical before and after; a real recall's is not.
+    #
+    # A baseline read that raises proves NOTHING about this tool's post-plant
+    # count: defaulting it to zero (as an earlier version of this fix did)
+    # made the baseline easiest, not hardest, to beat -- a transient baseline
+    # failure (timeout, rate limit) next to a post-plant call that merely
+    # echoes the token once would then read `1 > 0` as recalled, the exact
+    # I2 echo bug re-opened through a different door (#324 re-review). A tool
+    # whose baseline failed is excluded from the recall check entirely: it
+    # can never yield SEED_PASSED this run, whatever its post-plant reply
+    # says.
+    baselines: dict[str, str] = {}
+    problems: list[str] = []
+    for recall, args in calls:
+        try:
+            baseline_result = await adapter._bounded(session.call_tool(recall.name, args))
+        except Exception as exc:
+            problems.append(
+                f"{recall.name!r}'s baseline read raised {type(exc).__name__}, so it cannot "
+                "confirm a recall this run"
+            )
+            continue
+        baselines[recall.name] = _result_readback_text(baseline_result)
+
     try:
         await adapter._run_seed_arm(session, arm, body, [])
     except SeedArmUnavailable:
@@ -767,20 +855,23 @@ async def _plant_and_recall(
     except Exception as exc:
         raise SeedArmUnavailable(f"seed_arm plant call raised {type(exc).__name__}") from exc
 
-    problems: list[str] = []
     for recall, args in calls:
+        if recall.name not in baselines:
+            # Its baseline read already failed above; the problem is recorded.
+            continue
         try:
             result = await adapter._bounded(session.call_tool(recall.name, args))
         except Exception as exc:
             problems.append(f"{recall.name!r} raised {type(exc).__name__}")
             continue
-        content = str(getattr(result, "content", "") or "")
+        content = _result_readback_text(result)
         if getattr(result, "isError", False):
             problems.append(f"{recall.name!r} returned an error: {_quote(content)}")
-        elif token in content:
+            continue
+        before = baselines[recall.name]
+        if content.count(token) > before.count(token):
             return SeedControl(SEED_PASSED, None, "planted and recalled", recall.name)
-        else:
-            problems.append(f"{recall.name!r} did not return it")
+        problems.append(f"{recall.name!r} did not return it")
     raise SeedArmUnavailable(
         f"the record planted through {arm.tool!r} was not recalled: " + "; ".join(problems)
     )
