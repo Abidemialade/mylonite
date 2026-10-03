@@ -3,6 +3,8 @@
     "EXIT_BUDGET": 3,
     "EXIT_CONFIG": 2,
     "EXIT_FINDINGS": 1,
+    "EXIT_GATE_CANDIDATES": 10,
+    "EXIT_GATE_KEPT": 9,
     "EXIT_GENERATE_FAILED": 6,
     "EXIT_NOT_KEPT": 5,
     "EXIT_PROVIDER": 4,
@@ -12,6 +14,8 @@
   },
   "severity_order": [
     0,
+    10,
+    9,
     1,
     2,
     3,

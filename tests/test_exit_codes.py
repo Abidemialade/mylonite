@@ -35,8 +35,9 @@ def _load_script(relative: str, name: str) -> ModuleType:
     return module
 
 
-# Every exit code defined today (0-8) -- see test_documented_values below.
-_ALL_CODES = [
+# The codes 0-8, which rank more severe as their number increases -- see
+# test_most_severe_agrees_with_max_for_the_numerically_ordered_codes below.
+_NUMERIC_CODES = [
     exit_codes.EXIT_SUCCESS,
     exit_codes.EXIT_FINDINGS,
     exit_codes.EXIT_CONFIG,
@@ -47,6 +48,9 @@ _ALL_CODES = [
     exit_codes.EXIT_VALIDATE_FAILED,
     exit_codes.EXIT_PR_FAILED,
 ]
+
+# Every exit code defined today, including the gate's result codes 9 and 10.
+_ALL_CODES = [*_NUMERIC_CODES, exit_codes.EXIT_GATE_KEPT, exit_codes.EXIT_GATE_CANDIDATES]
 
 # A module-level assignment of an EXIT_* / _EXIT_* name to an integer *literal*.
 # Assignments to another named constant (e.g. `_X: Final = EXIT_CONFIG`) are fine.
@@ -62,6 +66,9 @@ def test_documented_values() -> None:
     assert exit_codes.EXIT_NOT_KEPT == 5
     assert exit_codes.EXIT_GENERATE_FAILED == 6
     assert exit_codes.EXIT_VALIDATE_FAILED == 7
+    assert exit_codes.EXIT_PR_FAILED == 8
+    assert exit_codes.EXIT_GATE_KEPT == 9
+    assert exit_codes.EXIT_GATE_CANDIDATES == 10
 
 
 def test_consumers_reference_the_single_source() -> None:
@@ -100,20 +107,28 @@ def test_severity_order_contains_every_documented_code_exactly_once() -> None:
     assert len(exit_codes.SEVERITY_ORDER) == len(set(exit_codes.SEVERITY_ORDER))
 
 
-def test_severity_order_is_not_simply_sorted_numerically() -> None:
-    # Guards against a no-op "explicit" list that's secretly `sorted(_ALL_CODES)`
-    # in disguise -- the ordering must be a real, independent list literal.
-    assert list(exit_codes.SEVERITY_ORDER) == sorted(exit_codes.SEVERITY_ORDER), (
-        "SEVERITY_ORDER happens to be numerically sorted today (it must reproduce "
-        "max() for codes 0-8), but this test exists to be revisited, not deleted, "
-        "the day a later code needs to rank out of numeric order."
-    )
+def test_severity_order_places_the_gate_result_codes_by_hand() -> None:
+    # 9 and 10 are results, not errors: they rank above success and below every
+    # error code, and a proven finding (9) ranks above an unproven one (10).
+    # Their numbers alone would put them above 8, which is why the order is a
+    # hand-written list and not sorted().
+    assert list(exit_codes.SEVERITY_ORDER) == [0, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8]
+    assert list(exit_codes.SEVERITY_ORDER) != sorted(exit_codes.SEVERITY_ORDER)
 
 
-def test_most_severe_agrees_with_max_for_every_combination_of_documented_codes() -> None:
-    for r in range(1, len(_ALL_CODES) + 1):
-        for combo in itertools.combinations_with_replacement(_ALL_CODES, r):
+def test_most_severe_agrees_with_max_for_the_numerically_ordered_codes() -> None:
+    for r in range(1, len(_NUMERIC_CODES) + 1):
+        for combo in itertools.combinations_with_replacement(_NUMERIC_CODES, r):
             assert exit_codes.most_severe(combo) == max(combo)
+
+
+def test_most_severe_ranks_the_gate_result_codes_below_every_error() -> None:
+    kept, candidates = exit_codes.EXIT_GATE_KEPT, exit_codes.EXIT_GATE_CANDIDATES
+    assert exit_codes.most_severe([kept, candidates]) == kept
+    assert exit_codes.most_severe([exit_codes.EXIT_SUCCESS, candidates]) == candidates
+    for error in _NUMERIC_CODES[1:]:
+        assert exit_codes.most_severe([kept, error]) == error
+        assert exit_codes.most_severe([candidates, error]) == error
 
 
 def test_most_severe_is_order_independent() -> None:
