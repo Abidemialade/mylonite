@@ -51,6 +51,15 @@ nav:
       - Choose a model: choose-a-model.md
       - Installing on Windows: install-windows.md
       - Try it — the reference app: quarry.md
+  - The journey:
+      - Overview: journey/index.md
+      - 1. Try it: journey/1-try.md
+      - 2. Choose a model: journey/2-choose-a-model.md
+      - 3. Point at your app: journey/3-point-at-your-app.md
+      - 4. Find: journey/4-find.md
+      - 5. Prove: journey/5-prove.md
+      - 6. Commit the gate: journey/6-commit-the-gate.md
+      - 7. Re-prove: journey/7-re-prove.md
   - Guides:
       - Test your own app: test-your-app.md
       - Test a plain HTTP agent: http-agent.md
@@ -72,6 +81,7 @@ nav:
       - Reason codes: reason-codes.md
       - Architecture & modules: architecture.md
       - Plugin authoring: plugin-authoring.md
+      - Claims register: claims.md
   - Operating:
       - Enterprise networking: enterprise-networking.md
       - Self-hosted models (Ollama/vLLM): self-hosted-models.md
