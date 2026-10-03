@@ -37,7 +37,7 @@ from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SU
 
 def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> None:
     """Run the demo and exit with the appropriate code. Always raises ``typer.Exit``."""
-    from mylonite.cli import _exit_if_missing_kitchen_sink
+    from mylonite._cli_io import _exit_if_missing_kitchen_sink
     from mylonite.demo import CorruptFixtureError, MissingFixtureError
     from mylonite.demo.render import render_demo
 

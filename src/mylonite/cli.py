@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, NoReturn, TypeVar
 import typer
 
 from mylonite._cli_io import (
+    _exit_if_missing_kitchen_sink,
     _exit_if_missing_target_file,
     echo,
     echo_err,
@@ -734,26 +735,6 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
     if num_retries is not None:
         kwargs["num_retries"] = num_retries
     return LLMPolicy(**kwargs, extra_headers=configured_llm_headers())
-
-
-def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
-    """Map a missing reference target to a friendly EXIT_CONFIG, else return.
-
-    The deliberately-vulnerable reference target is a separate package (not a
-    base dependency): PyPI users get it with ``pip install mcp-kitchen-sink``;
-    an editable checkout needs
-    ``pip install -e ./reference_targets/mcp_kitchen_sink``. Without it,
-    ``scan reference:*`` / ``validate`` raise ``ModuleNotFoundError`` deep
-    in the adapter. Translate that one cause into a clear message everywhere (instead
-    of a raw traceback on the scan path); re-raise anything unrelated by returning.
-    """
-    if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
-        echo_err(
-            "the reference app target isn't installed (it's opt-in) — run "
-            "`pip install mcp-kitchen-sink`, or from a checkout "
-            "`pip install -e ./reference_targets/mcp_kitchen_sink`."
-        )
-        raise typer.Exit(code=EXIT_CONFIG) from exc
 
 
 def _missing_authorize(

@@ -21,6 +21,7 @@ from rich.markup import escape as rich_escape
 from rich.table import Table
 
 from mylonite._cli_io import (
+    _exit_if_missing_kitchen_sink,
     _exit_if_missing_target_file,
     console_print,
     echo,
@@ -29,6 +30,7 @@ from mylonite._cli_io import (
 )
 from mylonite.exit_codes import EXIT_CONFIG, EXIT_FINDINGS, EXIT_SUCCESS
 from mylonite.plugins.cli_targets import _build_adapter_for_reference
+from mylonite.scan._types import AdapterDescribeFailed
 from mylonite.scan.control_shim import _check_description_pins, _has_approval_sibling
 from mylonite.scan.tool_classifier import destination_tools
 from mylonite.scan.tool_inventory import role_text, tool_inventory, treated_as_text, unknown_tools
@@ -174,6 +176,26 @@ def check(
     echo_err(f"connecting to {target_file or target} to introspect its tools (no LLM call)…")
     try:
         descriptor = asyncio.run(adapter.describe())
+    except (ModuleNotFoundError, ImportError) as exc:
+        # `check reference:*` drives the bundled reference target in-process, which
+        # lazily imports mcp_kitchen_sink inside describe() -- on an editable
+        # checkout without it (or a plain `pip install mylonite`), that surfaces
+        # here. Fail with the same friendly hint `scan`/`validate` give, not the
+        # raw ModuleNotFoundError.
+        _exit_if_missing_kitchen_sink(exc)
+        echo_exc("could not connect to / introspect the target", exc)
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    except AdapterDescribeFailed as exc:
+        # Raised with an operator-ready message already (see its docstring --
+        # the same contract ScanEngine.run() relies on for its own abort
+        # detail), already naming what went wrong (and, for a launch
+        # failure, the command -- #210). Show it verbatim: echo_exc's
+        # "ClassName: message" prefix would otherwise lead with e.g.
+        # "AdapterDescribeFailed: " for no reason, and the generic
+        # "could not connect to / introspect the target:" prefix below would
+        # duplicate what this message already says.
+        echo_err(str(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
     except Exception as exc:
         echo_exc("could not connect to / introspect the target", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc

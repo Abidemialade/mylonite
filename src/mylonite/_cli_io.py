@@ -22,6 +22,7 @@ from mylonite._redaction import redact, redact_exception
 from mylonite.exit_codes import EXIT_CONFIG
 
 __all__ = [
+    "_exit_if_missing_kitchen_sink",
     "_exit_if_missing_target_file",
     "console_print",
     "echo",
@@ -103,4 +104,26 @@ def _exit_if_missing_target_file(exc: Exception, target_file: Path) -> None:
     """
     if isinstance(exc, FileNotFoundError) and not target_file.exists():
         echo_err(missing_target_file_message(target_file))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
+    """Map a missing reference target to a friendly EXIT_CONFIG, else return.
+
+    The deliberately-vulnerable reference target is a separate package (not a
+    base dependency): PyPI users get it with ``pip install mcp-kitchen-sink``;
+    an editable checkout needs
+    ``pip install -e ./reference_targets/mcp_kitchen_sink``. Without it,
+    ``scan reference:*`` / ``validate`` / ``check reference:*`` raise
+    ``ModuleNotFoundError`` deep in the adapter. Translate that one cause into
+    a clear message everywhere (instead of a raw traceback, or the exception
+    class name and all, via the generic ``echo_exc`` fallback); re-raise
+    anything unrelated by returning.
+    """
+    if (getattr(exc, "name", "") or "").split(".")[0] == "mcp_kitchen_sink":
+        echo_err(
+            "the reference app target isn't installed (it's opt-in) — run "
+            "`pip install mcp-kitchen-sink`, or from a checkout "
+            "`pip install -e ./reference_targets/mcp_kitchen_sink`."
+        )
         raise typer.Exit(code=EXIT_CONFIG) from exc

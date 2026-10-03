@@ -17,8 +17,12 @@ Four guards:
 
 from __future__ import annotations
 
+import sys
+from importlib.abc import MetaPathFinder
 from pathlib import Path
+from typing import Any
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -104,6 +108,57 @@ def test_check_runs_with_the_env_var_set() -> None:
     result = runner.invoke(app, ["check", "reference:vulnerable"], env={ENV_VAR: "1"})
     assert result.exit_code == 0, result.output
     assert "is experimental" not in result.output
+
+
+def test_check_reference_missing_kitchen_sink_maps_to_exit_2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#195/#210: `check reference:*` without the reference target package
+    installed used to surface the raw `ModuleNotFoundError` from describe()
+    (via the generic ``echo_exc`` fallback, exception class name and all)
+    instead of the same friendly hint `scan`/`validate` already give."""
+
+    class _BlockKitchenSink(MetaPathFinder):
+        def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+            if fullname == "mcp_kitchen_sink" or fullname.startswith("mcp_kitchen_sink."):
+                raise ModuleNotFoundError(f"No module named '{fullname}'", name="mcp_kitchen_sink")
+            return None
+
+    for name in list(sys.modules):
+        if name == "mcp_kitchen_sink" or name.startswith("mcp_kitchen_sink."):
+            monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_BlockKitchenSink(), *sys.meta_path])
+
+    result = runner.invoke(app, ["check", "reference:vulnerable"], env={ENV_VAR: "1"})
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "pip install -e ./reference_targets/mcp_kitchen_sink" in out
+    assert "ModuleNotFoundError" not in out
+    assert "Traceback" not in out
+
+
+def test_check_describe_failure_shows_the_message_not_the_exception_class_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#195: ``AdapterDescribeFailed`` is raised with an operator-ready message
+    already (the same contract ``ScanEngine.run()`` relies on for its own
+    abort detail) -- `check` used to lose that and show the bare exception
+    class name first (``AdapterDescribeFailed: ...``) via the generic
+    ``echo_exc`` fallback."""
+    import mylonite.commands.check as check_mod
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    class _DescribeFails:
+        async def describe(self) -> Any:
+            raise AdapterDescribeFailed("the server closed the connection before replying")
+
+    monkeypatch.setattr(check_mod, "_build_adapter_for_reference", lambda *a, **k: _DescribeFails())
+
+    result = runner.invoke(app, ["check", "reference:vulnerable"], env={ENV_VAR: "1"})
+    assert result.exit_code == EXIT_CONFIG, result.output
+    out = result.stderr or result.output
+    assert "the server closed the connection before replying" in out, out
+    assert "AdapterDescribeFailed" not in out, out
 
 
 def test_ablate_runs_with_the_env_var_set() -> None:
