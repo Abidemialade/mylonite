@@ -235,6 +235,10 @@ _EXTERNAL_DESTINATION_KEY_HINTS: tuple[str, ...] = (
     "domain",
     "endpoint",
     "target",
+    "link",
+    "address",
+    "webhook",
+    "callback",
 )
 
 #: Never "outside the target", whatever the operator's own allowlist says.

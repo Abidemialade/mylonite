@@ -588,6 +588,10 @@ _DESTINATION_ARGS = (
     {"url": f"https://{DEFAULT_EXFIL_HOST}/x"},
     {"host": DEFAULT_EXFIL_HOST},
     {"nested": {"target": DEFAULT_EXFIL_HOST}},
+    {"link": DEFAULT_EXFIL_HOST},
+    {"address": DEFAULT_EXFIL_HOST},
+    {"webhook": DEFAULT_EXFIL_HOST},
+    {"callback": DEFAULT_EXFIL_HOST},
 )
 
 
