@@ -174,13 +174,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command-tree snapshot changed. **Upgrading:** a CI script that treated `gate`
   exit `0` as "gated" needs to check for `9`; a job that fails on any non-zero
   exit fails when `gate` keeps a finding. The scaffolded discovery workflow and
-  the gate action don't read these codes yet, so until they do, a night that
-  keeps a finding (`9`) or finds only candidates (`10`) shows as a failed run.
+  `gate-action` now read these codes (see the next entry), so a night that
+  keeps a finding (`9`) or finds only candidates (`10`) shows green, not red.
   A re-run that does not keep a finding no longer removes an earlier kept test,
   exploit or fixtures with the same id; they stay byte for byte, and the
   re-run's own files go to the evidence folder. `--fast` under `gate` now keeps
   a finding only when an `effect_probe` proves it, and `gate` never commits a
   finding on a black-box `rest` target.
+- **The scaffolded discovery workflow and `gate-action` go green on `gate`'s
+  `9` and `10`, instead of red.** Both used to run `mylonite gate --open-pr`
+  as their last step with no exit-code handling, so a night that kept a
+  proven finding (`9`) or found only unproven candidates (`10`) failed the
+  job — the opposite of what a nightly discovery run should show, since a
+  pending-fix finding re-appears every night until it's fixed. Both now map
+  `0`/`9`/`10` to a successful step (a `::notice::` for `0`/`9`, a
+  `::warning::` for `10` naming how to prove each candidate) and fail only on
+  `1`-`8`, an infrastructure problem. `gate-action` also gains an `exit-code`
+  output, a `result` output (`clean`/`kept`/`candidates`), and an opt-in
+  `fail-on` input (`none` by default, or `kept`/`candidates`) for a caller
+  that wants a red check on a specific result. **Upgrading:** re-run `gate
+  --workflows` to pick up the new discovery template, or edit a committed one
+  by hand; bump `gate-action`'s pinned tag to get the new mapping and
+  outputs. This changed the discovery workflow's golden render.
+- **A re-run that re-finds an already-gated finding no longer fails on exit
+  `8`.** `gate --open-pr` names its branch after the finding's pattern id, so
+  re-finding the same one on a later run (most often a self-hosted runner
+  with a persistent workspace) hit the same branch name and `git checkout -b`
+  refused it. `gate` now checks for exactly that case — the branch already
+  exists locally — and reports it as already proposed instead: no checkout,
+  no commit, no delete, and the run exits `9` like a freshly kept finding. A
+  `checkout -b` failure for any other reason still stops `gate` on exit `8`,
+  unchanged.
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
   model could stall a reference `validate` run past the limit you set. Each

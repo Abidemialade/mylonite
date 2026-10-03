@@ -12,10 +12,29 @@ def test_composite_action_is_well_formed():
     doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
     assert doc["runs"]["using"] == "composite"
     inputs = doc["inputs"]
-    for key in ("target-file", "authorize", "model", "open-pr", "runs-on", "mode"):
+    for key in ("target-file", "authorize", "model", "open-pr", "runs-on", "mode", "fail-on"):
         assert key in inputs, f"missing input {key}"
     blob = Path("gate-action/action.yml").read_text(encoding="utf-8")
     assert "mylonite gate" in blob
+
+
+def test_action_declares_exit_code_and_result_outputs():
+    """A caller that wants a red signal on a specific result reads these
+    instead of (or alongside) `fail-on` -- e.g.
+    `steps.<id>.outputs.result == 'kept'`."""
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    outputs = doc["outputs"]
+    assert outputs["exit-code"]["value"] == "${{ steps.gate.outputs.exit-code }}"
+    assert outputs["result"]["value"] == "${{ steps.gate.outputs.result }}"
+    steps = doc["runs"]["steps"]
+    gate_step = next(s for s in steps if s.get("id") == "gate")
+    assert gate_step["name"] == "Run mylonite gate"
+
+
+def test_fail_on_input_defaults_to_none():
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    assert doc["inputs"]["fail-on"]["required"] is False
+    assert doc["inputs"]["fail-on"]["default"] == "none"
 
 
 def test_action_pins_package_to_release():
@@ -76,7 +95,13 @@ def _rendered_args(**env: str) -> list[str]:
     doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
     run_script = doc["runs"]["steps"][-1]["run"]
     script = run_script.replace('mylonite gate "${args[@]}"', 'printf "%s\\n" "${args[@]}"')
-    base_env = {"PATH": __import__("os").environ.get("PATH", "")}
+    # The real step writes exit-code/result to $GITHUB_OUTPUT after calling
+    # `mylonite gate` -- this helper's stand-in (the printf above) always
+    # exits 0, so that always lands on the "clean" branch, which appends a
+    # single `::notice::` line to stdout. Membership checks below ("--model"
+    # in args) tolerate the extra element; exact-length/equality checks
+    # would not.
+    base_env = {"PATH": __import__("os").environ.get("PATH", ""), "GITHUB_OUTPUT": "/dev/null"}
     result = subprocess.run(
         [bash, "-c", script],
         env={**base_env, "MODE": "discovery", "RUNS_ON": "ubuntu-latest", **env},
@@ -215,7 +240,7 @@ def _run_final_step_script(**env: str) -> subprocess.CompletedProcess:
         'printf "API_KEY_STILL_SET=%s\\n" "${API_KEY+yes}"\n'
     )
     script = run_script.replace('mylonite gate "${args[@]}"', probe)
-    base_env = {"PATH": __import__("os").environ.get("PATH", "")}
+    base_env = {"PATH": __import__("os").environ.get("PATH", ""), "GITHUB_OUTPUT": "/dev/null"}
     return subprocess.run(
         [bash, "-c", script],
         env={
@@ -256,6 +281,104 @@ def test_action_unsets_api_key_after_exporting_it():
     result = _run_final_step_script(KEY_VAR="ANTHROPIC_API_KEY", API_KEY="sk-ant-test")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "API_KEY_STILL_SET=\n" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# mylonite gate's own exit code: outputs, annotations, and `fail-on`.
+# ---------------------------------------------------------------------------
+
+
+def _run_gate_mapping(tmp_path: Path, code: int, **env: str) -> subprocess.CompletedProcess:
+    """Execute the final step's own script with `mylonite gate "${args[@]}"`
+    swapped for a bare `(exit <code>)`, against a real $GITHUB_OUTPUT file,
+    proving the mapping the step itself applies -- not a re-implementation
+    of it."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available to execute the rendered run script")
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    run_script = doc["runs"]["steps"][-1]["run"]
+    script = run_script.replace('mylonite gate "${args[@]}"', f"(exit {code})")
+    github_output = tmp_path / "github_output"
+    github_output.write_text("", encoding="utf-8")
+    base_env = {
+        "PATH": __import__("os").environ.get("PATH", ""),
+        "GITHUB_OUTPUT": str(github_output),
+        "MODE": "discovery",
+        "RUNS_ON": "ubuntu-latest",
+        "TARGET_FILE": "target.yaml",
+        "AUTHORIZE": "my-app",
+        "MODEL": "anthropic/claude-haiku-4-5",
+        "OPEN_PR": "",
+        "FAIL_ON": "none",
+    }
+    result = subprocess.run(
+        [bash, "-c", script],
+        env={**base_env, **env},
+        capture_output=True,
+        text=True,
+    )
+    result.github_output = github_output.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    return result
+
+
+def test_exit_0_maps_to_clean_and_never_fails_the_step(tmp_path: Path) -> None:
+    result = _run_gate_mapping(tmp_path, 0)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "exit-code=0" in result.github_output
+    assert "result=clean" in result.github_output
+    assert "::notice::" in result.stdout
+
+
+def test_exit_9_maps_to_kept_and_does_not_fail_by_default(tmp_path: Path) -> None:
+    """Covers a freshly-opened PR and a repeat night where the finding was
+    already proposed -- both are `gate`'s exit 9."""
+    result = _run_gate_mapping(tmp_path, 9)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "exit-code=9" in result.github_output
+    assert "result=kept" in result.github_output
+    assert "::notice::" in result.stdout
+
+
+def test_exit_10_maps_to_candidates_and_warns_without_failing(tmp_path: Path) -> None:
+    result = _run_gate_mapping(tmp_path, 10)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "exit-code=10" in result.github_output
+    assert "result=candidates" in result.github_output
+    assert "::warning::" in result.stdout
+
+
+def test_an_infrastructure_exit_code_still_fails_the_step(tmp_path: Path) -> None:
+    """1-8 (config, budget, provider, the PR step itself) is a real
+    failure, never mapped to a result or softened by `fail-on`."""
+    result = _run_gate_mapping(tmp_path, 4)
+    assert result.returncode == 4
+    assert "exit-code=4" in result.github_output
+    assert "result=" not in result.github_output
+
+
+def test_fail_on_kept_fails_the_step_on_a_kept_finding(tmp_path: Path) -> None:
+    result = _run_gate_mapping(tmp_path, 9, FAIL_ON="kept")
+    assert result.returncode == 9
+    assert "result=kept" in result.github_output
+
+
+def test_fail_on_kept_leaves_a_candidates_only_run_green(tmp_path: Path) -> None:
+    result = _run_gate_mapping(tmp_path, 10, FAIL_ON="kept")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "result=candidates" in result.github_output
+
+
+def test_fail_on_candidates_fails_the_step_on_candidates_only(tmp_path: Path) -> None:
+    result = _run_gate_mapping(tmp_path, 10, FAIL_ON="candidates")
+    assert result.returncode == 10
+    assert "result=candidates" in result.github_output
+
+
+def test_fail_on_none_is_the_default_and_never_fails_on_a_result(tmp_path: Path) -> None:
+    for code in (0, 9, 10):
+        result = _run_gate_mapping(tmp_path, code, FAIL_ON="none")
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _run_bash_step(step: dict, env: dict[str, str], tmp_path: Path) -> subprocess.CompletedProcess:
