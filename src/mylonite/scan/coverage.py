@@ -554,7 +554,7 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     "launch_failure": "never launched the target",
     "skipped_no_seed_arm": "had no seed_arm to plant the payload",
     "skipped_payload_not_delivered": "planted a payload the planner never retrieved",
-    "skipped_planner_no_engagement": "got no tool calls from the model at all",
+    "skipped_planner_no_engagement": "never called the tool this attack targets",
     "not_applicable": "targeted a capability this surface doesn't expose",
     _UNDECIDED_EFFECT_PROBE_BUCKET: (
         "reached no verdict because the declared effect_probe's verify call errored"
