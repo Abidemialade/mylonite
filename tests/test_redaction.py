@@ -937,12 +937,22 @@ def test_another_librarys_record_is_left_alone_when_nothing_matches(
     tree_redaction: pytest.LogCaptureFixture,
 ) -> None:
     """Masking registered values in a third-party record must not flatten
-    its template and args when there was nothing to mask."""
+    its template and args when there was nothing to mask. A plain library
+    logger is used: LiteLLM attaches its own handler and filter once it has
+    logged, and that filter flattens records by itself."""
     with tree_redaction.at_level(logging.WARNING):
-        logging.getLogger("LiteLLM").warning("retry %d of %d", 1, 3)
-    (record,) = [r for r in tree_redaction.records if r.name == "LiteLLM"]
+        logging.getLogger("some_library.client").warning("retry %d of %d", 1, 3)
+    (record,) = [r for r in tree_redaction.records if r.name == "some_library.client"]
     assert record.msg == "retry %d of %d"
     assert record.args == (1, 3)
+    litellm_filters = [
+        f for f in logging.getLogger("LiteLLM").filters if isinstance(f, SecretRedactingFilter)
+    ]
+    assert litellm_filters
+    untouched = logging.LogRecord("LiteLLM", logging.WARNING, "", 0, "retry %d", (1,), None)
+    for flt in litellm_filters:
+        flt.filter(untouched)
+    assert (untouched.msg, untouched.args) == ("retry %d", (1,))
 
 
 def test_make_log_record_does_not_crash_with_redaction_installed(
