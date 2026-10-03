@@ -175,7 +175,9 @@ proposed one), or remove W3/W4 from `weakness_classes`.
    whitespace or starts with `-`; with `--open-pr` or `--workflows`, an output
    directory outside the repository; with `--open-pr`, a working tree with staged
    files or uncommitted changes to tracked files.
-2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
+2. On Windows without long paths, the output path check, exiting `2` (see
+   [Windows path length](#windows-path-length)).
+3. The target, `--authorize`, model, provider key and uncoverable-class checks, each
    exiting `2`.
 
 So when both kinds of problem are present, the exit-`8` error is the one you see first.
@@ -195,16 +197,53 @@ your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
 commands to commit and open the PR yourself. With neither flag below, your
 repository is not modified: no branch, no commit, no workflow files.
 
+Each finding gets a short, stable id: its weakness class and six hex digits
+of a hash of its pattern id, for example `w2-1a2b3c`. Its test is
+`test_w2-1a2b3c.py` and the exploit it loads is `exploit_w2-1a2b3c.json`. The
+full pattern id is in the test's docstring and the exploit JSON, `gate` prints
+which pattern each test gates, and a multi-finding PR body has a table mapping
+each pattern id to its test.
+
 One finding is written straight into `.mylonite/gate/`, and on the reference
 target its replay recordings sit beside it in `.mylonite/gate/fixtures/`. With
-two or more, each kept finding gets its own folder, `.mylonite/gate/<finding>/`,
+two or more, each kept finding gets its own folder, `.mylonite/gate/<id>/`,
 holding its test, exploit JSON, validation report and, on the reference target,
 the `fixtures/` its test replays. With `--target-file`, each finding folder also
 gets its own redacted `target.yaml`, because the test loads the file from its
 own folder. `pytest .mylonite/gate/` runs every kept test; on the reference
 target it runs offline, with no provider key. A rejected finding's files,
-recordings included, move to `.mylonite/gate-rejected/<finding>/` and are never
+recordings included, move to `.mylonite/gate-rej/<id>/` and are never
 committed.
+
+Gate dirs written by earlier versions, with folders and tests named after the
+full pattern id, keep replaying unchanged. When you upgrade, re-run `gate` with
+`--workflows`, or change the `mylonite==` pin in your committed gate workflows
+to the new version, before committing new tests: an older pin cannot replay
+the new recordings, so those tests would fail in CI on their first run. `gate`
+prints a warning naming the workflow file when it finds an older pin. A new
+run into the same `--out` writes the short-id layout beside the old folders
+and leaves them alone, so `pytest .mylonite/gate/` then runs both; delete the
+old folders once the new tests are committed.
+
+### Windows path length
+
+**`gate` refuses an output directory Windows cannot hold before it calls a model
+or starts your target.** Without long paths enabled, Windows caps a file path at
+259 characters. `gate` works out the longest path it could write under `--out`
+(a folder per finding, rejected findings included) and, if that is over the
+limit, prints one line naming the path, its length and how many characters to
+cut from `--out`, then exits `2`. After the scan it checks again with the real
+findings, before any validation. Linux, macOS and Windows with long paths on
+skip the check.
+
+With the default `.mylonite/gate`, a project path of up to 200 characters fits:
+the deepest file, `.mylonite/gate-rej/<id>/fixtures/<recording>.json`, uses 58
+of the 259. CI runs a two-finding gate from a 200-character project root with
+long paths off. To go deeper, pass a shorter `--out` or enable long paths
+(`LongPathsEnabled` in the registry, plus `git config core.longpaths true` for
+teammates who clone the gate). Replay recordings are named by the first 12 hex
+digits of their key (17 characters); recordings made by earlier versions keep
+their 64-digit names and still replay.
 
 `gate` redacts secret-shaped values in the exploit JSON, the validation report
 and `PR_BODY.md` (its evidence lines and the optional LLM suggestion) before it
@@ -448,7 +487,8 @@ collected; tests without that marker are never inspected. Leave it unset for loc
 where a keyless skip is the intended default. You also need:
 
 - `mylonite` and `pytest` installed
-- the scan artefacts (`exploit_<pattern_id>.json`, `target.yaml`) co-located with the test
+- the scan artefacts (the exploit JSON and `target.yaml`) co-located with the test:
+  `exploit_<id>.json` in a gate dir, `exploit_<pattern_id>.json` from `generate`
 - a provider key
 - network egress to both the model provider and your MCP server
 

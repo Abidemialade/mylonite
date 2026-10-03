@@ -315,7 +315,9 @@ one, run `scan` first and pass the `target.yaml` it writes to `gate`.
    whitespace or starts with `-`; with `--open-pr` or `--workflows`, an output
    directory outside the repository; with `--open-pr`, a working tree with staged
    files or uncommitted changes to tracked files.
-2. The target, `--authorize`, model, provider key and uncoverable-class checks, each
+2. On Windows without long paths, the output path check, exiting `2` (see
+   [Windows path length](ci-gating.md#windows-path-length)).
+3. The target, `--authorize`, model, provider key and uncoverable-class checks, each
    exiting `2`.
 
 So when both kinds of problem are present, the exit-`8` error is the one you see first.
