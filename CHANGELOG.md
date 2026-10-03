@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anyway, with the header. A test goes without the header only when a KEPT
   report proved that exact test: one exploit in the folder, no newer than the
   report, no `--prove-control`, the kept test matches the new one, and the
-  same target (the `target.yaml` beside the report, unchanged since, and any
-  `--target-file` matching it). `gate` is unchanged. The new flag changed the command-tree snapshot.
+  same target (the `target.yaml` beside the report, still there and unchanged
+  since, and any `--target-file` matching it). `gate` is unchanged. The new
+  flag changed the command-tree snapshot.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow

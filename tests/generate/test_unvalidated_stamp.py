@@ -25,7 +25,7 @@ from mylonite.contracts import (
     ValidationOutcome,
     ValidationReport,
 )
-from mylonite.exit_codes import EXIT_NOT_KEPT, EXIT_SUCCESS
+from mylonite.exit_codes import EXIT_CONFIG, EXIT_NOT_KEPT, EXIT_SUCCESS
 from mylonite.generate import provenance
 from mylonite.generate.provenance import (
     UNVALIDATED_MARKER,
@@ -441,3 +441,41 @@ def test_gate_generate_fn_never_stamps() -> None:
 
     generated = generate_fn(_exploit())
     assert not is_unvalidated(generated.source)
+
+
+def test_kept_custom_target_whose_target_yaml_was_deleted_stamps(tmp_path: Path) -> None:
+    """Without it the test could be pointed at any app, so it is not the proven one."""
+    src = _kept_custom_dir(tmp_path)
+    (src / "target.yaml").unlink()
+    assert is_unvalidated(_generate(src, tmp_path / "gen"))
+
+
+def test_kept_custom_target_with_a_non_utf8_target_file_exits_2(tmp_path: Path) -> None:
+    src = _kept_custom_dir(tmp_path)
+    bad = tmp_path / "bad.yaml"
+    bad.write_bytes(b"family: \xff\xfe\n")
+
+    result = runner.invoke(
+        app, ["generate", str(src), "--out", str(tmp_path / "gen"), "--target-file", str(bad)]
+    )
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_stamp_goes_after_a_byte_order_mark(tmp_path: Path) -> None:
+    """A stamped file that starts with a BOM still compiles and strips back exactly."""
+    original = '﻿"""doc"""\nX = 1\n'
+    stamped = stamp_unvalidated(original)
+
+    assert stamped.startswith("﻿" + UNVALIDATED_MARKER)
+    assert is_unvalidated(stamped)
+    compile(stamped.encode("utf-8"), "t.py", "exec")
+    assert strip_unvalidated(stamped) == original
+
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_bytes(original.encode("utf-8"))
+    sync_stamp(test_path, _report(kept=False))
+    compile(test_path.read_bytes(), "t.py", "exec")
+    sync_stamp(test_path, _report(kept=True))
+    assert test_path.read_bytes() == original.encode("utf-8")
