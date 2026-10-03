@@ -9,6 +9,7 @@ tests run the check against the real, committed docs and golden.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -126,6 +127,45 @@ def test_real_docs_match_the_real_golden() -> None:
 def test_real_allowlist_has_no_launch_set_entries() -> None:
     problems = cfc.check_allowlist_has_no_launch_set_entries(ROOT)
     assert not problems, "\n".join(p.message for p in problems)
+
+
+def _fenced_bash_console_lines(text: str) -> list[str]:
+    """Every raw line inside a ```bash/```console fence -- prose outside a
+    fence (which may legitimately *describe* a bare command as a warning)
+    is deliberately not scanned."""
+    lines: list[str] = []
+    in_shell = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            in_shell = not in_shell and stripped[3:].strip().lower() in cfc._SHELL_FENCES
+            continue
+        if in_shell:
+            lines.append(raw)
+    return lines
+
+
+def test_re_prove_page_never_shows_a_bare_live_target_command() -> None:
+    """Regression guard for the DOC-4 round-1 review's Critical finding: a
+    bare `pytest .mylonite/gate/` on the re-prove page would be silently
+    SKIPPED (the emitted test's own `pytest.mark.skipif` gate), every time,
+    before the fix and after it -- looking like a pass while proving
+    nothing. Every RUNNABLE command (inside a ```bash/```console fence) that
+    mentions `pytest .mylonite/gate` must be prefixed with
+    `MYLONITE_LIVE_TARGET=1 `. Prose may still describe the bare form as a
+    warning -- that's the fix for this finding, not a regression of it --
+    so only fenced code is checked, not the whole page.
+    """
+    text = (ROOT / "docs" / "journey" / "7-re-prove.md").read_text(encoding="utf-8")
+    assert "MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate" in text, (
+        "the live-target-gated command is missing from the re-prove page"
+    )
+    bare = [
+        line
+        for line in _fenced_bash_console_lines(text)
+        if re.search(r"(?<!MYLONITE_LIVE_TARGET=1 )pytest \.mylonite/gate", line)
+    ]
+    assert not bare, f"bare 'pytest .mylonite/gate' in a runnable code block: {bare}"
 
 
 def test_real_collection_is_not_vacuous() -> None:

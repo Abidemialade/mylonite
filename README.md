@@ -119,6 +119,7 @@ Published for the same reason the positive ones are.
   [the docs](./docs/index.md#coverage-by-app-shape).
 - **Finding nothing is the normal outcome** for a well-built app on a robust model. See
   [below](#finding-nothing-is-also-a-result).
+<!-- claim:readme-single-model-evidence -->
 - **The evidence rests largely on one model** — Claude Haiku 4.5 — at small, deliberately
   cost-capped sample sizes.
 <!-- claim:readme-measurement-window -->
@@ -296,7 +297,7 @@ Full guide: [docs/ci-gating.md](./docs/ci-gating.md). Behind a corporate network
 | `mylonite generate` | Writes the `pytest` test from a confirmed weakness. | No |
 | `mylonite validate` | Confirms a test is meaningful by running the comparison. `--fast` makes it cheaper. | Yes |
 | `mylonite gate` | End to end: scan → generate → validate → optionally open a gating PR. | Yes |
-| `mylonite report` | Terminal summary, **SARIF 2.1.0**, or a JSON bundle — each carrying the supporting evidence and compliance tags. | No |
+| `mylonite report` | Terminal summary, **SARIF 2.1.0**, or a JSON bundle — each carrying the supporting evidence and compliance tags.<!-- claim:readme-sarif-version --> | No |
 | `mylonite plugins` | Lists installed plugins across all five extension points. | No |
 | `mylonite version` | Prints the installed version. | No |
 
@@ -362,7 +363,9 @@ Full policy: [SECURITY.md](./SECURITY.md).
 
 Bug reports, adapter requests and attack-pattern submissions are welcome — see
 [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, how to write a plugin, and the
-pull-request conventions. The five extension points (attack modules, test generators,
+pull-request conventions.
+<!-- claim:readme-extension-points -->
+The five extension points (attack modules, test generators,
 validators, target adapters, compliance mappers) are versioned public API with reference
 implementations in this repository.
 
