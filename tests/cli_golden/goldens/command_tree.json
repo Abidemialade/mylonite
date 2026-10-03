@@ -327,7 +327,7 @@
         {
           "default": "False",
           "envvar": null,
-          "help": "Skip the differential leg for a custom target (no boundary-guarded twin). Faster/cheaper but a WEAKER guarantee — the kept test no longer proves the safeguard, not the model, carries the security.",
+          "help": "Skip the differential leg for a custom target (no boundary-guarded twin). gate then keeps a finding only when an effect_probe proves it; otherwise the finding is an unproven candidate, no test is written, and gate exits 10.",
           "is_flag": true,
           "multiple": false,
           "name": "fast",
@@ -453,7 +453,7 @@
         {
           "default": "False",
           "envvar": null,
-          "help": "For a black-box HTTP (rest) target: run the input data-framing ('spotlighting') differential to measure whether that input defence is load-bearing. Opt-in; otherwise a rest target is gated by stability + effect + consensus.",
+          "help": "For a black-box HTTP (rest) target: run the input data-framing ('spotlighting') differential to measure whether that input defence is load-bearing. Opt-in; otherwise a rest target is validated by stability + effect + consensus. gate lists a rest finding as a candidate; it never commits it.",
           "is_flag": true,
           "multiple": false,
           "name": "prove_input_control",

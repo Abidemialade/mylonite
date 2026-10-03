@@ -101,10 +101,13 @@ candidate:
   committed; its evidence goes to the `-rej` folder next to `--out`, with its
   validation report;
 - the console prints one line per candidate, with the reason and how to get it
-  proven: declare `control_env` or an `effect_probe` in the target file and
-  re-run `gate`;
+  proven: declare `control_env` and drop `--fast`, or declare an `effect_probe`,
+  then re-run `gate`. A finding on a black-box `rest` target can't be proven
+  this way, so `gate` never commits one;
 - when another finding was kept, `PR_BODY.md` lists the candidates under
   "Candidates (not proven, not committed)";
+- an earlier kept test, exploit and fixtures with the same id stay in place,
+  byte for byte;
 - with nothing kept, no PR is opened and `gate` exits `10`.
 
 ```text
@@ -131,8 +134,9 @@ is in [Reading the results](reading-results.md#exit-codes-for-ci).
 run. A kept finding now exits `9`. A CI script that treated `0` as "gated" needs
 to check for `9`; one that treats any non-zero exit as a failure now fails when
 `gate` keeps a finding, which is the point of a gate. The scaffolded discovery
-workflow runs `gate --open-pr` as its last step, so a night that opens a gate PR
-now shows as a failed run.
+workflow and the gate action run `gate --open-pr` as their last step and don't
+yet read these codes, so for now a night that keeps a finding (`9`) or finds only
+candidates (`10`) shows as a failed run.
 
 A finding that was generated and validated but not kept is still named in
 `PR_BODY.md`, with the reason, under "Other findings (not gated)" — it isn't
@@ -181,7 +185,7 @@ pending.
 `--max-llm-calls` bounds the *scan* phase (see the sizing box above). If the
 budget runs out mid-scan but the scan already proved a real finding, `gate` still
 generates, validates, and opens or prints the PR for that finding — nothing is
-thrown away. The run's exit code is still the scan's own: **`3`**, not `0` — the
+thrown away. The run's exit code is still the scan's own: **`3`**, not `0` or `9` — the
 same "abort always wins" rule `scan` follows on its own (see
 [Reading the results](reading-results.md#exit-codes-for-ci)). Treat exit `3` from
 `gate` as "check `PR_BODY.md` before you decide this was just an infrastructure
@@ -342,9 +346,9 @@ be tied to that attempt — see [Effect attribution](target-file.md#effect-attri
 each lower it one step, so a PR body never reads a weaker signal as a fully-confirmed one.
 
 For a custom target the gate proves the finding **differentially by default** (the
-control-efficacy check); `--fast` skips that leg for a faster, cheaper check that no
-longer proves the safeguard carries the security — a deliberate trade-off, not the
-recommended default.
+control-efficacy check). `--fast` skips that leg, so `gate` keeps a finding only when
+an `effect_probe` proves it; otherwise the finding is a candidate, no test is written,
+and `gate` exits `10`.
 
 ## Adopting it in GitHub CI
 

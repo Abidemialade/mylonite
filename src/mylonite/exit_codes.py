@@ -28,6 +28,12 @@ Contract:
 * ``10`` ``gate`` kept nothing, but at least one finding reproduced without
   proof (STABLE, NOT PROVEN): it is reported as a candidate, never written as
   a gate test
+
+``gate`` picks among its own result codes by outcome, not by
+:func:`most_severe`: a kept finding gives ``9`` even when other findings were
+rejected (``5``), and a candidate gives ``10`` even when others failed to
+validate (``7``). Don't combine gate result codes with :func:`most_severe`;
+it ranks every error above them.
 """
 
 from __future__ import annotations

@@ -304,7 +304,7 @@ the experimental `check --enforce` · `2` configuration · `3` budget · `4` pro
 `5` not confirmed · `6` generate failed · `7` validate failed · `8` PR step failed ·
 `9` `gate` kept a proven finding · `10` `gate` found only unproven candidates). A scan that finds
 something exits `0`; `gate` exits `0` only when it found nothing. Budget exhaustion always wins: a run that finds something AND runs
-out of `--max-llm-calls` exits `3`, not `0` — the findings are still written to disk and
+out of `--max-llm-calls` exits `3`, not `0` (or `9` for a `gate` that kept a finding) — the findings are still written to disk and
 (for `gate`) still turned into a test and gated, so nothing is lost. Full details in the
 [CLI reference](./docs/cli-reference.md).
 
