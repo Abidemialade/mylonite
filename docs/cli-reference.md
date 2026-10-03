@@ -3,6 +3,9 @@
 Every command, its key options, and a worked example. Run `mylonite COMMAND --help` for
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
+A recognised `--env-file` value that is itself an unresolved `${VAR}`-shaped placeholder
+(never substituted by a templating tool or secrets manager) is a config error naming the
+variable and the file, not a silent load of that literal text as a credential.
 
 **Hard spend limit.** The global option `--max-llm-requests N` (before the command), or
 `MYLONITE_MAX_LLM_REQUESTS=N`, caps every LLM request the whole run sends, retries
@@ -182,6 +185,10 @@ any spend, naming both the flag's values and the file's declared ones. With no
 the inline `mcp:custom` flags already do with nothing else to set them. Rejects an
 unknown or lowercase value, e.g. `w4`, naming it). For a custom target: `--command`,
 `--arg`, `--env`, `--scope`, `--system-prompt`/`--system-prompt-file`, `--primary-tool`.
+`--command`/`--arg`/`--env` build an INLINE target from flags; combining any of them
+with `--target-file` (which already fully describes the target) refuses with exit `2`
+naming the flag(s) passed, except with `--scaffold`, which uses them to BUILD the file
+in the first place.
 
 If an attack module that would have run fails to import or construct, `scan` (and
 `gate`) runs the rest and reports each weakness class that module covers as NOT TESTED
@@ -280,6 +287,12 @@ note: secrets in headers and env were kept out of app.yaml. It reads them from t
   PowerShell:
     $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'
 ```
+
+`args` has no key name to mask a value by, so a credential passed through `--arg`
+instead (`--api-key=sk-...`, a URL with `?access_token=...`) is still written in plain
+text — but now warns, naming the position and withholding the value:
+`args[0] looks like it carries a credential (value withheld). Move it to env: ...`. See
+[A credential in args is written in plain text](target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns).
 
 Set it before `check`, `scan` or `gate` loads the file; an unset one stops the load with
 exit code 2 and the same `export` line. The scan-directory copy, `generate`'s copy and

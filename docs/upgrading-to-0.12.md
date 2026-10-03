@@ -1,11 +1,14 @@
 # Upgrading from 0.10.x / 0.11.x
 
-0.12 changes six things an automated caller or a committed CI workflow can
+0.12 changes several things an automated caller or a committed CI workflow can
 trip on: there is no default model, `gate`'s exit codes now separate "kept" from
 "clean", an unproven finding is never committed, a few commands trade a
 traceback for a clean exit code, several reason codes are new or now mean
-something more specific, and the files `gate` writes are shaped differently on
-disk. Everything here is already in [`CHANGELOG.md`](https://github.com/Abidemialade/mylonite/blob/main/CHANGELOG.md)
+something more specific, the files `gate` writes are shaped differently on
+disk, and credential handling around target files is stricter —
+`--env`/`--arg` with `--target-file`, a credential-shaped `--arg` value, and
+an unresolved `--env-file` placeholder each now get a named error or warning
+instead of silence. Everything here is already in [`CHANGELOG.md`](https://github.com/Abidemialade/mylonite/blob/main/CHANGELOG.md)
 under `[Unreleased]`; this page is the upgrade checklist, not a second copy of
 that detail.
 
@@ -277,3 +280,48 @@ file already sets one, that value still wins.
 
 **What to do.** Nothing, unless a `rest` target's class was reading NOT TESTED
 for this reason — re-run the scan and it should now reach the agent.
+
+## `--env`/`--arg` with `--target-file` now refuses
+
+**What changed.** `scan` accepts `--target-file` alongside the `mcp:custom`
+flags (`--command`, `--arg`, `--env`) that build an inline target spec. Once
+`--target-file` was also given, those three flags had no effect at all — the
+file's own `command`/`args`/`env` always won — with nothing printed to say so.
+
+**What you'll see.** Passing any of `--command`, `--arg` or `--env` together
+with `--target-file` now exits `2`, naming the flag(s) you passed. A script
+that relied on them being silently dropped needs updating.
+
+**What to do.** Put the launch override in the target file's `env:` block
+instead, or drop `--target-file` and build the target from the flags alone.
+
+## A credential-shaped `--arg` value now warns
+
+**What changed.** `scan --scaffold` keeps a secret out of the written
+`target.yaml` when it arrives via `--env` or a header — but a credential
+passed through `--arg` (`--api-key=sk-...`, a URL with `?access_token=...`)
+has no key name to mask by, and was written in plain text with no warning
+that it had been.
+
+**What you'll see.** `scan --scaffold`, and every later command that loads the
+file, now warns on a credential-shaped `args` entry — naming its position,
+never the value — and points at the fix. The value is still written in plain
+text; the warning is what's new.
+
+**What to do.** Move a credential out of `args` into `env:` (most subprocess
+CLIs also accept it from an environment variable) or a remote target's
+`headers:`, as `${VAR}`.
+
+## `--env-file` refuses an unresolved `${VAR}` placeholder
+
+**What changed.** `--env-file` set a recognised provider-key variable to
+whatever text followed `=`, even when that text was itself an unresolved
+`${VAR}`-shaped reference left behind by a templating tool or secrets
+manager that never ran — sending the literal placeholder text to the
+provider as if it were the key.
+
+**What you'll see.** `--env-file` now exits `2` and names the variable and
+the file when a loaded value is exactly `${SOME_NAME}`, instead of loading it.
+
+**What to do.** Resolve the reference before Mylonite reads the file — run
+the templating step first, or set the real value directly.
