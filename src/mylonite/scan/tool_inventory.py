@@ -17,8 +17,11 @@ readers and declared lists:
 * store / recall: the scan's own auto-wire pick (``_classify_tools``);
 * verdict read: whether the verdict's trace reading (``effect_verdict.is_read_tool``)
   counts a call to the tool as a read rather than a dispatch. It matches read
-  words as substrings, so it can disagree with the confirm gate on a name such
-  as ``budget_report``; the inventory shows that rather than smoothing it over.
+  words as whole words, never counts a name with a consequential or egress word
+  as a read, and so agrees with the gate's name tier. It can still disagree with
+  the gate's fail-closed default: ``list_notes`` is guarded by that default, yet
+  the verdict counts its calls as reads. The inventory shows that rather than
+  smoothing it over.
 
 A tool that no tier recognises is "unknown", and the confirm-gate control
 already treats it as consequential (the fail-closed default); the egress
