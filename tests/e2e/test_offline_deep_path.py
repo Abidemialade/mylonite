@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from mylonite.exit_codes import EXIT_GATE_KEPT
 from mylonite.scan.pytest_runner import run_test_file
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,7 +81,7 @@ def test_every_call_was_answered_from_a_recording(gate_run: Any) -> None:
 
 def test_the_gate_keeps_the_generated_test(gate_run: Any) -> None:
     assert gate_run.result.kept is True
-    assert gate_run.result.exit_code == 0
+    assert gate_run.result.exit_code == EXIT_GATE_KEPT
     assert gate_run.result.opened_pr is False
 
 
