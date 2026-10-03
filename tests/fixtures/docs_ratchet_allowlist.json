@@ -1,5 +1,9 @@
 {
   "cli_flags": [],
   "testkit": [],
-  "reason_codes": []
+  "reason_codes": [],
+  "exit_codes": [],
+  "env_vars": [],
+  "target_yaml_fields": [],
+  "providers": []
 }

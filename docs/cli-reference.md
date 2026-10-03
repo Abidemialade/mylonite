@@ -509,3 +509,27 @@ the message. A scan reports such a module's classes NOT TESTED with
 `scan`, `gate`, `validate`, `ablate` and `check` accept `--config mylonite.yaml` (auto-discovered from `./mylonite.yaml`)
 to declare `target_file` / `authorize` / `provider` / `model` / budget once. An explicit
 flag always wins.
+
+Most keys also have a flat `MYLONITE_*` env var, the lowest-precedence source of the
+three: an explicit flag wins over `mylonite.yaml`, which wins over the env var, which
+wins over the command's own built-in default.
+
+| `mylonite.yaml` key | Env var | What it sets |
+|---|---|---|
+| `target_file` | — | the custom-target YAML (`--target-file`) |
+| `authorize` | — | the ownership assertion (`--authorize`) |
+| `provider` | `MYLONITE_PROVIDER` | the LiteLLM provider id — deprecated, prefix `model` instead |
+| `model` | `MYLONITE_MODEL` | the model LiteLLM calls |
+| `planner_model` | `MYLONITE_PLANNER_MODEL` | the model driving the agent under test; defaults to `model` |
+| `customiser_model` | `MYLONITE_CUSTOMISER_MODEL` | the model crafting attack payloads; defaults to `model` |
+| `judge_model` | `MYLONITE_JUDGE_MODEL` | the model deciding the LLM-judge fallback verdict; defaults to `model` |
+| `max_llm_calls` | — | the process-wide LLM call budget for a scan (`--max-llm-calls`) |
+| `api_base` | `MYLONITE_API_BASE` | a self-hosted or proxy LiteLLM endpoint |
+| `max_tokens` | `MYLONITE_MAX_TOKENS` | the per-call `max_tokens` |
+| `temperature` | `MYLONITE_TEMPERATURE` | the per-call temperature |
+| `timeout` | `MYLONITE_TIMEOUT` | the per-call socket timeout, in seconds |
+| `num_retries` | `MYLONITE_NUM_RETRIES` | the per-call LiteLLM retry count |
+| `root` | `MYLONITE_ROOT` | overrides the artefact root every command's output nests under |
+
+`target_file`, `authorize` and `max_llm_calls` have no flat env var — set them with
+`--target-file`/`--authorize`/`--max-llm-calls`, or in `mylonite.yaml`.

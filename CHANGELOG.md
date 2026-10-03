@@ -128,6 +128,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands (`demo`, `scan`, `generate`, `validate`, `gate`, `report`) carry
   no allowlist entries; `tests/fixtures/fenced_commands_allowlist.json`
   starts empty.
+- **The docs/registry ratchet now covers four more registries:** the
+  process exit-code enum, every `MYLONITE_*` environment variable `src/`
+  reads, every `target.yaml` field, and the approved-provider table. Each is
+  checked both ways, the same as the CLI-flag/testkit/reason-code rows
+  already in `tests/test_docs_registry_ratchet.py`. Fixed along the way:
+  `docs/cli-reference.md`'s run-config section now tables every flat env var
+  `mylonite.yaml`'s keys have (`MYLONITE_PROVIDER`, `MYLONITE_PLANNER_MODEL`,
+  `MYLONITE_CUSTOMISER_MODEL`, `MYLONITE_JUDGE_MODEL`, `MYLONITE_MAX_TOKENS`,
+  `MYLONITE_TEMPERATURE`, `MYLONITE_TIMEOUT` and `MYLONITE_ROOT` had no
+  mention anywhere under `docs/` before this), and `docs/target-file.md`'s
+  `control_config` field group now documents `accepts_untrusted_tools` and
+  `description_pins`. All four new registries start clean (empty allowlist).
 
 ### Changed
 
