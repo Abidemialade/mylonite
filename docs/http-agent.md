@@ -59,7 +59,8 @@ request:
   agent's reply (list indices are numbers, e.g. `choices.0.message.content`). Omit
   it to judge the whole response body.
 - **`headers`** — optional auth; values are never written to any log, report, or
-  test artifact.
+  test artifact. When the body is JSON and you set no `Content-Type`, Mylonite sends
+  `Content-Type: application/json`; a `Content-Type` you set always wins.
 - **`timeout_s`** — the HTTP client timeout for every call to the agent, in
   seconds. Defaults to **30**. A local-model agent often takes longer than 30s per
   turn; raise this if a scan fails with a timeout. The error names `request.timeout_s`

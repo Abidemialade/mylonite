@@ -711,3 +711,36 @@ def test_rest_target_file_builds_spec_and_round_trips(tmp_path: object) -> None:
     spec = build_target_spec(tf)
     assert spec.transport == "rest"
     assert spec.request is not None and spec.request.response_path == "reply"
+
+
+def test_a_json_body_goes_out_as_json_when_no_content_type_is_set() -> None:
+    """FastAPI-style agents reject a JSON body sent with no content type (422)
+    before the payload reaches the agent. A JSON body now carries one."""
+    _register_rest()
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["content-type"] = request.headers.get("content-type", "")
+        return httpx.Response(200, json={"reply": "ok"})
+
+    adapter = HTTPAgentAdapter(family="myagent")
+    adapter._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        asyncio.run(adapter.invoke(_payload("hello")))
+    finally:
+        asyncio.run(adapter.close())
+
+    assert captured["content-type"] == "application/json"
+
+
+def test_a_declared_content_type_always_wins() -> None:
+    from mylonite.plugins._http.http_adapter import _with_json_content_type
+
+    declared = {"content-type": "application/vnd.custom+json"}
+    assert _with_json_content_type(declared, '{"prompt": "x"}') == declared
+
+
+def test_a_non_json_body_gets_no_content_type_added() -> None:
+    from mylonite.plugins._http.http_adapter import _with_json_content_type
+
+    assert _with_json_content_type(None, "prompt=x") is None

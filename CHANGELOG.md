@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A JSON request body is sent as JSON.** The `rest` transport sent its body with no
+  content type, so agent servers that require one (FastAPI, for example) rejected every
+  attack with a 422 before it reached the agent, and the class read NOT TESTED. When the
+  body is JSON and the target file sets no `Content-Type`, Mylonite now sends
+  `application/json`. A content type you declare always wins.
 - **A rejection no longer says the guard "did not block" when it blocked everything it
   could see.** When the guarded side of a custom-target differential leaked nothing but
   some runs reached no verdict (for example, an effect probe that failed calibration),

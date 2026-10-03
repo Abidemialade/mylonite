@@ -90,6 +90,23 @@ def _prompt_occurrences_quoted(body: str) -> list[bool]:
     return flags
 
 
+def _with_json_content_type(headers: dict[str, str] | None, body: str) -> dict[str, str] | None:
+    """Add ``Content-Type: application/json`` when the rendered body is JSON and
+    the target file set no content type of its own.
+
+    Without it a JSON body goes out with no content type, and common agent
+    servers (FastAPI, for one) reject it with a 422 before the payload reaches
+    the agent. A content type the target file declares always wins.
+    """
+    if headers and any(k.lower() == "content-type" for k in headers):
+        return headers
+    try:
+        json.loads(body)
+    except ValueError:
+        return headers or None
+    return {**(headers or {}), "Content-Type": "application/json"}
+
+
 def _escape_for_body(text: str, body: str) -> str:
     """Return ``text`` safe to substitute into every ``{prompt}`` slot of ``body``.
 
@@ -360,7 +377,7 @@ class HTTPAgentAdapter(AsyncTargetAdapterBase):
             async with client.stream(
                 req.method.upper(),
                 req.url,
-                headers=req.headers or None,
+                headers=_with_json_content_type(req.headers, body),
                 content=body.encode("utf-8"),
             ) as response:
                 # Fail loud on a transport/config error (4xx/5xx) instead of judging
