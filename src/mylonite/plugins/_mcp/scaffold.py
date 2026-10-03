@@ -319,7 +319,11 @@ def _render_target_scaffold(
     prompt_line = (
         f"system_prompt_file: {system_prompt_file}\n"
         if system_prompt_file is not None
-        else '# system_prompt_file: prompt.txt   # or set system_prompt: "..." inline\n'
+        else (
+            "# Your app's real system prompt: some weaknesses only show under it, and\n"
+            "# without one the scan uses Mylonite's generic default (and warns).\n"
+            '# system_prompt_file: prompt.txt   # or set system_prompt: "..." inline\n'
+        )
     )
     scope_line = f"scope: {tf.scope}\n" if tf.scope is not None else "# scope: my-scope\n"
 

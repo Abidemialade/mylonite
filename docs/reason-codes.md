@@ -448,6 +448,18 @@ the held item and the attempt stays NOT TESTED.
 it marks them with in `deferred_markers`, so a held action can be told apart from one
 accepted for later delivery.
 
+## MYL-INC-013
+
+The agent tried a tool listed under `control_config.never_call`. Mylonite blocked the call
+before it reached the server, so the attempt proved neither a finding nor resistance. The
+blocked call is in the attempt's trace with `blocked_by: never_call`. The whole attempt
+reads NOT TESTED, even when another call in it went through, because a seed's predicate
+can still read the blocked call's arguments. See
+[`never_call`](target-file.md#never_call-tools-mylonite-must-never-call).
+
+**Fix:** If the tool is safe to call on your test instance, remove it from `never_call`
+and re-run; otherwise leave it listed and read the class as not tested for that tool.
+
 ## MYL-SRV-001
 
 The negative rests only on the server returning an error.

@@ -1356,6 +1356,30 @@ def scan(
             timeout_s=_autowire_budget_s(refusal_tf.timeout_s),
         )
 
+    # The run plan and one plain line estimating the LLM spend, BEFORE any of
+    # it happens -- ahead of calibration, whose control writes are the first
+    # live tool calls. A dry run makes none, so it's exempt (and this never
+    # duplicates the seed-enumeration dry-run output).
+    if not dry_run:
+        from mylonite.commands.cost_estimate import scan_estimate_line
+        from mylonite.commands.run_plan import print_run_plan
+
+        print_run_plan(
+            planner=effective_planner_model,
+            customiser=effective_customiser_model,
+            judge=effective_judge_model,
+            target_file=refusal_tf,
+            target_id=report_target_id,
+            adapter=adapter,
+        )
+        echo_err(
+            scan_estimate_line(
+                report_target_id,
+                weakness_classes=weakness_class,
+                declared_classes=refusal_tf.weakness_classes if refusal_tf is not None else None,
+            )
+        )
+
     if refusal_tf is not None and not dry_run and refusal_tf.transport != "rest":
         _calibrate_custom_target_now(adapter)  # never under --dry-run
     # A5: randomize the exfil destination by DEFAULT on live custom-target scans, so a
@@ -1390,20 +1414,6 @@ def scan(
         attack_modules=attack_modules,
         module_load_failures=module_load_failures,
     )
-
-    # One plain line estimating the LLM spend BEFORE it happens --
-    # a dry run makes none, so it's exempt (and this never duplicates the
-    # seed-enumeration dry-run output, which carries no call estimate at all).
-    if not dry_run:
-        from mylonite.commands.cost_estimate import scan_estimate_line
-
-        echo_err(
-            scan_estimate_line(
-                report_target_id,
-                weakness_classes=weakness_class,
-                declared_classes=refusal_tf.weakness_classes if refusal_tf is not None else None,
-            )
-        )
 
     from mylonite.scan._llm import llm_scope
     from mylonite.scan.seeds import weakness_class_scope
@@ -1787,7 +1797,16 @@ def _validate_custom(
     # before the live preflight call just below, which is the first request
     # this command sends to the provider.
     from mylonite.commands.cost_estimate import validate_estimate_line
+    from mylonite.commands.run_plan import print_run_plan
 
+    print_run_plan(
+        planner=planner_model or model,
+        customiser=customiser_model or model,
+        judge=judge_model or model,
+        target_file=tf,
+        target_id=f"mcp:{tf.family}",
+        recorded_tools=list(generated.exploit.response.tool_calls),
+    )
     echo_err(
         validate_estimate_line(
             is_reference=False,
@@ -2278,9 +2297,17 @@ def validate(
         from mylonite.plugins._reference.reference_validator import workload_message
 
         echo_err(workload_message(iterations, model=effective_model, fast=fast))
-        # One plain line estimating the LLM spend BEFORE it happens.
+        # The run plan and one plain line estimating the LLM spend, BEFORE it happens.
         from mylonite.commands.cost_estimate import validate_estimate_line
+        from mylonite.commands.run_plan import print_run_plan
 
+        print_run_plan(
+            planner=effective_planner_model,
+            customiser=effective_customiser_model,
+            judge=effective_judge_model,
+            target_file=None,
+            target_id=generated.exploit.target_id,
+        )
         echo_err(
             validate_estimate_line(is_reference=True, iterations=iterations, twins=2, fast=fast)
         )
@@ -3061,6 +3088,16 @@ def gate(
     # validation part is unknown until the scan decides how many findings it
     # kept, so this names the per-finding cost instead of a false total.
     gate_target_id = f"mcp:{tf.family}" if tf is not None else (target or "mcp:custom")
+    from mylonite.commands.run_plan import print_run_plan
+
+    print_run_plan(
+        planner=effective_planner_model,
+        customiser=effective_customiser_model,
+        judge=effective_judge_model,
+        target_file=tf,
+        target_id=gate_target_id,
+        adapter=adapter,
+    )
     echo_err(
         gate_estimate_line(
             gate_target_id,

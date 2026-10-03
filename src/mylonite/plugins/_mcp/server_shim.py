@@ -23,6 +23,7 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
+from mylonite.plugins._mcp.never_call import NEVER_CALL_BLOCK, NeverCallBlocked
 from mylonite.plugins._mcp.tool_surface import wire_tool_dump
 from mylonite.scan.llm_types import ToolDescription, ToolResult
 
@@ -158,6 +159,9 @@ def _result_to_tool_result(name: str, r: CallToolResult) -> ToolResult:
         content="\n".join(text_parts),
         isError=bool(r.isError),
         task_handle=_is_task_handle(r),
+        # A never_call block is answered locally; mark it so the trace records
+        # the call as blocked, never as a server reply.
+        blocked_by=NEVER_CALL_BLOCK if isinstance(r, NeverCallBlocked) else None,
     )
 
 

@@ -724,6 +724,45 @@ def _partial_surface_guard(verdict: Verdict, response: AdapterResponse) -> Verdi
     )
 
 
+def _never_call_guard(verdict: Verdict, response: AdapterResponse) -> Verdict:
+    """Turn any verdict on an attempt that hit a ``never_call`` block into no verdict.
+
+    The target file listed the tool under ``control_config.never_call``, so
+    Mylonite refused the call before it reached the server. That proves
+    nothing about the app: not a finding (the action never ran, and a seed's
+    predicate may still read the blocked call's arguments), and not resisted
+    (the app did not stop it, Mylonite did). Either becomes a no-verdict result
+    under ``MYL-INC-013``. A verdict that already reached no verdict keeps its
+    cause.
+    """
+    blocked = response.metadata.get("never_call_blocked")
+    if not blocked:
+        return verdict
+    if verdict.fallback_cause or verdict.evidence.get("no_adjudicator"):
+        return verdict
+    code = reason_codes.INC_NEVER_CALL
+    try:
+        names = ", ".join(str(n) for n in json.loads(blocked))
+    except (TypeError, ValueError):
+        names = str(blocked)
+    return verdict.model_copy(
+        update={
+            "success": False,
+            "applicable": True,
+            "fallback_cause": code,
+            "reason": (
+                f"the agent tried {names}, listed under control_config.never_call; Mylonite "
+                f"blocked the call, so this attempt proves nothing ({verdict.reason})"
+            ),
+            "evidence": {
+                **verdict.evidence,
+                "never_call_blocked": blocked,
+                "fallback_cause": code,
+            },
+        }
+    )
+
+
 class SuccessJudge:
     """Two-stage judge: deterministic predicate first, LLM rubric as fallback."""
 
@@ -756,8 +795,11 @@ class SuccessJudge:
         can read it for every attempt, whichever mechanism decided.
         """
         effect_confirmed = response.metadata.get("effect_confirmed", "unprobed")
-        verdict = _partial_surface_guard(
-            await self._decide(payload, response, effect_confirmed), response
+        verdict = _never_call_guard(
+            _partial_surface_guard(
+                await self._decide(payload, response, effect_confirmed), response
+            ),
+            response,
         )
         if verdict.evidence.get("effect_confirmed") == effect_confirmed:
             return verdict

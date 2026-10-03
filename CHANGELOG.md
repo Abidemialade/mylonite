@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`scan`, `validate` and `gate` show what a live run will touch before
+  it sends anything.** A short run plan now prints just above the call
+  estimate: the model (or each role's model), where the agent's system prompt
+  comes from, the consequential tools the run may drive, the `never_call`
+  list, and "Run against a test instance, never production." When the target
+  declares no `system_prompt` or `system_prompt_file`, the plan names
+  Mylonite's generic default and warns, with the field to set. On a custom
+  `scan` the plan now prints before calibration's control writes, the first
+  calls that touch your tools. `--dry-run` prints neither line. The
+  `--scaffold` output also says why the prompt matters, next to the
+  commented `system_prompt_file` line.
+
+- **`control_config.never_call` blocks a tool outright.** List tools in the
+  target file that Mylonite must never call. A call to one is answered
+  locally with an error and never reaches your server, on stdio, `sse` and
+  `http` targets alike, and for the agent, a `seed_arm` plant, an effect
+  probe and the calibration controls. The trace records the call with
+  `blocked_by: never_call`, and the attempt reads NOT TESTED under the new
+  reason code `MYL-INC-013`: never a finding, never resisted. A `rest`
+  target, or a `seed_arm.tool` or `effect_probe.verify_tool` that is also
+  listed, is refused at load. The reason-code snapshot gains the new code.
+
 - **The gate PR body reads verdict, impact, fix, then proof — every time.**
   Every finding section now opens with an explicit verdict line, a severity
   label and a one-sentence, plain-language impact statement ("anyone who can

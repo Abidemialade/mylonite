@@ -190,6 +190,7 @@ class TargetFile(BaseModel):
         else:  # sse | http — remote MCP
             if not self.url:
                 raise ValueError(f"transport {self.transport!r} requires a 'url'")
+        self._check_never_call()
         if self.family in {"filesystem", "fetch", "github"}:
             msg = f"family {self.family!r} is reserved for a bundled target; choose another name"
             raise ValueError(msg)
@@ -215,6 +216,36 @@ class TargetFile(BaseModel):
             # consumer of `requires_scope` that still trusts the flag.
             self.requires_scope = True
         return self
+
+    def _check_never_call(self) -> None:
+        """Refuse a ``never_call`` list Mylonite could not honour."""
+        never = self.control_config.never_call if self.control_config is not None else ()
+        if not never:
+            return
+        if any(not name.strip() for name in never):
+            raise ValueError("control_config.never_call entries must be non-empty tool names")
+        if self.transport == "rest":
+            raise ValueError(
+                "control_config.never_call is for MCP transports (stdio/sse/http); a rest "
+                "target calls its tools itself, so Mylonite cannot block one. Point the "
+                "rest target at a test instance instead."
+            )
+        clashes = [
+            f"{where} {tool!r}"
+            for where, tool in (
+                ("seed_arm.tool", self.seed_arm.tool if self.seed_arm else None),
+                (
+                    "effect_probe.verify_tool",
+                    self.effect_probe.verify_tool if self.effect_probe else None,
+                ),
+            )
+            if tool and tool in never
+        ]
+        if clashes:
+            raise ValueError(
+                f"{', '.join(clashes)} is also listed under control_config.never_call, so "
+                "Mylonite could never call it. Remove it from never_call or name another tool."
+            )
 
 
 def resolved_system_prompt_path(tf: TargetFile) -> Path | None:
