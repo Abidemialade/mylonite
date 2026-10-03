@@ -3,10 +3,12 @@
 # kept exploit opens a gating PR that adds/updates the .mylonite/gate/ test plus
 # a suggested-fix description. Never blocks merges.
 #
-# Requires the MYLONITE_API_KEY secret. Uses the built-in GITHUB_TOKEN to open
-# the PR — no extra secret needed. Pinned to the model this gate run used;
-# set a MYLONITE_MODEL repository variable to change it without editing this
-# file.
+# Requires the MYLONITE_API_KEY secret, mapped below to the credential
+# variable the model that scaffolded this file actually needs. Uses the
+# built-in GITHUB_TOKEN to open the PR — no extra secret needed. Pinned to
+# the model this gate run used; set a MYLONITE_MODEL repository variable to
+# change it without editing this file. Changing providers also needs a
+# fresh `gate --workflows` run, so the key mapping below is re-baked too.
 name: Mylonite discovery
 on:
   schedule:
@@ -15,19 +17,28 @@ on:
 permissions:
   contents: write
   pull-requests: write
+concurrency:
+  group: mylonite-discovery
+  cancel-in-progress: false
 jobs:
   discover:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MYLONITE_REDRIVE_ATTEMPTS: "3"
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install mylonite + pytest
-        run: pip install "mylonite==0.10.4" pytest
+        run: pip install "mylonite==0.10.4" pytest -c .github/workflows/mylonite-constraints.txt
+      - name: Configure git identity for the gating PR
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
       - name: Discover -> generate -> validate -> open gating PR
         # The variable travels through env, not an expression inside `run:`:
         # GitHub pastes an expression into the script text before bash parses

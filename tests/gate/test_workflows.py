@@ -32,12 +32,14 @@ def test_write_workflows_creates_both_with_runs_on(tmp_path):
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
     )
     names = {p.name for p in written}
-    assert names == {"mylonite-gate.yml", "mylonite-discovery.yml"}
+    assert names == {"mylonite-gate.yml", "mylonite-discovery.yml", "mylonite-constraints.txt"}
     for p in written:
         assert p.parent == tmp_path / ".github" / "workflows"
         text = p.read_text(encoding="utf-8")
         assert "__RUNS_ON__" not in text  # token substituted
         assert "__MYLONITE_MODEL__" not in text  # ditto for the model token
+        if p.suffix != ".yml":  # the vendored P2 constraints file isn't a workflow
+            continue
         doc = yaml.safe_load(text)
         job = next(iter(doc["jobs"].values()))
         assert job["runs-on"] == "ubuntu-latest"
@@ -428,3 +430,163 @@ def test_target_secrets_are_checked_non_empty_before_the_gate_runs(tmp_path, nam
         text=True,
     )
     assert full.returncode == 0, full.stdout + full.stderr
+
+
+# ---------------------------------------------------------------------------
+# T3/DoD2: the credential env var is read from the gate run's own resolved
+# provider, never hardcoded to Anthropic's.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("model", "key_var"),
+    [
+        ("anthropic/claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
+        ("openai/gpt-4o-mini", "OPENAI_API_KEY"),
+        ("gemini/gemini-2.5-pro", "GEMINI_API_KEY"),
+    ],
+)
+def test_write_workflows_maps_the_key_var_for_the_models_own_provider(tmp_path, model, key_var):
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest", model=model)
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    assert doc["jobs"]["gate"]["env"][key_var] == "${{ secrets.MYLONITE_API_KEY }}"
+
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
+    assert ddoc["jobs"]["discover"]["env"][key_var] == "${{ secrets.MYLONITE_API_KEY }}"
+
+
+def test_write_workflows_refuses_a_local_model(tmp_path):
+    """Ollama/vLLM have no credential a hosted GitHub runner could use even
+    if one were mapped -- scaffolding a workflow for one would only ever
+    produce CI that can't pass."""
+    from mylonite.gate.pr import GatePrError
+
+    with pytest.raises(GatePrError, match="local model"):
+        write_workflows(tmp_path, runs_on="ubuntu-latest", model="ollama_chat/llama3.2:3b")
+
+
+def test_write_workflows_refuses_a_multi_key_provider(tmp_path):
+    """Bedrock needs two credential vars (an access key + a secret), which a
+    single MYLONITE_API_KEY secret can't express -- refuse rather than
+    silently map only one of them."""
+    from mylonite.gate.pr import GatePrError
+
+    with pytest.raises(GatePrError, match="needs"):
+        write_workflows(tmp_path, runs_on="ubuntu-latest", model="bedrock/anthropic.claude-haiku")
+
+
+# ---------------------------------------------------------------------------
+# GT8: SHA-pinned actions, concurrency, timeout-minutes.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["mylonite-gate.yml", "mylonite-discovery.yml"])
+def test_emitted_workflows_pin_actions_by_sha(tmp_path, name):
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
+    assert "actions/checkout@v6\n" not in text
+    assert "actions/setup-python@v6\n" not in text
+    assert "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0" in text
+    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0" in text
+
+
+@pytest.mark.parametrize(
+    ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
+)
+def test_emitted_workflows_set_concurrency_and_timeout(tmp_path, name, job):
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
+    assert "concurrency" in doc
+    assert "group" in doc["concurrency"]
+    assert isinstance(doc["jobs"][job]["timeout-minutes"], int)
+    assert doc["jobs"][job]["timeout-minutes"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TK-3 carry: explicit MYLONITE_REDRIVE_ATTEMPTS per job.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_workflow_sets_one_redrive_attempt(tmp_path):
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    assert doc["jobs"]["gate"]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "1"
+
+
+def test_discovery_workflow_sets_three_redrive_attempts(tmp_path):
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    doc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
+    assert doc["jobs"]["discover"]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "3"
+
+
+# ---------------------------------------------------------------------------
+# P3/P5: Node/uv setup emitted only when the target's launch command needs
+# it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command", ["npx", "node"])
+def test_write_workflows_emits_node_setup_for_a_node_target(tmp_path, command):
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        model="anthropic/claude-haiku-4-5-20251001",
+        target_command=command,
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0" in text
+    assert "pip install uv" not in text
+
+
+@pytest.mark.parametrize("command", ["uvx", "uv"])
+def test_write_workflows_emits_uv_setup_for_a_uv_target(tmp_path, command):
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        model="anthropic/claude-haiku-4-5-20251001",
+        target_command=command,
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "pip install uv" in text
+    assert "setup-node" not in text
+
+
+def test_write_workflows_emits_no_runtime_setup_for_a_python_target(tmp_path):
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        model="anthropic/claude-haiku-4-5-20251001",
+        target_command="python",
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "setup-node" not in text
+    assert "pip install uv" not in text
+    assert "__RUNTIME_SETUP_STEP__" not in text
+
+
+def test_write_workflows_emits_no_runtime_setup_when_command_is_unknown(tmp_path):
+    """The default (``target_command=None``) -- a reference/bundled target,
+    or a caller that doesn't have the command -- renders byte-identical to
+    before this param existed (see the vendored-render test above)."""
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "setup-node" not in text
+    assert "pip install uv" not in text

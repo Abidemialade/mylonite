@@ -9,9 +9,86 @@ from pathlib import Path
 
 from mylonite.gate.pr import GatePrError
 from mylonite.layout import DEFAULT_LAYOUT
+from mylonite.providers.registry import PROVIDERS
 from mylonite.version import __version__
 
 _TEMPLATES = ("mylonite-gate.yml", "mylonite-discovery.yml")
+
+#: Launch commands that need a runtime setup step before the target can be
+#: spawned — a hosted runner has neither Node nor uv preinstalled the way it
+#: has Python (T3's sibling findings P3/P5: a target launched with
+#: npx/uvx/node/uv otherwise fails to launch in CI with no clearer message
+#: than "command not found").
+_NODE_COMMANDS = frozenset({"npx", "node"})
+_UV_COMMANDS = frozenset({"uvx", "uv"})
+
+
+def _llm_key_env_var(model: str) -> str:
+    """The credential env var name for ``model``'s provider — read from the
+    approved-provider registry rather than always assuming one provider
+    (T3): the scaffolded workflow used to map the gate secret to a single
+    hardcoded provider's key variable unconditionally, so a different
+    provider's user had their gate job fail in CI with no useful message,
+    and a finding made with a local model re-drove it on a runner that has
+    none.
+
+    Raises :class:`GatePrError` when the model's provider is local
+    (:attr:`~mylonite.providers.registry.ProviderInfo.local`, e.g. Ollama/
+    vLLM) — there is no key to map, and a hosted GitHub runner can't reach a
+    local server anyway, so scaffolding a workflow for it would only produce
+    CI that can never pass. Also raises when the provider is unrecognised
+    (no registry row at all) or needs more than one credential variable
+    (Bedrock's access-key pair) — a single ``MYLONITE_API_KEY`` secret can't
+    express either case; such a target needs a hand-written workflow instead
+    of the scaffolded one.
+    """
+    from mylonite.scan.providers import env_vars_for, provider_from_model
+
+    provider = provider_from_model(model)
+    info = PROVIDERS.get(provider) if provider else None
+    if info is not None and info.local:
+        raise GatePrError(
+            f"can't scaffold a CI workflow for the local model {model!r} "
+            f"(provider {provider!r} has no credential — it runs on this "
+            "machine, not a hosted GitHub runner). Point the target at a "
+            "CI-reachable backend and gate with a non-local model, or write "
+            "the CI workflow by hand for a self-hosted runner that has it."
+        )
+    key_vars = env_vars_for(provider)
+    if len(key_vars) != 1:
+        reason = "no registered credential" if not key_vars else f"needs {key_vars}, not one var"
+        raise GatePrError(
+            f"can't scaffold a CI workflow for model {model!r} (provider "
+            f"{provider!r} {reason}) — a scaffolded workflow maps exactly "
+            "one MYLONITE_API_KEY secret to one credential variable. Write "
+            "the CI workflow by hand for this provider instead."
+        )
+    return key_vars[0]
+
+
+def _runtime_setup_step(command: str | None) -> str:
+    """A step that installs the runtime ``command`` needs, inserted before
+    the step that installs/runs mylonite — empty (nothing emitted) when the
+    target launches with ``python`` or its command is unknown, since the
+    Python ``actions/setup-python`` already set up is enough (P3/P5): a
+    target launched via `npx`/`node` or `uvx`/`uv` otherwise has nothing on
+    the runner to launch it with.
+    """
+    if command in _NODE_COMMANDS:
+        lines = [
+            "      - name: Set up Node (the target launches with npx/node)",
+            "        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0",
+            "        with:",
+            '          node-version: "22"',
+        ]
+    elif command in _UV_COMMANDS:
+        lines = [
+            "      - name: Install uv (the target launches with uvx/uv)",
+            "        run: pip install uv",
+        ]
+    else:
+        return ""
+    return "\n".join(lines)
 
 
 def _target_secrets_env_block(target_env_vars: Sequence[str]) -> str:
@@ -94,6 +171,7 @@ def write_workflows(
     runs_on: str = "ubuntu-latest",
     gate_dir: Path = DEFAULT_LAYOUT.gate,
     target_env_vars: Sequence[str] = (),
+    target_command: str | None = None,
 ) -> list[Path]:
     """Render both workflow templates into ``repo_root/.github/workflows/``.
 
@@ -135,6 +213,13 @@ def write_workflows(
     * ``__TARGET_SECRETS_CHECK_STEP__`` -> a step, before the one that runs
       the gate, that fails the job naming each target secret that is empty
       (see :func:`_target_secrets_check_step`); removed when there are none.
+    * ``__LLM_KEY_ENV__`` -> the credential env var for ``model``'s provider
+      (T3; see :func:`_llm_key_env_var`) — never hardcoded to Anthropic's.
+    * ``__RUNTIME_SETUP_STEP__`` -> a Node/uv setup step when
+      ``target_command`` needs one (P3/P5; see :func:`_runtime_setup_step`);
+      removed when the target launches with Python or ``target_command`` is
+      unknown (``None`` — a reference/bundled target, or a caller that
+      doesn't have it).
 
     Returns the written paths.
     """
@@ -144,6 +229,7 @@ def write_workflows(
         "__GATE_DIR__": posix_gate_dir,
         "__MYLONITE_VERSION__": __version__,
         "__MYLONITE_MODEL__": model,
+        "__LLM_KEY_ENV__": _llm_key_env_var(model),
     }
     # The templates spell these as full-line YAML comments
     # (``#__TARGET_SECRETS_ENV__``) so the RAW, unsubstituted template stays
@@ -158,6 +244,7 @@ def write_workflows(
         "#__TARGET_SECRETS_ENV__": _target_secrets_env_block(target_env_vars),
         "#__TARGET_SECRETS_ENV_LINES__": _target_secrets_env_lines(target_env_vars),
         "#__TARGET_SECRETS_CHECK_STEP__": _target_secrets_check_step(target_env_vars),
+        "#__RUNTIME_SETUP_STEP__": _runtime_setup_step(target_command),
     }
     dest = repo_root / ".github" / "workflows"
     dest.mkdir(parents=True, exist_ok=True)
@@ -172,6 +259,16 @@ def write_workflows(
         out = dest / name
         out.write_text(text, encoding="utf-8")
         written.append(out)
+    # P2: a pinned, exact-version constraints file both templates' install
+    # steps apply (`pip install ... -c mylonite-constraints.txt`) — vendored
+    # verbatim (no tokens) so a LiteLLM compromise like 24 Mar 2026's doesn't
+    # reach a scaffolded CI run just because PyPI resolved a newer release
+    # that same day. Returned alongside the two workflow files so a caller
+    # (the git-add step in gate/wiring.py) stages it too.
+    constraints_src = base / "constraints.txt"
+    constraints_out = dest / "mylonite-constraints.txt"
+    constraints_out.write_text(constraints_src.read_text(encoding="utf-8"), encoding="utf-8")
+    written.append(constraints_out)
     return written
 
 

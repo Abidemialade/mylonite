@@ -4,9 +4,12 @@
 # model, 1 iteration). A regression fails this check, and so does a gate test
 # that did not run (MYLONITE_REQUIRE_GATE_RUN).
 #
-# Requires one secret: MYLONITE_API_KEY (your LLM provider key). Pinned to
-# the model this gate run used; set a MYLONITE_MODEL repository variable to
-# change it without editing this file.
+# Requires one secret: MYLONITE_API_KEY (your LLM provider key — mapped below
+# to the credential variable the model that found this exploit actually
+# needs). Pinned to the model this gate run used; set a MYLONITE_MODEL
+# repository variable to change it without editing this file. Changing
+# providers also needs a fresh `gate --workflows` run, so the key mapping
+# below is re-baked for the new provider.
 #
 # Enterprise / air-gapped: if your MCP server's backend is behind a corporate
 # network, change `runs-on` below to a self-hosted runner inside your perimeter,
@@ -18,21 +21,27 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: mylonite-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   gate:
     runs-on: __RUNS_ON__
+    timeout-minutes: 15
     env:
       MYLONITE_LIVE_TARGET: "1"
       MYLONITE_REQUIRE_GATE_RUN: "1"
+      MYLONITE_REDRIVE_ATTEMPTS: "1"
       MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '__MYLONITE_MODEL__' }}
-      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
+      __LLM_KEY_ENV__: ${{ secrets.MYLONITE_API_KEY }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+#__RUNTIME_SETUP_STEP__
       - name: Install mylonite + pytest
-        run: pip install "mylonite==__MYLONITE_VERSION__" pytest
+        run: pip install "mylonite==__MYLONITE_VERSION__" pytest -c .github/workflows/mylonite-constraints.txt
 #__TARGET_SECRETS_CHECK_STEP__
       - name: Run the committed gate test
         run: pytest __GATE_DIR__ -q -ra
