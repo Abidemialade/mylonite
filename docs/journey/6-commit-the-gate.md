@@ -8,7 +8,15 @@ that needs [a git repository](index.md#before-you-start): `--open-pr` and
 `--workflows` alone writes its CI files without that check.
 
 ```bash
-mylonite gate --target-file app.yaml --authorize my-app
+mylonite gate --target-file app.yaml --authorize my-app --max-llm-calls 50
+```
+
+Committing needs a git identity. On a fresh machine or a CI runner that has
+none, set one in the repository first:
+
+```bash
+git config user.name "Your Name"
+git config user.email "you@example.com"
 ```
 
 **By default, nothing outside `.mylonite/gate/` changes.** `gate` writes the
