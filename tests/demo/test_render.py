@@ -802,6 +802,8 @@ def test_the_kept_finding_leads_with_verdict_impact_fix_then_red_and_green(
     positions = [output.index(text) for text in order]
     assert positions == sorted(positions), "the kept block must come first, in this order"
     assert "fired 1/1 without the safeguard, resisted 1/1 with it" in output
+    assert "flakiness    not measured (1 run per build)" in output
+    assert "is stable" not in output
     assert "the kept finding above also passed the oracle" in output
     assert "✗ FAIL / ✓ PASS" in output
 

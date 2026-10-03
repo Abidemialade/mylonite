@@ -2,9 +2,10 @@
   "measured_at": "a203a7b",
   "how": "python scripts/count_llm_calls.py --gate, with PYTHONPATH and --root pointing at a checkout of the commit above",
   "allowed_growth_percent": 15,
+  "gate_rebaselined": "2026-10-03: the gate path now validates the demo's kept W4 finding (src/mylonite/demo/kept/) instead of the W2 example the re-recorded demo scan no longer finds, so its count was re-measured on that path (42); the scan counts are unchanged",
   "counts": {
     "scan_vulnerable": 34,
     "scan_guarded": 36,
-    "gate": 113
+    "gate": 42
   }
 }

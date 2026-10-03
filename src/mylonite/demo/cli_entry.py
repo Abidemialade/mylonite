@@ -48,22 +48,13 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
     # message at import time, before any of the imported symbols are referenced.
     try:
         from mylonite.demo.proof import prove_kept
-        from mylonite.demo.runner import DEMO_MODEL, DEMO_PROVIDER, DemoFixtureError, run_demo
+        from mylonite.demo.runner import DemoFixtureError, demo_model, demo_provider, run_demo
     except (ModuleNotFoundError, ImportError) as exc:
         _exit_if_missing_kitchen_sink(exc)
         raise
 
-    # Replay is pinned to the recorded provider/model. Never silently drop the
-    # override flags - a user who passed them deserves to know they did nothing.
-    if not live and (provider is not None or model is not None):
-        echo_err(
-            "warning: --provider/--model are ignored in replay mode - the demo "
-            f"replays fixtures recorded against {DEMO_PROVIDER}/{DEMO_MODEL}. "
-            "Pass --live to use a different provider/model."
-        )
-
     # No default provider or model: --live makes a REAL call, so it needs a
-    # model chosen for it same as scan/validate/gate/ablate do -- DEMO_MODEL
+    # model chosen for it same as scan/validate/gate/ablate do -- demo_model()
     # is the REPLAY fixtures' own recorded identity (see the module
     # docstring above), never a live default to fall back to silently.
     # Replay itself needs none: it never reaches this branch unless --live
@@ -76,6 +67,17 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
 
     start = time.monotonic()
     try:
+        # Replay is pinned to the recorded provider/model. Never silently drop
+        # the override flags - a user who passed them deserves to know they did
+        # nothing. Inside the try: naming the recorded model reads the fixture
+        # sidecars, and a missing or mixed one must exit 2 like any other
+        # fixture problem, not raise a traceback.
+        if not live and (provider is not None or model is not None):
+            echo_err(
+                "warning: --provider/--model are ignored in replay mode - the demo "
+                f"replays fixtures recorded against {demo_provider()}/{demo_model()}. "
+                "Pass --live to use a different provider/model."
+            )
         result = asyncio.run(run_demo(live=live, provider=provider, model=model))
         # The kept finding and its test, red then green. Always a replay of the
         # packaged recording, live or not: it is the proof the scan table leads to,

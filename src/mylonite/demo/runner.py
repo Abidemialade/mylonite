@@ -71,7 +71,13 @@ def _recorded_model() -> str:
     root = packaged_fixture_dir()
     models: set[str] = set()
     for variant in _VARIANTS:
-        meta = json.loads((root / variant / "_meta.json").read_text(encoding="utf-8"))
+        try:
+            meta = json.loads((root / variant / "_meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise DemoFixtureError(
+                f"demo fixtures for the {variant!r} variant have a missing or unreadable "
+                f"_meta.json ({type(exc).__name__}). {DEMO_RERECORD_HINT}"
+            ) from exc
         if not isinstance(meta, dict) or not meta.get("model"):
             raise DemoFixtureError(
                 f"demo fixtures for the {variant!r} variant have no recorded model in "
@@ -144,13 +150,35 @@ class DemoFixtureError(FixtureError):
     """
 
 
-#: The model the demo replays, exactly as the packaged fixtures recorded it.
-#: Read from the fixtures, never chosen here: it is the recording's identity, not a
-#: default. It is used only for replay; `--live` needs a model chosen for it.
-DEMO_MODEL: str = _recorded_model()
-#: The provider that model belongs to, derived from the model id through the
-#: provider registry rather than named.
-DEMO_PROVIDER: str = provider_from_model(DEMO_MODEL) or "unknown"
+def demo_model() -> str:
+    """The model the demo replays, exactly as the packaged fixtures recorded it.
+
+    Read from the fixtures on each call, never chosen here and never at import: it
+    is the recording's identity, not a default, and a missing or mixed sidecar must
+    surface as :class:`DemoFixtureError` where the CLI can turn it into exit 2,
+    not as an import-time traceback. Used only for replay; `--live` needs a model
+    chosen for it.
+    """
+    return _recorded_model()
+
+
+def demo_provider() -> str:
+    """The provider of :func:`demo_model`, derived through the provider registry."""
+    return provider_from_model(demo_model()) or "unknown"
+
+
+def __getattr__(name: str) -> str:
+    """``DEMO_MODEL`` / ``DEMO_PROVIDER``, resolved lazily on first access.
+
+    Kept as names for the scripts and tests that import them; resolving them on
+    access rather than at import is what keeps a broken sidecar from breaking
+    ``import mylonite.demo.runner``.
+    """
+    if name == "DEMO_MODEL":
+        return demo_model()
+    if name == "DEMO_PROVIDER":
+        return demo_provider()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @dataclass
@@ -279,8 +307,8 @@ async def run_demo(
             vulnerable=result["vulnerable"],
             guarded=result["guarded"],
             mode=_replay_mode_label(),
-            provider=DEMO_PROVIDER,
-            model=DEMO_MODEL,
+            provider=demo_provider(),
+            model=demo_model(),
             elapsed_s=elapsed,
         )
 
@@ -289,8 +317,8 @@ async def run_demo(
         # empty-string provider/model from a programmatic caller, as opposed to
         # CLI Optional[str] which never surfaces "") must still win over the
         # default rather than being silently discarded (DCR-0030).
-        used_provider = provider if provider is not None else DEMO_PROVIDER
-        used_model = model if model is not None else DEMO_MODEL
+        used_model = model if model is not None else demo_model()
+        used_provider = provider if provider is not None else demo_provider()
         # A model override alone used to leave the provider at DEMO_PROVIDER
         # ("ollama"), so `--live --model <some-other-provider's-model>` printed
         # a "live" label naming the demo provider for a run LiteLLM routed
@@ -357,16 +385,16 @@ async def run_demo(
         "vulnerable",
         completion_fn=vuln_recorder,
         note_id_factory=_note_id_counter(),
-        provider=DEMO_PROVIDER,
-        model=DEMO_MODEL,
+        provider=demo_provider(),
+        model=demo_model(),
         llm_assist=False,
     )
     guard_engine = _build_scan(
         "guarded",
         completion_fn=guard_recorder,
         note_id_factory=_note_id_counter(),
-        provider=DEMO_PROVIDER,
-        model=DEMO_MODEL,
+        provider=demo_provider(),
+        model=demo_model(),
         llm_assist=False,
     )
     vuln_result, guard_result = await run_twins(vuln_engine.run(), guard_engine.run())
@@ -378,8 +406,8 @@ async def run_demo(
         vulnerable=results["vulnerable"],
         guarded=results["guarded"],
         mode=_replay_mode_label(),
-        provider=DEMO_PROVIDER,
-        model=DEMO_MODEL,
+        provider=demo_provider(),
+        model=demo_model(),
         elapsed_s=elapsed,
     )
 
@@ -414,8 +442,8 @@ async def _run_injected(recorder: Any) -> dict[str, ScanResult]:
             variant,
             completion_fn=recorder,
             note_id_factory=_note_id_counter(),
-            provider=DEMO_PROVIDER,
-            model=DEMO_MODEL,
+            provider=demo_provider(),
+            model=demo_model(),
             llm_assist=False,
         )
         results[variant] = await engine.run()
@@ -426,10 +454,10 @@ async def _run_injected(recorder: Any) -> dict[str, ScanResult]:
 
 
 __all__ = [
-    "DEMO_MODEL",
-    "DEMO_PROVIDER",
     "DemoFixtureError",
     "DemoResult",
     "_build_scan",
+    "demo_model",
+    "demo_provider",
     "run_demo",
 ]

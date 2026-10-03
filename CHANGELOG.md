@@ -49,8 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads the model from them rather than naming one; the vulnerable scan shows
   2 exploits on this recording, down from 5. Replay stays offline and keyless.
   The CI wall-time bar moves from 10 s to 20 s because the demo now also runs
-  the generated test. A replay that misses a recorded lookup still fails
-  rather than showing a result.
+  the generated test. A replay that misses a recorded lookup, or a missing or
+  mixed fixture sidecar, exits 2 with one line rather than showing a result.
+- **A repeat-run leg that rests on one run per build now reads "not
+  measured".** `validate`, `report`, the gate PR body and the demo used to show
+  a passing flakiness or stability leg and "the test discriminates and is
+  stable" even at `--iterations 1`, where the rate is 0% or 100% by
+  construction. They now mark the leg "not measured (1 run per build)" and say
+  stability was not measured. Runs with two or more iterations read as before.
 
 - **`scan`, `validate` and `gate` show what a live run will touch before
   it sends anything.** A short run plan now prints just above the call

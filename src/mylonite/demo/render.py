@@ -30,7 +30,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mylonite._cli_io import console_print
-from mylonite._verdict import verdict_label, verdict_reason
+from mylonite._verdict import (
+    STABILITY_STAGES,
+    stability_measured,
+    stability_not_measured,
+    verdict_label,
+    verdict_reason,
+)
 from mylonite.scan.artefacts import NOT_TESTED_OUTCOMES, OUTCOME_MARKS
 from mylonite.scan.coverage import attempt_reached_no_verdict
 from mylonite.scan.engine import ScanResult
@@ -328,7 +334,7 @@ def _leg_summary(stage: str, proof: KeptProof) -> str:
 
 _W1_FLOOR_NOTE: Final[str] = (
     "W1 does not land in this recording: summarising a note is normal on both "
-    "builds, so its checks cannot separate them, and the demo runs no LLM judge. "
+    "builds, so its checks cannot separate them, and this scan runs no LLM judge. "
     "A known limit, not a clean result (docs/limitations.md)."
 )
 
@@ -371,15 +377,17 @@ def _print_kept(console: Console, proof: KeptProof) -> None:
         f"Verdict: [bold green]{label}[/bold green] — {verdict_reason(proof.report)}",
         highlight=False,
     )
+    measured = stability_measured(proof.report)
     for outcome in proof.report.outcomes:
         if outcome.report_only:
             continue
-        mark = "[green]✓[/green]" if outcome.passed else "[red]✗[/red]"
-        console_print(
-            console,
-            f"  {mark} {outcome.stage:<12} {_leg_summary(outcome.stage, proof)}",
-            highlight=False,
-        )
+        if outcome.stage in STABILITY_STAGES and not measured:
+            # One run per build measures nothing; never show it as a pass.
+            mark, summary = "[yellow]·[/yellow]", stability_not_measured(proof.report)
+        else:
+            mark = "[green]✓[/green]" if outcome.passed else "[red]✗[/red]"
+            summary = _leg_summary(outcome.stage, proof)
+        console_print(console, f"  {mark} {outcome.stage:<12} {summary}", highlight=False)
     console_print(
         console,
         "  (one recorded run per build, replayed; a live `mylonite validate` repeats it)",
