@@ -531,9 +531,9 @@ SARIF report computes — no new analysis. Source: `mylonite.report.bundle`.
 When you run [`gate`](ci-gating.md), the PR body is itself a result surface:
 
 - **What was found** — the validated weakness, compliance tags, attack tier. Only a
-  `KEPT` validation gets the claim ("Control efficacy verified", a **Proven fix**). A
-  `STABLE, NOT PROVEN` or `REJECTED` one opens with "Control efficacy not proven" and
-  its verdict and reason instead.
+  `KEPT` validation is gated and gets the claim ("Control efficacy verified", a
+  **Proven fix**). A `STABLE, NOT PROVEN` finding is never gated: it is listed under
+  "Candidates (not proven, not committed)" with its reason and how to prove it.
 - **The differential proof** — the fires/resists numbers and the kept formula, so the
   reviewer sees *why the test is trustworthy*, not just that it exists.
 - **Located at** — the exact locus to fix: which tool's *description* smuggled the
@@ -605,7 +605,7 @@ them.
 
 | Code | Meaning |
 |------|---------|
-| 0 | success / the test is kept |
+| 0 | success / the test is kept (`validate`); for `gate`, the scan ran and found nothing |
 | 1 | structural findings present (the experimental `check --enforce` — see [experimental.md](experimental.md)) |
 | 2 | config or usage error (incl. an empty scan — never reads as a clean pass) |
 | 3 | LLM-call budget exceeded |
@@ -614,6 +614,8 @@ them.
 | 6 | `gate`: the test generator returned nothing |
 | 7 | `gate`: the validator returned nothing |
 | 8 | `gate`: the git/gh step failed (findings and report still written to `--out`) |
+| 9 | `gate`: at least one proven (KEPT) finding was gated and its test written |
+| 10 | `gate`: nothing was kept; at least one finding is a STABLE, NOT PROVEN candidate, and no test was written |
 
 `scan` on its own exits `0` even when it finds weaknesses — a scan's job is to report,
 not to gate. Finding something is only a red build once you route it through a command

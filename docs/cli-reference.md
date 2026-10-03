@@ -46,14 +46,23 @@ provider's error names. Local providers
 run; the later reachability check reports those. A key that is not set at all still
 exits `2` before any request.
 
-**Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
+**Exit codes:** `0` ok (for `gate`: the scan ran and found nothing) · `1` structural findings present (the experimental `check
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
 empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` no model
 chosen, the provider refused the key or a required header, or the chosen provider
 unreachable · `5` test rejected
 (not kept), or `generate` refused an input whose validation did not keep it · `6`
 `gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
-`gate`: the git/gh step failed (your findings and validation report are still in `--out`).
+`gate`: the git/gh step failed (your findings and validation report are still in `--out`) ·
+`9` `gate`: at least one proven finding was kept and its gate test written · `10` `gate`:
+nothing was kept, but at least one finding reproduced without proof (STABLE, NOT PROVEN); it
+is listed as a candidate and no test is written.
+
+`gate` writes a gate test only for a finding whose verdict is KEPT: a passing build and a
+passing differential or effect leg. A finding that reproduced but proved nothing is a
+candidate. `gate` prints it with the reason and how to get it proven, lists it in the PR
+body when something else was kept, and keeps its evidence outside the gate directory.
+`validate` on its own still exits `0` for a STABLE, NOT PROVEN test (see below).
 
 Budget exhaustion always exits `3`, whichever layer of the run observes it first — and it
 wins over a finding, not the other way round: a run that finds a real weakness and then

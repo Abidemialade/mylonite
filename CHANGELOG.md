@@ -62,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   logger, when it receives a record from a module logger created after that
   point. Turning redaction off removes every filter.
 
+- **`gate` never commits an unproven finding, and its exit code now tells
+  "gated" from "clean".** A finding whose validation passed without a passing
+  differential or effect leg (STABLE, NOT PROVEN) used to be committed as a gate
+  test. It is now a candidate: nothing for it is written to the gate directory
+  or committed, the console prints why and how to prove it (declare
+  `control_env` or an `effect_probe`), and the PR body lists it under
+  "Candidates (not proven, not committed)". Two new exit codes: `9` when at
+  least one proven finding was kept and gated, `10` when nothing was kept but a
+  candidate remains. `0` now means only that the scan ran and found nothing.
+  An aborted scan still wins with its own code. The exit-code snapshot and the
+  command-tree snapshot changed. **Upgrading:** a CI script that treated `gate`
+  exit `0` as "gated" needs to check for `9`; a job that fails on any non-zero
+  exit, such as the scaffolded discovery workflow, now fails on the night it
+  opens a gate PR.
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
   model could stall a reference `validate` run past the limit you set. Each
