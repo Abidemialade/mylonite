@@ -130,12 +130,16 @@ persisted so `generate`/`validate` reuse it); `--randomize-exfil/--no-randomize-
 (mint a unique exfil address per run so a finding proves the target leaks to ANY
 attacker destination, not one demo literal — **defaults ON for live custom-target
 scans**, off for the reference/replay path; matches `generate`/`validate`/`gate`).
-`--weakness-class W2` (repeatable; on `reference:*` and a bundled `mcp:<family>` this
-filters which seeds run — on a custom target, `--target-file` or inline `mcp:custom`
-flags, it adds to the target file's declared `weakness_classes` instead. Unifying the
-two is a deliberate follow-up, not this release. Rejects an unknown or lowercase value,
-e.g. `w4`, naming it). For a custom target: `--command`, `--arg`,
-`--env`, `--scope`, `--system-prompt`/`--system-prompt-file`, `--primary-tool`.
+`--weakness-class W2` (repeatable; one meaning everywhere — only these classes run.
+On `reference:*` and a bundled `mcp:<family>` it filters which seeds run. On a custom
+target, `--target-file` or inline `mcp:custom` flags, it filters the target file's
+declared `weakness_classes` the same way — it never widens past what the file
+declares; naming only classes it doesn't declare matches nothing and refuses before
+any spend, naming both the flag's values and the file's declared ones. With no
+`weakness_classes` declared at all, the flag declares them instead — the same thing
+the inline `mcp:custom` flags already do with nothing else to set them. Rejects an
+unknown or lowercase value, e.g. `w4`, naming it). For a custom target: `--command`,
+`--arg`, `--env`, `--scope`, `--system-prompt`/`--system-prompt-file`, `--primary-tool`.
 
 If an attack module that would have run fails to import or construct, `scan` (and
 `gate`) runs the rest and reports each weakness class that module covers as NOT TESTED
