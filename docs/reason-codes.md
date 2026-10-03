@@ -198,8 +198,8 @@ code `3`.
 
 **Fix:** Raise `--max-llm-calls` (the per-scan budget), or the hard request ceiling
 (`--max-llm-requests` or `MYLONITE_MAX_LLM_REQUESTS`) when the run names it, or run fewer
-weakness classes: `--weakness-class` on a reference or bundled target, `weakness_classes`
-in the target file for a custom one. Then re-run.
+weakness classes with `--weakness-class` (every target kind), or by editing
+`weakness_classes` in the target file (a custom target only). Then re-run.
 
 ## MYL-ABT-002
 
