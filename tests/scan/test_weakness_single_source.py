@@ -19,6 +19,7 @@ from mylonite.scan.seeds import Weakness
 from mylonite.scan.weakness import (
     WEAKNESS_CLASSES,
     WeaknessClass,
+    apply_weakness_class_filter,
     validate_weakness_class_flag_or_exit,
 )
 
@@ -84,6 +85,48 @@ def test_validate_weakness_class_flag_rejects_lowercase_value(
         validate_weakness_class_flag_or_exit(["w4"])
     err = capsys.readouterr().err
     assert "w4" in err
+
+
+def test_apply_weakness_class_filter_is_a_noop_with_no_flag() -> None:
+    effective, added = apply_weakness_class_filter(["W2", "W4"], None)
+    assert effective == ["W2", "W4"]
+    assert added == []
+
+
+def test_apply_weakness_class_filter_declares_when_the_target_declares_nothing() -> None:
+    """#227: an empty ``declared`` (no weakness_classes: line, or the inline
+    mcp:custom flags with nothing else to set them) has nothing to filter --
+    the flag declares the classes instead, exactly like the inline path
+    already does on its own."""
+    effective, added = apply_weakness_class_filter([], ["W2"])
+    assert effective == ["W2"]
+    assert added == ["W2"]
+
+
+def test_apply_weakness_class_filter_intersects_a_declared_set() -> None:
+    """#227: the flag never WIDENS a declared set any more -- it narrows it,
+    order preserved from the file, and reports nothing as flag-added (the
+    class was already in the file)."""
+    effective, added = apply_weakness_class_filter(["W2", "W3", "W4"], ["W4", "W2"])
+    assert effective == ["W2", "W4"]
+    assert added == []
+
+
+def test_apply_weakness_class_filter_refuses_an_empty_intersection(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#227: naming only classes the target doesn't declare used to WIDEN
+    past the declared set; now it matches nothing and refuses up front,
+    before any spend, rather than silently running zero seeds."""
+    with pytest.raises(typer.Exit) as excinfo:
+        apply_weakness_class_filter(["W4"], ["W3"])
+    from mylonite.exit_codes import EXIT_CONFIG
+
+    assert excinfo.value.exit_code == EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "W3" in err
+    assert "W4" in err
+    assert "--weakness-class" in err
 
 
 def test_no_module_re_lists_the_full_key_set() -> None:

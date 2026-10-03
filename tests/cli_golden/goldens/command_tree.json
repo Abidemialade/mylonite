@@ -1120,7 +1120,7 @@
         {
           "default": "None",
           "envvar": null,
-          "help": "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). A custom target (--target-file, or inline mcp:custom flags) ADDS it to weakness_classes; every other target (reference:*, a bundled mcp:<family>) FILTERS which seeds run.",
+          "help": "Only run these weakness classes, e.g. W2/W4 (repeatable). On reference:*/a bundled mcp:<family> target it filters which seeds run. On a custom target (--target-file, or inline mcp:custom flags) it filters the file's declared weakness_classes the same way -- naming only classes it doesn't declare matches nothing and refuses before any spend; with no weakness_classes declared at all, this flag declares them instead.",
           "is_flag": false,
           "multiple": true,
           "name": "weakness_class",

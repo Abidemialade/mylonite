@@ -852,10 +852,13 @@ def scan(
         typer.Option(
             "--weakness-class",
             help=(
-                "A weakness class to scope the scan to, e.g. W2/W4 (repeatable). A "
-                "custom target (--target-file, or inline mcp:custom flags) ADDS it "
-                "to weakness_classes; every other target (reference:*, a bundled "
-                "mcp:<family>) FILTERS which seeds run."
+                "Only run these weakness classes, e.g. W2/W4 (repeatable). On "
+                "reference:*/a bundled mcp:<family> target it filters which seeds "
+                "run. On a custom target (--target-file, or inline mcp:custom "
+                "flags) it filters the file's declared weakness_classes the same "
+                "way -- naming only classes it doesn't declare matches nothing and "
+                "refuses before any spend; with no weakness_classes declared at "
+                "all, this flag declares them instead."
             ),
         ),
     ] = None,
@@ -1189,18 +1192,18 @@ def scan(
                 _exit_if_missing_target_file(exc, target_file)
                 echo_exc(f"invalid --target-file {target_file}", exc)
                 raise typer.Exit(code=EXIT_CONFIG) from exc
-            # --weakness-class used to be a silent no-op alongside
-            # --target-file (only the YAML's weakness_classes were honoured).
-            # Merge the flag's classes into the file's, order-stable and deduped,
-            # so a documented, accepted flag actually does something.
-            if weakness_class:
-                flag_added_classes = [w for w in weakness_class if w not in tf.weakness_classes]
-                merged = list(tf.weakness_classes)
-                for w in weakness_class:
-                    if w not in merged:
-                        merged.append(w)
-                if merged != list(tf.weakness_classes):
-                    tf = tf.model_copy(update={"weakness_classes": merged})
+            # #227: --weakness-class means ONE thing everywhere -- "only these
+            # classes". Against a declared set it FILTERS (never widens, and
+            # an empty intersection refuses here, before any spend); against
+            # an undeclared one it DECLARES them (apply_weakness_class_filter
+            # raises typer.Exit itself on the refusal case).
+            from mylonite.scan.weakness import apply_weakness_class_filter
+
+            effective_classes, flag_added_classes = apply_weakness_class_filter(
+                tf.weakness_classes, weakness_class
+            )
+            if effective_classes != list(tf.weakness_classes):
+                tf = tf.model_copy(update={"weakness_classes": effective_classes})
         else:
             tf = _target_file_from_flags(
                 command=command,

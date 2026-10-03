@@ -42,6 +42,56 @@ WEAKNESS_CLASSES: frozenset[str] = frozenset(WeaknessClass)
 EFFECTFUL_WEAKNESS_CLASSES: frozenset[str] = frozenset({"W3", "W4"})
 
 
+def apply_weakness_class_filter(
+    declared: list[str], flag: Iterable[str] | None
+) -> tuple[list[str], list[str]]:
+    """Resolve a custom target's effective ``weakness_classes`` against
+    ``--weakness-class`` (#227): the flag means the SAME thing everywhere now
+    -- "only these classes run".
+
+    * No flag: ``declared`` is returned unchanged; nothing came from the flag.
+    * ``declared`` is empty (the target file has no ``weakness_classes:``, or
+      an inline ``mcp:custom`` target with no other source for them): there is
+      nothing to filter, so the flag *declares* the classes instead -- the
+      same thing the inline ``mcp:custom`` CLI flags already do on their own.
+    * ``declared`` is non-empty: the flag *filters* it (set intersection,
+      preserving the file's order) -- never widens it. A class named by the
+      flag that the file doesn't declare is simply not in the result; if
+      NONE of the flag's classes are declared, the intersection is empty and
+      this refuses up front, before any spend, rather than silently scanning
+      nothing or (the old bug) widening past what the file declared.
+
+    Returns ``(effective_classes, added_by_flag)``. ``added_by_flag`` names
+    classes that have no ``weakness_classes:`` line to point a fix at (the
+    empty-``declared`` case) -- a caller reporting an uncoverable class can
+    then say "drop it from the flag" instead of "remove it from
+    weakness_classes", which would name a key the target file doesn't have.
+    """
+    flag_list = list(flag or [])
+    if not flag_list:
+        return list(declared), []
+    if not declared:
+        return flag_list, flag_list
+    filtered = [w for w in declared if w in flag_list]
+    if not filtered:
+        import typer
+
+        from mylonite._cli_io import echo_err
+        from mylonite.exit_codes import EXIT_CONFIG
+        from mylonite.reason_codes import PRE_WEAKNESS_FILTER_EMPTY, get, tag
+
+        echo_err(
+            tag(
+                PRE_WEAKNESS_FILTER_EMPTY,
+                f"error: --weakness-class {sorted(flag_list)} matches none of this "
+                f"target's declared weakness_classes {list(declared)}; nothing would "
+                f"be scanned. {get(PRE_WEAKNESS_FILTER_EMPTY).fix}",
+            )
+        )
+        raise typer.Exit(code=EXIT_CONFIG)
+    return filtered, []
+
+
 def validate_weakness_class_flag_or_exit(values: Iterable[str]) -> None:
     """CLI pre-flight for ``--weakness-class`` (#205c): exit ``EXIT_CONFIG``
     naming any value that isn't an exact, uppercase, known class id --

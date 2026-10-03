@@ -1557,14 +1557,29 @@ def test_refusal_describe_budget_is_the_autowire_budget(
     target_registry.clear_runtime_targets()
 
 
-def test_scan_refusal_names_the_flag_when_the_class_came_from_it(
+def test_scan_refuses_before_any_spend_when_the_filter_matches_none_of_the_declared_classes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#227: --weakness-class FILTERS a custom target's declared
+    weakness_classes -- it no longer widens past them. Naming only a class
+    the file doesn't declare (W3, against a file that declares only W4)
+    intersects to nothing, so this refuses with one line, before the server
+    is even described -- not after discovering W3 is uncoverable from the
+    tool surface (the old, now-impossible, "added by the flag" case)."""
     from mylonite.plugins._mcp import target_registry
 
     target_registry.clear_runtime_targets()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    _patch_fake_mcp_session_with_one_tool(monkeypatch, "send_email")
+
+    class _Reached(Exception):
+        pass
+
+    def _must_not_reach(*_a: object, **_k: object) -> None:
+        raise _Reached("describe()/refusal reached despite an empty intersection")
+
+    monkeypatch.setattr(
+        "mylonite.plugins.cli_targets.refuse_uncoverable_weakness_classes", _must_not_reach
+    )
     p = tmp_path / "t.yaml"
     p.write_text(
         "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W4]\n",
@@ -1575,8 +1590,80 @@ def test_scan_refusal_names_the_flag_when_the_class_came_from_it(
         ["scan", "--target-file", str(p), "--authorize", "acme", "--weakness-class", "W3"],
     )
     out = result.stderr or result.output
+    assert result.exception is None or not isinstance(result.exception, _Reached), out
     assert result.exit_code == EXIT_CONFIG, out
-    assert "W3 was added by --weakness-class" in out
+    assert "MYL-PRE-006" in out
+    assert "W3" in out and "W4" in out
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_filter_narrows_a_declared_set_without_widening_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#227: a --weakness-class that overlaps the declared set narrows to the
+    overlap and the scan proceeds (dry-run) -- it is not an error to name a
+    mix of declared and undeclared classes, only to match none of them."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2, W4]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(p),
+            "--authorize",
+            "acme",
+            "--weakness-class",
+            "W4",
+            "--weakness-class",
+            "W3",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_filter_drops_a_filtered_out_class_from_effect_probe_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#227: a class --weakness-class filters OUT must not show up as a gap
+    anywhere downstream either -- MYL-NT-017 (no effect_probe for a W3/W4
+    class) is keyed off `tf.weakness_classes`, so it must only ever name W4
+    here, never the filtered-out W3, even though the file declares both."""
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    _patch_fake_mcp_session(monkeypatch)
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W3, W4]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(p),
+            "--authorize",
+            "acme",
+            "--weakness-class",
+            "W4",
+            "--dry-run",
+        ],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_SUCCESS, out
+    assert "MYL-NT-017" in out or "effect_probe" in out, out
+    assert "W3" not in out, out
     target_registry.clear_runtime_targets()
 
 
