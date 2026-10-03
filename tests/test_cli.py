@@ -6748,6 +6748,35 @@ def test_check_unknown_tools_never_gate_enforce_or_change_the_count(
     assert "unknown role" not in result.output
     assert "no (declared)" in result.output
 
+    # Zero structural findings while an unknown tool remains: --enforce exits 0.
+    def _desc_unknown_only() -> Any:
+        from mylonite.contracts import TargetDescriptor, ToolSpec
+
+        return TargetDescriptor(
+            target_id="mcp:myapp",
+            kind="mcp",
+            system_prompt="x",
+            tools=[
+                ToolSpec(
+                    name="frobnicate_thing",
+                    description="Does a thing.",
+                    json_schema={"properties": {}},
+                )
+            ],
+        )
+
+    _patch_fake_adapter_for(monkeypatch, _desc_unknown_only)
+    thing_pin = DescriptionIntegrityControl.digest("Does a thing.")
+    target_file = _write_check_target(
+        tmp_path,
+        extra=f"control_config:\n  description_pins:\n    frobnicate_thing: {thing_pin}\n",
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert "1 tool(s) have an unknown role" in result.output
+    assert "0 structural finding(s)" in result.output or "no structural exposure" in result.output
+    assert result.exit_code == EXIT_SUCCESS, result.output
+
+    _patch_fake_adapter_for(monkeypatch, _desc_with_an_unrecognised_tool)
     target_file = _write_check_target(
         tmp_path, extra=f"control_config:\n  description_pins:\n{pins}"
     )

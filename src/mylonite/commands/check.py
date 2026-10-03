@@ -66,8 +66,9 @@ def _print_tool_inventory(tools: list[ToolSpec], cc: ControlConfig | None) -> No
     if unknown:
         echo_err(
             f"{len(unknown)} tool(s) have an unknown role and are treated as consequential "
-            f"(fail-closed): {', '.join(unknown)}. To confirm them, list the consequential "
-            "tools under control_config.consequential_tools."
+            f"(fail-closed): {', '.join(unknown)}. To confirm them, list every consequential "
+            "tool under control_config.consequential_tools; every tool left off that list is "
+            "then treated as not consequential, so include the ones already recognised."
         )
 
 
