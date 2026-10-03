@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Final
 
 from mylonite._redaction import (
     REDACTION_PLACEHOLDER,
@@ -31,19 +32,43 @@ __all__ = [
 ]
 
 
-def _hint(key: str | None) -> str:
+#: Substring that marks a derived variable name as standing for a HEADER value
+#: (``MYLONITE_TARGET_HEADERS_...`` or ``MYLONITE_TARGET_REQUEST_HEADERS_...``
+#: — see ``target_yaml_env_ref_name``), as opposed to an ``env:`` entry. The
+#: hint differs because a header's value is the WHOLE header line (e.g.
+#: ``Bearer sk-...``), not a bare token — #183: the old hint (``<your
+#: Authorization>``) read the same for both, so an operator filling in a
+#: header variable would plausibly type just the token and get a malformed
+#: header the target then rejects.
+_HEADER_VAR_MARKER: Final = "_HEADERS_"
+
+
+def _hint(key: str | None, var: str = "") -> str:
     # A quote in a key would break the shell line; the hint is only a label.
-    return f"<your {key.replace(chr(39), '')}>" if key else "<value>"
+    if not key:
+        return "<value>"
+    label = key.replace(chr(39), "")
+    if _HEADER_VAR_MARKER in var:
+        return f"<the full {label} header value, e.g. Bearer ...>"
+    return f"<your {label}>"
 
 
 def posix_export_line(var: str, key: str | None) -> str:
-    """``export VAR='<your KEY>'`` for bash, zsh and other POSIX shells."""
-    return f"export {var}='{_hint(key)}'"
+    """``export VAR='<your KEY>'`` for bash, zsh and other POSIX shells.
+
+    For a ``headers``/``request.headers`` variable the hint instead reads
+    ``<the full KEY header value, e.g. Bearer ...>``, since that variable must
+    hold the WHOLE header value, not just the bare token (#183).
+    """
+    return f"export {var}='{_hint(key, var)}'"
 
 
 def powershell_env_line(var: str, key: str | None) -> str:
-    """``$env:VAR = '<your KEY>'`` for PowerShell."""
-    return f"$env:{var} = '{_hint(key)}'"
+    """``$env:VAR = '<your KEY>'`` for PowerShell.
+
+    See :func:`posix_export_line` for the header-value hint variant.
+    """
+    return f"$env:{var} = '{_hint(key, var)}'"
 
 
 def env_notice_lines(text: str, target: Path) -> list[str]:
