@@ -3,8 +3,12 @@
 Every command, its key options, and a worked example. Run `mylonite COMMAND --help` for
 the authoritative, always-current list (the help strings and usage examples live in the
 CLI itself). Global options `--api-key-file` and `--env-file` work before any command.
-A recognised `--env-file` value that is itself an unresolved `${VAR}`-shaped placeholder
-(never substituted by a templating tool or secrets manager) is a config error naming the
+Beyond recognised provider credential/config names, `--env-file` also loads every
+`MYLONITE_TARGET_...`-prefixed name and every name the run's own `--target-file` (if
+any) references as `${NAME}` — see
+[Secrets stay out of the file](target-file.md#secrets-stay-out-of-the-file). A
+recognised value that is itself an unresolved `${VAR}`-shaped placeholder (never
+substituted by a templating tool or secrets manager) is a config error naming the
 variable and the file, not a silent load of that literal text as a credential.
 
 **Hard spend limit.** The global option `--max-llm-requests N` (before the command), or

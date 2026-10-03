@@ -312,16 +312,26 @@ text; the warning is what's new.
 CLIs also accept it from an environment variable) or a remote target's
 `headers:`, as `${VAR}`.
 
-## `--env-file` refuses an unresolved `${VAR}` placeholder
+## `--env-file` loads more, and refuses an unresolved `${VAR}` placeholder
 
-**What changed.** `--env-file` set a recognised provider-key variable to
-whatever text followed `=`, even when that text was itself an unresolved
-`${VAR}`-shaped reference left behind by a templating tool or secrets
-manager that never ran — sending the literal placeholder text to the
-provider as if it were the key.
+**What changed.** `--env-file` only ever recognised provider-key/config
+names, dropping a `MYLONITE_TARGET_...` placeholder or a hand-written
+`${NAME}` reference in a target file with a warning — you had to `set -a; .
+./.env; set +a` instead. It also set a recognised variable to whatever text
+followed `=`, even when that text was itself an unresolved `${VAR}`-shaped
+reference left behind by a templating tool or secrets manager that never
+ran — sending the literal placeholder text to the provider as if it were
+the key.
 
-**What you'll see.** `--env-file` now exits `2` and names the variable and
-the file when a loaded value is exactly `${SOME_NAME}`, instead of loading it.
+**What you'll see.** `--env-file` now additionally loads every
+`MYLONITE_TARGET_...`-prefixed name and every name the run's own
+`--target-file` references as `${NAME}` (pass both flags together, or let
+`mylonite.yaml`'s `target_file:` supply the path). It also exits `2` and
+names the variable and the file when a loaded value is exactly
+`${SOME_NAME}`, instead of loading it.
 
-**What to do.** Resolve the reference before Mylonite reads the file — run
-the templating step first, or set the real value directly.
+**What to do.** Nothing, unless a script relied on one of those names being
+silently dropped (unlikely) or on the raw-placeholder value loading
+(should never have worked). Resolve a `${VAR}` reference before Mylonite
+reads the file — run the templating step first, or set the real value
+directly.
