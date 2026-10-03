@@ -22,7 +22,9 @@ from mylonite._redaction import (
     REDACTION_PLACEHOLDER,
     SecretRedactingFilter,
     install_log_redaction,
+    is_unresolved_var_placeholder,
     looks_like_api_key,
+    looks_like_credential_arg,
     redact,
     redact_env,
     redact_exception,
@@ -556,6 +558,113 @@ def test_headers_secret_is_indirected(monkeypatch: pytest.MonkeyPatch, tmp_path:
     rest_tf = load_target_file(rest_target_yaml)
     assert rest_tf.request is not None
     assert rest_tf.request.headers["Authorization"] == rest_secret
+
+
+def test_header_value_already_referencing_a_var_is_preserved_not_rewrapped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """#183: a header value that already references an env var (the
+    documented ``Authorization: Bearer ${MY_TOKEN}`` pattern from
+    docs/http-agent.md) must be left exactly as written, not re-wrapped into
+    a SECOND, disconnected ``${MYLONITE_TARGET_...}`` placeholder — doing so
+    used to silently orphan the ``MY_TOKEN`` export the operator already had
+    in their shell."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    src = "family: app\ncommand: python\nheaders:\n  Authorization: Bearer ${MY_TOKEN}\n"
+    out = redact_target_yaml(src)
+
+    assert "Bearer ${MY_TOKEN}" in out
+    assert "MYLONITE_TARGET_HEADERS_AUTHORIZATION" not in out
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(out, encoding="utf-8")
+    fake_token = "fake-token-value-not-a-real-secret"
+    monkeypatch.setenv("MY_TOKEN", fake_token)
+    tf = load_target_file(target_yaml)
+    assert tf.headers["Authorization"] == f"Bearer {fake_token}"
+
+
+def test_env_value_already_referencing_a_var_is_preserved_even_with_a_secret_key_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Same preservation for ``env``, where the KEY name alone (``GITHUB_TOKEN``)
+    would otherwise force a mask regardless of the value's shape."""
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    src = "family: app\ncommand: python\nenv:\n  GITHUB_TOKEN: ${MY_GH_TOKEN}\n"
+    out = redact_target_yaml(src)
+
+    assert "${MY_GH_TOKEN}" in out
+    assert "MYLONITE_TARGET_ENV_GITHUB_TOKEN" not in out
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(out, encoding="utf-8")
+    fake_token = "fake-gh-token-not-a-real-secret"
+    monkeypatch.setenv("MY_GH_TOKEN", fake_token)
+    tf = load_target_file(target_yaml)
+    assert tf.env["GITHUB_TOKEN"] == fake_token
+
+
+def test_redact_target_yaml_never_resolves_an_existing_var_ref_to_its_live_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Writing a target file never expands a ``${VAR}`` reference from the
+    live environment — only loading does. A real secret sitting in
+    ``os.environ`` under the referenced name must never land in the WRITTEN
+    text, even when that variable happens to be set at write time."""
+    live_secret = "sk-ant-should-never-be-written-to-disk"  # pragma: allowlist secret
+    monkeypatch.setenv("MY_TOKEN", live_secret)
+    out = redact_target_yaml(
+        "family: app\ncommand: python\nheaders:\n  Authorization: Bearer ${MY_TOKEN}\n"
+    )
+    assert live_secret not in out
+    assert "Bearer ${MY_TOKEN}" in out
+
+
+def test_header_var_ref_hint_names_the_full_header_value(tmp_path: Path) -> None:
+    """#183: the printed hint for a HEADERS variable must say it holds the
+    WHOLE header value, not just the bare token the old ``<your KEY>`` wording
+    implied."""
+    from mylonite._target_env import env_notice_lines
+
+    src = "family: app\ncommand: python\nheaders:\n  Authorization: Bearer ${MY_TOKEN}\n"
+    text = redact_target_yaml(src)
+    # No ${MYLONITE_TARGET_...} placeholder is written (the value already
+    # referenced a var), so there is nothing new to set -- the notice is empty.
+    assert env_notice_lines(text, tmp_path / "app.yaml") == []
+
+    # Force the header-indirection path with a literal secret instead, to see
+    # the hint text that IS printed for a headers variable.
+    literal_src = "family: app\ncommand: python\nheaders:\n  Authorization: Bearer sk-live-abc\n"
+    literal_text = redact_target_yaml(literal_src)
+    block = "\n".join(env_notice_lines(literal_text, tmp_path / "app.yaml"))
+    assert "the full Authorization header value, e.g. Bearer ..." in block
+
+
+def test_looks_like_credential_arg_flags_flag_value_and_bare_token() -> None:
+    assert looks_like_credential_arg(
+        "--api-key=sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    )
+    assert looks_like_credential_arg(
+        "ghp_abcdefghijklmnopqrstuvwxyz1234567890"  # pragma: allowlist secret
+    )
+    assert looks_like_credential_arg("https://api.example.com/v1?access_token=abcdefghijklmnop")
+
+
+def test_looks_like_credential_arg_leaves_ordinary_args_alone() -> None:
+    assert not looks_like_credential_arg("server.py")
+    assert not looks_like_credential_arg("--port")
+    assert not looks_like_credential_arg("/usr/local/bin/python3")
+    assert not looks_like_credential_arg("")
+
+
+def test_is_unresolved_var_placeholder() -> None:
+    assert is_unresolved_var_placeholder("${SOME_VAR}")
+    assert is_unresolved_var_placeholder("  ${SOME_VAR}  ")
+    assert not is_unresolved_var_placeholder("sk-ant-realvalue")
+    assert not is_unresolved_var_placeholder("Bearer ${SOME_VAR}")  # not the WHOLE value
+    assert not is_unresolved_var_placeholder("")
 
 
 def test_colliding_header_keys_get_distinct_var_names(
