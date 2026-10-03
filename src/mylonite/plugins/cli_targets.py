@@ -370,6 +370,16 @@ def autowire_seed_arm(
         # cause). Show it verbatim; never fall through to the seed_arm advice.
         echo_err(reason_codes.tag(reason_codes.PRE_AUTOWIRE_DESCRIBE_FAILED, f"auto-wire: {exc}"))
         raise typer.Exit(code=EXIT_CONFIG) from None
+    except typer.Exit:
+        # The probe's own adapter build already produced and echoed an
+        # operator-ready refusal (a mismatched --authorize, an invalid target
+        # scope/family, ...) and asked to exit. That is a deliberate abort,
+        # never a "describe() failed, let's fall back" case: typer.Exit
+        # subclasses RuntimeError/Exception, so without this clause the
+        # generic handler below caught it, printed a confusing "(Exit)"
+        # fallback message, and let the SAME refusal fire a second time when
+        # the real adapter build hit the identical check. Propagate it as-is.
+        raise
     except Exception as exc:
         descriptor = None
         echo_err(

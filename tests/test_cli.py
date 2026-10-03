@@ -1365,6 +1365,37 @@ def test_scan_autowire_describe_timeout_names_the_timeout_not_seed_arm_advice(
     target_registry.clear_runtime_targets()
 
 
+def test_scan_autowire_probe_authorize_failure_does_not_echo_the_refusal_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#195: the auto-wire probe's own adapter build can raise typer.Exit (e.g. a
+    mismatched --authorize) before it ever calls describe(). That used to be
+    swallowed by the probe's generic "describe failed" fallback -- which both
+    hid the real reason behind a bare exception class name (`Exit`) and let
+    the SAME refusal print a second time when the later real adapter build
+    hit the identical check. The refusal must surface once, immediately, with
+    no auto-wire noise in between."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
+    from mylonite.plugins._mcp import target_registry
+
+    target_registry.clear_runtime_targets()
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        ["scan", "--target-file", str(p), "--authorize", "not-acme", "--dry-run"],
+    )
+    out = result.stderr or result.output
+    assert result.exit_code == EXIT_CONFIG, out
+    refusal = "--authorize must equal the family name"
+    assert out.count(refusal) == 1, out
+    assert "(Exit)" not in out, out
+    target_registry.clear_runtime_targets()
+
+
 def test_autowire_budget_floors_at_the_constant_when_target_declares_less() -> None:
     from mylonite.cli import _AUTOWIRE_DESCRIBE_TIMEOUT_S, _autowire_budget_s
 
