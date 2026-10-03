@@ -1531,8 +1531,11 @@ def test_a_rejected_findings_own_fixtures_move_to_the_rejected_evidence(tmp_path
 
 def test_a_rejected_single_finding_leaves_the_gate_root_fixtures_alone(tmp_path):
     """One finding writes into the gate root, whose fixtures/ may belong to an
-    earlier kept run, so it is never moved."""
+    earlier kept run. Those stay byte for byte; only this run's own
+    recordings move to the evidence folder."""
     out_dir = tmp_path / ".mylonite" / "gate"
+    (out_dir / "fixtures").mkdir(parents=True)
+    (out_dir / "fixtures" / "earlier.json").write_text('{"kept": 1}', encoding="utf-8")
 
     run_gate(
         out_dir=out_dir,
@@ -1543,8 +1546,10 @@ def test_a_rejected_single_finding_leaves_the_gate_root_fixtures_alone(tmp_path)
         open_pr=False,
     )
 
-    assert (out_dir / "fixtures" / "rec.json").is_file()
-    assert not (tmp_path / ".mylonite" / "gate-rej" / _fid("solo") / "fixtures").exists()
+    assert sorted(p.name for p in (out_dir / "fixtures").iterdir()) == ["earlier.json"]
+    assert (out_dir / "fixtures" / "earlier.json").read_text(encoding="utf-8") == '{"kept": 1}'
+    evidence = tmp_path / ".mylonite" / "gate-rej" / _fid("solo") / "fixtures"
+    assert (evidence / "rec.json").is_file()
 
 
 def test_colliding_ids_get_distinct_test_file_names(tmp_path, monkeypatch):

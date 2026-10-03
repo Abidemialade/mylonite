@@ -31,6 +31,7 @@ from mylonite.exit_codes import (
     EXIT_BUDGET,
     EXIT_GATE_CANDIDATES,
     EXIT_GATE_KEPT,
+    EXIT_NOT_KEPT,
     EXIT_SUCCESS,
 )
 from mylonite.gate.orchestrator import (
@@ -291,8 +292,9 @@ def test_the_candidate_line_prints_on_a_cp1252_console(notes: str | None) -> Non
 
 def test_a_candidate_leaves_an_earlier_kept_report_in_the_gate_dir_alone(tmp_path: Path) -> None:
     """A single-finding run writes straight into the gate dir, which can hold
-    an earlier run's kept test and report. The candidate's report goes with
-    its evidence, never over the kept one."""
+    an earlier run's kept report. The candidate's report goes with its
+    evidence, never over the kept one. The earlier kept test, exploit and
+    fixtures are covered by the re-run tests below."""
     out_dir = tmp_path / "gate"
     out_dir.mkdir()
     earlier = out_dir / "validation_report.json"
@@ -303,3 +305,80 @@ def test_a_candidate_leaves_an_earlier_kept_report_in_the_gate_dir_alone(tmp_pat
     assert result.exit_code == EXIT_GATE_CANDIDATES
     assert earlier.read_text(encoding="utf-8") == '{"kept": true}\n'
     assert [p.name for p in _files_under(out_dir)] == ["validation_report.json"]
+
+
+def _recording_run(
+    out_dir: Path, exploits: list[ExploitRecord], reports: dict[str, ValidationReport], tag: str
+) -> Any:
+    """Run the gate with a validator that records replay fixtures the way the
+    reference route does: into the finding's own folder, content tagged by run."""
+
+    def validate(test: GeneratedTest, finding_dir: Path) -> ValidationReport:
+        fixtures = finding_dir / "fixtures"
+        fixtures.mkdir(parents=True, exist_ok=True)
+        (fixtures / f"{tag}.json").write_text(f'{{"run": "{tag}"}}', encoding="utf-8")
+        (fixtures / "_meta.json").write_text(f'{{"run": "{tag}"}}', encoding="utf-8")
+        return reports[test.exploit.pattern_id]
+
+    return run_gate(
+        out_dir=out_dir,
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_outcome(), exploits=exploits),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="t.py", source=f"# {tag}\n", exploit=e
+        ),
+        validate_fn=validate,
+        open_pr_fn=_Recorder(),
+        open_pr=False,
+    )
+
+
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in _files_under(root)}
+
+
+@pytest.mark.parametrize(
+    ("second", "expected_exit"),
+    [("candidate", EXIT_GATE_CANDIDATES), ("rejected", EXIT_NOT_KEPT)],
+)
+def test_a_rerun_that_does_not_keep_leaves_the_earlier_kept_test_in_place(
+    tmp_path: Path, second: str, expected_exit: int
+) -> None:
+    """A KEPT run, then a run of the same finding id that is not kept: the
+    earlier test, exploit, report and fixtures stay byte for byte."""
+    out_dir = tmp_path / "gate"
+    first = _recording_run(out_dir, [_exploit(UNPROVEN)], {UNPROVEN: _report(proven=True)}, "run1")
+    assert first.exit_code == EXIT_GATE_KEPT
+    before = _snapshot(out_dir)
+    (finding_id,) = _finding_ids([_exploit(UNPROVEN)])
+    assert {f"test_{finding_id}.py", "fixtures/run1.json", "fixtures/_meta.json"} <= set(before)
+
+    report = _report(proven=False) if second == "candidate" else _rejected_report()
+    result = _recording_run(out_dir, [_exploit(UNPROVEN)], {UNPROVEN: report}, "run2")
+
+    assert result.exit_code == expected_exit
+    assert _snapshot(out_dir) == before
+    # The second run's own recordings went with its evidence.
+    evidence = tmp_path / "gate-rej" / finding_id
+    assert (evidence / "fixtures" / "run2.json").is_file()
+    assert (evidence / f"test_{finding_id}.py").read_text(encoding="utf-8") == "# run2\n"
+
+
+def test_a_multi_finding_rerun_keeps_an_earlier_kept_finding_folder(tmp_path: Path) -> None:
+    out_dir = tmp_path / "gate"
+    exploits = [_exploit(PROVEN), _exploit(UNPROVEN)]
+    proven = {PROVEN: _report(proven=True), UNPROVEN: _report(proven=True)}
+    assert _recording_run(out_dir, exploits, proven, "run1").exit_code == EXIT_GATE_KEPT
+    before = _snapshot(out_dir)
+
+    second = {PROVEN: _report(proven=True), UNPROVEN: _report(proven=False)}
+    result = _recording_run(out_dir, exploits, second, "run2")
+
+    assert result.exit_code == EXIT_GATE_KEPT
+    assert (result.kept_count, result.candidate_count) == (1, 1)
+    ordered = sorted(exploits, key=lambda e: e.pattern_id)
+    ids = {e.pattern_id: fid for e, fid in zip(ordered, _finding_ids(ordered), strict=True)}
+    after = _snapshot(out_dir)
+    unproven_files = {k: v for k, v in before.items() if k.startswith(ids[UNPROVEN] + "/")}
+    assert unproven_files
+    assert {k: after.get(k) for k in unproven_files} == unproven_files
+    assert not any(k.startswith(ids[UNPROVEN] + "/fixtures/run2") for k in after)
