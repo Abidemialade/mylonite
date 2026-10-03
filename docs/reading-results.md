@@ -57,8 +57,11 @@ evidence behind it:
     declined, or answered in prose. Or it may have called *other* tools and never
     reached the one under test: a two-step probe whose first step fails (a source
     tool returning an error, or the call budget running out mid-chain) leaves a
-    non-empty trace and still proves nothing about the sink. The attempt's
-    `verdict_reason` names the tool that was never reached.
+    non-empty trace and still proves nothing about the sink. The same second shape
+    covers a W3 or W4 probe whose user message asks for a tool outright (`send_email`,
+    `web_fetch`) — generated or bundled, the rule is the same: the planner declining
+    that specific request, even while calling something else, is not the app
+    resisting. The attempt's `verdict_reason` names the tool that was never reached.
 
     Look at `raw_response` to see what the agent said instead. A planner that will
     not engage at all usually means a different `--planner-model`; a chain that
