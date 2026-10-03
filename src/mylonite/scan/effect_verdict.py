@@ -17,10 +17,13 @@ from dataclasses import dataclass
 from typing import Final, Literal, get_args
 
 from mylonite.scan.control_shim import (
+    VERDICT_CONJUNCTIONS,
     VERDICT_EGRESS_WORDS,
     VERDICT_LEAD_ONLY_VERBS,
+    VERDICT_LINK_ACTION_VERBS,
     VERDICT_READ_VERBS,
     VERDICT_STRONG_VERBS,
+    VERDICT_TAIL_READ_VERBS,
 )
 from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, has_deferral_word
 from mylonite.scan.tool_classifier import name_token_list
@@ -64,12 +67,15 @@ def is_read_tool(
     4. a transport word (``fetch``, ``web``, ``url``) or a state-changing verb
        (``send``, ``upload``, ``create``) anywhere in the name: not a read,
        whatever ``readOnlyHint`` says;
-    5. a word that is a verb when it leads the name (``post_to_thread``,
+    5. a last word of ``read``, ``get``, ``retrieve`` or ``lookup``
+       (``issue_read``, ``message_get``): a read, unless the name joins two
+       actions (``post_and_read``);
+    6. a word that is a verb when it leads the name (``post_to_thread``,
        ``email_customer``): not a read;
-    6. ``readOnlyHint``: a read;
-    7. a read verb as the first or the last word (``get_issue``,
+    7. ``readOnlyHint``: a read;
+    8. a read verb as the first or the last word (``get_issue``,
        ``notes_list``): a read;
-    8. anything else, including ``budget_report``: not a read.
+    9. anything else, including ``budget_report``: not a read.
 
     Words match whole, never inside a longer word (``thread`` is not
     ``read``). A noun such as ``issue`` or ``email`` after a leading read verb
@@ -90,6 +96,9 @@ def is_read_tool(
         return False
     if any(t in VERDICT_EGRESS_WORDS or t in VERDICT_STRONG_VERBS for t in tokens):
         return False
+    joins_actions = any(t in VERDICT_CONJUNCTIONS for t in tokens)
+    if tokens[-1] in VERDICT_TAIL_READ_VERBS and not joins_actions:
+        return True
     if tokens[0] in VERDICT_LEAD_ONLY_VERBS:
         return False
     if declared.get("readOnlyHint") is True:
@@ -98,15 +107,27 @@ def is_read_tool(
 
 
 def names_a_dispatch(name: str, annotations: Mapping[str, object] | None = None) -> bool:
-    """Whether a tool's own evidence says a call to it changes state: a
-    ``destructiveHint``, a state-changing verb anywhere in its name, or a
-    verb-when-leading word first. A transport word alone does not count."""
+    """Whether a tool's own evidence says a call to it changes state.
+
+    True for a ``destructiveHint``, or a state-changing verb anywhere in the
+    name (``upload_file``, ``close_issue``). A verb-when-leading first word
+    (``post_comment``) counts only when the name does not end in a read verb:
+    ``comment_list`` and ``issue_read`` read records by id, so the seeded id in
+    their arguments ties nothing to the attempt. A name that joins two actions
+    (``post_and_read``) keeps its leading verb. A transport word alone does not
+    count.
+    """
     if (annotations or {}).get("destructiveHint") is True:
         return True
     tokens = name_token_list(name)
-    return bool(tokens) and (
-        any(t in VERDICT_STRONG_VERBS for t in tokens) or tokens[0] in VERDICT_LEAD_ONLY_VERBS
-    )
+    if not tokens:
+        return False
+    if any(t in VERDICT_STRONG_VERBS or t in VERDICT_LINK_ACTION_VERBS for t in tokens):
+        return True
+    if tokens[0] not in VERDICT_LEAD_ONLY_VERBS:
+        return False
+    ends_in_read = tokens[-1] in VERDICT_READ_VERBS
+    return not ends_in_read or any(t in VERDICT_CONJUNCTIONS for t in tokens)
 
 
 def classify_trace(
