@@ -405,11 +405,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also show `⚠ NOT TESTED` instead of `⚠ N/A (no such capability)`. The new
   codes are listed in `docs/reason-codes.md` (reason-code snapshot updated),
   and the new field in `docs/target-file.md`.
+- **The bundled W3 and W4 probes that ask for `send_email` or `web_fetch`
+  outright now read NOT TESTED, not resisted, when the planner never calls
+  that tool.** These two name their tool in the catalogue, not in
+  synthesis metadata, so the fix above missed them: a planner that declined
+  the request, or called some other tool instead, still read as the app
+  resisting. Both now resolve to `MYL-NT-003` like a generated probe would.
+  The `MYL-NT-003` fix text itself was also wrong here — it said the model
+  "got no tool calls... at all", which is false when the planner called a
+  different tool — and now reads "never called the tool this attack
+  targets", matching `docs/reading-results.md`. `docs/limitations.md` no
+  longer lists this as an open gap.
 - **Known limitations now says when a resisted result measures the planner
   model, not your app.** A new section in `docs/limitations.md` covers the
-  two cases where a planner that declines still reads resisted: indirect W1
-  and W2 attacks, and the bundled direct W3 and W4 probes. Generated W3 and
-  W4 probes already read NOT TESTED in that case.
+  case where a planner that declines still reads resisted: indirect W1
+  and W2 attacks. Direct W3 and W4 probes, generated and bundled alike,
+  read NOT TESTED instead.
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and
