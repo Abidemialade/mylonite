@@ -1275,6 +1275,7 @@ def test_scan_autowire_describe_timeout_names_the_timeout_not_seed_arm_advice(
     timeout -- misdiagnosing a slow first-run npx/uvx download as a missing
     seed_arm. A timeout now names itself and exits immediately, without the
     seed_arm advice."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
     from contextlib import asynccontextmanager
 
     from mylonite import cli
@@ -1332,6 +1333,7 @@ def test_scan_autowire_describe_timeout_uses_the_target_files_larger_timeout_s(
     surfaces in the message -- not the bare constant. The constant itself is
     monkeypatched to something tiny here purely so the test doesn't need to
     wait out a real 20s floor; timeout_s (1.5s) is what actually governs."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
     from contextlib import asynccontextmanager
 
     from mylonite import cli
@@ -1367,6 +1369,7 @@ def test_scan_autowire_mcperror_timeout_also_skips_the_seed_arm_advice(
     MCPSessionAdapterBase.describe), not a bare TimeoutError. The auto-wire
     except clause must recognise this too and never fall through to the
     seed_arm advice."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
     from contextlib import asynccontextmanager
 
     import httpx
@@ -4000,8 +4003,11 @@ def test_render_validation_report_effect_remediation_is_generic_without_the_clau
 # ---------------------------------------------------------------------------
 
 
-def test_scan_custom_w2_without_seed_arm_blocks(tmp_path: Path) -> None:
+def test_scan_custom_w2_without_seed_arm_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Declaring W2 (indirect-injection-only) with no seed_arm blocks a real scan."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
     from mylonite.plugins._mcp import target_registry
 
     target_registry.clear_runtime_targets()
