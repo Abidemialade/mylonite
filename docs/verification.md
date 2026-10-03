@@ -69,6 +69,16 @@ target with the wrong content type
 the measured build). None of these were silently scored clean. Total spend: $0.91 on
 Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama cell.
 
+## Launch rehearsal: the journey docs, run as written
+
+`verification/rehearsal/` holds a script that a reader wrote from the
+seven [journey pages](journey/index.md) alone, and a manual CI workflow
+(`rehearsal.yml`) that runs it unchanged on clean Linux and Windows runners
+against the official MCP memory server and the reference app, with a hosted
+or local model. A cell that fails because the docs were wrong is a docs bug.
+Every Mylonite process in a cell is capped by `MYLONITE_MAX_LLM_REQUESTS`;
+the README there gives the matrix and the budget.
+
 ## The one-line result
 
 **Model robustness ≠ app security.** A frontier model resisted *generic* injection
