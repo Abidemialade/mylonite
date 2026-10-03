@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from importlib.resources import files
 from importlib.resources.abc import Traversable
+from pathlib import Path
 
 from mylonite._replay import (
     CACHE_KEY_VERSION,
@@ -60,6 +61,18 @@ def packaged_fixture_dir() -> Traversable:
     return files("mylonite.demo") / "fixtures"
 
 
+def packaged_kept_dir() -> Path:
+    """The recorded kept finding shipped inside the wheel (``mylonite/demo/kept``).
+
+    Holds one exploit, the test generated for it, and three recorded sets: the
+    differential the verdict re-derives from (``differential_fixtures/``), the
+    guarded twin's run the test replays (``fixtures/``) and the vulnerable twin's
+    run it fails on (``red_fixtures/``). A real ``Path``, not a ``Traversable``:
+    the generated test imports from its own file and reads fixtures beside it.
+    """
+    return Path(__file__).resolve().parent / "kept"
+
+
 __all__ = [
     "CACHE_KEY_VERSION",
     "CACHE_KEY_VERSION_FIELD",
@@ -70,4 +83,5 @@ __all__ = [
     "LiteLLMRecorder",
     "MissingFixtureError",
     "packaged_fixture_dir",
+    "packaged_kept_dir",
 ]

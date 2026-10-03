@@ -116,14 +116,33 @@ needs-a-key table.
 
 ## `demo` — the reference-app playground
 
-Zero-config, zero-key: runs the vulnerable-vs-guarded differential on the bundled
-reference agent. This is the fastest way to see what the tool actually does. Needs
+Zero-config, zero-key: shows one kept finding end to end, then the
+vulnerable-vs-guarded scan behind it, on the bundled reference agent. This is the
+fastest way to see what the tool actually does. Needs
 `pip install "mylonite[demo]"` (the extra pulls the reference app).
 
 ```bash
-mylonite demo            # offline replay, instant, no API key
-mylonite demo --live     # real calls; needs the recorded model served locally
+mylonite demo            # offline replay, a few seconds, no API key
+mylonite demo --live     # the scan makes real calls with the model you choose
 ```
+
+What it prints, in order:
+
+1. **The kept finding** (W4, an email sent with no approval step). The verdict is
+   re-derived from a recorded run of the validator: fired without the safeguard,
+   resisted with it, held under a deterministic rewording, and the generated test
+   collects. Then come the severity, impact and suggested fix that `validate` and the
+   gate PR print.
+2. **Its regression test, red then green.** The generated test's check fails on the
+   vulnerable build, and the test file itself passes on the guarded build, both
+   replayed from recordings.
+3. **The scan table** for W1 to W4 on both builds, the headline counts, a coverage
+   note, and a legend for every mark.
+
+The kept finding rests on one recorded run per build; a live `validate` repeats each
+build several times. W1 does not land in the recording (see
+[limitations](limitations.md#12-w1-does-not-land-on-the-reference-app)), and the
+output says so instead of leaving a bare NO VERDICT cell.
 
 Options: `--live`; `--provider`, `--model` (both `--live` only — replay is pinned to the
 provider/model the fixtures were recorded against, and the command says so rather than
@@ -136,10 +155,12 @@ responses are canned. The output labels itself `mode: replay (offline)` and carr
 model and date the fixtures were recorded — do not read a replayed number as a fresh
 measurement of today's model. `--live` is the fresh measurement.
 
-One deliberate difference from `scan`: the demo runs with the per-seed LLM customiser and
-the LLM-judge fallback **off**, so it drives raw seed bodies judged by deterministic
-predicates only. That is what makes the recording reproducible. A `--live` `scan` exercises
-both of those stages and can legitimately reach a different result.
+One deliberate difference from `scan`: the demo's scan table runs with the per-seed LLM
+customiser and the LLM-judge fallback **off**, so it drives raw seed bodies judged by
+deterministic predicates only. That is what makes the recording reproducible. A `--live`
+`scan` exercises both of those stages and can legitimately reach a different result. The
+kept finding is the exception: it replays the validator's own recorded run, customiser and
+judge included, so `--live` changes the scan table and never the kept finding.
 
 If fixtures are missing or stale the command **fails** with exit `2` and tells you to
 re-record. It does not fall back to a live call, and it does not render a clean result —

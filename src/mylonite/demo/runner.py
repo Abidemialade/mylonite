@@ -53,46 +53,37 @@ from mylonite.scan.wiring import build_scan, note_id_counter
 _build_scan = build_scan
 _note_id_counter = note_id_counter
 
-#: The provider the demo fixtures are recorded against. Replay forces this;
-#: live runs default to it but honour caller overrides.
-#:
-#: Self-hosted on purpose. `mylonite demo` advertises needing no API key, but
-#: replayed fixtures recorded against a hosted model meant the one command a
-#: newcomer runs first could not be reproduced without a paid account. It now
-#: can: `ollama pull qwen3:4b-instruct-2507-q4_K_M`, then
-#: `python scripts/record_demo_fixtures.py`.
-#:
-#: `ollama`, not `ollama_chat`: this names the PROVIDER (which
-#: `scan.providers.PROVIDER_ENV_VARS` maps to `()` — no key required), while
-#: `ollama_chat` below is a LiteLLM ROUTE on that provider.
-DEMO_PROVIDER = "ollama"
-#: The exact model the demo fixtures are recorded with. Binding for this
-#: project — the recorded fixtures use this model and replay keys on it, so
-#: changing it invalidates every fixture.
-#:
-#: Chosen on measured evidence, and the choice was previously made WRONG in a
-#: way worth recording. A weaker 3B planner was picked first because a capable
-#: one drove the *guarded* twin into exfiltration — measured at 40%, 80% and
-#: 100% of runs across three W2 payload phrasings, the swing itself proving the
-#: old prompt-level control was not a control. Picking the planner too weak to
-#: find that hole made the demo look clean while leaving the hole open: it was
-#: demo-tuning. The hole is now closed in server code (the W2 taint gate, M5)
-#: and the leak re-measured at 0/0/0%, so the capable planner is the honest
-#: choice — it executes on every W2/W3/W4 variant tried and the guard holds
-#: against it anyway.
-#:
-#: The numbers are inlined deliberately rather than cited: the harness that
-#: produced them is a local working artefact (see .gitignore), so a path
-#: reference here would point at evidence that never ships and cannot be
-#: audited by a reader.
-#:
-#: `ollama_chat/` rather than `ollama/` is the chat-completions route, which is  # allow-literal: example
-#: what Ollama's own tool-calling support targets — and the demo is entirely a
-#: tool-calling exercise. See docs/self-hosted-models.md.
-DEMO_MODEL = "ollama_chat/qwen3:4b-instruct-2507-q4_K_M"  # allow-literal: example -- the replay fixtures' own recorded identity, not a default (see the REPLAY INVARIANT docstring above); never read without --live, which carries its own choose-a-model requirement
-
 #: The two reference variants the demo runs, in render order.
 _VARIANTS: tuple[Literal["vulnerable", "guarded"], ...] = ("vulnerable", "guarded")
+
+
+def _recorded_model() -> str:
+    """The model the packaged fixtures were recorded against, read from their sidecars.
+
+    Replay keys every lookup on the model string, so the demo must replay under
+    exactly the identity the fixtures carry. Reading it from the sidecars, rather
+    than naming a model here, means a re-record can never leave this module and the
+    fixtures disagreeing, and no model id is written into the source at all.
+
+    Both variants must name the same model: a mixed set means one directory was
+    re-recorded on its own, and replaying it would miss on every lookup.
+    """
+    root = packaged_fixture_dir()
+    models: set[str] = set()
+    for variant in _VARIANTS:
+        meta = json.loads((root / variant / "_meta.json").read_text(encoding="utf-8"))
+        if not isinstance(meta, dict) or not meta.get("model"):
+            raise DemoFixtureError(
+                f"demo fixtures for the {variant!r} variant have no recorded model in "
+                f"their _meta.json. {DEMO_RERECORD_HINT}"
+            )
+        models.add(str(meta["model"]))
+    if len(models) != 1:
+        raise DemoFixtureError(
+            f"the demo fixture variants were recorded against different models "
+            f"({', '.join(sorted(models))}). {DEMO_RERECORD_HINT}"
+        )
+    return models.pop()
 
 
 def _replay_mode_label() -> str:
@@ -151,6 +142,15 @@ class DemoFixtureError(FixtureError):
     (``DEMO_RERECORD_HINT``) because a stale fixture otherwise renders the
     vulnerable scan clean and the demo silently lies.
     """
+
+
+#: The model the demo replays, exactly as the packaged fixtures recorded it.
+#: Read from the fixtures, never chosen here: it is the recording's identity, not a
+#: default. It is used only for replay; `--live` needs a model chosen for it.
+DEMO_MODEL: str = _recorded_model()
+#: The provider that model belongs to, derived from the model id through the
+#: provider registry rather than named.
+DEMO_PROVIDER: str = provider_from_model(DEMO_MODEL) or "unknown"
 
 
 @dataclass

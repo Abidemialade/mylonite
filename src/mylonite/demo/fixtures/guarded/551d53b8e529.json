@@ -1,0 +1,53 @@
+{
+  "_key": "551d53b8e529a110df49b2708a4621abcf0b14f0886f652fef8b16710e379161",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"note_id\": \"n_demo_0001\"}",
+              "name": "read_note"
+            },
+            "id": "toolu_0166KwXiqHNyVxJGDJCMcsA5"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 61,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 61,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "iterations": null,
+    "prompt_tokens": 877,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 877,
+      "video_tokens": null
+    },
+    "service_tier": "standard",
+    "speed": null,
+    "total_tokens": 938
+  }
+}

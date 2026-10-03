@@ -27,6 +27,7 @@ command a newcomer ever runs. Do not call ``_discover_run_config`` or
 from __future__ import annotations
 
 import asyncio
+import time
 
 import typer
 from rich.console import Console
@@ -46,6 +47,7 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
     # separately via the `[demo]` extra. Map its absence to the friendly exit-2
     # message at import time, before any of the imported symbols are referenced.
     try:
+        from mylonite.demo.proof import prove_kept
         from mylonite.demo.runner import DEMO_MODEL, DEMO_PROVIDER, DemoFixtureError, run_demo
     except (ModuleNotFoundError, ImportError) as exc:
         _exit_if_missing_kitchen_sink(exc)
@@ -72,8 +74,13 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
         echo_err(no_model_configured_message())
         raise typer.Exit(code=EXIT_PROVIDER)
 
+    start = time.monotonic()
     try:
         result = asyncio.run(run_demo(live=live, provider=provider, model=model))
+        # The kept finding and its test, red then green. Always a replay of the
+        # packaged recording, live or not: it is the proof the scan table leads to,
+        # and it must never spend a call.
+        kept = prove_kept()
     except (MissingFixtureError, DemoFixtureError) as exc:
         # A fixture miss does NOT propagate on its own (the _llm fallback chain
         # and the adapter's skip-conversion swallow completion_fn exceptions -
@@ -102,24 +109,21 @@ def run_demo_command(*, live: bool, provider: str | None, model: str | None) -> 
         result.vulnerable,
         result.guarded,
         mode=result.mode,
-        elapsed_s=result.elapsed_s,
+        elapsed_s=time.monotonic() - start,
         console=Console(),
+        kept=kept,
     )
 
     # A --live run can abort cleanly (the engine returns rather than raises), so
     # surface those as distinct exit codes. Replay never aborts this way.
     for variant in (result.vulnerable, result.guarded):
         if variant.report.aborted == "provider_unreachable":
-            # Leads with the self-hosted remedy because the default live
-            # provider is self-hosted: the likely cause here is a local server
-            # that is not running or a model that was never pulled, not a
-            # missing key. Naming a vendor key first sent people to fix
-            # something the default configuration never uses.
+            # Names the model this run actually used: --live has no default, so
+            # the replay fixtures' recorded model is never the one to blame here.
             echo_err(
-                f"no provider reachable - the demo's live default is "
-                f"{DEMO_PROVIDER}/{DEMO_MODEL}, so check that it is served "
-                "locally and the model is pulled. Or pass --provider/--model "
-                "for a hosted LiteLLM provider, with that provider's key set."
+                f"no provider reachable for {result.provider}/{result.model} - for a "
+                "local model, check that it is served and pulled; for a hosted one, "
+                "check that its key is set."
             )
             raise typer.Exit(code=EXIT_PROVIDER)
         if variant.report.aborted == "budget_exceeded":

@@ -155,6 +155,10 @@ repos:
     hooks:
       - id: mypy
         files: ^src/
+        # The demo's recorded kept finding ships the test file Mylonite generated
+        # for it, verbatim. That file imports pytest, which this hook's isolated
+        # environment does not install; `mypy src` in CI checks it with pytest.
+        exclude: ^src/mylonite/demo/kept/
         additional_dependencies:
           - pydantic>=2.7
           - pydantic-settings>=2.3

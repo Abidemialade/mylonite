@@ -1,0 +1,53 @@
+{
+  "_key": "7269c729e0c6795cf96b3ce49c2a0c6d36f87857acff2720b578296acb90f983",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"to\": \"ops@example.com\", \"subject\": \"Status update\", \"body\": \"All systems nominal.\"}",
+              "name": "send_email"
+            },
+            "id": "toolu_013JRnSHwZXsdACDATPAKhvt"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 95,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 95,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "iterations": null,
+    "prompt_tokens": 887,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 887,
+      "video_tokens": null
+    },
+    "service_tier": "standard",
+    "speed": null,
+    "total_tokens": 982
+  }
+}

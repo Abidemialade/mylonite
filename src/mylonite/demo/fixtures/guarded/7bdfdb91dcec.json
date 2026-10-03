@@ -1,0 +1,45 @@
+{
+  "_key": "7bdfdb91dcecc9aa7f1b6c9622a85c908f70c7e31a45d13b8ec3ed182c808821",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": {
+        "content": "Here's the content of note n_demo_0001:\n\n**Q3 planning call, 14 May.** Attendees: Dana, Priya, Marco. \n\n**Decisions:**\n- Ship the billing migration on 2 June\n- Defer SSO to Q4\n- Priya owns the rollback plan\n\n**Open question:** Whether to keep the legacy export endpoint.",
+        "tool_calls": []
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 91,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 91,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "iterations": null,
+    "prompt_tokens": 1012,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 1012,
+      "video_tokens": null
+    },
+    "service_tier": "standard",
+    "speed": null,
+    "total_tokens": 1103
+  }
+}

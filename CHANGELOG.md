@@ -37,6 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mylonite demo` now shows a kept finding and its test going red, then
+  green.** It opens with the unconfirmed-email-send weakness (W4): the
+  verdict, re-derived offline from a recorded run (fired 1/1 without the
+  safeguard, resisted 1/1 with it, held under a rewording), then the impact
+  and suggested fix that `validate` and the gate PR print. Next comes the
+  generated regression test: it fails on the vulnerable build and passes on
+  the guarded one. A legend explains every mark, and when W1 does not land a
+  line says why instead of leaving a bare NO VERDICT cell. The recordings were
+  redone on 2026-10-03 against `claude-haiku-4-5-20251001`, and the demo now
+  reads the model from them rather than naming one; the vulnerable scan shows
+  2 exploits on this recording, down from 5. Replay stays offline and keyless.
+  The CI wall-time bar moves from 10 s to 20 s because the demo now also runs
+  the generated test. A replay that misses a recorded lookup still fails
+  rather than showing a result.
+
 - **`scan`, `validate` and `gate` show what a live run will touch before
   it sends anything.** A short run plan now prints just above the call
   estimate: the model (or each role's model), where the agent's system prompt

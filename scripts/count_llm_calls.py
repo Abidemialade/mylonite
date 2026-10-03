@@ -5,7 +5,7 @@ Every call goes through one scripted fake model that counts it by role:
 
 * **planner** calls (the agent under test) replay the recorded demo fixtures
   (``mylonite demo``'s own), or, for the gate's validation leg, the committed
-  differential fixtures under ``examples/reference_validation/``. A call with
+  differential fixtures under ``src/mylonite/demo/kept/``. A call with
   no recording gets a plain "Done." reply and is counted as a miss.
 * **customiser** calls get the seed body back unchanged, as strict JSON.
 * **judge** calls get a low-confidence "not landed" reply.
@@ -60,8 +60,10 @@ BASELINE_FILE = ROOT / "tests" / "fixtures" / "llm_call_baseline.json"
 #: How far above the baseline a count may go before the build fails, in percent.
 ALLOWED_GROWTH_PERCENT = 15
 
-#: The committed reference finding the gate path validates.
-EXAMPLE_DIRNAME = Path("examples") / "reference_validation"
+#: The committed reference finding the gate path validates: the kept finding
+#: `mylonite demo` ships, recorded on the same run as the demo scan fixtures,
+#: so the scan above finds the seed it validates.
+EXAMPLE_DIRNAME = Path("src") / "mylonite" / "demo" / "kept"
 
 _SEED_RE = re.compile(
     r"SEED PATTERN \([^)]*\):\n(?P<body>.*)\n\nProduce the refined payload body\.",
@@ -196,7 +198,14 @@ def run_reference_gate(out_dir: Path, *, root: Path = ROOT) -> GateRun:
 
     scan_result, scan_fake = run_reference_scan("vulnerable")
     found = [e.pattern_id for e in scan_result.exploits]
-    picked = [e for e in scan_result.exploits if e.pattern_id == meta["pattern_id"]]
+    # Validate the committed exploit, not the scan's copy of it: the recorded
+    # differential is keyed on the payload the recording run validated, and the
+    # scripted customiser here hands back the raw seed body instead. The scan
+    # still has to find the seed for the gate to reach validation at all.
+    from mylonite.testkit import load_exploit
+
+    committed = load_exploit(next(example.glob("exploit_*.json")))
+    picked = [committed] if meta["pattern_id"] in found else []
 
     validate_fake = ScriptedLLM(differential)
     validator = DifferentialValidator(

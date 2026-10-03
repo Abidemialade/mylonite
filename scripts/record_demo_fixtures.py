@@ -68,15 +68,14 @@ exists, do not rely on CI to notice.
 
 How to run
 ----------
-``DEMO_PROVIDER``/``DEMO_MODEL`` are self-hosted, so the default invocation
-needs no API key and no account — only that the model is served locally::
-
-    ollama pull llama3.2:3b
-    python scripts/record_demo_fixtures.py
-
-That is the whole prerequisite, and it is deliberate: the demo is the first
-command a newcomer runs and it advertises needing no key, so re-recording it
-must not require a paid vendor account either.
+``DEMO_PROVIDER``/``DEMO_MODEL`` are read from the packaged fixtures'
+sidecars, so the default invocation re-records against the model the shipped
+set was recorded with, and needs that provider's key. The manual
+``record-reference-example`` workflow does exactly that in CI with the
+repository key, alongside the demo's kept finding. To record against another
+model (a locally served one needs no key), pass ``--provider``/``--model``;
+the demo then replays under that model, because it reads it back from the
+sidecars.
 
 ``--provider``/``--model`` override the recorded pair, which is how the demo
 would be re-recorded against a hosted model instead::

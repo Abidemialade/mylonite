@@ -48,9 +48,8 @@ mylonite demo                         # the differential, replayed offline
 `demo` replays committed fixtures: real scan, real predicates, real differential,
 canned model replies. It names the model and date they were recorded against, and
 it fails loudly rather than showing a clean result if a fixture is missing. Add
-`--live` to re-run the attacks for real — that calls a model, and by default the
-self-hosted one the fixtures were recorded against, which must be served locally
-(or pass `--provider`/`--model` for a hosted one, with that provider's key set).
+`--live` to re-run the scan for real with a model you choose (`--model`, plus that
+provider's key or a locally served model); the kept finding and its test still replay.
 
 To drive the attacks live against this app, add a key:
 
