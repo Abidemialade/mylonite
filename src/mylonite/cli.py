@@ -2567,8 +2567,8 @@ def gate(
             "--fast",
             help=(
                 "Skip the differential leg for a custom target (no boundary-guarded twin). "
-                "Faster/cheaper but a WEAKER guarantee — the kept test no longer proves the "
-                "safeguard, not the model, carries the security."
+                "gate then keeps a finding only when an effect_probe proves it; otherwise "
+                "the finding is an unproven candidate, no test is written, and gate exits 10."
             ),
         ),
     ] = False,
@@ -2579,8 +2579,9 @@ def gate(
             help=(
                 "For a black-box HTTP (rest) target: run the input data-framing "
                 "('spotlighting') differential to measure whether that input defence is "
-                "load-bearing. Opt-in; otherwise a rest target is gated by "
-                "stability + effect + consensus."
+                "load-bearing. Opt-in; otherwise a rest target is validated by "
+                "stability + effect + consensus. gate lists a rest finding as a "
+                "candidate; it never commits it."
             ),
         ),
     ] = False,

@@ -5412,7 +5412,9 @@ def _canned_finding_result(target_id: str, exploit: Any) -> Any:
     return ScanResult(report=report, exploits=[exploit])
 
 
-def _stub_differential_validator(monkeypatch: pytest.MonkeyPatch, target: str) -> dict[str, Any]:
+def _stub_differential_validator(
+    monkeypatch: pytest.MonkeyPatch, target: str, *, proven: bool = True
+) -> dict[str, Any]:
     """Patch ``DifferentialValidator`` at ``target`` with a capturing stub; return
     the dict its constructor kwargs land in. The stub's ``.validate()`` returns a
     real, minimal ``ValidationReport`` (not a bare SimpleNamespace) so a full
@@ -5427,9 +5429,9 @@ def _stub_differential_validator(monkeypatch: pytest.MonkeyPatch, target: str) -
             captured.update(kw)
 
         def validate(self, *_a: Any, **_k: Any) -> Any:
-            return ValidationReport(
-                test_filename="test_security_x.py", kept=True, outcomes=proven_legs()
-            )
+            # Without the proof leg the keep reads STABLE, NOT PROVEN.
+            legs = proven_legs() if proven else proven_legs()[:2]
+            return ValidationReport(test_filename="test_security_x.py", kept=True, outcomes=legs)
 
     monkeypatch.setattr(target, _StubValidator)
     return captured
@@ -5504,6 +5506,61 @@ def test_gate_reports_a_pr_failure_gracefully(
     # a named, readable error — not a stack trace
     assert result.exception is None or isinstance(result.exception, SystemExit)
     assert "not a git repository" in result.output
+
+
+def test_gate_exits_10_and_writes_nothing_for_an_unproven_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through the real command: a finding that reproduced without proof is a
+    candidate. `gate` exits 10, writes nothing to --out and opens no PR."""
+    _skip_uncoverable_refusal(monkeypatch)
+    from mylonite.exit_codes import EXIT_GATE_CANDIDATES
+    from mylonite.gate import pr as pr_mod
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    target_registry.clear_runtime_targets()
+    exploit = _sample_exploit().model_copy(update={"target_id": "mcp:myapp-server"})
+    canned = _canned_finding_result("mcp:myapp-server", exploit)
+
+    async def _fake_run(self: Any) -> Any:
+        return canned
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+    _stub_differential_validator(
+        monkeypatch,
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator",
+        proven=False,
+    )
+    pr_calls: list[Any] = []
+    monkeypatch.setattr(pr_mod, "open_or_print_pr", lambda *a, **k: pr_calls.append(a))
+
+    target_yaml = tmp_path / "target.yaml"
+    target_yaml.write_text(_SERVER_LAYER_TARGET_YAML, encoding="utf-8")
+    out = tmp_path / "gate_out"
+    try:
+        result = runner.invoke(
+            app,
+            [
+                "gate",
+                "--target-file",
+                str(target_yaml),
+                "--authorize",
+                "myapp-server",
+                "--out",
+                str(out),
+                "--no-workflows",
+            ],
+        )
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert result.exit_code == EXIT_GATE_CANDIDATES, result.output
+    assert "STABLE, NOT PROVEN - a candidate only" in result.output
+    assert pr_calls == []
+    assert not out.exists() or not [p for p in out.rglob("*") if p.is_file()]
 
 
 def test_gate_out_outside_repo_root_exits_8_before_any_scan_or_llm_work(

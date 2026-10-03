@@ -414,10 +414,13 @@ global `--max-llm-requests` caps scan and validation together);
 reproducibility across runs; pass `1` for the fastest, weakest gate); `--runs-on LABEL`
 (GitHub runner; use a self-hosted label for in-perimeter MCP backends);
 `--workflows/--no-workflows` (**default off**); `--llm-enrich` (append a labelled, unverified LLM fix
-suggestion, rendered after the structural recommendation above); `--fast`;
+suggestion, rendered after the structural recommendation above); `--fast` (skip the
+differential leg for a custom target: `gate` then keeps a finding only when an
+`effect_probe` proves it, otherwise the finding is a candidate and `gate` exits `10`);
 `--prove-input-control` (for a black-box HTTP/`rest` target, run the input
 data-framing differential to measure whether that input defence is load-bearing;
-opt-in, otherwise a `rest` target is gated by stability + effect + consensus);
+opt-in, otherwise a `rest` target is validated by stability + effect + consensus;
+`gate` lists a `rest` finding as a candidate and never commits it);
 `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
 
 `gate` ends with a `gate llm:` line: the LLM calls made across every stage (by role), the
