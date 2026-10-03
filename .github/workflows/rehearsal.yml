@@ -52,9 +52,10 @@ on:
         default: "server-memory,kitchen-sink"
       max_llm_calls:
         description: >-
-          Per-process --max-llm-calls cap for a hosted cell, 1-150. The
-          default (80) keeps a hosted cell at or under about $0.40 at
-          roughly $0.005 a call.
+          Request ceiling for EACH mylonite process in a cell, 1-150, also
+          exported as MYLONITE_MAX_LLM_REQUESTS. A cell runs several
+          spending commands, so its worst case is this value times that
+          count; size a dispatch from the generated journey.sh.
         default: "80"
       ref:
         description: "branch, tag or sha to check out and rehearse"
@@ -292,6 +293,7 @@ jobs:
           OLLAMA_API_BASE: http://127.0.0.1:11434
           REH_MODEL: ${{ steps.model.outputs.model }}
           REH_MAX_LLM_CALLS: ${{ needs.plan.outputs.max_llm_calls }}
+          MYLONITE_MAX_LLM_REQUESTS: ${{ needs.plan.outputs.max_llm_calls }}
         run: |
           cd "$REH_SCRATCH"
           set +e
@@ -409,6 +411,7 @@ jobs:
           OPENAI_API_KEY: ${{ env.REH_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
           REH_MODEL: ${{ steps.model.outputs.model }}
           REH_MAX_LLM_CALLS: ${{ needs.plan.outputs.max_llm_calls }}
+          MYLONITE_MAX_LLM_REQUESTS: ${{ needs.plan.outputs.max_llm_calls }}
         run: |
           cd "$REH_SCRATCH"
           set +e
