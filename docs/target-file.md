@@ -273,8 +273,11 @@ read, calibration checks the probe on that record instead, in this order:
 Passing it reads `calibration: confirm_only [MYL-INC-003]`, never
 `certified`: the probe can confirm a planted record appears; it cannot clear a call that
 changed nothing, because the plant shows only that it sees writes to the record it reads.
-The earlier code stays on the result, and a scan treats `confirm_only` exactly like a
-probe that failed calibration, so no verdict changes.
+The earlier code stays on the result. A `confirm_only` probe never clears a call: for
+that, a scan treats it exactly like a probe that failed calibration. It can raise a
+dispatch to `effect-confirmed` when it sees the call change the record it reads, under
+the guard in [How an MCP attempt is
+decided](reading-results.md#how-an-mcp-attempt-is-decided).
 
 ## never_call: tools Mylonite must never call
 
@@ -510,8 +513,9 @@ falls into one of:
   clear anything the agent did.
 
 None of these values decides an attempt alone. The tool-call trace says what the agent
-did. The probe can raise a linked dispatch to `effect-confirmed`, or clear it, only
-after calibration has proven the probe works. See [How an MCP attempt is
+did. The probe can clear a linked dispatch only after calibration has certified it, and
+raise one to `effect-confirmed` only after calibration has certified it or shown it
+can confirm (`confirm_only`). See [How an MCP attempt is
 decided](reading-results.md#how-an-mcp-attempt-is-decided).
 
 This is what stops a target whose state outlives one run — a file, a database, a memory

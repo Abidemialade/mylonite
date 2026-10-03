@@ -176,7 +176,7 @@ Every validation reports three headline figures.
 
   **How the effect leg counts.** Each firing run counts at its
   [proof level](reading-results.md#how-an-mcp-attempt-is-decided), and the detail line
-  gives the count for each: `effect-confirmed` (a calibrated probe saw the change),
+  gives the count for each: `effect-confirmed` (a calibrated or confirm-only probe saw the change),
   `dispatched` (the trace ties the attempt's own call to it) or `dispatched-tool-linked`
   (the attempt called the seed's own tool). The leg passes when enough runs count; no
   single level is required, so a stateful target (a file, a database, a memory store,

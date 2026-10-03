@@ -1282,3 +1282,68 @@ async def test_a_declared_egress_tool_is_a_dispatch_whatever_its_name() -> None:
         _Store(), _Script([("fetch_and_forward", {"url": "https://example.test/x"})])
     )
     assert meta["trace_outcome"] == "dispatched-ok"
+
+
+# --- confirm_capable: calibration showed the probe sees a write land -------------
+
+
+def _recorded(spec: target_registry.TargetSpec, status: str, *certified: str) -> None:
+    from mylonite.plugins._mcp import calibration
+
+    calibration.record(
+        calibration.CalibrationResult(
+            spec_key=calibration.spec_key(spec, None),
+            status=status,
+            reason_code=None if status == calibration.STATUS_CERTIFIED else "MYL-INC-003",
+            detail=status,
+            tools=tuple(
+                calibration.ToolControl(
+                    tool=name,
+                    status=calibration.TOOL_CERTIFIED,
+                    reason_code=None,
+                    detail="negative and positive controls passed",
+                )
+                for name in certified
+            ),
+            seed_control=calibration.SeedControl(
+                status=calibration.SEED_NOT_DECLARED, reason_code=None, detail="none"
+            ),
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "certified", "calibrated", "confirm_capable"),
+    [
+        ("confirm_only", (), "false", "true"),
+        ("certified", ("send_email",), "true", "true"),
+        # Certified, but not through the tool this attempt dispatched: still not
+        # calibrated for it, while the probe has been shown to see a write land.
+        ("certified", ("log_event",), "false", "true"),
+        ("failed", (), "false", "false"),
+        ("no_probe", (), "false", "false"),
+        ("not_authorized", (), "false", "false"),
+    ],
+)
+async def test_confirm_capable_follows_the_calibration_status(
+    status: str, certified: tuple[str, ...], calibrated: str, confirm_capable: str
+) -> None:
+    from mylonite.plugins._mcp import calibration
+
+    spec = _outbox_spec()
+    _recorded(spec, status, *certified)
+    try:
+        meta = await _invoke(_Store(), _Script([_send()]))
+    finally:
+        calibration.clear_calibrations()
+    assert meta["calibrated"] == calibrated
+    assert meta["confirm_capable"] == confirm_capable
+
+
+@pytest.mark.asyncio
+async def test_an_uncalibrated_target_is_not_confirm_capable() -> None:
+    _register(_OUTBOX_PROBE)
+    meta = await _invoke(_Store(), _Script([_send()]))
+    assert meta["confirm_capable"] == "false"
+    assert meta["calibrated"] == "false"

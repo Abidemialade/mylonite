@@ -85,6 +85,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions the gate PR body uses — the fix is always a suggestion, and
   neither surface says "your safeguard stopped it".
 
+### Changed
+
+- **A `confirm_only` probe that sees the attack change its record now
+  raises the finding to `effect-confirmed` (#324).** Before, its reading was
+  ignored and the call stayed a `dispatched` finding. The raise happens only
+  when the trace is `dispatched-ok` with no held or queued call, the probe's
+  marker is not `{payload}`, and the dispatched call carries the probe's own
+  marker (or the probe has no marker). On the memory store, an attack that
+  adds an observation carrying the marker to the seed record is now
+  `effect-confirmed`; one that writes a different record stays `dispatched`.
+  What never changes: such a probe never clears a call. Its "no change" is
+  read exactly as an uncalibrated probe's, so it never gives RESISTED and
+  never a `certified-observer` negative, and the class keeps its calibration
+  code (`MYL-INC-003`). A probe `certified` through other tools than the
+  ones an attempt called can raise that attempt the same way, and still
+  cannot clear it. Adapter metadata gains a `confirm_capable` flag; the
+  `calibrated` flag is unchanged. See [How an MCP attempt is
+  decided](docs/reading-results.md#how-an-mcp-attempt-is-decided).
+
 ### Fixed
 
 - **Calibration now shows when a memory-style store's probe sees its own
@@ -100,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes reads `calibration: confirm_only [MYL-INC-003]`, a new status in
   the scan output and `verdicts.json`: the probe can confirm a planted
   record appears; it cannot clear a call that changed nothing. It counts as
-  uncalibrated everywhere, so no verdict changes. Stores that echo the
+  uncalibrated for every negative; see the next entry for the one finding it
+  can raise. Stores that echo the
   query, readbacks that never change, and reads that error, come back empty
   or raise stay `failed` with their codes. See [Calibration](docs/target-file.md#calibration).
 
