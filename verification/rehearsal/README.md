@@ -46,9 +46,12 @@ cell, and both dropped shapes, cost nothing.
 
 ## Budget
 
-Each hosted cell (Anthropic or OpenAI) is capped by `max_llm_calls`,
-which defaults to a value that keeps a single cell at or under about
-$0.40 at roughly $0.005 a call, with a hard cap of 150. A dispatch with the
+Every Mylonite process in a hosted cell (Anthropic or OpenAI) is capped
+at `max_llm_calls` requests (hard cap 150), exported as
+`MYLONITE_MAX_LLM_REQUESTS` so the ceiling holds whatever flags the
+generated script passes. A cell runs several spending commands, so its
+worst case is `max_llm_calls` times the number of spending commands in
+`journey.sh`. Size each dispatch from that product. A dispatch with the
 matching provider key unset skips that cell with a notice instead of
 failing the run.
 
