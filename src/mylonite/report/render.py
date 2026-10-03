@@ -320,7 +320,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         # Deferred: the validator module pulls in the scan engine, which a
         # report render does not otherwise need.
         from mylonite.plugins._reference.reference_validator import (
-            BLACK_BOX_EFFECT_CLAUSE,
+            BLACK_BOX_EFFECT_PREFIX,
             EFFECT_UNPROVEN_CLAUSE,
             unguarded_no_verdict,
         )
@@ -330,11 +330,13 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         )
         # A rest target refuses an effect_probe: don't advise one there.
         if any(
-            o.stage == "effect" and o.detail == BLACK_BOX_EFFECT_CLAUSE for o in report.outcomes
+            o.stage == "effect" and o.detail.startswith(BLACK_BOX_EFFECT_PREFIX)
+            for o in report.outcomes
         ):
             consensus_remediation = (
-                "consensus fail: judges disagreed the attack landed; a black-box target "
-                "gives no state to settle it, so scan the agent's MCP server to confirm."
+                "consensus fail: judges disagreed the attack landed, and a black-box target "
+                "gives no state to settle it. Re-run with a stronger judge model "
+                "(--judge-model), or, if the agent has an MCP server, scan that to confirm."
             )
 
         effect_remediation = (

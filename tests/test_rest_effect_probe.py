@@ -40,40 +40,84 @@ def rest_with_probe(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _no_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail the test if any command gets as far as building a target adapter."""
+def reached(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record any adapter build or model request a command makes.
+
+    Recorded, not raised: several commands map any exception to exit 2, so a
+    raise here could pass for the refusal.
+    """
     from mylonite.plugins._mcp import factory
+    from mylonite.scan import _llm
 
-    def _refuse(**_: Any) -> Any:
-        raise AssertionError("the target was reached before the target file was refused")
+    calls: list[str] = []
 
-    monkeypatch.setattr(factory, "build_mcp_adapter", _refuse)
+    def _record(name: str) -> Any:
+        def _stub(*_: Any, **__: Any) -> Any:
+            calls.append(name)
+            raise RuntimeError(name)
+
+        return _stub
+
+    monkeypatch.setattr(factory, "build_mcp_adapter", _record("build_mcp_adapter"))
+    monkeypatch.setattr(factory, "build_adapter_for_spec", _record("build_adapter_for_spec"))
+    monkeypatch.setattr(_llm, "_charge_request", _record("model request"))
+    return calls
 
 
-def test_check_refuses_a_rest_effect_probe_before_connecting(rest_with_probe: Path) -> None:
+def test_check_refuses_a_rest_effect_probe_before_connecting(
+    rest_with_probe: Path, reached: list[str]
+) -> None:
     """`check` used to connect, find no tools and stop there with exit 0."""
     result = runner.invoke(app, ["check", "--target-file", str(rest_with_probe)])
     assert result.exit_code == EXIT_CONFIG, result.output
     out = result.output + (result.stderr or "")
     assert _REFUSAL in out
     assert "no tools" not in out
+    assert reached == []
 
 
-def test_scan_refuses_a_rest_effect_probe_before_any_spend(rest_with_probe: Path) -> None:
-    result = runner.invoke(
-        app,
-        [
-            "scan",
-            "--target-file",
-            str(rest_with_probe),
-            "--authorize",
-            "my-agent",
-            "--model",
-            "ollama/llama3.2:3b",
-        ],
+def _generated_dir(root: Path) -> Path:
+    """A `generate` output folder for a custom target, as `validate` reads it."""
+    from .test_cli import _write_custom_exploit_json
+
+    out_dir = root / "gen"
+    out_dir.mkdir()
+    _write_custom_exploit_json(out_dir / "exploit_pid.json")
+    (out_dir / "test_security_pid.py").write_text(
+        "def test_x():\n    assert True\n", encoding="utf-8"
     )
+    return out_dir
+
+
+_MODEL = ["--authorize", "my-agent", "--model", "ollama/llama3.2:3b"]
+
+
+@pytest.mark.parametrize("command", ["scan", "check", "validate", "gate", "ablate"])
+def test_every_command_refuses_a_rest_effect_probe_before_any_spend(
+    command: str, rest_with_probe: Path, tmp_path: Path, reached: list[str]
+) -> None:
+    args = [command]
+    if command == "validate":
+        args.append(str(_generated_dir(tmp_path)))
+    args += ["--target-file", str(rest_with_probe)]
+    if command != "check":
+        args += _MODEL
+    result = runner.invoke(app, args)
     assert result.exit_code == EXIT_CONFIG, result.output
     assert _REFUSAL in result.output + (result.stderr or "")
+    assert reached == []
+
+
+def test_validate_refuses_a_saved_rest_target_yaml_with_an_effect_probe(
+    tmp_path: Path, reached: list[str]
+) -> None:
+    """An older scan folder whose saved target.yaml carries the block stops too."""
+    out_dir = _generated_dir(tmp_path)
+    (out_dir / "target.yaml").write_text(_REST_WITH_PROBE, encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(out_dir), *_MODEL])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert _REFUSAL in result.output + (result.stderr or "")
+    assert reached == []
 
 
 def _validate_black_box(*, fired: bool, consensus: float) -> Any:
@@ -145,4 +189,7 @@ def test_validate_never_tells_a_rest_user_to_declare_an_effect_probe(
     assert effect.report_only is True
     assert "effect_probe" not in effect.detail
     assert "black-box" in effect.detail
-    assert "effect_probe" not in _rendered(report)
+    rendered = _rendered(report)
+    assert "effect_probe" not in rendered
+    if fired and consensus < 0.5:  # the consensus remediation line
+        assert "--judge-model" in rendered
