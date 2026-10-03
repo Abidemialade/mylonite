@@ -27,7 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arm reads as the undelivered-payload skip it always should have, and a
   target/transport crash reads as a target failure, not a planner one. A
   group that does not collapse to one cause is left alone and still reads as
-  an unclassified planner exception, as before. (#319)
+  an unclassified planner exception, as before. Every NOT TESTED attempt also
+  now carries its own reason code in `verdict_reason`, not just on the
+  summary's `coverage:` line, so a tool reading `scan_report.json`
+  attempt-by-attempt no longer needs the summary to see why an attempt proved
+  nothing. (#319)
 - **A rejection no longer says the guard "did not block" when it blocked everything it
   could see.** When the guarded side of a custom-target differential leaked nothing but
   some runs reached no verdict (for example, an effect probe that failed calibration),

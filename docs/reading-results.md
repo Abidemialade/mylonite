@@ -46,8 +46,10 @@ evidence behind it:
     | `not_applicable` with [`MYL-NT-019`](reason-codes.md#myl-nt-019) | a seed that had not finished when the scan stopped early — shown as `⚠ NOT TESTED` |
 
     Each NOT TESTED attempt also carries a reason code, such as `MYL-NT-005`, shown on
-    the summary's `coverage:` line. Look it up in [Reason codes](reason-codes.md) for
-    the fix.
+    the summary's `coverage:` line **and** on the attempt's own `verdict_reason` (as a
+    `[MYL-NT-005]` prefix) — a tool reading `scan_report.json` attempt-by-attempt, such
+    as campaign scoring, sees the same code without reading the summary line. Look it
+    up in [Reason codes](reason-codes.md) for the fix.
 
     `skipped_planner_no_engagement` is the subtlest of these: the attack was
     generated and delivered, and the agent never exercised it against the target.

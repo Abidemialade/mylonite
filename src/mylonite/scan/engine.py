@@ -53,6 +53,7 @@ from mylonite.scan.coverage import (
     SYNTHESIS_CAPPED_KEY,
     AbortReason,
     provider_abort_message,
+    stamp_reason_codes,
 )
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.evidence_tier import EVIDENCE_TIER_KEY, EVIDENCE_TIERS, evidence_tier
@@ -1053,7 +1054,14 @@ class ScanEngine:
             provider=self._config.provider,
             model=self._config.model,
             elapsed_seconds=round(elapsed, 3),
-            attempts=attempts,
+            # #319: stamp each NOT_TESTED attempt's OWN reason code onto its
+            # verdict_reason here, once, so a consumer that reads only an
+            # attempt's own text fields (campaign scoring's
+            # ``_unexplained_attempts``) sees the same code the coverage
+            # summary line already names. A no-op for attempts that already
+            # carry one (the engine-synthesized rows) or aren't NOT_TESTED at
+            # all (finding/no_finding/dry_run) -- see ``stamp_reason_codes``.
+            attempts=stamp_reason_codes(attempts),
             findings_count=len(exploits),
             inconclusive_attempts=inconclusive_attempts,
             fallback_breakdown=fallback_breakdown or {},
