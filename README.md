@@ -173,7 +173,10 @@ pip install mylonite                      # the CLI, from PyPI
 pip install "mylonite[demo]"              # ...plus the bundled practice app
 ```
 
-Python 3.11–3.14.
+Python 3.11–3.14. On an older Python, `pip` doesn't say so — it reports "Could not find
+a version that satisfies the requirement mylonite" with no reason. Check `python
+--version` first, or run `python -m pip install --upgrade pip` before retrying: a bundled
+pip older than 21 can misreport even a correctly-versioned interpreter the same way.
 
 The `[demo]` extra installs the bundled practice app, and you need it for **any**
 `reference:...` command — `demo` and `scan reference:...` alike.
@@ -351,11 +354,13 @@ auditors already use. See [docs/standards-mapping.md](./docs/standards-mapping.m
 ## Responsible use
 
 Mylonite reproduces working attacks against AI agents. **Use it only against targets you
-control or are contractually authorised to test.** Every command that drives a real target —
-`scan`, `gate`, `validate` and `ablate` — refuses to run without an explicit `--authorize`
-flag naming that target: the value must match the target's declared `scope`, or its family
-name where no scope is declared. The bundled insecure practice app runs in-process and opens
-no network ports.
+control or are contractually authorised to test.** Every command that drives a real target
+other than the bundled practice app — `scan`, `gate`, `validate` and `ablate` against your
+own MCP server — refuses to run without an explicit `--authorize` flag naming that target:
+the value must match the target's declared `scope`, or its family name where no scope is
+declared. The bundled `reference:vulnerable`/`reference:guarded` practice app runs
+in-process, opens no network ports, and takes any `--authorize` value or none — there is
+nothing external it could reach.
 
 Full policy: [SECURITY.md](./SECURITY.md).
 

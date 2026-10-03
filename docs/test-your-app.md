@@ -105,6 +105,12 @@ trying Mylonite against real servers:
 mylonite scan mcp:filesystem:/tmp/sandbox --authorize /tmp/sandbox
 ```
 
+On Windows, use an existing, non-root directory and quote the path if it has spaces:
+
+```powershell
+mylonite scan mcp:filesystem:C:\sandbox --authorize C:\sandbox
+```
+
 `mcp:github` needs a token: export `GITHUB_PERSONAL_ACCESS_TOKEN` (the exact variable
 the real GitHub MCP server reads) before you scan — an unset value fails fast, naming it,
 before any subprocess launches.
