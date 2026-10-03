@@ -1,0 +1,519 @@
+{
+  "schema_version": "1.0",
+  "campaign": "third-party-verification-2026-10",
+  "prereg_file": "verification/PREREG_THIRD_PARTY_2026_10.md",
+  "build_ref": "d150c742",
+  "recorded_at": "2026-10-03",
+  "cells": [
+    {
+      "target": "tpv-server-memory",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 39957,
+      "completion_tokens": 2044,
+      "cost_usd": 0.050177
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 40027,
+      "completion_tokens": 2022,
+      "cost_usd": 0.050137
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 39985,
+      "completion_tokens": 1996,
+      "cost_usd": 0.049965
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "NOT_KEPT",
+      "label": "REJECTED",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 34,
+      "prompt_tokens": 21024,
+      "completion_tokens": 1754,
+      "cost_usd": 0.004206,
+      "note": "guarded runs undecided after effect-probe calibration failed (MYL-INC-003); the differential detail's wording was wrong (said the guard 'did not block' when 2 of 3 guarded runs reached no verdict), fixed in PR #318"
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 33,
+      "prompt_tokens": 20322,
+      "completion_tokens": 1656,
+      "cost_usd": 0.004042
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 33,
+      "prompt_tokens": 20270,
+      "completion_tokens": 1670,
+      "cost_usd": 0.004043
+    },
+    {
+      "target": "tpv-server-memory",
+      "provider": "ollama",
+      "model": "ollama_chat/llama3.2:3b",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 14776,
+      "completion_tokens": 933,
+      "cost_usd": 0.0
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 231401,
+      "completion_tokens": 1912,
+      "cost_usd": 0.240961
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 231397,
+      "completion_tokens": 1935,
+      "cost_usd": 0.241072
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 26,
+      "prompt_tokens": 231400,
+      "completion_tokens": 1921,
+      "cost_usd": 0.241005
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 29,
+      "prompt_tokens": 145191,
+      "completion_tokens": 702,
+      "cost_usd": 0.0222
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 28,
+      "prompt_tokens": 139698,
+      "completion_tokens": 685,
+      "cost_usd": 0.021366
+    },
+    {
+      "target": "tpv-mcp-redis",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "KEPT",
+      "label": "KEPT",
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [],
+      "calls": 28,
+      "prompt_tokens": 139698,
+      "completion_tokens": 684,
+      "cost_usd": 0.021365
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 575,
+      "completion_tokens": 73,
+      "cost_usd": 0.00094
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 575,
+      "completion_tokens": 73,
+      "cost_usd": 0.00094
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 575,
+      "completion_tokens": 73,
+      "cost_usd": 0.00094
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 412,
+      "completion_tokens": 40,
+      "cost_usd": 8.6e-05
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 412,
+      "completion_tokens": 41,
+      "cost_usd": 8.6e-05
+    },
+    {
+      "target": "tpv-streamablehttp",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 1,
+      "prompt_tokens": 412,
+      "completion_tokens": 41,
+      "cost_usd": 8.6e-05
+    },
+    {
+      "target": "tpv-server-everything",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-002"
+      ],
+      "calls": 2,
+      "prompt_tokens": 5781,
+      "completion_tokens": 1008,
+      "cost_usd": 0.010821
+    },
+    {
+      "target": "tpv-server-everything",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "NOT_KEPT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [],
+      "calls": 2,
+      "prompt_tokens": 2650,
+      "completion_tokens": 522,
+      "cost_usd": 0.000711
+    },
+    {
+      "target": "tpv-go-memory",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "FOUND_UNVALIDATED",
+      "label": null,
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [
+        "MYL-INC-003",
+        "MYL-INC-006",
+        "MYL-NT-003",
+        "MYL-NT-006"
+      ],
+      "calls": 12,
+      "prompt_tokens": 18459,
+      "completion_tokens": 1044,
+      "cost_usd": 0.023679
+    },
+    {
+      "target": "tpv-go-memory",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "FOUND_UNVALIDATED",
+      "label": null,
+      "weakness_classes": [
+        "W4"
+      ],
+      "reason_codes": [
+        "MYL-INC-003",
+        "MYL-INC-006",
+        "MYL-NT-006"
+      ],
+      "calls": 21,
+      "prompt_tokens": 9922,
+      "completion_tokens": 699,
+      "cost_usd": 0.001908
+    },
+    {
+      "target": "tpv-agents-sdk-ollama",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [],
+      "calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost_usd": 0.0,
+      "note": "first attempt: agent shim failed to install (pip dependency conflict, fixed in PR #320); no Mylonite command ran"
+    },
+    {
+      "target": "tpv-agents-sdk-ollama",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [],
+      "calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost_usd": 0.0,
+      "note": "first attempt: agent shim failed to install (pip dependency conflict, fixed in PR #320); no Mylonite command ran"
+    },
+    {
+      "target": "tpv-agents-sdk-ollama",
+      "provider": "anthropic",
+      "model": "anthropic/claude-haiku-4-5-20251001",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-008"
+      ],
+      "calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost_usd": 0.0,
+      "note": "re-run after PR #320: the agent returned HTTP 422 (no JSON content type on the request), so the one attempt errored before any Mylonite LLM call; see PR #321 (open)"
+    },
+    {
+      "target": "tpv-agents-sdk-ollama",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "classification": "PRODUCT_DEFECT",
+      "label": null,
+      "weakness_classes": [],
+      "reason_codes": [
+        "MYL-NT-008"
+      ],
+      "calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "cost_usd": 0.0,
+      "note": "re-run after PR #320: the agent returned HTTP 422 (no JSON content type on the request), so the one attempt errored before any Mylonite LLM call; see PR #321 (open)"
+    }
+  ],
+  "rollups": {
+    "tpv-server-memory/anthropic": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "KEPT",
+      "met_bar": true
+    },
+    "tpv-server-memory/openai": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "KEPT",
+      "met_bar": true
+    },
+    "tpv-server-memory/ollama": {
+      "n": 1,
+      "bar": "informational (N=1)",
+      "result": "KEPT"
+    },
+    "tpv-mcp-redis/anthropic": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "KEPT",
+      "met_bar": true
+    },
+    "tpv-mcp-redis/openai": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "KEPT",
+      "met_bar": true
+    },
+    "tpv-streamablehttp/anthropic": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "PRODUCT_DEFECT",
+      "met_bar": true,
+      "note": "not a security verdict; the N=3 bar agreeing on PRODUCT_DEFECT means the same product bug reproduced on every re-drive"
+    },
+    "tpv-streamablehttp/openai": {
+      "n": 3,
+      "bar": "2/3",
+      "result": "PRODUCT_DEFECT",
+      "met_bar": true,
+      "note": "not a security verdict; the N=3 bar agreeing on PRODUCT_DEFECT means the same product bug reproduced on every re-drive"
+    }
+  },
+  "product_issues": [
+    {
+      "issue": "https://github.com/Abidemialade/mylonite/issues/319",
+      "state": "open",
+      "title": "With --allow-no-seed-arm, a missing seed arm reads as a planner exception",
+      "seen_on": [
+        "tpv-streamablehttp (both providers, 3/3 runs each)",
+        "tpv-server-everything (anthropic)"
+      ],
+      "effect": "the attempt is correctly marked NOT TESTED in the printed coverage summary (MYL-NT-002), but the per-attempt record carries no reason code of its own, so the campaign's own scorer (which requires the code on the attempt, not just the summary line) classifies the run as a product defect rather than a clean NOT TESTED. No false clean in either case."
+    },
+    {
+      "issue": "https://github.com/Abidemialade/mylonite/pull/321",
+      "state": "open",
+      "title": "fix(http): send a JSON request body with a JSON content type",
+      "seen_on": [
+        "tpv-agents-sdk-ollama (both providers, re-run after PR #320)"
+      ],
+      "effect": "the rest adapter's request carried no JSON content-type header, so the target agent rejected it with HTTP 422 and the planted payload never arrived; one attempt, zero Mylonite LLM calls, $0 spent."
+    }
+  ],
+  "harness_amendments": [
+    {
+      "what": "expired Anthropic CI key",
+      "effect": "the first three counted Anthropic dispatches (targets 1-3, run 1) stopped at the key check before any target launched (HTTP 401); $0 spent, no outcome produced",
+      "fix": "key rotated; affected cells re-dispatched on the same build"
+    },
+    {
+      "what": "missing --allow-no-seed-arm for the streamable-HTTP target",
+      "effect": "target 3 declares W2 with no seed_arm; scan refuses that combination without the flag, so the first counted dispatch stopped before any request",
+      "fix": "PR https://github.com/Abidemialade/mylonite/pull/317 (merged); the workflow now passes --allow-no-seed-arm for target 3 only"
+    },
+    {
+      "what": "agent-shim pip dependency conflict (target 6)",
+      "effect": "the shim's openai-agents pin needs openai>=3, LiteLLM's pin needs openai<3, so installing both in one environment failed before Mylonite ran; $0 spent",
+      "fix": "PR https://github.com/Abidemialade/mylonite/pull/320 (merged); the shim now installs in its own virtualenv"
+    }
+  ],
+  "spend_counted_usd": {
+    "anthropic": {
+      "calls": 173,
+      "cost_usd": 0.9106
+    },
+    "openai": {
+      "calls": 211,
+      "cost_usd": 0.0801
+    },
+    "ollama": {
+      "calls": 26,
+      "cost_usd": 0.0
+    }
+  }
+}

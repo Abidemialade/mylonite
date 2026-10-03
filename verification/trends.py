@@ -100,6 +100,64 @@ _SEMVER_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
 #: so "how do I refresh this" never requires reading this module's source.
 _REGENERATE_COMMAND = "python -m verification.trends"
 
+#: The third-party campaign (``verification/PREREG_THIRD_PARTY_2026_10.md``) is a
+#: different kind of evidence than layer1/2/3's academic benchmarks: six real MCP/
+#: agent systems Mylonite had never run against, scored against a pre-registered
+#: rule rather than a released dataset's own labels. It is committed one directory
+#: level deeper (``<version>/third-party/results.json``), so a version directory
+#: that holds ONLY this evidence has no top-level ``meta.json`` -- that must never
+#: render as a "skipped: no meta.json" note (which would read as a broken commit),
+#: so it gets its own short table instead, right after the main one.
+_THIRD_PARTY_SUBDIR = "third-party"
+_THIRD_PARTY_RESULTS_FILE = "results.json"
+_THIRD_PARTY_HEADER = (
+    "| Version | Date | Targets KEPT (bar met) | Product defects (open issues) | Spend |"
+)
+_THIRD_PARTY_SEPARATOR = "| --- | --- | --- | --- | --- |"
+
+
+def _third_party_summary(results_path: Path) -> dict[str, Any] | None:
+    """The fields :func:`_render_third_party_row` needs, or ``None`` if the file
+    is missing or unreadable -- caught, never raised, the same posture
+    ``render_trends`` already takes toward a malformed ``meta.json``."""
+    try:
+        return _load_json(results_path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _render_third_party_row(version: str, data: dict[str, Any]) -> str:
+    """One summary row from a committed ``third-party/results.json``.
+
+    Deliberately coarse -- this table exists to show WHETHER a version shipped
+    live third-party evidence and its shape at a glance, not to duplicate that
+    directory's own ``README.md``, which is the full per-cell write-up.
+    """
+    rollups = data.get("rollups", {})
+    kept = sorted(
+        {
+            key.split("/", 1)[0]
+            for key, r in rollups.items()
+            if isinstance(r, dict) and r.get("result") == "KEPT" and r.get("met_bar")
+        }
+    )
+    kept_cell = ", ".join(f"`{name}`" for name in kept) if kept else "none"
+
+    issues = data.get("product_issues", [])
+    open_issues = [i for i in issues if isinstance(i, dict) and i.get("state") == "open"]
+    defects_cell = f"{len(issues)} ({len(open_issues)} open)" if issues else "0"
+
+    spend = data.get("spend_counted_usd", {})
+    spend_parts = []
+    for provider in sorted(spend):
+        entry = spend[provider]
+        if isinstance(entry, dict) and "cost_usd" in entry:
+            spend_parts.append(f"{provider} ${entry['cost_usd']:.2f}")
+    spend_cell = ", ".join(spend_parts) if spend_parts else "?"
+
+    date = str(data.get("recorded_at", "?"))
+    return f"| {version} | {date} | {kept_cell} | {defects_cell} | {spend_cell} |"
+
 
 def _semver_key(version: str) -> tuple[int, int, int] | None:
     """Sortable ``(major, minor, patch)``, or ``None`` if not ``X.Y.Z``.
@@ -217,17 +275,38 @@ def render_trends(results_root: Path) -> str:
     """
     rows: list[tuple[tuple[int, int, int], str]] = []
     notes: list[str] = []
+    third_party_rows: list[tuple[tuple[int, int, int] | str, str]] = []
 
     entries = sorted(results_root.iterdir()) if results_root.exists() else []
     for entry in entries:
         if not entry.is_dir():
             continue
+
+        # Checked independently of the academic meta.json below -- a version
+        # can carry third-party evidence, academic evidence, both, or neither.
+        third_party_path = entry / _THIRD_PARTY_SUBDIR / _THIRD_PARTY_RESULTS_FILE
+        if third_party_path.is_file():
+            data = _third_party_summary(third_party_path)
+            if data is not None:
+                key = _semver_key(entry.name)
+                third_party_rows.append(
+                    (
+                        key if key is not None else entry.name,
+                        _render_third_party_row(entry.name, data),
+                    )
+                )
+            else:
+                notes.append(f"- skipped `{entry.name}`: unreadable {third_party_path.name}")
+
         meta_path = entry / "meta.json"
+        if not meta_path.is_file():
+            # No academic campaign for this version -- not a defect by itself
+            # (it may carry only third-party evidence, already handled above).
+            if not third_party_path.is_file():
+                notes.append(f"- skipped `{entry.name}`: no meta.json")
+            continue
         try:
             meta = _load_json(meta_path)
-        except FileNotFoundError:
-            notes.append(f"- skipped `{entry.name}`: no meta.json")
-            continue
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             notes.append(f"- skipped `{entry.name}`: unreadable meta.json ({exc})")
             continue
@@ -256,6 +335,33 @@ def render_trends(results_root: Path) -> str:
 
     rows.sort(key=lambda item: item[0])
     lines = [_HEADER, _SEPARATOR, *(row for _, row in rows)]
+
+    if third_party_rows:
+        # Mixed key types (a semver tuple, or the raw directory name when it
+        # isn't one) aren't comparable against each other in Python 3, so
+        # normalise to a (0, tuple) / (1, name) pair -- semver-named
+        # directories sort first, by version; anything else sorts after, by
+        # name.
+        def _tp_sort_key(item: tuple[tuple[int, int, int] | str, str]) -> tuple[int, Any]:
+            key = item[0]
+            return (0, key) if isinstance(key, tuple) else (1, key)
+
+        third_party_rows.sort(key=_tp_sort_key)
+        lines.append("")
+        lines.append("## Third-party verification campaigns")
+        lines.append("")
+        lines.append(
+            "Live-in-CI runs against real third-party systems, scored against a "
+            "pre-registered rule rather than a released dataset's own labels -- see "
+            "each version's own `third-party/README.md` for the full write-up. "
+            "`met_bar` KEPT cells only; a candidate (`FOUND_UNVALIDATED`) or a smoke "
+            "pass never counts as KEPT here."
+        )
+        lines.append("")
+        lines.append(_THIRD_PARTY_HEADER)
+        lines.append(_THIRD_PARTY_SEPARATOR)
+        lines.extend(row for _, row in third_party_rows)
+
     if notes:
         lines.append("")
         lines.append("Skipped (malformed or unreadable):")
