@@ -56,10 +56,10 @@ closes it, not proof about any one deployment's own guard.
 Three other targets in the same campaign produced no security verdict: a streamable-HTTP
 example server hit a product defect on every run (a missing seed arm reads as an
 unclassified exception, [issue #319](https://github.com/Abidemialade/mylonite/issues/319),
-open), and two smoke-only targets (no verdict was ever claimed for them) produced one
+fixed after the measured build), and two smoke-only targets (no verdict was ever claimed for them) produced one
 clean resist, one more instance of the same product defect, an unvalidated finding, and a
 request that reached its target with the wrong content type
-([PR #321](https://github.com/Abidemialade/mylonite/pull/321), open). None of these were
+(fixed after the measured build in [PR #321](https://github.com/Abidemialade/mylonite/pull/321)). None of these were
 silently scored clean. Total spend: $0.91 on Anthropic, $0.08 on OpenAI, $0 on the
 in-runner Ollama cell.
 
