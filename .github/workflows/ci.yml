@@ -200,7 +200,7 @@ jobs:
         run: pytest tests/cli_golden -q
       - name: No hardcoded provider model or credential env var
         run: python scripts/check_no_hardcoded_models.py
-      - name: "Demo replay wall time (bar: 10s)"
+      - name: "Demo replay wall time (bar: 20s)"
         env:
           ANTHROPIC_API_KEY: ""
           OPENAI_API_KEY: ""
@@ -213,11 +213,11 @@ jobs:
             end_ms=$(date +%s%3N)
             elapsed_ms=$((end_ms - start_ms))
             echo "demo replay wall time (attempt ${attempt}): ${elapsed_ms}ms"
-            if [ "$elapsed_ms" -le 10000 ]; then
+            if [ "$elapsed_ms" -le 20000 ]; then
               exit 0
             fi
           done
-          echo "::error::demo replay took over the 10000ms (10s) bar twice in a row (last: ${elapsed_ms}ms)"
+          echo "::error::demo replay took over the 20000ms (20s) bar twice in a row (last: ${elapsed_ms}ms)"
           exit 1
       - name: Test count floor (never drops without the tests-removed label)
         run: python scripts/check_test_count.py --labels-env PR_LABELS

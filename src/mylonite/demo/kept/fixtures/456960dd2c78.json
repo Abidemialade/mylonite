@@ -1,0 +1,53 @@
+{
+  "_key": "456960dd2c781d8b46ea7662a6a527b8a36d48ab36f8be3825a6129e4ca1b75d",
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "message": {
+        "content": "Now I'll confirm and dispatch the email:",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "confirm_send"
+            },
+            "id": "toolu_01SMJ68hv8BhbjATCda3doH8"
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "completion_tokens": 46,
+    "completion_tokens_details": {
+      "accepted_prediction_tokens": null,
+      "audio_tokens": null,
+      "image_tokens": null,
+      "reasoning_tokens": 0,
+      "rejected_prediction_tokens": null,
+      "text_tokens": 46,
+      "video_tokens": null
+    },
+    "inference_geo": "not_available",
+    "iterations": null,
+    "prompt_tokens": 1021,
+    "prompt_tokens_details": {
+      "audio_tokens": null,
+      "cache_creation_token_details": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_tokens": 0,
+      "cache_write_tokens": 0,
+      "cached_tokens": 0,
+      "image_tokens": null,
+      "text_tokens": 1021,
+      "video_tokens": null
+    },
+    "service_tier": "standard",
+    "speed": null,
+    "total_tokens": 1067
+  }
+}

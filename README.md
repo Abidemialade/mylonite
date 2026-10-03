@@ -204,17 +204,19 @@ With the `[demo]` extra already installed (see [Install](#install)), the same de
 mylonite demo
 ```
 
-Either way, that runs the comparison against the bundled practice app — deliberately insecure, runs
-in-process, opens no network ports — and prints what got through on the unguarded build
-next to what was stopped on the guarded one. Same attacks, two builds, different outcomes.
+Either way, that runs against the bundled practice app (deliberately insecure, runs
+in-process, opens no network ports). It opens with a kept finding, an email sent with no
+approval step, with its verdict, impact and suggested fix. Then it runs the regression test
+Mylonite generated for it: the test **fails on the unguarded build and passes on the guarded
+one**. The full comparison table follows. Same attacks, two builds, different outcomes.
 **That contrast is the point of the tool.**
 
 `demo` replays model responses recorded against those bundled apps, so it is offline and
 gives the same answer every time. The scan engine, the adapters and the comparison are all
 the real ones; only the model's replies are pre-recorded, and the output tells you which
-model produced them and when. Every demo mode — replay and `--live` alike — turns off the
-per-seed customiser and the LLM-judge fallback, so a verdict is decided purely by
-deterministic predicates; `scan` itself runs each payload once by default, and the
+model produced them and when. The comparison table, in replay and `--live` alike, turns
+off the per-seed customiser and the LLM-judge fallback, so a verdict there is decided purely
+by deterministic predicates (the kept finding replays the full validator run); `scan` itself runs each payload once by default, and the
 repeat-run consensus belongs to `validate` (five iterations by default), which `gate` runs
 for you. Treat the numbers as a demonstration of the machinery rather than a fresh
 measurement of today's model — `mylonite demo --live` is the fresh measurement, and it does

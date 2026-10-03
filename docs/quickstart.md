@@ -28,9 +28,10 @@ Then, with no API key and nothing to configure:
 mylonite demo
 ```
 
-That replays a recorded scan against the bundled reference app's vulnerable and guarded
-builds and prints the differential — weaknesses on one side, clean on the other. It is
-the fastest way to see what the tool does. See [`demo`](cli-reference.md) for exactly
+That replays a recorded run against the bundled reference app's vulnerable and guarded
+builds. It shows a kept finding with its suggested fix, then the regression test
+generated for it failing on the vulnerable build and passing on the guarded one, then the
+scan table for every weakness class. It is the fastest way to see what the tool does. See [`demo`](cli-reference.md) for exactly
 what "replay" means and how it differs from a live `scan`.
 
 The `[demo]` extra adds the reference target (`mcp-kitchen-sink`), which is a separate

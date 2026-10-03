@@ -361,6 +361,29 @@ same planner, and a test is kept only when the attack lands without the safeguar
 stopped with it. To see what your app does when the agent obeys, also run a less-aligned
 planner.
 
+## 12. W1 does not land on the reference app
+
+`mylonite demo` shows W1 (tool-description smuggling) as NO VERDICT on the vulnerable
+build, and prints a line saying why. The reference app offers two W1 vectors, and neither
+separates the builds:
+
+- **Summary smuggling.** The smuggled note asks the agent to summarise what it reads.
+  Agents summarise on both builds anyway, so the text is near-identical on each side
+  and there is no difference to detect. Loosening the check to catch it would fire on
+  the guarded build too.
+- **Send-licence smuggling.** The two builds describe `send_email` differently, and
+  both descriptions are true: the guarded build really does stage the email. A careful
+  agent reads the vulnerable build's line as a warning and declines to send, so the
+  result tracks the W4 safeguard rather than W1.
+
+The demo runs with no LLM judge, so these attempts stay undecided. A live scan with a
+judge can rule on them, and results vary by model (see
+[What a second model actually showed](#what-a-second-model-actually-showed)), but no W1
+finding has been kept on the reference app. The seeds and checks stay as they are:
+rewording them to force a finding would teach to the test. One W1 vector needs no agent
+cooperation, a tool list that changes mid-session; the scanner detects it, but the
+reference app does not seed it.
+
 ## Reporting something missing
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented

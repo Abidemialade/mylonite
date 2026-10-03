@@ -180,8 +180,8 @@ def test_render_clean_differential() -> None:
 
     # Teaser, next step, and footer.
     assert (
-        "Each finding becomes a committed regression test, validated against this "
-        "same vulnerable/guarded oracle. Turn one into a gating test (choose a model and set its key -- see docs/cli-reference.md):"
+        "Run the same keep-and-gate step live on this app (choose a model and set its "
+        "key -- see docs/cli-reference.md):"
     ) in output
     assert "mylonite gate reference:vulnerable" in lines
     # `--command` takes the executable and `--arg` each argument; a single
@@ -755,3 +755,91 @@ def test_no_cell_is_cut_either_side_of_the_layout_switch(offset: int | None) -> 
         assert tuple(cells[-2:]) == verdicts, cells
     headline = [line.strip() for line in text.splitlines()]
     assert "reference app: 3 exploits on vulnerable, 0 on guarded" in headline
+
+
+# --- the kept finding, the W1 line, the legend, the coverage count -----------
+
+
+@pytest.fixture(scope="module")
+def kept_proof():  # type: ignore[no-untyped-def]
+    """The packaged kept finding, replayed for real (offline, no key)."""
+    from mylonite.demo.proof import prove_kept
+
+    return prove_kept()
+
+
+def _render_with_kept(vulnerable: ScanResult, guarded: ScanResult, kept: object) -> str:
+    console = Console(file=io.StringIO(), record=True, width=240)
+    render_demo(
+        vulnerable,
+        guarded,
+        mode="replay (offline)",
+        elapsed_s=0.8,
+        console=console,
+        kept=kept,  # type: ignore[arg-type]
+    )
+    return console.export_text()
+
+
+def test_the_kept_finding_leads_with_verdict_impact_fix_then_red_and_green(
+    kept_proof: object,
+) -> None:
+    vulnerable = _result(
+        "reference:vulnerable",
+        _outcomes({"excessive-agency-send-email-direct-unconfirmed": "finding"}),
+    )
+    output = _render_with_kept(vulnerable, _result("reference:guarded", _outcomes()), kept_proof)
+
+    order = [
+        "kept finding: W4 unconfirmed-email-send",
+        "Verdict: KEPT",
+        "Impact:",
+        "Suggested fix",
+        "✗ FAIL on the vulnerable build (red)",
+        "✓ PASS on the guarded build (green)",
+        "the reference app — vulnerable vs guarded build",
+    ]
+    positions = [output.index(text) for text in order]
+    assert positions == sorted(positions), "the kept block must come first, in this order"
+    assert "fired 1/1 without the safeguard, resisted 1/1 with it" in output
+    assert "the kept finding above also passed the oracle" in output
+    assert "✗ FAIL / ✓ PASS" in output
+
+
+def test_the_w1_line_names_why_it_does_not_land() -> None:
+    output = _render(
+        _result("reference:vulnerable", _outcomes(), no_verdict=_W1),
+        _result("reference:guarded", _outcomes()),
+    )
+    assert "W1 does not land in this recording" in output
+    assert "docs/limitations.md" in output
+
+
+def test_no_w1_line_when_w1_lands() -> None:
+    w1_found = dict.fromkeys(_W1, "finding")
+    output = _render(
+        _result("reference:vulnerable", _outcomes(w1_found)),  # type: ignore[arg-type]
+        _result("reference:guarded", _outcomes()),
+    )
+    assert "W1 does not land" not in output
+
+
+def test_the_legend_lists_only_the_marks_printed() -> None:
+    output = _render(
+        _result("reference:vulnerable", _outcomes({_W4[0]: "finding"})),
+        _result("reference:guarded", _outcomes()),
+    )
+    legend = output[output.index("legend:") :]
+    assert "the attack landed" in legend
+    assert "a check decided the attack was resisted" in legend
+    assert "NOT TESTED" not in legend
+    assert "FAIL / " not in legend, "no test result is printed without a kept finding"
+
+
+def test_an_undecided_attempt_is_counted_once_in_the_coverage_note() -> None:
+    output = _render(
+        _result("reference:vulnerable", _outcomes(), no_verdict=[_W4[0]]),
+        _result("reference:guarded", _outcomes()),
+    )
+    assert "1 reached NO VERDICT" in output
+    assert "NOT TESTED (the attack" not in output
