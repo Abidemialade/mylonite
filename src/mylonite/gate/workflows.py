@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources as ir
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -172,3 +173,52 @@ def write_workflows(
         out.write_text(text, encoding="utf-8")
         written.append(out)
     return written
+
+
+_PIN = re.compile(r"mylonite==([0-9][0-9A-Za-z.+!-]*)")
+
+
+def stale_workflow_pins(gate_dir: Path, *, version: str = __version__) -> list[str]:
+    """One warning line per committed gate workflow that pins an older mylonite.
+
+    The workflows ``gate --workflows`` scaffolds install ``mylonite==<the
+    version that wrote them>``. An older pin may not replay what a newer
+    ``gate`` records (recordings made by this version are named by a short
+    key prefix older versions do not look for), so the new tests would fail
+    in CI on their first run. Looks in the nearest ``.github/workflows/``
+    at or above ``gate_dir``. A warning, never a refusal: the user may bump
+    the pin in the same commit.
+    """
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        running = Version(version)
+    except InvalidVersion:
+        return []
+    start = Path(gate_dir).absolute()
+    for folder in (start, *start.parents):
+        workflows = folder / ".github" / "workflows"
+        if workflows.is_dir():
+            break
+    else:
+        return []
+    lines: list[str] = []
+    for name in _TEMPLATES:
+        path = workflows / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for pinned in sorted(set(_PIN.findall(text))):
+            try:
+                older = Version(pinned) < running
+            except InvalidVersion:
+                continue
+            if older:
+                lines.append(
+                    f"warning: {path} installs mylonite=={pinned}, older than this "
+                    f"mylonite ({version}), which may not replay the recordings this run "
+                    f"wrote. Re-run gate with --workflows, or change the pin to "
+                    f"mylonite=={version}."
+                )
+    return lines

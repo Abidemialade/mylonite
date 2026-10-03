@@ -636,6 +636,17 @@ def make_open_pr_fn(
             if workflows
             else []
         )
+        if not workflows:
+            # The committed workflows pin the mylonite that wrote them. An
+            # older pin may not replay what this run recorded, so the new
+            # tests would fail in CI on their first run. Warn; never refuse.
+            from mylonite._cli_io import echo_err
+            from mylonite.gate.workflows import stale_workflow_pins
+
+            for line in stale_workflow_pins(
+                out_dir if out_dir.is_absolute() else repo_root / out_dir
+            ):
+                echo_err(line)
         secret_lines = repo_secret_lines(env_refs)
         if secret_lines:
             from mylonite._cli_io import echo_err
