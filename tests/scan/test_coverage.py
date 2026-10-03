@@ -642,20 +642,18 @@ def test_budget_exceeded_has_an_actionable_operator_message() -> None:
     assert "incomplete" in message, "and be explicit that this is not a clean result"
 
 
-def test_budget_exceeded_message_does_not_wrongly_tell_a_custom_target_to_use_the_flag() -> None:
-    """#205: --weakness-class WIDENS a custom target's seed
-    set (adds to weakness_classes) but FILTERS a reference/bundled target's
-    -- this message has no target-kind context (a bare AbortReason lookup),
-    so it must not name --weakness-class alone as the fix for every target,
-    which used to read as "narrow with --weakness-class" regardless of kind
-    (wrong advice for a custom target, where the flag widens)."""
+def test_budget_exceeded_message_names_both_narrowing_remedies() -> None:
+    """#227: --weakness-class FILTERS every target's seed set now (it used to
+    WIDEN a custom target's declared weakness_classes instead of narrowing
+    it), so this generic, target-kind-blind message (a bare AbortReason
+    lookup) can safely name the flag as a remedy for any target -- it must
+    also still name the target-file key, since that's the only remedy for a
+    custom target the flag doesn't fully replace (narrowing via the file
+    needs no --weakness-class flag on every re-run)."""
     message = _OPERATOR_MESSAGE_BY_ABORT[AbortReason.BUDGET_EXCEEDED]
     assert message is not None
-    # Either it names BOTH remedies (flag for reference/bundled, target-file
-    # weakness_classes for custom) or it avoids naming --weakness-class as a
-    # narrowing device on its own.
-    if "--weakness-class" in message:
-        assert "weakness_classes" in message, message
+    assert "--weakness-class" in message, message
+    assert "weakness_classes" in message, message
 
 
 # --- no-verdict attempts ----------------------------------------------------

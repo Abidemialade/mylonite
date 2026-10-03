@@ -816,14 +816,18 @@ class ScanEngine:
                         {p.pattern_id for p in all_payloads} - set(counter.by_seed) - completed
                     )
                     if starved:
-                        # #205: --weakness-class FILTERS a reference/bundled target's
-                        # seeds (no declared weakness_classes -- the legacy family
-                        # path) but WIDENS a custom target's (adds to its declared
-                        # weakness_classes). descriptor.weakness_classes is exactly
-                        # the signal seed_coverage itself branches on for this same
-                        # distinction, so it names the correct remedy here too.
+                        # #227: --weakness-class FILTERS every target's seeds now,
+                        # custom included (it used to WIDEN a custom target's
+                        # declared weakness_classes, the opposite of "narrow").
+                        # A custom target (declared weakness_classes) can narrow
+                        # either way; a reference/bundled target (the legacy
+                        # family path, no declared classes) has no target-file
+                        # weakness_classes: key to edit, so only the flag applies.
+                        # descriptor.weakness_classes is exactly the signal
+                        # seed_coverage itself branches on for this distinction.
                         narrow_hint = (
-                            "narrow weakness_classes in the target file"
+                            "narrow the scan with --weakness-class, or narrow "
+                            "weakness_classes in the target file"
                             if descriptor.weakness_classes
                             else "narrow the scan with --weakness-class"
                         )

@@ -1216,24 +1216,24 @@ async def _run_starved_budget_scenario(
 async def test_starved_seed_warning_names_the_flag_for_a_reference_or_bundled_target(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """#205: a target with NO declared weakness_classes (the
-    legacy family path every reference:*/bundled mcp:<family> target takes)
-    -- --weakness-class genuinely narrows there, so naming it is correct."""
+    """A target with NO declared weakness_classes (the legacy family path
+    every reference:*/bundled mcp:<family> target takes) has no target-file
+    weakness_classes: key to point at, so only the flag is named."""
     warning_text = await _run_starved_budget_scenario(caplog, weakness_classes=[])
     assert "--weakness-class" in warning_text, warning_text
     assert "weakness_classes in the target file" not in warning_text, warning_text
 
 
 @pytest.mark.asyncio
-async def test_starved_seed_warning_names_the_target_file_for_a_custom_target(
+async def test_starved_seed_warning_names_both_remedies_for_a_custom_target(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A target that DECLARES weakness_classes (a custom target) -- here
-    --weakness-class WIDENS the seed set instead of narrowing it, so the
-    warning must not tell this operator to use the flag."""
+    """#227: a target that DECLARES weakness_classes (a custom target) can
+    narrow either way now that --weakness-class FILTERS a declared set
+    instead of widening it, so the warning names both remedies."""
     warning_text = await _run_starved_budget_scenario(caplog, weakness_classes=["W1", "W4"])
     assert "weakness_classes in the target file" in warning_text, warning_text
-    assert "--weakness-class" not in warning_text, warning_text
+    assert "--weakness-class" in warning_text, warning_text
 
 
 @pytest.mark.asyncio
