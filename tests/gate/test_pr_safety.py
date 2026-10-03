@@ -146,7 +146,7 @@ def test_branch_only_on_origin_reports_already_proposed(tmp_path: Path) -> None:
 
 
 def test_missing_origin_falls_through_honestly_instead_of_claiming_proposed(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No `origin` remote at all (the shape a network failure or a
     never-configured remote also produces for `ls-remote`) must never be
@@ -155,6 +155,8 @@ def test_missing_origin_falls_through_honestly_instead_of_claiming_proposed(
     means `checkout -b` succeeds (no local collision either) and the run
     fails later, honestly, when `git push` has nothing to push to."""
     repo = _init_repo(tmp_path / "repo")  # no `origin` remote configured
+    # Pretend `gh` is installed, as CI runners may not have it on PATH.
+    monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
 
     calls: list[list[str]] = []
 
