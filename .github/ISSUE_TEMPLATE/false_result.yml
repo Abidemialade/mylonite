@@ -1,0 +1,92 @@
+name: False result (false positive / false negative)
+description: A kept finding, a clean result, or a NOT TESTED row that doesn't match reality.
+labels: ["bug", "false-result", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template when a scan, validate or gate run reported something
+        that does not hold up: a finding that was kept but the attack doesn't
+        actually land, a clean result on a target you know is vulnerable, or a
+        NOT TESTED row that should have reached a verdict.
+
+        For security-sensitive issues, use the private security advisory
+        channel listed in SECURITY.md instead of this template.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of mismatch
+      options:
+        - False positive (a finding was kept, but the attack does not really land)
+        - False negative (a real weakness read as clean or resisted)
+        - Wrong NOT TESTED / wrong reason code
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: mylonite-version
+    attributes:
+      label: Mylonite version
+      description: Output of `mylonite version`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Exact command
+      description: The full `mylonite ...` command that produced the result, flags included.
+      placeholder: "mylonite validate .mylonite/generated/<finding> --target-file app.yaml --authorize my-app"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: What the result said, and what you believe is actually true
+      description: Quote the verdict line(s) and say what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scan-report
+    attributes:
+      label: scan_report.json (secrets removed)
+      description: >-
+        Attach or paste the `scan_report.json` from `.mylonite/scans/<ts>/` (or
+        the `validation_report.json` next to the generated test). Remove any
+        live credential, bearer token, or secret-shaped value first — the
+        `${VAR}`-style placeholders Mylonite itself writes are safe to leave in.
+      render: json
+    validations:
+      required: true
+
+  - type: input
+    id: reason-codes
+    attributes:
+      label: Reason codes
+      description: >-
+        Any `MYL-...` codes attached to the attempt or class in question. See
+        `docs/reason-codes.md`.
+      placeholder: "MYL-INC-001"
+    validations:
+      required: false
+
+  - type: input
+    id: target-shape
+    attributes:
+      label: Target shape
+      description: Bundled (`reference:*`, `mcp:<family>`), or a custom `--target-file` (stdio / sse / http / rest)?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I removed every live credential and secret-shaped value from the report before pasting it.
+          required: true
