@@ -31,7 +31,7 @@ from mylonite.plugins._mcp import target_registry
 # `_relative_sqlite_env_keys` FROM THIS MODULE, and this module's own
 # `_scaffold_target_file` below, both keep working unchanged (#187).
 from mylonite.plugins._mcp.target_file import (
-    _relative_sqlite_arg_values as _relative_sqlite_arg_values,
+    _relative_sqlite_arg_indices as _relative_sqlite_arg_indices,
 )
 from mylonite.plugins._mcp.target_file import (
     _relative_sqlite_env_keys as _relative_sqlite_env_keys,
@@ -216,12 +216,23 @@ def _rebase_relative_path(path: Path, *, output: Path) -> Path:
     - otherwise ``path`` is returned as an absolute path — a ``..``-climbing
       relative value would fail the loader's containment check (see
       ``resolved_system_prompt_path``), so that is never written.
+
+    On Windows, ``path`` and ``output`` can resolve onto different drives
+    (``--scaffold T:/configs/app.yaml`` run from a ``C:`` cwd); there is no
+    relative path between two drives at all, and ``os.path.relpath`` raises
+    ``ValueError`` rather than returning one. That is exactly the "otherwise"
+    case above (no relative path can reach it), so it falls back to the same
+    absolute-path branch instead of propagating the exception.
     """
     if path.is_absolute():
         return path
     abs_path = (Path.cwd() / path).resolve()
     output_dir = output.resolve().parent
-    rel = os.path.relpath(abs_path, output_dir)
+    try:
+        rel = os.path.relpath(abs_path, output_dir)
+    except ValueError:
+        # Different drives on Windows -- no relative path exists at all.
+        return abs_path
     if rel.startswith(".."):
         return abs_path
     return Path(rel)

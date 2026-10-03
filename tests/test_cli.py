@@ -884,6 +884,36 @@ def test_scan_scaffold_warns_on_relative_sqlite_path_in_args(
     assert "relative SQLite path" in (result.stderr or result.output)
 
 
+def test_scan_scaffold_never_prints_a_credential_shaped_arg_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Critical fix (review round 1): the scaffold's own `args` warning must
+    withhold the flagged value too -- a credential-shaped token survives
+    `redact()`'s shape-based patterns untouched."""
+    _patch_fake_adapter(monkeypatch)
+    token = "session_7f3a9c2b1e4d6f8a0b2c4d6e8f0a2b4c.sqlite3"
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            "--cache-db",
+            "--arg",
+            token,
+            "--scaffold",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = result.stderr or result.output
+    assert "relative SQLite path" in output
+    assert "args[1]" in output
+    assert token not in output
+
+
 def test_relative_sqlite_env_keys_does_not_misclassify_hostname_substring() -> None:
     """DCR-0011: the unanchored `"sqlite" in low` substring match misclassified a
     non-SQLite URL whose HOSTNAME merely contains "sqlite" as a relative SQLite

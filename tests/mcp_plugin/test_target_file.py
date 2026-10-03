@@ -311,6 +311,26 @@ def test_load_target_file_warns_on_relative_sqlite_path_in_args(
     assert "relative SQLite path" in capsys.readouterr().err
 
 
+def test_load_target_file_never_prints_a_credential_shaped_arg_value(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Critical fix (review round 1): the `args` warning must withhold the
+    flagged value exactly like the `env` warning already does -- a
+    credential-shaped token with no recognised prefix sails straight past
+    `redact()`'s shape-based patterns. Names the position instead."""
+    token = "session_7f3a9c2b1e4d6f8a0b2c4d6e8f0a2b4c.sqlite3"
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        f"family: acme\ncommand: python\nargs: ['--cache-db', '{token}']\n",
+        encoding="utf-8",
+    )
+    load_target_file(p)
+    err = capsys.readouterr().err
+    assert "relative SQLite path" in err
+    assert "args[1]" in err
+    assert token not in err
+
+
 def test_load_target_file_silent_with_no_relative_sqlite_path(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

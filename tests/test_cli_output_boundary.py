@@ -22,16 +22,16 @@ import re
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "mylonite"
-# `target_file.py` (#187): `load_target_file`'s own relative-SQLite-path
-# warning prints with a bare `print(..., file=sys.stderr)`, not
-# `mylonite._cli_io.echo_err` -- this function must keep importing and
-# running with NOTHING beyond its own module's dependencies (pydantic/yaml)
-# installed, because `gate-action/action.yml`'s runtime-detection step calls
-# it from a bare `python` before any later step needs `typer`. The one print
-# site there still calls `mylonite._redaction.redact()` by hand, the same
-# function `echo_err` itself calls, so the redaction guarantee this test
-# protects still holds.
-_ALLOWED = {"_cli_io.py", "target_file.py"}
+# `_stderr_warn.py` (#187): `load_target_file` (`target_file.py`) needs a
+# redacted stderr print with NOTHING beyond its own module's dependencies
+# (pydantic/yaml) -- `gate-action/action.yml`'s runtime-detection step calls
+# it from a bare `python`, before any later step installs `typer`
+# (`_cli_io.py` pulls `typer` in at import time). This one-function module
+# exists only to give that call site a redacted print without that
+# dependency -- see its own docstring -- so the exception stays scoped to
+# it instead of to all of `target_file.py` (which handles credential-bearing
+# `env`/`args`/`headers` data extensively).
+_ALLOWED = {"_cli_io.py", "_stderr_warn.py"}
 
 # Each pattern is a (label, compiled regex, guidance) triple. All three route
 # through mylonite._cli_io — the single place secret-shaped tokens are masked
