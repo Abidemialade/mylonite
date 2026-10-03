@@ -191,6 +191,36 @@ probe. The reason names the readback the scaffold would propose, when there is o
 **Fix:** Declare an `effect_probe` whose `verify_tool` reads back what the attack would
 change (see [Target file](target-file.md)), or remove the class from `weakness_classes`.
 
+## MYL-NT-018
+
+The per-class probe ceiling left this tool without a probe, so it was never attacked.
+Mylonite builds at most 8 probes per weakness class on a custom target. A server with more
+candidate tools than that in one class gets one NOT TESTED row per tool left over, shown as
+`⚠ NOT TESTED`, so the class can no longer read resisted with tools nobody probed. A scan
+whose only gap is this code exits `2`.
+
+```text
+classes:
+  W4  NOT TESTED [MYL-NT-018 x4] (8 resisted, 4 not tested)
+```
+
+**Fix:** Name the tools that matter in the target file's `control_config` (`egress_tools`
+for W3, `consequential_tools` for W4); declared tools are probed first. Or remove the class
+from `weakness_classes`. A larger `--max-llm-calls` does not lift the ceiling.
+
+## MYL-NT-019
+
+The scan stopped early before this seed finished, so it proved nothing. When the call
+budget, the provider or the wall-clock limit stops a scan, every seed that had not
+finished gets a NOT TESTED row, shown as `⚠ NOT TESTED`. A class whose seeds were all cut
+off now shows in the class summary as NOT TESTED instead of dropping out, and a class
+with one resisted seed and the rest cut off no longer reads resisted. The exit code is
+the abort's own.
+
+**Fix:** Fix the cause the scan's abort line names (its `MYL-ABT` code), such as the call
+budget ([`MYL-ABT-001`](#myl-abt-001)) or the wall-clock limit
+([`MYL-ABT-007`](#myl-abt-007)), then re-run.
+
 ## MYL-ABT-001
 
 The scan used up its LLM call budget and stopped early; coverage is incomplete. Exit

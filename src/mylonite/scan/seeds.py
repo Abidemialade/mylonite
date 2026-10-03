@@ -831,6 +831,9 @@ class SeedCoverage:
     seeds: tuple[SeedPattern, ...]
     #: weakness -> reason, one entry per declared class with ZERO seeds.
     uncoverable: dict[str, str]
+    #: ``(weakness, tool name)`` for each candidate tool the synthesis ceiling
+    #: left unprobed. The engine reports each one as a NOT TESTED attempt.
+    dropped: tuple[tuple[str, str], ...] = ()
 
 
 def seed_coverage(descriptor: Any) -> SeedCoverage:
@@ -857,7 +860,8 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
         # store->recall shape. Deferred import breaks the seeds<->seed_synth cycle.
         from mylonite.scan import seed_synth
 
-        synthesized = seed_synth.synthesize_seeds(descriptor)
+        synthesis = seed_synth.synthesize(descriptor)
+        synthesized = synthesis.seeds
         # W1/W2 synthesis rides an ALTERNATIVE channel (tool-description /
         # direct-content) to the kitchen-sink store->recall shape, so a synthesised
         # W1/W2 seed SUPPRESSES the redundant kitchen seed for that class. W3/W4
@@ -969,6 +973,7 @@ def seed_coverage(descriptor: Any) -> SeedCoverage:
         return SeedCoverage(
             seeds=tuple([*synthesized, *kitchen]),
             uncoverable={w: _uncoverable_reason(w, descriptor) for w in uncovered},
+            dropped=synthesis.dropped,
         )
     family = target_family(descriptor.target_id)
     seeds = tuple(s for s in SEED_CATALOGUE if family in s.applicable_targets)

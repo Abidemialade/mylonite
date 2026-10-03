@@ -230,6 +230,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The scaffold's store and recall pick uses whole words too, so
     `post_to_thread` is no longer offered as the recall tool. The tool
     inventory's "counts its calls as reads" note follows the new rule.
+- **A seed that never ran is now a NOT TESTED row, so its class cannot read
+  resisted.** Two cases used to leave no trace in the result. On a custom
+  target with more than 8 candidate tools in one class, the tools past the
+  per-class probe ceiling were only named in a log warning; each is now a
+  `⚠ NOT TESTED` row with the new code `MYL-NT-018`, and the warning no longer
+  suggests raising `--max-llm-calls`, which cannot lift the ceiling. When the
+  call budget, the provider or the wall-clock limit stops a scan early, each
+  seed that had not finished is now a NOT TESTED row with the new code
+  `MYL-NT-019`, so a class whose seeds were all cut off reads NOT TESTED
+  instead of dropping out of the class summary. A scan whose only gap is
+  `MYL-NT-018` exits `2`. Both codes are listed in
+  `docs/reason-codes.md` (reason-code snapshot updated).
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and

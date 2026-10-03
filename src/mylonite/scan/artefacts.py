@@ -18,7 +18,7 @@ import io
 import json
 import re
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
@@ -31,7 +31,7 @@ from rich.table import Table
 from mylonite._cli_io import console_print
 from mylonite._paths import safe_slug
 from mylonite._redaction import redact, redact_value
-from mylonite.contracts import ExploitRecord, ScanReport, ToolSpec
+from mylonite.contracts import ExploitRecord, ScanAttempt, ScanReport, ToolSpec
 from mylonite.reason_codes import NT_MODULE_LOAD_FAILED, format_code_counts
 from mylonite.scan._llm import LLMSpend
 from mylonite.scan.assembly import unmatched_opt_in_note
@@ -46,6 +46,8 @@ from mylonite.scan.coverage import (
     EFFECT_UNCONFIRMABLE_KEY,
     MODULE_LOAD_FAILURE_KEY,
     NO_ATTACK_EMITTED_KEY,
+    SEED_CUT_OFF_KEY,
+    SYNTHESIS_CAPPED_KEY,
     AttemptClass,
     adjudication_counts,
     attempt_reached_no_verdict,
@@ -115,6 +117,20 @@ OUTCOME_MARKS_ASCII: Final[dict[str, str]] = {
     "skipped_dry_run": "dry-run",
     "error": "error",
 }
+
+
+def row_mark(attempt: ScanAttempt, marks: Mapping[str, str]) -> str:
+    """The status cell for one attempt row.
+
+    A row the engine made for a tool the synthesis ceiling skipped, or for a
+    seed the scan stopped before it finished, is ``not_applicable`` on the wire
+    but reads NOT TESTED: the capability exists, the seed simply never ran.
+    """
+    evidence = attempt.judge_evidence
+    if evidence.get(SYNTHESIS_CAPPED_KEY) or evidence.get(SEED_CUT_OFF_KEY):
+        return marks["skipped_planner_no_engagement"]
+    return marks.get(attempt.outcome, attempt.outcome)
+
 
 # Pre-v0.3.0 private name — kept as an alias so existing call sites stay valid.
 _OUTCOME_MARK: Final = OUTCOME_MARKS
@@ -329,6 +345,8 @@ def _has_class_summary(result: ScanResult) -> bool:
         or any(
             a.judge_evidence.get(NO_ATTACK_EMITTED_KEY)
             or a.judge_evidence.get(EFFECT_UNCONFIRMABLE_KEY)
+            or a.judge_evidence.get(SYNTHESIS_CAPPED_KEY)
+            or a.judge_evidence.get(SEED_CUT_OFF_KEY)
             for a in result.report.attempts
         )
     )
@@ -510,7 +528,7 @@ def render_summary(result: ScanResult, *, ascii_safe: bool | None = None) -> str
         rows = findings_first(rows)  # type: ignore[assignment]
 
     for attempt in rows:
-        mark = marks.get(attempt.outcome, attempt.outcome)
+        mark = row_mark(attempt, marks)
         table.add_row(
             mark,
             # seed_id/verdict_mechanism/verdict_reason are attacker/target-

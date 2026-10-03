@@ -23,6 +23,7 @@ channel); synthesis only fills the gap.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from mylonite._paths import safe_slug
@@ -309,38 +310,62 @@ def _cap_for(n_tools: int) -> int:
     return max(_SYNTH_CAP_FLOOR, min(_SYNTH_CAP_CEILING, n_tools))
 
 
-def _capped(candidates: list[Any], cap: int, *, weakness: str, target_id: str) -> list[Any]:
-    """Take at most ``cap`` candidates, reporting anything dropped.
+def _capped(
+    candidates: list[Any],
+    cap: int,
+    *,
+    weakness: str,
+    target_id: str,
+    dropped: list[tuple[str, str]],
+) -> list[Any]:
+    """Take at most ``cap`` candidates, recording anything dropped.
 
     A cap that silently truncates reads downstream as "this surface was fully
-    probed". Naming the shortfall is what lets an operator tell a clean result
-    from an unexamined one, and points at the lever (a larger budget, or an
-    explicit ``control_config`` naming the tools that matter).
+    probed". Each dropped ``(weakness, tool)`` goes into ``dropped``, and the
+    scan reports it as a NOT TESTED attempt, so the class cannot read resisted
+    with tools left unprobed. A larger call budget does not lift the ceiling, so
+    the warning does not offer it as the fix.
     """
     if len(candidates) <= cap:
         return candidates
-    dropped = [
-        getattr(c, "name", c) if not isinstance(c, tuple) else c[0] for c in candidates[cap:]
+    names = [
+        str(getattr(c, "name", c) if not isinstance(c, tuple) else c[0]) for c in candidates[cap:]
     ]
+    dropped.extend((weakness, name) for name in names)
     logger.warning(
-        "%s: %s synthesis capped at %d of %d candidate tool(s); not probed: %s. "
-        "Raise --max-llm-calls and re-run, or name the tools that matter in the "
-        "target file's control_config, to cover them.",
+        "%s: %s synthesis capped at %d of %d candidate tool(s); not probed, reported as "
+        "NOT TESTED: %s. Name the tools that matter in the target file's control_config "
+        "(they are probed first), or remove the class from weakness_classes.",
         target_id,
         weakness,
         cap,
         len(candidates),
-        ", ".join(str(d) for d in dropped),
+        ", ".join(names),
     )
     return candidates[:cap]
 
 
+@dataclass(frozen=True)
+class SynthesisResult:
+    """What synthesis built for a descriptor, and what its ceiling left out."""
+
+    seeds: list[SeedPattern]
+    #: ``(weakness, tool name)`` for every candidate tool the per-class ceiling
+    #: dropped. Never probed, so each is a NOT TESTED row in the scan.
+    dropped: tuple[tuple[str, str], ...] = ()
+
+
 def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
     """Build channel-appropriate seeds from a target's declared classes + tool surface."""
+    return synthesize(descriptor).seeds
+
+
+def synthesize(descriptor: Any) -> SynthesisResult:
+    """:func:`synthesize_seeds`, plus the tools the per-class ceiling dropped."""
     classes = set(getattr(descriptor, "weakness_classes", None) or [])
     tools = list(getattr(descriptor, "tools", None) or [])
     if not classes:
-        return []
+        return SynthesisResult(seeds=[])
 
     # Black-box agent (kind "http-agent" — a plain HTTP agent, transport: rest):
     # no tool surface, so the only applicable channel is DIRECT prompt injection
@@ -349,12 +374,13 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
     # Keyed on ``kind`` (NOT merely empty tools) so a tool-less MCP descriptor still
     # falls back to the kitchen-sink shapes as before.
     if getattr(descriptor, "kind", None) == "http-agent":
-        return [_w2_direct_injection_seed()] if "W2" in classes else []
+        return SynthesisResult(seeds=[_w2_direct_injection_seed()] if "W2" in classes else [])
 
     if not tools:
-        return []
+        return SynthesisResult(seeds=[])
 
     out: list[SeedPattern] = []
+    dropped: list[tuple[str, str]] = []
     cap = _cap_for(len(tools))
     target_id = str(getattr(descriptor, "target_id", "target"))
 
@@ -365,7 +391,11 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         # mutates its surface mid-session), whose finding is the mutation itself,
         # so it does not need a description that already looks poisoned.
         for name, excerpt in _capped(
-            tool_roles.instruction_bearing_tools(tools), cap, weakness="W1", target_id=target_id
+            tool_roles.instruction_bearing_tools(tools),
+            cap,
+            weakness="W1",
+            target_id=target_id,
+            dropped=dropped,
         ):
             out.append(_w1_seed(name, excerpt))
         out.append(_w1_rugpull_seed())
@@ -382,6 +412,7 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
                 cap,
                 weakness="W2",
                 target_id=target_id,
+                dropped=dropped,
             ):
                 out.append(_w2_seed(name))
 
@@ -392,7 +423,11 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         # tool_classifier.destination_tools() the `check` W3 row uses, so a
         # static preview never diverges from what scan attacks.
         for name, dest_param in _capped(
-            _egress_candidates(descriptor, tools), cap, weakness="W3", target_id=target_id
+            _egress_candidates(descriptor, tools),
+            cap,
+            weakness="W3",
+            target_id=target_id,
+            dropped=dropped,
         ):
             out.append(_w3_seed(name, dest_param, tools))
 
@@ -401,11 +436,15 @@ def synthesize_seeds(descriptor: Any) -> list[SeedPattern]:
         # exposes. Operator declaration first, then control_shim's own
         # consequential classifier — the same one the live W4 control applies.
         for name in _capped(
-            _consequential_candidates(descriptor, tools), cap, weakness="W4", target_id=target_id
+            _consequential_candidates(descriptor, tools),
+            cap,
+            weakness="W4",
+            target_id=target_id,
+            dropped=dropped,
         ):
             out.append(_w4_seed(name, tools))
 
-    return out
+    return SynthesisResult(seeds=out, dropped=tuple(dropped))
 
 
 def _egress_candidates(descriptor: Any, tools: list[Any]) -> list[tuple[str, str]]:

@@ -67,6 +67,14 @@
     "category": "not-tested",
     "summary": "No effect_probe was in effect for this run, so this class's effect could not be confirmed or ruled out."
   },
+  "MYL-NT-018": {
+    "category": "not-tested",
+    "summary": "The per-class probe ceiling left this tool without a probe, so it was never attacked."
+  },
+  "MYL-NT-019": {
+    "category": "not-tested",
+    "summary": "The scan stopped early before this seed finished, so it proved nothing."
+  },
   "MYL-ABT-001": {
     "category": "abort",
     "summary": "The scan used up its LLM call budget and stopped early; coverage is incomplete."

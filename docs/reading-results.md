@@ -42,6 +42,8 @@ evidence behind it:
     | `error` with [`MYL-NT-015`](reason-codes.md#myl-nt-015) | the attack module for this class failed to load; the `attack modules:` line names it |
     | `not_applicable` with [`MYL-NT-016`](reason-codes.md#myl-nt-016) | no attack module in this run emitted an attack for this class, such as W3 or W4 on a `transport: rest` target |
     | `not_applicable` with [`MYL-NT-017`](reason-codes.md#myl-nt-017) | a W3 or W4 class on a custom target that ran with no `effect_probe`: its effect can be neither confirmed nor ruled out |
+    | `not_applicable` with [`MYL-NT-018`](reason-codes.md#myl-nt-018) | a tool the per-class probe ceiling left without a probe — shown as `⚠ NOT TESTED` |
+    | `not_applicable` with [`MYL-NT-019`](reason-codes.md#myl-nt-019) | a seed that had not finished when the scan stopped early — shown as `⚠ NOT TESTED` |
 
     Each NOT TESTED attempt also carries a reason code, such as `MYL-NT-005`, shown on
     the summary's `coverage:` line. Look it up in [Reason codes](reason-codes.md) for
@@ -61,7 +63,8 @@ evidence behind it:
     Look at `raw_response` to see what the agent said instead. A planner that will
     not engage at all usually means a different `--planner-model`; a chain that
     stalls usually means the first step failed, or `--max-llm-calls` was too tight
-    for the number of seeds (the summary names any seed that never started).
+    for the number of seeds (each seed the budget cut off is its own NOT TESTED row,
+    [`MYL-NT-019`](reason-codes.md#myl-nt-019)).
 
 When coverage is incomplete and nothing was found, the summary's hint line names the
 NOT TESTED cause that accounts for most of the untested attempts, and its remedy — not
