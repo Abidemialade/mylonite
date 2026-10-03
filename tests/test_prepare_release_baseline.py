@@ -15,8 +15,11 @@ hook must report unchanged.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
@@ -106,6 +109,35 @@ def test_paths_are_posix_and_sorted(tmp_path: Path) -> None:
     assert all(
         "\\" not in entry["filename"] for findings in data["results"].values() for entry in findings
     )
+
+
+def test_refresh_never_puts_the_tracked_file_list_on_the_command_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #199. The refresh used to pass every tracked file as its own
+    argument, which crosses Windows's command-line length limit once the
+    repository has enough of them -- and chunking isn't safe, because
+    `detect-secrets scan --baseline` trims the baseline against exactly the
+    files it was given. Pin the fix: the scan names only the baseline, so its
+    command line is a fixed size no matter how large the tree grows. A fake
+    `subprocess.run` stands in; this never touches a real baseline."""
+    baseline = tmp_path / ".secrets.baseline"
+    baseline.write_text(json.dumps({"results": {}}, indent=2) + "\n", encoding="utf-8")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(prepare_release.subprocess, "run", fake_run)
+
+    prepare_release.refresh_secrets_baseline(tmp_path)
+
+    scan_calls = [c for c in calls if "detect_secrets" in c]
+    assert scan_calls == [
+        [sys.executable, "-m", "detect_secrets", "scan", "--baseline", str(baseline)]
+    ], "the scan must name only the baseline, never a per-file argument list"
 
 
 def test_there_is_only_one_normaliser(tmp_path: Path) -> None:
