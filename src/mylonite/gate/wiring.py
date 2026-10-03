@@ -576,6 +576,29 @@ def make_open_pr_fn(
     pr_mod: Any,
     base: str | None = None,
 ) -> Callable[..., Any]:
+    # This factory runs in cli.py BEFORE run_gate (scan -> generate ->
+    # validate) starts, so a model/provider that can never scaffold a
+    # workflow is refused HERE, before any LLM call is paid for -- not only
+    # at the end, inside open_pr_fn, after the whole run already happened.
+    # write_workflows (called inside open_pr_fn, below) re-derives the same
+    # value when it actually renders the templates; this call's only job is
+    # the side effect of raising early for the exact same condition.
+    # GatePrError must not escape this factory as a raw traceback: cli.py's
+    # own `except pr_mod.GatePrError` wraps only run_gate, not this call, so
+    # it is caught and converted to a clean exit right here instead.
+    if workflows:
+        from mylonite.gate.workflows import _llm_key_env_var
+
+        try:
+            _llm_key_env_var(model)
+        except pr_mod.GatePrError as exc:
+            echo_err(f"\nerror: can't scaffold a CI workflow for this gate run: {exc}")
+            echo_err(
+                "Nothing has been spent yet -- fix the --model/provider choice (or "
+                "drop --workflows) and re-run."
+            )
+            raise typer.Exit(code=EXIT_PR_FAILED) from exc
+
     def open_pr_fn(
         *,
         out_dir: Path,
@@ -702,10 +725,18 @@ def make_open_pr_fn(
             add_paths.append(finding_dir / report.test_filename)
             add_paths.append(finding_dir / exploit_filename_for(report.test_filename))
             add_paths.append(finding_dir / "validation_report.json")
-            if target_file is not None:
-                add_paths.append(finding_dir / "target.yaml")
-        if target_file is not None and out_dir not in dirs:
-            add_paths.append(out_dir / "target.yaml")
+            # Also stage a target.yaml that ALREADY sat here from an
+            # earlier --target-file run, not only one this run just wrote --
+            # the #224 refusal above treats that pre-existing file as
+            # satisfying the co-location requirement, so a PR that ships
+            # without staging it would leave the committed test unable to
+            # load one on a fresh checkout.
+            finding_target = finding_dir / "target.yaml"
+            if target_file is not None or finding_target.exists():
+                add_paths.append(finding_target)
+        root_target = out_dir / "target.yaml"
+        if (target_file is not None or root_target.exists()) and out_dir not in dirs:
+            add_paths.append(root_target)
         # The reference-target differential leg records each finding's replay
         # fixtures in that finding's own directory -- committed so the emitted
         # test can run offline in CI. A `fixtures/` at the gate root that no

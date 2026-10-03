@@ -95,16 +95,18 @@ def test_workflow_gate_dir_is_substituted(tmp_path):
 
 
 def test_gate_workflow_requires_the_gate_to_run(tmp_path):
-    """The per-PR gate job sets MYLONITE_REQUIRE_GATE_RUN and prints skip reasons."""
+    """The per-PR gate job sets MYLONITE_REQUIRE_GATE_RUN and prints skip
+    reasons -- scoped to the one step that runs pytest, not the job."""
     written = write_workflows(
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
     )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     job = doc["jobs"]["gate"]
-    assert job["env"]["MYLONITE_REQUIRE_GATE_RUN"] == "1"
-    assert job["env"]["MYLONITE_LIVE_TARGET"] == "1"
-    assert job["steps"][-1]["run"] == "pytest .mylonite/gate -q -ra"
+    last_step = job["steps"][-1]
+    assert last_step["env"]["MYLONITE_REQUIRE_GATE_RUN"] == "1"
+    assert last_step["env"]["MYLONITE_LIVE_TARGET"] == "1"
+    assert last_step["run"] == "pytest .mylonite/gate -q -ra"
 
 
 @pytest.mark.parametrize("name", ["mylonite-gate.yml", "mylonite-discovery.yml"])
@@ -149,10 +151,7 @@ def test_rendered_workflow_carries_the_gates_model(tmp_path, name, job):
     assert "__MYLONITE_MODEL__" not in rendered
 
     doc = yaml.safe_load(rendered)
-    if name == "mylonite-gate.yml":
-        env = doc["jobs"][job]["env"]
-    else:
-        env = doc["jobs"][job]["steps"][-1]["env"]
+    env = doc["jobs"][job]["steps"][-1]["env"]
     assert env["MYLONITE_MODEL"] == "${{ vars.MYLONITE_MODEL || 'openai/gpt-4o-mini' }}"
 
 
@@ -213,35 +212,50 @@ def test_discovery_workflow_never_runs_gate_with_no_model_configured(tmp_path, m
 
 
 def test_gate_workflow_s_model_variable_is_set_but_unread_by_the_pytest_step(tmp_path):
-    """The per-PR job sets `MYLONITE_MODEL` in its `env:` block (for
-    consistency, and in case a future committed test needs it as a
-    fallback), but the step that actually runs is a bare `pytest` -- no
+    """The per-PR job sets `MYLONITE_MODEL` in the pytest step's `env:`
+    block (for consistency, and in case a future committed test needs it as
+    a fallback), but that step's `run:` is a bare `pytest` -- no
     `mylonite` CLI invocation that would read the variable at all."""
     written = write_workflows(
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
     )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
-    job = doc["jobs"]["gate"]
-    assert "MYLONITE_MODEL" in job["env"]
-    assert job["steps"][-1]["run"] == "pytest .mylonite/gate -q -ra"
+    last_step = doc["jobs"]["gate"]["steps"][-1]
+    assert "MYLONITE_MODEL" in last_step["env"]
+    assert last_step["run"] == "pytest .mylonite/gate -q -ra"
 
 
 def test_write_workflows_no_target_secrets_renders_no_extra_env_lines(tmp_path):
-    """#185: a target with no secrets renders nothing extra — the gate job
-    step keeps no ``env:`` key at all, matching pre-#185 output."""
+    """#185: a target with no secrets renders nothing extra beyond each
+    step's own fixed LLM/model vars (now moved to step level) — no
+    ``MYLONITE_TARGET_*`` key appears in either."""
     written = write_workflows(
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
     )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     step = doc["jobs"]["gate"]["steps"][-1]
-    assert "env" not in step
+    assert set(step["env"]) == {
+        "MYLONITE_LIVE_TARGET",
+        "MYLONITE_REQUIRE_GATE_RUN",
+        "MYLONITE_REDRIVE_ATTEMPTS",
+        "MYLONITE_MODEL",
+        "ANTHROPIC_API_KEY",
+        "MYLONITE_LLM_HEADERS",
+    }
 
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
     dstep = ddoc["jobs"]["discover"]["steps"][-1]
-    assert set(dstep["env"]) == {"MYLONITE_AUTHORIZE", "MYLONITE_MODEL"}
+    assert set(dstep["env"]) == {
+        "MYLONITE_AUTHORIZE",
+        "MYLONITE_MODEL",
+        "ANTHROPIC_API_KEY",
+        "GH_TOKEN",
+        "MYLONITE_REDRIVE_ATTEMPTS",
+        "MYLONITE_LLM_HEADERS",
+    }
 
 
 def test_write_workflows_no_secrets_is_byte_identical_to_the_vendored_render(tmp_path):
@@ -271,8 +285,9 @@ def test_write_workflows_no_secrets_is_byte_identical_to_the_vendored_render(tmp
 
 
 def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
-    """#185: a target with a header secret renders an env: entry mapped to a
-    repository secret of the same name, in the step that runs pytest."""
+    """#185: a target with a header secret renders an extra env: entry
+    mapped to a repository secret of the same name, alongside the step's
+    own fixed LLM/model vars (now moved to step level too)."""
     written = write_workflows(
         tmp_path,
         model="anthropic/claude-haiku-4-5-20251001",
@@ -282,9 +297,10 @@ def test_write_workflows_target_secrets_render_an_env_line(tmp_path):
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
     step = doc["jobs"]["gate"]["steps"][-1]
-    assert step["env"] == {
-        "MYLONITE_TARGET_HEADERS_X_API_KEY": "${{ secrets.MYLONITE_TARGET_HEADERS_X_API_KEY }}"
-    }
+    assert step["env"]["MYLONITE_TARGET_HEADERS_X_API_KEY"] == (
+        "${{ secrets.MYLONITE_TARGET_HEADERS_X_API_KEY }}"
+    )
+    assert step["env"]["ANTHROPIC_API_KEY"] == "${{ secrets.MYLONITE_API_KEY }}"
 
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
@@ -450,11 +466,38 @@ def test_write_workflows_maps_the_key_var_for_the_models_own_provider(tmp_path, 
     written = write_workflows(tmp_path, runs_on="ubuntu-latest", model=model)
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
-    assert doc["jobs"]["gate"]["env"][key_var] == "${{ secrets.MYLONITE_API_KEY }}"
+    assert doc["jobs"]["gate"]["steps"][-1]["env"][key_var] == "${{ secrets.MYLONITE_API_KEY }}"
 
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     ddoc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
-    assert ddoc["jobs"]["discover"]["env"][key_var] == "${{ secrets.MYLONITE_API_KEY }}"
+    assert ddoc["jobs"]["discover"]["steps"][-1]["env"][key_var] == (
+        "${{ secrets.MYLONITE_API_KEY }}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
+)
+def test_write_workflows_emits_azures_extra_env_alongside_the_key(tmp_path, name, job):
+    """Azure passes the one-key-var check but also needs its endpoint
+    and API version -- silently dropping those scaffolded a workflow that
+    could never pass. Emitted as repository variables, not secrets."""
+    written = write_workflows(tmp_path, runs_on="ubuntu-latest", model="azure/my-deployment")
+    doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
+    env = doc["jobs"][job]["steps"][-1]["env"]
+    assert env["AZURE_API_KEY"] == "${{ secrets.MYLONITE_API_KEY }}"
+    assert env["AZURE_API_BASE"] == "${{ vars.AZURE_API_BASE }}"
+    assert env["AZURE_API_VERSION"] == "${{ vars.AZURE_API_VERSION }}"
+
+
+def test_write_workflows_emits_no_extra_env_for_a_provider_without_one(tmp_path):
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "AZURE_API_BASE" not in text
+    assert "__LLM_EXTRA_ENV__" not in text
 
 
 def test_write_workflows_refuses_a_local_model(tmp_path):
@@ -490,8 +533,11 @@ def test_emitted_workflows_pin_actions_by_sha(tmp_path, name):
     text = next(p for p in written if p.name == name).read_text(encoding="utf-8")
     assert "actions/checkout@v6\n" not in text
     assert "actions/setup-python@v6\n" not in text
-    assert "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0" in text
-    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0" in text
+    # Matches the major version AND sha this repo's own .github/workflows
+    # pin (actions/checkout@v7.0.1, actions/setup-python@v7.0.0) -- not an
+    # older major this repo's own CI has moved past.
+    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1" in text
+    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in text
 
 
 @pytest.mark.parametrize(
@@ -519,7 +565,7 @@ def test_gate_workflow_sets_one_redrive_attempt(tmp_path):
     )
     gate = next(p for p in written if p.name == "mylonite-gate.yml")
     doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
-    assert doc["jobs"]["gate"]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "1"
+    assert doc["jobs"]["gate"]["steps"][-1]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "1"
 
 
 @pytest.mark.parametrize(
@@ -532,7 +578,8 @@ def test_emitted_workflows_pass_through_optional_llm_headers(tmp_path, name, job
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
     )
     doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
-    assert doc["jobs"][job]["env"]["MYLONITE_LLM_HEADERS"] == "${{ secrets.MYLONITE_LLM_HEADERS }}"
+    env = doc["jobs"][job]["steps"][-1]["env"]
+    assert env["MYLONITE_LLM_HEADERS"] == "${{ secrets.MYLONITE_LLM_HEADERS }}"
 
 
 def test_discovery_workflow_sets_three_redrive_attempts(tmp_path):
@@ -541,7 +588,62 @@ def test_discovery_workflow_sets_three_redrive_attempts(tmp_path):
     )
     discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
     doc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
-    assert doc["jobs"]["discover"]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "3"
+    assert doc["jobs"]["discover"]["steps"][-1]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "3"
+
+
+# ---------------------------------------------------------------------------
+# The vendored constraints files stay in sync with each other and
+# with pyproject.toml's own litellm range.
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_vendored_constraints_files_are_byte_identical():
+    """gate-action/constraints.txt and src/mylonite/gate/templates/
+    constraints.txt are two copies of the same pin, kept in step by hand --
+    nothing re-derives one from the other. A future edit to just one would
+    leave the scaffolded workflows and the action installing different
+    LiteLLM releases with no test to catch the drift."""
+    repo_root = Path(__file__).resolve().parents[2]
+    a = (repo_root / "gate-action" / "constraints.txt").read_text(encoding="utf-8")
+    b = (repo_root / "src" / "mylonite" / "gate" / "templates" / "constraints.txt").read_text(
+        encoding="utf-8"
+    )
+    assert a == b
+
+
+def test_the_vendored_litellm_pin_satisfies_pyprojects_own_range():
+    """The exact pin both constraints files ship must itself satisfy
+    pyproject.toml's own `litellm` specifier (floor AND the <2.0 cap) --
+    otherwise a floor bump there (e.g. to clear a CVE) silently leaves the
+    scaffolded install below it, and every install from a committed
+    workflow or gate-action hits ResolutionImpossible."""
+    import re
+    import tomllib
+
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
+    repo_root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = pyproject["project"]["dependencies"]
+    litellm_dep = next(d for d in deps if d.startswith("litellm"))
+    spec = SpecifierSet(litellm_dep.removeprefix("litellm"))
+
+    constraints_text = (
+        repo_root / "src" / "mylonite" / "gate" / "templates" / "constraints.txt"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"^litellm==([0-9][0-9A-Za-z.+!-]*)\s*$", constraints_text, re.MULTILINE)
+    assert match is not None, "no litellm== pin found in the vendored constraints file"
+    pin = Version(match.group(1))
+
+    assert spec.contains(pin), f"litellm=={pin} does not satisfy pyproject.toml's {spec!r}"
+    # Specifically pin >= the floor the 3.14 resolver needs (the whole
+    # point of choosing this pin over something lower, per pyproject's own
+    # comment) -- a regression here would silently drop 3.14 support for
+    # every scaffolded/action install, without failing the pyproject
+    # specifier check above (which only enforces the FLOOR pyproject itself
+    # declares, currently lower, for the other supported Pythons).
+    assert pin >= Version("1.93.0")
 
 
 # ---------------------------------------------------------------------------
@@ -589,6 +691,49 @@ def test_write_workflows_emits_no_runtime_setup_for_a_python_target(tmp_path):
     assert "setup-node" not in text
     assert "pip install uv" not in text
     assert "__RUNTIME_SETUP_STEP__" not in text
+
+
+@pytest.mark.parametrize(
+    ("command", "expect"),
+    [
+        ("/usr/local/bin/npx", "setup-node"),
+        ("/usr/bin/node", "setup-node"),
+        ("/usr/local/bin/uvx", "pip install uv"),
+        ("/usr/bin/uv", "pip install uv"),
+    ],
+)
+def test_write_workflows_reduces_an_absolute_path_command_to_its_basename(
+    tmp_path, command, expect
+):
+    """load_target_file(...).command can be an absolute path -- a bare
+    membership test against it would never match npx/node/uvx/uv. The
+    runner is Linux (ubuntu-latest), so a POSIX absolute path is the
+    realistic shape."""
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        model="anthropic/claude-haiku-4-5-20251001",
+        target_command=command,
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert expect in text
+
+
+def test_write_workflows_emits_no_runtime_setup_for_an_empty_command(tmp_path):
+    """An sse/http target's TargetFile.command defaults to '' (no
+    'command:' line at all) -- this must behave exactly like the unknown/
+    None case, never raise."""
+    written = write_workflows(
+        tmp_path,
+        runs_on="ubuntu-latest",
+        model="anthropic/claude-haiku-4-5-20251001",
+        target_command="",
+    )
+    gate = next(p for p in written if p.name == "mylonite-gate.yml")
+    text = gate.read_text(encoding="utf-8")
+    assert "setup-node" not in text
+    assert "pip install uv" not in text
 
 
 def test_write_workflows_emits_no_runtime_setup_when_command_is_unknown(tmp_path):

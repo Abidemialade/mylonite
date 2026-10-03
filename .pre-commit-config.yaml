@@ -113,7 +113,16 @@ repos:
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
     rev: v1.29.0
     hooks:
+      # The hook's own default `files` regex only matches
+      # .github/workflows/**.ya?ml and action.ya?ml, so it never saw the
+      # gate's own scaffolded-workflow golden renders (the raw templates
+      # under src/mylonite/gate/templates/ hold unsubstituted __TOKEN__
+      # placeholders, not real workflow syntax, so those stay out on
+      # purpose -- the golden fixtures are the fully-rendered, realistic
+      # stand-in). Union, not replace, so the default locations keep
+      # being covered too.
       - id: zizmor
+        files: (^\.github/workflows/.*\.ya?ml$|action\.ya?ml$|^tests/gate/fixtures/no_secrets_render/.*\.yml$)
 
   # CI-only, via `stages: [manual]`. The hook is `language: golang`, and
   # pre-commit bootstraps an entire Go toolchain when `go` is absent -- a
