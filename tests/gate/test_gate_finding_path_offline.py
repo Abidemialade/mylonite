@@ -180,7 +180,7 @@ def test_the_gate_wrote_a_runnable_directory(gate_run: tuple[Any, Path, _Recordi
     rather than failing somewhere downstream."""
     _, out_dir, _pr = gate_run
 
-    emitted = sorted(out_dir.glob("test_security_*.py"))
+    emitted = sorted(out_dir.glob("test_*.py"))
     assert len(emitted) == 1, f"expected one emitted test, found {emitted}"
     assert sorted(out_dir.glob("exploit_*.json")), "the exploit JSON was not written"
     assert (out_dir / "validation_report.json").is_file(), (
@@ -193,7 +193,7 @@ def test_the_emitted_test_passes_offline(gate_run: tuple[Any, Path, _RecordingPr
     """What a user's CI actually runs: `pytest <gate-dir>`. This is the end of
     the claim — the gate's own output, executed, with no provider configured."""
     _, out_dir, _pr = gate_run
-    emitted = sorted(out_dir.glob("test_security_*.py"))[0]
+    emitted = sorted(out_dir.glob("test_*.py"))[0]
 
     result = run_test_file(emitted)
 

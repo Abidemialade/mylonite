@@ -152,6 +152,15 @@ def test_security_{slug}() -> None:
 #: already passes on the current build.
 PENDING_FIX_METADATA_KEY = "pending_fix"
 
+#: ``Payload.metadata`` key carrying the short id ``mylonite gate`` gives a
+#: finding (e.g. ``w4-1a2b3c``). When present and well formed, the test file
+#: is ``test_<id>.py`` and it loads ``exploit_<id>.json``, which is what the
+#: gate writes; without it the names follow the pattern id, as ``generate``
+#: has always written them. Like the pending tag, only the copy handed to the
+#: generator carries it.
+GATE_ID_METADATA_KEY = "gate_finding_id"
+_SAFE_GATE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+
 _PENDING_NOTE = """It is committed as a PENDING FIX: the attack still worked on your app when
 this test was written, so it is an expected failure and CI stays green. Once
 your fix lands the test passes and fails the run on purpose: then delete the
@@ -292,6 +301,13 @@ class ReferencePytestGenerator(TestGeneratorBase):
 
         slug = _slugify(exploit.pattern_id)
         compliance = exploit.compliance
+        gate_id = str(exploit.payload.metadata.get(GATE_ID_METADATA_KEY) or "")
+        if _SAFE_GATE_ID.fullmatch(gate_id):
+            test_filename = f"test_{gate_id}.py"
+            exploit_filename = f"exploit_{gate_id}.json"
+        else:
+            test_filename = f"test_security_{slug}.py"
+            exploit_filename = f"exploit_{exploit.pattern_id}.json"
 
         # Bounded OWASP markers only — and ONLY those the pytest11 plugin actually
         # registers (``REGISTERED_OWASP_MARKERS``). An out-of-range OWASP ID (e.g.
@@ -416,7 +432,7 @@ class ReferencePytestGenerator(TestGeneratorBase):
             # CODE-interpolation sites: rendered as Python literals, never as
             # bare strings, so an attacker-influenceable value can't terminate
             # the literal it sits in and start executing (DCR-0001, DCR-0002).
-            exploit_filename=_py_literal(f"exploit_{exploit.pattern_id}.json"),
+            exploit_filename=_py_literal(exploit_filename),
             control_literal=_py_literal(control),
             model_kwarg=model_kwarg,
             provider_kwarg=provider_kwarg,
@@ -427,7 +443,7 @@ class ReferencePytestGenerator(TestGeneratorBase):
 
         return GeneratedTest(
             framework="pytest",
-            filename=f"test_security_{slug}.py",
+            filename=test_filename,
             source=source,
             exploit=exploit,
         )

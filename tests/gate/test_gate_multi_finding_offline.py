@@ -1,8 +1,8 @@
 """A two-finding reference gate writes a directory that passes ``pytest`` on its
 first run, offline, with no provider key.
 
-Each kept finding lives in its own ``<gate dir>/<slug>/`` and its emitted test
-replays ``<slug>/fixtures``. The validator must record each finding's replay
+Each kept finding lives in its own ``<gate dir>/<id>/`` and its emitted test
+replays ``<id>/fixtures``. The validator must record each finding's replay
 fixtures into that finding's own directory: a single shared ``fixtures/`` at the
 gate root left every test but the last without matching recordings, and the
 validator's own copy of the test at the root broke pytest collection.
@@ -27,14 +27,18 @@ from tests.plugins.test_differential_validator import _build_exploit
 from tests.plugins.test_record_during_validate import _install_fake_acompletion
 
 from mylonite.gate import pr as real_pr_mod
-from mylonite.gate.orchestrator import ScanOutcomeBundle, run_gate
+from mylonite.gate.orchestrator import ScanOutcomeBundle, _finding_id, run_gate
 from mylonite.gate.wiring import make_open_pr_fn, make_validate_fn
-from mylonite.generate.wiring import _slugify_pattern
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.scan.coverage import Coverage, ScanOutcome
 
 _PATTERNS = ("indirect-injection-note-body-direct", "indirect-injection-note-body-roleplay")
 _REPO_SRC = str(Path(__file__).resolve().parents[2] / "src")
+
+
+def _folder(out_dir: Path, pattern: str) -> Path:
+    """The short-id folder the gate gives this pattern's finding."""
+    return out_dir / _finding_id(_build_exploit(pattern))
 
 
 def _two_found() -> ScanOutcome:
@@ -130,7 +134,7 @@ def test_each_finding_records_its_own_fixtures(
 
     _result, out_dir, _captured = two_finding_gate
     for pattern in _PATTERNS:
-        meta_path = out_dir / _slugify_pattern(pattern) / "fixtures" / "_meta.json"
+        meta_path = _folder(out_dir, pattern) / "fixtures" / "_meta.json"
         assert meta_path.is_file(), f"no fixtures recorded for {pattern}"
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         assert meta["pattern_id"] == pattern
@@ -158,8 +162,8 @@ def test_the_gate_dir_passes_pytest_on_its_first_run_offline(
 
 
 def test_colliding_pattern_ids_still_collect_as_two_tests(tmp_path: Path) -> None:
-    """Two pattern_ids that slug the same get separate folders and, with the
-    real generator, distinct test file names, so pytest collects both."""
+    """Two similar pattern_ids get separate folders and, with the real
+    generator, distinct test file names, so pytest collects both."""
     from mylonite.contracts import ValidationReport
 
     out_dir = tmp_path / ".mylonite" / "gate"
@@ -217,5 +221,5 @@ def test_the_commit_names_each_findings_fixtures(
     assert len(captured) == 1
     add_paths = set(captured[0].add_paths)
     for pattern in _PATTERNS:
-        assert out_dir / _slugify_pattern(pattern) / "fixtures" in add_paths
+        assert _folder(out_dir, pattern) / "fixtures" in add_paths
     assert out_dir / "fixtures" not in add_paths

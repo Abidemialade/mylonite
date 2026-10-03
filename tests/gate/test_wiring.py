@@ -343,17 +343,16 @@ def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monke
         open_pr=False,
     )
 
-    from mylonite.generate.wiring import _slugify_pattern
+    from mylonite.gate.orchestrator import _finding_id
 
-    slug_a = _slugify_pattern("indirect-injection-note-body-direct")
-    slug_b = _slugify_pattern("indirect-injection-note-body-roleplay")
+    slug_a, slug_b = (_finding_id(e) for e in exploits)
 
     # Each kept finding's own directory has BOTH the emitted test AND its own
     # target.yaml — the emitted source's `here / "target.yaml"` proves this
     # is exactly where the test looks.
     for slug in (slug_a, slug_b):
         finding_dir = out_dir / slug
-        emitted = next(finding_dir.glob("test_security_*.py"))
+        emitted = next(finding_dir.glob("test_*.py"))
         assert 'here / "target.yaml"' in emitted.read_text(encoding="utf-8")
         finding_target = finding_dir / "target.yaml"
         assert finding_target.is_file()
@@ -393,9 +392,8 @@ def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, m
     from mylonite.contracts import ValidationReport
     from mylonite.contracts.exec_context import ExecContext
     from mylonite.gate import pr as real_pr_mod
-    from mylonite.gate.orchestrator import ScanOutcomeBundle, run_gate
+    from mylonite.gate.orchestrator import ScanOutcomeBundle, _finding_id, run_gate
     from mylonite.gate.wiring import make_open_pr_fn
-    from mylonite.generate.wiring import _slugify_pattern
     from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
@@ -440,8 +438,7 @@ def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, m
         open_pr=False,
     )
 
-    slug = _slugify_pattern("indirect-injection-note-body-direct")
-    finding_dir = out_dir / slug
+    finding_dir = out_dir / _finding_id(exploits[0])
     assert (finding_dir / "target.yaml").is_file()
 
     repo_src = str(Path(__file__).resolve().parents[2] / "src")
