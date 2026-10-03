@@ -736,3 +736,46 @@ def test_finding_block_degrades_gracefully_with_no_report_or_target():
     ex = _exploit_for("indirect-injection-note-body-direct")
     lines = finding_block(ex, None, target=None)
     assert lines  # never raises, never empty
+
+
+# --- one run per build: the evidence section says "not measured", never pass ---
+
+
+def _reference_report(iterations: int) -> ValidationReport:
+    from mylonite.contracts import ReproducibilityEvidence
+
+    return ValidationReport(
+        test_filename="test_security_excessive_agency_send_email_direct_unconfirmed.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="ran"),
+            ValidationOutcome(stage="differential", passed=True, detail="fires", metric=1.0),
+            ValidationOutcome(stage="flakiness", passed=True, detail="gap +100%", metric=1.0),
+            ValidationOutcome(stage="metamorphic", passed=True, detail="held", metric=1.0),
+        ],
+        kept=True,
+        gating_formula="kept = build AND differential AND flakiness AND metamorphic",
+        gating_legs=["build", "differential", "flakiness", "metamorphic"],
+        reproducibility=ReproducibilityEvidence(
+            iterations=iterations, vuln_fired=iterations, guard_resisted=iterations
+        ),
+    )
+
+
+def test_pr_body_marks_one_run_stability_not_measured():
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, _reference_report(1))
+
+    assert "- **flakiness**: not measured (1 run per build)" in body
+    assert "- **flakiness**: pass" not in body
+    assert "flakiness (not measured)" in body
+    assert "flakiness ✓" not in body
+    assert "is stable" not in body
+
+
+def test_pr_body_at_the_default_three_iterations_is_unchanged():
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, _reference_report(3))
+
+    assert "- **flakiness**: pass — gap +100%" in body
+    assert "flakiness ✓" in body
+    assert "not measured" not in body

@@ -391,7 +391,9 @@ measured a real `control_env`, never Mylonite's boundary stand-in. It carries:
 - **The differential proof** — the fires/resists numbers and the `kept` formula, so a
   reviewer sees *why the test is trustworthy*, not just that it exists. The per-seed kill
   matrix marks a seed this test never ran as "not run" rather than lumping it in with a
-  genuine miss, with a legend explaining each mark.
+  genuine miss, with a legend explaining each mark. At `--iterations 1` the flakiness
+  leg reads "not measured (1 run per build)", never a pass, because one run per build
+  has nothing to compare; the default `--iterations 3` measures it.
 - **A reviewer checklist** — four lines to confirm against your own app before merging:
   the proof level, the planner model, whether the prompt was declared or Mylonite's
   generic default, and the run counts behind the proof.
