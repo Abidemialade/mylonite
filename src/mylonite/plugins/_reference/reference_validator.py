@@ -144,10 +144,11 @@ _EFFECT_PROOF_LEVELS: Final[tuple[ProofLevel, ...]] = get_args(ProofLevel)
 EFFECT_UNPROVEN_CLAUSE: Final = "fired with nothing tying the damage to that attempt"
 
 #: The effect leg's detail on a black-box (``transport: rest``) target, which
-#: refuses an ``effect_probe``. ``report/render.py`` keys off it to keep its
-#: remediation from advising one.
+#: refuses an ``effect_probe``. ``report/render.py`` keys off its prefix to
+#: keep its remediation from advising one, so a reworded clause still matches.
+BLACK_BOX_EFFECT_PREFIX: Final = "black-box target:"
 BLACK_BOX_EFFECT_CLAUSE: Final = (
-    "black-box target: Mylonite sees only the agent's reply and cannot read its "
+    f"{BLACK_BOX_EFFECT_PREFIX} Mylonite sees only the agent's reply and cannot read its "
     "state, so the effect leg is REPORT-ONLY and does NOT contribute to kept "
     "(end-to-end damage was NOT confirmed). To confirm the damage, validate "
     "against the agent's MCP server instead."

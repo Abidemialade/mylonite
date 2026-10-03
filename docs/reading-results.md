@@ -286,7 +286,8 @@ calibrate the probe.
 On a `transport: rest` target the effect leg is always report-only: Mylonite sees only the
 agent's reply, so there is no state to read. Its detail starts `black-box target:`, and
 neither it nor the remediation lines suggest an `effect_probe`, which a `rest` target
-refuses (see [Plain HTTP agents](http-agent.md)).
+refuses (see [Plain HTTP agents](http-agent.md)). When the judges disagree there, the
+remediation line suggests a stronger `--judge-model` instead.
 
 ### Reading a rug-pull result
 

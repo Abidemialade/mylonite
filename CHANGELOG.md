@@ -145,7 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declaring one, and `check` stopped at "no tools" without reaching it. The
   effect leg on a black-box target now says it is report-only because there
   is no state to read, and no `validate` remediation line suggests an
-  `effect_probe` there. The plain HTTP agent page no longer says to add one.
+  `effect_probe` there; when the judges disagree it suggests a stronger
+  `--judge-model` instead. The `MYL-INC-011` fix text now says an
+  `effect_probe` applies on an MCP target only. The plain HTTP agent page no
+  longer says to add one. A `target.yaml` saved in an earlier scan folder
+  with this block now stops `generate` and `validate` with exit `2` too:
+  delete the `effect_probe` block from that file and re-run.
 - **A gate run on the reference target with two or more findings now writes a
   directory that passes `pytest` on its first run.** Each kept finding's replay
   fixtures are recorded in that finding's own folder,
