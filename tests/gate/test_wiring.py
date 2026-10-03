@@ -116,7 +116,7 @@ def test_open_pr_fn_writes_target_before_workflows_and_threads_secret_vars(
 def test_open_pr_fn_threads_the_targets_command_into_the_workflows(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """P3/P5: the scaffolded workflow gets a Node setup step when the
+    """The scaffolded workflow gets a Node setup step when the
     target's own `command:` is `npx` -- read back via `load_target_file`,
     not re-parsed by hand."""
     monkeypatch.chdir(tmp_path)

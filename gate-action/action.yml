@@ -10,6 +10,13 @@ inputs:
   model:
     description: "LiteLLM model id (provider-prefixed, e.g. anthropic/claude-haiku-4-5). No default -- see docs/cli-reference.md for the approved providers."  # allow-literal: example
     required: true
+  api-key:
+    description: "Your LLM provider's API key (e.g. secrets.MYLONITE_API_KEY). Mapped automatically to the credential variable the chosen model's provider needs -- never hardcoded to one provider."
+    required: true
+  llm-headers:
+    description: "Optional extra LLM request headers (e.g. a workspace id), as NAME=VALUE pairs, comma- or newline-separated (e.g. secrets.MYLONITE_LLM_HEADERS). Passed through as MYLONITE_LLM_HEADERS."  # allow-literal: example
+    required: false
+    default: ""
   open-pr:
     description: "Open the gating PR (true) or just write artifacts (false)."
     required: false
@@ -36,12 +43,97 @@ runs:
     - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: ${{ inputs.python-version }}
+    # The target's own launch `command` (target-file's `command:` line)
+    # decides whether the runner needs Node or uv -- neither is preinstalled
+    # the way Python is, and a target launched with npx/uvx otherwise fails
+    # to launch with no clearer message than "command not found". A plain
+    # grep, not a YAML parser: `command:` is always a bare top-level scalar
+    # (see docs/target-file.md), and mylonite isn't installed yet at this
+    # point in the step order to lend its own loader.
+    - name: Decide whether the target needs Node or uv
+      id: runtime
+      shell: bash
+      env:
+        TARGET_FILE: ${{ inputs.target-file }}
+      run: |
+        cmd=$(grep -m1 '^command:' "$TARGET_FILE" | cut -d: -f2 | tr -d '[:space:]')
+        case "$cmd" in
+          npx|node) echo "needs=node" >> "$GITHUB_OUTPUT" ;;
+          uvx|uv) echo "needs=uv" >> "$GITHUB_OUTPUT" ;;
+          *) echo "needs=" >> "$GITHUB_OUTPUT" ;;
+        esac
+    - name: Set up Node (the target launches with npx/node)
+      if: ${{ steps.runtime.outputs.needs == 'node' }}
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      with:
+        node-version: "22"
+    - name: Install uv (the target launches with uvx/uv)
+      if: ${{ steps.runtime.outputs.needs == 'uv' }}
+      shell: bash
+      run: pip install uv
     # Pinned to the release whose tag this action is referenced by
     # (gate-action@vX.Y.Z installs mylonite==X.Y.Z). scripts/prepare_release.py
     # bumps it with __version__, and the release gate refuses a mismatch.
+    # constraints.txt is vendored next to this file (never hash-locked --
+    # see its own header) so a bad/compromised LiteLLM release doesn't reach
+    # every repo that calls this action the day it's published.
     - name: Install mylonite
       shell: bash
-      run: pip install "mylonite==0.11.0"
+      run: pip install "mylonite==0.11.0" -c "${{ github.action_path }}/constraints.txt"
+    # Maps the api-key input to the credential variable the chosen
+    # model's provider actually needs (never hardcoded to Anthropic's), using
+    # the approved-provider registry mylonite itself ships -- installed by
+    # the step above, so it's available here.
+    - name: Map the API key to the model's provider
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        API_KEY: ${{ inputs.api-key }}  # pragma: allowlist secret
+      run: |  # pragma: allowlist secret
+        python - <<'PY'
+        import os
+
+        from mylonite.providers.registry import PROVIDERS
+        from mylonite.scan.providers import env_vars_for, provider_from_model
+
+        model = os.environ.get("MODEL", "")
+        api_key = os.environ.get("API_KEY", "")
+        provider = provider_from_model(model) if model else None
+        info = PROVIDERS.get(provider) if provider else None
+        key_vars = env_vars_for(provider)
+
+        if not api_key:
+            if info is not None and not info.local:
+                print(
+                    f"::warning::no api-key input set for provider {provider!r}; "
+                    "set one, or this provider's call will fail on its own missing-"
+                    "credential check"
+                )
+        elif len(key_vars) == 1:
+            with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+                f.write(f"{key_vars[0]}={api_key}\n")
+        else:
+            reason = "no registered credential variable" if not key_vars else f"needs {key_vars}"
+            print(
+                f"::warning::provider {provider!r} {reason}; this api-key input "
+                "cannot be mapped automatically -- export the right "
+                "variable(s) yourself in this job's own env"
+            )
+        if info is not None and info.extra_env:
+            print(
+                f"::warning::provider {provider!r} also needs {info.extra_env}; "
+                "export those yourself in this job's own env"
+            )
+        PY
+    # `mylonite gate --open-pr` runs `git commit` directly -- a hosted
+    # runner has no git identity configured by default, so without this the
+    # commit fails on every call that opens a PR.
+    - name: Configure git identity for the gating PR
+      if: ${{ inputs.open-pr == 'true' }}
+      shell: bash
+      run: |
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
     - name: Run mylonite gate
       shell: bash
       # Inputs travel through env, never through `${{ }}` inside `run:`. GitHub
@@ -58,6 +150,11 @@ runs:
         RUNS_ON: ${{ inputs.runs-on }}
         MODE: ${{ inputs.mode }}
         OPEN_PR: ${{ inputs.open-pr }}
+        # Named exactly as mylonite itself reads it -- inherited by the
+        # `mylonite gate` subprocess below directly from this step's own
+        # environment, never turned into a CLI flag or interpolated into
+        # `run:`. Empty (the default) when the input isn't set.
+        MYLONITE_LLM_HEADERS: ${{ inputs.llm-headers }}
       run: |
         # #198: both `mode` and `runs-on` are deprecated. This action never
         # passes --workflows, so --runs-on has nothing to scaffold with, and

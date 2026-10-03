@@ -108,3 +108,64 @@ def test_model_flag_is_omitted_when_the_input_is_empty() -> None:
     model gets from mylonite gate itself."""
     args = _rendered_args(TARGET_FILE="target.yaml", AUTHORIZE="my-app", MODEL="", OPEN_PR="")
     assert "--model" not in args
+
+
+# ---------------------------------------------------------------------------
+# An api-key input, a provider-driven key mapping, and a git-identity step.
+# ---------------------------------------------------------------------------
+
+
+def test_action_has_a_required_api_key_input():
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    assert doc["inputs"]["api-key"]["required"] is True
+
+
+def test_action_maps_the_api_key_through_the_registry_not_a_hardcoded_var():
+    """The key-mapping step reads the provider registry at run time -- it
+    must never spell out one provider's credential variable itself (that's
+    the same bug the scaffolded workflows used to have, just moved into the
+    action)."""
+    blob = Path("gate-action/action.yml").read_text(encoding="utf-8")
+    assert "provider_from_model" in blob
+    assert "env_vars_for" in blob
+    assert "ANTHROPIC_API_KEY" not in blob
+
+
+def test_action_configures_git_identity_before_running_gate():
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    steps = doc["runs"]["steps"]
+    names = [s.get("name") for s in steps]
+    assert "Configure git identity for the gating PR" in names
+    git_idx = names.index("Configure git identity for the gating PR")
+    assert git_idx < len(steps) - 1, "must run before the step that runs mylonite gate"
+    git_step = steps[git_idx]
+    assert "git config user.email" in git_step["run"]
+    assert "git config user.name" in git_step["run"]
+
+
+def test_action_decides_node_or_uv_setup_from_the_target_files_command():
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    names = [s.get("name") for s in doc["runs"]["steps"]]
+    assert "Decide whether the target needs Node or uv" in names
+    assert any(n and n.startswith("Set up Node") for n in names)
+    assert any(n and n.startswith("Install uv") for n in names)
+
+
+def test_action_passes_through_optional_llm_headers():
+    """An optional llm-headers input, mapped through env: only (never
+    interpolated into run:), named exactly as mylonite itself reads it so
+    the mylonite gate subprocess picks it up directly."""
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    assert doc["inputs"]["llm-headers"]["required"] is False
+    run_step = doc["runs"]["steps"][-1]
+    assert run_step["env"]["MYLONITE_LLM_HEADERS"] == "${{ inputs.llm-headers }}"
+    assert "MYLONITE_LLM_HEADERS" not in run_step["run"]
+
+
+def test_action_pins_its_own_litellm_install_to_the_constraints_file():
+    """The same exact-pin constraints file the scaffolded workflows use,
+    vendored next to this action rather than fetched."""
+    blob = Path("gate-action/action.yml").read_text(encoding="utf-8")
+    assert "constraints.txt" in blob
+    assert Path("gate-action/constraints.txt").is_file()
+    assert "litellm==" in Path("gate-action/constraints.txt").read_text(encoding="utf-8")

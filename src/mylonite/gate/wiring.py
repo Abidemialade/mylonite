@@ -653,7 +653,7 @@ def make_open_pr_fn(
             for finding_dir in dirs:
                 if finding_dir != out_dir:
                     (finding_dir / "target.yaml").write_text(written_text, encoding="utf-8")
-            # P3/P5: the target's own launch command decides whether the
+            # The target's own launch command decides whether the
             # scaffolded workflow needs a Node/uv setup step — already
             # validated by this same gate run (generate.wiring's build_target_spec
             # call), so this re-load can't fail on a target that got this far.
