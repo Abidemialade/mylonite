@@ -351,7 +351,7 @@ def test_pr_body_control_efficacy_framing():
 
 
 def test_pr_body_server_layer_differential_is_not_captioned_proxy():
-    """A3: a genuine SERVER-LAYER differential (the target's real control_env-
+    """a genuine SERVER-LAYER differential (the target's real control_env-
     declared guard, toggled directly) used to be captioned '(proxy)' anyway,
     because the caption keyed off is_control alone instead of whether the
     guarded twin was actually server-layer. This is the strongest possible
@@ -517,7 +517,7 @@ def test_control_finding_is_not_pending():
 
 
 def test_pr_body_follows_the_verdict_impact_fix_proof_order():
-    """A3/SV3/RP2: one result template, verdict -> impact -> fix -> proof, so
+    """one result template, verdict -> impact -> fix -> proof, so
     the facts a reviewer needs most read top to bottom instead of landing at
     the bottom of the PR or not appearing at all."""
     ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
@@ -530,7 +530,7 @@ def test_pr_body_follows_the_verdict_impact_fix_proof_order():
 
 
 def test_pr_body_shows_severity_and_a_deterministic_impact_sentence():
-    """SV1 (severity shown) + SV3 (a deterministic, plain-language impact
+    """severity shown, plus (a deterministic, plain-language impact
     sentence per weakness class)."""
     from mylonite.gate.mitigation import impact_sentence
 
@@ -547,7 +547,7 @@ def test_pr_body_shows_severity_and_a_deterministic_impact_sentence():
 
 
 def test_pr_body_recommend_shown_under_a_kept_finding():
-    """A3: the deterministic fix must not be exclusive to a validated
+    """the deterministic fix must not be exclusive to a validated
     directory or an export -- it is already rendered under every KEPT gate
     PR finding, proven or control-efficacy, via recommend()/render_markdown()."""
     ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
@@ -557,7 +557,7 @@ def test_pr_body_recommend_shown_under_a_kept_finding():
 
 
 def test_pr_body_has_a_reviewer_checklist():
-    """T5: a short reviewer checklist naming the proof level, the planner
+    """a short reviewer checklist naming the proof level, the planner
     model, the prompt used, and the runs/rates -- for the reviewer to
     confirm against their own app, not a claim Mylonite makes for them."""
     ex = _exploit_for("indirect-injection-note-body-direct")
@@ -687,7 +687,7 @@ def test_severity_sort_kept_handles_empty_input():
 
 
 def test_sort_exploits_by_severity_orders_most_severe_first():
-    """SV1: the same most-severe-first order `scan`'s end-of-run findings
+    """the same most-severe-first order `scan`'s end-of-run findings
     use, for a plain list of exploits (no ValidationReport yet)."""
     from mylonite.gate.mitigation import sort_exploits_by_severity
 
@@ -700,7 +700,7 @@ def test_sort_exploits_by_severity_orders_most_severe_first():
 
 
 def test_finding_block_is_verdict_free_severity_impact_then_suggested_fix():
-    """A3: the same facts the gate PR body opens with (severity, the
+    """the same facts the gate PR body opens with (severity, the
     deterministic impact sentence, then recommend()'s suggestion), reused
     rather than re-derived, for a surface (scan, with no ValidationReport
     yet) that has no KEPT/REJECTED verdict to show at all."""

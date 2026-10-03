@@ -3048,7 +3048,7 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_validate_kept_shows_severity_impact_and_fix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A3/SV1: a plain KEPT verdict shows severity, the deterministic impact
+    """a plain KEPT verdict shows severity, the deterministic impact
     sentence and the suggested fix -- the same facts the gate PR body opens
     with, reused (mylonite.gate.mitigation.finding_block) rather than
     re-derived -- before the "Next: commit" line."""
@@ -3089,7 +3089,7 @@ def test_validate_stable_not_proven_does_not_say_commit_to_gate(
     assert "STABLE, NOT PROVEN" in result.output
     assert "so CI can gate on it" not in result.output
     assert "gates reproduction only" in result.output
-    # A3: the severity/impact/fix block is shown only under a plain KEPT --
+    # the severity/impact/fix block is shown only under a plain KEPT --
     # an unproven keep already says nothing was proven, so it stays bare.
     assert "Severity:" not in result.output
     assert "Suggested fix" not in result.output
@@ -3540,7 +3540,7 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
 def test_scan_shows_severity_impact_and_fix_sorted_most_severe_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A3/SV1: every FOUND exploit gets a severity/impact/suggested-fix block
+    """every FOUND exploit gets a severity/impact/suggested-fix block
     -- the same facts (reused, not re-derived) the gate PR body opens with --
     and a scan with more than one finding lists the most severe one first,
     before the "Next: mylonite generate" hint."""
