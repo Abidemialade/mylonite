@@ -26,11 +26,11 @@ import logging
 import re
 import secrets
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from mcp import ClientSession
 
@@ -46,6 +46,12 @@ from mylonite.contracts import (
 )
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
 from mylonite.plugins._mcp import target_registry, tool_surface
+from mylonite.plugins._mcp.never_call import (
+    NEVER_CALL_METADATA_KEY,
+    NeverCallSession,
+    blocked_tools,
+    never_call_names,
+)
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
@@ -445,6 +451,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         self._launch_env = launch_env
         self._launch_command = launch_command
         self._launch_args = launch_args
+        #: The last successful ``describe()``, so the CLI's pre-spend run plan
+        #: can name the tools without listing them a second time.
+        self._last_descriptor: TargetDescriptor | None = None
 
     # --- transport seam -------------------------------------------------------
     def _session(
@@ -461,6 +470,28 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         launch knobs; remote transports ignore them.
         """
         raise NotImplementedError
+
+    @contextlib.asynccontextmanager
+    async def _guarded_session(
+        self,
+        *,
+        extra_env: dict[str, str] | None,
+        command: str | None,
+        args: list[str] | None,
+    ) -> AsyncIterator[ClientSession]:
+        """:meth:`_session`, with the target's ``never_call`` guard applied.
+
+        The one tool-dispatch chokepoint: every caller in this package opens its
+        session here, so the planner, a plant, an effect probe and calibration
+        all go through the guard, on every transport. With no ``never_call``
+        list the transport's session is yielded unchanged.
+        """
+        names = never_call_names(self._spec.control_config)
+        async with self._session(extra_env=extra_env, command=command, args=args) as session:
+            if not names:
+                yield session
+            else:
+                yield cast(ClientSession, NeverCallSession(session, names))
 
     # --- descriptor flavour (overridable) -------------------------------------
     def _describe_data_sources(self) -> list[str]:
@@ -567,7 +598,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
     async def describe(self) -> TargetDescriptor:
         try:
-            async with self._session(
+            async with self._guarded_session(
                 extra_env=self._effective_env(),
                 command=self._launch_command,
                 args=self._launch_args,
@@ -584,7 +615,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     f"{self._timeout_s_remedy()}."
                 ) from exc
             raise
-        return TargetDescriptor(
+        descriptor = TargetDescriptor(
             target_id=self._target_id(),
             kind="mcp",
             system_prompt=self._spec.default_system_prompt,
@@ -616,6 +647,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 else []
             ),
         )
+        self._last_descriptor = descriptor
+        return descriptor
 
     async def invoke(self, payload: Payload) -> AdapterResponse:
         # NOTE (#17): a fresh MCP session is opened per invoke() — clean
@@ -672,9 +705,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         #: True when a tool listing stopped before its last page, so the planner
         #: (or the re-list) worked from a partial surface.
         tool_list_truncated = False
+        #: never_call tools this attempt tried to call (blocked, never sent).
+        never_call_blocked: list[str] = []
 
         try:
-            async with self._session(
+            async with self._guarded_session(
                 extra_env=self._effective_env(),
                 command=self._launch_command,
                 args=self._launch_args,
@@ -825,6 +860,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                         exfil_email=exfil_email,
                         exfil_host=exfil_host,
                     )
+                never_call_blocked = blocked_tools(planner_calls, session)
 
         except TimeoutError as exc:
             raise AdapterInvocationSkipped(
@@ -984,6 +1020,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # the planner, so a negative here proves nothing about them. The
                 # judge turns any non-finding into an inconclusive result.
                 **({"tool_list_truncated": "true"} if tool_list_truncated else {}),
+                # The agent tried a never_call tool: the call was blocked before
+                # the server, so the judge reads this attempt as no verdict.
+                **(
+                    {NEVER_CALL_METADATA_KEY: json.dumps(never_call_blocked)}
+                    if never_call_blocked
+                    else {}
+                ),
                 # Rug-pull evidence (W1): whether the tool surface mutated
                 # mid-session, and how. Read by the tool_surface_mutated_mid_session
                 # predicate. "false" when a re-list ran and nothing changed;
@@ -1091,7 +1134,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         staying that way forever — a future addition here (e.g. an eager
         capability probe) must not get to silently leak a spawned subprocess.
         """
-        cm = self._session(
+        cm = self._guarded_session(
             extra_env=self._effective_env(),
             command=self._launch_command,
             args=self._launch_args,
@@ -1950,6 +1993,9 @@ class _MCPAttackSession:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
         if session_shim.truncated:
             metadata["tool_list_truncated"] = "true"
+        never_call_blocked = blocked_tools(planner_calls, self._session)
+        if never_call_blocked:
+            metadata[NEVER_CALL_METADATA_KEY] = json.dumps(never_call_blocked)
         # This stateful session carries no Payload (no per-attempt minted
         # exfil token, no declared consequential/egress tool), so the
         # historical defaults and no seed-tool identity are the honest inputs.

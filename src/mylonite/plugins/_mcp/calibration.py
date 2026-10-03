@@ -52,6 +52,7 @@ from mylonite.plugins._mcp._session_adapter import (
     _serialise_tools,
     _truncate_result,
 )
+from mylonite.plugins._mcp.never_call import never_call_names
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._types import SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
@@ -334,7 +335,7 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
             ),
         )
 
-    async with adapter._session(
+    async with adapter._guarded_session(
         extra_env=adapter._effective_env(),
         command=adapter._launch_command,
         args=adapter._launch_args,
@@ -494,10 +495,13 @@ def _candidate_tools(
         if spec.control_config is not None and spec.control_config.consequential_tools
         else None
     )
+    # A never_call tool is never written through, not even by a calibration
+    # control; the guarded session would refuse it anyway.
+    never = frozenset(never_call_names(spec.control_config))
     out: list[tuple[ToolSpec, dict[str, Any]]] = []
     for name, _reason in consequential_tool_names(specs, declared=declared):
         tool = by_name[name]
-        if name == verify_tool or _is_destructive(tool, spec):
+        if name == verify_tool or name in never or _is_destructive(tool, spec):
             continue
         slot = _content_slot_template(tool)
         if slot is None:
@@ -694,7 +698,8 @@ def _recall_candidates(
         and _classify_tools([by_name[verify]]).retrieve_tool is not None
     ):
         names.append(verify)
-    return [by_name[n] for n in names[:MAX_RECALL_TOOLS]]
+    never = frozenset(never_call_names(spec.control_config))
+    return [by_name[n] for n in names if n not in never][:MAX_RECALL_TOOLS]
 
 
 async def _seed_control(

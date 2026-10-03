@@ -70,7 +70,11 @@ minutes and API spend rather than seconds.
     count after filters, `--iterations`, twins, metamorphic re-drives), plus
     the ceiling above when one is set. It never prices the run: no provider
     carries a price yet, so the line says cost is unknown rather than
-    guessing one. A `--dry-run` scan makes no call and skips the line.
+    guessing one. A `--dry-run` scan makes no call and skips the line. Just
+    above it, a short run plan names the model, the system-prompt source, the
+    consequential tools the run may drive and the `never_call` list, then says
+    to run against a test instance, never production (see
+    [`scan`](cli-reference.md)).
 
 ```bash
 # against the bundled reference agent

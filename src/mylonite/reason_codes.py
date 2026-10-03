@@ -231,6 +231,10 @@ INC_JUDGE_BELOW_FLOOR: Final = "MYL-INC-011"
 #: consequential call (or returned a task handle) and the effect probe did not
 #: see the action held.
 INC_UNCHECKED_DEFERRAL: Final = "MYL-INC-012"
+#: Stamped by the judge when the agent tried a tool the target file lists
+#: under ``control_config.never_call``: Mylonite blocked the call, so the
+#: attempt proves neither a finding nor resistance.
+INC_NEVER_CALL: Final = "MYL-INC-013"
 
 #: ``scan/coverage.py`` cause bucket -> code. Every bucket
 #: ``_not_tested_cause_bucket`` can return is a key (enforced by a test). The
@@ -254,6 +258,7 @@ NT_CODE_BY_BUCKET: Final[dict[str, str]] = {
     "undecided_tool_list_truncated": INC_TOOL_LIST_TRUNCATED,
     "undecided_judge_below_floor": INC_JUDGE_BELOW_FLOOR,
     "undecided_unchecked_deferral": INC_UNCHECKED_DEFERRAL,
+    "undecided_never_call": INC_NEVER_CALL,
     "undecided": NT_UNDECIDED,
     "skipped_invalid_metadata": NT_INVALID_METADATA,
     "skipped_unknown_seed": NT_UNKNOWN_SEED,
@@ -482,6 +487,14 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "Declare an effect_probe whose verify tool lists held actions, and name the "
         "word it marks them with in deferred_markers, so a held action can be told "
         "apart from one accepted for later delivery.",
+    ),
+    _rc(
+        INC_NEVER_CALL,
+        "The agent tried a tool listed under control_config.never_call. Mylonite blocked "
+        "the call before it reached the server, so the attempt proved neither a finding "
+        "nor resistance.",
+        "If the tool is safe to call on your test instance, remove it from never_call and "
+        "re-run; otherwise leave it listed and read the class as not tested for that tool.",
     ),
 )
 

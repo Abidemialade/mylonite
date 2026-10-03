@@ -470,6 +470,7 @@ _UNDECIDED_RELIST_FAILED_BUCKET: Final = "undecided_relist_failed"
 _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET: Final = "undecided_tool_list_truncated"
 _UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET: Final = "undecided_judge_below_floor"
 _UNDECIDED_UNCHECKED_DEFERRAL_BUCKET: Final = "undecided_unchecked_deferral"
+_UNDECIDED_NEVER_CALL_BUCKET: Final = "undecided_never_call"
 #: #222: the engine records one ``outcome == "error"`` attempt per weakness class
 #: an attack module would have covered when that module failed to import or
 #: construct. Told apart from a real error by this ``judge_evidence`` key.
@@ -519,6 +520,7 @@ _INC_BUCKET_BY_CAUSE: Final[dict[str, str]] = {
     reason_codes.INC_TOOL_LIST_TRUNCATED: _UNDECIDED_TOOL_LIST_TRUNCATED_BUCKET,
     reason_codes.INC_JUDGE_BELOW_FLOOR: _UNDECIDED_JUDGE_BELOW_FLOOR_BUCKET,
     reason_codes.INC_UNCHECKED_DEFERRAL: _UNDECIDED_UNCHECKED_DEFERRAL_BUCKET,
+    reason_codes.INC_NEVER_CALL: _UNDECIDED_NEVER_CALL_BUCKET,
 }
 
 #: Exception class NAMES (``type(exc).__name__``, the only thing
@@ -588,6 +590,9 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     _UNDECIDED_UNCHECKED_DEFERRAL_BUCKET: (
         "reached no verdict because the server said it queued the call and the effect_probe "
         "did not see it held, so it may still go out"
+    ),
+    _UNDECIDED_NEVER_CALL_BUCKET: (
+        "reached no verdict because the agent tried a never_call tool, which Mylonite blocked"
     ),
     "undecided": (
         "reached no verdict — no mechanism (predicate/effect_probe/LLM judge) decided them"

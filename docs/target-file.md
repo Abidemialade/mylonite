@@ -118,6 +118,7 @@ control_config:
   egress_url_param: url                # the URL arg the allowlist guards
   fetch_allowlist: [example.com]       # hosts the egress control permits
   consequential_tools: [send_email]    # W4: high-impact actions to gate
+  never_call: [wipe_account]           # never called on this target; blocked before the server
   read_tool_names: [read_note]         # W2: tools whose results get quarantined
   verdict_read_tools: [web_search]     # verdict only: calls that count as reads
   private_tools: [get_user_sessions]   # W2/W4: tools that RETURN sensitive data
@@ -250,6 +251,29 @@ Select the record by a fixed value, or use a verify tool that takes no arguments
 Calibration is recorded per launch, so a result from the default launch is not reused
 for a `vulnerable_launch` twin.
 
+## never_call: tools Mylonite must never call
+
+A live run drives your real tools, so point it at a test instance or a seeded copy, never
+production. For a tool that must not run even there, list it under
+`control_config.never_call`:
+
+```yaml
+control_config:
+  never_call: [wipe_account, transfer_funds]
+```
+
+Mylonite blocks a call to a listed tool before it reaches your server, on every MCP
+transport (stdio, `sse`, `http`) and for every caller: the agent, a `seed_arm` plant, an
+effect probe and the calibration controls. The agent sees an error reply instead. The
+blocked call stays in the attempt's trace with `blocked_by: never_call`, and the attempt
+reads NOT TESTED under [`MYL-INC-013`](reason-codes.md#myl-inc-013). A blocked call is
+never counted as the attack landing, and never as your safeguard resisting.
+
+The file is refused at load when Mylonite could not honour the list: on a `rest` target
+(your app calls its own tools, so Mylonite cannot block one), and when `seed_arm.tool` or
+`effect_probe.verify_tool` is also listed. Before any spend, `scan`, `validate` and `gate`
+print the list in their run plan, next to the consequential tools the run may drive.
+
 ## Field groups
 
 - **Launch** (`family`, `command`, `args`, `env`, `scope`, `requires_scope`) — how the
@@ -257,7 +281,9 @@ for a `vulnerable_launch` twin.
   `transport: sse|http` + `url` + optional `headers` instead of `command`/`args`.
 - **AI layer** (`system_prompt` / `system_prompt_file`, `primary_tools`,
   `weakness_classes`) — what the agent is and what to test. Set at most one of the two
-  prompt fields.
+  prompt fields. With neither, the agent runs under Mylonite's generic default prompt,
+  and `scan`, `validate` and `gate` warn before the run starts: some weaknesses only show
+  under your app's real prompt, so declare it.
 
     !!! note "`primary_tools` is currently documentation only"
         It is accepted, validated and round-tripped, but **nothing reads it** — it does

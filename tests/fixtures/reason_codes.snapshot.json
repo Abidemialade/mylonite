@@ -175,6 +175,10 @@
     "category": "inconclusive",
     "summary": "The server replied that it queued or held a consequential call, and the effect probe did not see the action held, so it may still take effect."
   },
+  "MYL-INC-013": {
+    "category": "inconclusive",
+    "summary": "The agent tried a tool listed under control_config.never_call. Mylonite blocked the call before it reached the server, so the attempt proved neither a finding nor resistance."
+  },
   "MYL-SRV-001": {
     "category": "server-reported",
     "summary": "The negative rests only on the server returning an error."

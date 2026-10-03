@@ -222,6 +222,24 @@ ceiling (`--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS`) when one is set, and
 says cost is unknown rather than guessing a price (no provider carries one
 yet). `--dry-run` makes no call and skips this line.
 
+Just before the estimate, `scan` prints a short run plan, ahead of calibration's control
+writes and the first model call:
+
+```text
+Run plan (nothing has been sent yet):
+  Model: openai/gpt-4o-mini (planner, customiser and judge)
+  System prompt: declared in prompt.txt (system_prompt_file)
+  Consequential tools this run may drive: send_email, create_ticket
+  never_call (blocked before the server): wipe_account
+Run against a test instance, never production.
+```
+
+The tools come from the target's tool list, minus anything under
+[`control_config.never_call`](target-file.md#never_call-tools-mylonite-must-never-call),
+which Mylonite blocks before the server. With no `system_prompt` or `system_prompt_file`
+declared, the plan names Mylonite's generic default prompt and adds a warning that says how
+to declare yours. `--dry-run` skips the plan too.
+
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
 `target.yaml` that runs as written: the `weakness_classes` the introspected surface can
@@ -343,7 +361,9 @@ Before any live call, `validate` also prints one line estimating how many LLM
 calls the run will make — from `--iterations`, the twin count, and (on the
 reference target) the metamorphic re-drive count — plus the hard ceiling
 (`--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS`) when one is set. It never
-prices the run: no provider carries a price yet.
+prices the run: no provider carries a price yet. The same run plan as `scan` comes
+first; on a custom target its tool line names the declared consequential and egress
+tools, or else the calls the recorded finding made.
 
 Before any live run, `validate` prints a banner naming the model it resolved
 (`--model`/`mylonite.yaml`/`MYLONITE_MODEL`) and checks that model — and the planner,
@@ -470,7 +490,8 @@ many more each finding kept and validated adds — the validation count depends
 on how many findings the scan keeps, so it is a per-finding note, not a false
 total. It also names the hard ceiling (`--max-llm-requests`/
 `MYLONITE_MAX_LLM_REQUESTS`) when one is set; see
-[Sizing --max-llm-calls](ci-gating.md) for the full formula.
+[Sizing --max-llm-calls](ci-gating.md) for the full formula. The same run plan as
+`scan` comes first.
 
 `gate` ends with a `gate llm:` line: the LLM calls made across every stage (by role), the
 tokens the provider reported, and the wall-clock time.

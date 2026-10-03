@@ -230,6 +230,12 @@ class ControlConfig(BaseModel):
     # name a marker your private data carries (e.g. an internal token prefix).
     # Complements private_tools; both feed the confidentiality axis.
     private_markers: tuple[str, ...] = ()
+    # Tools Mylonite must never call on this target, whatever the run. A call
+    # to one is blocked before it reaches the server (``plugins/_mcp/never_call``),
+    # recorded in the trace as blocked, and the attempt reads NOT TESTED
+    # (MYL-INC-013): a blocked call is neither the attack landing nor the
+    # safeguard resisting. Every MCP transport; refused for a rest target.
+    never_call: tuple[str, ...] = ()
 
 
 class LaunchOverride(BaseModel):
